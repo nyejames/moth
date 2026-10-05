@@ -1,0 +1,25 @@
+@separator content as separator_content
+
+#[$md:
+See @./#numeric-literals
+(Numeric literals).
+
+Mixed @./#mixed 	
+	 (Mixed).
+
+Same @./#same-line 	 (Same line).
+
+@./#blank
+
+(Blank).
+
+@./#spaced-blank
+ 	
+(Spaced blank).
+
+@./#blocked
+stray (Blocked). Then @./#after
+(After).
+]
+
+#[:[separator_content]]

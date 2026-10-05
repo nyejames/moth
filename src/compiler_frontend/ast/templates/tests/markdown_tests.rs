@@ -29,23 +29,14 @@ fn formatter_text_piece(text: &str, string_table: &mut StringTable) -> Formatter
     })
 }
 
-/// Splits plain text into markdown lines for test helpers.
-///
-/// WHAT: mirrors the production `split_formatter_input_into_lines` logic
-/// without building a `FormatterInput`, so tests can drive `render_markdown_stream`
-/// directly from source strings.
+/// Splits plain text into markdown lines through the production formatter splitter.
 fn split_text_into_lines(content: &str) -> Vec<MarkdownLine> {
-    let mut lines = vec![MarkdownLine::default()];
+    let mut string_table = StringTable::new();
+    let input = FormatterInput {
+        pieces: vec![formatter_text_piece(content, &mut string_table)],
+    };
 
-    for ch in content.chars() {
-        if ch == '\n' {
-            lines.push(MarkdownLine::default());
-        } else {
-            super::push_atom_to_current_line(&mut lines, MarkdownInlineAtom::Char(ch));
-        }
-    }
-
-    lines
+    super::split_formatter_input_into_lines(input, &string_table)
 }
 
 fn to_markdown(content: &str, default_tag: &str) -> String {
@@ -204,15 +195,40 @@ fn invalid_scheme_like_targets_do_not_parse_as_links() {
 }
 
 #[test]
-fn requires_horizontal_whitespace_before_label() {
+fn requires_separator_before_label() {
     let rendered = to_markdown("@https://example.com(Example)", "p");
     assert_eq!(rendered, "<p>@https://example.com(Example)</p>");
 }
 
 #[test]
-fn newline_between_target_and_label_breaks_link_recognition() {
-    let rendered = to_markdown("@https://example.com\n(Example)", "p");
-    assert_eq!(rendered, "<p>@https://example.com (Example)</p>");
+fn one_soft_newline_between_target_and_label_forms_link() {
+    for input in [
+        "@./#numeric-literals\n(Numeric literals).",
+        "@./#numeric-literals \t\n\t  (Numeric literals).",
+    ] {
+        assert_eq!(
+            to_markdown(input, "p"),
+            "<p><a href=\"./#numeric-literals\">Numeric literals</a>.</p>",
+            "input: {input:?}"
+        );
+    }
+}
+
+#[test]
+fn link_separator_rejects_invalid_whitespace_runs() {
+    // Blank lines split blocks before inline parsing, so the parser's own upper bound
+    // is only observable on raw atoms. NBSP protects the ASCII space/tab separator set.
+    for separator in ["\n\n", "\n \t\n", "\u{00a0}"] {
+        let atoms: Vec<MarkdownInlineAtom> = format!("@./#target{separator}(Label)")
+            .chars()
+            .map(MarkdownInlineAtom::Char)
+            .collect();
+
+        assert!(
+            super::parsing::try_parse_link_at_atoms(&atoms, 0).is_none(),
+            "separator {separator:?} must not associate a label"
+        );
+    }
 }
 
 #[test]
@@ -296,6 +312,22 @@ fn opaque_anchor_inside_link_candidate_falls_back_to_literal_text() {
     ]);
 
     assert_eq!(rendered, "<p>@/docs{child:7} (Docs)</p>");
+}
+
+#[test]
+fn opaque_anchor_inside_wrapped_link_separator_falls_back_to_literal_text() {
+    for (anchor, anchor_text) in [
+        (child_anchor(7), "{child:7}"),
+        (dynamic_anchor(9), "{dynamic:9}"),
+    ] {
+        let rendered = markdown_formatter_output_from_text_and_anchors(&[
+            (Some("@./#target "), None),
+            (None, Some(anchor)),
+            (Some("\n(Label)"), None),
+        ]);
+
+        assert_eq!(rendered, format!("<p>@./#target {anchor_text} (Label)</p>"));
+    }
 }
 
 #[test]

@@ -9,6 +9,11 @@
 //! - Templates need lightweight markdown support without adding a full markdown dependency.
 //! - Parent markdown runs must keep child template output sealed while still preserving
 //!   paragraph and list structure across opaque anchors.
+//!
+//! Data flow: formatter input splits into lines of atoms here, `blocks` groups them into
+//! headings, lists and paragraphs, and `inline` renders each block's atoms. `parsing` and
+//! `inline_code` own the grammar, `types` the shared records and `output` the piece buffer.
+//! Plain Markdown `.md` content has its own renderer and does not use this module.
 
 use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterAnchorId, FormatterInput, FormatterInputPiece, FormatterOpaqueKind,
@@ -23,15 +28,16 @@ use crate::compiler_frontend::style_directives::StyleDirectiveArgumentValue;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::sync::Arc;
 
+mod blocks;
+mod inline;
 mod inline_code;
 mod output;
+mod parsing;
 mod types;
 
 use output::MarkdownOutputBuilder;
 use types::*;
-mod blocks;
-mod inline;
-mod parsing;
+
 pub struct MarkdownTemplateFormatter;
 
 impl TemplateFormatter for MarkdownTemplateFormatter {
@@ -82,40 +88,28 @@ fn split_formatter_input_into_lines(
     input: FormatterInput,
     string_table: &StringTable,
 ) -> Vec<MarkdownLine> {
-    let mut lines = vec![MarkdownLine::default()];
+    let mut lines = Vec::new();
+    let mut current_line = MarkdownLine::default();
 
     for piece in input.pieces {
         match piece {
             FormatterInputPiece::Text(text_piece) => {
                 for ch in string_table.resolve(text_piece.text).chars() {
                     if ch == '\n' {
-                        lines.push(MarkdownLine::default());
+                        lines.push(std::mem::take(&mut current_line));
                     } else {
-                        push_atom_to_current_line(&mut lines, MarkdownInlineAtom::Char(ch));
+                        current_line.atoms.push(MarkdownInlineAtom::Char(ch));
                     }
                 }
             }
             FormatterInputPiece::Opaque(anchor) => {
-                push_atom_to_current_line(&mut lines, MarkdownInlineAtom::Opaque(anchor));
+                current_line.atoms.push(MarkdownInlineAtom::Opaque(anchor));
             }
         }
     }
 
+    lines.push(current_line);
     lines
-}
-
-/// Appends one atom to the current markdown line, creating a fallback line if state drift occurs.
-///
-/// WHAT: keeps line-atom writes non-panicking during formatter/text splitting.
-/// WHY: malformed or drifted parsing state should degrade gracefully instead of relying on
-/// unchecked `last_mut()` invariants.
-fn push_atom_to_current_line(lines: &mut Vec<MarkdownLine>, atom: MarkdownInlineAtom) {
-    if lines.is_empty() {
-        lines.push(MarkdownLine::default());
-    }
-    if let Some(line) = lines.last_mut() {
-        line.atoms.push(atom);
-    }
 }
 
 /// Renders the full markdown line stream while keeping block/list state across anchors.

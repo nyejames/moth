@@ -175,3 +175,24 @@ fn markdown_single_newline_before_child_template_stays_in_same_list_item() {
 
     assert_eq!(rendered, "<ul><li><p>hello</p>child<p>world</p></li></ul>");
 }
+
+#[test]
+fn markdown_link_separator_counts_logical_newlines_in_source() {
+    // Rust escapes put real control characters into the source before tokenization,
+    // so CRLF and lone CR coverage does not depend on fixture checkout conversion.
+    for newline in ["\n", "\r\n", "\r"] {
+        let single = format!("[$md:@./#numeric-literals \t{newline}\t (Numeric literals).]");
+        assert_eq!(
+            folded_template_output(&single),
+            "<p><a href=\"./#numeric-literals\">Numeric literals</a>.</p>",
+            "newline: {newline:?}"
+        );
+
+        let double = format!("[$md:@./#two-breaks{newline}{newline}(Two breaks).]");
+        assert_eq!(
+            folded_template_output(&double),
+            "<p>@./#two-breaks</p><p>(Two breaks).</p>",
+            "newline: {newline:?}"
+        );
+    }
+}

@@ -5978,6 +5978,13 @@ contract = "language.templates.markdown_inline_code_acceptance"
 role = "primary"
 
 [[case]]
+id = "template_markdown_path_first_separator"
+path = "template_markdown_path_first_separator"
+tags = ["integration","templates","markdown"]
+contract = "language.templates.markdown_path_first_separator"
+role = "primary"
+
+[[case]]
 id = "template_frontend_builtins_normal_flow_success"
 path = "template_frontend_builtins_normal_flow_success"
 tags = ["integration","templates"]

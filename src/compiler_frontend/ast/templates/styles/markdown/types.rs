@@ -2,7 +2,8 @@
 //!
 //! WHAT: stores the small parsed markdown records shared by block and inline rendering.
 //! WHY: keeping these shapes separate lets the formatter pipeline read as staged rendering
-//! instead of a long prelude of local structs.
+//! instead of a long prelude of local structs. Parsed records borrow their content from the
+//! formatter's line stream so block detection never copies atoms.
 
 use super::*;
 
@@ -42,42 +43,22 @@ pub(super) enum MarkdownInlineAtom {
     Opaque(FormatterOpaquePiece),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum LeadingChildTemplateLine {
-    None,
-    Standalone,
-    InlineContinuation,
-}
-
 #[derive(Clone, Debug, Default)]
 pub(super) struct MarkdownLine {
     pub(super) atoms: Vec<MarkdownInlineAtom>,
 }
 
 #[derive(Debug)]
-pub(super) struct ParsedMarkdownListItemLine {
+pub(super) struct ParsedMarkdownListItemLine<'a> {
     pub(super) indent_width: usize,
     pub(super) kind: MarkdownListKind,
-    pub(super) content: Vec<MarkdownInlineAtom>,
+    pub(super) content: &'a [MarkdownInlineAtom],
 }
 
 #[derive(Debug)]
-pub(super) struct ParsedMarkdownHeadingLine {
+pub(super) struct ParsedMarkdownHeadingLine<'a> {
     pub(super) level: usize,
-    pub(super) content: Vec<MarkdownInlineAtom>,
-}
-
-#[derive(Debug, Clone)]
-pub(super) enum MarkdownListItemFragment {
-    Line(Vec<MarkdownInlineAtom>),
-    NestedList(Vec<FormatterOutputPiece>),
-}
-
-#[derive(Debug, Clone)]
-pub(super) enum MarkdownListItemBlock {
-    Paragraph(Vec<Vec<MarkdownInlineAtom>>),
-    StandaloneInline(Vec<MarkdownInlineAtom>),
-    NestedList(Vec<FormatterOutputPiece>),
+    pub(super) content: &'a [MarkdownInlineAtom],
 }
 
 #[derive(Debug)]

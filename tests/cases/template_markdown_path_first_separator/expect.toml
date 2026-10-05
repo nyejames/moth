@@ -1,0 +1,23 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "<p>See <a href=\"./#numeric-literals\">Numeric literals</a>.</p>",
+    "<p>Mixed <a href=\"./#mixed\">Mixed</a>.</p>",
+    "<p>Same <a href=\"./#same-line\">Same line</a>.</p>",
+    "<p>@./#blank</p><p>(Blank).</p>",
+    "<p>@./#spaced-blank</p><p>(Spaced blank).</p>",
+    "<p>@./#blocked stray (Blocked). Then <a href=\"./#after\">After</a>.</p>",
+    "<p>Implicit <a href=\"./#implicit\">Implicit</a>.</p>",
+]
+must_not_contain = [
+    "<a href=\"./#blank\"",
+    "<a href=\"./#spaced-blank\"",
+    "<a href=\"./#blocked\"",
+]

@@ -6,15 +6,15 @@
 
 use super::{
     MarkdownInlineAtom, MarkdownLine, MarkdownListKind, ParsedMarkdownHeadingLine,
-    ParsedMarkdownLink, ParsedMarkdownListItemLine,
+    ParsedMarkdownLink, ParsedMarkdownListItemLine, atom_char,
 };
 
-pub(super) fn parse_heading_line(line: &MarkdownLine) -> Option<ParsedMarkdownHeadingLine> {
+pub(super) fn parse_heading_line(line: &MarkdownLine) -> Option<ParsedMarkdownHeadingLine<'_>> {
     let start = skip_leading_horizontal_whitespace(&line.atoms);
     let mut index = start;
     let mut level = 0usize;
 
-    while let Some('#') = super::types::atom_char(&line.atoms, index) {
+    while let Some('#') = atom_char(&line.atoms, index) {
         level += 1;
         index += 1;
     }
@@ -23,22 +23,19 @@ pub(super) fn parse_heading_line(line: &MarkdownLine) -> Option<ParsedMarkdownHe
         return None;
     }
 
-    let separator = super::types::atom_char(&line.atoms, index)?;
+    let separator = atom_char(&line.atoms, index)?;
     if !separator.is_whitespace() {
         return None;
     }
 
     Some(ParsedMarkdownHeadingLine {
         level,
-        content: line.atoms[index + 1..].to_vec(),
+        content: &line.atoms[index + 1..],
     })
 }
 
-pub(super) fn parse_list_item_line(line: &MarkdownLine) -> Option<ParsedMarkdownListItemLine> {
-    if super::line_is_blank(line) {
-        return None;
-    }
-
+/// Parses a list item marker line. Blank lines never match because every marker is visible text.
+pub(super) fn parse_list_item_line(line: &MarkdownLine) -> Option<ParsedMarkdownListItemLine<'_>> {
     let (indent_width, start_index) = consume_line_indentation(&line.atoms);
 
     if let Some(item) = parse_unordered_list_item(&line.atoms, start_index, indent_width) {
@@ -74,13 +71,13 @@ fn parse_unordered_list_item(
     atoms: &[MarkdownInlineAtom],
     start_index: usize,
     indent_width: usize,
-) -> Option<ParsedMarkdownListItemLine> {
-    let marker = super::types::atom_char(atoms, start_index)?;
+) -> Option<ParsedMarkdownListItemLine<'_>> {
+    let marker = atom_char(atoms, start_index)?;
     if !matches!(marker, '-' | '*' | '+') {
         return None;
     }
 
-    let separator = super::types::atom_char(atoms, start_index + 1)?;
+    let separator = atom_char(atoms, start_index + 1)?;
     if !separator.is_whitespace() {
         return None;
     }
@@ -96,10 +93,10 @@ fn parse_ordered_list_item(
     atoms: &[MarkdownInlineAtom],
     start_index: usize,
     indent_width: usize,
-) -> Option<ParsedMarkdownListItemLine> {
+) -> Option<ParsedMarkdownListItemLine<'_>> {
     let mut index = start_index;
 
-    while let Some(ch) = super::types::atom_char(atoms, index) {
+    while let Some(ch) = atom_char(atoms, index) {
         if !ch.is_ascii_digit() {
             break;
         }
@@ -110,12 +107,12 @@ fn parse_ordered_list_item(
         return None;
     }
 
-    let marker = super::types::atom_char(atoms, index)?;
+    let marker = atom_char(atoms, index)?;
     if !matches!(marker, '.' | ')') {
         return None;
     }
 
-    let separator = super::types::atom_char(atoms, index + 1)?;
+    let separator = atom_char(atoms, index + 1)?;
     if !separator.is_whitespace() {
         return None;
     }
@@ -127,23 +124,25 @@ fn parse_ordered_list_item(
     })
 }
 
-pub(super) fn join_lines_with_spaces(lines: &[Vec<MarkdownInlineAtom>]) -> Vec<MarkdownInlineAtom> {
+/// Joins the lines of one paragraph into a single inline atom run.
+///
+/// Each line boundary stays a `'\n'` atom so every inline construct can enforce its own
+/// newline rule. Inline code rejects it and a link separator accepts at most one. Inline
+/// rendering prints each boundary as exactly one visible space.
+pub(super) fn join_paragraph_lines(lines: &[&[MarkdownInlineAtom]]) -> Vec<MarkdownInlineAtom> {
     let mut joined = Vec::new();
 
     for (index, line) in lines.iter().enumerate() {
         if index > 0 {
-            // Preserve a soft line boundary for inline parsing rules (for example
-            // preventing cross-line link parsing). Inline rendering turns this into
-            // exactly one visible space.
             joined.push(MarkdownInlineAtom::Char('\n'));
         }
-        joined.extend(line.iter().copied());
+        joined.extend_from_slice(line);
     }
 
     joined
 }
 
-pub(super) fn trim_atoms(atoms: &[MarkdownInlineAtom]) -> Vec<MarkdownInlineAtom> {
+pub(super) fn trim_atoms(atoms: &[MarkdownInlineAtom]) -> &[MarkdownInlineAtom] {
     let mut start = 0usize;
     let mut end = atoms.len();
 
@@ -158,13 +157,13 @@ pub(super) fn trim_atoms(atoms: &[MarkdownInlineAtom]) -> Vec<MarkdownInlineAtom
         end -= 1;
     }
 
-    atoms[start..end].to_vec()
+    &atoms[start..end]
 }
 
 pub(super) fn trim_leading_horizontal_whitespace(
     atoms: &[MarkdownInlineAtom],
-) -> Vec<MarkdownInlineAtom> {
-    atoms[skip_leading_horizontal_whitespace(atoms)..].to_vec()
+) -> &[MarkdownInlineAtom] {
+    &atoms[skip_leading_horizontal_whitespace(atoms)..]
 }
 
 pub(super) fn skip_leading_horizontal_whitespace(atoms: &[MarkdownInlineAtom]) -> usize {
@@ -175,19 +174,20 @@ pub(super) fn skip_leading_horizontal_whitespace(atoms: &[MarkdownInlineAtom]) -
     index
 }
 
+/// Parses `@target (label)` starting at the `@` atom.
+///
+/// Returns `None` without consuming anything when the candidate is malformed, so the
+/// renderer prints it as literal text and keeps scanning for later constructs.
 pub(super) fn try_parse_link_at_atoms(
     atoms: &[MarkdownInlineAtom],
     at_index: usize,
 ) -> Option<ParsedMarkdownLink> {
-    if super::types::atom_char(atoms, at_index)? != '@' {
+    if atom_char(atoms, at_index)? != '@' {
         return None;
     }
 
     let target_start = at_index + 1;
-    let mut cursor = target_start;
-    if !consume_target_start_atoms(atoms, &mut cursor) {
-        return None;
-    }
+    let mut cursor = target_start + target_prefix_length(atoms, target_start)?;
 
     while let Some(atom) = atoms.get(cursor) {
         match atom {
@@ -197,23 +197,31 @@ pub(super) fn try_parse_link_at_atoms(
         }
     }
     let target_end = cursor;
-    if target_end == target_start {
-        return None;
-    }
 
-    let spacing_start = cursor;
+    // The separator is spaces or tabs with at most one soft line boundary, so a wrapped
+    // paragraph can put the label on the next line. A second boundary would mean a blank
+    // line, and an opaque anchor could render as anything, so both reject the candidate.
+    let separator_start = cursor;
+    let mut crossed_line_boundary = false;
     while let Some(atom) = atoms.get(cursor) {
         match atom {
-            MarkdownInlineAtom::Char(ch) if is_horizontal_whitespace(*ch) => cursor += 1,
+            MarkdownInlineAtom::Char(' ' | '\t') => cursor += 1,
+
+            MarkdownInlineAtom::Char('\n') if !crossed_line_boundary => {
+                crossed_line_boundary = true;
+                cursor += 1;
+            }
+
+            MarkdownInlineAtom::Char('\n') | MarkdownInlineAtom::Opaque(_) => return None,
+
             MarkdownInlineAtom::Char(_) => break,
-            MarkdownInlineAtom::Opaque(_) => return None,
         }
     }
-    if spacing_start == cursor {
+    if separator_start == cursor {
         return None;
     }
 
-    if super::types::atom_char(atoms, cursor)? != '(' {
+    if atom_char(atoms, cursor)? != '(' {
         return None;
     }
     cursor += 1;
@@ -227,7 +235,7 @@ pub(super) fn try_parse_link_at_atoms(
         }
     }
 
-    if super::types::atom_char(atoms, cursor)? != ')' {
+    if atom_char(atoms, cursor)? != ')' {
         return None;
     }
 
@@ -255,67 +263,46 @@ fn collect_plain_chars(atoms: &[MarkdownInlineAtom]) -> String {
         .collect()
 }
 
-/// Consumes the scheme or path prefix at the start of a markdown link target.
-fn consume_target_start_atoms(atoms: &[MarkdownInlineAtom], cursor: &mut usize) -> bool {
-    if *cursor >= atoms.len() {
-        return false;
-    }
-
-    if starts_with_chars(atoms, *cursor, &['/', '/']) {
-        *cursor += 2;
-        return true;
-    }
-    if starts_with_chars(atoms, *cursor, &['.', '/']) {
-        *cursor += 2;
-        return true;
-    }
-    if starts_with_chars(atoms, *cursor, &['.', '.', '/']) {
-        *cursor += 3;
-        return true;
-    }
-
-    match super::types::atom_char(atoms, *cursor) {
-        Some('/' | '#' | '?') => {
-            *cursor += 1;
-            true
+/// Returns the atom length of the scheme or path prefix that must open a link target.
+fn target_prefix_length(atoms: &[MarkdownInlineAtom], start: usize) -> Option<usize> {
+    // Multi-character path prefixes are checked first so `//` never reads as a site route.
+    for prefix in ["//", "./", "../"] {
+        if starts_with_chars(atoms, start, prefix) {
+            return Some(prefix.len());
         }
-        Some(ch) if ch.is_ascii_alphabetic() => consume_scheme_prefix_atoms(atoms, cursor),
-        _ => false,
+    }
+
+    match atom_char(atoms, start)? {
+        '/' | '#' | '?' => Some(1),
+        ch if ch.is_ascii_alphabetic() => scheme_prefix_length(atoms, start),
+        _ => None,
     }
 }
 
-fn consume_scheme_prefix_atoms(atoms: &[MarkdownInlineAtom], cursor: &mut usize) -> bool {
-    if !matches!(super::types::atom_char(atoms, *cursor), Some(ch) if ch.is_ascii_alphabetic()) {
-        return false;
-    }
-
-    *cursor += 1;
-    while let Some(ch) = super::types::atom_char(atoms, *cursor) {
+/// Returns the length of a `scheme:` prefix whose first letter is already known to be alphabetic.
+fn scheme_prefix_length(atoms: &[MarkdownInlineAtom], start: usize) -> Option<usize> {
+    let mut cursor = start + 1;
+    while let Some(ch) = atom_char(atoms, cursor) {
         if !is_scheme_char(ch) {
             break;
         }
-        *cursor += 1;
+        cursor += 1;
     }
 
-    if super::types::atom_char(atoms, *cursor) != Some(':') {
-        return false;
+    if atom_char(atoms, cursor)? != ':' {
+        return None;
     }
 
-    *cursor += 1;
-    true
+    Some(cursor + 1 - start)
 }
 
-fn starts_with_chars(atoms: &[MarkdownInlineAtom], start: usize, prefix: &[char]) -> bool {
+fn starts_with_chars(atoms: &[MarkdownInlineAtom], start: usize, prefix: &str) -> bool {
     prefix
-        .iter()
+        .chars()
         .enumerate()
-        .all(|(offset, expected)| super::types::atom_char(atoms, start + offset) == Some(*expected))
+        .all(|(offset, expected)| atom_char(atoms, start + offset) == Some(expected))
 }
 
 fn is_scheme_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || matches!(ch, '+' | '.' | '-')
-}
-
-fn is_horizontal_whitespace(ch: char) -> bool {
-    matches!(ch, ' ' | '\t')
 }

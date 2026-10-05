@@ -42,6 +42,10 @@ Every other target renders literally:
 
 A relative target is already correct from the page that contains it, and an absolute or protocol-relative URL addresses another origin entirely, so neither takes the site root.
 
+### Link labels
+
+Separate a link target from its parenthesised label with spaces or tabs, or one line break with optional spaces or tabs on either side. At least one separator character is required. LF, CRLF and lone CR each count as one line break. A second line break or intervening non-whitespace content prevents association. Links remain within the current inline block and cannot cross an opaque template or expression boundary.
+
 ### Inline code
 
 Inline code uses paired isolated single backticks on one Markdown line.
