@@ -372,6 +372,8 @@ mod source_package_boundary_indexes_tests {
     use crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry;
     use crate::compiler_frontend::compiler_errors::ErrorType;
     use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidConfigReason};
+    #[cfg(unix)]
+    use crate::compiler_tests::test_fs::RestrictedDirectory;
     use crate::projects::html_project::external_js::js_import_provider::JsExternalImportProvider;
     use std::path::Path;
     use std::sync::Arc;
@@ -609,8 +611,6 @@ mod source_package_boundary_indexes_tests {
     #[cfg(unix)]
     #[test]
     fn unreadable_normal_module_root_returns_file_error() {
-        use std::os::unix::fs::PermissionsExt;
-
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         let package_root = root.join("pkg");
@@ -619,8 +619,7 @@ mod source_package_boundary_indexes_tests {
 
         // Remove read permission so the package boundary traversal cannot read the directory.
         // Canonicalization still succeeds because it only traverses the parent.
-        fs::set_permissions(&package_root, fs::Permissions::from_mode(0o000))
-            .expect("should remove read permissions");
+        let _restricted_package_root = RestrictedDirectory::deny_listing(&package_root);
 
         let mut source_packages = SourcePackageRegistry::new();
         register_pkg(&mut source_packages, &package_root);
@@ -633,10 +632,6 @@ mod source_package_boundary_indexes_tests {
             .infrastructure_error()
             .expect("expected an infrastructure file error");
         assert_eq!(error.error_type, ErrorType::File);
-
-        // Restore permissions so cleanup can remove the directory.
-        fs::set_permissions(&package_root, fs::Permissions::from_mode(0o755))
-            .expect("should restore permissions");
     }
 
     #[test]
@@ -864,6 +859,8 @@ mod module_identity_tests {
     use crate::compiler_frontend::semantic_identity::{
         ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
     };
+    #[cfg(unix)]
+    use crate::compiler_tests::test_fs::RestrictedDirectory;
     use std::path::{Path, PathBuf};
 
     fn discover_index(
@@ -1243,8 +1240,6 @@ mod module_identity_tests {
     #[cfg(unix)]
     #[test]
     fn unreadable_project_root_surfaces_file_error_not_missing_facade() {
-        use std::os::unix::fs::PermissionsExt;
-
         let _tmp_root = tempfile::tempdir().expect("should create temp dir");
         let root = _tmp_root.path().to_path_buf();
         let entry_root = root.join("src");
@@ -1259,8 +1254,7 @@ mod module_identity_tests {
 
         // Drop read permission so facade discovery cannot read the project root directory.
         // Execute permission is retained so the earlier canonicalization already succeeded.
-        fs::set_permissions(&root, fs::Permissions::from_mode(0o300))
-            .expect("should drop read permission");
+        let _restricted_root = RestrictedDirectory::deny_listing(&root);
 
         let mut string_table = StringTable::new();
         let failure = super::source_tree_index::SourceTreeIndex::discover(
@@ -1279,10 +1273,6 @@ mod module_identity_tests {
         let messages = failure.into_messages(&string_table);
 
         assert_file_infrastructure_error(&messages, "discovering package facade");
-
-        // Restore permissions so cleanup can remove the directory.
-        fs::set_permissions(&root, fs::Permissions::from_mode(0o755))
-            .expect("should restore permissions");
     }
     fn assert_file_infrastructure_error(messages: &CompilerMessages, expected_text: &str) {
         use crate::compiler_frontend::compiler_errors::ErrorType;
