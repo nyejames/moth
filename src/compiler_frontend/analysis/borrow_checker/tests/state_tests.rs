@@ -53,6 +53,8 @@ fn join_reports_growth_for_each_fact_and_keeps_joined_facts() {
 
     // Each incoming state grows exactly one fact of local 2: its mode, its value roots or its
     // direct-alias roots. Worklist scheduling depends on every kind of growth being reported.
+    // Direct-alias roots stay within value roots, as in production, so direct growth comes
+    // last, after the joined value roots already hold its new root.
     let mut mode_growth = base.clone();
     mode_growth.update_local_state(
         2,
@@ -70,7 +72,7 @@ fn join_reports_growth_for_each_fact_and_keeps_joined_facts() {
     let mut direct_growth = base.clone();
     direct_growth.update_local_state(
         2,
-        LocalState::alias_with_direct(roots(local_count, &[0]), roots(local_count, &[0, 1])),
+        LocalState::alias_with_direct(roots(local_count, &[0, 1]), roots(local_count, &[0, 1])),
     );
 
     let mut joined = base.clone();
