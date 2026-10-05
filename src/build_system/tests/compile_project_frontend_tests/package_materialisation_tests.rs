@@ -560,34 +560,74 @@ fn assert_link_facts_match_final_cfg(
         .expect("published link facts should describe the final CFG");
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LaneFixture {
+    InstallsLane,
+    PrunesHandler,
+    Unchanged,
+}
+
 #[test]
 fn published_link_facts_follow_private_failure_lane_rewrites() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let generic_identity = "identity type T |value T| -> T:\n    return value\n;\n\n";
-    // The first module installs a private failure lane; the second leaves its HIR unchanged.
-    for (source, installs_lane) in [
+    for (fixture, page, support) in [
+        // A fallible private chain gets a builtin-Error lane.
         (
+            LaneFixture::InstallsLane,
             "multiply |left Int, right Int| -> Int:\n    return left * right\n;\n\n\
              safe_product |left Int, right Int| -> Int, Error!:\n    return multiply(left, right)\n;\n\n\
              product = safe_product(6, 7) catch then 0\n\
              same Int = identity(product)\n\
              [: product=[same]]\n",
-            true,
+            None,
         ),
-        ("same Int = identity(42)\n[: same=[same]]\n", false),
+        // U8 + U8 into U32 is proven safe, so only the generic call keeps the catch. That call's
+        // failure stays provisional until materialisation proves `identity` infallible, which
+        // leaves the handler without an error edge for the installer to prune. Post-install HIR
+        // validation rejects an unpruned handler, and pruning compacts block ids, so stale link
+        // facts would no longer match. A non-generic callee is proven before HIR lowering and
+        // never reaches pruning.
+        (
+            LaneFixture::PrunesHandler,
+            "left U8 = 255\n\
+             right U8 = 255\n\
+             same U32 = identity(left) + right catch then 0\n\
+             [: same=[same]]\n",
+            None,
+        ),
+        // Every page has an entry whose provisional error carrier is narrowed, so only an
+        // API-only support module can leave installation unchanged: it has no entry to narrow,
+        // no catch to record and no fallible private function to give a lane.
+        (
+            LaneFixture::Unchanged,
+            "@utils pass_through\nsame Int = pass_through(42)\n[: same=[same]]\n",
+            Some(
+                "export:\n    pass_through |value Int| -> Int:\n        return identity(value)\n    ;\n;\n",
+            ),
+        ),
     ] {
         let _temp = tempfile::tempdir().expect("should create temp dir");
         let dir = _temp.path().to_path_buf();
+        fs::create_dir_all(dir.join("src")).expect("should create source root");
         fs::write(
             dir.join("config.moth"),
-            "project #= (\n    name = \"docs\",\n)\nhtml #= ()\n",
+            "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
         )
         .expect("should write config");
-        fs::write(
-            dir.join("@page.moth"),
-            format!("{generic_identity}{source}"),
-        )
-        .expect("should write link-fact fixture");
+        let page = match support {
+            Some(support) => {
+                fs::create_dir_all(dir.join("src/utils")).expect("should create support root");
+                fs::write(
+                    dir.join("src/utils/+package.moth"),
+                    format!("{generic_identity}{support}"),
+                )
+                .expect("should write support package");
+                page.to_owned()
+            }
+            None => format!("{generic_identity}{page}"),
+        };
+        fs::write(dir.join("src/@page.moth"), page).expect("should write page");
 
         let mut config = Config::new(dir.clone());
         let style_directives = StyleDirectiveRegistry::built_ins();
@@ -600,34 +640,41 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
             &mut BuilderSurface::with_mandatory_core(),
             &mut string_table,
         )
-        .expect("link-fact fixture should compile");
+        .unwrap_or_else(|error| panic!("{fixture:?}: link-fact fixture should compile: {error:?}"));
 
-        let base_module = &frontend
-            .project
-            .successful_artefacts_in_module_id_order()
-            .next()
-            .expect("project should retain a base module")
-            .module;
-        let has_failure_lane = base_module.executable.hir.blocks.iter().any(|block| {
-            block.statements.iter().any(|statement| {
-                matches!(
-                    statement.kind,
-                    HirStatementKind::NumericOp {
-                        failure_mode: NumericFailureMode::ReturnError,
-                        ..
-                    }
-                )
-            })
-        });
-        assert_eq!(has_failure_lane, installs_lane);
-        assert_link_facts_match_final_cfg(base_module);
+        let mut has_api_only_module = false;
+        for artefact in frontend.project.successful_artefacts_in_module_id_order() {
+            let hir = &artefact.module.executable.hir;
+            let has_failure_lane = hir.blocks.iter().any(|block| {
+                block.statements.iter().any(|statement| {
+                    matches!(
+                        statement.kind,
+                        HirStatementKind::NumericOp {
+                            failure_mode: NumericFailureMode::ReturnError,
+                            ..
+                        }
+                    )
+                })
+            });
+            assert_eq!(
+                has_failure_lane,
+                fixture == LaneFixture::InstallsLane,
+                "{fixture:?}"
+            );
+            assert_link_facts_match_final_cfg(&artefact.module);
+            has_api_only_module |= hir.start_function.is_none();
+        }
+        assert_eq!(has_api_only_module, fixture == LaneFixture::Unchanged);
 
         let mut sidecar_count = 0;
         for sidecar in frontend.project.generated.sidecars() {
             assert_link_facts_match_final_cfg(&sidecar.module);
             sidecar_count += 1;
         }
-        assert_eq!(sidecar_count, 1, "the identity request needs one sidecar");
+        assert_eq!(
+            sidecar_count, 1,
+            "{fixture:?}: the identity request needs one sidecar"
+        );
     }
 }
 
