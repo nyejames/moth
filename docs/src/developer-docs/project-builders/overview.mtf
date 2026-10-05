@@ -1,0 +1,48 @@
+# Rust project-builder API
+
+This directory owns the public Rust project-builder tutorial and its SDK
+contracts. Read `creating-a-builder.mtf` for the complete path from a definition
+to output, then the focused references below.
+
+`@page.moth` owns website composition. It doesn't import this routing reference.
+The examples use the `moth::builder` and `moth::host` public facades. Physical
+crate placement doesn't change compiler, builder or runtime ownership.
+
+## Reading routes
+
+- Builder lifecycle and public API: `creating-a-builder.mtf`
+- Source packages, Rust attributes, supported signatures, resources and context:
+  `host-packages.mtf`
+- Configuration, metadata directives, formatters, source adapters and import
+  providers: `capabilities-and-directives.mtf`
+- Assemblies, template fragments, entry errors, lifecycles, lowering, resources,
+  output and testing: `assemblies-and-runtime.mtf`
+
+## Shared authorities
+
+`docs/compiler-design-overview.md` owns semantic compilation, identities,
+result slots, validated compiler handoffs and the normal-root entry contract.
+`docs/build-system-design.md` owns graph orchestration, package topology,
+configuration, assembly, lifecycle inputs and output ownership.
+
+Exact source directive contracts belong to
+`docs/src/docs/directives/directives.mtf`. Language and memory references remain
+authoritative for value semantics. This SDK supplies constrained registrations
+and consumer services rather than an alternate source language.
+
+## Boundary rules
+
+The definition helpers produce one frozen capability surface. Public compiled
+views borrow or reference their owning results without duplicating semantic
+stores. Lowering services keep HIR, type environments, interners and analysis
+side tables out of the ordinary builder API.
+
+Rust host attributes generate checked descriptors and adapters over the same
+manual binding path. Registration is explicit. Rust signatures use the closed
+host profile, not guessed layouts or source generation. A host binding isn't a
+network route or a portable browser implementation.
+
+Normal-root startup preserves its success fragment slots and built-in Error!
+channel. Publication waits for success and never implies rollback of prior IO.
+Templates remain strings. Resource strings retain their structural origins
+until a valid output context supplies their characters.
