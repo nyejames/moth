@@ -29,7 +29,7 @@ registered synthetic interface with tracked provenance, not ambient state.
 
 ### Derive a host interface from a Rust signature
 
-Apply `#[moth::host_function]` to a supported concrete Rust free function. Add
+Apply `["#[moth::host_function]"]` to a supported concrete Rust free function. Add
 its generated descriptor to a package explicitly:
 
 [codeblock, $code("rust"):
@@ -165,7 +165,7 @@ normal Moth error returns.
 
 ### Register opaque resources
 
-Use `#[moth::host_type]` for a Rust-owned resource whose internals stay on the
+Use `["#[moth::host_type]"]` for a Rust-owned resource whose internals stay on the
 host. Register its type and free-function surface in the package:
 
 [codeblock, $code("rust"):
