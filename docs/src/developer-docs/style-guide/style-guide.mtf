@@ -27,23 +27,6 @@ Priorities:
 - Include an exact `SourceSpan` when authored source owns the diagnostic and preserve source labels wherever they add useful context.
 - Type diagnostics should carry semantic `TypeId`s and context enums and render through `DiagnosticRenderContext`, not cloned `DataType` values or formatted type names.
 - Use `DiagnosticBag` for stage-local accumulation and `CompilerMessages` only at build/render boundaries.
-- Never suggest wrapping arithmetic, an unchecked mode, resource recovery, a grouped `if:` handler or a public `fails` marker.
-- Treat an assertion as an explicit user choice, never the default repair suggestion.
-- Never advise adding `Error!` beside an existing custom `E!` slot; that would create two error channels.
-
-Implicit-failure, catch and error-boundary diagnostics show this evidence:
-
-- Exported callable without an error slot whose implicit failure escapes: name the callable, label its signature or export exposure and show the direct operation or bounded private-call witness. Guide towards built-in `Error!` or local handling.
-- Custom `E!` body leaving implicit failure: show the custom slot and the failing source, and explain that automatic conversion exists only for built-in `Error`. Guide towards `catch` with `return!` of an `E` value, local recovery or a deliberate change to `Error!`.
-- Incompatible catch producers: show both producer expressions and their error types or kinds, distinguishing allowed `Error`-plus-implicit mixing from disallowed custom mixing. Guide towards splitting the expression or explicit mapping.
-- Typed error without a handler or propagation: point at that call or cast instead of treating it as implicit failure. Guide towards `catch` or a compatible `!`.
-- Misplaced catch or propagation: identify the actual expression boundary and the conflicting operator or context.
-- Incomplete handler result: show the required arity and types and a reachable non-producing branch. Guide towards `then`, `return`, `return!` or a valid terminal branch.
-- Escaping checked compound write-back: distinguish RHS recovery from the later arithmetic or conversion and label the target type.
-- Assertion message that can fail: show the message expression and the escaping implicit, typed or optional operation.
-- Static numeric invalidity or an unsupported target capability: keep its existing category and precise source reason rather than suggesting `catch`.
-
-Report the original cause once with enough call context to explain the closed boundary, not a cascade at every private hop. Invalid exports are diagnosed even when no entry executes them.
 
 For test assertion policy, see `testing.mtf`.
 
@@ -94,31 +77,7 @@ This codebase should optimise for fast and easy review. Dense and verbose code i
 
 Prefer code that reads as a sequence of named steps and makes data flow obvious before every detail is understood. The main function for a module or pass should also read as a sequence of named steps.
 
-Use named intermediate values, short single-purpose functions, explicit multi-step control flow, narrow helpers, context/input structs, enums for meaningful states, comments as landmarks and visible spacing. Avoid dense expression chains, clever iterator nesting, large inline matches and logic compressed into one expression. Brevity is less important than clarity.
-
-### Vertical spacing
-
-Use vertical spacing to show structure.
-
-Required:
-
-- one blank line between functions
-- one blank line between unrelated statement groups
-- one blank line between major control-flow blocks inside long functions
-- one blank line between match arms unless the arms are tiny and visually identical
-- one blank line before a comment that introduces a new logical step
-
-Prefer this:
-
-[codeblock, $code("rust"):
-    let source_file = header.source_file.clone();
-    let visibility = binding_environment.visibility_for(&source_file)?;
-
-    // Resolve type aliases before constants because constant folding may depend on alias-expanded types.
-    self.resolve_type_aliases(&headers, visibility, string_table)?;
-
-    self.resolve_constant_headers(&headers, visibility, string_table)?;
-]
+Use named intermediate values, short single-purpose functions, explicit multi-step control flow, context/input structs, enums for meaningful states, comments as landmarks and visible spacing. Avoid dense expression chains, large inline matches and logic compressed into one expression. Brevity is less important than clarity and maintainability.
 
 ### Comments as reading landmarks
 
@@ -174,7 +133,7 @@ Do not preserve a bad API shape because it already exists.
 
 ### API breakage
 
-- Moth is pre-release. Backward compatibility isn't a priority.
+- Backward compatibility isn't a priority.
 - When APIs change, thread the new shape through the compiler and remove the old one.
 - Don't add compatibility wrappers, forwarding shims, parallel structs or defaulted legacy entry points just to preserve an older interface.
 - Prefer one current API shape, not transitional layers.
@@ -261,15 +220,14 @@ A few more lines are fine when the result is easier to inspect and harder to mis
 
 ### Macros
 
-Prefer functions and types. Introduce declarative macros only where they remove meaningful repeated structure. Avoid creating procedural macros.
+Prefer functions and types. Introduce declarative macros only where they remove meaningful repeated structure or move possible runtime work into compiletime.
+Avoid creating procedural macros unless they measurably improve performance and don't harm readability.
 
 ### Warnings and lints
 
 - Use `clippy` and the default Rust formatter.
-- Keep unused variables and dead code to a minimum.
+- Avoid leaving unused variables and dead code in the codebase that can't be caught by clippy.
 - Any lint suppression must be justified and documented. Use `allow` only with supported reasoning.
-
-The banner has three lines. The title starts with `//  ` and uses title case or a clear imperative name. The top and bottom start with `// ` and their dashes extend equally beyond the title on both sides. Do not use banners around small helpers or to hide a file that should be split.
 
 ### Returning errors
 

@@ -78,7 +78,6 @@ Core contracts:
 - Before adding a helper, pass, type, registry, validator, module or test abstraction, search the current owner, adjacent modules and tests. Share only identical behaviour with a clear owner. Reuse existing utilities. Look before you write. Don't re-implement what's a few files over.
 - Keep one owner for each fact and rule. Derive cheap secondary values rather than maintaining parallel state, and share behaviour only when its meaning and ownership match.
 - Do not move shared logic into a broad utility module unless it is genuinely shared and ownership remains clear.
-- Do not claim validation commands were run when they were not. Add or update focused tests for changed behaviour and regressions. Use the project's existing test structure. Run the relevant tests and required checks, and report failures or checks that could not run.
 - Avoid wrapper types, forwarding helpers and context objects whose main effect is another navigation step.
 - Use `./tmp` for temporary snippets and artefacts that should be untracked by git.
 
@@ -106,7 +105,7 @@ Follow `docs/src/developer-docs/style-guide/testing.mtf`.
 
 ## Documentation and status
 
-Do not modify documentation unless the user explicitly requests it or approves identified changes.
+Do not modify documentation unless the user explicitly requests it, approves it or a plan provided by the user instructs documentation changes.
 
 Exceptions:
 - Update the progress matrix when implementation status, rejection behaviour, backend coverage or test coverage changes. Do not edit it for a pure refactor or prose-only correction.
@@ -136,19 +135,3 @@ Documentation-only branch checkpoints use the documentation gate. Report the exa
 ## Compaction rules
 
 After compaction, reread `AGENTS.md`, reclassify the active task and reload the routed material and required canonical sections. Do not continue from compressed recollection of project contracts.
-
-## Slice review
-
-Every non-trivial slice ends with this review. It is a self-review checklist, not a structured audit. The structured audit framework under `docs/roadmap/` is a separate and unrelated.
-
-Review in this order:
-
-1. Re-check the relevant architecture, language, memory, style and build contracts.
-2. Read each changed module from its entry point. Confirm one clear owner. File documentation should state ownership and important exclusions, and the main flow should read as named steps.
-3. Search changed and adjacent paths again for duplicated, legacy or obsolete logic, including compatibility wrappers and fallback paths.
-4. Review API and abstraction shape. Reject broad, premature or wrong-layer abstractions, noisy parameter lists, boolean-heavy state and clever control flow that slows review.
-5. Review local readability. Keep imports readable, group matches by meaning, space unrelated blocks and give complex code concise non-local WHAT/WHY comments. Remove stale comments and justify every lint suppression.
-6. Review diagnostics. Use the correct lane, preserve source context, avoid user-input panics and centralise repeated diagnostic construction.
-7. Review tests. Protect observable behaviour or real invariants, keep each test under the correct owner and remove redundant or implementation-shaped coverage.
-8. Review progress, index and documentation effects under their update rules. Mark an audit-log row stale if this slice materially changed an area it records.
-9. Confirm the selected checkpoint checks ran and report exactly what was and was not validated.
