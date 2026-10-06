@@ -33,6 +33,8 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - [HTML page directives and runtime title](./plans/html-page-directives-and-runtime-title-plan.md) - Queued: root-only $page, explicit root purposes, metadata cutover and browser title capability
 
+- [Constraints foundations and fast math](./plans/constraints-and-fast-math-plan.md) - Queued: compiler-owned `$fast_math`, transitive `$safe_math` and `$infallible`, a universal numeric backend contract V1, selected fast Core Math helpers and the corresponding documentation and optimisation work. Ordinary arithmetic remains checked. Fast arithmetic has specified wrapping and trapping while preserving numeric value invariants.
+
 - [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md) - Queued after shared MON syntax and unified numeric semantics, including fixed widths, Byte and Dec. Support recursive local anonymous records through ordinary hidden nominal structs, with explicit nominal children and transitive escape checks.
 
 - [Never return contracts](./plans/never-return-contract-plan.md)
@@ -49,7 +51,7 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - [Package dependency declarations and package-manager foundations](./plans/package-dependency-declarations-and-manager-foundations-plan.md)
 
-- TODO plan: Test root purpose. Design $test as a non-page consumer of normal-root top-level execution, including command selection, lifecycle, reporting, failure handling and HTML-aware testing needs. Schedule after the currently queued implementation work.
+- TODO plan: Test root purpose. Design $test` as a non-page consumer of normal-root top-level execution, including command selection, lifecycle, reporting, failure handling and HTML-aware testing needs. Schedule after the currently queued implementation work.
 
 - TODO plan: Moth-native MON integration and static asset builder. Schedule after every roadmap item listed above this entry. Consume the standalone `moth-mon` codec, its expanded numeric schemas and shared `moth-lexical` policies for compiler-owned `$mon` convenience, automatic schemas from ordinary Moth types, checked anonymous-record generation, explicit source encode/decode operations and backend integration. Complete still-undelivered source parity for `{=}`, Unicode escapes and contextual `::Variant` construction. Add the static `.mon` project builder through normal output ownership. Exact directive and command syntax remain design work. Standalone Rust availability delivers none of these source/runtime or builder capabilities.
 
@@ -171,9 +173,9 @@ The last recorded replay sweep, at checkpoint `99ab43de2`, covered 1068 sources 
 
 `reduce_problem` and `render_fixture_skeleton` are implemented, audited and covered by the reducer tests, and the operational oracle authority documents the pass order, the preserved classification and the rendered fixture skeleton. Nothing outside the tests calls either of them, so a developer who follows the disagreement workflow reduces a problem by writing a test rather than by running a command.
 
-Making reduction reachable is a CLI slice with two parts. The Boracle dump vocabulary in `src/projects/cli.rs` needs a reduction arm, and the differential service needs bound inputs, because `service.rs` hard-codes `OracleBounds::default()` and exposes no bound flags. Reduction is only useful when the caller can choose the bounds the reduced result must preserve.
+Making reduction reachable is a CLI slice with two parts. The Boracle dump vocabulary in `src/projects/cli.rs` needs a reduction arm, and the differential service needs bound inputs, because `service.rs` hard-codes `OracleBounds::default()`. Reduction is only useful when the caller can choose the bounds the reduced result must preserve.
 
-No plan owns this. The bounded operational oracle plan deliberately excluded CLI changes, and its completion criteria require a reducer that preserves the disagreement class rather than a reachable command.
+No plan owns this. The bounded operational oracle plan deliberately excluded CLI changes, and its completion criteria require a reducer that preserves the disagreement class, not a reachable command.
 
 ## Genuinely deferred items
 
@@ -275,4 +277,21 @@ The [package dependency declarations and package-manager foundations plan](./pla
     3. Bronze dependencies only have silver or gold dependencies.
     4. Lead dependencies do not meet these criteria and there is additional friction and checks before they can be added to a project.
 - Lead dependencies may not be eligible for the future official Moth package registry and will not be supported automatically by the package manager.
-- The package manager should be extremely strict about security and other things before something can become an official "package". Maybe the source code must pass a series of quality checks and be run through various bits of compiler tooling before it can be added.
+- The package manager should be extremely strict about security and other things before something can become an official "package". Maybe the source code must pass a series of quality checks and be run through various bits of compiler tooling before it can be added to a project.
+
+## Possible additional constraints
+
+The constraints foundation deliberately implements only `$fast_math`, `$safe_math` and
+`$infallible`. It need not grow into a general effects system. Future restrictions require
+their own design and cost justification, not reserved syntax or speculative compiler machinery.
+
+Explore `$pure`, `$no_io` and possibly `$no_wrap` later. A no-wrap restriction could allow fast
+trapping arithmetic while prohibiting possible modular overflow. Its exact proof rules are open.
+Purity needs a contract for observable mutation, ambient reads and nondeterminism. Isolate
+side-effect origins in designated compiler- or builder-provided packages with explicit trusted
+contracts. Arbitrary opaque foreign code cannot establish absence guarantees. Moth-source
+packages remain analysable through ordinary canonical summaries.
+
+The progress matrix should retain a labelled future-design reminder, separate from accepted
+implementation rows. These candidate names are not implemented, accepted directive syntax or
+permissions granted to source. Preserve the restriction-oriented name **constraints**.
