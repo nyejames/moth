@@ -292,15 +292,7 @@ impl<'source> CodeScanner<'source> {
                 }
 
                 // A block comment shields its contents from every other role.
-                if matches!(
-                    self.language,
-                    CodeLanguage::Css
-                        | CodeLanguage::C
-                        | CodeLanguage::Sql
-                        | CodeLanguage::JavaScript
-                        | CodeLanguage::TypeScript
-                        | CodeLanguage::Rust
-                ) && self.bytes[self.index..].starts_with(b"/*")
+                if self.language.has_block_comments() && self.bytes[self.index..].starts_with(b"/*")
                 {
                     self.scan_block_comment(output);
                     return;
@@ -881,7 +873,6 @@ impl<'source> CodeScanner<'source> {
         let mut end = self.index + 2;
         let mut depth = 1usize;
 
-        // Rust permits nesting. Other profiles retain first-terminator behaviour.
         // Only ASCII delimiters or EOF end the run, so byte scanning cannot split UTF-8.
         while end < self.bytes.len() {
             if self.bytes[end..].starts_with(b"*/") {
@@ -890,7 +881,7 @@ impl<'source> CodeScanner<'source> {
                 if depth == 0 {
                     break;
                 }
-            } else if self.language == CodeLanguage::Rust && self.bytes[end..].starts_with(b"/*") {
+            } else if self.language.block_comments_nest() && self.bytes[end..].starts_with(b"/*") {
                 depth += 1;
                 end += 2;
             } else {

@@ -108,12 +108,31 @@ impl CodeLanguage {
     pub(super) fn comment_prefix(self) -> Option<&'static str> {
         match self {
             Self::Text | Self::Html | Self::Markdown | Self::Css => None,
-            Self::Generic | Self::Json | Self::C => Some("//"),
-            Self::Moth => Some("--"),
-            Self::JavaScript | Self::TypeScript | Self::Rust => Some("//"),
+            Self::Generic
+            | Self::Json
+            | Self::C
+            | Self::JavaScript
+            | Self::TypeScript
+            | Self::Rust => Some("//"),
+            Self::Moth | Self::Sql => Some("--"),
             Self::Python | Self::Shell | Self::Toml | Self::Yaml => Some("#"),
-            Self::Sql => Some("--"),
         }
+    }
+
+    /// True when `/* ... */` opens a block comment in this profile.
+    pub(super) fn has_block_comments(self) -> bool {
+        matches!(
+            self,
+            Self::Css | Self::C | Self::Sql | Self::JavaScript | Self::TypeScript | Self::Rust
+        )
+    }
+
+    /// True when block comments nest, so each `/*` needs its own `*/`.
+    ///
+    /// WHY: Rust nests block comments, while the other C-style profiles close
+    ///      at the first terminator.
+    pub(super) fn block_comments_nest(self) -> bool {
+        self == Self::Rust
     }
 
     /// True when capitalized words receive the nominal fallback role.
