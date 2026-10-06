@@ -37,6 +37,7 @@ must_contain = [
     "<span class='moth-code-operator'>-&gt;</span> <span class='moth-code-error'>!</span><span class='moth-code-delimiter'>:</span>",
     "<span class='moth-code-string'>&quot;return! into Dec2&quot;</span> <span class='moth-code-comment'>-- cast! into Dec2</span>",
     "<code class='codeblock'>return! into Dec2 &lt;&amp;&gt;</code>",
+    "<span class='moth-code-delimiter'>:</span> Hello, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span>! Don&#39;t panic -- really<span class='moth-code-delimiter'>]</span>",
     "<span class='moth-code-comment'>/* throw &lt;&amp;&gt; */</span>",
     "<span class='moth-code-error'>catch</span>",
     "<span class='moth-code-error'>throw</span> error",

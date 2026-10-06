@@ -58,7 +58,63 @@ pub(super) enum DependencyHighlightState {
     ExpectSelection,
 }
 
+/// One open Moth template in the presentation scanner.
+///
+/// WHAT: a `[` opens a head at `head_depth`. The first `:` at that same
+///       delimiter depth starts the body, and the matching `]` closes it.
+/// WHY: template bodies are authored text, so prose punctuation such as `!`,
+///      quotes or `--` must not take code roles. Only nested `[...]`
+///      templates inside a body are code again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct TemplateFrame {
+    head_depth: usize,
+    in_body: bool,
+}
+
 impl<'source> CodeScanner<'source> {
+    /// True when the cursor sits in the body text of the innermost template.
+    pub(super) fn in_template_body(&self) -> bool {
+        self.template_frames
+            .last()
+            .is_some_and(|frame| frame.in_body)
+    }
+
+    /// Opens, closes or enters the body of a template at one delimiter.
+    ///
+    /// Called after `update_moth_delimiter_depth`, so a `[` frame records the
+    /// depth its own head runs at.
+    pub(super) fn update_template_frames(&mut self) {
+        match self.bytes[self.index] {
+            b'[' => self.template_frames.push(TemplateFrame {
+                head_depth: self.moth_delimiter_depth,
+                in_body: false,
+            }),
+            b']' => {
+                self.template_frames.pop();
+            }
+            b':' => {
+                if let Some(frame) = self.template_frames.last_mut()
+                    && !frame.in_body
+                    && frame.head_depth == self.moth_delimiter_depth
+                {
+                    frame.in_body = true;
+                    self.in_pipe_group = false;
+                    self.dependency_state = DependencyHighlightState::None;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Leaves body text up to the next template bracket in the plain run.
+    ///
+    /// WHY: brackets are ASCII, so stopping on them never splits a UTF-8
+    ///      scalar, and the whole stretch flushes with the surrounding run.
+    pub(super) fn skip_template_body_text(&mut self) {
+        self.index = consume_while(self.bytes, self.index, |byte| !matches!(byte, b'[' | b']'));
+        self.expected_word_role = None;
+    }
+
     /// Returns the byte index just past one identifier word.
     ///
     /// WHAT: scans ASCII alphanumerics and underscores and consumes whole

@@ -216,3 +216,62 @@ fn rust_comments_nest_while_javascript_closes_at_the_first_terminator() {
         "<span class='moth-code-comment'>/* outer /* inner */</span>"
     );
 }
+
+#[test]
+fn moth_template_bodies_are_plain_text_around_highlighted_interpolations() {
+    assert_eq!(
+        highlight_code_html(
+            "[: Hello, [name]! Don't -- stop \"now\"]",
+            CodeLanguage::Moth
+        ),
+        "<span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> \
+         Hello, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span>\
+         ! Don&#39;t -- stop &quot;now&quot;<span class='moth-code-delimiter'>]</span>"
+    );
+
+    // Heads keep code roles, including nested templates inside head arguments,
+    // while body markup and quotes stay plain.
+    let highlighted = highlight_code_html(
+        "[$children([:<li>[$slot]</li>]): <ul class=\"x\">[$slot]</ul>]",
+        CodeLanguage::Moth,
+    );
+    assert_eq!(
+        highlighted
+            .matches("<span class='moth-code-directive'>$slot</span>")
+            .count(),
+        2
+    );
+    assert!(highlighted.contains("<span class='moth-code-directive'>$children</span>"));
+    assert!(highlighted.contains(
+        "<span class='moth-code-delimiter'>:</span> &lt;ul class=&quot;x&quot;&gt;<span class='moth-code-delimiter'>[</span>"
+    ));
+    assert!(!highlighted.contains("moth-code-operator"));
+    assert!(!highlighted.contains("moth-code-string"));
+}
+
+#[test]
+fn moth_template_heads_keep_control_flow_strings_and_code_resumes_after_close() {
+    let highlighted = highlight_code_html(
+        "[loop items |item, index|:\n    [index]: [item] if ready!\n]\n[\"[literal]\"]\nreturn! value",
+        CodeLanguage::Moth,
+    );
+    assert!(highlighted.contains("<span class='moth-code-keyword'>loop</span>"));
+    assert!(highlighted.contains(
+        "<span class='moth-code-delimiter'>]</span>: <span class='moth-code-delimiter'>[</span>"
+    ));
+    assert!(highlighted.contains("</span> if ready!\n<span class='moth-code-delimiter'>]</span>"));
+    assert!(highlighted.contains("<span class='moth-code-string'>&quot;[literal]&quot;</span>"));
+    assert!(highlighted.ends_with(
+        "<span class='moth-code-keyword'>return</span><span class='moth-code-error'>!</span> value"
+    ));
+    assert_eq!(highlighted.matches("moth-code-error").count(), 1);
+}
+
+#[test]
+fn unfinished_moth_template_body_stays_plain_to_the_end_of_the_snippet() {
+    assert_eq!(
+        highlight_code_html("[: unfinished ! π <&>", CodeLanguage::Moth),
+        "<span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> \
+         unfinished ! π &lt;&amp;&gt;"
+    );
+}

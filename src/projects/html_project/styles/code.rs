@@ -17,7 +17,9 @@
 //! The production scanner is one byte-indexed pass over borrowed source slices. It batches plain
 //! runs, escapes directly into one owned output string per text piece and uses maximal munch for
 //! compound Moth operators. Moth contextual roles (contracts, functions, directives, paths and the
-//! `io` namespace) are bounded lexical presentation heuristics, never semantic analysis.
+//! `io` namespace) are bounded lexical presentation heuristics, never semantic analysis. A small
+//! template-frame stack keeps Moth template bodies as plain authored text around their highlighted
+//! heads and `[...]` interpolations.
 
 use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterInput, FormatterInputPiece, FormatterOutput, FormatterOutputPiece,
@@ -41,7 +43,7 @@ pub(crate) use language_profiles::CodeLanguage;
 #[cfg(test)]
 pub(crate) use language_profiles::LANGUAGE_ALIASES;
 use language_profiles::classify_non_moth_word;
-use moth_scanner::{ContractState, DependencyHighlightState};
+use moth_scanner::{ContractState, DependencyHighlightState, TemplateFrame};
 
 /// One language-neutral presentation role shared by every code language profile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -215,6 +217,7 @@ struct CodeScanner<'source> {
     css_brace_depth: usize,
     expected_word_role: Option<ExpectedWordRole>,
     dependency_state: DependencyHighlightState,
+    template_frames: Vec<TemplateFrame>,
 }
 
 impl<'source> CodeScanner<'source> {
@@ -233,13 +236,16 @@ impl<'source> CodeScanner<'source> {
             css_brace_depth: 0,
             expected_word_role: None,
             dependency_state: DependencyHighlightState::None,
+            template_frames: Vec::new(),
         }
     }
 
     fn scan(&mut self, output: &mut String) {
         while self.index < self.bytes.len() {
             let byte = self.bytes[self.index];
-            if byte.is_ascii() {
+            if self.in_template_body() && !matches!(byte, b'[' | b']') {
+                self.skip_template_body_text();
+            } else if byte.is_ascii() {
                 self.scan_ascii_byte(byte, output);
             } else {
                 self.scan_non_ascii_scalar(output);
@@ -671,6 +677,7 @@ impl<'source> CodeScanner<'source> {
 
         if self.language == CodeLanguage::Moth {
             self.update_moth_delimiter_depth();
+            self.update_template_frames();
             if matches!(self.bytes[self.index], b'|' | b':') {
                 self.end_loop_header_at_top_level();
             }
