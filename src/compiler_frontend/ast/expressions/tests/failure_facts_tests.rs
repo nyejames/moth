@@ -614,7 +614,7 @@ fn cursor_span(index: u32) -> Option<SourceSpan> {
 }
 
 #[test]
-fn witness_candidates_select_on_demand_without_ordering_unused_contributors() {
+fn witness_candidates_yield_calls_then_one_terminal_origin_on_demand() {
     // WHAT: a long body whose first candidate already ends the search.
     // WHY: the walkers try one candidate at a time, so selecting the first must not classify or
     //      order the rest. Arithmetic looks ahead once for its own compound write-back.
@@ -646,8 +646,28 @@ fn witness_candidates_select_on_demand_without_ordering_unused_contributors() {
     assert!(std::ptr::eq(first.unwrap(), &sites[CALL_COUNT - 1]));
     assert_eq!(activity_checks.get(), 2);
     assert_eq!(site_reads.get(), CALL_COUNT);
-    let second = candidates.next_candidate(is_active, site).unwrap();
-    assert!(std::ptr::eq(second.unwrap(), &sites[0]));
-    let third = candidates.next_candidate(is_active, site).unwrap();
-    assert!(std::ptr::eq(third.unwrap(), &sites[1]));
+    // The selected write-back is terminal, so the cursor is exhausted.
+    assert!(
+        candidates
+            .next_candidate(is_active, site)
+            .unwrap()
+            .is_none()
+    );
+
+    // Calls are skippable and stay in order until the first terminal origin ends the body.
+    sites[2] = FailureWitnessSite::Arithmetic(cursor_span(2));
+    sites[0] = FailureWitnessSite::Call;
+    activity_checks.set(0);
+    let mut candidates = WitnessCandidates::new(&sites);
+    for expected in sites.iter().take(3) {
+        let yielded = candidates.next_candidate(is_active, site).unwrap();
+        assert!(std::ptr::eq(yielded.unwrap(), expected));
+    }
+    assert!(
+        candidates
+            .next_candidate(is_active, site)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(activity_checks.get(), 3);
 }

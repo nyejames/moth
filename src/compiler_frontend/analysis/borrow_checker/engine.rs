@@ -155,17 +155,18 @@ impl<'a> BorrowChecker<'a> {
         }
         in_states.insert(function.entry, initial_state);
 
+        // `pending` mirrors queue membership so a block whose input grows from several
+        // predecessors before it runs is visited once with the accumulated input.
         let mut worklist = VecDeque::new();
+        let mut pending = FxHashSet::default();
         worklist.push_back(function.entry);
+        pending.insert(function.entry);
 
         let mut summary = FunctionBorrowSummary {
             reachable_blocks: reachable_blocks.len(),
             mutable_call_sites: 0,
-            alias_heavy_blocks: Vec::new(),
             worklist_iterations: 0,
         };
-
-        let mut alias_heavy = FxHashSet::default();
 
         borrow_log!(format!(
             "[Borrow] Analyzing function '{}' (entry={} blocks={})",
@@ -176,15 +177,16 @@ impl<'a> BorrowChecker<'a> {
 
         // Standard forward fixed-point iteration over reachable blocks.
         while let Some(block_id) = worklist.pop_front() {
+            // Clear before transfer so a self-loop or later back edge can queue the block again.
+            pending.remove(&block_id);
             summary.worklist_iterations += 1;
 
-            // The stored input is narrowed in place, then cloned once as the transfer state.
-            let Some(input_state) = in_states.get_mut(&block_id) else {
+            // Stored inputs are already narrowed to this block's visibility: the entry state and
+            // every incoming edge are narrowed before insertion or join, and joining states
+            // narrowed to the same mask stays narrowed.
+            let Some(input_state) = in_states.get(&block_id) else {
                 continue;
             };
-            if let Some(mask) = visible_locals_by_block.get(&block_id) {
-                input_state.kill_invisible(mask);
-            }
             let mut output_state = input_state.clone();
 
             let block = self.block_by_id_or_error(block_id, function.id)?;
@@ -221,10 +223,6 @@ impl<'a> BorrowChecker<'a> {
                         .reactive_invalidations
                         .insert(statement_id, invalidations);
                 }
-            }
-
-            if output_state.has_any_alias_conflict() {
-                alias_heavy.insert(block_id);
             }
 
             let changed_out = match out_states.get(&block_id) {
@@ -268,7 +266,7 @@ impl<'a> BorrowChecker<'a> {
                         true
                     }
                 };
-                if changed_in {
+                if changed_in && pending.insert(successor) {
                     worklist.push_back(successor);
                 }
 
@@ -277,10 +275,6 @@ impl<'a> BorrowChecker<'a> {
 
             out_states.insert(block_id, output_state);
         }
-
-        let mut alias_heavy_blocks = alias_heavy.into_iter().collect::<Vec<_>>();
-        alias_heavy_blocks.sort_by_key(|id| id.0);
-        summary.alias_heavy_blocks = alias_heavy_blocks;
 
         // Persist snapshots for debug tooling and downstream analyses.
         for block_id in &reachable_blocks {

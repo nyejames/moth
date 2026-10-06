@@ -694,8 +694,9 @@ fn run_semantic_stages(
 
     // Link facts are the validated-HIR owner for direct call targets. The convergence
     // observation model consumes these facts after HIR validation rather than scanning
-    // source or introducing a second HIR call graph.
-    let function_link_facts = collect_module_function_link_facts(&hir_module)?;
+    // source or introducing a second HIR call graph. Convergence refreshes them only when the
+    // private failure lane rewrites the CFG.
+    let mut function_link_facts = collect_module_function_link_facts(&hir_module)?;
 
     #[cfg(feature = "boracle")]
     if request == SemanticStageRequest::Boracle {
@@ -731,7 +732,7 @@ fn run_semantic_stages(
     let borrow_analysis = run_generated_summary_convergence(
         compiler,
         &mut hir_module,
-        &function_link_facts,
+        &mut function_link_facts,
         &mut generated_transaction,
         bootstrap_borrow_analysis,
         &mut type_environment,
@@ -813,9 +814,6 @@ fn run_semantic_stages(
         context.builder_runtime_packages,
     );
 
-    // The private failure lane may have added blocks after the convergence model was built.
-    // Recollect link facts from the final CFG before proofs and publication.
-    let function_link_facts = collect_module_function_link_facts(&hir_module)?;
     let numeric_proofs = analyse_numeric_proofs(
         &hir_module,
         &type_environment,

@@ -496,6 +496,10 @@ impl LaneInstaller<'_> {
         &self,
         records: &[CatchProtectedCall],
     ) -> Result<(), CompilerError> {
+        // Most modules carry no protected calls, so skip indexing every call statement.
+        if records.is_empty() {
+            return Ok(());
+        }
         let call_statements = self
             .hir
             .blocks

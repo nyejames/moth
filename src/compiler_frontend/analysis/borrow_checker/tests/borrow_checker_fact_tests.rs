@@ -2013,3 +2013,112 @@ fn catch_handler_cannot_load_never_initialised_success_call_result() {
         .expect_err("the handler must not read the skipped outer call's result");
     assert_borrow_error_kind(&error, BorrowDiagnosticKind::UseOfUninitializedLocal);
 }
+
+#[test]
+fn equal_depth_diamond_merges_both_roots_in_one_merge_visit() {
+    use crate::compiler_frontend::tests::hir_fixture_support::{
+        bool_expression, expression, statement,
+    };
+
+    let source = "left ~{String = Int} = {\"Priya\" = 10}\n\
+                  right ~{String = Int} = {\"Rob\" = 20}\n\
+                  view = left\n";
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let left = find_local_by_name(&hir, &path_fork, &string_table, "left")
+        .expect("fixture declares the left root");
+    let right = find_local_by_name(&hir, &path_fork, &string_table, "right")
+        .expect("fixture declares the right root");
+    let view = find_local_by_name(&hir, &path_fork, &string_table, "view")
+        .expect("fixture declares the view alias");
+    let start = hir.start_function.expect("fixture has a start function");
+    let entry_id = hir.functions[start.0 as usize].entry;
+    let entry = &mut hir.blocks[entry_id.0 as usize];
+    let region = entry.region;
+    let view_type = entry
+        .locals
+        .iter()
+        .find(|local| local.id == view)
+        .expect("view is declared in the entry region")
+        .ty;
+    let assignment_index = entry
+        .statements
+        .iter()
+        .position(|statement| {
+            matches!(&statement.kind, HirStatementKind::Assign { target: HirPlace::Local(local), .. }
+                if *local == view)
+        })
+        .expect("fixture binds the view alias");
+    let left_assignment = entry.statements.remove(assignment_index);
+    let mut right_assignment = left_assignment.clone();
+    right_assignment.id = HirNodeId(90_000);
+    let HirStatementKind::Assign { value, .. } = &mut right_assignment.kind else {
+        unreachable!("the selected statement is an assignment");
+    };
+    value.id = HirValueId(90_001);
+    value.kind = HirExpressionKind::Load(HirPlace::Local(right));
+
+    // Both arms sit one edge from the entry, so breadth-first scheduling reaches the merge from
+    // the left arm and grows its input from the right arm before the merge is popped.
+    let base = hir.blocks.len() as u32;
+    let left_arm = BlockId(base);
+    let right_arm = BlockId(base + 1);
+    let merge = BlockId(base + 2);
+    let exit_terminator = hir.blocks[entry_id.0 as usize].terminator.clone();
+    hir.blocks[entry_id.0 as usize].terminator = HirTerminator::If {
+        condition: bool_expression(90_002, true, builtin_type_ids::BOOL, region),
+        then_block: left_arm,
+        else_block: right_arm,
+    };
+    let jump_to_merge = HirTerminator::Jump {
+        target: merge,
+        args: vec![],
+    };
+    let read_view = expression(
+        90_003,
+        HirExpressionKind::Load(HirPlace::Local(view)),
+        view_type,
+        region,
+        ValueKind::Place,
+    );
+    hir.blocks.extend([
+        HirBlock {
+            id: left_arm,
+            region,
+            locals: vec![],
+            statements: vec![left_assignment],
+            terminator: jump_to_merge.clone(),
+        },
+        HirBlock {
+            id: right_arm,
+            region,
+            locals: vec![],
+            statements: vec![right_assignment],
+            terminator: jump_to_merge,
+        },
+        HirBlock {
+            id: merge,
+            region,
+            locals: vec![],
+            statements: vec![statement(90_004, HirStatementKind::Expr(read_view), 4)],
+            terminator: exit_terminator,
+        },
+    ]);
+
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("reading a view of either root is legal");
+
+    let merge_view = report.analysis.block_entry_states[&merge]
+        .locals
+        .iter()
+        .find(|snapshot| snapshot.local == view)
+        .expect("merge entry snapshot should include the view");
+    assert!(merge_view.alias_roots.contains(&left));
+    assert!(merge_view.alias_roots.contains(&right));
+
+    // Entry, both arms and the merge: the grown merge input is visited once, not once per arm.
+    let summary = &report.analysis.function_summaries[&start];
+    assert_eq!(summary.reachable_blocks, 4);
+    assert_eq!(summary.worklist_iterations, 4);
+}
