@@ -40,6 +40,7 @@
   --moth-code-function: #82aaff;
   --moth-code-directive: #bcde8a;
   --moth-code-contract: #f5646b;
+  --moth-code-error: #ff5252;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -137,6 +138,9 @@ body {
 }
 .moth-code-contract {
   color: var(--moth-code-contract);
+}
+.moth-code-error {
+  color: var(--moth-code-error);
 }
 
 /* BASIC CSS RESET STUFF */
