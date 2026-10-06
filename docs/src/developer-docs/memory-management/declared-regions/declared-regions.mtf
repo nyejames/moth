@@ -140,7 +140,7 @@ Rules:
 - Declared-region identity is not source type identity.
 - Declared region closure occurs on every exit: fallthrough, `return`, `return!`, `break`, recovery exit, and checked-operation failure path.
 
-The declared region name is local to the current executable body scope. It cannot collide with a visible value, type, dependency binding, constant, reactive source or active declared region. A declared region is not a value. Declared regions are invalid in constants, config, signatures, fields, choices, traits and export surfaces.
+The declared region name is local to the current executable body scope. It cannot collide with a visible value, type, dependency binding, constant or active declared region. A declared region is not a value. Declared regions are invalid in constants, config, signatures, fields, choices, traits and export surfaces.
 
 Ordinary declarations inside a declared region are not implicitly declared-region-owned. Only declarations with `into region_name` place fresh results or independent graphs into the declared region.
 
@@ -321,7 +321,7 @@ Invalid escapes include:
 - returning a projection or alias rooted in declared-region-owned storage
 - storing a declared-region-owned value in a longer-lived local or aggregate
 - storing a value owned by a child declared region in a parent or sibling declared region
-- assigning a declared-region-owned value into longer-lived reactive storage
+- retaining a declared-region-owned value in a longer-lived capture or builder-owned object
 - passing a declared-region-owned value to an external call that may retain it
 - keeping a map lookup, collection element or field alias live after declared-region exit
 - creating a longer-lived retained edge into the declared region
@@ -382,30 +382,19 @@ A fresh-result-root summary and its retained-edge constraints must be backend-ne
 
 Affine cleanup responsibility records which runtime path may perform individual cleanup. It does not prove uniqueness, identify the final observer or establish lifetime legality. A declared region owns release for its whole storage family, so a callee never receives individual cleanup responsibility for a declared-region-owned allocation and never releases one. Declared-region-owned handles are passed borrowed and uncounted.
 
-## Reactive and builder-owned lifetimes
+## Retained captures and builder-owned lifetimes
 
-Reactive storage can outlive the lexical function that creates it. V1 must reject:
+Captured values and builder-owned objects may not retain a declared-region-owned alias past that
+region's exit. Route captures obey this rule without a special lifetime exemption. Wire binding
+identity creates no retained subscription or longer-lived owner.
 
-- reactive declarations placed directly into a declared region
-- assigning declared-region-owned values into reactive storage that outlives the declared region
-- subscriptions or mounted state retaining declared-region-owned aliases past declared-region exit
+Builder-owned regions obey the same retained-edge rule as source declared regions. The project
+runtime creates and ends them according to a supported lifecycle contract. The compiler may use
+those explicit roots but may not invent a page or mount owner to avoid a source diagnostic. A GC
+backend may use ordinary reachability only for the same already-legal topology.
 
-A GC backend may use ordinary reachability for already-legal topology.
-
-A future collector-free HTML-Wasm path should use builder-owned lifecycle regions such as:
-
-[codeblock, $code("text"):
-    Page region
-    ├── page reactive state
-    ├── Mount A region
-    │   ├── subscriptions
-    │   └── render-generation region
-    └── Mount B region
-        ├── subscriptions
-        └── render-generation region
-]
-
-Builder-owned regions obey the same retained-edge rule as source declared regions, but they are created and ended by the project runtime rather than ordinary source blocks. Builders cannot change source legality.
+Future Wiring observation and event delivery require a separate accepted lifecycle design.
+Reactivity V1 subscriptions and reactive declarations are not part of declared-region semantics.
 
 ## Diagnostics
 
@@ -441,7 +430,7 @@ Deferred work includes:
 - expression-site placement
 - declared region-local graph construction and publication
 - direct reference-cycle construction inside one declared region
-- builder lifecycle region metadata for reactivity
+- builder lifecycle integration for future Wiring observation after its separate design
 - field-sensitive region splitting
 - physical region layout and runtime ABI encoding
 

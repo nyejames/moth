@@ -4,6 +4,12 @@ Boracle's operational oracle is a bounded executor for normalized `BorrowProblem
 
 The reference solver this oracle deliberately differs from is specified in `docs/src/developer-docs/memory-management/boracle/boracle-reference-solver.mtf`.
 
+The `ReactiveObserve` entries below document the current legacy normalized event. The compiler
+foundation retires that event, its source producer and obsolete cases with Reactivity V1. These
+entries do not require a subscription model in the final borrow handoff or authorise replacement
+Wiring observation. Until the owner is removed, the oracle must still execute its actual input
+faithfully. Update this event catalogue in the same implementation slice that deletes the event.
+
 ## Purpose and locked constraints
 
 The oracle is a second, deliberately different executable semantics for a normalized `BorrowProblem`. It executes concrete events with concrete dynamic value generations and concrete control flow. It exists to find likely soundness defects, precision candidates, malformed normalized inputs and minimal counterexamples.

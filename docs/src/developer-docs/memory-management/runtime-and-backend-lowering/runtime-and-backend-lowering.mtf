@@ -5,7 +5,7 @@
 
 Different targets and build profiles may receive different allocation, region, counted, handle and ownership representations. The compiler-owned memory planner selects them per physical variant, backend lowering encodes the result, and no target may receive different language semantics.
 
-Every backend must preserve shared read-only access, exclusive mutation, explicit copy behaviour, affine transfer safety, lifetime-topology legality, reactive liveness and identical observable results.
+Every backend must preserve shared read-only access, exclusive mutation, explicit copy behaviour, affine transfer safety, lifetime-topology legality, retained-value liveness and identical observable results.
 
 **Collector-free release guarantee.** Backends declare whether they support collector-free release lowering. A backend that advertises full memory control must lower every accepted topology in a release build without a tracing or reachability collector, and must not silently fall back to one. There is no source-visible or project-visible no-GC mode: this is a backend capability, not a language mode.
 
@@ -321,7 +321,7 @@ A future resource-capable profile requires a separate complete design for identi
 - Explicit copy remains graph-independent semantically even if current implementation lags.
 - Ownership-specific advisory facts may be ignored.
 - JS host behaviour must not silently mutate shared aliases or duplicate values contrary to Moth semantics.
-- Reactive mounts follow builder lifecycle roots and stay alive through runtime reachability.
+- Builder-owned state follows its explicit lifecycle roots. Runtime reachability may realise only already-validated retention.
 
 ## Wasm lowering
 
@@ -385,7 +385,7 @@ Backends may consume:
 - validated lifetime topology and allocation-family facts
 - builder lifecycle roots
 - region/exit information
-- reactive invalidation and liveness metadata
+- validated retained-capture and builder-lifecycle constraints
 - external boundary classifications
 - the compilation boundary's `NumericProfile`, consumed rather than selected
 
@@ -399,9 +399,17 @@ Backends must not:
 - treat missing facts as proof of ownership or topology legality
 - reconsider source legality
 
-## Reactive and mounted-fragment liveness
+## Retained values and builder lifecycle liveness
 
-Live reactive subscriptions and mounted fragments can keep state observable. Ownership-aware lowering must not free a source or template instance while its builder lifecycle or reactive subscription keeps it observable. A GC representation may realise those already-proven lifecycle and observability facts with reachability, but reachability does not define the semantic lifetime. Finer invalidation granularity may improve performance but not lifetime semantics. Runtime fragment and reactive mount behaviour remain separate concerns.
+Ownership-aware lowering preserves every retained capture and builder-owned value for its
+validated lifetime. A GC representation may realise that topology with reachability, but
+reachability does not define the semantic owner or legalise an escape. Ordinary runtime fragment
+insertion does not implicitly create an observer.
+
+Wire and Route parameter contracts add no automatic observation, template updates or event
+delivery. A backend consumes their validated reads, forwarding and captures without restoring a
+Reactivity V1 scheduler or subscription graph. Future observation and event lifecycles require a
+separate accepted contract before they become memory-planning inputs.
 
 ## Backend specialisation
 
@@ -446,7 +454,7 @@ Conservative retention is valid. Semantic divergence isn't. In a capable full-co
 - Require deterministic destruction for observable correctness.
 - Fall back to a tracing collector in a capable full-control release build.
 - Upgrade an uncounted allocation to REC at runtime.
-- Make reactive observability depend on target-specific early release.
+- Make retained-value observability depend on target-specific early release.
 - Assume page memory includes arbitrary imported components.
 - Invent a numbered Stage 7 for backend lowering.
 
@@ -457,7 +465,7 @@ Conservative retention is valid. Semantic divergence isn't. In a capable full-co
 - Presenting current Wasm scaffolding as the whole accepted memory architecture.
 - Treating every runtime value as a tagged heap pointer.
 - Lowering advisory drops without checking ownership.
-- Freeing reactive state too early.
+- Freeing captured or builder-owned state before its validated lifetime ends.
 - Treating imprecise cleanup placement as an error.
 - Treating missing topology proof as backend GC fallback.
 - Presenting collector-free release as a source-visible or project-visible mode.

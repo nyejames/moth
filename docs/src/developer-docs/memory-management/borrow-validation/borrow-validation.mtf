@@ -22,7 +22,6 @@ Every borrow solver must publish the same semantic handoff even when its interna
 - proof that a persistent edge or affine root cannot disappear while a dependent temporary borrow remains usable
 - proof that no capable source alias survives a candidate cleanup frontier
 - preliminary return-root alias and projection evidence
-- reactive invalidation and observability facts
 - resolved external access-boundary classifications
 
 These are semantic facts rather than a required lattice, root table or solver storage format. A different solver can compute them differently without changing source semantics. The handoff never selects REC, constructs a physical memory plan or emits runtime instructions.
@@ -48,6 +47,11 @@ These are semantic facts rather than a required lattice, root table or solver st
 - Source locations and string table for diagnostics.
 
 Borrow validation doesn't reparse source syntax, solve generics or traits, or see AST-only generic or trait state.
+
+Native call results have explicit success positions and a separate error channel. Borrow facts are
+keyed to their HIR owner and those positions. Distinct positions are not proof of independent
+storage: preliminary provenance may alias parameters or other results. Success values are usable
+only on their successful CFG edge, and the error value only on its error edge.
 
 ## Semantic places and access liveness
 
@@ -200,7 +204,6 @@ Borrow validation consumes and produces:
 - mutation effects
 - transfer eligibility / effect category
 - preliminary return-root alias and projection evidence
-- reactive effects
 - external function access rules
 - external return-alias metadata
 
@@ -232,23 +235,20 @@ The alpha side table may emit advisory `DropIfOwned` drop candidates. `DropIfOwn
 
 The permanent conceptual conditional operation is `discharge_if_owned`. The memory planner owns final transfer, discharge, destroy and bulk-reclaim plans.
 
-## Reactive subscriptions and invalidation
+## Binding capabilities and captured values
 
-- A subscription is a read-only dependency.
-- A subscription isn't an active borrow.
-- A subscription doesn't grant mutation.
-- A subscription doesn't extend a source-language lifetime category.
-- Writes, place mutations, map mutations and mutable arguments can create invalidation facts.
-- Ordinary alias and exclusivity checks still apply.
-- Ownership-aware lowering must not destroy an observable source or mounted state too early.
+Wire and Route parameter contracts use ordinary access and lifetime rules. Reading a Wire reads the
+binding's current value, while forwarding it preserves binding identity. That identity grants no
+mutation authority, creates no subscription and extends no lifetime. A static compiler expression
+ID is not the runtime binding instance.
 
-Reactivity V1 precision:
+Route captures evaluate when the route forms. Their reads, effects and aliases participate in the
+ordinary access facts. Lifetime analysis owns any retained-edge and outlives constraints. Borrow
+validation does not turn a capture into an implicit copy or an independent allocation.
 
-- invalidation is source-level today
-- field, item and path granularity is future precision
-- subscription observability is consumed by lifetime validation
-
-Reactive invalidation and observability facts are part of the stable handoff. They're distinct from builder-owned page/mount lifetime roots.
+Automatic observation, subscriptions and event delivery require their own later accepted
+contracts. Reactivity V1 invalidation facts are not part of this stable handoff. Builder-owned
+lifecycle roots remain distinct inputs to lifetime topology.
 
 ## Handoff to lifetime validation
 
@@ -262,7 +262,6 @@ Borrow validation supplies the next analysis with:
 - temporary-borrow safety proof that a persistent edge or affine root cannot disappear while its dependent temporary borrow remains usable
 - path- and epoch-sensitive edge-coexistence evidence
 - preliminary return-root alias and projection evidence
-- reactive invalidation and observability facts
 - external boundary classifications already resolved for access
 
 Lifetime-region and escape validation then decides one lifetime owner, retained-edge legality, escapes, cycles, edge coexistence and outlives constraints. It reasons about committed retained-edge states rather than treating every analysis fact as a physical decision. See @../lifetime-regions-and-escape-validation (Lifetime regions and escape validation).
@@ -337,7 +336,7 @@ Current advisory drop candidates are implementation hints for the alpha lowering
 - Solve generics or traits.
 - Parse source syntax.
 - Introduce source lifetimes.
-- Treat reactive subscriptions as active borrow lifetimes.
+- Treat a parameter capability as extra mutation authority or a lifetime extension.
 - Skip validation because the target uses GC.
 
 ## Common mistakes
