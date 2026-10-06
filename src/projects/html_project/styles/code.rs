@@ -58,6 +58,8 @@ enum CodeHighlightRole {
     Function,
     Directive,
     Contract,
+    /// Error-handling syntax, not a claim that the source is invalid.
+    Error,
 }
 
 impl CodeHighlightRole {
@@ -75,6 +77,7 @@ impl CodeHighlightRole {
             Self::Function => "moth-code-function",
             Self::Directive => "moth-code-directive",
             Self::Contract => "moth-code-contract",
+            Self::Error => "moth-code-error",
         }
     }
 }
@@ -282,10 +285,15 @@ impl<'source> CodeScanner<'source> {
                     }
                 }
 
-                // Block comments cover CSS and multi-line C/SQL comments.
+                // A block comment shields its contents from every other role.
                 if matches!(
                     self.language,
-                    CodeLanguage::Css | CodeLanguage::C | CodeLanguage::Sql
+                    CodeLanguage::Css
+                        | CodeLanguage::C
+                        | CodeLanguage::Sql
+                        | CodeLanguage::JavaScript
+                        | CodeLanguage::TypeScript
+                        | CodeLanguage::Rust
                 ) && self.bytes[self.index..].starts_with(b"/*")
                 {
                     self.scan_block_comment(output);
@@ -857,14 +865,30 @@ impl<'source> CodeScanner<'source> {
         self.scan_delimiter(output);
     }
 
-    /// Scans one `/* ... */` block comment through the first `*/`.
+    /// Scans a block comment, including nested Rust comments and unfinished snippets.
     fn scan_block_comment(&mut self, output: &mut String) {
         let run_start = self.index;
-        let end = self.bytes[self.index + 2..]
-            .windows(2)
-            .position(|window| window == b"*/")
-            .map(|offset| self.index + 2 + offset + 2)
-            .unwrap_or(self.bytes.len());
+        let mut end = self.index + 2;
+        let mut depth = 1usize;
+
+        // Rust permits nesting. Other profiles retain first-terminator behaviour.
+        // Only ASCII delimiters or EOF end the run, so byte scanning cannot split UTF-8.
+        while end < self.bytes.len() {
+            if self.bytes[end..].starts_with(b"*/") {
+                end += 2;
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            } else if self.language == CodeLanguage::Rust
+                && self.bytes[end..].starts_with(b"/*")
+            {
+                depth += 1;
+                end += 2;
+            } else {
+                end += 1;
+            }
+        }
 
         self.expected_word_role = None;
         self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::Comment);

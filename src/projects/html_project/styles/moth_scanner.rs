@@ -10,8 +10,8 @@ use super::{
 };
 use crate::compiler_frontend::builtins::error_type::ERROR_TYPE_NAME;
 use crate::compiler_frontend::external_packages::IO_NAMESPACE_NAME;
-use crate::compiler_frontend::keywords::attached_bang_keyword_token_tag;
 use crate::compiler_frontend::symbols::identifier_policy::is_uppercase_constant_name;
+use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::words::{SourceWordClass, classify_source_word};
 
 /// Contract-list kind for the Moth heuristic.
@@ -61,11 +61,11 @@ pub(super) enum DependencyHighlightState {
 impl<'source> CodeScanner<'source> {
     /// Returns the byte index just past one identifier word.
     ///
-    /// WHAT: scans ASCII alphanumerics and underscores, consumes one scalar for
-    ///       any non-ASCII byte, then includes an attached `return!` / `cast!`
-    ///       bang for Moth.
-    /// WHY: the word range is computed locally so the shared emitter can hold the
-    ///      single invariant that the cursor is still at the token start.
+    /// WHAT: scans ASCII alphanumerics and underscores and consumes whole
+    ///       non-ASCII scalars. Punctuation, including an attached bang, stays
+    ///       outside the word so error markers can receive their own role.
+    /// WHY: presentation spans need not match compiler token boundaries;
+    ///      `return!` and `cast!` retain their exact source spelling.
     pub(super) fn word_end(&self, start: usize) -> usize {
         let mut end = start;
 
@@ -86,15 +86,6 @@ impl<'source> CodeScanner<'source> {
             }
         }
 
-        // `return!` and `cast!` keep the attached bang inside the keyword span.
-        if self.language == CodeLanguage::Moth
-            && end < self.bytes.len()
-            && self.bytes[end] == b'!'
-            && attached_bang_keyword_token_tag(&self.source[start..end]).is_some()
-        {
-            end += 1;
-        }
-
         end
     }
 
@@ -107,14 +98,6 @@ impl<'source> CodeScanner<'source> {
     ) -> Option<CodeHighlightRole> {
         if let Some(role) = self.dependency_word_role(word) {
             return Some(role);
-        }
-
-        // Attached bang forms are keyword spans.
-        if let Some(prefix) = word.strip_suffix('!')
-            && attached_bang_keyword_token_tag(prefix).is_some()
-        {
-            self.reset_declaration_context();
-            return Some(CodeHighlightRole::Keyword);
         }
 
         if let Some(source_word) = classify_source_word(word) {
@@ -177,8 +160,17 @@ impl<'source> CodeScanner<'source> {
             return Some(role);
         }
 
-        // Canonical builtin spellings that are not tokenizer keywords.
-        if word == ERROR_TYPE_NAME {
+        // The docs show accepted final syntax, not just current parser support.
+        // `memory/declared-regions.mtf` owns `into`; keep this presentation-only
+        // supplement out of the compiler's source-word/reservation inventory.
+        if word == "into" {
+            self.reset_declaration_context();
+            return Some(CodeHighlightRole::Keyword);
+        }
+
+        // Builtins outside the fixed source-word table share their canonical
+        // spelling owner. In particular, Dec01 and Dec257 are not builtin types.
+        if word == ERROR_TYPE_NAME || NumberScale::from_name(word).is_some() {
             self.contract_state = ContractState::None;
             return Some(CodeHighlightRole::Type);
         }
@@ -511,8 +503,15 @@ impl<'source> CodeScanner<'source> {
             self.reset_declaration_context();
         }
 
+        // The palette is shared, but punctuation meaning is language-specific:
+        // JavaScript negation and Rust macro bangs are not Moth error markers.
+        let role = if self.language == CodeLanguage::Moth && self.bytes[run_start] == b'!' {
+            CodeHighlightRole::Error
+        } else {
+            CodeHighlightRole::Operator
+        };
         self.expected_word_role = None;
-        self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::Operator);
+        self.emit_highlighted_range(output, run_start, end, role);
     }
 
     pub(super) fn operator_length(&self) -> Option<usize> {
