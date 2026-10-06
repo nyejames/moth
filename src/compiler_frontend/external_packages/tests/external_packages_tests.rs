@@ -397,6 +397,16 @@ fn constant_registration_rejects_mismatched_numeric_payload_types_without_publis
             ExternalSignatureType::Abi(ExternalAbiType::I32),
             ExternalConstantValue::Float(1.5),
         ),
+        (
+            "UINT_WITH_INT",
+            ExternalSignatureType::NativeUint,
+            ExternalConstantValue::Int(7),
+        ),
+        (
+            "INT_WITH_UINT",
+            ExternalSignatureType::NativeInt,
+            ExternalConstantValue::Uint(7),
+        ),
     ];
 
     for (index, (name, data_type, value)) in mismatches.iter().enumerate() {
@@ -446,6 +456,25 @@ fn constant_registration_rejects_mismatched_numeric_payload_types_without_publis
         ExternalSignatureType::Abi(ExternalAbiType::F64)
     );
     assert_eq!(valid_constant.value, ExternalConstantValue::Float(3.25));
+
+    let uint_path = ExternalSymbolPath::from_single("VALID_UINT");
+    registry
+        .register_constant_at_path(
+            package_id,
+            uint_path.clone(),
+            ExternalConstantId(705),
+            ExternalConstantDef {
+                name: "VALID_UINT".to_owned(),
+                data_type: ExternalSignatureType::NativeUint,
+                value: ExternalConstantValue::Uint(u64::MAX),
+            },
+        )
+        .expect("an exact Uint constant should register without signed reinterpretation");
+    let (_, uint_constant) = registry
+        .resolve_package_constant_by_path("@test/constant_types", &uint_path)
+        .expect("the matching Uint constant should resolve");
+    assert_eq!(uint_constant.data_type, ExternalSignatureType::NativeUint);
+    assert_eq!(uint_constant.value, ExternalConstantValue::Uint(u64::MAX));
 }
 
 #[test]
@@ -899,21 +928,28 @@ fn string_content_resolves_to_string_datatype() {
 fn native_numeric_signatures_keep_native_ids_and_abi_widths_keep_fixed_ids() {
     let mut type_environment = TypeEnvironment::new();
     let native_int_id = type_environment.builtins().int;
+    let native_uint_id = type_environment.builtins().uint;
     let native_float_id = type_environment.builtins().float;
     let builtin_error_type_id = type_environment.builtins().none;
     let fixed_i32_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let fixed_f64_id = builtin_type_ids::fixed_scalar(FixedScalar::F64);
 
     let native_int = ExternalSignatureType::NativeInt;
+    let native_uint = ExternalSignatureType::NativeUint;
     let native_float = ExternalSignatureType::NativeFloat;
     let abi_i32 = ExternalSignatureType::Abi(ExternalAbiType::I32);
     let abi_f64 = ExternalSignatureType::Abi(ExternalAbiType::F64);
 
     assert_eq!(native_int.to_datatype(), Some(DataType::Int));
+    assert_eq!(native_uint.to_datatype(), Some(DataType::Uint));
     assert_eq!(native_float.to_datatype(), Some(DataType::Float));
     assert_eq!(
         native_int.to_parameter_type_id(&mut type_environment),
         Some(native_int_id),
+    );
+    assert_eq!(
+        native_uint.to_parameter_type_id(&mut type_environment),
+        Some(native_uint_id),
     );
     assert_eq!(
         native_float.to_parameter_type_id(&mut type_environment),
@@ -924,10 +960,13 @@ fn native_numeric_signatures_keep_native_ids_and_abi_widths_keep_fixed_ids() {
         Some(native_int_id),
     );
     assert_eq!(
+        native_uint.to_type_id(&mut type_environment, builtin_error_type_id),
+        Some(native_uint_id),
+    );
+    assert_eq!(
         native_float.to_type_id(&mut type_environment, builtin_error_type_id),
         Some(native_float_id),
     );
-
     assert_eq!(
         abi_i32.to_datatype(),
         Some(DataType::FixedScalar(FixedScalar::I32)),
@@ -954,7 +993,15 @@ fn native_numeric_signatures_keep_native_ids_and_abi_widths_keep_fixed_ids() {
     );
     assert_ne!(native_int_id, fixed_i32_id);
     assert_ne!(native_float_id, fixed_f64_id);
-
+    assert_ne!(
+        native_uint_id, native_int_id,
+        "Uint keeps a distinct identity from Int while sharing the unsigned U32 range fact"
+    );
+    assert_ne!(
+        ExternalSignatureType::NativeUint,
+        ExternalSignatureType::Abi(ExternalAbiType::I32),
+        "Uint must not collapse into a fixed foreign width"
+    );
     let native_returns = external_success_returns(native_float, ExternalReturnAlias::Fresh);
     assert_eq!(native_returns.len(), 1);
     assert_eq!(

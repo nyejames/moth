@@ -146,6 +146,7 @@ define_source_words! {
     U16Type => ("U16", BuiltinType, None);
     U32Type => ("U32", BuiltinType, None);
     U64Type => ("U64", BuiltinType, None);
+    UintType => ("Uint", BuiltinType, None);
     F16Type => ("F16", BuiltinType, None);
     F32Type => ("F32", BuiltinType, None);
     F64Type => ("F64", BuiltinType, None);

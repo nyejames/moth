@@ -57,13 +57,14 @@ normalisation or XID substitution. Naming conventions above describe style, not
 lexical validity: a style mismatch can produce a warning without making an
 otherwise valid identifier invalid.
 
-The shared policy reserves the numeric names `Int`, `Float`, `I8`, `I16`, `I32`,
+The shared policy reserves the numeric names `Int`, `Uint`, `Float`, `I8`, `I16`, `I32`,
 `I64`, `U8`, `U16`, `U32`, `U64`, `F16`, `F32`, `F64` and `Byte`. It also
 reserves the Dec family: bare `dec` and any ASCII-digit suffix match after
 leading underscores are removed, without regard to case. This includes invalid
 type spellings such as `dec01` and `dec257`. `DecBox` remains an ordinary name.
 Type recognition stays stricter: only canonical `Dec` and `Dec0` through
-`Dec256` spellings name Dec types.
+`Dec256` spellings name Dec types. `uint` in any ASCII case is reserved as the `Uint` type name. `UintBox` remains
+an ordinary name.
 
 Any reservation change alters which MON documents and schemas pass, so it is a
 MON format compatibility change. Such a change updates the shared rule, the

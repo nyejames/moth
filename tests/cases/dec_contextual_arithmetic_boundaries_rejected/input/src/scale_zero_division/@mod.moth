@@ -1,0 +1,4 @@
+reject_scale_zero_division || -> String:
+    result Dec0 = 1 / 2
+    return [result]
+;

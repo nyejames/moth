@@ -2,7 +2,7 @@
 
 use crate::compiler_frontend::datatypes::numeric_operators::{
     NumericOperator, binary_operation_domain, common_fixed_integer, comparison_supported,
-    negation_domain, numeric_failure_codes, numeric_operation_cannot_fail,
+    negation_domain, numeric_failure_codes, numeric_operation_cannot_fail, range_iteration_domain,
 };
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::decimal::NumberScale;
@@ -246,6 +246,10 @@ fn number_power_accepts_only_a_profile_int_exponent() {
         None
     );
     assert_eq!(
+        binary_operation_domain(NumericOperator::Power, number_scale, NumericScalar::Uint),
+        None
+    );
+    assert_eq!(
         binary_operation_domain(NumericOperator::Power, NumericScalar::Int, number_scale),
         None
     );
@@ -254,7 +258,7 @@ fn number_power_accepts_only_a_profile_int_exponent() {
 #[test]
 fn number_mixes_only_with_integer_domains_for_arithmetic_and_comparison() {
     let number_domain = number(2);
-    for integer in [NumericScalar::Int]
+    for integer in [NumericScalar::Int, NumericScalar::Uint]
         .into_iter()
         .chain(FIXED_INTEGERS.into_iter().map(fixed))
     {
@@ -314,6 +318,115 @@ fn families_never_mix_implicitly() {
             }
         }
     }
+}
+
+#[test]
+fn uint_arithmetic_selects_checked_uint_or_direct_float() {
+    use NumericScalar::{Float, Int, Uint};
+
+    for operator in [
+        NumericOperator::Add,
+        NumericOperator::Subtract,
+        NumericOperator::Multiply,
+        NumericOperator::IntegerDivide,
+        NumericOperator::Remainder,
+        NumericOperator::Power,
+    ] {
+        assert_eq!(
+            binary_operation_domain(operator, Uint, Uint),
+            Some(Uint),
+            "{operator:?} on Uint"
+        );
+    }
+    assert_eq!(
+        binary_operation_domain(NumericOperator::Divide, Uint, Uint),
+        Some(Float)
+    );
+
+    // Mixed Uint/Float arithmetic computes in Float, except `//` which is invalid.
+    for operator in [
+        NumericOperator::Add,
+        NumericOperator::Subtract,
+        NumericOperator::Multiply,
+        NumericOperator::Divide,
+        NumericOperator::Remainder,
+        NumericOperator::Power,
+    ] {
+        assert_eq!(
+            binary_operation_domain(operator, Uint, Float),
+            Some(Float),
+            "{operator:?} on Uint/Float"
+        );
+        assert_eq!(
+            binary_operation_domain(operator, Float, Uint),
+            Some(Float),
+            "{operator:?} on Float/Uint"
+        );
+    }
+    assert_eq!(
+        binary_operation_domain(NumericOperator::IntegerDivide, Uint, Float),
+        None
+    );
+    assert_eq!(
+        binary_operation_domain(NumericOperator::IntegerDivide, Float, Uint),
+        None
+    );
+
+    // Uint never mixes with Int or fixed widths: no transitive compatibility through Float.
+    // Dec mixes with Uint through the shared exact rule; that pair is asserted separately.
+    for operator in BINARY_OPERATORS {
+        assert_eq!(
+            binary_operation_domain(operator, Uint, Int),
+            None,
+            "{operator:?} on Uint/Int"
+        );
+        assert_eq!(
+            binary_operation_domain(operator, Int, Uint),
+            None,
+            "{operator:?} on Int/Uint"
+        );
+        for scalar in FIXED_INTEGERS.into_iter().chain(FIXED_FLOATS) {
+            assert_eq!(
+                binary_operation_domain(operator, Uint, fixed(scalar)),
+                None,
+                "{operator:?} on Uint/{scalar:?}"
+            );
+            assert_eq!(
+                binary_operation_domain(operator, fixed(scalar), Uint),
+                None,
+                "{operator:?} on {scalar:?}/Uint"
+            );
+        }
+    }
+    // Dec power keeps its own exponent rule: Int stays, Uint never becomes the exponent.
+    assert_eq!(
+        binary_operation_domain(NumericOperator::Power, number(2), Int),
+        Some(number(2))
+    );
+}
+
+#[test]
+fn uint_comparison_is_exact_with_int_and_float() {
+    use NumericScalar::{Float, Int, Uint};
+
+    assert!(comparison_supported(Uint, Uint));
+    assert!(comparison_supported(Uint, Int));
+    assert!(comparison_supported(Int, Uint));
+    assert!(comparison_supported(Uint, Float));
+    assert!(comparison_supported(Float, Uint));
+
+    for scalar in FIXED_INTEGERS.into_iter().chain(FIXED_FLOATS) {
+        assert!(
+            !comparison_supported(Uint, fixed(scalar)),
+            "Uint must not compare with {scalar:?}"
+        );
+        assert!(
+            !comparison_supported(fixed(scalar), Uint),
+            "{scalar:?} must not compare with Uint"
+        );
+    }
+    assert!(!comparison_supported(Uint, fixed(Byte)));
+    assert!(!comparison_supported(fixed(Byte), Uint));
 }
 
 #[test]
@@ -428,6 +541,29 @@ fn discharge_proves_only_range_contained_fixed_integer_add_sub_mul_negate() {
             NumericScalar::Float,
             false,
         ),
+        // Uint stays outside the profile-free discharge even though its
+        // range is bounded — only fixed-width scalars discharge.
+        (
+            Op::Add,
+            NumericScalar::Uint,
+            Some(NumericScalar::Uint),
+            NumericScalar::Uint,
+            false,
+        ),
+        (
+            Op::Multiply,
+            NumericScalar::Uint,
+            Some(NumericScalar::Uint),
+            NumericScalar::Uint,
+            false,
+        ),
+        (
+            Op::Negate,
+            NumericScalar::Uint,
+            None,
+            NumericScalar::Uint,
+            false,
+        ),
         (
             Op::IntegerDivide,
             fixed(I32),
@@ -527,4 +663,47 @@ fn failure_codes_leave_exact_float_negation_and_dec_arithmetic_without_a_failure
             "{operator:?} on Int must retain failure codes"
         );
     }
+}
+
+#[test]
+fn range_iteration_selects_float_for_any_float_operand_with_int_or_uint_peers() {
+    use NumericScalar as Scalar;
+
+    // The audit repro: a `Float` step rescues an otherwise-invalid `Uint`/`Int` pair.
+    assert_eq!(
+        range_iteration_domain(Scalar::Uint, Scalar::Int, Some(Scalar::Float)),
+        Some(Scalar::Float)
+    );
+    assert_eq!(
+        range_iteration_domain(Scalar::Uint, Scalar::Float, Some(Scalar::Uint)),
+        Some(Scalar::Float)
+    );
+    assert_eq!(
+        range_iteration_domain(Scalar::Int, Scalar::Float, None),
+        Some(Scalar::Float)
+    );
+
+    // Without a `Float` peer the existing pairwise table still governs.
+    assert_eq!(
+        range_iteration_domain(Scalar::Uint, Scalar::Uint, Some(Scalar::Uint)),
+        Some(Scalar::Uint)
+    );
+    assert_eq!(
+        range_iteration_domain(Scalar::Uint, Scalar::Int, Some(Scalar::Uint)),
+        None
+    );
+    assert_eq!(
+        range_iteration_domain(Scalar::Uint, Scalar::Int, None),
+        None
+    );
+
+    // Fixed-width operands keep the pairwise table, including mixed-width promotion.
+    assert_eq!(
+        range_iteration_domain(fixed(I8), fixed(U16), Some(fixed(U16))),
+        Some(fixed(I32))
+    );
+    assert_eq!(
+        range_iteration_domain(Scalar::Float, fixed(U16), Some(Scalar::Float)),
+        None
+    );
 }

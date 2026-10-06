@@ -1,0 +1,124 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0003","MOTH-RULE-0083","MOTH-TYPE-0003","MOTH-TYPE-0003","MOTH-SYNTAX-0008","MOTH-SYNTAX-0008","MOTH-TYPE-0003","MOTH-TYPE-0003","MOTH-TYPE-0001","MOTH-TYPE-0003","MOTH-TYPE-0003","MOTH-TYPE-0003","MOTH-TYPE-0001","MOTH-TYPE-0001","MOTH-TYPE-0001","MOTH-SYNTAX-0008","MOTH-TYPE-0001","MOTH-TYPE-0001","MOTH-TYPE-0001"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 1
+path = "input/byte_mix/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+occurrence = 1
+path = "input/cast_operand/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 2
+path = "input/float_exponent/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 3
+path = "input/float_mix/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0008"
+occurrence = 1
+reason = "invalid_number_literal.inexact_number_scale"
+path = "input/inexact_cancellation/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0008"
+occurrence = 2
+reason = "invalid_number_literal.inexact_number_scale"
+path = "input/inexact_sum/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 4
+path = "input/int_floor_compound/@mod.moth"
+line = 3
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 5
+path = "input/int_floor_receiver/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 1
+path = "input/named_int_constants/@mod.moth"
+line = 4
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 6
+path = "input/positive_scale_floor/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 7
+path = "input/receiver_peer_conflict/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 8
+path = "input/scale_zero_division/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 2
+path = "input/typed_call_bare_catch/@mod.moth"
+line = 5
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 3
+path = "input/typed_call_dec_handler/@mod.moth"
+line = 5
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 4
+path = "input/typed_dec_result/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 5
+path = "input/typed_int_power/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 6
+path = "input/typed_int_sum/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0008"
+occurrence = 3
+reason = "invalid_number_literal.outside_fixed_scalar_range"
+path = "input/u8_peer_range/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 7
+path = "input/unresolved_generic_slot/@mod.moth"
+line = 5

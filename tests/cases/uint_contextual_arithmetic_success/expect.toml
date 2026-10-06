@@ -1,0 +1,7 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "uint context count=3 large=3000000001 grouped=9 right=13 left=13 power-group=8 power-right=512 power-left=64 intdiv=3 rem=1 mixed-left=11.5 mixed-right=11.5 div=2.5 acc=13 scaled=30 powered=8 peer-left=13 peer-right=13 peer-group-right=16 peer-product=12 peer-typed-inner=14 received-typed-inner=14 typed-inner=8 received-inner=8 same=true ordered=true power-typed=8 concrete=3 explicit=3 default=3 branch=3/7 split=3/7 mutable=3 optional=3 point=3 element=3 keyed=3 missing=9 call-peer=6 dec-power=10.5 decmix=11.5 float=10 rendered=10 match=five"

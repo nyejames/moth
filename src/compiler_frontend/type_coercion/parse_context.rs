@@ -23,14 +23,14 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// Parse-time expected type for context-sensitive literals such as `none`,
-/// empty collection literals, and direct numeric literals.
+/// empty collection literals and unresolved numeric expressions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ExpectedType {
     Known(TypeId),
-    /// A direct numeric-literal destination: the evaluator may materialise one
-    /// pending literal in the destination type, and in every other respect
-    /// this behaves exactly like `Infer`.
-    DirectLiteral(TypeId),
+    /// A numeric receiving destination. Every numeric type can materialise a lone pending
+    /// literal, while Dec and Uint additionally supply context through raw arithmetic and
+    /// groups. This is a literal hint, never a strict expectation for typed operands or results.
+    NumericLiteral(TypeId),
     Infer,
 }
 
@@ -38,13 +38,13 @@ impl ExpectedType {
     pub(crate) fn known_type_id(self) -> Option<TypeId> {
         match self {
             Self::Known(type_id) => Some(type_id),
-            Self::DirectLiteral(_) | Self::Infer => None,
+            Self::NumericLiteral(_) | Self::Infer => None,
         }
     }
 
     pub(crate) fn literal_destination_type_id(self) -> Option<TypeId> {
         match self {
-            Self::Known(type_id) | Self::DirectLiteral(type_id) => Some(type_id),
+            Self::Known(type_id) | Self::NumericLiteral(type_id) => Some(type_id),
             Self::Infer => None,
         }
     }
@@ -95,7 +95,7 @@ pub(crate) fn parse_expectation_for_type_id(
     }
 
     if is_numeric_literal_destination_type_id(target_id, type_environment) {
-        return ExpectedType::DirectLiteral(target_id);
+        return ExpectedType::NumericLiteral(target_id);
     }
 
     if type_environment.is_collection(target_id) {
@@ -116,7 +116,7 @@ pub(crate) fn parse_expectation_for_type_id(
 
 /// Returns whether a receiving type can directly materialise a numeric literal.
 ///
-/// WHAT: accepts `Int`, `Float`, fixed scalars, `Byte`, `Dec`, and their optional forms.
+/// WHAT: accepts `Int`, `Uint`, `Float`, fixed scalars, `Byte`, `Dec`, and their optional forms.
 /// WHY: assignments and call arguments share one semantic eligibility rule, while each
 ///      boundary retains its own handling for `none`.
 pub(crate) fn is_numeric_literal_destination_type_id(
@@ -129,6 +129,7 @@ pub(crate) fn is_numeric_literal_destination_type_id(
     let builtins = type_environment.builtins();
 
     inner_type_id == builtins.int
+        || inner_type_id == builtins.uint
         || inner_type_id == builtins.float
         || type_environment.fixed_scalar(inner_type_id).is_some()
         || type_environment.number_scale(inner_type_id).is_some()

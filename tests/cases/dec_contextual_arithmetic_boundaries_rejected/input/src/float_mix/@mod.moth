@@ -1,0 +1,4 @@
+reject_float_mix |value Float| -> String:
+    result Dec4 = value + 1
+    return [result]
+;

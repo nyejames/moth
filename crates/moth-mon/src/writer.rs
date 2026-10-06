@@ -126,6 +126,9 @@ impl<'a> Writer<'a> {
             (Value::Char(value), PreparedType::Char) => self.write_char(*value),
             (Value::String(value), PreparedType::String) => self.write_string(value),
             (Value::Int(value), PreparedType::Int { .. }) => self.write_number(&value.to_string()),
+            (Value::Uint(value), PreparedType::Uint { .. }) => {
+                self.write_number(&value.to_string())
+            }
             (Value::Float(value), PreparedType::Float { precision }) => {
                 self.write_float(*value, BinaryFloatPrecision::from(*precision))
             }

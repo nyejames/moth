@@ -1513,8 +1513,9 @@ Rust API signatures and routine type shapes belong to the codec's doc comments.
 Compiler-retained numeric text stays in the compiler's numeric token side store.
 The MON reader borrows original spelling from caller input and retains a bounded
 owned normalised string until the schema selects a destination. The prepared
-schema records the numeric profile its `Int` and `Float` entries use,
-defaulting to `Int32` and `Float64` for a standalone caller that selects no
+schema records the numeric profile its `Int`, `Uint` and `Float` entries use,
+with `Uint` following the profile `Int` width and defaulting to `Uint32` alongside
+`Int32` and `Float64` for a standalone caller that selects no
 profile. Fixed widths and `Byte` follow shared `moth-lexical` materialisation
 rules, while exact decimal scales cover 0 through 256 without a second parser
 or a binary-float intermediate. The buffer's decoded-byte accounting appears
@@ -1585,7 +1586,7 @@ formatting. `Float` materialisation follows the numeric authority and rejects
 non-finite source values and conversion results, emitting `-0.0` for negative
 zero and `0` for positive zero while decoding preserves the sign bit.
 
-Materialisation for a fixed width, `Byte`, `Int` or `Float` uses the schema's
+Materialisation for a fixed width, `Byte`, `Int`, `Uint` or `Float` uses the schema's
 recorded profile and the same shared numeric policies
 the compiler uses, so a schema entry never invents a private conversion rule of
 its own. Whole-number and decimal or exponent categories stay strict: decimal or
@@ -1596,7 +1597,7 @@ Numeric normalization storage is included in the logical `max_decoded_bytes`
 budget. The reader charges the unsigned token byte length before
 `parse_numeric_literal` reserves that capacity, including for malformed
 tokens. Programmatic `Integer`/`Decimal` values and defaults charge the same
-scratch before parsing. Reader `Int` and `Float` materialize from the normalized
+scratch before parsing. Reader `Int`, `Uint` and `Float` materialize from the normalized
 facts. Exact reader `Integer` and `Decimal` values transfer the normalized
 buffer into the result instead of cloning it; a negative sign is charged before
 it is inserted. Schema validation charges its caller-owned output clone

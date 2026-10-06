@@ -1,0 +1,12 @@
+@external_uint.js identity_uint, bad_uint
+
+-- An invalid Uint32 success payload cannot be exercised here: the glue
+-- adapter throws a bare RangeError (the Int-equivalent failure path, not a
+-- `new Error`), so Node exits before writing the harness event summary and
+-- no ESM assertion shape can observe it. That path is pinned instead by the
+-- Node-executed glue test
+-- `fallible_native_uint32_adapter_reads_success_once_before_boundary_throw`,
+-- which evaluates the violating payload exactly once before the throw. This
+-- ESM case keeps the valid maximum projecting through the same adapter.
+top Uint = identity_uint(4294967295)
+io.line([: external_native_uint_boundary top=[top]])

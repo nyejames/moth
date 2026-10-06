@@ -1,0 +1,4 @@
+reject_float_intdivide |value Uint, factor Float| -> String:
+    result = value // factor
+    return [result]
+;

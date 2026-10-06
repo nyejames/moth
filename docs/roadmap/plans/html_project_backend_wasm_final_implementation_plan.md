@@ -110,7 +110,7 @@ unsigned support or change a public signature from the physical carrier of a sig
 Consume the scalar implementation already delivered by the numeric checkpoint:
 I8/U8/Byte use one memory byte, I16/U16 two, I32/U32/F32 four and I64/U64/F64
 eight. Narrow integers and Byte use i32 carriers. F16 stores two bytes and uses
-an f32 carrier with explicit binary16 conversion. Int and Float follow the
+an f32 carrier with explicit binary16 conversion. Int, Uint and Float follow the
 selected numeric profile, not the selected backend. Reuse existing scalar
 checks, conversions, formatting and helpers rather than implementing a second
 numeric runtime while restructuring control flow.
@@ -316,7 +316,7 @@ See `docs/build-system-design.md` "External JavaScript".
 - Build-level runtime emission deduplicates runtime assets, required module specifiers and shared provider runtime files.
 - Entry-level glue generation emits only wrappers for external functions referenced by the selected JavaScript bundle, required import preambles and import-map entries.
 - Direct builder packages and provider-created packages use the same binding identity and runtime asset model.
-- Keep foreign I*/U*/F* widths distinct from deliberate Moth Int/Float signatures. Preserve finite validation, F16 conversion boundaries and U32 runtime error codes.
+- Keep foreign I*/U*/F* widths distinct from deliberate Moth Int/Uint/Float signatures. Preserve finite validation, F16 conversion boundaries and U32 runtime error codes.
 - Reserve WIT/component handling for a later foreign-Wasm binding delivery. This phase must not encode Moth-source package interfaces as WIT.
 
 ### Phase 9: Physical variants, manifests and output ownership

@@ -43,9 +43,9 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidExpressionReason, InvalidExternalModuleReason, InvalidFallibleOperandReason,
     InvalidGenericParameterReason, InvalidImportPathReason, InvalidMapLiteralReason,
     InvalidMapTypeReason, InvalidMutableAccessReason, InvalidOutputFolderReason,
-    InvalidPageMetadataReason, InvalidTemplateDirectiveReason, MalformedTemplateReason,
-    NameNamespace, NamespaceTypeValueMisuseKind, PathKind, RangeOperandKind,
-    SourceSpanCapacityResource, UnsupportedOperatorCategory,
+    InvalidPageMetadataReason, InvalidRangeOperandReason, InvalidTemplateDirectiveReason,
+    MalformedTemplateReason, NameNamespace, NamespaceTypeValueMisuseKind, PathKind,
+    RangeOperandKind, SourceSpanCapacityResource, UnsupportedOperatorCategory,
 };
 use crate::compiler_frontend::compiler_messages::{DiagnosticToken, TokenDescriptorPayload};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
@@ -193,7 +193,7 @@ pub(crate) fn invalid_map_type_message(
         InvalidMapTypeReason::UnsupportedKeyType { key_type } => {
             let type_name = diagnostic_type_name(key_type, context);
             format!(
-                "Map key type '{type_name}' is not supported. Builtin hashmap keys are limited to String, Int, Bool, Char, I8, I16, I32, I64, U8, U16, U32, U64, and Byte. Use a package or user-defined map type for custom key behavior."
+                "Map key type '{type_name}' is not supported. Builtin hashmap keys are limited to String, Int, Uint, Bool, Char, I8, I16, I32, I64, U8, U16, U32, U64, and Byte. Use a package or user-defined map type for custom key behavior."
             )
         }
         InvalidMapTypeReason::ExcessiveInlineNesting { depth } => {
@@ -407,7 +407,7 @@ pub(crate) fn unsupported_operator_types_message(
         );
     }
 
-    // Fixed-width values do not implicitly mix with Int/Float or the other fixed numeric family.
+    // Fixed-width values do not implicitly mix with Int/Uint/Float or the other fixed numeric family.
     if (is_arithmetic_operator(operator) || is_comparison_operator(operator))
         && let Some(rhs) = rhs
         && implicitly_mixed_numeric_pair(lhs, rhs)
@@ -487,7 +487,9 @@ fn implicitly_mixed_numeric_pair(lhs: TypeId, rhs: TypeId) -> bool {
 }
 
 fn is_profile_numeric(type_id: TypeId) -> bool {
-    type_id == builtin_type_ids::INT || type_id == builtin_type_ids::FLOAT
+    type_id == builtin_type_ids::INT
+        || type_id == builtin_type_ids::UINT
+        || type_id == builtin_type_ids::FLOAT
 }
 
 fn generic_parameter_operator_message(
@@ -760,6 +762,7 @@ fn deferred_feature_static_message(reason: &DeferredFeatureReason) -> &'static s
 pub(crate) fn invalid_range_operand_message(
     operand: RangeOperandKind,
     found_type: TypeId,
+    reason: InvalidRangeOperandReason,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
     let operand_name = match operand {
@@ -768,8 +771,16 @@ pub(crate) fn invalid_range_operand_message(
         RangeOperandKind::Step => "step",
     };
     let type_name = diagnostic_type_name(found_type, context);
-
-    format!("Range {operand_name} must be numeric (Int or Float). Found '{type_name}'")
+    match reason {
+        InvalidRangeOperandReason::NotNumeric => {
+            format!(
+                "Range {operand_name} must be numeric (Int, Uint or Float). Found '{type_name}'"
+            )
+        }
+        InvalidRangeOperandReason::IncompatibleDomain => format!(
+            "Range {operand_name} type '{type_name}' has no shared numeric domain with the other range operands. Uint or Int bounds and steps do not mix unless a Float operand selects Float, and explicit-width types stay in their own family. Convert the operand explicitly with `cast` at a typed declaration."
+        ),
+    }
 }
 
 pub(crate) fn unsupported_builder_package_message(

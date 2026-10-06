@@ -39,6 +39,7 @@ pub(crate) fn fold_expression_kind_to_string(
             // the compile-time path rather than panicking on an internal invariant.
             format_finite_float(*value, numeric_profile.float_precision.into()).ok()
         }
+        ExpressionKind::Uint(value) => Some(value.to_string()),
         ExpressionKind::Int(value) => Some(value.to_string()),
         ExpressionKind::Number(value) => Some(value.to_string()),
         ExpressionKind::FixedScalar(value) => {

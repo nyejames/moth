@@ -1,0 +1,4 @@
+reject_u8_peer_range |value U8| -> String:
+    result = value + 300
+    return [result]
+;

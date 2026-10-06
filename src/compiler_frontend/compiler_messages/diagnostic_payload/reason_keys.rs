@@ -607,6 +607,17 @@ macro_rules! define_reasoned_diagnostic_registry {
                 }
                 descriptor: { "MOTH-RULE-0061", "Invalid page metadata", Error }
             },
+            Rule::InvalidRangeOperand => {
+                payload: InvalidRangeOperand;
+                fields: {
+                    operand: RangeOperandKind,
+                    found_type: TypeId,
+                    reason: InvalidRangeOperandReason
+                }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-RULE-0059", "Invalid range operand", Error }
+            },
             Rule::InvalidCompileTimePath => {
                 payload: InvalidCompileTimePath;
                 fields: { path: PathId, reason: InvalidCompileTimePathReason }
@@ -864,6 +875,8 @@ define_stable_reason_keys! {
     &NumberLiteralErrorReason::InvalidExponentSignPlacement => "invalid_number_literal.invalid_exponent_sign_placement",
     &NumberLiteralErrorReason::InvalidSeparatorPlacement => "invalid_number_literal.invalid_separator_placement",
     &NumberLiteralErrorReason::OutsideIntRange => "invalid_number_literal.outside_int_range",
+    &NumberLiteralErrorReason::OutsideUintRange(_) => "invalid_number_literal.outside_uint_range",
+    &NumberLiteralErrorReason::NegativeUintLiteral(_) => "invalid_number_literal.negative_uint_literal",
     &NumberLiteralErrorReason::OutsideFixedScalarRange(_) => "invalid_number_literal.outside_fixed_scalar_range",
     &NumberLiteralErrorReason::NegativeUnsignedLiteral(_) => "invalid_number_literal.negative_unsigned_literal",
     &NumberLiteralErrorReason::NonFiniteFloat => "invalid_number_literal.non_finite_float",
@@ -1484,6 +1497,11 @@ define_stable_reason_keys! {
     InvalidPageMetadataReason => {
     &InvalidPageMetadataReason::NotAString => "invalid_page_metadata.not_a_string",
     &InvalidPageMetadataReason::DuplicateDeclaration => "invalid_page_metadata.duplicate_declaration",
+    },
+
+    InvalidRangeOperandReason => {
+    &InvalidRangeOperandReason::NotNumeric => "invalid_range_operand.not_numeric",
+    &InvalidRangeOperandReason::IncompatibleDomain => "invalid_range_operand.incompatible_domain",
     },
 
     InvalidExpressionReason => {

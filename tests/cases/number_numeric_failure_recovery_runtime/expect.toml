@@ -3,4 +3,4 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "number errors zero-divisor=300 negative-exponent=302"
+rendered_output_exact = "number errors zero-divisor=1.2/300 negative-exponent=2.3/302"

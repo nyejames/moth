@@ -1,0 +1,6 @@
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = "coerced call=4 snapshot=5 reassigned=7"
+

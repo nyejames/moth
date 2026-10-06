@@ -1,0 +1,5 @@
+consume || -> Uint, Error!:
+    maximum #Uint = 4294967295
+    counts #= (top = maximum)
+    return counts.top + 1
+;

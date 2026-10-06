@@ -1,0 +1,18 @@
+-- Task 4: Uint arithmetic through a builtin Error! edge recovers in HTML-JS
+-- but stays outside the Wasm capability boundary, which rejects reachable
+-- recoverable numeric failure with a structured diagnostic before lowering.
+
+add_guarded |a Uint, b Uint| -> Uint, Error!:
+    return a + b
+;
+
+top Uint = add_guarded(4294967295, 0) catch:
+    then 0
+;
+just_above Uint = add_guarded(2147483648, 1) catch:
+    then 0
+;
+top_text String = cast top
+above_text String = cast just_above
+
+[:uint recoverable top=[top]/[top_text] above=[just_above]/[above_text]]

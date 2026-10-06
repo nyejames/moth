@@ -2220,6 +2220,53 @@ fn operator_item(operator: Operator) -> ExpressionRpnItem {
 }
 
 #[test]
+fn constant_fold_reports_escaped_pending_items_as_infrastructure() {
+    let mut string_table = StringTable::new();
+    let literal_text = string_table.intern("1");
+    let pending_literal = ExpressionRpnItem::PendingNumericLiteral {
+        token: crate::compiler_frontend::numeric_text::token::NumericLiteralToken::new(
+            NumericLiteralSign::Positive,
+            literal_text,
+            literal_text,
+            moth_lexical::numeric::grammar::NumericLiteralKind::WholeNumber,
+            1,
+            0,
+            0,
+            moth_lexical::numeric::grammar::NumericExponentSign::None,
+        ),
+        span: None,
+        value_mode: ValueMode::ImmutableOwned,
+    };
+    let pending_group = ExpressionRpnItem::PendingGroup {
+        nodes: Vec::new(),
+        span: None,
+    };
+
+    for pending in [pending_literal, pending_group] {
+        // A foldable peer and operator around the pending item would fold or preserve it if the
+        // guard were removed, so only the infrastructure lane satisfies this assertion.
+        let nodes = vec![
+            rvalue_item(Expression::int(
+                2,
+                Default::default(),
+                ValueMode::ImmutableOwned,
+            )),
+            pending,
+            operator_item(Operator::Add),
+        ];
+        match constant_fold(nodes, &mut string_table, NumericProfile::STANDARD, None) {
+            Err(ConstantFoldError::Infrastructure(error)) => assert!(
+                error
+                    .msg
+                    .contains("evaluate_expression must resolve it first"),
+                "unexpected invariant message: {error:?}"
+            ),
+            other => panic!("escaped pending syntax must be an infrastructure error: {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn constant_fold_folds_comparison_then_boolean_chain() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -3019,4 +3066,220 @@ fn fold_cast_fallible_builtin_failure_with_branching_catch_rejects_handler() {
     .expect_err("branching catch handler needs real const statement evaluation");
 
     assert_invalid_cast_error(&error, InvalidCastReason::CatchHandlerNotConstFoldable);
+}
+
+#[test]
+fn evaluate_operator_folds_uint_arithmetic_and_rejects_overflow() {
+    // Uint leaves fold in their own domain; overflow, underflow and
+    // zero divisors report the stable integer failure codes at compile time.
+    let mut string_table = StringTable::new();
+    let _path_fork = PathInternerFork::empty();
+    let uint = |value: u64| Expression::uint(value, None, ValueMode::ImmutableOwned);
+
+    let folded = expect_folded_operator(uint(1).evaluate_operator(
+        &uint(2),
+        &Operator::Add,
+        &mut string_table,
+        NumericProfile::STANDARD,
+        None,
+    ));
+    assert!(matches!(folded.kind, ExpressionKind::Uint(3)));
+    assert_eq!(folded.diagnostic_type, DataType::Uint);
+
+    let error = uint(u32::MAX as u64)
+        .evaluate_operator(
+            &uint(1),
+            &Operator::Add,
+            &mut string_table,
+            NumericProfile::STANDARD,
+            None,
+        )
+        .expect_err("u32::MAX + 1 exceeds the Uint32 boundary");
+    assert_compile_time_error(
+        &error,
+        CompileTimeEvaluationErrorReason::IntegerOverflow,
+        Some("+"),
+        &string_table,
+    );
+
+    // `0 ^ 0` folds to one and overflowing powers report the boundary.
+    let folded = expect_folded_operator(uint(0).evaluate_operator(
+        &uint(0),
+        &Operator::Exponent,
+        &mut string_table,
+        NumericProfile::STANDARD,
+        None,
+    ));
+    assert!(matches!(folded.kind, ExpressionKind::Uint(1)));
+
+    let error = uint(2)
+        .evaluate_operator(
+            &uint(32),
+            &Operator::Exponent,
+            &mut string_table,
+            NumericProfile::STANDARD,
+            None,
+        )
+        .expect_err("2 ^ 32 exceeds the Uint32 boundary");
+    assert_compile_time_error(
+        &error,
+        CompileTimeEvaluationErrorReason::IntegerOverflow,
+        Some("^"),
+        &string_table,
+    );
+
+    let error = uint(0)
+        .evaluate_operator(
+            &uint(1),
+            &Operator::Subtract,
+            &mut string_table,
+            NumericProfile::STANDARD,
+            None,
+        )
+        .expect_err("0 - 1 underflows Uint");
+    assert_compile_time_error(
+        &error,
+        CompileTimeEvaluationErrorReason::IntegerOverflow,
+        Some("-"),
+        &string_table,
+    );
+
+    let error = uint(7)
+        .evaluate_operator(
+            &uint(0),
+            &Operator::IntDivide,
+            &mut string_table,
+            NumericProfile::STANDARD,
+            None,
+        )
+        .expect_err("Uint // 0 must fail at compile time");
+    assert_compile_time_error(
+        &error,
+        CompileTimeEvaluationErrorReason::DivideByZero,
+        None,
+        &string_table,
+    );
+
+    // Uint `/` folds in Float directly, never through an Int intermediary.
+    let folded = expect_folded_operator(uint(7).evaluate_operator(
+        &uint(2),
+        &Operator::Divide,
+        &mut string_table,
+        NumericProfile::STANDARD,
+        None,
+    ));
+    assert!(matches!(folded.kind, ExpressionKind::Float(_)));
+    assert_eq!(folded.diagnostic_type, DataType::Float);
+}
+
+#[test]
+fn evaluate_operator_folds_uint_comparisons_and_dec_mixed_pairs() {
+    // Uint compares exactly with Uint and Int, and Dec mixes with
+    // Uint through the shared exact rule used by `k2 #Dec2 = cu + 0.5`.
+    let mut string_table = StringTable::new();
+    let _path_fork = PathInternerFork::empty();
+    let uint = |value: u64| Expression::uint(value, None, ValueMode::ImmutableOwned);
+    let int = |value: i64| Expression::int(value, None, ValueMode::ImmutableOwned);
+
+    assert!(expect_folded_boolean(
+        uint(3),
+        uint(5),
+        Operator::LessThan,
+        &mut string_table,
+    ));
+    assert!(!expect_folded_boolean(
+        uint(3),
+        int(-1),
+        Operator::LessThan,
+        &mut string_table,
+    ));
+    assert!(expect_folded_boolean(
+        uint(0),
+        int(-1),
+        Operator::GreaterThan,
+        &mut string_table,
+    ));
+
+    let mut type_environment = TypeEnvironment::new();
+    let dec_type =
+        type_environment.intern_number(NumberScale::new(2).expect("test Dec scale is valid"));
+    let dec = number_expression("5.00", NumericLiteralSign::Positive, 2, dec_type);
+    assert!(expect_folded_boolean(
+        uint(3),
+        dec,
+        Operator::LessThan,
+        &mut string_table,
+    ));
+}
+
+#[test]
+fn evaluate_operator_folds_uint64_at_full_bounds_and_rejects_overflow() {
+    // Under Int64/Float64 the Uint domain spans the whole u64
+    // range, so values above i64::MAX fold exactly and u64::MAX + 1, 2 ^ 64
+    // and underflowing products report the stable integer failures.
+    let int64_profile = NumericProfile {
+        int_width: IntWidth::Bits64,
+        float_precision: FloatPrecision::Bits64,
+    };
+    let mut string_table = StringTable::new();
+    let _path_fork = PathInternerFork::empty();
+    let uint = |value: u64| Expression::uint(value, None, ValueMode::ImmutableOwned);
+
+    let folded = expect_folded_operator(uint(u64::MAX).evaluate_operator(
+        &uint(0),
+        &Operator::Subtract,
+        &mut string_table,
+        int64_profile,
+        None,
+    ));
+    assert!(matches!(folded.kind, ExpressionKind::Uint(u64::MAX)));
+    assert_eq!(folded.diagnostic_type, DataType::Uint);
+
+    let error = uint(u64::MAX)
+        .evaluate_operator(
+            &uint(1),
+            &Operator::Add,
+            &mut string_table,
+            int64_profile,
+            None,
+        )
+        .expect_err("u64::MAX + 1 exceeds the Uint64 boundary");
+    assert_compile_time_error(
+        &error,
+        CompileTimeEvaluationErrorReason::IntegerOverflow,
+        Some("+"),
+        &string_table,
+    );
+
+    let error = uint(2)
+        .evaluate_operator(
+            &uint(64),
+            &Operator::Exponent,
+            &mut string_table,
+            int64_profile,
+            None,
+        )
+        .expect_err("2 ^ 64 exceeds the Uint64 boundary");
+    assert_compile_time_error(
+        &error,
+        CompileTimeEvaluationErrorReason::IntegerOverflow,
+        Some("^"),
+        &string_table,
+    );
+
+    let error = uint(9_223_372_036_854_775_808)
+        .evaluate_operator(
+            &uint(2),
+            &Operator::Multiply,
+            &mut string_table,
+            int64_profile,
+            None,
+        )
+        .expect_err("2^63 * 2 exceeds the Uint64 boundary");
+    assert_compile_time_error(
+        &error,
+        CompileTimeEvaluationErrorReason::IntegerOverflow,
+        Some("*"),
+        &string_table,
+    );
 }

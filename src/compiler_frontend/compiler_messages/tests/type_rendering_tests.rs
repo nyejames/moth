@@ -386,6 +386,12 @@ fn unsupported_operator_message_explains_fixed_numeric_mixing() {
             "`F32` and `Float` do not mix implicitly. Convert one operand with `cast` first.",
         ),
         (
+            DiagnosticOperator::Add,
+            builtin_type_ids::fixed_scalar(FixedScalar::U8),
+            builtin_type_ids::UINT,
+            "`U8` and `Uint` do not mix implicitly. Convert one operand with `cast` first.",
+        ),
+        (
             DiagnosticOperator::Multiply,
             builtin_type_ids::fixed_scalar(FixedScalar::I32),
             builtin_type_ids::fixed_scalar(FixedScalar::F16),

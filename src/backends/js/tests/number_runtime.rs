@@ -1,38 +1,15 @@
 //! Executable behavior tests for exact Dec JavaScript runtime helpers.
 
 use super::support::*;
-use crate::backends::js::JsEmitter;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-use crate::compiler_frontend::hir::module::HirModule;
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::process::Command;
 
 fn emit_cast_helpers(policies: &[BuiltinCastPolicyId]) -> String {
-    let string_table = StringTable::new();
-    let path_fork = PathInternerFork::empty();
-    let path_table = path_fork.snapshot_table();
-    let (type_environment, _) = build_type_environment();
-    let hir = HirModule::new();
-    let borrow_analysis = BorrowCheckReport::default();
-    let numeric_proofs = NumericProofs::default();
-    let mut emitter = JsEmitter::new(
-        &hir,
-        &borrow_analysis,
-        &numeric_proofs,
-        &string_table,
-        &path_table,
-        default_config(),
-        &type_environment,
-    );
-    for policy in policies {
-        emitter.used_cast_policies.insert(*policy);
-    }
-    emitter.emit_runtime_error_helpers();
-    emitter.emit_runtime_cast_helpers();
-    std::mem::take(&mut emitter.out)
+    emit_cast_helpers_for_profile(policies, NumericProfile::STANDARD)
 }
 
 #[test]
@@ -150,6 +127,123 @@ fn number_operation_helpers_round_signed_ties_and_keep_exact_power_intermediates
     assert_eq!(
         run_javascript(&script).trim(),
         r#"["ok :2","ok :2","ok :-2","ok :-2","ok :2","ok :8","ok :-2","ok :-8","ok :22","ok :-34","ok :-2","ok :-1","ok :123456789012345678901234567891","ok :-123456789012345678901234567890","ok :10","ok :-10","ok :0","ok :10"]"#
+    );
+}
+
+#[test]
+fn number_power_keeps_scale_for_integral_bases_and_rejects_negative_exponents() {
+    let scale_four = NumberScale::new(4).expect("scale four is valid");
+    let mut script = lower_number_operation_source(scale_four);
+    script.push_str(
+        "\nconst summarizeFallible = result => result.tag === \"ok\" ? \"ok:\" + String(result.value) : \"err:\" + __moth_error_code(result.value);\n",
+    );
+
+    let mut calls = Vec::new();
+    let mut expected = Vec::new();
+    for scale in [0_usize, 1, 4, 256] {
+        let zeros = "0".repeat(scale);
+        let scale_factor = format!("1{zeros}n");
+        for (base, powers) in [(2_i32, [1_i32, 2, 4, 8]), (-2, [1, -2, 4, -8])] {
+            for (exponent, power) in powers.iter().enumerate() {
+                calls.push(format!(
+                    "__moth_number_pow({base}n * {scale_factor}, {exponent}n, {scale_factor})"
+                ));
+                expected.push(format!("\"ok:{power}{zeros}\""));
+            }
+        }
+        calls.push(format!(
+            "__moth_number_pow(2n * {scale_factor}, 64n, {scale_factor})"
+        ));
+        expected.push(format!("\"ok:18446744073709551616{zeros}\""));
+    }
+    calls.extend(
+        [
+            "__moth_number_pow(18446744073709551616n * 10000n, 2n, 10000n)",
+            "__moth_number_pow(20000n, -1n, 10000n)",
+            "__moth_number_pow(10000n, 9223372036854775807n, 10000n)",
+            "__moth_number_pow(-10000n, 9223372036854775807n, 10000n)",
+            "__moth_number_pow(-10000n, 9223372036854775806n, 10000n)",
+        ]
+        .map(str::to_owned),
+    );
+    let invalid_exponent = BuiltinErrorCode::InvalidExponent.as_u32();
+    expected.extend([
+        "\"ok:3402823669209384634633746074317682114560000\"".to_owned(),
+        format!("\"err:{invalid_exponent}\""),
+        "\"ok:10000\"".to_owned(),
+        "\"ok:-10000\"".to_owned(),
+        "\"ok:10000\"".to_owned(),
+    ]);
+    script.push_str(&format!(
+        "console.log(JSON.stringify([{}].map(summarizeFallible)));",
+        calls.join(",")
+    ));
+
+    assert_eq!(
+        run_javascript(&script).trim(),
+        format!("[{}]", expected.join(",")),
+        "integral powers keep each scale factor; negative exponents report code {invalid_exponent}"
+    );
+}
+
+#[test]
+fn number_power_shortcut_edges_zero_tiny_powers_and_reject_negative_exponents() {
+    let scale_four = NumberScale::new(4).expect("scale four is valid");
+    let mut script = lower_number_operation_source(scale_four);
+    script.push_str(
+        "\nconst summarizeFallible = result => result.tag === \"ok\" ? \"ok:\" + String(result.value) : \"err:\" + __moth_error_code(result.value);\n",
+    );
+
+    let mut calls = Vec::new();
+    let mut expected = Vec::new();
+    // A coefficient of +/-1 at a positive scale is at most a tenth in magnitude, so
+    // exponents two and above round to zero while exponent one keeps the input.
+    for scale_factor in ["10n", "10000n"] {
+        let unity = scale_factor.strip_suffix('n').unwrap_or(scale_factor);
+        for tiny in ["1n", "-1n"] {
+            let input = tiny.strip_suffix('n').unwrap_or(tiny);
+            calls.push(format!("__moth_number_pow({tiny}, 1n, {scale_factor})"));
+            expected.push(format!("\"ok:{input}\""));
+            for exponent in ["2n", "3n", "9223372036854775807n"] {
+                calls.push(format!(
+                    "__moth_number_pow({tiny}, {exponent}, {scale_factor})"
+                ));
+                expected.push("\"ok:0\"".to_owned());
+            }
+        }
+
+        // Zero to the zeroth power keeps the existing scale-unity contract.
+        calls.push(format!("__moth_number_pow(0n, 0n, {scale_factor})"));
+        expected.push(format!("\"ok:{unity}\""));
+    }
+
+    // Negative exponents are rejected before any power shortcut fires.
+    let invalid_exponent = BuiltinErrorCode::InvalidExponent.as_u32();
+    for scale_factor in [10_i64, 10_000] {
+        let bases = [
+            "0n".to_owned(),
+            format!("{scale_factor}n"),
+            format!("-{scale_factor}n"),
+            "1n".to_owned(),
+            "-1n".to_owned(),
+            format!("{}n", 2 * scale_factor),
+            format!("{}n", 15 * scale_factor / 10),
+        ];
+        for base in &bases {
+            calls.push(format!("__moth_number_pow({base}, -1n, {scale_factor}n)"));
+            expected.push(format!("\"err:{invalid_exponent}\""));
+        }
+    }
+
+    script.push_str(&format!(
+        "console.log(JSON.stringify([{}].map(summarizeFallible)));",
+        calls.join(",")
+    ));
+
+    assert_eq!(
+        run_javascript(&script).trim(),
+        format!("[{}]", expected.join(",")),
+        "tiny coefficients round to zero at positive scales; negative exponents report code {invalid_exponent}"
     );
 }
 

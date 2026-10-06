@@ -4,6 +4,7 @@ use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::expressions::eval_expression::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::eval_expression::evaluate_expression;
+use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
@@ -536,7 +537,11 @@ fn inline_visible_constant_references_in_rpn_item(
             )?,
         )),
         ExpressionRpnItem::Operator { .. } => Ok(item.clone()),
-        // Resolution removes pending literals before this stage.
-        ExpressionRpnItem::PendingNumericLiteral { .. } => Ok(item.clone()),
+        // Pending syntax never survives evaluation; its presence here is a broken compiler
+        // invariant, not an inlinable default position.
+        ExpressionRpnItem::PendingNumericLiteral { .. }
+        | ExpressionRpnItem::PendingGroup { .. } => {
+            Err(pending_expression_item_bug("struct field default inlining").into())
+        }
     }
 }

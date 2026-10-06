@@ -1,0 +1,5 @@
+project #= (
+    name = "uint_js_execution_int32_float32_release",
+    entry_root = "src",
+)
+html #= ()

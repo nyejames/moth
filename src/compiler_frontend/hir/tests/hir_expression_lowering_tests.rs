@@ -31,6 +31,7 @@ use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
+use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::definitions::{
@@ -40,6 +41,7 @@ use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, BuiltinTypeKey, NominalTypeId, TypeConstructor, TypeId,
 };
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::folded_value::OwnedFoldedString;
@@ -3805,4 +3807,69 @@ fn external_fallible_float_call_catch_validates_success() {
             .any(|statement| matches!(&statement.kind, HirStatementKind::ValidateFloat { .. })),
         "fallible external Float catch should validate the unwrapped success Float before merge"
     );
+}
+
+/// Verifies that an implicit numeric promotion through `ExpressionKind::Coerced`
+/// lowers to an explicit infallible `Cast` instead of a bare type override.
+///
+/// WHY: backends select the value conversion from the cast policy. A bare override
+/// would leave the source carrier (notably a 64-bit BigInt) under the target
+/// `Float` type, so implicit `Uint`/`Int` returns formatted as non-finite.
+#[test]
+fn coerced_numeric_promotion_lowers_to_explicit_infallible_cast() {
+    let mut path_fork = super::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let span = None;
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let float_type = builder
+        .lower_type_id(builtin_type_ids::FLOAT, &span)
+        .expect("builtin Float TypeId should lower in test context");
+
+    for (expected_source, inner) in [
+        (
+            NumericScalar::Uint,
+            Expression::uint(41, span, ValueMode::ImmutableOwned),
+        ),
+        (
+            NumericScalar::Int,
+            Expression::int(41, span, ValueMode::ImmutableOwned),
+        ),
+    ] {
+        let coerced = Expression::coerced(inner, builtin_type_ids::FLOAT);
+        let lowered = builder
+            .lower_expression(&coerced)
+            .expect("numeric promotion should lower in HIR");
+
+        assert!(
+            lowered.prelude.is_empty(),
+            "{expected_source:?} promotion should convert inline without prelude statements"
+        );
+        assert_eq!(lowered.value.ty, float_type);
+        let (policy_source, policy_target, converted) = match &lowered.value.kind {
+            HirExpressionKind::Cast { source, policy } => {
+                let BuiltinCastPolicyId::NumericConversion {
+                    source: domain_source,
+                    target: domain_target,
+                } = *policy
+                else {
+                    panic!("{expected_source:?} promotion should use a numeric conversion policy");
+                };
+                (domain_source, domain_target, &**source)
+            }
+            other => panic!("{expected_source:?} promotion should lower to Cast, got {other:?}"),
+        };
+        assert_eq!(policy_source, expected_source);
+        assert_eq!(policy_target, NumericScalar::Float);
+        match expected_source {
+            NumericScalar::Uint => assert!(
+                matches!(converted.kind, HirExpressionKind::Uint(41)),
+                "Uint promotion should convert the original Uint literal value"
+            ),
+            NumericScalar::Int => assert!(
+                matches!(converted.kind, HirExpressionKind::Int(41)),
+                "Int promotion should convert the original Int literal value"
+            ),
+            _ => unreachable!("promotion test only covers Uint and Int sources"),
+        }
+    }
 }

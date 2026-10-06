@@ -1,0 +1,29 @@
+-- Task 5A: Uint range bounds and the explicit step snapshot in source order.
+-- Each operand logs when evaluated; the final line pins iteration count,
+-- index and total alongside the mandated evaluation order.
+
+range_source_start || -> Uint:
+    io.line([: uint-range source-start])
+    return 1
+;
+
+range_source_end || -> Uint:
+    io.line([: uint-range source-end])
+    return 4
+;
+
+range_source_step || -> Uint:
+    io.line([: uint-range source-step])
+    return 2
+;
+
+source_order_total ~Uint = 0
+source_order_count ~= 0
+source_order_last_index ~= 0
+loop range_source_start() to & range_source_end() by range_source_step() |value, index|:
+    source_order_total = source_order_total + value
+    source_order_count = source_order_count + 1
+    source_order_last_index = index
+;
+
+io.line([: uint_range_source_order count=[source_order_count]/index=[source_order_last_index]/total=[source_order_total]])

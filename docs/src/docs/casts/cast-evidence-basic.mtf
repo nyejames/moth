@@ -24,7 +24,9 @@ This stays explicit. Matching method names alone do not create cast support.
 Builtin numeric conversions are decided by the static source and target types,
 not by values the compiler happens to know. An integer conversion is exact when
 the whole source range fits the destination, and fallible otherwise. `Byte` and
-`U8` convert in both directions without failing.
+`U8` convert in both directions without failing. `Uint` and `Int` need an
+explicit cast between each other in both directions, even when the values would
+fit.
 
 Binary conversions may lose precision by design. Integer-to-float and
 binary-float precision narrowing round to nearest, ties to even, and

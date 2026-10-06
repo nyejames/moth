@@ -17,6 +17,8 @@ pub(crate) use crate::compiler_frontend::ast::expressions::expression::Expressio
 #[cfg(test)]
 pub(crate) use crate::compiler_frontend::value_mode::ValueMode;
 pub use evaluator::evaluate_expression;
+pub(crate) use evaluator::pending_expression_item_bug;
+pub(super) use ordering::extract_expression_span;
 pub(crate) use typing_error::ExpressionTypingError;
 
 #[cfg(test)]

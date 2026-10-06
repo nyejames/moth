@@ -1,0 +1,3 @@
+fail_huge_power || -> Uint, Error!:
+    return 10 ^ 10
+;

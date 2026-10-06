@@ -1,0 +1,17 @@
+-- Task 4: the fallible Uint-to-Int statement cast recovers in HTML-JS but
+-- stays outside the Wasm capability boundary, which rejects statement-form
+-- casts with a structured diagnostic before lowering.
+
+to_int |value Uint| -> Int, Error!:
+    return cast! value
+;
+
+top Uint = 4294967295 + 0
+top_to_int Int = to_int(top) catch:
+    then -1
+;
+small_to_int Int = to_int(7) catch:
+    then -2
+;
+
+[:uint statement casts=[top_to_int]/[small_to_int]]

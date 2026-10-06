@@ -1,0 +1,4 @@
+reject_completed_float_receiver || -> String:
+    result Uint = 1.5 + 2.5
+    return [result]
+;

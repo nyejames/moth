@@ -1,0 +1,171 @@
+-- Task 2A: Uint contextual arithmetic. Uint receivers and both-sided Uint
+-- peers type unresolved whole-number arithmetic as Uint; decimal leaves keep
+-- Float typing and select the mixed Uint/Float rule.
+
+peer_left_text |value Uint| -> String:
+    result = value + (1 + 2)
+    return [result]
+;
+
+peer_right_text |value Uint| -> String:
+    result = (1 + 2) + value
+    return [result]
+;
+
+peer_group_right_text |value Uint| -> String:
+    result = value + ((1 + 2) * 2)
+    return [result]
+;
+
+peer_product_text |value Uint| -> String:
+    result = value + (1 * 2)
+    return [result]
+;
+
+peer_typed_inner_text |value Uint, other Uint| -> String:
+    result = value + (other + 1)
+    return [result]
+;
+
+received_typed_inner_text |value Uint, other Uint| -> String:
+    result Uint = value + (other + 1)
+    return [result]
+;
+
+typed_inner_text |left Uint, right Uint| -> String:
+    result Uint = (left + right) + 1
+    return [result]
+;
+
+received_inner_text |left Uint, right Uint| -> String:
+    result Uint = left + (right + 1)
+    return [result]
+;
+
+same_text |value Uint| -> String:
+    result Bool = value is (1 + 2)
+    return [result]
+;
+
+ordered_text |value Uint| -> String:
+    result Bool = value < (1 + 20)
+    return [result]
+;
+
+power_uint_exponent_text |exponent Uint| -> String:
+    result Uint = 2 ^ exponent
+    return [result]
+;
+
+take_uint |value Uint| -> Uint:
+    return value
+;
+
+explicit_return_text || -> Uint:
+    return 1 + 2
+;
+
+with_default |value Uint = 1 + 2| -> Uint:
+    return value
+;
+
+branch_text |flag Bool| -> Uint:
+    result Uint = if flag:
+        then 1 + 2
+    else
+        then 3 + 4
+    ;
+    return result
+;
+
+split_pair |flag Bool| -> Uint, Int:
+    return 1 + 2, 3 + 4
+;
+
+make_uint || -> Uint:
+    return 1 + 2
+;
+
+call_peer_text || -> String:
+    result = make_uint() + (1 + 2)
+    return [result]
+;
+
+mutable_assign_text || -> String:
+    target ~Uint = 0
+    target = 1 + 2
+    return [target]
+;
+
+render_uint_text |value Uint| -> String:
+    return [value]
+;
+
+Point = |
+    x Uint,
+|
+
+count Uint = 1 + 2
+large Uint = 3_000_000_000 + 1
+grouped Uint = (1 + 2) * 3
+peer Uint = 10
+from_right = (1 + 2) + peer
+from_left = peer + (1 + 2)
+power_group Uint = 2 ^ (1 + 2)
+power_right Uint = 2 ^ 3 ^ 2
+power_left Uint = (2 ^ 3) ^ 2
+int_div Uint = 7 // 2
+remainder Uint = 7 % 3
+mixed_left = 1.5 + peer
+mixed_right = peer + 1.5
+real_div = peer / 4
+accumulate ~Uint = 10
+accumulate += 1 + 2
+scaled ~Uint = 10
+scaled *= 1 + 2
+powered ~Uint = 2
+powered ^= 1 + 2
+peer_left = peer_left_text(10)
+peer_right = peer_right_text(10)
+peer_group_right = peer_group_right_text(10)
+peer_product = peer_product_text(10)
+peer_typed_inner = peer_typed_inner_text(10, 3)
+received_typed_inner = received_typed_inner_text(10, 3)
+typed_inner = typed_inner_text(3, 4)
+received_inner = received_inner_text(3, 4)
+comparison = same_text(3)
+ordered = ordered_text(3)
+power_typed = power_uint_exponent_text(3)
+concrete_argument = take_uint(1 + 2)
+explicit_return = explicit_return_text()
+omitted_default = with_default()
+branch_true = branch_text(true)
+branch_false = branch_text(false)
+split_first Uint, split_second Int = split_pair(true)
+mutable_assign = mutable_assign_text()
+optional_payload Uint? = 1 + 2
+optional_text String = if optional_payload is |payload| then [payload] else "none"
+point Point = Point(x = 1 + 2)
+elements {Uint} = {1 + 2}
+element_value Uint = elements.get(0) catch:
+    then 0
+;
+keyed {String = Uint} = { "a" = 1 + 2 }
+keyed_value Uint = keyed.get("a") catch:
+    then 0
+;
+missing Uint = elements.get(5) catch then 4 + 5
+call_peer = call_peer_text()
+amount Dec2 = 1.5
+dec_uint_power Dec2 = amount + (3 ^ 2)
+decmix Dec2 = 1.5 + peer
+float_from_uint Float = peer
+rendered = render_uint_text(peer)
+matched_text ~= ""
+m Uint = 5
+if m is:
+    5 => matched_text = "five"
+    else => matched_text = "other"
+;
+
+[:uint context count=[count] large=[large] grouped=[grouped] right=[from_right] left=[from_left] power-group=[power_group] power-right=[power_right] power-left=[power_left] intdiv=[int_div] rem=[remainder] mixed-left=[mixed_left] mixed-right=[mixed_right] div=[real_div] acc=[accumulate] scaled=[scaled] powered=[powered] peer-left=[peer_left] peer-right=[peer_right] peer-group-right=[peer_group_right] peer-product=[peer_product] peer-typed-inner=[peer_typed_inner] received-typed-inner=[received_typed_inner] typed-inner=[typed_inner] received-inner=[received_inner] same=[comparison] ordered=[ordered] power-typed=[power_typed] concrete=[concrete_argument] explicit=[explicit_return] default=[omitted_default] branch=[branch_true]/[branch_false] split=[split_first]/[split_second] mutable=[mutable_assign] optional=[optional_text] point=[point.x] element=[element_value] keyed=[keyed_value] missing=[missing] call-peer=[call_peer] dec-power=[dec_uint_power] decmix=[decmix] float=[float_from_uint] rendered=[rendered] match=[matched_text]]

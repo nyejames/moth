@@ -6,7 +6,7 @@
 use super::anonymous_const_record::parse_parenthesized_anonymous_const_record_expression;
 use super::call_arguments::{ParenthesizedExpressionKind, classify_parenthesized_expression};
 use super::error::ExpressionParseError;
-use super::eval_expression::evaluate_expression;
+use super::eval_expression::{evaluate_expression, extract_expression_span};
 use super::expression::{Expression, ExpressionKind, Operator};
 use super::expression_rpn::ExpressionRpnItem;
 use super::option_propagation::parse_option_propagation_suffix_for_expression;
@@ -95,7 +95,7 @@ fn reject_adjacent_operand(
 ) -> Result<(), ExpressionParseError> {
     let previous_is_operand = expression
         .last()
-        .is_some_and(ExpressionRpnItem::is_operand_or_pending_literal);
+        .is_some_and(ExpressionRpnItem::is_operand_shape);
 
     if previous_is_operand {
         return Err(CompilerDiagnostic::invalid_expression(
@@ -522,10 +522,10 @@ pub(super) fn dispatch_expression_token(
             }
 
             token_stream.advance();
-            // A group is not a receiving boundary: a direct-literal hint becomes
-            // inference inside, while `Known` propagates exactly as the baseline.
+            // A group is not a receiving boundary. Retain its raw syntax for the outer
+            // evaluator, while typed completion boundaries use their own natural context.
             let mut grouped_expected_type = match *state.expected_type {
-                ExpectedType::DirectLiteral(_) => ExpectedType::Infer,
+                ExpectedType::NumericLiteral(_) => ExpectedType::Infer,
                 other => other,
             };
             let mut grouped_cast_target_context = CastTargetContext::None;
@@ -543,20 +543,21 @@ pub(super) fn dispatch_expression_token(
             let value = match collect_expression_fragment(&mut grouped_input)? {
                 ExpressionFragment::Value(value) => *value,
 
-                // Parentheses stay transparent for a lone literal: the pending item moves
-                // into the outer fragment unevaluated, so only the outer fragment decides
-                // whether it is a direct literal of its receiving boundary. A typed suffix
-                // after the group (`.`, `!`, `catch`, `?`) needs an evaluated operand.
+                // Typed suffixes need a completed operand. Plain `catch` is not one:
+                // dispatch stops the whole outer fragment and its receiving owner completes
+                // recovery after evaluation. Well-formed groups defer so receivers and Dec/Uint
+                // peers reach their leaves; malformed groups evaluate eagerly so the
+                // diagnostic stays anchored at the group's own operator.
                 ExpressionFragment::Nodes(nodes)
-                    if matches!(
-                        nodes.as_slice(),
-                        [ExpressionRpnItem::PendingNumericLiteral { .. }]
-                    ) && !typed_suffix_follows(token_stream, 0) =>
+                    if !typed_suffix_follows(token_stream, 0)
+                        && group_nodes_have_balanced_operands(&nodes) =>
                 {
-                    state.expression.extend(nodes);
+                    let span = extract_expression_span(&nodes)?;
+                    state
+                        .expression
+                        .push(ExpressionRpnItem::PendingGroup { nodes, span });
                     return Ok(ExpressionTokenStep::Continue);
                 }
-
                 ExpressionFragment::Nodes(nodes) => evaluate_expression(
                     context,
                     nodes,
@@ -896,7 +897,7 @@ pub(super) fn dispatch_expression_token(
             if state
                 .expression
                 .last()
-                .is_some_and(ExpressionRpnItem::is_operand_or_pending_literal)
+                .is_some_and(ExpressionRpnItem::is_operand_shape)
             {
                 if !context.kind.is_constant_context()
                     && let Some(error) =
@@ -1337,6 +1338,28 @@ fn parse_cast_operand_expression(
         consume_closing_parenthesis,
     );
     create_expression_with_trailing_newline_policy(input)
+}
+
+/// Check a group's own operand balance before deferring it into a pending group.
+///
+/// Shunting-yard diagnostics belong to the malformed group when its operand shape says so.
+/// A dangling inner operator placed in the outer stream would report at the wrong anchor.
+fn group_nodes_have_balanced_operands(nodes: &[ExpressionRpnItem]) -> bool {
+    let mut operands = 0;
+    let mut binary_operators = 0;
+    for node in nodes {
+        match node {
+            ExpressionRpnItem::Operand(_)
+            | ExpressionRpnItem::PendingNumericLiteral { .. }
+            | ExpressionRpnItem::PendingGroup { .. } => operands += 1,
+            ExpressionRpnItem::Operator { operator, .. } => {
+                if operator.required_values() == 2 {
+                    binary_operators += 1;
+                }
+            }
+        }
+    }
+    operands == binary_operators + 1
 }
 
 #[cfg(test)]

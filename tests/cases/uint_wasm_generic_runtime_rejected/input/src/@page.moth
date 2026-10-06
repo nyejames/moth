@@ -1,0 +1,13 @@
+-- Task 4: a Uint carried through a generic aggregate executes in HTML-JS
+-- but stays outside the Wasm capability boundary, which rejects reachable
+-- generic runtime values with a structured diagnostic before lowering.
+
+Box type T = |
+    value T,
+|
+
+top Uint = 4294967295 + 0
+boxed = Box(top)
+top_text String = cast boxed.value
+
+[:uint aggregate box=[boxed.value]/[top_text]]

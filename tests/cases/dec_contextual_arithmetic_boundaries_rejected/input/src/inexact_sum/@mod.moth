@@ -1,0 +1,4 @@
+reject_inexact_sum || -> String:
+    result Dec2 = 0.005 + 0.005
+    return [result]
+;

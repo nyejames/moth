@@ -5,9 +5,9 @@
 //!     (`+=`, `-=`, `*=`, `/=`, `//=`, `%=`, `^=`) after a place
 //!     expression has been resolved.
 //!   - Validates mutability and type compatibility for the target.
-//!   - Parses compound RHSs with direct-literal peer hints for fixed scalars, bare `Float` and
-//!     non-power `Dec` targets, evaluates `target op rhs` in its promoted domain and converts
-//!     incompatible numeric results back through builtin cast evidence.
+//!   - Parses compound RHSs with numeric-literal peer hints for fixed scalars, bare `Float`,
+//!     non-power `Dec` and every `Uint` target, evaluates `target op rhs` in its promoted
+//!     domain and converts incompatible numeric results back through builtin cast evidence.
 //!
 //! WHY:  Mutation is a distinct expression kind in the AST; centralising
 //!       the parsing, validation, and compound-value construction here
@@ -129,10 +129,12 @@ struct CompoundAssignmentInput<'a> {
     operator: Operator,
 }
 
-/// WHAT: gives existing fixed-scalar targets, bare `Float` targets and non-power `Dec` targets
-///       a direct-literal peer hint, then evaluates `target op rhs` in the promoted domain.
+/// WHAT: gives existing fixed-scalar targets, bare `Float` targets, non-power `Dec` targets
+///       and every `Uint` target a numeric literal hint, then evaluates `target op rhs` in the
+///       promoted domain.
 /// WHY: `Dec ^ Int` must keep the exponent in the profile `Int` domain even when the compound
-///      assignment's receiving type is a Dec scale.
+///      assignment's receiving type is a Dec scale, while `Uint ^ Uint` keeps its exponent in
+///      the `Uint` domain.
 fn evaluate_compound_assignment_value(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
@@ -155,10 +157,11 @@ fn evaluate_compound_assignment_value(
         is_numeric_literal_destination_type_id(target_type_id, type_environment)
             && (type_environment.fixed_scalar(target_type_id).is_some()
                 || target_type_id == type_environment.builtins().float
+                || target_type_id == type_environment.builtins().uint
                 || target_is_number)
             && !number_power_exponent;
     let mut expr_type = if peer_numeric_literal {
-        ExpectedType::DirectLiteral(target_type_id)
+        ExpectedType::NumericLiteral(target_type_id)
     } else {
         ExpectedType::Infer
     };
@@ -331,7 +334,9 @@ fn build_mutation_from_target(
     let value = match token_stream.current_tag() {
         TokenTag::ASSIGN => {
             // Simple assignment keeps the receiver hint for context-sensitive values. Compound
-            // RHSs peer direct literals for fixed scalars and bare Float before promoted evaluation.
+            // RHSs peer numeric literals for fixed scalars, bare Float and Uint before
+            // promoted evaluation; Dec and Uint arithmetic resolve through their receiving
+            // and peer contexts.
             token_stream.advance();
 
             let mut expr_type =

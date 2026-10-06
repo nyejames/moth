@@ -1,0 +1,3 @@
+fail_sub || -> Uint, Error!:
+    return 0 - 1
+;

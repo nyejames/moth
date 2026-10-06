@@ -214,3 +214,77 @@ fn abi_f64_constant_rejects_nonfinite_values() {
         Some(numeric_profile(FloatPrecision::Bits64))
     );
 }
+
+#[test]
+fn native_uint_constant_projects_exact_payload() {
+    use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
+    use crate::compiler_frontend::external_packages::ExternalSignatureType;
+    use moth_lexical::numeric::parse::NumberLiteralErrorReason;
+
+    fn uint32_profile() -> NumericProfile {
+        NumericProfile {
+            int_width: IntWidth::Bits32,
+            float_precision: FloatPrecision::Bits64,
+        }
+    }
+
+    fn uint64_profile() -> NumericProfile {
+        NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision: FloatPrecision::Bits64,
+        }
+    }
+
+    fn project(
+        value: u64,
+        profile: NumericProfile,
+        string_table: &mut StringTable,
+    ) -> Result<Expression, crate::compiler_frontend::compiler_messages::CompilerDiagnostic> {
+        let constant_name = string_table.intern("HOST_UINT");
+        let definition = ExternalConstantDef {
+            name: "HOST_UINT".to_owned(),
+            data_type: ExternalSignatureType::NativeUint,
+            value: ExternalConstantValue::Uint(value),
+        };
+        project_external_constant(
+            &definition,
+            constant_name,
+            None,
+            profile,
+            ValueMode::ImmutableOwned,
+            string_table,
+        )
+    }
+
+    let mut string_table = StringTable::new();
+
+    // Uint32 accepts its own maximum exactly.
+    let projected = project(u64::from(u32::MAX), uint32_profile(), &mut string_table)
+        .expect("the Uint32 maximum should project under Bits32");
+    assert_eq!(projected.type_id, builtin_type_ids::UINT);
+    let ExpressionKind::Uint(value) = projected.kind else {
+        panic!("a Uint constant must project as a Uint expression, not a signed reinterpretation");
+    };
+    assert_eq!(value, u64::from(u32::MAX));
+
+    // Uint32 rejects the successor and u64::MAX with the source-level range diagnostic.
+    for rejected in [u64::from(u32::MAX) + 1, u64::MAX] {
+        let error = project(rejected, uint32_profile(), &mut string_table)
+            .expect_err("an out-of-profile Uint payload must not project under Bits32");
+        let DiagnosticPayload::InvalidNumberLiteral { reason, .. } = error.payload else {
+            panic!("an out-of-profile Uint constant should report the numeric range lane");
+        };
+        assert_eq!(
+            reason,
+            NumberLiteralErrorReason::OutsideUintRange(IntWidth::Bits32)
+        );
+    }
+
+    // Uint64 keeps the full range exact, including u64::MAX.
+    let projected = project(u64::MAX, uint64_profile(), &mut string_table)
+        .expect("u64::MAX should project under Bits64");
+    let ExpressionKind::Uint(value) = projected.kind else {
+        panic!("a Uint64 constant must project as a Uint expression");
+    };
+    assert_eq!(value, u64::MAX);
+}

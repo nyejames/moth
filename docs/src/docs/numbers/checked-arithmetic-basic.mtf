@@ -39,10 +39,11 @@ even inside `Error!` or an expression with `catch`.
 Each operation checks its own result type rather than the storage width of its
 operands. Fixed-width arithmetic typing and numeric constant folding are
 implemented in the frontend/HIR. HTML-JS executes checked runtime arithmetic,
-including fixed-width operations. HTML-Wasm executes supported scalar
+including fixed-width and `Uint` operations. HTML-Wasm executes supported scalar
 arithmetic; any operation that can actually fail and needs recoverable delivery
 is rejected with a capability diagnostic, while operations proven unable to
 fail, such as `U8 + U8 -> U32`, compile. There is no trap fallback.
-HTML-JS executes `Dec` arithmetic with exact coefficients and per-operation
+HTML-JS executes `Uint` checked arithmetic with unsigned-range failure and
+`Dec` arithmetic with exact coefficients and per-operation
 half-even rounding at the result scale. Wasm rejects reachable `Dec` values
 and recoverable numeric failures. See @../progress (Progress) for current support.

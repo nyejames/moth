@@ -61,7 +61,8 @@ Any range that uses `Float` needs an explicit step:
 ]
 
 The value binding takes the range's numeric type, and the optional index binding
-is always `Int`.
+is always `Int`, including in an all-`Uint` range.
 
 Fixed-width bounds and steps promote to a common type before the loop runs, and a
-fixed binary float range also needs an explicit step. Invalid steps and counter updates produce implicit failure through the enclosing handler or function contract. Ranges run on HTML-JS; HTML-Wasm rejects recoverable range failure with a capability diagnostic. See @../progress (Progress) for current support.
+fixed binary float range also needs an explicit step. An all-`Uint` range binds
+`Uint`. Invalid steps and counter updates produce implicit failure through the enclosing handler or function contract. Ranges run on HTML-JS; HTML-Wasm rejects recoverable range failure with a capability diagnostic. See @../progress (Progress) for current support.

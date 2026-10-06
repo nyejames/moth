@@ -21,11 +21,11 @@ or state it explicitly.
 
 ### Numeric types
 
-- `Int` and `Float` are the signed integer and binary float selected by the compiler's numeric profile. The default profile selects `Int32` and `Float64`.
+- `Int`, `Uint` and `Float` are the signed integer, unsigned integer and binary float selected by the compiler's numeric profile. `Uint` follows the selected `Int` width. The default profile selects `Int32` and `Float64`, and therefore `Uint32`.
 - Fixed-width spellings are the integers `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32` and `U64`, and the binary floats `F16`, `F32` and `F64`.
 - `Byte` is a one-byte octet value with equality and unsigned-octet ordering. It takes no part in numeric arithmetic.
 - `Dec` is an arbitrary-precision integer at scale zero, `Dec1` through `Dec256` are arbitrary-precision scaled integers, and `Dec0` is another spelling of `Dec`'s scale-zero identity.
-- `Int` and `Float` keep their own identities even when their selected width matches an explicit-width type.
+- `Int`, `Uint` and `Float` keep their own identities even when their selected width matches an explicit-width type.
 
 The Numbers documentation owns the complete type family, exact numeric grammar,
 literal inference, operators and conversions. Current implementation and

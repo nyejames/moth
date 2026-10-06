@@ -1464,6 +1464,7 @@ fn collect_expression_loaded_locals(expression: &HirExpression, visitor: &mut im
             collect_expression_loaded_locals(result, visitor);
         }
         HirExpressionKind::Number(_)
+        | HirExpressionKind::Uint(_)
         | HirExpressionKind::Int(_)
         | HirExpressionKind::Float(_)
         | HirExpressionKind::FixedScalar(_)

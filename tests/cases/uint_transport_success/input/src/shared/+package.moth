@@ -1,0 +1,7 @@
+export:
+    shared_count #Uint = 23
+
+    keep_uint |value Uint| -> Uint:
+        return value
+    ;
+;

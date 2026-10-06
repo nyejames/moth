@@ -336,65 +336,6 @@ fn lower_minimal_module_with_numeric_op(
     )
 }
 
-fn lower_minimal_module_with_numeric_op_for_profile(
-    op: HirNumericOp,
-    failure_mode: NumericFailureMode,
-    operands: HirNumericOperands,
-    result_type: TypeId,
-    numeric_profile: NumericProfile,
-) -> String {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let (type_environment, types) = build_type_environment();
-    let region = RegionId(0);
-
-    let numeric_statement = statement(
-        1,
-        HirStatementKind::NumericOp {
-            op,
-            failure_mode,
-            operands,
-            result: LocalId(0),
-        },
-    );
-
-    let block = HirBlock {
-        id: BlockId(0),
-        region,
-        locals: vec![local(0, result_type, region)],
-        statements: vec![numeric_statement],
-        terminator: HirTerminator::Return(unit_expression(2, types.unit, region)),
-    };
-
-    let function = HirFunction {
-        id: FunctionId(0),
-        entry: BlockId(0),
-        params: vec![],
-        return_type: types.unit,
-    };
-
-    let module = build_module(
-        &mut path_fork,
-        &mut string_table,
-        "main",
-        vec![block],
-        function,
-        &[(LocalId(0), "result")],
-    );
-
-    lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &NumericProofs::default(),
-        &string_table,
-        JsLoweringConfig::direct_js(false, numeric_profile),
-        &type_environment,
-        &path_fork.snapshot_table(),
-    )
-    .expect("JS lowering should succeed")
-    .source
-}
-
 fn int_op(operator: NumericOperator) -> HirNumericOp {
     HirNumericOp {
         operator,

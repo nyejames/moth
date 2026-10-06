@@ -1,0 +1,7 @@
+-- Task 5A: a Uint value does not silently satisfy an Int binding.
+-- Crossing the boundary needs an explicit handled cast (covered by
+-- uint_cast_conversions_success).
+
+source Uint = 7
+target Int = source
+[:test]

@@ -1,0 +1,48 @@
+-- Task 4 cross-profile under Int64/Float64: Uint64 boundary values execute in
+-- the Wasm lane through the shared I64 carrier with unsigned opcodes, unsigned
+-- rendering and exact Uint/Int comparisons. Literal arithmetic folds before the
+-- backend; dynamic comparisons, conversions and formatting exercise the
+-- supported scalar paths.
+compare_below |limit Int, edge Uint| -> String:
+    return if limit < edge then "yes" else "no"
+;
+
+compare_above |edge Uint, limit Int| -> String:
+    return if edge > limit then "yes" else "no"
+;
+
+compare_equal |edge Uint, other Uint| -> String:
+    return if edge is other then "yes" else "no"
+;
+
+above Uint = 9223372036854775808 + 0
+kept_above Uint = 9223372036854775808 + 100
+huge Uint = 18446744073709551615 + 0
+max_signed Int = 9223372036854775807
+min_signed Int = -9223372036854775808
+
+above_less_text String = compare_below(max_signed, above)
+above_equal_text String = compare_equal(huge, 18446744073709551615)
+above_above_max_text String = compare_above(above, max_signed)
+min_below_zero_text String = compare_below(min_signed, 0)
+zero_above_min_text String = compare_above(0, min_signed)
+
+-- A Uint function parameter converts to the profile Float at runtime. Under
+-- Float64, 9007199254740993 rounds to 9007199254740992.
+implicit_to_float |value Uint| -> Float:
+    return value
+;
+
+explicit_to_float |value Uint| -> Float:
+    return cast value
+;
+
+witness Uint = 9007199254740993
+implicit_witness Float = implicit_to_float(witness)
+explicit_witness Float = explicit_to_float(witness)
+witness_match_text String = if implicit_witness is 9007199254740992.0 then "yes" else "no"
+witness_agree_text String = if implicit_witness is explicit_witness then "yes" else "no"
+fmt_above String = cast above
+fmt_huge String = cast huge
+
+[:uint wasm64f64 wide=[kept_above]/[huge] compare=[above_less_text]/[above_equal_text]/[above_above_max_text]/[min_below_zero_text]/[zero_above_min_text] float=[implicit_witness]/[explicit_witness]/[witness_match_text]/[witness_agree_text] fmt=[fmt_above]/[fmt_huge]]

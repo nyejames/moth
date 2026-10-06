@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "uint checked zero=1 const=3/3/3.5/true/true record=3/6 under=99/301 div=98 rem=97 real=-1 neg=true/true/true atomic=301/100/1/0 wback=301/4294967295/0 divassign=2/2/0/0 floored=3 rem=1 reduced=7 wide=2147483647/2147483649/4294967295/7 prod=4294967295/8 compare=true/true/true/true implicit=3000000001 agree=true"

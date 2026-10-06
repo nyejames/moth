@@ -161,8 +161,17 @@ fn substitute_source_consts_in_rpn_item(
             substitute_source_consts_in_expression(expression.clone(), context, string_table),
         ),
         operator @ ExpressionRpnItem::Operator { .. } => operator.clone(),
-        // Resolution removes pending literals before this stage.
-        pending @ ExpressionRpnItem::PendingNumericLiteral { .. } => pending.clone(),
+        // Pending syntax never survives evaluation. This helper is infallible, so flag an escaped
+        // item in debug builds; final type validation rejects the cloned item with the canonical
+        // pending-item invariant error.
+        pending @ (ExpressionRpnItem::PendingNumericLiteral { .. }
+        | ExpressionRpnItem::PendingGroup { .. }) => {
+            debug_assert!(
+                false,
+                "pending expression syntax reached const-required source-const substitution"
+            );
+            pending.clone()
+        }
     }
 }
 

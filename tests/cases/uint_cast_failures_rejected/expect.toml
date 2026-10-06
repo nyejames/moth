@@ -1,0 +1,69 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0083", "MOTH-RULE-0083", "MOTH-RULE-0083", "MOTH-RULE-0083", "MOTH-RULE-0083", "MOTH-RULE-0083", "MOTH-RULE-0083", "MOTH-RULE-0083", "MOTH-RULE-0083"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+occurrence = 1
+reason = "invalid_cast.no_evidence"
+path = "input/from_bool/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+occurrence = 2
+reason = "invalid_cast.no_evidence"
+path = "input/from_byte/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+occurrence = 3
+reason = "invalid_cast.no_evidence"
+path = "input/from_char/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+occurrence = 4
+reason = "invalid_cast.fallible_evidence_requires_handling"
+path = "input/plain_fallible/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+occurrence = 5
+reason = "invalid_cast.fallible_evidence_requires_handling"
+path = "input/plain_int_to_uint/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+occurrence = 6
+reason = "invalid_cast.same_source_and_target"
+path = "input/same_type/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+occurrence = 7
+reason = "invalid_cast.no_evidence"
+path = "input/to_bool/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+occurrence = 8
+reason = "invalid_cast.no_evidence"
+path = "input/to_byte/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+occurrence = 9
+reason = "invalid_cast.no_evidence"
+path = "input/to_char/@mod.moth"
+line = 2

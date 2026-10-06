@@ -349,6 +349,103 @@ pub(super) fn default_config() -> JsLoweringConfig {
     JsLoweringConfig::direct_js(false, NumericProfile::STANDARD)
 }
 
+/// Builds and lowers a minimal module with one numeric operation statement.
+///
+/// WHY: helper-demand tests need focused numeric-op fixtures, but the
+/// module/function/lowering setup is identical for every op. Callers name only
+/// the op, failure mode, operands, result type, and numeric profile.
+pub(super) fn lower_minimal_module_with_numeric_op_for_profile(
+    op: crate::compiler_frontend::hir::numeric::HirNumericOp,
+    failure_mode: crate::compiler_frontend::hir::numeric::NumericFailureMode,
+    operands: crate::compiler_frontend::hir::numeric::HirNumericOperands,
+    result_type: TypeId,
+    numeric_profile: NumericProfile,
+) -> String {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (type_environment, types) = build_type_environment();
+    let region = RegionId(0);
+
+    let numeric_statement = statement(
+        1,
+        HirStatementKind::NumericOp {
+            op,
+            failure_mode,
+            operands,
+            result: LocalId(0),
+        },
+    );
+
+    let block = HirBlock {
+        id: BlockId(0),
+        region,
+        locals: vec![local(0, result_type, region)],
+        statements: vec![numeric_statement],
+        terminator: HirTerminator::Return(unit_expression(2, types.unit, region)),
+    };
+
+    let function = HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: vec![],
+        return_type: types.unit,
+    };
+
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        "main",
+        vec![block],
+        function,
+        &[(LocalId(0), "result")],
+    );
+
+    lower_hir_to_js(
+        &module,
+        &BorrowCheckReport::default(),
+        &NumericProofs::default(),
+        &string_table,
+        JsLoweringConfig::direct_js(false, numeric_profile),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("JS lowering should succeed")
+    .source
+}
+
+/// Emits the runtime cast helpers demanded by the given cast policies.
+///
+/// WHY: demand-driven cast-helper tests name only policies; the emitter setup
+/// is identical every time. The profile selects the destination precision of
+/// profile-sensitive conversions.
+pub(super) fn emit_cast_helpers_for_profile(
+    policies: &[BuiltinCastPolicyId],
+    numeric_profile: NumericProfile,
+) -> String {
+    let string_table = StringTable::new();
+    let path_fork = PathInternerFork::empty();
+    let path_table = path_fork.snapshot_table();
+    let (type_environment, _) = build_type_environment();
+    let hir = HirModule::new();
+    let borrow_analysis = BorrowCheckReport::default();
+    let numeric_proofs = NumericProofs::default();
+    let mut emitter = crate::backends::js::JsEmitter::new(
+        &hir,
+        &borrow_analysis,
+        &numeric_proofs,
+        &string_table,
+        &path_table,
+        JsLoweringConfig::direct_js(false, numeric_profile),
+        &type_environment,
+    );
+    for policy in policies {
+        emitter.used_cast_policies.insert(*policy);
+    }
+    emitter.emit_runtime_error_helpers();
+    emitter.emit_runtime_cast_helpers();
+    std::mem::take(&mut emitter.out)
+}
+
 /// Builds and lowers a minimal module that performs one runtime cast expression.
 ///
 /// WHY: demand-driven cast-helper tests need focused HIR fixtures, but the

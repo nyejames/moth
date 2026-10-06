@@ -855,7 +855,8 @@ impl<'a> HirBuilder<'a> {
 
         if !matches!(
             lowered_pattern.value.kind,
-            HirExpressionKind::Int(_)
+            HirExpressionKind::Uint(_)
+                | HirExpressionKind::Int(_)
                 | HirExpressionKind::Float(_)
                 | HirExpressionKind::Bool(_)
                 | HirExpressionKind::Char(_)

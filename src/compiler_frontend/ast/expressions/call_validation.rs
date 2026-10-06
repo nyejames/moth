@@ -650,7 +650,20 @@ fn classify_argument_source_state(
             Some(ExpressionRpnItem::Operand(inner)) => {
                 classify_argument_source_state(inner, path_fork)
             }
-            _ => CallArgumentSourceState::Fresh,
+            Some(ExpressionRpnItem::Operator { .. }) => CallArgumentSourceState::Fresh,
+            // Pending syntax never survives evaluation; flag it in debug builds so the invalid
+            // boundary is visible instead of silently classifying it as a fresh value.
+            Some(
+                ExpressionRpnItem::PendingNumericLiteral { .. }
+                | ExpressionRpnItem::PendingGroup { .. },
+            ) => {
+                debug_assert!(
+                    false,
+                    "pending expression syntax reached call-argument classification"
+                );
+                CallArgumentSourceState::Fresh
+            }
+            None => CallArgumentSourceState::Fresh,
         },
         _ => CallArgumentSourceState::Fresh,
     }

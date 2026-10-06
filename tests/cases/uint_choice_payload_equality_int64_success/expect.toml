@@ -1,0 +1,7 @@
+entry = "."
+numeric_profile = "Int64/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "uint_int64_choice_equality same=true different=false above_signed=true above_not_max=false optional_same=true optional_different=false"

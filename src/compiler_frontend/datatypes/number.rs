@@ -2,12 +2,13 @@
 //!
 //! WHAT: owns arbitrary-precision decimal coefficients, Dec arithmetic and the exact
 //!       integer/rescaling conversions shared by frontend consumers.
-//! WHY: AST, casts and MON receiving paths must use one coefficient owner without a bounded or
+//! WHY: AST, casts and constant folding must use one coefficient owner without a bounded or
 //!      floating-point intermediate.
 //!
 //! Exclusions: numeric syntax, `NumberScale` and normalized-decimal facts belong to
-//! `moth-lexical`; MON budgets, spans and error context belong to the MON codec;
-//! runtime/backend representation does not belong here.
+//! `moth-lexical`; MON decimal text validation, budgets and error context belong to the
+//! MON codec, which keeps its own text representation; runtime/backend representation
+//! does not belong here.
 
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use moth_lexical::numeric::decimal::{NormalizedDecimalFacts, NumberScale};
@@ -123,8 +124,9 @@ impl NumberValue {
             return Ok(Self::new(BigInt::zero(), scale));
         }
 
-        // The shared borrowed facts decide exact fit before any coefficient expansion. MON and
-        // Dec therefore use the same exponent and trailing-zero interpretation.
+        // The shared borrowed facts decide exact fit before any coefficient expansion. The MON
+        // codec validates the same trailing-zero and exponent interpretation for decimal text,
+        // keeping its own representation.
         if facts.effective_scale() > usize::from(scale.get()) {
             return Err(NumberMaterializationError::InexactScale);
         }
@@ -391,6 +393,19 @@ impl NumberValue {
         // every higher power round to zero at this scale, without expanding a huge denominator.
         if self.coefficient.magnitude().is_one() {
             return Ok(Self::new(BigInt::zero(), self.scale));
+        }
+
+        // Integral bases divide out the removable scale factor first: `(c / F)^e * F` is exact.
+        // For Dec256 `2 ^ 10000`, raise the unscaled base 2, then restore the scale factor. The
+        // final coefficient has 3,267 digits, without multi-million-digit cancelling
+        // intermediates. The quotient keeps the base sign, so negative integral bases stay
+        // exact. Unity quotients returned above.
+        let (quotient, remainder) = self.coefficient.as_ref().div_rem(&unity);
+        if remainder.is_zero() {
+            return Ok(Self::new(
+                bigint_power(&quotient, exponent) * &unity,
+                self.scale,
+            ));
         }
 
         let exact_numerator = bigint_power(self.coefficient.as_ref(), exponent);

@@ -1760,6 +1760,7 @@ fn collect_expression_values(expression: &HirExpression, out: &mut FxHashSet<Hir
         }
         HirExpressionKind::Number(_)
         | HirExpressionKind::Int(_)
+        | HirExpressionKind::Uint(_)
         | HirExpressionKind::Float(_)
         | HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Bool(_)

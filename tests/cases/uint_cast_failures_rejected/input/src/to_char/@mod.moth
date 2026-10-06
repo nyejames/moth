@@ -1,0 +1,3 @@
+bad |value Uint| -> Char:
+    return cast value
+;

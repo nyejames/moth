@@ -36,14 +36,20 @@ only.
 
 ### Typed widths
 
-`Int` and `Float` are the ordinary arithmetic types. Fixed-width values do not
+`Int`, `Uint` and `Float` are the ordinary arithmetic types. `Uint` follows the
+selected `Int` width and checks its unsigned range. `Uint` and `Int` need an
+explicit conversion to mix, even for arithmetic, while `Uint` and `Float`
+mix to `Float` and `Uint` values compare exactly with `Int` values.
+Fixed-width values do not
 mix with them or with each other silently. A fixed-width operator first promotes
 both operands to a common type chosen from their complete ranges, and some pairs,
 such as `I64` and `U64`, have no common type and are rejected. Fixed integer `/`
 produces `F64`, while `//` stays integer division.
 
-Unary minus is invalid on every `U*` value, including a known zero. Convert to a
+Unary minus is invalid on every `U*` and `Uint` value, including a known zero. Convert to a
 signed type first. `Byte` takes part in no arithmetic at all.
+
+A `Dec` or `Uint` receiver types unresolved literal arithmetic before operator selection, with different exponent rules. See @./#numeric-literals (Numeric literals) for that contract.
 
 A compound assignment such as `+=` computes in the promoted type and then checks
 that the result fits the left-hand type. It writes only after both checks succeed.
@@ -51,8 +57,9 @@ A `catch` on the right-hand expression does not catch these later update checks.
 See @./#checked-arithmetic (Checked arithmetic) for failure delivery.
 
 Fixed-width promotion, compatibility checks and numeric constant folding are
-implemented in the frontend/HIR. HTML-JS executes fixed-width, `Byte` and
-`Dec` runtime values. HTML-Wasm executes supported fixed integers, `Byte`
+implemented in the frontend/HIR. HTML-JS executes fixed-width, `Byte`, `Uint` and
+`Dec` runtime values. HTML-Wasm executes supported fixed integers, `Uint`
+scalars through `U32`/`U64` carriers in trap-mode-supported paths, `Byte`
 and fixed binary float values; any operation that can actually fail and needs
 recoverable delivery is rejected with a capability diagnostic, while
 operations proven unable to fail, such as `U8 + U8 -> U32`, compile. `F16`

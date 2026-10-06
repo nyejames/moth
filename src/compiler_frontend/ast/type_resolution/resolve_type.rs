@@ -73,6 +73,7 @@ fn parsed_type_ref_span(source_ref: &ParsedTypeRef) -> Option<SourceSpan> {
         | ParsedTypeRef::Applied { span, .. }
         | ParsedTypeRef::BuiltinBool { span, .. }
         | ParsedTypeRef::BuiltinInt { span, .. }
+        | ParsedTypeRef::BuiltinUint { span, .. }
         | ParsedTypeRef::BuiltinFloat { span, .. }
         | ParsedTypeRef::BuiltinString { span, .. }
         | ParsedTypeRef::BuiltinChar { span, .. }
@@ -354,6 +355,7 @@ pub(crate) fn resolve_diagnostic_type_to_type_id_opt(
     match data_type {
         DataType::Bool => Some(type_environment.builtins().bool),
         DataType::Int => Some(type_environment.builtins().int),
+        DataType::Uint => Some(type_environment.builtins().uint),
         DataType::Float => Some(type_environment.builtins().float),
         // Dec scales intern lazily into the active environment.
         DataType::Number(scale) => Some(type_environment.intern_number(*scale)),

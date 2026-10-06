@@ -1,0 +1,8 @@
+entry = "."
+numeric_profile = "Int64/Float32"
+
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = "uint int64float32 wide=9223372036854775908/18446744073709551615/7/9 prod=18446744073000000000/8 compare=true/true/true/true/true implicit=9007200000000000/9007200000000000/true/true/true casts=-1/11/-2 compound=18446744073709551611/13 agree=true"

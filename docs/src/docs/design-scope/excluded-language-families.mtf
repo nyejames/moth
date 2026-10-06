@@ -71,8 +71,8 @@ User-defined `HASHABLE`, custom map hashers or comparers and user-defined keys
 for builtin maps stay outside the language. Builtin map syntax stays
 scalar-keyed. More sophisticated maps belong in packages as ordinary structs.
 
-Builtin keys remain limited to `String`, `Int`, `Bool` and `Char`. The builtin
-map surface excludes `Float`, structs, choices, collections, maps, traits,
+Builtin keys remain limited to `String`, `Int`, `Uint`, `Bool`, `Char`, fixed integers and `Byte`. The builtin
+map surface excludes `Float`, `Dec`, structs, choices, collections, maps, traits,
 functions, external opaque types and generic parameters as key families. It
 also excludes hashset syntax, map equality, indexing syntax, mutable entry
 APIs, const maps, fixed-capacity maps and specialised map variants.

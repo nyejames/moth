@@ -1,0 +1,4 @@
+reject_int_arithmetic |value Uint, integer Int| -> String:
+    result = value + integer
+    return [result]
+;

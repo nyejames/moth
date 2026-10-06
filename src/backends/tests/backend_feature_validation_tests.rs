@@ -9,6 +9,7 @@ use crate::backends::backend_feature_validation::{
     validate_hir_backend_feature_support,
 };
 use crate::backends::external_package_validation::BackendTarget;
+use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
@@ -70,6 +71,7 @@ fn wasm_feature_validation_matches_explicit_numeric_cast_cases() {
         int_width: IntWidth::Bits64,
         float_precision: FloatPrecision::Bits64,
     };
+    let uint_scalar = NumericScalar::Uint;
     let int32_scalar = NumericScalar::Int;
     let float_scalar = NumericScalar::Float;
     let i32_scalar = NumericScalar::Fixed(FixedScalar::I32);
@@ -93,6 +95,81 @@ fn wasm_feature_validation_matches_explicit_numeric_cast_cases() {
         (int64_float64, u64_scalar, f64_scalar, None),
         (int32_float32, int32_scalar, float_scalar, None),
         (int64_float64, int32_scalar, float_scalar, None),
+        (int32_float32, uint_scalar, float_scalar, None),
+        (int64_float64, uint_scalar, float_scalar, None),
+        (int32_float32, uint_scalar, f32_scalar, None),
+        (int32_float64, uint_scalar, f64_scalar, None),
+        (int64_float32, uint_scalar, f32_scalar, None),
+        (int64_float64, uint_scalar, f64_scalar, None),
+        // Profile-sized Uint widens infallibly only into a complete-range holder.
+        (int32_float64, uint_scalar, u32_scalar, None),
+        (int32_float64, uint_scalar, i64_scalar, None),
+        (int32_float64, uint_scalar, u64_scalar, None),
+        (int64_float64, uint_scalar, u64_scalar, None),
+        // Uint/Int exchange stays fallible in every profile: the shared width
+        // always leaves the unsigned maximum outside the signed range.
+        (
+            int32_float32,
+            uint_scalar,
+            int32_scalar,
+            runtime_cast_rejection,
+        ),
+        (
+            int64_float64,
+            uint_scalar,
+            int32_scalar,
+            runtime_cast_rejection,
+        ),
+        (
+            int32_float32,
+            int32_scalar,
+            uint_scalar,
+            runtime_cast_rejection,
+        ),
+        (
+            int64_float64,
+            int32_scalar,
+            uint_scalar,
+            runtime_cast_rejection,
+        ),
+        (
+            int64_float64,
+            uint_scalar,
+            i64_scalar,
+            runtime_cast_rejection,
+        ),
+        (
+            int64_float64,
+            uint_scalar,
+            u32_scalar,
+            runtime_cast_rejection,
+        ),
+        (
+            int32_float32,
+            uint_scalar,
+            i32_scalar,
+            runtime_cast_rejection,
+        ),
+        // Float sources truncate before the unsigned range check and same-type
+        // casts stay invalid.
+        (
+            int32_float32,
+            float_scalar,
+            uint_scalar,
+            runtime_cast_rejection,
+        ),
+        (
+            int32_float32,
+            f32_scalar,
+            uint_scalar,
+            runtime_cast_rejection,
+        ),
+        (
+            int32_float32,
+            uint_scalar,
+            uint_scalar,
+            runtime_cast_rejection,
+        ),
         (int32_float32, f32_scalar, f64_scalar, None),
         // Nominal Float casts are infallible at equal precision.
         (int32_float32, f32_scalar, float_scalar, None),
@@ -387,6 +464,7 @@ fn wasm_feature_validation_allows_numeric_text_casts_and_keeps_other_text_casts_
     let type_environment = TypeEnvironment::new();
     for domain in [
         NumericScalar::Int,
+        NumericScalar::Uint,
         NumericScalar::Fixed(FixedScalar::I8),
         NumericScalar::Fixed(FixedScalar::U64),
         NumericScalar::Fixed(FixedScalar::F16),
@@ -542,6 +620,38 @@ fn wasm_feature_validation_rejects_statement_casts() {
         "Wasm should reject statement-shaped casts, including Int-to-Float",
     );
 
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::RuntimeCasts,
+    );
+    let statement = HirStatement {
+        id: HirNodeId(14),
+        kind: HirStatementKind::CastOp {
+            policy: BuiltinCastPolicyId::NumericConversion {
+                source: NumericScalar::Uint,
+                target: NumericScalar::Float,
+            },
+            source: bounded_numeric_scalar_expression(15, NumericScalar::Uint),
+            result: None,
+        },
+        span: None,
+    };
+    let module = hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![statement],
+            HirTerminator::Return(unit_expression(0)),
+        )],
+    );
+    let diagnostic = wasm_feature_validation_diagnostic(
+        &module,
+        &type_environment,
+        &mut string_table,
+        "Wasm should reject statement-shaped casts, including infallible Uint-to-Float",
+    );
     assert_unsupported_feature(
         &diagnostic,
         &mut string_table,
@@ -729,30 +839,84 @@ fn wasm_feature_validation_rejects_reachable_return_error_validate_float() {
 fn wasm_feature_validation_allows_reachable_trap_integer_numeric_op() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
+    for domain in [NumericScalar::Int, NumericScalar::Uint] {
+        let module = hir_module(
+            FunctionId(0),
+            vec![function(FunctionId(0), BlockId(0))],
+            vec![block(
+                BlockId(0),
+                vec![numeric_op_statement(
+                    10,
+                    HirNumericOp {
+                        operator: NumericOperator::Add,
+                        domain,
+                    },
+                    None,
+                )],
+                HirTerminator::Return(unit_expression(0)),
+            )],
+        );
+        let reachability = test_reachability(&module);
+        let result = validate_hir_backend_feature_support(
+            BackendFeatureValidationInput {
+                hir: &module,
+                reachability: &reachability,
+                target: BackendTarget::Wasm,
+                type_environment: Some(&type_environment),
+                numeric_profile: NumericProfile::STANDARD,
+            },
+            &mut string_table,
+        );
+
+        assert!(
+            result.is_ok(),
+            "Wasm should allow reachable trap-mode {domain:?} numeric operations"
+        );
+    }
+}
+
+#[test]
+fn wasm_recoverable_gate_fires_for_proven_safe_uint_operation() {
+    // `1 + 2` in `ReturnError` mode is provably safe (the companion analyser
+    // test pins `integer_operation_is_safe`), yet the gate must still reject it with
+    // `RecoverableNumericFailure`. A range proof discharges runtime checks; it never
+    // authorises recoverable delivery, which Wasm does not implement.
+
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
     let module = hir_module(
         FunctionId(0),
         vec![function(FunctionId(0), BlockId(0))],
         vec![block(
             BlockId(0),
-            vec![numeric_op_statement(10, int_add_op(), None)],
+            vec![numeric_op_statement_with_failure(
+                10,
+                HirNumericOp {
+                    operator: NumericOperator::Add,
+                    domain: NumericScalar::Uint,
+                },
+                None,
+                NumericFailureMode::ReturnError,
+            )],
             HirTerminator::Return(unit_expression(0)),
         )],
     );
-    let reachability = test_reachability(&module);
-    let result = validate_hir_backend_feature_support(
-        BackendFeatureValidationInput {
-            hir: &module,
-            reachability: &reachability,
-            target: BackendTarget::Wasm,
-            type_environment: Some(&type_environment),
-            numeric_profile: NumericProfile::STANDARD,
-        },
-        &mut string_table,
+    let proofs = analyse_numeric_proofs(&module, &type_environment, NumericProfile::STANDARD);
+    assert!(
+        proofs.integer_operation_is_safe(HirNodeId(10), NumericProfile::STANDARD),
+        "the `1 + 2` fixture must be provably safe so this test pins gate-over-proof priority"
     );
 
-    assert!(
-        result.is_ok(),
-        "Wasm should allow reachable trap-mode integer numeric operations"
+    let diagnostic = wasm_feature_validation_diagnostic(
+        &module,
+        &type_environment,
+        &mut string_table,
+        "Wasm validation must reject recoverable delivery even for proven-safe operations",
+    );
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::RecoverableNumericFailure,
     );
 }
 
@@ -762,6 +926,7 @@ fn wasm_feature_validation_rejects_reachable_return_error_numeric_ops() {
     let type_environment = TypeEnvironment::new();
     let domains = [
         NumericScalar::Int,
+        NumericScalar::Uint,
         NumericScalar::Float,
         NumericScalar::Fixed(FixedScalar::F32),
         NumericScalar::Fixed(FixedScalar::F64),
@@ -2493,6 +2658,7 @@ fn numeric_op_statement_with_failure(
 fn bounded_numeric_scalar_expression(id: u32, domain: NumericScalar) -> HirExpression {
     let (kind, ty) = match domain {
         NumericScalar::Int => (HirExpressionKind::Int(1), builtin_type_ids::INT),
+        NumericScalar::Uint => (HirExpressionKind::Uint(1), builtin_type_ids::UINT),
         NumericScalar::Float => (HirExpressionKind::Float(1.5), builtin_type_ids::FLOAT),
         NumericScalar::Fixed(scalar) => (
             HirExpressionKind::FixedScalar(fixed_scalar_value(scalar)),
@@ -2537,6 +2703,7 @@ fn numeric_cast_expression(
 fn bounded_numeric_scalar_type_id(domain: NumericScalar) -> TypeId {
     match domain {
         NumericScalar::Int => builtin_type_ids::INT,
+        NumericScalar::Uint => builtin_type_ids::UINT,
         NumericScalar::Float => builtin_type_ids::FLOAT,
         NumericScalar::Fixed(scalar) => builtin_type_ids::fixed_scalar(scalar),
         NumericScalar::Number(_) => unreachable!(

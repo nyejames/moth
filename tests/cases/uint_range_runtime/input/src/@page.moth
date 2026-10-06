@@ -1,0 +1,130 @@
+-- Task 5A (Int32 profile): typed Uint ranges reuse the unsigned
+-- candidate/termination shape. Ascending/descending, implicit/explicit steps,
+-- empty/equal/inclusive bounds, a Uint value binding with an Int iteration
+-- index, break/continue, and the zero and Uint32-max terminal endpoints.
+
+asc_lo Uint = 0
+asc_hi Uint = 5
+asc_total ~Uint = 0
+asc_count ~= 0
+asc_last_index ~= 0
+loop asc_lo to & asc_hi |value, index|:
+    asc_total = asc_total + value
+    asc_count = asc_count + 1
+    asc_last_index = index
+;
+
+step_two Uint = 2
+stepped_total ~Uint = 0
+stepped_count ~= 0
+loop asc_lo to & asc_hi by step_two |value|:
+    stepped_total = stepped_total + value
+    stepped_count = stepped_count + 1
+;
+
+desc_total ~Uint = 0
+desc_count ~= 0
+desc_last ~Uint = 99
+desc_first_val ~Uint = 99
+loop asc_hi to & asc_lo |item, idx|:
+    desc_total = desc_total + item
+    desc_count = desc_count + 1
+    desc_last = copy item
+    if desc_count is 0 + 1:
+        desc_first_val = copy item
+    ;
+;
+desc_step_total ~Uint = 0
+desc_step_count ~= 0
+loop asc_hi to & asc_lo by step_two |value|:
+    desc_step_total = desc_step_total + value
+    desc_step_count = desc_step_count + 1
+;
+
+empty_count ~= 0
+loop asc_hi to asc_hi |value|:
+    empty_count = empty_count + 1
+;
+equal_inclusive_count ~= 0
+loop asc_hi to & asc_hi |value|:
+    equal_inclusive_count = equal_inclusive_count + 1
+;
+
+zero_terminal ~Uint = 99
+zero_count ~= 0
+loop step_two to & asc_lo by step_two |value|:
+    zero_terminal = value
+    zero_count = zero_count + 1
+;
+
+max_lo Uint = 4294967293
+max_hi Uint = 4294967295
+max_last ~Uint = 0
+max_count ~= 0
+loop max_lo to & max_hi |value|:
+    max_last = value
+    max_count = max_count + 1
+;
+
+mixed_lo Uint = 0
+mixed_hi Int = 3
+mixed_step Float = 1.0
+mixed_total ~Float = 0.0
+mixed_count ~= 0
+loop mixed_lo to & mixed_hi by mixed_step |value|:
+    mixed_total = mixed_total + value
+    mixed_count = mixed_count + 1
+;
+
+float_end Float = 3.0
+bound_step Uint = 1
+bound_total ~Float = 0.0
+bound_count ~= 0
+loop mixed_lo to & float_end by bound_step |value|:
+    bound_total = bound_total + value
+    bound_count = bound_count + 1
+;
+
+broken_count ~= 0
+loop asc_lo to & asc_hi |value|:
+    broken_count = broken_count + 1
+    if value is 2:
+        break
+    ;
+    broken_count = broken_count + 10
+;
+continued_total ~Uint = 0
+loop asc_lo to & asc_hi |value|:
+    if value is 2:
+        continue
+    ;
+    continued_total = continued_total + value
+;
+
+render |asc_total Uint, asc_count Int, asc_last_index Int, stepped_total Uint, stepped_count Int, desc_total Uint, desc_count Int, desc_last Uint, desc_first_val Uint, desc_step_total Uint, desc_step_count Int, empty_count Int, equal_inclusive_count Int, zero_terminal Uint, zero_count Int, max_last Uint, max_count Int, mixed_total Float, mixed_count Int, bound_total Float, bound_count Int, broken_count Int, continued_total Uint| -> String:
+    assert(asc_count is 6)
+    assert(asc_last_index is 5)
+    assert(stepped_total is 6)
+    assert(stepped_count is 3)
+    assert(desc_total is 15)
+    assert(desc_count is 6)
+    assert(desc_first_val is 5)
+    assert(desc_last is 0)
+    assert(desc_step_total is 9)
+    assert(desc_step_count is 3)
+    assert(empty_count is 0)
+    assert(equal_inclusive_count is 1)
+    assert(zero_terminal is 0)
+    assert(zero_count is 2)
+    assert(max_last is 4294967295)
+    assert(max_count is 3)
+    assert(mixed_total is 6.0)
+    assert(mixed_count is 4)
+    assert(bound_total is 6.0)
+    assert(bound_count is 4)
+    assert(broken_count is 23)
+    assert(continued_total is 13)
+    return [:uint_range_runtime asc=[asc_total]/[asc_count]/[asc_last_index] step=[stepped_total]/[stepped_count] desc=[desc_total]/[desc_count]/[desc_first_val]/[desc_last] dstep=[desc_step_total]/[desc_step_count] empty=[empty_count]/[equal_inclusive_count] zero=[zero_terminal]/[zero_count] max=[max_last]/[max_count] mixed=[mixed_total]/[mixed_count]/[bound_total]/[bound_count] flow=[broken_count]/[continued_total]]
+;
+
+[:[render(asc_total, asc_count, asc_last_index, stepped_total, stepped_count, desc_total, desc_count, desc_last, desc_first_val, desc_step_total, desc_step_count, empty_count, equal_inclusive_count, zero_terminal, zero_count, max_last, max_count, mixed_total, mixed_count, bound_total, bound_count, broken_count, continued_total)]]

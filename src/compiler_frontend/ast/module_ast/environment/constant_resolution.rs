@@ -18,7 +18,9 @@
 use super::config_resolution::resolve_config_declaration;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::const_eval::{ConstantFoldOutcome, constant_fold};
+use crate::compiler_frontend::ast::const_eval::{
+    ConstantFoldError, ConstantFoldOutcome, constant_fold,
+};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::cursor::AstCursor;
@@ -405,15 +407,13 @@ impl ConstantResolutionSession {
             .map(|kind| kind.is_compile_time_value())
             .map_err(ExpressionParseError::from)?;
         if !initializer_is_compile_time_constant {
-            if let ExpressionKind::Runtime(rpn) = &declaration.value.kind
-                && let Ok(ConstantFoldOutcome::TextUnavailable { diagnostic, .. }) = constant_fold(
+            if let ExpressionKind::Runtime(rpn) = &declaration.value.kind {
+                non_constant_initializer_fold_refusal(constant_fold(
                     rpn.items.clone(),
                     string_table,
                     self.module_view.numeric_profile,
                     Some(&scope_context),
-                )
-            {
-                return Err(ExpressionParseError::from(diagnostic));
+                ))?;
             }
 
             return Err(CompilerDiagnostic::compile_time_evaluation_error(
@@ -497,3 +497,27 @@ impl ConstantResolutionSession {
         context
     }
 }
+
+/// Map the fold of a runtime constant initializer onto the header's error lanes.
+///
+/// A text-unavailable refusal keeps its precise diagnostic and a broken compiler invariant stays
+/// on the infrastructure lane. `Ok(())` leaves the caller to report the ordinary
+/// `ConstantInitializerNotFoldable` refusal, which also covers source fold diagnostics.
+fn non_constant_initializer_fold_refusal(
+    fold: Result<ConstantFoldOutcome, ConstantFoldError>,
+) -> Result<(), ExpressionParseError> {
+    match fold {
+        Ok(ConstantFoldOutcome::TextUnavailable { diagnostic, .. }) => {
+            Err(ExpressionParseError::from(diagnostic))
+        }
+        // A broken compiler invariant must not surface as a source refusal.
+        Err(ConstantFoldError::Infrastructure(error)) => {
+            Err(ExpressionParseError::Infrastructure(error))
+        }
+        Ok(_) | Err(ConstantFoldError::Diagnostic(_)) => Ok(()),
+    }
+}
+
+#[cfg(test)]
+#[path = "constant_resolution_tests.rs"]
+mod constant_resolution_tests;

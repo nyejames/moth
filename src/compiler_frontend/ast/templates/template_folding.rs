@@ -9,6 +9,7 @@
 
 use crate::compiler_frontend::ast::const_eval::{ConstantFoldOutcome, constant_fold};
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
+use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, ExpressionRpnItem,
@@ -438,8 +439,12 @@ fn fold_runtime_expression_with_bindings<'a>(
                 }
             }
             ExpressionRpnItem::Operator { .. } => item.clone(),
-            // Resolution removes pending literals before this stage.
-            ExpressionRpnItem::PendingNumericLiteral { .. } => item.clone(),
+            // Pending syntax never survives evaluation; its presence here is a broken
+            // compiler invariant, not a foldable position.
+            ExpressionRpnItem::PendingNumericLiteral { .. }
+            | ExpressionRpnItem::PendingGroup { .. } => {
+                return Err(pending_expression_item_bug("template folding").into());
+            }
         };
         substituted.push(new_item);
     }

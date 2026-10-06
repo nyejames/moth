@@ -8,6 +8,7 @@
 use super::store::{ConstTemplateValue, ConstValueStore, ConstValueStoreError};
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
+use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
@@ -263,8 +264,20 @@ fn insert_from_expression(
     match &expression.kind {
         ExpressionKind::Runtime(rpn) => {
             for item in &rpn.items {
-                if let ExpressionRpnItem::Operand(operand) = item {
-                    insert_from_expression(store, operand, type_environment, template_builder)?;
+                match item {
+                    ExpressionRpnItem::Operand(operand) => {
+                        insert_from_expression(store, operand, type_environment, template_builder)?;
+                    }
+                    ExpressionRpnItem::Operator { .. } => {}
+                    // Pending syntax never survives evaluation; this fallible store walk reports
+                    // the broken invariant instead of silently skipping the malformed operand.
+                    ExpressionRpnItem::PendingNumericLiteral { .. }
+                    | ExpressionRpnItem::PendingGroup { .. } => {
+                        return Err(pending_expression_item_bug(
+                            "body-local const-record insertion",
+                        )
+                        .into());
+                    }
                 }
             }
             Ok(())
@@ -416,6 +429,7 @@ fn insert_from_expression(
         ExpressionKind::NoValue
         | ExpressionKind::OptionNone
         | ExpressionKind::Int(_)
+        | ExpressionKind::Uint(_)
         | ExpressionKind::Number(_)
         | ExpressionKind::Float(_)
         | ExpressionKind::FixedScalar(_)

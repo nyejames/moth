@@ -436,3 +436,108 @@ fn literal_kind_initialises_matches_direct_receiving_boundaries() {
         }
     }
 }
+
+#[test]
+fn materialize_normalized_uint_accepts_both_unsigned_maxima() {
+    assert_eq!(
+        materialize_normalized_uint("4294967295", false, IntWidth::Bits32).unwrap(),
+        u32::MAX as u64
+    );
+    assert_eq!(
+        materialize_normalized_uint("18446744073709551615", false, IntWidth::Bits64).unwrap(),
+        u64::MAX
+    );
+    // Zero materialises without a sign.
+    assert_eq!(
+        materialize_normalized_uint("0", false, IntWidth::Bits32).unwrap(),
+        0
+    );
+}
+
+#[test]
+fn materialize_normalized_uint_rejects_maxima_plus_one_as_text() {
+    assert_eq!(
+        materialize_normalized_uint("4294967296", false, IntWidth::Bits32).unwrap_err(),
+        NumberLiteralErrorReason::OutsideUintRange(IntWidth::Bits32)
+    );
+    assert_eq!(
+        materialize_normalized_uint("18446744073709551616", false, IntWidth::Bits64).unwrap_err(),
+        NumberLiteralErrorReason::OutsideUintRange(IntWidth::Bits64)
+    );
+    // A 32-bit maximum still fits under the 64-bit width.
+    assert_eq!(
+        materialize_normalized_uint("4294967295", false, IntWidth::Bits64).unwrap(),
+        u32::MAX as u64
+    );
+}
+
+#[test]
+fn materialize_normalized_uint_rejects_negative_spellings_including_minus_zero() {
+    for normalized in ["1", "0", "00", "4294967295"] {
+        assert_eq!(
+            materialize_normalized_uint(normalized, true, IntWidth::Bits32).unwrap_err(),
+            NumberLiteralErrorReason::NegativeUintLiteral(IntWidth::Bits32),
+            "{normalized}"
+        );
+    }
+    assert_eq!(
+        materialize_normalized_uint("0", true, IntWidth::Bits64).unwrap_err(),
+        NumberLiteralErrorReason::NegativeUintLiteral(IntWidth::Bits64)
+    );
+}
+
+#[test]
+fn parse_numeric_text_to_uint_accepts_boundaries_and_separators() {
+    assert_eq!(
+        parse_numeric_text_to_uint("4_294_967_295", IntWidth::Bits32).unwrap(),
+        u32::MAX as u64
+    );
+    assert_eq!(
+        parse_numeric_text_to_uint("18_446_744_073_709_551_615", IntWidth::Bits64).unwrap(),
+        u64::MAX
+    );
+    assert_eq!(
+        parse_numeric_text_to_uint("9_223_372_036_854_775_808", IntWidth::Bits64).unwrap(),
+        i64::MAX as u64 + 1,
+        "values above i64::MAX stay exact instead of narrowing through a signed type"
+    );
+}
+
+#[test]
+fn parse_numeric_text_to_uint_rejects_out_of_range_values() {
+    assert_eq!(
+        parse_numeric_text_to_uint("4294967296", IntWidth::Bits32).unwrap_err(),
+        NumberLiteralErrorReason::OutsideUintRange(IntWidth::Bits32)
+    );
+    assert_eq!(
+        parse_numeric_text_to_uint("18446744073709551616", IntWidth::Bits64).unwrap_err(),
+        NumberLiteralErrorReason::OutsideUintRange(IntWidth::Bits64)
+    );
+    // 2^31 is accepted under Bits64.
+    assert_eq!(
+        parse_numeric_text_to_uint("2147483648", IntWidth::Bits64).unwrap(),
+        2_147_483_648_u64
+    );
+}
+
+#[test]
+fn parse_numeric_text_to_uint_rejects_negative_and_non_whole_text() {
+    for source in ["-1", "-0", "-4294967295"] {
+        assert_eq!(
+            parse_numeric_text_to_uint(source, IntWidth::Bits32).unwrap_err(),
+            NumberLiteralErrorReason::NegativeUintLiteral(IntWidth::Bits32),
+            "{source}"
+        );
+    }
+    for source in ["1.0", "1e3", "+1", " 1", "1 ", ""] {
+        let reason = parse_numeric_text_to_uint(source, IntWidth::Bits32).expect_err(source);
+        assert!(
+            !matches!(
+                reason,
+                NumberLiteralErrorReason::OutsideUintRange(_)
+                    | NumberLiteralErrorReason::NegativeUintLiteral(_)
+            ),
+            "{source} should fail as invalid grammar, not as a Uint range error"
+        );
+    }
+}

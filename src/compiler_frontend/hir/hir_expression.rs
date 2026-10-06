@@ -156,6 +156,11 @@ impl<'a> HirBuilder<'a> {
                 })
             }
 
+            ExpressionKind::Uint(value) => self.lower_literal_expression(
+                &expr.span,
+                expr.type_id,
+                HirExpressionKind::Uint(*value),
+            ),
             ExpressionKind::Int(value) => self.lower_literal_expression(
                 &expr.span,
                 expr.type_id,
@@ -560,9 +565,12 @@ impl<'a> HirBuilder<'a> {
                 ),
 
             // Lower the inner value and override the HIR type with the declared
-            // coercion target. Numeric coercions are resolved by the code generation
-            // backend based on the type annotation. Option coercions materialize
-            // `some(value)` here so backends see the real runtime carrier.
+            // coercion target. Option coercions materialize `some(value)` here so
+            // backends see the real runtime carrier. Implicit numeric promotions
+            // (`Int`/`Uint` to `Float`) materialize as an explicit infallible
+            // `Cast` instead: backends select the value conversion from the cast
+            // policy, so a bare type override would leave the source carrier
+            // (notably a BigInt) under the target type.
             ExpressionKind::Coerced { value, .. } => {
                 let mut prelude = Vec::new();
                 let mut lowered_value =
@@ -592,10 +600,25 @@ impl<'a> HirBuilder<'a> {
                     });
                 }
 
-                lowered_value.ty = coerced_ty;
+                let source_scalar =
+                    NumericScalar::from_type_id(lowered_value.ty, &self.type_environment);
+                let target_scalar = NumericScalar::from_type_id(coerced_ty, &self.type_environment);
+                if let (Some(source), Some(target)) = (source_scalar, target_scalar)
+                    && source != target
+                {
+                    let converted =
+                        self.convert_numeric_operand_to_domain(lowered_value, target, &expr.span)?;
+                    return Ok(LoweredExpression {
+                        prelude,
+                        value: converted,
+                    });
+                }
+
+                let mut converted_value = lowered_value;
+                converted_value.ty = coerced_ty;
                 Ok(LoweredExpression {
                     prelude,
-                    value: lowered_value,
+                    value: converted_value,
                 })
             }
 
@@ -790,8 +813,18 @@ impl<'a> HirBuilder<'a> {
                         ExpressionRpnItem::Operand(expression) => {
                             self.expression_needs_current_block_lowering(expression)
                         }
-                        ExpressionRpnItem::Operator { .. }
-                        | ExpressionRpnItem::PendingNumericLiteral { .. } => false,
+                        ExpressionRpnItem::Operator { .. } => false,
+                        // Pending syntax never survives evaluation; flag it like the completed
+                        // lowering tree builder does so a debug build fails at the first invalid
+                        // boundary instead of silently treating it as lowering-inert.
+                        ExpressionRpnItem::PendingNumericLiteral { .. }
+                        | ExpressionRpnItem::PendingGroup { .. } => {
+                            debug_assert!(
+                                false,
+                                "pending expression syntax reached HIR lowering query"
+                            );
+                            false
+                        }
                     })
             }
             ExpressionKind::Template(_) => true,
@@ -799,7 +832,8 @@ impl<'a> HirBuilder<'a> {
             | ExpressionKind::RuntimeSlotApplicationHandoff(_) => true,
             ExpressionKind::ValueBlock { .. } => true,
 
-            ExpressionKind::Int(_)
+            ExpressionKind::Uint(_)
+            | ExpressionKind::Int(_)
             | ExpressionKind::Float(_)
             | ExpressionKind::FixedScalar(_)
             | ExpressionKind::Number(_)

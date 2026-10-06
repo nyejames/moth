@@ -1,0 +1,4 @@
+reject_decimal_leaf_receiver |value Uint| -> String:
+    result Uint = value + 1.5
+    return [result]
+;

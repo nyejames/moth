@@ -64,6 +64,35 @@ pub(crate) fn lower_expression(
                 prefer_move: false,
             })
         }
+        HirExpressionKind::Uint(value) => {
+            let abi = lower_type_to_abi(context.module_context, expression.ty);
+            let dst = context.alloc_temp(abi);
+            match abi {
+                WasmAbiType::I32 => {
+                    let value = u32::try_from(*value)
+                        .map(|value| value as i32)
+                        .map_err(|_| {
+                            lir_transformation_error(format!(
+                                "Wasm lowering received Uint value {value} outside the selected I32 profile"
+                            ))
+                        })?;
+                    statements.push(WasmLirStmt::ConstI32 { dst, value });
+                }
+                WasmAbiType::I64 => statements.push(WasmLirStmt::ConstI64 {
+                    dst,
+                    value: *value as i64,
+                }),
+                other => {
+                    return Err(lir_transformation_error(format!(
+                        "Wasm lowering expected an integer carrier for Uint, found {other:?}"
+                    )));
+                }
+            }
+            Ok(ExprLoweringOutput {
+                value: dst,
+                prefer_move: false,
+            })
+        }
         HirExpressionKind::FixedScalar(value) => {
             let scalar = value.scalar();
             let abi = lower_type_to_abi(context.module_context, expression.ty);
@@ -881,6 +910,10 @@ fn comparison_type(
 ) -> WasmScalarComparisonType {
     match scalar {
         NumericScalar::Int => WasmScalarComparisonType::SignedInteger(match profile.int_width {
+            IntWidth::Bits32 => 32,
+            IntWidth::Bits64 => 64,
+        }),
+        NumericScalar::Uint => WasmScalarComparisonType::UnsignedInteger(match profile.int_width {
             IntWidth::Bits32 => 32,
             IntWidth::Bits64 => 64,
         }),

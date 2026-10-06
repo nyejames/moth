@@ -193,6 +193,7 @@ fn parsed_type_to_signature_type(
 ) -> Result<ExternalSignatureType, CompilerError> {
     match type_name {
         "Int" => Ok(ExternalSignatureType::NativeInt),
+        "Uint" => Ok(ExternalSignatureType::NativeUint),
         "Float" => Ok(ExternalSignatureType::NativeFloat),
         "Bool" => Ok(ExternalSignatureType::Abi(ExternalAbiType::Bool)),
         "String" => Ok(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
@@ -222,6 +223,11 @@ mod tests {
             parsed_type_to_signature_type("Int", &opaque_types)
                 .expect("Int annotation should resolve"),
             ExternalSignatureType::NativeInt,
+        );
+        assert_eq!(
+            parsed_type_to_signature_type("Uint", &opaque_types)
+                .expect("Uint annotation should resolve"),
+            ExternalSignatureType::NativeUint,
         );
         assert_eq!(
             parsed_type_to_signature_type("Float", &opaque_types)

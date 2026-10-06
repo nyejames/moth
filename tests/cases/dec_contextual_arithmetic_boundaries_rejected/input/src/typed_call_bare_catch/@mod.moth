@@ -1,0 +1,7 @@
+read_int || -> Int, Error!:
+    return 7
+;
+reject_typed_call_bare_catch || -> String:
+    result Dec4 = read_int() catch then 0
+    return [result]
+;

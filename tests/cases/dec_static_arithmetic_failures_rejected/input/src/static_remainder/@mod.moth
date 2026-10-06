@@ -1,0 +1,3 @@
+caught_remainder Dec1 = 1 % 0 catch:
+    then 0.0
+;

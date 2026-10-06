@@ -183,6 +183,14 @@ impl<'hir> JsEmitter<'hir> {
             emitter.emit_line(
                 "if (a === -scaleFactor) return { tag: \"ok\", value: (exponent & 1n) === 0n ? scaleFactor : -scaleFactor };",
             );
+            emitter.emit_line("// Integral bases divide out the scale factor: (a / F) ** e * F is exact.");
+            emitter.emit_line("if (scaleFactor > 1n && a % scaleFactor === 0n) {");
+            emitter.with_indent(|em| {
+                em.emit_line(
+                    "return { tag: \"ok\", value: (a / scaleFactor) ** exponent * scaleFactor };",
+                );
+            });
+            emitter.emit_line("}");
             emitter.emit_line("const numerator = a ** exponent;");
             emitter.emit_line("const denominator = scaleFactor ** (exponent - 1n);");
             emitter.emit_line(

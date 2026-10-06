@@ -1,0 +1,53 @@
+-- Uint values flow through the ordinary equality paths: direct scalar
+-- comparison, choice payloads holding Uint, optional Uint wrapping and
+-- unwrapping, nested choice payloads, struct field extraction and
+-- collection element extraction.
+Holder ::
+    Single | value Uint |,
+    Pair | first Uint, second Uint |,
+;
+
+Inner ::
+    Count | value Uint |,
+;
+
+Outer ::
+    Empty,
+    Wrapped | inner Inner |,
+;
+
+Point = |
+    x Uint,
+    y Uint,
+|
+origin Point = Point(3, 4)
+
+chosen Holder = Holder::Single(7)
+same = chosen is Holder::Single(7)
+different = chosen is Holder::Single(8)
+pair_same = Holder::Pair(1, 2) is Holder::Pair(1, 2)
+pair_different = Holder::Pair(1, 2) is Holder::Pair(1, 3)
+variant_mismatch = Holder::Single(7) is Holder::Pair(7, 7)
+
+maybe_present Uint? = 41
+maybe_missing Uint? = none
+forty_one Uint = 41
+forty_two Uint = 42
+optional_same = maybe_present is forty_one
+optional_different = maybe_present is forty_two
+optional_missing = maybe_missing is none
+optional_present_vs_missing = maybe_present is none
+
+nested_same = Outer::Wrapped(Inner::Count(9)) is Outer::Wrapped(Inner::Count(9))
+nested_different = Outer::Wrapped(Inner::Count(9)) is Outer::Wrapped(Inner::Count(10))
+
+field_same = origin.x is 3
+field_different = origin.y is 5
+
+items {Uint} = {10, 20, 30}
+first Uint = items.get(0) catch:
+    then 0
+;
+element_same = first is 10
+
+[:uint_choice_payload_equality same=[same] different=[different] pair_same=[pair_same] pair_different=[pair_different] variant_mismatch=[variant_mismatch] optional_same=[optional_same] optional_different=[optional_different] optional_missing=[optional_missing] optional_present_vs_missing=[optional_present_vs_missing] nested_same=[nested_same] nested_different=[nested_different] field_same=[field_same] field_different=[field_different] element_same=[element_same]]

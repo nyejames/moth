@@ -523,6 +523,9 @@ fn primitive_value_from_expression(
                 .map(PrimitiveBuildValue::String))
         }
         ExpressionKind::Int(value) => Ok(Some(PrimitiveBuildValue::Int(*value))),
+        // `Uint` is not a build-input primitive, so a Uint default never becomes a
+        // build value; the unsupported-contract path rejects `#Config of Uint` first.
+        ExpressionKind::Uint(_) => Ok(None),
         ExpressionKind::Float(value) => Ok(PrimitiveBuildValue::float(*value).ok()),
         ExpressionKind::Bool(value) => Ok(Some(PrimitiveBuildValue::Bool(*value))),
         ExpressionKind::Char(value) => Ok(Some(PrimitiveBuildValue::Char(*value))),

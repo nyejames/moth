@@ -14,6 +14,10 @@ fn int_literal(value: i64) -> Expression {
     Expression::int(value, None, ValueMode::ImmutableOwned)
 }
 
+fn uint_literal(value: u64) -> Expression {
+    Expression::uint(value, None, ValueMode::ImmutableOwned)
+}
+
 fn float_literal(value: f64) -> Expression {
     Expression::float(value, None, ValueMode::ImmutableOwned)
 }
@@ -137,6 +141,61 @@ fn int_to_float_coercion_rounds_at_the_profile_precision() {
     assert!(
         matches!(float64_result.kind, ExpressionKind::Float(v) if v == 16777217.0),
         "Int -> Float64 must keep 16777217 exactly"
+    );
+}
+
+#[test]
+fn uint_to_float_coercion_rounds_directly_at_the_profile_precision() {
+    let env = TypeEnvironment::new();
+
+    let small = coerce_expression_to_declared_type(
+        uint_literal(3),
+        env.builtins().float,
+        &env,
+        NumericProfile::STANDARD.float_precision,
+    );
+    assert_eq!(small.type_id, builtin_type_ids::FLOAT);
+    assert!(
+        matches!(small.kind, ExpressionKind::Float(v) if v == 3.0),
+        "small Uint values convert exactly"
+    );
+
+    // `9007199791611905` must round directly to Float32 bits `0x5a000001`
+    // (exact integer value `9007200328482816`), never through an f64 intermediate
+    // which would double-round to `0x5a000000`.
+    let direct = coerce_expression_to_declared_type(
+        uint_literal(9_007_199_791_611_905),
+        env.builtins().float,
+        &env,
+        FloatPrecision::Bits32,
+    );
+    assert_eq!(direct.type_id, builtin_type_ids::FLOAT);
+    let ExpressionKind::Float(bits) = direct.kind else {
+        panic!("Uint -> Float32 must produce a Float literal");
+    };
+    assert_eq!(
+        (bits as f32).to_bits(),
+        0x5a00_0001_u32,
+        "Uint64 9007199791611905 must round directly to Float32 bits 0x5a000001"
+    );
+}
+
+#[test]
+fn uint_to_float_coercion_rejects_transitive_int_compatibility() {
+    let env = TypeEnvironment::new();
+
+    // A Uint expression into an Int declaration stays incompatible even though
+    // both convert to Float: there is no search through Float.
+    let into_int = coerce_expression_to_declared_type(
+        uint_literal(3),
+        env.builtins().int,
+        &env,
+        NumericProfile::STANDARD.float_precision,
+    );
+    assert_eq!(into_int.type_id, builtin_type_ids::UINT);
+    assert!(
+        matches!(into_int.kind, ExpressionKind::Uint(3)),
+        "Uint into Int must stay unconverted"
     );
 }
 

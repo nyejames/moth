@@ -158,9 +158,9 @@ permit separate Int widths or Float precisions. Source dependencies compile for
 the selected profile. A precompiled dependency must match that profile or be
 rebuilt/rejected, never adapted silently at an import. This matters even when
 its exported types are explicit-width because private arithmetic and folded
-constants may use Int/Float.
+constants may use Int/Uint/Float.
 
-Preserve the distinct canonical identities of Int/Float, fixed I*/U*/F* types,
+Preserve the distinct canonical identities of Int/Uint/Float, fixed I*/U*/F* types,
 Byte and Dec scales through facade projection, generated requests and reuse.
 Include the profile in semantic artefact compatibility and the existing ABI,
 layout and physical-variant inputs. Error.code uses the delivered U32 contract,
@@ -398,8 +398,8 @@ Review gate: declaration, resolution and compilation must have separate owners.
 - source and precompiled descriptors share one consumer boundary
 - package output identity does not depend on consumer alias
 - source packages share all four supported numeric-profile combinations with their consumer
-- an incompatible precompiled profile is rejected even when only private implementation arithmetic uses Int/Float
-- exported fixed widths, Byte, Dec scale and U32 Error.code preserve canonical identity beneath aliases
+- an incompatible precompiled profile is rejected even when only private implementation arithmetic uses Int/Uint/Float
+- exported fixed widths, Byte, Dec scale, Uint and U32 Error.code preserve canonical identity beneath aliases
 - foreign WIT projections remain distinct from Moth-native package interfaces
 
 ## Stop conditions

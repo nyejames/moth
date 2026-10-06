@@ -204,6 +204,10 @@ fn parse_type_atom(
             token_stream.advance();
             Ok(ParsedTypeRef::BuiltinInt { span })
         }
+        TokenTag::DATATYPE_UINT => {
+            token_stream.advance();
+            Ok(ParsedTypeRef::BuiltinUint { span })
+        }
 
         TokenTag::DATATYPE_FLOAT => {
             token_stream.advance();

@@ -80,6 +80,12 @@ impl JsNumericCarrier {
         Self::integer_literal(carrier, i128::from(value))
     }
 
+    /// Formats a profile-selected Moth `Uint` literal for JavaScript.
+    pub(crate) fn uint_literal(value: u64, profile: NumericProfile) -> Option<String> {
+        let carrier = Self::for_scalar(NumericScalar::Uint, profile)?;
+        Self::integer_literal(carrier, i128::from(value))
+    }
+
     /// Formats an already-materialised fixed scalar without changing its exact value.
     ///
     /// WHAT: integer carriers choose decimal Number or BigInt spelling, binary-float values retain

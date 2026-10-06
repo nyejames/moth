@@ -1,0 +1,19 @@
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+    "uint_range_source_order count=2/index=1/total=4",
+]
+rendered_output_contains_exactly_once = [
+    "uint-range source-start",
+    "uint-range source-end",
+    "uint-range source-step",
+]
+rendered_output_contains_in_order = [
+    "uint-range source-start",
+    "uint-range source-end",
+    "uint-range source-step",
+    "uint_range_source_order count=2/index=1/total=4",
+]

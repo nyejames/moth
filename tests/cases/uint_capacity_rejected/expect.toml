@@ -1,0 +1,10 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0016"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0016"
+reason = "invalid_collection_type.capacity_not_int"

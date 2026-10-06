@@ -34,6 +34,32 @@ fn declaration_compatibility_int_vs_float_is_compatible() {
 }
 
 #[test]
+fn declaration_compatibility_uint_vs_float_is_compatible() {
+    let env = TypeEnvironment::new();
+    assert!(is_declaration_compatible(
+        env.builtins().float,
+        env.builtins().uint,
+        &env
+    ));
+    // Exact structural matching stays exact: Uint never becomes Int through Float.
+    assert!(!is_declaration_compatible(
+        env.builtins().int,
+        env.builtins().uint,
+        &env
+    ));
+    assert!(!is_declaration_compatible(
+        env.builtins().uint,
+        env.builtins().int,
+        &env
+    ));
+    assert!(!is_declaration_compatible(
+        env.builtins().uint,
+        env.builtins().float,
+        &env
+    ));
+}
+
+#[test]
 fn float_to_int_is_never_compatible() {
     let env = TypeEnvironment::new();
     assert!(!is_type_compatible(

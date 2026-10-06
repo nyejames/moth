@@ -1,0 +1,4 @@
+reject_int_floor_receiver |value Dec4, integer Int| -> String:
+    result Dec4 = value + integer // 2
+    return [result]
+;

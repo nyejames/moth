@@ -28,6 +28,10 @@ pub enum NumberLiteralErrorReason {
     InvalidExponentSignPlacement,
     InvalidSeparatorPlacement,
     OutsideIntRange,
+    /// A literal is outside the inclusive range of the profile `Uint` width it initialises.
+    OutsideUintRange(IntWidth),
+    /// A negative literal cannot initialise the profile `Uint` width.
+    NegativeUintLiteral(IntWidth),
     /// A literal is outside the inclusive range of the fixed scalar it initialises.
     OutsideFixedScalarRange(FixedScalar),
     /// A negative literal cannot initialise an unsigned fixed scalar or `Byte`.
@@ -343,6 +347,94 @@ pub fn materialize_normalized_int(
         NumericLiteralSign::Positive
     };
     materialize_int_text_with_sign(normalized, sign, width)
+}
+
+/// Materialize already validated normalized whole-number text at one `Uint` width.
+///
+/// WHAT: reuses the shared unsigned-width boundary policy without reparsing the literal
+///       grammar.
+/// WHY: retained normalized facts reach this destination without a second normalization pass.
+///
+/// # Input contract
+///
+/// `normalized` must be the unsigned, separator-free `normalized_text` produced by
+/// [`parse_numeric_literal`] with [`NumericLiteralKind::WholeNumber`]. This low-level
+/// operation does not validate the grammar again; use [`parse_numeric_text_to_uint`]
+/// for unchecked text.
+pub fn materialize_normalized_uint(
+    normalized: &str,
+    negative: bool,
+    width: IntWidth,
+) -> Result<u64, NumberLiteralErrorReason> {
+    let sign = if negative {
+        NumericLiteralSign::Negative
+    } else {
+        NumericLiteralSign::Positive
+    };
+    materialize_uint_text_with_sign(normalized, sign, width)
+}
+
+/// Shared unsigned whole-number materialization for one `Uint` width.
+///
+/// WHAT: any literal carrying a negative sign is rejected, including `-0`; accepted
+///       magnitudes parse as `u64` and range-check against the width's unsigned maximum.
+/// WHY: negative values cannot initialise `Uint`, and parsing as `u64` keeps `Uint64`
+///      values above `i64::MAX` exact instead of narrowing them through a signed type.
+fn materialize_uint_text_with_sign(
+    text: &str,
+    sign: NumericLiteralSign,
+    width: IntWidth,
+) -> Result<u64, NumberLiteralErrorReason> {
+    // The sign is part of the literal spelling, so `-0` is refused like any other negative
+    // literal rather than being normalised away.
+    if sign == NumericLiteralSign::Negative {
+        return Err(NumberLiteralErrorReason::NegativeUintLiteral(width));
+    }
+
+    let value = text
+        .parse::<u64>()
+        .map_err(|_| NumberLiteralErrorReason::OutsideUintRange(width))?;
+
+    if value <= width.unsigned_max_value() {
+        Ok(value)
+    } else {
+        Err(NumberLiteralErrorReason::OutsideUintRange(width))
+    }
+}
+
+/// Parse unsigned numeric text into a `Uint` at one width using the Moth whole-number grammar.
+///
+/// WHAT: applies the shared numeric text grammar to an entire input string, including
+///       an optional leading `-`, rejects non-whole-number forms, then materializes
+///       the unsigned value through the same width boundary helper as source literals.
+/// WHY: `String -> Uint` casts must agree with source literal range and separator rules
+///      without reimplementing sign/range policy in the cast subsystem.
+pub fn parse_numeric_text_to_uint(
+    source: &str,
+    width: IntWidth,
+) -> Result<u64, NumberLiteralErrorReason> {
+    if source.is_empty() {
+        return Err(NumberLiteralErrorReason::InvalidSeparatorPlacement);
+    }
+
+    let (sign, unsigned) = if let Some(rest) = source.strip_prefix('-') {
+        (NumericLiteralSign::Negative, rest)
+    } else if source.starts_with('+') {
+        return Err(NumberLiteralErrorReason::InvalidSeparatorPlacement);
+    } else {
+        (NumericLiteralSign::Positive, source)
+    };
+
+    if unsigned.is_empty() {
+        return Err(NumberLiteralErrorReason::InvalidSeparatorPlacement);
+    }
+
+    let parsed = parse_numeric_literal(unsigned)?;
+    if parsed.kind != NumericLiteralKind::WholeNumber {
+        return Err(NumberLiteralErrorReason::InvalidSeparatorPlacement);
+    }
+
+    materialize_uint_text_with_sign(&parsed.normalized_text, sign, width)
 }
 
 /// Shared float materialization for one `Float` precision.

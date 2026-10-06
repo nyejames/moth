@@ -526,3 +526,188 @@ fn same_target_has_no_evidence_and_non_numeric_pairs_fall_through() {
         lookup_builtin_evidence(BuiltinCastTarget::Bool, BuiltinCastTarget::Int, profile).is_none()
     );
 }
+
+#[test]
+fn uint_evidence_classifies_narrowing_and_text_pairs() {
+    // Uint participates in the numeric evidence matrix exactly like
+    // Int — fallible narrowing to Int, infallible widening to Float, text in
+    // both directions — while same-type casts stay invalid.
+    let profile = NumericProfile::STANDARD;
+    assert_numeric_row(
+        BuiltinCastTarget::Uint,
+        BuiltinCastTarget::Int,
+        NumericScalar::Uint,
+        NumericScalar::Int,
+        BuiltinCastFallibility::Fallible,
+        profile,
+    );
+    assert_numeric_row(
+        BuiltinCastTarget::Int,
+        BuiltinCastTarget::Uint,
+        NumericScalar::Int,
+        NumericScalar::Uint,
+        BuiltinCastFallibility::Fallible,
+        profile,
+    );
+    assert_numeric_row(
+        BuiltinCastTarget::Uint,
+        BuiltinCastTarget::Float,
+        NumericScalar::Uint,
+        NumericScalar::Float,
+        BuiltinCastFallibility::Infallible,
+        profile,
+    );
+    assert_numeric_row(
+        BuiltinCastTarget::Float,
+        BuiltinCastTarget::Uint,
+        NumericScalar::Float,
+        NumericScalar::Uint,
+        BuiltinCastFallibility::Fallible,
+        profile,
+    );
+    assert!(
+        lookup_builtin_evidence(BuiltinCastTarget::Uint, BuiltinCastTarget::Uint, profile)
+            .is_none()
+    );
+
+    let formatted =
+        lookup_builtin_evidence(BuiltinCastTarget::Uint, BuiltinCastTarget::String, profile)
+            .expect("Uint -> String evidence should exist");
+    assert_eq!(formatted.fallibility, BuiltinCastFallibility::Infallible);
+    assert_eq!(
+        formatted.policy,
+        BuiltinCastPolicyId::NumericToString(NumericScalar::Uint)
+    );
+    let parsed =
+        lookup_builtin_evidence(BuiltinCastTarget::String, BuiltinCastTarget::Uint, profile)
+            .expect("String -> Uint evidence should exist");
+    assert_eq!(parsed.fallibility, BuiltinCastFallibility::Fallible);
+    assert_eq!(
+        parsed.policy,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Uint)
+    );
+}
+
+#[test]
+fn uint_fixed_classification_follows_complete_source_ranges_per_profile() {
+    // A fixed-width cast is infallible only when the complete
+    // source range fits the target, so Uint rows flip with the profile:
+    // Uint32 holds u32::MAX under both profiles while Uint64 holds u64::MAX.
+    let int32 = NumericProfile::STANDARD;
+    let int64 = NumericProfile {
+        int_width: IntWidth::Bits64,
+        float_precision: FloatPrecision::Bits64,
+    };
+    let uint32_target = BuiltinCastTarget::Fixed(FixedScalar::U32);
+    let uint64_target = BuiltinCastTarget::Fixed(FixedScalar::U64);
+
+    for (source, target, source_scalar, target_scalar, int32_fallibility, int64_fallibility) in [
+        (
+            BuiltinCastTarget::Uint,
+            BuiltinCastTarget::Int,
+            NumericScalar::Uint,
+            NumericScalar::Int,
+            BuiltinCastFallibility::Fallible,
+            BuiltinCastFallibility::Fallible,
+        ),
+        (
+            BuiltinCastTarget::Uint,
+            fixed_target(FixedScalar::I64),
+            NumericScalar::Uint,
+            NumericScalar::Fixed(FixedScalar::I64),
+            BuiltinCastFallibility::Infallible,
+            BuiltinCastFallibility::Fallible,
+        ),
+        (
+            BuiltinCastTarget::Uint,
+            uint32_target,
+            NumericScalar::Uint,
+            NumericScalar::Fixed(FixedScalar::U32),
+            BuiltinCastFallibility::Infallible,
+            BuiltinCastFallibility::Fallible,
+        ),
+        (
+            BuiltinCastTarget::Uint,
+            uint64_target,
+            NumericScalar::Uint,
+            NumericScalar::Fixed(FixedScalar::U64),
+            BuiltinCastFallibility::Infallible,
+            BuiltinCastFallibility::Infallible,
+        ),
+        (
+            fixed_target(FixedScalar::U64),
+            BuiltinCastTarget::Uint,
+            NumericScalar::Fixed(FixedScalar::U64),
+            NumericScalar::Uint,
+            BuiltinCastFallibility::Fallible,
+            BuiltinCastFallibility::Infallible,
+        ),
+        (
+            fixed_target(FixedScalar::U32),
+            BuiltinCastTarget::Uint,
+            NumericScalar::Fixed(FixedScalar::U32),
+            NumericScalar::Uint,
+            BuiltinCastFallibility::Infallible,
+            BuiltinCastFallibility::Infallible,
+        ),
+        (
+            fixed_target(FixedScalar::I32),
+            BuiltinCastTarget::Uint,
+            NumericScalar::Fixed(FixedScalar::I32),
+            NumericScalar::Uint,
+            BuiltinCastFallibility::Fallible,
+            BuiltinCastFallibility::Fallible,
+        ),
+    ] {
+        assert_numeric_row(
+            source,
+            target,
+            source_scalar,
+            target_scalar,
+            int32_fallibility,
+            int32,
+        );
+        assert_numeric_row(
+            source,
+            target,
+            source_scalar,
+            target_scalar,
+            int64_fallibility,
+            int64,
+        );
+    }
+
+    // Fixed binary floats round once: Uint widens infallibly into F32/F64
+    // while the reverse stays fallible under every profile.
+    for profile in [int32, int64] {
+        for scalar in [FixedScalar::F32, FixedScalar::F64] {
+            assert_numeric_row(
+                BuiltinCastTarget::Uint,
+                fixed_target(scalar),
+                NumericScalar::Uint,
+                NumericScalar::Fixed(scalar),
+                BuiltinCastFallibility::Infallible,
+                profile,
+            );
+            assert_numeric_row(
+                fixed_target(scalar),
+                BuiltinCastTarget::Uint,
+                NumericScalar::Fixed(scalar),
+                NumericScalar::Uint,
+                BuiltinCastFallibility::Fallible,
+                profile,
+            );
+        }
+        // Uint16 is not a thing: Uint has no Byte/Char/Bool evidence at all.
+        for target in [
+            BuiltinCastTarget::Fixed(FixedScalar::Byte),
+            BuiltinCastTarget::Char,
+            BuiltinCastTarget::Bool,
+        ] {
+            assert!(
+                lookup_builtin_evidence(BuiltinCastTarget::Uint, target, profile).is_none(),
+                "Uint -> {target:?} must have no evidence"
+            );
+        }
+    }
+}

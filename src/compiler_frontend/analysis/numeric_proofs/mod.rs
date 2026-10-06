@@ -335,6 +335,10 @@ impl BlockAnalyser<'_> {
     fn expression_interval(&self, expression: &HirExpression) -> Option<Interval> {
         match &expression.kind {
             // Literals are singleton exact values.
+            HirExpressionKind::Uint(value) => {
+                let value = i128::from(*value);
+                Some((value, value))
+            }
             HirExpressionKind::Int(value) => {
                 let value = i128::from(*value);
                 Some((value, value))

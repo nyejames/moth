@@ -482,6 +482,7 @@ fn canonical_builtin_for_cast_target(target: BuiltinCastTarget) -> CanonicalBuil
     match target {
         BuiltinCastTarget::Bool => CanonicalBuiltinType::Bool,
         BuiltinCastTarget::Int => CanonicalBuiltinType::Int,
+        BuiltinCastTarget::Uint => CanonicalBuiltinType::Uint,
         BuiltinCastTarget::String => CanonicalBuiltinType::String,
         BuiltinCastTarget::Char => CanonicalBuiltinType::Char,
         BuiltinCastTarget::Float => CanonicalBuiltinType::Float,

@@ -23,14 +23,12 @@ use crate::compiler_frontend::ast::statements::condition_validation::ensure_loop
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidLoopHeaderReason, RangeOperandKind,
+    CompilerDiagnostic, InvalidLoopHeaderReason, InvalidRangeOperandReason, RangeOperandKind,
 };
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::numeric_operators::{
-    NumericOperator, binary_operation_domain,
-};
+use crate::compiler_frontend::datatypes::numeric_operators::range_iteration_domain;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::{
@@ -767,6 +765,7 @@ fn range_operand_domain(
         _ => Err(CompilerDiagnostic::invalid_range_operand(
             kind,
             expression.type_id,
+            InvalidRangeOperandReason::NotNumeric,
             expression.span,
         )
         .into()),
@@ -786,30 +785,31 @@ fn range_numeric_domain(
         }
         None => end_domain,
     };
-    let Some(mut domain) = binary_operation_domain(NumericOperator::Add, start_domain, end_domain)
-    else {
+    let step_domain = step
+        .map(|step_expression| {
+            range_operand_domain(step_expression, RangeOperandKind::Step, type_environment)
+        })
+        .transpose()?;
+    let Some(domain) = range_iteration_domain(start_domain, end_domain, step_domain) else {
+        // The whole header selects its domain, so a Float step can rescue Uint/Int bounds. On
+        // failure, the same selector applied to the bounds alone tells whether the explicit step
+        // introduced the incompatibility or the bounds already disagreed.
+        let (operand, offender) = match step {
+            Some(step_expression)
+                if range_iteration_domain(start_domain, end_domain, None).is_some() =>
+            {
+                (RangeOperandKind::Step, step_expression)
+            }
+            _ => (RangeOperandKind::End, end),
+        };
         return Err(CompilerDiagnostic::invalid_range_operand(
-            RangeOperandKind::End,
-            end.type_id,
-            end.span,
+            operand,
+            offender.type_id,
+            InvalidRangeOperandReason::IncompatibleDomain,
+            offender.span,
         )
         .into());
     };
-
-    if let Some(step_expression) = step {
-        let step_domain =
-            range_operand_domain(step_expression, RangeOperandKind::Step, type_environment)?;
-        let Some(promoted) = binary_operation_domain(NumericOperator::Add, domain, step_domain)
-        else {
-            return Err(CompilerDiagnostic::invalid_range_operand(
-                RangeOperandKind::Step,
-                step_expression.type_id,
-                step_expression.span,
-            )
-            .into());
-        };
-        domain = promoted;
-    }
 
     Ok(domain)
 }
@@ -817,6 +817,7 @@ fn range_numeric_domain(
 fn contextual_range_zero(domain: NumericScalar, span: Option<SourceSpan>) -> Expression {
     match domain {
         NumericScalar::Int => Expression::int(0, span, ValueMode::ImmutableOwned),
+        NumericScalar::Uint => Expression::uint(0, span, ValueMode::ImmutableOwned),
         NumericScalar::Float => Expression::float(0.0, span, ValueMode::ImmutableOwned),
         NumericScalar::Fixed(scalar) => {
             let zero = match scalar.class() {
@@ -1260,6 +1261,7 @@ fn declare_loop_binding(
 fn is_zero_numeric_literal(expression: &Expression) -> bool {
     match expression.kind {
         ExpressionKind::Int(value) => value == 0,
+        ExpressionKind::Uint(value) => value == 0,
         ExpressionKind::Float(value) => value == 0.0,
         ExpressionKind::FixedScalar(value) => {
             value.as_i64() == Some(0) || value.as_u64() == Some(0) || value.as_f64() == Some(0.0)

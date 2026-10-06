@@ -523,7 +523,8 @@ fn render_payload_message(
         DiagnosticPayload::InvalidRangeOperand {
             operand,
             found_type,
-        } => invalid_range_operand_message(*operand, *found_type, context),
+            reason,
+        } => invalid_range_operand_message(*operand, *found_type, *reason, context),
         DiagnosticPayload::UnsupportedBuilderPackage { package_path } => {
             unsupported_builder_package_message(*package_path, string_table)
         }

@@ -1,0 +1,12 @@
+entry = "."
+numeric_profile = "Int64/Float32"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "uint wasm64 wide=9223372036854775908/18446744073709551615 prod=18446744073000000000 compare=yes/yes/yes/yes/yes/yes float=9007200000000000/9223372000000000000 fmt=9223372036854775808/18446744073709551615"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "uint wasm64 wide=9223372036854775908/18446744073709551615 prod=18446744073000000000 compare=yes/yes/yes/yes/yes/yes float=9007200000000000/9223372000000000000 fmt=9223372036854775808/18446744073709551615"

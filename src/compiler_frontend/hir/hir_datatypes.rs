@@ -24,6 +24,8 @@ pub enum HirTypeClass {
     Bool,
     Char,
     Int,
+    /// Profile-sized unsigned integer, following the selected `Int` width.
+    Uint,
     Float,
     /// Explicit-width builtin scalar or the `Byte` octet type.
     ///
@@ -64,6 +66,7 @@ pub fn classify_hir_type(
         TypeDefinition::Builtin(builtin) => Ok(match builtin.key {
             BuiltinTypeKey::Bool => HirTypeClass::Bool,
             BuiltinTypeKey::Int => HirTypeClass::Int,
+            BuiltinTypeKey::Uint => HirTypeClass::Uint,
             BuiltinTypeKey::Float => HirTypeClass::Float,
             BuiltinTypeKey::Number(scale) => HirTypeClass::Number(scale),
             BuiltinTypeKey::Char => HirTypeClass::Char,

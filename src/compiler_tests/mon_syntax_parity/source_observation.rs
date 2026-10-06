@@ -34,6 +34,7 @@ use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 pub(super) enum SourceTypeIdentity {
     Bool,
     Int,
+    Uint,
     Float,
     String,
     Char,
@@ -59,6 +60,8 @@ pub(super) struct ObservedSourceValue {
 #[derive(Debug, Clone)]
 pub(super) enum ObservedSourceKind {
     Int(i64),
+    /// One profile-sized unsigned integer observation; follows the selected `Int` width.
+    Uint(u64),
     Float(f64),
     Number(NumberValue),
     FixedScalar(FixedScalarValue),
@@ -365,6 +368,20 @@ fn assert_source_matches_value(
             require_type(case, path, expected, observed, SourceTypeIdentity::Int);
             match &observed.kind {
                 ObservedSourceKind::Int(actual) if *actual == *expected_value => {}
+                _ => source_mismatch(case, path, expected, observed),
+            }
+        }
+        Value::Uint(expected_value) => {
+            assert_identity_expectation_unused(
+                identity_expectation,
+                case,
+                path,
+                expected,
+                observed,
+            );
+            require_type(case, path, expected, observed, SourceTypeIdentity::Uint);
+            match &observed.kind {
+                ObservedSourceKind::Uint(actual) if *actual == *expected_value => {}
                 _ => source_mismatch(case, path, expected, observed),
             }
         }
@@ -872,6 +889,7 @@ fn observe_stored_value(
         .expect("module constant row and child references must name stored values");
     let kind = match payload {
         ConstValuePayload::Int(value) => ObservedSourceKind::Int(*value),
+        ConstValuePayload::Uint(value) => ObservedSourceKind::Uint(*value),
         ConstValuePayload::Float(value) => ObservedSourceKind::Float(*value),
         ConstValuePayload::Number(value) => ObservedSourceKind::Number(value.clone()),
         ConstValuePayload::FixedScalar(value) => ObservedSourceKind::FixedScalar(*value),
@@ -974,6 +992,7 @@ fn observe_expression(
     let type_identity = source_type_identity(expression.type_id, context);
     let kind = match &expression.kind {
         ExpressionKind::Int(value) => ObservedSourceKind::Int(*value),
+        ExpressionKind::Uint(value) => ObservedSourceKind::Uint(*value),
         ExpressionKind::Float(value) => ObservedSourceKind::Float(*value),
         ExpressionKind::Number(value) => ObservedSourceKind::Number(value.clone()),
         ExpressionKind::FixedScalar(value) => ObservedSourceKind::FixedScalar(*value),
@@ -1094,6 +1113,7 @@ fn source_type_identity(type_id: TypeId, context: &ObservationContext<'_>) -> So
         TypeDefinition::Builtin(builtin) => match builtin.key {
             BuiltinTypeKey::Bool => SourceTypeIdentity::Bool,
             BuiltinTypeKey::Int => SourceTypeIdentity::Int,
+            BuiltinTypeKey::Uint => SourceTypeIdentity::Uint,
             BuiltinTypeKey::Float => SourceTypeIdentity::Float,
             BuiltinTypeKey::String => SourceTypeIdentity::String,
             BuiltinTypeKey::Char => SourceTypeIdentity::Char,

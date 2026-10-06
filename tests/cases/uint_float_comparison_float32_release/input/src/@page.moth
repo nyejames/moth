@@ -1,0 +1,20 @@
+-- Task 2B: runtime Uint/Float comparisons convert Uint directly to the
+-- profile Float, so they agree with folding. Under Float32, 16777217
+-- rounds to 16777216.0, which discriminates a raw-carrier comparison.
+
+runtime_eq |a Uint, b Float| -> Bool:
+    return a is b
+;
+
+runtime_lt |b Float, a Uint| -> Bool:
+    return b < a
+;
+
+big #Uint = 16777217
+folded_eq #Bool = big is 16777216.0
+folded_lt #Bool = 16777216.0 < big
+big_value Uint = 16777217
+cmp_runtime_eq Bool = runtime_eq(big_value, 16777216.0)
+cmp_runtime_lt Bool = runtime_lt(16777216.0, big_value)
+
+[:uint float32 eq=[folded_eq]/[cmp_runtime_eq] lt=[folded_lt]/[cmp_runtime_lt]]

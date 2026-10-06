@@ -20,9 +20,10 @@ use super::{
 
 /// A schema type after eligibility, names, scales and defaults have been checked.
 ///
-/// `Int` and `Float` capture the profile the schema was prepared under, so every later walk reads
-/// the captured width or precision from the prepared node instead of re-deriving it. Explicit-width
-/// members collapse into one `Fixed` arm carrying their own scalar identity.
+/// `Int`, `Uint` and `Float` capture the profile the schema was prepared under, so every later
+/// walk reads the captured width or precision from the prepared node instead of re-deriving it.
+/// `Uint` follows the profile's `Int` width. Explicit-width members collapse into one `Fixed`
+/// arm carrying their own scalar identity.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum PreparedType {
     None,
@@ -30,6 +31,9 @@ pub(super) enum PreparedType {
     Char,
     String,
     Int {
+        width: IntWidth,
+    },
+    Uint {
         width: IntWidth,
     },
     Float {
@@ -271,8 +275,8 @@ fn prepare_type(
         SchemaType::Char => Ok(PreparedType::Char),
         SchemaType::String => Ok(PreparedType::String),
         // Explicit-width spellings are profile-independent identities, so their prepared node is
-        // the scalar identity itself. `Int` and `Float` are deliberately absent: a matching profile
-        // width never makes them alias `I32` or `F64`.
+        // the scalar identity itself. `Int`, `Uint` and `Float` are deliberately absent: a matching
+        // profile width never makes them alias `I32`, `U32` or `F64`.
         SchemaType::I8 => Ok(PreparedType::Fixed(FixedScalar::I8)),
         SchemaType::I16 => Ok(PreparedType::Fixed(FixedScalar::I16)),
         SchemaType::I32 => Ok(PreparedType::Fixed(FixedScalar::I32)),
@@ -286,6 +290,9 @@ fn prepare_type(
         SchemaType::F64 => Ok(PreparedType::Fixed(FixedScalar::F64)),
         SchemaType::Byte => Ok(PreparedType::Fixed(FixedScalar::Byte)),
         SchemaType::Int => Ok(PreparedType::Int {
+            width: profile.int_width,
+        }),
+        SchemaType::Uint => Ok(PreparedType::Uint {
             width: profile.int_width,
         }),
         SchemaType::Float => Ok(PreparedType::Float {
@@ -358,7 +365,7 @@ fn prepare_type(
                 return Err(schema_error(
                     MonErrorCode::InvalidMapKey,
                     path,
-                    "map keys must be String, Bool, Char, Int, a fixed-width integer or Byte",
+                    "map keys must be String, Bool, Char, Int, Uint, a fixed-width integer or Byte",
                 ));
             }
 
@@ -644,7 +651,8 @@ fn is_supported_map_key(ty: &PreparedType) -> bool {
         PreparedType::String
         | PreparedType::Bool
         | PreparedType::Char
-        | PreparedType::Int { .. } => true,
+        | PreparedType::Int { .. }
+        | PreparedType::Uint { .. } => true,
         // Fixed integers and `Byte` are data keys; fixed binary floats are not key families.
         PreparedType::Fixed(scalar) => scalar.class() != FixedScalarClass::BinaryFloat,
         _ => false,
@@ -742,6 +750,21 @@ fn complete_value(
                     MonErrorCode::NumericRange,
                     path,
                     "Int value is outside the captured profile width",
+                ))
+            }
+        }
+        (Value::Uint(value), PreparedType::Uint { width }) => {
+            // The carrier is `u64` so a `Uint64` prepared node keeps values above `i64::MAX`
+            // exact; the captured profile width decides which values this receiving boundary
+            // accepts, so a Uint32 node rejects a supplied value above `u32::MAX`.
+            if *value <= width.unsigned_max_value() {
+                Ok(Value::Uint(*value))
+            } else {
+                Err(value_error(
+                    context,
+                    MonErrorCode::NumericRange,
+                    path,
+                    "Uint value is outside the captured profile width",
                 ))
             }
         }
@@ -1090,6 +1113,7 @@ pub(super) fn clone_default(
             Ok(Value::String(value.clone()))
         }
         Value::Int(value) => Ok(Value::Int(*value)),
+        Value::Uint(value) => Ok(Value::Uint(*value)),
         Value::Float(value) => Ok(Value::Float(*value)),
         // Fixed-scalar payloads are `Copy` and their prepared defaults were range- and
         // rounding-checked when the schema was prepared, so the copy owns no new storage.
@@ -1362,6 +1386,7 @@ fn drop_schema_type_tree(root: SchemaType) {
             | SchemaType::Char
             | SchemaType::String
             | SchemaType::Int
+            | SchemaType::Uint
             | SchemaType::Float
             | SchemaType::Integer
             | SchemaType::Decimal { .. }
@@ -1428,6 +1453,7 @@ fn drop_value_tree(root: Value) {
             | Value::Char(_)
             | Value::String(_)
             | Value::Int(_)
+            | Value::Uint(_)
             | Value::Float(_)
             | Value::Integer(_)
             | Value::Decimal(_)

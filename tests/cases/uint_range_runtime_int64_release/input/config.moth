@@ -1,0 +1,5 @@
+project #= (
+    name = "uint_range_runtime_int64_release",
+    entry_root = "src",
+)
+html #= ()

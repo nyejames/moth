@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "uint transport small=42 separated=4294967295 zero=0 missing=0 present=41 point=1/2 choice=7 first=1 alias=11 boxed=13 kept=17 shared=23"

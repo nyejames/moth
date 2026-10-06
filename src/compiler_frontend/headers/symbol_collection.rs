@@ -209,6 +209,7 @@ fn receiver_method_receiver_name(
         }
         // Builtin scalar types are parsed directly; map them to their language-visible names.
         ParsedTypeRef::BuiltinInt { .. } => Some(string_table.intern("Int")),
+        ParsedTypeRef::BuiltinUint { .. } => Some(string_table.intern("Uint")),
         ParsedTypeRef::BuiltinFloat { .. } => Some(string_table.intern("Float")),
         ParsedTypeRef::BuiltinBool { .. } => Some(string_table.intern("Bool")),
         ParsedTypeRef::BuiltinString { .. } => Some(string_table.intern("String")),

@@ -1091,12 +1091,14 @@ fn collect_parsed_type_anchor_snapshots(
         }
         ParsedTypeRef::BuiltinBool { span }
         | ParsedTypeRef::BuiltinInt { span }
+        | ParsedTypeRef::BuiltinUint { span }
         | ParsedTypeRef::BuiltinFloat { span }
         | ParsedTypeRef::BuiltinString { span }
         | ParsedTypeRef::BuiltinChar { span } => {
             let expected_text = match parsed_type {
                 ParsedTypeRef::BuiltinBool { .. } => "Bool",
                 ParsedTypeRef::BuiltinInt { .. } => "Int",
+                ParsedTypeRef::BuiltinUint { .. } => "Uint",
                 ParsedTypeRef::BuiltinFloat { .. } => "Float",
                 ParsedTypeRef::BuiltinString { .. } => "String",
                 ParsedTypeRef::BuiltinChar { .. } => "Char",

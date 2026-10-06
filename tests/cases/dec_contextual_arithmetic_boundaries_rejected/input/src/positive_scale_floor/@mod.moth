@@ -1,0 +1,4 @@
+reject_positive_scale_floor || -> String:
+    result Dec1 = 1 // 2
+    return [result]
+;

@@ -186,19 +186,23 @@ fn numeric_evidence_row(
     }
 }
 
-/// Every numeric domain in canonical order: `Int`, `Float`, then the non-`Byte` fixed scalars.
+/// Every numeric domain in canonical order: `Int`, `Uint`, `Float`, then the non-`Byte` fixed scalars.
 ///
 /// WHY: the numeric conversion matrix and both numeric text matrices cover exactly the same
 ///      domains, so one iterator owns that domain list instead of three parallel spellings.
 pub(crate) fn numeric_scalars() -> impl Iterator<Item = NumericScalar> {
-    [NumericScalar::Int, NumericScalar::Float]
-        .into_iter()
-        .chain(
-            FixedScalar::ALL
-                .into_iter()
-                .filter(|scalar| *scalar != FixedScalar::Byte)
-                .map(NumericScalar::Fixed),
-        )
+    [
+        NumericScalar::Int,
+        NumericScalar::Uint,
+        NumericScalar::Float,
+    ]
+    .into_iter()
+    .chain(
+        FixedScalar::ALL
+            .into_iter()
+            .filter(|scalar| *scalar != FixedScalar::Byte)
+            .map(NumericScalar::Fixed),
+    )
 }
 
 /// The generated evidence row for one numeric domain's text conversion.
@@ -394,6 +398,7 @@ pub(crate) fn type_id_for_builtin_target(
     match target {
         BuiltinCastTarget::Bool => Some(builtins.bool),
         BuiltinCastTarget::Int => Some(builtins.int),
+        BuiltinCastTarget::Uint => Some(builtins.uint),
         BuiltinCastTarget::String => Some(builtins.string),
         BuiltinCastTarget::Char => Some(builtins.char),
         BuiltinCastTarget::Float => Some(builtins.float),

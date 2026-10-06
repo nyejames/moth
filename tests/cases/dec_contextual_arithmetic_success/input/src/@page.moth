@@ -1,0 +1,339 @@
+int_left_text |value Int| -> String:
+    result Dec4 = value + 1
+    return [result]
+;
+
+int_right_text |value Int| -> String:
+    result Dec4 = 1 + value
+    return [result]
+;
+
+typed_inner_text |left Int, right Int| -> String:
+    result Dec4 = (left + right) + 1
+    return [result]
+;
+
+received_inner_text |left Int, right Int| -> String:
+    result Dec4 = left + (right + 1)
+    return [result]
+;
+
+u8_text |value U8| -> String:
+    result Dec4 = value + 300
+    return [result]
+;
+
+peer_left_text |value Dec4| -> String:
+    result = value + (0.1 + 0.2)
+    return [result]
+;
+
+peer_right_text |value Dec4| -> String:
+    result = 0.1 + 0.2 + value
+    return [result]
+;
+
+peer_group_right_text |value Dec4| -> String:
+    result = (0.1 + 0.2) + value
+    return [result]
+;
+
+peer_product_text |value Dec4| -> String:
+    result = value + 0.1 * 2
+    return [result]
+;
+
+peer_typed_inner_text |value Dec4, integer Int| -> String:
+    result = value + (integer + 1)
+    return [result]
+;
+
+received_typed_inner_text |value Dec4, integer Int| -> String:
+    result Dec4 = value + (integer + 1)
+    return [result]
+;
+
+same_text |value Dec4| -> String:
+    result Bool = value is (0.1 + 0.2)
+    return [result]
+;
+
+power_int_text |exponent Int| -> String:
+    result Dec4 = 2 ^ exponent
+    return [result]
+;
+
+division_runtime_text |value Dec4| -> String:
+    result Dec4 = value / 3 * 3
+    return [result]
+;
+
+division_group_runtime_text |value Dec2| -> String:
+    result Dec2 = (value / 2) * 2
+    return [result]
+;
+
+power_runtime_text |value Dec2, exponent Int| -> String:
+    result Dec2 = value ^ exponent
+    return [result]
+;
+
+multiply_runtime_text |value Dec2| -> String:
+    result Dec2 = (value * value) * value
+    return [result]
+;
+
+rounding_runtime_text |value Dec1| -> String:
+    result Dec1 = value * 0.3 + 0.3
+    return [result]
+;
+
+maximum_sum_text |value Dec256| -> String:
+    result Dec256 = value + 1e-256
+    return [result]
+;
+
+maximum_exact_text |value Dec256| -> String:
+    result Bool = value + value is 2e-256
+    return [result]
+;
+mutable_assign_text || -> String:
+    target ~Dec4 = 0
+    target = 0.1 + 0.2
+    return [target]
+;
+
+take_dec |value Dec4| -> Dec4:
+    return value
+;
+
+explicit_return_text || -> Dec4:
+    return 0.1 + 0.2
+;
+
+with_default |value Dec4 = 0.1 + 0.2| -> Dec4:
+    return value
+;
+
+branch_text |flag Bool| -> Dec4:
+    result Dec4 = if flag:
+        then 0.1 + 0.2
+    else
+        then 0.1 + 0.2
+    ;
+    return result
+;
+
+split_pair |flag Bool| -> Dec4, Int:
+    return 0.1 + 0.2, 1 + 2
+;
+
+make_dec || -> Dec4:
+    return 0.1 + 0.2
+;
+
+call_peer_text || -> String:
+    result = make_dec() + (0.1 + 0.2)
+    return [result]
+;
+
+local_peer |value Dec4| -> String:
+    result = (0.1 + 0.2) + value
+    return [result]
+;
+
+float_outer_flag |value Float| -> Dec4:
+    if value > 0.3:
+        return 1
+    ;
+    return 0
+;
+
+overflow_inner_text |left Int, right Int| -> Dec4, Error!:
+    result Dec4 = (left + right) + 1
+    return result
+;
+
+peer_overflow |value Dec4, integer Int| -> Dec4, Error!:
+    result = value + (integer + 1)
+    return result
+;
+
+received_overflow |value Dec4, integer Int| -> Dec4, Error!:
+    result Dec4 = value + (integer + 1)
+    return result
+;
+
+compound_overflow |integer Int| -> Dec4, Error!:
+    total ~Dec4 = 1
+    total += integer + 1
+    return total
+;
+
+bump_dec |calls ~Int| -> Dec4:
+    calls += 1
+    return 0.1 + 0.2
+;
+
+zero_dec |calls ~Int| -> Dec4:
+    calls += 1
+    return 0
+;
+
+order_text |calls ~Int, seen Dec4| -> Dec4:
+    calls += 1
+    return seen + calls
+;
+
+divide_dec |target ~Dec4, rhs_calls ~Int| -> Dec4, Error!:
+    target /= zero_dec(~rhs_calls)
+    return target
+;
+
+read_int || -> Int, Error!:
+    return 7
+;
+
+render_dec_text |value Dec4| -> String:
+    return [value]
+;
+
+take_holder |value Holder of Dec4| -> Dec4:
+    return value.value
+;
+
+Money as Dec4
+
+Holder type T = |
+    value T,
+|
+
+Amount ::
+    Present |value Dec4|,
+    Empty,
+;
+
+Point = |
+    x Dec4,
+|
+
+StructDefault = |
+    x Dec4 = 0.1 + 0.2,
+|
+
+whole Dec4 = 1 + 1
+fraction Dec4 = 0.1 + 0.2
+group Dec4 = (1 + 2) * 3
+negative Dec4 = -(0.1 + 0.2)
+large Dec4 = 100000000000000000000 + 1
+zero_exponent_leaf Dec0 = 1e2 + 2
+int_left = int_left_text(7)
+int_right = int_right_text(7)
+typed_inner = typed_inner_text(3, 4)
+received_inner = received_inner_text(3, 4)
+unsigned_mix = u8_text(200)
+peer_left = peer_left_text(1)
+peer_right = peer_right_text(1)
+peer_group_right = peer_group_right_text(1)
+peer_product = peer_product_text(1)
+peer_typed_inner = peer_typed_inner_text(1, 7)
+received_typed_inner = received_typed_inner_text(1, 7)
+same = same_text(0.3)
+power_group Dec4 = 2 ^ (1 + 2)
+power_right Dec4 = 2 ^ 3 ^ 2
+power_left Dec4 = (2 ^ 3) ^ 2
+power_int = power_int_text(3)
+cast_sum Dec4 = cast (1 + 2)
+division_chain Dec4 = 1 / 3 * 3
+division_runtime = division_runtime_text(1)
+division_group Dec2 = (0.03 / 2) * 2
+division_group_runtime = division_group_runtime_text(0.03)
+power_once Dec2 = 1.07 ^ 3
+power_runtime = power_runtime_text(1.07, 3)
+multiply_chain Dec2 = (1.07 * 1.07) * 1.07
+multiply_runtime = multiply_runtime_text(1.07)
+folded #Dec4 = 0.1 + 0.2
+folded_rounding #Dec1 = 1.5 * 0.3 + 0.3
+rounding_runtime = rounding_runtime_text(1.5)
+maximum_leaf Dec256 = 1e-256
+maximum_sum = maximum_sum_text(1e-256)
+maximum_exact = maximum_exact_text(1e-256)
+zero_leaf Dec = 1e2
+mutable_assign = mutable_assign_text()
+concrete_argument = take_dec(0.1 + 0.2)
+explicit_return = explicit_return_text()
+omitted_default = with_default()
+optional_payload Dec4? = 0.1 + 0.2
+optional_text String = if optional_payload is |payload| then render_dec_text(payload) else "none"
+point Point = Point(x = 0.1 + 0.2)
+elements {Dec4} = {0.1 + 0.2}
+element_value Dec4 = elements.get(0) catch:
+    then 0
+;
+keyed {String = Dec4} = { "a" = 0.1 + 0.2 }
+keyed_value Dec4 = keyed.get("a") catch:
+    then 0
+;
+branch_true = branch_text(true)
+branch_false = branch_text(false)
+split_first Dec4, split_second Int = split_pair(true)
+alias_value Money = 0.1 + 0.2
+holder Holder of Dec4 = Holder(value = 0.1 + 0.2)
+holder_value = take_holder(holder)
+choice_value Amount = Amount::Present(0.1 + 0.2)
+choice_text ~= ""
+if choice_value is:
+    Present(value) => choice_text = render_dec_text(value)
+    Empty => choice_text = "empty"
+;
+struct_default StructDefault = StructDefault()
+local_peer_text = local_peer(1)
+call_peer = call_peer_text()
+float_outer Dec4 = float_outer_flag(0.1 + 0.2)
+overflow_code ~U32 = 0
+overflow_value = overflow_inner_text(2147483647, 1) catch |overflow_error|:
+    overflow_code = overflow_error.code
+    then 0
+;
+peer_overflow_code ~U32 = 0
+peer_overflow_value = peer_overflow(1, 2147483647) catch |peer_error|:
+    peer_overflow_code = peer_error.code
+    then 0
+;
+received_overflow_code ~U32 = 0
+received_overflow_value = received_overflow(1, 2147483647) catch |received_error|:
+    received_overflow_code = received_error.code
+    then 0
+;
+compound_overflow_code ~U32 = 0
+compound_overflow_value = compound_overflow(2147483647) catch |compound_error|:
+    compound_overflow_code = compound_error.code
+    then 0
+;
+order_calls ~Int = 0
+order_value = order_text(~order_calls, 0.1 + 0.2) - order_text(~order_calls, 0.1 + 0.2)
+accumulate ~Dec4 = 2
+accumulate += 0.1 + 0.2
+reduced ~Dec4 = 2
+reduced -= 0.1 + 0.2
+scaled ~Dec4 = 2
+scaled *= 0.1 + 0.2
+power_accum ~Dec4 = 2
+power_accum ^= (1 + 2)
+dec_bump_calls ~Int = 0
+dec_first = bump_dec(~dec_bump_calls)
+dec_second = bump_dec(~dec_bump_calls)
+divide_target ~Dec4 = 5
+divide_calls ~Int = 0
+divide_code ~U32 = 0
+divide_result = divide_dec(~divide_target, ~divide_calls) catch |divide_error|:
+    divide_code = divide_error.code
+    then 0
+;
+zero_divisor Dec4 = 0
+protected_recovery Dec4 = 1 / zero_divisor catch then 0.1 + 0.2
+caught_arithmetic Dec4 = read_int() + 0 catch then 0
+grouped_arithmetic Dec4 = (read_int() + 0) catch then 0
+protected_literal Dec4 = read_int() + (0.1 + 0.2) catch then 0
+
+[:dec context whole=[whole] fraction=[fraction] group=[group] negative=[negative] large=[large] zero-exponent-leaf=[zero_exponent_leaf] int-left=[int_left] int-right=[int_right] typed-inner=[typed_inner] received-inner=[received_inner] u8=[unsigned_mix] peer-left=[peer_left] peer-right=[peer_right] peer-group-right=[peer_group_right] peer-product=[peer_product] peer-typed-inner=[peer_typed_inner] received-typed-inner=[received_typed_inner] same=[same] power-group=[power_group] power-right=[power_right] power-left=[power_left] power-int=[power_int] cast=[cast_sum] division-chain=[division_chain] division-runtime=[division_runtime] division-group=[division_group] division-group-runtime=[division_group_runtime] power-once=[power_once] power-runtime=[power_runtime] multiply-chain=[multiply_chain] multiply-runtime=[multiply_runtime] folded=[folded] folded-rounding=[folded_rounding] rounding-runtime=[rounding_runtime] maximum-leaf=[maximum_leaf] maximum-sum=[maximum_sum] maximum-exact=[maximum_exact] zero-leaf=[zero_leaf] mutable-assign=[mutable_assign] concrete-argument=[concrete_argument] explicit-return=[explicit_return] omitted-default=[omitted_default] optional=[optional_text] field=[point.x] element=[element_value] map-value=[keyed_value] branch-true=[branch_true] branch-false=[branch_false] split=[split_first]/[split_second] alias=[alias_value] holder=[holder_value] choice=[choice_text] struct-default=[struct_default.x] local-peer=[local_peer_text] call-peer=[call_peer] float-outer=[float_outer] overflow=[overflow_code]/[overflow_value] peer-overflow=[peer_overflow_code]/[peer_overflow_value] received-overflow=[received_overflow_code]/[received_overflow_value] compound-overflow=[compound_overflow_code]/[compound_overflow_value] order=[order_value]/[order_calls] accumulate=[accumulate] reduced=[reduced] scaled=[scaled] power-accum=[power_accum] bumps=[dec_first]/[dec_second]/[dec_bump_calls] divide=[divide_code]/[divide_result]/[divide_target]/[divide_calls] protected-recovery=[protected_recovery] caught=[caught_arithmetic] grouped=[grouped_arithmetic] protected-literal=[protected_literal]]

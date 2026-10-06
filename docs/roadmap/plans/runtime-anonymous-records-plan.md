@@ -48,7 +48,7 @@ Use the canonical runtime reference for construction, hidden identity, recursive
 - Apply those restrictions recursively, including through a containing parent, optional or captured value. An ordinary leaf extracted from a record keeps its ordinary permitted uses.
 - Constructing a local record inside an already concrete generic body differs from passing a hidden type as a generic argument. Only the former is permitted.
 - Empty runtime records remain invalid. Ordinary constant-looking fields do not select the const-record path. Wire and Route storage restrictions remain independent of shared syntax.
-- Numeric leaves retain their canonical semantic type. Extracting a U8 field yields U8, while arithmetic may separately promote it to U32. An i32 carrier does not widen the field's semantic type or physical storage. Int/Float fields retain their profile-selected contract and Byte gains no arithmetic from being stored in a record.
+- Numeric leaves retain their canonical semantic type. Extracting a U8 field yields U8, while arithmetic may separately promote it to U32. An i32 carrier does not widen the field's semantic type or physical storage. Int/Uint/Float fields retain their profile-selected contract and Byte gains no arithmetic from being stored in a record.
 
 The initial implementation includes nesting. It must not accept only a flat subset and leave parent/child support or recursive escape checks for later.
 
@@ -128,7 +128,7 @@ Tests should prove:
 - prohibited wrappers do not hide an anonymous identity from escape checks
 - ordinary extracted leaves retain their normal permitted uses
 - fixed integer/float and Byte field identity survives construction, projection and mutation without carrier-based retyping or implicit narrowing
-- Int/Float examples still work under their selected profile and Dec leaves keep exact scale semantics
+- Int/Uint/Float examples still work under their selected profile and Dec leaves keep exact scale semantics
 - compile-time records remain compile-time-only and named nominal construction stays explicit
 - supported backend execution agrees with ordinary struct semantics, while unsupported aggregate or Dec targets reject explicitly
 

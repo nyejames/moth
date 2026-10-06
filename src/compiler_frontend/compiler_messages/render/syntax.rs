@@ -83,6 +83,17 @@ pub(crate) fn invalid_number_literal_message(
         NumberLiteralErrorReason::OutsideIntRange => {
             format!("Integer literal '{literal}' is outside the supported Int range.")
         }
+        NumberLiteralErrorReason::OutsideUintRange(width) => {
+            format!(
+                "Integer literal '{literal}' is outside the Uint range 0 to {}.",
+                width.unsigned_max_value()
+            )
+        }
+        NumberLiteralErrorReason::NegativeUintLiteral(_) => {
+            format!(
+                "Numeric literal '{literal}' is negative, but Uint cannot hold negative values."
+            )
+        }
         NumberLiteralErrorReason::OutsideFixedScalarRange(scalar) => {
             let name = scalar.name();
             match fixed_scalar_inclusive_range(scalar) {

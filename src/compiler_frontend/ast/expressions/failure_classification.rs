@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
+use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, FallibleExpressionHandling, FallibleHandling,
 };
@@ -613,10 +614,21 @@ fn classify_expression_with_root_protection(
         }
         ExpressionKind::Runtime(rpn) => {
             for item in &rpn.items {
-                if let ExpressionRpnItem::Operand(operand) = item
-                    && let Some(effect) = classify_expression(operand, template_ir_store, state)?
-                {
-                    return Ok(Some(effect));
+                match item {
+                    ExpressionRpnItem::Operand(operand) => {
+                        if let Some(effect) =
+                            classify_expression(operand, template_ir_store, state)?
+                        {
+                            return Ok(Some(effect));
+                        }
+                    }
+                    ExpressionRpnItem::Operator { .. } => {}
+                    // Pending syntax never survives evaluation; this fallible classifier reports
+                    // the broken invariant instead of treating the malformed operand as effectless.
+                    ExpressionRpnItem::PendingNumericLiteral { .. }
+                    | ExpressionRpnItem::PendingGroup { .. } => {
+                        return Err(pending_expression_item_bug("failure classification"));
+                    }
                 }
             }
             Ok(None)
@@ -713,6 +725,7 @@ fn classify_expression_with_root_protection(
         ExpressionKind::NoValue
         | ExpressionKind::OptionNone
         | ExpressionKind::Int(_)
+        | ExpressionKind::Uint(_)
         | ExpressionKind::Float(_)
         | ExpressionKind::FixedScalar(_)
         | ExpressionKind::Number(_)

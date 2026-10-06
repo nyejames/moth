@@ -286,6 +286,51 @@ fn scale_zero_multiplication_and_power_remain_exact() {
 }
 
 #[test]
+fn exact_integral_powers_keep_scale_across_representative_scales() {
+    for scale in [0_u16, 1, 4, 256] {
+        let number_scale = NumberScale::new(scale).unwrap();
+        for (base, expected) in [(2_i128, [1_i128, 2, 4, 8]), (-2_i128, [1_i128, -2, 4, -8])] {
+            for (exponent, expected_magnitude) in expected.iter().enumerate() {
+                let powered = NumberValue::from_integer(base, number_scale)
+                    .checked_power(i64::try_from(exponent).expect("small test exponent fits i64"))
+                    .unwrap();
+                let expected_value = NumberValue::from_integer(*expected_magnitude, number_scale);
+                assert_eq!(powered.scale(), number_scale);
+                assert_eq!(
+                    powered, expected_value,
+                    "base {base} exponent {exponent} at scale {scale}"
+                );
+            }
+        }
+    }
+
+    let scale_256 = NumberScale::new(256).unwrap();
+    assert_eq!(
+        NumberValue::from_integer(2, scale_256)
+            .checked_power(64)
+            .unwrap(),
+        NumberValue::from_integer(18_446_744_073_709_551_616, scale_256)
+    );
+
+    let scale_four = NumberScale::new(4).unwrap();
+    let beyond_machine = NumberValue::from_integer(2, NumberScale::ZERO)
+        .checked_power(64)
+        .unwrap()
+        .rescale(scale_four)
+        .expect("an integer rescales exactly to a wider Dec scale");
+    let beyond_machine_squared = beyond_machine.checked_power(2).unwrap();
+    assert_eq!(beyond_machine_squared.scale(), scale_four);
+    assert_eq!(
+        beyond_machine_squared.coefficient().to_string(),
+        "3402823669209384634633746074317682114560000"
+    );
+    assert_eq!(
+        beyond_machine.checked_power(-1),
+        Err(NumberArithmeticError::InvalidExponent)
+    );
+}
+
+#[test]
 fn exact_power_rounds_once_and_handles_zero_unity_and_int64_exponents() {
     let three_halves = decimal("1.5", NumericLiteralSign::Positive, 1);
     let cube = three_halves.checked_power(3).unwrap();
@@ -329,6 +374,73 @@ fn exact_power_rounds_once_and_handles_zero_unity_and_int64_exponents() {
         three_halves.checked_power(-1),
         Err(NumberArithmeticError::InvalidExponent)
     );
+}
+
+#[test]
+fn power_shortcut_edges_zero_tiny_powers_and_reject_negative_exponents() {
+    // A coefficient of +/-1 at a positive scale is at most a tenth in magnitude, so its
+    // square and every higher power round to zero at that scale. Exponent one keeps input.
+    for (scale, tiny_text) in [(1_u16, "0.1"), (4_u16, "0.0001")] {
+        let number_scale = NumberScale::new(scale).unwrap();
+        let zero = NumberValue::from_integer(0, number_scale);
+        let unity = NumberValue::from_integer(1, number_scale);
+        for sign in [NumericLiteralSign::Positive, NumericLiteralSign::Negative] {
+            let tiny = decimal(tiny_text, sign, scale);
+            let expected_coefficient = match sign {
+                NumericLiteralSign::Positive => "1",
+                NumericLiteralSign::Negative => "-1",
+            };
+            assert_eq!(
+                tiny.coefficient().to_string(),
+                expected_coefficient,
+                "test setup keeps coefficient one at scale {scale}"
+            );
+            assert_eq!(
+                tiny.checked_power(1).unwrap(),
+                tiny,
+                "coefficient one keeps its input for exponent one at scale {scale}"
+            );
+            for exponent in [2_i64, 3, i64::MAX] {
+                assert_eq!(
+                    tiny.checked_power(exponent).unwrap(),
+                    zero,
+                    "coefficient one rounds to zero for exponent {exponent} at scale {scale}"
+                );
+            }
+        }
+
+        // Zero to the zeroth power keeps the existing unity contract at each scale.
+        assert_eq!(
+            zero.checked_power(0).unwrap(),
+            unity,
+            "zero to the zeroth power is the scale unity at scale {scale}"
+        );
+    }
+
+    // Negative exponents are rejected before any power shortcut fires.
+    let scale_one = NumberScale::new(1).unwrap();
+    let negative_exponent_cases: [(&str, NumberValue); 7] = [
+        ("zero", decimal("0", NumericLiteralSign::Positive, 1)),
+        ("positive unity", NumberValue::from_integer(1, scale_one)),
+        ("negative unity", NumberValue::from_integer(-1, scale_one)),
+        ("tiny one", decimal("0.1", NumericLiteralSign::Positive, 1)),
+        (
+            "tiny negative one",
+            decimal("0.1", NumericLiteralSign::Negative, 1),
+        ),
+        ("integral", NumberValue::from_integer(2, scale_one)),
+        (
+            "fractional",
+            decimal("1.5", NumericLiteralSign::Positive, 1),
+        ),
+    ];
+    for (name, base) in negative_exponent_cases {
+        assert_eq!(
+            base.checked_power(-1),
+            Err(NumberArithmeticError::InvalidExponent),
+            "{name} rejects a negative exponent"
+        );
+    }
 }
 
 #[test]

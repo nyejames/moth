@@ -1,0 +1,4 @@
+reject_float_exponent || -> String:
+    result Dec4 = 2 ^ 2.0
+    return [result]
+;

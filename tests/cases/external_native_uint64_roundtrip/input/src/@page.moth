@@ -1,0 +1,14 @@
+@external_uint.js identity_uint, load_safe
+
+-- Uint64 travels as BigInt inside Moth JS and crosses to foreign JS as a
+-- safe Number: zero, the foreign safe-Number limit and a large exact value
+-- inside the bridge all survive the round trip unchanged, including through
+-- a fallible success payload.
+zero Uint = identity_uint(0)
+small Uint = identity_uint(17)
+large Uint = identity_uint(5000000000)
+safe_limit Uint = identity_uint(9007199254740991)
+loaded Uint = load_safe() catch |load_err|:
+    then 0
+;
+io.line([: external_native_uint64 zero=[zero] small=[small] large=[large] safe=[safe_limit] loaded=[loaded]])

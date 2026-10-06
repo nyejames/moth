@@ -1,0 +1,3 @@
+narrow |value Uint| -> Int:
+    return cast value
+;

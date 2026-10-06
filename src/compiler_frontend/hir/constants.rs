@@ -24,6 +24,8 @@ pub enum HirConstValue {
     #[allow(dead_code)]
     Int(i64),
     #[allow(dead_code)]
+    Uint(u64),
+    #[allow(dead_code)]
     Float(f64),
     /// One materialised fixed-width scalar or `Byte` value with exact-bit identity.
     #[allow(dead_code)]
@@ -102,6 +104,7 @@ impl HirConstValue {
             }
             Self::OptionSome(inner) => inner.remap_string_ids(remap),
             Self::Int(_)
+            | Self::Uint(_)
             | Self::Float(_)
             | Self::FixedScalar(_)
             | Self::Number(_)

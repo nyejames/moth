@@ -1341,6 +1341,7 @@ where
             .find_map(|field| first_unsupported_expression_occurrence(&field.value, search)),
         HirExpressionKind::Number(_)
         | HirExpressionKind::Int(_)
+        | HirExpressionKind::Uint(_)
         | HirExpressionKind::Float(_)
         | HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Bool(_)

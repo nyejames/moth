@@ -1,0 +1,5 @@
+project #= (
+    name = "uint_checked_arithmetic_release",
+    entry_root = "src",
+)
+html #= ()

@@ -1381,3 +1381,96 @@ fn number_to_string_formats_values_beyond_i128_without_exponent_text() {
         BuiltinCastLiteral::String("1234567890123456789012345678901234567890".to_string())
     );
 }
+
+#[test]
+fn float_to_uint_truncates_and_rejects_non_finite_negative_and_overflow() {
+    // The Float -> Uint rows truncate toward zero; NaN/inf fail as
+    // invalid values while negatives and 2^64 fail as out of range.
+    let policy = BuiltinCastPolicyId::NumericConversion {
+        source: NumericScalar::Float,
+        target: NumericScalar::Uint,
+    };
+
+    let result = apply_builtin_cast_policy(
+        policy,
+        &BuiltinCastLiteral::Float(1.9),
+        NumericProfile::STANDARD,
+    )
+    .expect("1.9 should fold");
+    assert_eq!(result, BuiltinCastLiteral::Uint(1));
+
+    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let error = apply_builtin_cast_policy(
+            policy,
+            &BuiltinCastLiteral::Float(value),
+            NumericProfile::STANDARD,
+        )
+        .expect_err("non-finite Float -> Uint should fail");
+        assert_eq!(error.code, BuiltinErrorCode::FloatCastToIntInvalidValue);
+    }
+
+    // Truncation toward zero folds `-0.5` to zero, exactly like `-0.9 -> U8`;
+    // `-1.0` truncates to `-1`, which is out of the unsigned range.
+    let result = apply_builtin_cast_policy(
+        policy,
+        &BuiltinCastLiteral::Float(-0.5),
+        NumericProfile::STANDARD,
+    )
+    .expect("-0.5 should fold");
+    assert_eq!(result, BuiltinCastLiteral::Uint(0));
+
+    for value in [-1.0, 4_294_967_296.0] {
+        let error = apply_builtin_cast_policy(
+            policy,
+            &BuiltinCastLiteral::Float(value),
+            NumericProfile::STANDARD,
+        )
+        .expect_err("negative or overflowing Float -> Uint should fail");
+        assert_eq!(error.code, BuiltinErrorCode::FloatCastToIntOutOfRange);
+    }
+
+    let result = apply_builtin_cast_policy(
+        policy,
+        &BuiltinCastLiteral::Float(4_294_967_295.0),
+        NumericProfile::STANDARD,
+    )
+    .expect("u32::MAX should fold");
+    assert_eq!(result, BuiltinCastLiteral::Uint(u32::MAX as u64));
+
+    let int64_profile = NumericProfile {
+        int_width: IntWidth::Bits64,
+        float_precision: FloatPrecision::Bits64,
+    };
+    let error = apply_builtin_cast_policy(
+        policy,
+        &BuiltinCastLiteral::Float(18_446_744_073_709_551_616.0),
+        int64_profile,
+    )
+    .expect_err("2^64 -> Uint64 should fail");
+    assert_eq!(error.code, BuiltinErrorCode::FloatCastToIntOutOfRange);
+}
+
+#[test]
+fn string_to_uint_accepts_boundaries_and_rejects_negative_zero() {
+    // String -> Uint owns the unsigned text grammar, so even `-0`
+    // is rejected rather than folding to zero.
+    let policy = BuiltinCastPolicyId::StringToNumeric(NumericScalar::Uint);
+
+    let result = apply_builtin_cast_policy(
+        policy,
+        &BuiltinCastLiteral::String(u32::MAX.to_string()),
+        NumericProfile::STANDARD,
+    )
+    .expect("u32::MAX text should fold");
+    assert_eq!(result, BuiltinCastLiteral::Uint(u32::MAX as u64));
+
+    for text in ["-0", "-1", "4294967296"] {
+        let error = apply_builtin_cast_policy(
+            policy,
+            &BuiltinCastLiteral::String(text.to_string()),
+            NumericProfile::STANDARD,
+        )
+        .expect_err("signed or overflowing Uint text should fail");
+        assert_eq!(error.code, BuiltinErrorCode::IntParseOutOfRange);
+    }
+}

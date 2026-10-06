@@ -3,10 +3,15 @@ A cast needs a clear destination type.
 These are supported cast targets:
 
 - `Bool`
-- the numeric types: `Int`, `Float`, the fixed-width integers and binary floats, `Byte`, and the exact `Dec` family
+- the numeric types: `Int`, `Uint`, `Float`, the fixed-width integers and binary floats, `Byte`, and the exact `Dec` family
 - `String`
 - `Char`
 - `Error`
+
+`Uint` converts implicitly to `Float` at value-receiving and mixed-operator
+boundaries, and explicitly with `cast` in both directions with `Int`,
+`Float`, fixed integers and the `Dec` family. `Uint` and `Int` need an
+explicit cast between each other even when the values would fit.
 
 Not every source type can convert to every target. `Byte` and `U8` convert in
 both directions without failing, and other `Byte` numeric conversions go through

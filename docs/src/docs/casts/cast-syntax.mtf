@@ -12,17 +12,23 @@ target after the expression and no constructor-like conversion form.
     half F16 = cast octet
     raw Byte = cast octet
     money Dec2 = cast count
+    total Uint = 1 + 2
+    back Int = cast total catch then 0
 ]
 
-Each conversion above is infallible: `U8` fits `U64`, `Byte` and the `F16`
-finite range, and a whole number scales exactly into `Dec2`. Fixed-width and
+Each conversion above is infallible except the last: `U8` fits `U64`, `Byte` and the `F16`
+finite range, and a whole number scales exactly into `Dec2`. The `Uint`-to-`Int`
+cast is fallible and needs its handler. Fixed-width and
 `Byte` cast policies and evidence are implemented in the frontend; the
-frontend also implements compiler-owned `Dec` cast policies. HTML-JS
-executes fixed-width, `Byte` and `Dec` runtime casts. Its exercised
+frontend also implements compiler-owned `Uint` and `Dec` cast policies. HTML-JS
+executes fixed-width, `Byte`, `Uint` and `Dec` runtime casts. Its exercised
 `Dec` casts include infallible integer-to-`Dec` and scale widening; scale
 narrowing and `Dec`-to-integer conversions are exact and fallible.
 `String`-to-`Dec` parsing is fallible and consumes the whole existing
-numeric grammar exactly; `Dec`-to-`String` uses canonical formatting.
+numeric grammar exactly; `Dec`-to-`String` uses canonical formatting. `Uint`
+casts use complete semantic ranges: `Uint -> Int` and `Int -> Uint` are
+fallible in both directions, `Uint -> Float` is direct and infallible, and
+same-type `Uint` casts stay invalid.
 
 HTML-Wasm executes infallible numeric expression casts that do not involve
 `F16`, as well as integer-to-`F16` and widening `F16`-to-`F32`/`F64`, plus

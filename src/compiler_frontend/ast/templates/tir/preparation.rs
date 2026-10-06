@@ -1221,8 +1221,20 @@ fn collect_source_constant_paths(
         }
         ExpressionKind::Runtime(rpn) => {
             for item in &rpn.items {
-                if let ExpressionRpnItem::Operand(operand) = item {
-                    collect_source_constant_paths(operand, source_scope, paths);
+                match item {
+                    ExpressionRpnItem::Operand(operand) => {
+                        collect_source_constant_paths(operand, source_scope, paths);
+                    }
+                    ExpressionRpnItem::Operator { .. } => {}
+                    // Pending syntax never survives evaluation; flag it in debug builds so the
+                    // invalid boundary is visible instead of silently collecting no paths.
+                    ExpressionRpnItem::PendingNumericLiteral { .. }
+                    | ExpressionRpnItem::PendingGroup { .. } => {
+                        debug_assert!(
+                            false,
+                            "pending expression syntax reached TIR source-constant collection"
+                        );
+                    }
                 }
             }
         }

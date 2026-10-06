@@ -1,0 +1,3 @@
+caught_floor Dec0 = 1 // 0 catch:
+    then 0
+;

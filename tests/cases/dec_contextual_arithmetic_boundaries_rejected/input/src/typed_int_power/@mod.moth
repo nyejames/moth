@@ -1,0 +1,4 @@
+reject_typed_int_power |value Int| -> String:
+    result Dec4 = value ^ 2
+    return [result]
+;

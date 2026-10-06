@@ -228,6 +228,8 @@ impl Hash for FiniteFloat {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum PublicFoldedValue {
     Int(i64),
+    /// One profile-sized unsigned integer value; follows the selected `Int` width.
+    Uint(u64),
     /// An exact decimal coefficient paired with its canonical scale.
     ///
     /// `NumberValue` shares immutable coefficient storage, so cloning this owned interface value
@@ -310,6 +312,7 @@ impl PublicFoldedValue {
             }
             Self::OptionSome(value) => value.visit_type_identities(visitor),
             Self::Int(_)
+            | Self::Uint(_)
             | Self::Number(_)
             | Self::Float(_)
             | Self::FixedScalar(_)
@@ -443,6 +446,7 @@ pub(crate) fn convert_expression_to_folded_value(
 
     match &expression.kind {
         ExpressionKind::Int(value) => Ok(PublicFoldedValue::Int(*value)),
+        ExpressionKind::Uint(value) => Ok(PublicFoldedValue::Uint(*value)),
         ExpressionKind::Float(value) => Ok(PublicFoldedValue::Float(FiniteFloat::new(*value)?)),
         ExpressionKind::Number(value) => {
             project_number_value(value, expression.type_id, type_environment)
@@ -594,6 +598,7 @@ pub(crate) fn convert_const_value_to_folded_value_with_provenance(
 
         match visit {
             ConstValueVisit::Int(value) => Ok(PublicFoldedValue::Int(value)),
+            ConstValueVisit::Uint(value) => Ok(PublicFoldedValue::Uint(value)),
             ConstValueVisit::Float(value) => Ok(PublicFoldedValue::Float(FiniteFloat::new(value)?)),
             ConstValueVisit::Number(value) => {
                 project_number_value(value, metadata.type_id, type_environment)

@@ -958,6 +958,7 @@ fn nested_structural_piece_lists<'value>(
         HirConstValue::OptionSome(inner) => nested_structural_piece_lists(inner, piece_lists),
 
         HirConstValue::Int(_)
+        | HirConstValue::Uint(_)
         | HirConstValue::Float(_)
         | HirConstValue::FixedScalar(_)
         | HirConstValue::Number(_)

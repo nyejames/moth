@@ -6,6 +6,7 @@
 
 use std::collections::HashSet;
 
+use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
@@ -124,6 +125,7 @@ pub(crate) fn classify_expression_const_evaluable_with_nested_template(
 ) -> Result<bool, TemplateError> {
     match &expression.kind {
         ExpressionKind::Int(_)
+        | ExpressionKind::Uint(_)
         | ExpressionKind::Float(_)
         | ExpressionKind::FixedScalar(_)
         | ExpressionKind::Number(_)
@@ -154,12 +156,24 @@ pub(crate) fn classify_expression_const_evaluable_with_nested_template(
         ExpressionKind::Runtime(rpn) => {
             let mut const_evaluable = true;
             for item in &rpn.items {
-                if let ExpressionRpnItem::Operand(operand) = item {
-                    const_evaluable &= classify_expression_const_evaluable_with_nested_template(
-                        operand,
-                        loop_binding_paths,
-                        nested_template,
-                    )?;
+                match item {
+                    ExpressionRpnItem::Operand(operand) => {
+                        const_evaluable &=
+                            classify_expression_const_evaluable_with_nested_template(
+                                operand,
+                                loop_binding_paths,
+                                nested_template,
+                            )?;
+                    }
+                    ExpressionRpnItem::Operator { .. } => {}
+                    // Pending syntax never survives evaluation; this fallible constness walk
+                    // reports the broken invariant instead of treating it as const-evaluable.
+                    ExpressionRpnItem::PendingNumericLiteral { .. }
+                    | ExpressionRpnItem::PendingGroup { .. } => {
+                        return Err(
+                            pending_expression_item_bug("TIR constness classification").into()
+                        );
+                    }
                 }
             }
             Ok(const_evaluable)

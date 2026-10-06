@@ -1,0 +1,4 @@
+reject_byte_mix |value Uint, octet Byte| -> String:
+    result = value + octet
+    return [result]
+;

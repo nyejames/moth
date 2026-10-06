@@ -1,0 +1,3 @@
+bad |value Bool| -> Uint:
+    return cast value
+;

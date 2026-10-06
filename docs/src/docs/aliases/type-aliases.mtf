@@ -25,7 +25,7 @@ The syntax is `AliasName as ExistingType`. Alias names follow type-name casing. 
 
 An alias target may be:
 
-- a builtin scalar such as `Int`, `Float`, `Bool`, `Char` or `String`
+- a builtin scalar such as `Int`, `Uint`, `Float`, `Bool`, `Char` or `String`
 - a struct or choice declared in the same file
 - an option such as `String?`
 - a growable collection such as `{String}`

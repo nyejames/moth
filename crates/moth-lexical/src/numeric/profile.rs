@@ -44,6 +44,18 @@ impl IntWidth {
     pub fn contains(self, value: i64) -> bool {
         value >= self.min_value() && value <= self.max_value()
     }
+
+    /// Largest `Uint` value representable at this width.
+    ///
+    /// WHY: `Uint` follows the selected `Int` width, so its range is `0` through
+    ///      this maximum. Callers range-check `u64` payloads against this one fact
+    ///      instead of hard-coding unsigned limits per call site.
+    pub fn unsigned_max_value(self) -> u64 {
+        match self {
+            IntWidth::Bits32 => u32::MAX as u64,
+            IntWidth::Bits64 => u64::MAX,
+        }
+    }
 }
 
 /// Precision of the boundary `Float` type.
@@ -77,6 +89,18 @@ impl FloatPrecision {
             FloatPrecision::Bits64 => value as f64,
             FloatPrecision::Bits32 => f64::from(value as f32),
         }
+    }
+
+    /// Convert a `Uint` value to this precision with a single rounding.
+    ///
+    /// WHY: `Uint64 -> Float32` must round directly from the `u64` payload at
+    ///      the destination precision. Routing through an `f64` intermediate
+    ///      double-rounds (for example `9007199791611905` lands on `0x5a000000`
+    ///      instead of `0x5a000001`), so this converts from the integer form.
+    pub fn round_uint(self, value: u64) -> f64 {
+        use super::precision::BinaryFloatPrecision;
+
+        BinaryFloatPrecision::from(self).round_integer(i128::from(value))
     }
 }
 

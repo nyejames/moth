@@ -95,7 +95,7 @@ duration is read.
 ### No operator surface
 
 Time values support no arithmetic and no comparison. The AST arithmetic policy accepts only
-`Int`/`Float` pairs, the comparison policy rejects same-type non-comparable categories, and
+numeric operand pairs, the comparison policy rejects same-type non-comparable categories, and
 `TypeEnvironment::supports_runtime_equality` returns false for external types. There is no
 registration hook for an operator, so all five arithmetic functions are named functions.
 

@@ -744,6 +744,83 @@ fn validator_accepts_valid_fixed_numeric_ops() {
 }
 
 #[test]
+fn validator_accepts_uint_numeric_ops_and_rejects_mixed_or_negated_pairs() {
+    // Uint arithmetic validates in its own domain; mixed Uint/Int
+    // operands and Uint negation never reach HIR, so both are rejected here.
+    let uint_type = builtin_type_ids::UINT;
+    let int_type = builtin_type_ids::INT;
+
+    for operator in [
+        NumericOperator::Add,
+        NumericOperator::Subtract,
+        NumericOperator::Multiply,
+        NumericOperator::IntegerDivide,
+        NumericOperator::Remainder,
+        NumericOperator::Power,
+    ] {
+        validate_numeric_op_for_test(
+            HirNumericOp {
+                operator,
+                domain: NumericScalar::Uint,
+            },
+            &[uint_type, uint_type],
+            uint_type,
+        )
+        .expect("valid Uint arithmetic should pass HIR validation");
+    }
+
+    // Uint `/` computes in Float, so a `/` NumericOp in the Uint domain itself
+    // is rejected: lowering must convert the operands before emitting it.
+    let error = validate_numeric_op_for_test(
+        HirNumericOp {
+            operator: NumericOperator::Divide,
+            domain: NumericScalar::Uint,
+        },
+        &[uint_type, uint_type],
+        uint_type,
+    )
+    .expect_err("Uint division must leave the Uint domain before NumericOp");
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+
+    let error = validate_numeric_op_for_test(
+        HirNumericOp {
+            operator: NumericOperator::Add,
+            domain: NumericScalar::Uint,
+        },
+        &[uint_type, int_type],
+        uint_type,
+    )
+    .expect_err("mixed Uint/Int operands must be converted before NumericOp");
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+
+    let error = validate_numeric_op_for_test(
+        HirNumericOp {
+            operator: NumericOperator::Negate,
+            domain: NumericScalar::Uint,
+        },
+        &[uint_type],
+        uint_type,
+    )
+    .expect_err("Uint negation has no operator domain");
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+}
+
+#[test]
+fn validator_accepts_uint_cast_pairs_and_comparisons() {
+    // Uint participates in fallible CastOp narrowing and in exact
+    // Uint/Uint and Uint/Int comparisons without any conversion failure.
+    validate_number_cast_op_for_test(NumericScalar::Uint, NumericScalar::Int)
+        .expect("Uint-to-Int narrowing should use a fallible CastOp");
+    validate_number_cast_op_for_test(NumericScalar::Int, NumericScalar::Uint)
+        .expect("Int-to-Uint narrowing should use a fallible CastOp");
+
+    validate_comparison_for_test(builtin_type_ids::UINT, builtin_type_ids::UINT, HirBinOp::Lt)
+        .expect("exact Uint comparison should remain valid");
+    validate_comparison_for_test(builtin_type_ids::UINT, builtin_type_ids::INT, HirBinOp::Gt)
+        .expect("exact Uint/Int comparison should remain valid");
+}
+
+#[test]
 fn validator_accepts_number_operator_scale_rules_and_int_power_exponent() {
     let scale_two = NumberScale::new(2).expect("test Dec scale is valid");
 

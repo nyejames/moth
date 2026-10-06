@@ -1,0 +1,3 @@
+step Int = 1
+mixed ~Uint = 5
+mixed += step

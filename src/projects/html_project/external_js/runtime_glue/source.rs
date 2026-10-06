@@ -177,6 +177,8 @@ enum ReturnAdapter {
     Identity,
     NativeInt32,
     NativeInt64,
+    NativeUint32,
+    NativeUint64,
     NativeFloat32,
     AbiI32,
     AbiF64,
@@ -230,6 +232,7 @@ fn is_numeric_signature_type(signature_type: &ExternalSignatureType) -> bool {
     matches!(
         signature_type,
         ExternalSignatureType::NativeInt
+            | ExternalSignatureType::NativeUint
             | ExternalSignatureType::NativeFloat
             | ExternalSignatureType::Abi(ExternalAbiType::I32 | ExternalAbiType::F64)
     )
@@ -255,6 +258,12 @@ fn return_adapter_for_type(
         }
         ExternalSignatureType::NativeInt if numeric_profile.int_width == IntWidth::Bits64 => {
             ReturnAdapter::NativeInt64
+        }
+        ExternalSignatureType::NativeUint if numeric_profile.int_width == IntWidth::Bits32 => {
+            ReturnAdapter::NativeUint32
+        }
+        ExternalSignatureType::NativeUint if numeric_profile.int_width == IntWidth::Bits64 => {
+            ReturnAdapter::NativeUint64
         }
         ExternalSignatureType::NativeFloat
             if numeric_profile.float_precision == FloatPrecision::Bits32 =>
@@ -285,14 +294,37 @@ fn prepare_call_arguments(
 
         if matches!(
             parameter_type,
-            ExternalSignatureType::NativeInt
+            ExternalSignatureType::NativeInt | ExternalSignatureType::NativeUint
                 if numeric_profile.int_width == IntWidth::Bits64
         ) {
-            writeln!(
-                &mut prelude,
-                "    if (typeof arg{index} !== \"bigint\") {{\n        throw new RangeError(\"Native Int64 parameter must be a BigInt\");\n    }}\n    const __moth_arg{index}_number = Number(arg{index});\n    if (!Number.isSafeInteger(__moth_arg{index}_number)) {{\n        throw new RangeError(\"Native Int64 parameter is not exactly representable as a JavaScript Number\");\n    }}"
-            )
-            .expect("writing generated wrapper checks into a String cannot fail");
+            // Int64 and Uint64 travel as BigInt inside Moth JS but cross to foreign
+            // JS as a Number. The unsigned lane additionally rejects negative or
+            // unsafe values before precision can be lost; it never widens the bridge.
+            let is_unsigned = matches!(parameter_type, ExternalSignatureType::NativeUint);
+            let (carrier, exactness_message) = if is_unsigned {
+                (
+                    "Uint64",
+                    "Native Uint64 parameter is not exactly representable as a JavaScript Number",
+                )
+            } else {
+                (
+                    "Int64",
+                    "Native Int64 parameter is not exactly representable as a JavaScript Number",
+                )
+            };
+            if is_unsigned {
+                writeln!(
+                    &mut prelude,
+                    "    if (typeof arg{index} !== \"bigint\") {{\n        throw new RangeError(\"Native {carrier} parameter must be a BigInt\");\n    }}\n    if (arg{index} < 0n || arg{index} > 9007199254740991n) {{\n        throw new RangeError(\"Native Uint64 parameter is outside the safe Number range\");\n    }}\n    const __moth_arg{index}_number = Number(arg{index});\n    if (!Number.isSafeInteger(__moth_arg{index}_number)) {{\n        throw new RangeError(\"{exactness_message}\");\n    }}"
+                )
+                .expect("writing generated wrapper checks into a String cannot fail");
+            } else {
+                writeln!(
+                    &mut prelude,
+                    "    if (typeof arg{index} !== \"bigint\") {{\n        throw new RangeError(\"Native {carrier} parameter must be a BigInt\");\n    }}\n    const __moth_arg{index}_number = Number(arg{index});\n    if (!Number.isSafeInteger(__moth_arg{index}_number)) {{\n        throw new RangeError(\"{exactness_message}\");\n    }}"
+                )
+                .expect("writing generated wrapper checks into a String cannot fail");
+            }
             write!(&mut arguments, "__moth_arg{index}_number")
                 .expect("writing generated wrapper arguments into a String cannot fail");
         } else {
@@ -303,6 +335,17 @@ fn prepare_call_arguments(
                 writeln!(
                     &mut prelude,
                     "    if (typeof arg{index} !== \"number\" || !Number.isInteger(arg{index}) || arg{index} < -2147483648 || arg{index} > 2147483647) {{\n        throw new RangeError(\"External I32 parameter is outside signed 32-bit range\");\n    }}"
+                )
+                .expect("writing generated wrapper checks into a String cannot fail");
+            }
+            if matches!(parameter_type, ExternalSignatureType::NativeUint)
+                && numeric_profile.int_width == IntWidth::Bits32
+            {
+                // Uint32 rides an exact Number. Integer -0 canonicalises through the
+                // `=== 0` check shared with the Int32/I32 return gates.
+                writeln!(
+                    &mut prelude,
+                    "    if (typeof arg{index} !== \"number\" || !Number.isInteger(arg{index}) || arg{index} < 0 || arg{index} > 4294967295) {{\n        throw new RangeError(\"Native Uint32 parameter is outside unsigned 32-bit range\");\n    }}\n    arg{index} = arg{index} === 0 ? 0 : arg{index};"
                 )
                 .expect("writing generated wrapper checks into a String cannot fail");
             }
@@ -346,27 +389,55 @@ fn adapted_return_body(
                 "{indent}const {raw_value} = {value_expression};\n{indent}const {adapted_value} = typeof {raw_value} === \"number\" ? Math.fround({raw_value}) : Number.NaN;\n{indent}return {returned_value};"
             )
         }
-        // Native Int32 and fixed I32 share a value gate, not a semantic identity. Integer
-        // zero must be canonical before a later float conversion can observe its sign.
-        ReturnAdapter::NativeInt32 | ReturnAdapter::AbiI32 => {
-            let boundary_message = if adapter == ReturnAdapter::NativeInt32 {
-                "External native Int32 result is not an integer within the signed 32-bit range"
-            } else {
-                "External I32 result is outside signed 32-bit range"
+        // Native Int32, native Uint32 and fixed I32 share one value-gate shape, not a
+        // semantic identity. Integer zero must be canonical before a later float
+        // conversion can observe its sign. Only the bounds and the message differ:
+        // the unsigned gate rejects negatives where the signed gates admit them.
+        ReturnAdapter::NativeInt32 | ReturnAdapter::NativeUint32 | ReturnAdapter::AbiI32 => {
+            let (boundary_message, minimum, maximum): (&str, i64, i64) = match adapter {
+                ReturnAdapter::NativeUint32 => (
+                    "External native Uint32 result is not an integer within the unsigned 32-bit range",
+                    0,
+                    4294967295,
+                ),
+                ReturnAdapter::NativeInt32 => (
+                    "External native Int32 result is not an integer within the signed 32-bit range",
+                    -2147483648,
+                    2147483647,
+                ),
+                _ => (
+                    "External I32 result is outside signed 32-bit range",
+                    -2147483648,
+                    2147483647,
+                ),
             };
             let returned_value = success_value("__moth_external_canonical_i32");
             format!(
-                "{indent}const __moth_external_i32 = {value_expression};\n{indent}if (typeof __moth_external_i32 !== \"number\" || !Number.isInteger(__moth_external_i32) || __moth_external_i32 < -2147483648 || __moth_external_i32 > 2147483647) {{\n{indent}    throw new RangeError(\"{boundary_message}\");\n{indent}}}\n{indent}const __moth_external_canonical_i32 = __moth_external_i32 === 0 ? 0 : __moth_external_i32;\n{indent}return {returned_value};"
+                "{indent}const __moth_external_i32 = {value_expression};\n{indent}if (typeof __moth_external_i32 !== \"number\" || !Number.isInteger(__moth_external_i32) || __moth_external_i32 < {minimum} || __moth_external_i32 > {maximum}) {{\n{indent}    throw new RangeError(\"{boundary_message}\");\n{indent}}}\n{indent}const __moth_external_canonical_i32 = __moth_external_i32 === 0 ? 0 : __moth_external_i32;\n{indent}return {returned_value};"
             )
         }
-        ReturnAdapter::NativeInt64 => {
+        // Int64 and Uint64 share one safe-Number bridge gate: check bounds before
+        // BigInt conversion, since safe JavaScript integers are a strict subset of
+        // either Moth range. BigInt(number) already canonicalizes integer -0.
+        // The unsigned lane narrows the bridge to non-negative safe integers; it
+        // never extends the Moth Uint64 range.
+        ReturnAdapter::NativeInt64 | ReturnAdapter::NativeUint64 => {
             let returned_value = success_value("__moth_external_integer");
-            // Safe JavaScript integers are a strict subset of Int64, so check bounds before
-            // BigInt conversion. BigInt(number) already canonicalizes integer -0.
-            let minimum = numeric_profile.int_width.min_value();
-            let maximum = numeric_profile.int_width.max_value();
+            let (boundary_message, minimum, maximum) = if adapter == ReturnAdapter::NativeUint64 {
+                (
+                    "External native Uint64 result is not a safe integer within the foreign Number range",
+                    0,
+                    9007199254740991,
+                )
+            } else {
+                (
+                    "External native Int64 result is not a safe integer within the Moth Int64 range",
+                    numeric_profile.int_width.min_value(),
+                    numeric_profile.int_width.max_value(),
+                )
+            };
             format!(
-                "{indent}const __moth_external_number = {value_expression};\n{indent}if (typeof __moth_external_number !== \"number\" || !Number.isSafeInteger(__moth_external_number) || __moth_external_number < {minimum} || __moth_external_number > {maximum}) {{\n{indent}    throw new RangeError(\"External native Int64 result is not a safe integer within the Moth Int64 range\");\n{indent}}}\n{indent}const __moth_external_integer = BigInt(__moth_external_number);\n{indent}return {returned_value};"
+                "{indent}const __moth_external_number = {value_expression};\n{indent}if (typeof __moth_external_number !== \"number\" || !Number.isSafeInteger(__moth_external_number) || __moth_external_number < {minimum} || __moth_external_number > {maximum}) {{\n{indent}    throw new RangeError(\"{boundary_message}\");\n{indent}}}\n{indent}const __moth_external_integer = BigInt(__moth_external_number);\n{indent}return {returned_value};"
             )
         }
         ReturnAdapter::AbiF64 => {

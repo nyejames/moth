@@ -1,0 +1,36 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 1
+reason = "compile_time_evaluation_error.divide_by_zero"
+path = "input/static_division/@mod.moth"
+line = 2
+column = 14
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 2
+reason = "compile_time_evaluation_error.invalid_exponent"
+path = "input/static_exponent/@mod.moth"
+line = 2
+column = 14
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 3
+reason = "compile_time_evaluation_error.divide_by_zero"
+path = "input/static_floor/@mod.moth"
+line = 1
+column = 23
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 4
+reason = "compile_time_evaluation_error.divide_by_zero"
+path = "input/static_remainder/@mod.moth"
+line = 1
+column = 27

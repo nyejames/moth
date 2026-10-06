@@ -49,7 +49,7 @@ Build configuration values are typed primitive values resolved before module AST
 
 Ordinary constants still require initializers. Only a marked configuration contract may omit one. Reject inferred `#=` configuration contracts, runtime or mutable bindings, multi-bind targets, parameters, fields, function-local declarations and type-position or value-position directives.
 
-Accepted types stay `String`, `Int`, `Float`, `Bool`, `Char` and one optional layer around those primitives.
+Accepted types stay `String`, `Int`, `Float`, `Bool`, `Char` and one optional layer around those primitives. The `Int`-only build-input scope is intentional: there is no `#Config` of `Uint`, `Dec` or fixed-width type, even though those types accept ordinary literals elsewhere.
 
 ### Explicit-only providers
 

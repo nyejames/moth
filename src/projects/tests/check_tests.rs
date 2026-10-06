@@ -853,6 +853,6 @@ fn nested_conditional_source(depth: usize) -> String {
     for level in (1..=depth).rev() {
         source.push_str(&format!("{};\n", "    ".repeat(level)));
     }
-    source.push_str("    return seed\n;\n\nio.line([: [nested(1)] ])\n");
+    source.push_str("    return seed\n;\n\nio.line([nested(1)])\n");
     source
 }

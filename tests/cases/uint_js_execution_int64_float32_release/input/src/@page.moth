@@ -1,0 +1,115 @@
+-- Task 3 under Int64/Float32: Uint64 values above i64::MAX execute through
+-- the shared BigInt-carrier helpers with unsigned bounds, Uint/Int
+-- comparisons stay exact in both directions, and implicit Uint returns round
+-- directly at Float32 precision with no binary64 detour.
+
+add_above |a Uint, b Uint| -> Uint, Error!:
+    return a + b
+;
+
+mul_above |a Uint, b Uint| -> Uint, Error!:
+    return a * b
+;
+
+sub_above |a Uint, b Uint| -> Uint, Error!:
+    return a - b
+;
+
+huge Uint = 18446744073709551615
+above Uint = 9223372036854775808
+max_signed Int = 9223372036854775807
+min_signed Int = -9223372036854775808
+
+kept_above Uint = add_above(above, 100) catch:
+    then 0
+;
+kept_huge Uint = add_above(huge, 0) catch:
+    then 0
+;
+huge_plus_one Uint = add_above(huge, 1) catch:
+    then 7
+;
+zero_minus_one Uint = sub_above(0, 1) catch:
+    then 9
+;
+exact_product Uint = mul_above(1000000000, 18446744073) catch:
+    then 0
+;
+square_overflow Uint = mul_above(4294967296, 4294967296) catch:
+    then 8
+;
+
+above_less |value Uint, limit Uint| -> Bool:
+    return value < limit
+;
+
+signed_below |limit Int, value Uint| -> Bool:
+    return limit < value
+;
+
+signed_above |value Uint, limit Int| -> Bool:
+    return value > limit
+;
+
+above_is_less Bool = above_less(above, huge)
+max_below_above Bool = signed_below(max_signed, above)
+above_above_max Bool = signed_above(above, max_signed)
+min_below_zero Bool = signed_below(min_signed, 0)
+zero_above_min Bool = signed_above(0, min_signed)
+
+-- Implicit Uint returns round directly at Float32 precision: 9007199791611905
+-- becomes bits 0x5a000001 (spelled 9007200000000000), while the forbidden
+-- binary64 detour would give 0x5a000000. The explicit cast of a runtime Uint
+-- rounds identically.
+implicit_to_float |value Uint| -> Float:
+    return value
+;
+
+explicit_to_float |value Uint| -> Float:
+    return cast value
+;
+
+implicit_witness Float = implicit_to_float(9007199791611905)
+explicit_witness Float = explicit_to_float(9007199791611905)
+folded_witness #Uint = 9007199791611905
+folded_eq #Bool = folded_witness is 9007200328482816.0
+dynamic_eq Bool = implicit_witness is 9007200328482816.0
+explicit_eq Bool = explicit_witness is 9007200328482816.0
+
+-- Dynamic Uint to Int and Int to Uint cast failures recover through catch.
+uint_to_int |value Uint| -> Int, Error!:
+    return cast! value
+;
+
+int_to_uint |value Int| -> Uint, Error!:
+    return cast! value
+;
+
+huge_to_int Int = uint_to_int(huge) catch:
+    then -1
+;
+neg_to_uint Uint = int_to_uint(-7) catch:
+    then 11
+;
+above_to_int Int = uint_to_int(above) catch:
+    then -2
+;
+
+-- Compound failure stores nothing and recovery keeps the entry value.
+accumulate |target ~Uint, delta Uint| -> Uint, Error!:
+    target += delta
+    return target
+;
+
+growing ~Uint = 18446744073709551611
+grown Uint = accumulate(~growing, 5) catch:
+    then 13
+;
+folded_above #Uint = 9223372036854775808
+folded_above_kept Uint = folded_above + 0
+dynamic_above Uint = add_above(above, 0) catch:
+    then 0
+;
+folded_dynamic_agree Bool = folded_above_kept is dynamic_above
+
+[:uint int64float32 wide=[kept_above]/[kept_huge]/[huge_plus_one]/[zero_minus_one] prod=[exact_product]/[square_overflow] compare=[above_is_less]/[max_below_above]/[above_above_max]/[min_below_zero]/[zero_above_min] implicit=[implicit_witness]/[explicit_witness]/[folded_eq]/[dynamic_eq]/[explicit_eq] casts=[huge_to_int]/[neg_to_uint]/[above_to_int] compound=[growing]/[grown] agree=[folded_dynamic_agree]]

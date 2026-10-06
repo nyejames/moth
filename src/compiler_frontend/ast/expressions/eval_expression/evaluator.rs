@@ -28,6 +28,7 @@ use crate::compiler_frontend::instrumentation::{
 };
 use crate::compiler_frontend::numeric_text::parse::{
     materialize_fixed_scalar, materialize_float, materialize_int, materialize_number,
+    materialize_uint,
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::SourceSpan;
@@ -49,10 +50,10 @@ use super::typing_error::ExpressionTypingError;
 
 /// Resolve a parsed expression fragment into a fully typed AST `Expression`.
 ///
-/// WHAT: orders RPN, resolves literal materialization and operator typing in one pass, then folds
-///       and validates the final result.
-/// WHY: immediate peers select literal domains while the canonical operator policy remains the
-///      sole source of result types.
+/// WHAT: orders unresolved syntax, selects literal contexts and resolves operator types before
+///       folding and final receiving validation.
+/// WHY: Dec/Uint receivers and local peers choose literal domains before arithmetic, while the
+///      canonical operator policy remains the sole source of result types.
 pub fn evaluate_expression(
     context: &ScopeContext,
     nodes: Vec<ExpressionRpnItem>,
@@ -62,9 +63,9 @@ pub fn evaluate_expression(
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
 ) -> Result<Expression, ExpressionTypingError> {
-    let direct_destination =
-        direct_numeric_destination(&nodes, type_interner.environment(), expected_type);
     let (mut ordered_nodes, span) = ordering::order_expression_nodes(nodes)?;
+    let literal_destination =
+        numeric_literal_destination(&ordered_nodes, type_interner.environment(), expected_type);
 
     // Fast path: a single R-value needs no operator resolution or RPN assembly.
     if ordered_nodes.len() == 1 {
@@ -75,7 +76,7 @@ pub fn evaluate_expression(
             materialize_pending_literal(
                 &mut ordered_nodes,
                 0,
-                direct_destination,
+                literal_destination,
                 context,
                 string_table,
             )?;
@@ -109,7 +110,7 @@ pub fn evaluate_expression(
             *expected_type = ExpectedType::Known(only_expression.type_id);
         } else if matches!(
             expected_type,
-            ExpectedType::Infer | ExpectedType::DirectLiteral(_)
+            ExpectedType::Infer | ExpectedType::NumericLiteral(_)
         ) {
             *expected_type = ExpectedType::Known(only_expression.type_id);
         }
@@ -121,7 +122,7 @@ pub fn evaluate_expression(
     let resolved = resolve_expression_result_type(
         &mut ordered_nodes,
         span,
-        direct_destination,
+        literal_destination,
         context,
         string_table,
         type_interner.environment(),
@@ -138,7 +139,7 @@ pub fn evaluate_expression(
 
     if matches!(
         expected_type,
-        ExpectedType::Infer | ExpectedType::DirectLiteral(_)
+        ExpectedType::Infer | ExpectedType::NumericLiteral(_)
     ) {
         *expected_type = ExpectedType::Known(resolved_type);
     }
@@ -156,8 +157,9 @@ pub fn evaluate_expression(
     let stack_span = ordered_nodes.iter().find_map(|item| match item {
         ExpressionRpnItem::Operand(expression) => expression.span,
         ExpressionRpnItem::Operator { .. } => None,
-        // Resolution replaces pending literals before folding.
-        ExpressionRpnItem::PendingNumericLiteral { .. } => None,
+        // Evaluation removes both pending forms before folding.
+        ExpressionRpnItem::PendingNumericLiteral { .. }
+        | ExpressionRpnItem::PendingGroup { .. } => None,
     });
     // Runtime RPN needs an owned value mode for the final expression node.
     let value_mode = value_mode.as_owned();
@@ -256,6 +258,7 @@ fn is_matching_materialized_numeric_value(
         && matches!(
             &expression.kind,
             ExpressionKind::Int(_)
+                | ExpressionKind::Uint(_)
                 | ExpressionKind::Float(_)
                 | ExpressionKind::FixedScalar(_)
                 | ExpressionKind::Number(_)
@@ -310,11 +313,11 @@ fn substitute_explicit_numeric_constants(
     }
 }
 
-/// Materialise a pending literal using its immediate numeric peer or natural value mode.
+/// Materialise one pending literal at its selected destination or natural value mode.
 ///
 /// WHAT: replaces one deferred RPN item with a typed operand and returns its semantic type.
-/// WHY: direct literal parsing must preserve lexical facts until either a peer or the receiving
-///      boundary chooses the materialisation domain.
+/// WHY: retained lexical facts allow receiving and peer contexts to choose a domain without
+///      first producing a bounded integer or binary-float intermediate.
 pub(super) fn materialize_pending_literal(
     nodes: &mut [ExpressionRpnItem],
     index: usize,
@@ -343,6 +346,7 @@ pub(super) fn materialize_pending_literal(
 
         let destination = destination.filter(|destination| match destination {
             PendingLiteralDestination::Int => token.kind == NumericLiteralKind::WholeNumber,
+            PendingLiteralDestination::Uint => token.kind == NumericLiteralKind::WholeNumber,
             PendingLiteralDestination::Float => true,
             PendingLiteralDestination::FixedScalar(scalar) => {
                 literal_kind_initialises(token.kind, *scalar)
@@ -362,6 +366,18 @@ pub(super) fn materialize_pending_literal(
                     CompilerDiagnostic::invalid_number_literal(token.source_text, reason, *span)
                 })?;
                 Expression::int(value, *span, value_mode.clone())
+            }
+            Some(PendingLiteralDestination::Uint) => {
+                let value = materialize_uint(
+                    token,
+                    token.sign,
+                    context.numeric_profile.int_width,
+                    string_table,
+                )
+                .map_err(|reason| {
+                    CompilerDiagnostic::invalid_number_literal(token.source_text, reason, *span)
+                })?;
+                Expression::uint(value, *span, value_mode.clone())
             }
             Some(PendingLiteralDestination::Float) => {
                 let value =
@@ -411,32 +427,39 @@ pub(super) fn materialize_pending_literal(
     Ok(type_id)
 }
 
-/// The direct destination when the whole fragment is one literal with a numeric expectation.
+/// Select a receiving literal destination after groups have been ordered.
 ///
-/// WHAT: returns the numeric destination only when the parsed nodes are exactly one pending
-///       literal and the expected type (or its option inner type) is numeric or `Byte`.
-/// WHY: "direct" means the literal is the entire receiving expression, so an operator result
-///      such as `1 + 1` never retags through its receiving annotation.
-fn direct_numeric_destination(
+/// Every numeric destination applies to a lone literal. Dec and Uint supply context through
+/// unresolved arithmetic, and already typed operands always retain their identities.
+fn numeric_literal_destination(
     nodes: &[ExpressionRpnItem],
     type_environment: &TypeEnvironment,
     expected_type: &ExpectedType,
 ) -> Option<PendingLiteralDestination> {
-    let [ExpressionRpnItem::PendingNumericLiteral { .. }] = nodes else {
-        return None;
-    };
-
     let expected_type_id = expected_type.literal_destination_type_id()?;
     let destination_type_id = type_environment
         .option_inner_type(expected_type_id)
         .unwrap_or(expected_type_id);
-    pending_literal_destination_for_type_id(destination_type_id, type_environment)
+    let destination =
+        pending_literal_destination_for_type_id(destination_type_id, type_environment)?;
+    if matches!(nodes, [ExpressionRpnItem::PendingNumericLiteral { .. }])
+        || matches!(
+            destination,
+            PendingLiteralDestination::Number { .. } | PendingLiteralDestination::Uint
+        )
+    {
+        Some(destination)
+    } else {
+        None
+    }
 }
 
 /// A semantic numeric or `Byte` destination eligible for pending-literal materialisation.
 #[derive(Clone, Copy)]
 pub(super) enum PendingLiteralDestination {
     Int,
+    /// Profile-sized unsigned integer destination; follows the selected `Int` width.
+    Uint,
     Float,
     FixedScalar(FixedScalar),
     /// One exact-decimal destination carrying its already-resolved local identity.
@@ -454,6 +477,9 @@ pub(super) fn pending_literal_destination_for_type_id(
     let builtins = type_environment.builtins();
     if type_id == builtins.int {
         return Some(PendingLiteralDestination::Int);
+    }
+    if type_id == builtins.uint {
+        return Some(PendingLiteralDestination::Uint);
     }
     if type_id == builtins.float {
         return Some(PendingLiteralDestination::Float);
@@ -517,15 +543,13 @@ fn default_materialised_literal(
     Ok(Expression::float(value, span, value_mode))
 }
 
-/// Compiler-bug error for a pending literal that escaped `evaluate_expression`.
+/// Compiler-bug error for pending expression syntax that escaped evaluation.
 ///
-/// WHAT: one shared constructor for the defensive arms in ordering, result typing and every
-///       later RPN consumer that must never observe a deferred literal.
-/// WHY: pending literals live only between parsing and evaluation; reaching any later stage
-///      is a broken invariant, not a source diagnostic.
-pub(crate) fn pending_numeric_literal_bug(function: &'static str) -> CompilerError {
+/// Pending groups disappear during ordering and pending literals during typing. Every later
+/// consumer handles their presence as a broken compiler invariant, not a source diagnostic.
+pub(crate) fn pending_expression_item_bug(function: &'static str) -> CompilerError {
     CompilerError::compiler_error(format!(
-        "Pending numeric literal reached {function}; evaluate_expression must resolve it first."
+        "Pending expression item reached {function}; evaluate_expression must resolve it first."
     ))
 }
 

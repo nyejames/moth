@@ -1,0 +1,46 @@
+-- Task 4 cross-profile under Int32/Float32: Uint32 boundary values execute in
+-- the Wasm lane through the shared I32 carrier with unsigned opcodes, unsigned
+-- rendering and exact Uint/Int comparisons. Literal arithmetic folds before the
+-- backend; dynamic comparisons, conversions and formatting exercise the
+-- supported scalar paths.
+compare_below |limit Int, edge Uint| -> String:
+    return if limit < edge then "yes" else "no"
+;
+
+compare_above |edge Uint, limit Int| -> String:
+    return if edge > limit then "yes" else "no"
+;
+
+compare_equal |edge Uint, other Uint| -> String:
+    return if edge is other then "yes" else "no"
+;
+
+just_below Uint = 2147483647 + 0
+just_above Uint = 2147483648 + 1
+top Uint = 4294967295 + 0
+
+above_text String = compare_below(2147483647, just_above)
+top_text String = compare_equal(top, 4294967295)
+neg_top_text String = compare_below(-1, top)
+wide_max_text String = compare_above(just_above, 2147483647)
+top_neg_text String = compare_above(top, -1)
+
+-- A Uint function parameter converts to the profile Float at runtime. Under
+-- Float32, 16777217 rounds to 16777216.
+implicit_to_float |value Uint| -> Float:
+    return value
+;
+
+explicit_to_float |value Uint| -> Float:
+    return cast value
+;
+
+witness Uint = 16777217
+implicit_witness Float = implicit_to_float(witness)
+explicit_witness Float = explicit_to_float(witness)
+witness_match_text String = if implicit_witness is 16777216.0 then "yes" else "no"
+witness_agree_text String = if implicit_witness is explicit_witness then "yes" else "no"
+fmt_above String = cast just_above
+fmt_top String = cast top
+
+[:uint wasm32f32 wide=[just_below]/[just_above]/[top] compare=[above_text]/[top_text]/[neg_top_text]/[wide_max_text]/[top_neg_text] float=[implicit_witness]/[explicit_witness]/[witness_match_text]/[witness_agree_text] fmt=[fmt_above]/[fmt_top]]

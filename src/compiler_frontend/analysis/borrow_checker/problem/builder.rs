@@ -715,6 +715,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             }
             HirExpressionKind::Load(_) | HirExpressionKind::Copy(_) => {}
             HirExpressionKind::Number(_)
+            | HirExpressionKind::Uint(_)
             | HirExpressionKind::Int(_)
             | HirExpressionKind::Float(_)
             | HirExpressionKind::FixedScalar(_)
@@ -760,6 +761,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 })
             }
             HirExpressionKind::Number(_)
+            | HirExpressionKind::Uint(_)
             | HirExpressionKind::Int(_)
             | HirExpressionKind::Float(_)
             | HirExpressionKind::FixedScalar(_)

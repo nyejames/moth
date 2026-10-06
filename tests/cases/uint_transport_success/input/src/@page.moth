@@ -1,0 +1,47 @@
+@shared keep_uint,
+    shared_count
+
+-- Task 1 transport: Uint literals reach every canonical type position with an
+-- exact u64 payload. No arithmetic context; each literal has an explicit
+-- Uint receiver.
+small Uint = 42
+separated Uint = 4_294_967_295
+zero Uint = 0
+
+maybe_missing Uint? = none
+maybe_present Uint? = 41
+
+Point = |
+    x Uint,
+    y Uint,
+|
+origin Point = Point(1, 2)
+
+Choice ::
+    Empty,
+    Count | value Uint |,
+;
+chosen Choice = Choice::Count(7)
+
+items {Uint} = {1, 2, 3}
+first = items.get(0) catch:
+    then 0
+;
+picked Uint = first
+
+Count as Uint
+
+aliased Count = 11
+
+Box type T = |
+    value T,
+|
+boxed Box of Uint = Box(13)
+
+kept Uint = keep_uint(17)
+
+missing_text Uint = if maybe_missing is |value| then value else 0
+present_text Uint = if maybe_present is |value| then value else 0
+chosen_count Uint = if chosen is Choice::Count(value) then value else 0
+
+[:uint transport small=[small] separated=[separated] zero=[zero] missing=[missing_text] present=[present_text] point=[origin.x]/[origin.y] choice=[chosen_count] first=[picked] alias=[aliased] boxed=[boxed.value] kept=[kept] shared=[shared_count]]

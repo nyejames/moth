@@ -1460,14 +1460,19 @@ impl<'a> HirBuilder<'a> {
             ));
         }
 
-        // Fixed numeric chunks render through the same numeric text policy as explicit casts, so a
-        // chunk never reaches `StringAppend` as a raw number. `Byte` is not numeric and keeps the
+        // Profile-sized `Uint` chunks render through the same numeric text policy as
+        // explicit casts, so a chunk never reaches `StringAppend` as a raw number.
+        // Fixed numeric chunks share this rule; `Byte` is not numeric and keeps the
         // append path; template validation rejects it before lowering.
-        if let Some(numeric) = self
-            .type_environment
-            .fixed_scalar(expression.ty)
-            .and_then(|scalar| BuiltinCastTarget::Fixed(scalar).numeric_scalar())
+        if expression.ty == self.type_environment.builtins().uint
+            || self
+                .type_environment
+                .fixed_scalar(expression.ty)
+                .and_then(|scalar| BuiltinCastTarget::Fixed(scalar).numeric_scalar())
+                .is_some()
         {
+            let numeric = NumericScalar::from_type_id(expression.ty, &self.type_environment)
+                .unwrap_or(NumericScalar::Uint);
             return Ok(self.make_expression(
                 span_ref,
                 HirExpressionKind::Cast {
@@ -1724,8 +1729,16 @@ fn runtime_template_append_candidate_for_expression(
                 runtime_template_append_candidate_for_expression(expression)
             }
             ExpressionRpnItem::Operator { .. } => None,
-            // Resolution removes pending literals before this stage.
-            ExpressionRpnItem::PendingNumericLiteral { .. } => None,
+            // Pending syntax never survives evaluation; flag it in debug builds so the invalid
+            // boundary is visible instead of silently reporting no append candidate.
+            ExpressionRpnItem::PendingNumericLiteral { .. }
+            | ExpressionRpnItem::PendingGroup { .. } => {
+                debug_assert!(
+                    false,
+                    "pending expression syntax reached HIR render-append query"
+                );
+                None
+            }
         },
 
         _ => None,

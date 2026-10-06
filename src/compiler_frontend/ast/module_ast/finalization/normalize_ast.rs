@@ -41,13 +41,13 @@ use super::finalizer::AstFinalizer;
 use super::template_helpers::{
     FinalizedTemplateValue, TemplateValueFinalizationInputs, finalize_template_value,
 };
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, LoopBindings, NodeKind};
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, LoopBindings, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::expressions::assertion_message_effects::{
     assert_message_escape_diagnostic, assertion_condition_is_statically_true,
 };
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
+use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, FallibleHandling, ReactiveTemplateMetadata,
 };
@@ -984,8 +984,17 @@ fn discard_inactive_assertion_messages_in_expression(
     match &mut expression.kind {
         ExpressionKind::Runtime(rpn) => {
             for item in &mut rpn.items {
-                if let ExpressionRpnItem::Operand(expression) = item {
-                    discard_inactive_assertion_messages_in_expression(expression)?;
+                match item {
+                    ExpressionRpnItem::Operand(expression) => {
+                        discard_inactive_assertion_messages_in_expression(expression)?;
+                    }
+                    ExpressionRpnItem::Operator { .. } => {}
+                    // Pending syntax never survives evaluation; this fallible elision reports the
+                    // broken invariant instead of silently keeping the malformed operand.
+                    ExpressionRpnItem::PendingNumericLiteral { .. }
+                    | ExpressionRpnItem::PendingGroup { .. } => {
+                        return Err(pending_expression_item_bug("assertion-message elision"));
+                    }
                 }
             }
         }
@@ -1098,6 +1107,7 @@ fn discard_inactive_assertion_messages_in_expression(
         ExpressionKind::Template(_)
         | ExpressionKind::NoValue
         | ExpressionKind::OptionNone
+        | ExpressionKind::Uint(_)
         | ExpressionKind::Int(_)
         | ExpressionKind::Float(_)
         | ExpressionKind::FixedScalar(_)
@@ -1326,8 +1336,12 @@ fn normalize_expression_templates_with_context(
                         )?;
                     }
                     ExpressionRpnItem::Operator { .. } => {}
-                    // Resolution removes pending literals before this stage.
-                    ExpressionRpnItem::PendingNumericLiteral { .. } => {}
+                    // Pending syntax never survives evaluation; its presence here is a broken
+                    // compiler invariant, not a normalizable template position.
+                    ExpressionRpnItem::PendingNumericLiteral { .. }
+                    | ExpressionRpnItem::PendingGroup { .. } => {
+                        return Err(pending_expression_item_bug("template normalization").into());
+                    }
                 }
             }
             None
@@ -1534,6 +1548,7 @@ fn normalize_expression_templates_with_context(
 
         ExpressionKind::NoValue
         | ExpressionKind::OptionNone
+        | ExpressionKind::Uint(_)
         | ExpressionKind::Int(_)
         | ExpressionKind::Float(_)
         | ExpressionKind::FixedScalar(_)

@@ -69,13 +69,15 @@ impl ExternalAbiType {
 ///
 /// WHAT: separates the backend ABI category from the Moth language type expected
 ///       at call sites. `Abi(...)` always describes a fixed foreign representation,
-///       while native Moth `Int`/`Float` use their profile-selected semantic identities.
+///       while native Moth `Int`/`Uint`/`Float` use their profile-selected semantic identities.
 ///       Provider-owned opaque types use `External(...)`, and reusable language-level
 ///       content policies such as string content use dedicated variants.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ExternalSignatureType {
     /// Profile-selected Moth `Int` semantic type.
     NativeInt,
+    /// Profile-selected Moth `Uint` semantic type, following the selected `Int` width.
+    NativeUint,
     /// Profile-selected Moth `Float` semantic type.
     NativeFloat,
     /// Fixed foreign representation and its corresponding Moth type.
@@ -103,6 +105,7 @@ impl ExternalSignatureType {
     pub(crate) fn to_datatype(&self) -> Option<DataType> {
         match self {
             Self::NativeInt => Some(DataType::Int),
+            Self::NativeUint => Some(DataType::Uint),
             Self::NativeFloat => Some(DataType::Float),
             Self::Abi(abi_type) => abi_type.to_datatype(),
             // The builtin Error type is nominal and registered per module, so the caller
@@ -124,6 +127,7 @@ impl ExternalSignatureType {
     ) -> Option<crate::compiler_frontend::datatypes::ids::TypeId> {
         match self {
             Self::NativeInt => Some(type_environment.builtins().int),
+            Self::NativeUint => Some(type_environment.builtins().uint),
             Self::NativeFloat => Some(type_environment.builtins().float),
             Self::Abi(abi_type) => abi_type.to_type_id(type_environment),
             Self::BuiltinError => Some(builtin_error_type_id),
@@ -151,6 +155,7 @@ impl ExternalSignatureType {
     ) -> Option<crate::compiler_frontend::datatypes::ids::TypeId> {
         match self {
             Self::NativeInt => Some(type_environment.builtins().int),
+            Self::NativeUint => Some(type_environment.builtins().uint),
             Self::NativeFloat => Some(type_environment.builtins().float),
             Self::Abi(abi_type) => abi_type.to_type_id(type_environment),
             // BuiltinError is not expected in parameter position; treat as unknown.

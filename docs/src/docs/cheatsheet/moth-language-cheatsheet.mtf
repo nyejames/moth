@@ -151,43 +151,46 @@ Further detail: @../memory (Memory).
 
 ## Numbers and operators
 
-- `Int` and `Float`: signed integer and finite binary float.
+- `Int`, `Uint` and `Float`: signed integer, unsigned integer and finite binary float.
 - `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`: fixed-width integers.
 - `F16`, `F32`, `F64`: fixed-precision binary floats.
 - `Dec`/`Dec0`, `Dec1` through `Dec256`: arbitrary-precision exact values.
 - `Byte`: a one-byte octet outside arithmetic.
 
-One numeric profile selects `Int` width and `Float` precision independently, each 32 or 64 bits, for the whole build. The default uses 32-bit `Int` and 64-bit `Float`. Their identities remain distinct from the fixed-width types. Binary floats allow subnormals and signed zero, never `NaN` or infinities.
+One numeric profile selects `Int` width and `Float` precision independently, each 32 or 64 bits, for the whole build. `Uint` follows the selected `Int` width, so it is `Uint32` under `Int32` and `Uint64` under `Int64`. The default uses 32-bit `Int` and 64-bit `Float`, and therefore `Uint32`. Their identities remain distinct from the fixed-width types. Binary floats allow subnormals and signed zero, never `NaN` or infinities.
 
 ### Literals
 
 [codeblock, $code("moth"):
     small U8 = 200
     total U32 = small + 1
+    count Uint = 1 + 2
     half F16 = 0.5
     price Dec2 = 12.50
 ]
 
-Whole literals naturally infer `Int`, decimal/exponent literals `Float`. Size never selects a narrower type. A receiving type materialises a literal directly. An immediate typed numeric peer can supply that type before promotion: `small + 1` types `1` as `U8`, then produces `U32`. `small + 300` is invalid. An annotation cannot retag an operation or an already typed value.
+Whole literals naturally infer `Int`, decimal/exponent literals `Float`. Size never selects a narrower type. A receiving type materialises a literal directly. An immediate typed numeric peer can supply that type before promotion: `small + 1` types `1` as `U8`, then produces `U32`. `small + 300` is invalid. An annotation cannot retag an operation or an already typed value. A `Dec` receiver goes further and types unresolved literal arithmetic: `total Dec4 = 1 + 1` holds `2` and `total Dec4 = 0.1 + 0.2` holds exactly `0.3`. A typed `Dec` peer supplies its scale to a literal-only opposite operand from either side. A `Uint` receiver and peer do the same for whole-number arithmetic: `count Uint = 1 + 2` holds `3`, while a typed `Int` never becomes `Uint` through a peer. Their exponent rules differ: a `Dec` exponent stays `Int`, a `Uint` exponent stays `Uint`.
 
-Whole literals can initialise floats and `Dec`. Decimal/exponent spelling cannot initialise `Int`, fixed integers or `Byte` merely because its value is whole. Negative values cannot initialise `U*` or `Byte`. Signed minima materialise directly from their negative spelling. Binary float literals round once at destination precision, nearest with ties to even. `0.1` is valid.
+- Whole literals can initialise floats, `Uint` and `Dec`. Decimal/exponent spelling cannot initialise `Int`, `Uint`, fixed integers or `Byte` merely because its value is whole. Negative values cannot initialise `U*`, `Uint` or `Byte`. Signed minima materialise directly from their negative spelling. Binary float literals round once at destination precision, nearest with ties to even. `0.1` is valid.
 
 Use lowercase `e`, as in `1.0e+21`, and underscores between digits. Uppercase `E`, radix literals, suffixes, unary `+` and spaced `- count` are invalid.
 
 ### Arithmetic and comparison
 
 - `Int`/`Int` produces `Int` for `+ - * // % ^`, `Float` for `/`. Mixed `Int`/`Float` arithmetic produces `Float`. Receiving `Int -> Float` promotion may round. Reverse conversion needs a cast.
-- Fixed integers promote together, as do fixed floats. Neither family implicitly mixes with typed `Int`/`Float`, and fixed integers do not implicitly mix with fixed floats.
+- `Uint`/`Uint` produces `Uint` for `+ - * // % ^`, checked against the selected unsigned range, and `Float` for `/`. Mixed `Uint`/`Float` arithmetic produces `Float`. Receiving `Uint -> Float` promotion is direct and infallible. Reverse conversion needs a cast.
+- `Uint`/`Int` arithmetic in either order needs an explicit conversion, including `/` and `^`. `Uint` underflow is failure, not an `Int` result. `Uint` also needs an explicit conversion to mix with fixed-width values.
+- Fixed integers promote together, as do fixed floats. Neither family implicitly mixes with typed `Int`/`Uint`/`Float`, and fixed integers do not implicitly mix with fixed floats.
 - Fixed integer `+ - * // % ^` select a common type from complete operand ranges. Same signedness takes the wider width, at least 32 bits. Mixed signedness takes the smallest signed type, at least 32 bits, holding both ranges. `I32 + U32 -> I64`. `I64 + U64` and `I32 + U64` have no common type and are invalid.
 - Fixed integer `/` requires that same common integer type, then converts to and produces `F64`.
 - Fixed float arithmetic uses the wider precision, at least `F32`, rounding each result. Binary floats have no `//`.
-- Unary minus rejects typed `U*`, including zero. `I8`/`I16` negation produces `I32`, `F16` negation `F32`. Wider signed types and `Int` check their own limits.
+- Unary minus rejects typed `U*` and `Uint`, including zero. `I8`/`I16` negation produces `I32`, `F16` negation `F32`. Wider signed types and `Int` check their own limits.
 - `//` truncates towards zero and `%` follows the dividend's sign. The result type's signed minimum `// -1` overflows, but its `% -1` is zero. `^` means exponentiation.
-- Any fixed integer types compare exactly, including `I64`/`U64`, without an arithmetic common type. `Int`/`Float` support mixed comparisons. Other family restrictions still apply. Positive and negative floating zero compare equal.
+- Any fixed integer types compare exactly, including `I64`/`U64`, without an arithmetic common type. `Int`/`Float` support mixed comparisons. `Uint`/`Uint` and `Uint`/`Int` compare exactly, while `Uint`/`Float` converts directly then uses float comparison. Other family restrictions still apply. Positive and negative floating zero compare equal.
 
 Checks use the operation's result type. `U8 + U8` yielding `256` is valid `U32`. Overflow, zero division and invalid exponents follow the enclosing error contract or handler, without wrapping or implicit panic. Statically known failures remain diagnostics inside `catch`.
 
-Compound `+= -= *= /= //= %= ^=` evaluate the place and right operand once, compute in the promoted domain, then check conversion back. They write only after both checks succeed. Right-hand `catch` does not cover the later operation or conversion. Integer `/=` converts the floating result back. Use `//=` for integer division.
+Compound `+= -= *= /= //= %= ^=` evaluate the place and right operand once, compute in the promoted domain, then check conversion back. They write only after both checks succeed. Right-hand `catch` does not cover the later operation or conversion. Integer `/=` converts the floating result back. A `Uint` `/=` has a `Float` result before checked conversion back. Use `//=` for integer division.
 
 Precedence, highest first: unary `not`/`-`, `^`, `* / // %`, `+ -`, comparisons, `and`, `or`. `^` associates right, other binary operators left. Parentheses override precedence.
 
@@ -205,8 +208,9 @@ Literals must fit the scale exactly. `price Dec2 = 1.239` is invalid. Decimal/ex
 
 - Same-scale `+`/`-` and unary minus are exact. Multiplication rounds its exact product half to even. Positive-scale `/` and exponentiation also round half to even at each result.
 - Scale zero permits `//`/`%`, not `/`. Positive scales permit `/`/`%`, not `//`.
-- `DecN ^ Int` requires a non-negative exponent, never silently converted to `Dec`.
-- `Int` and fixed integers scale exactly into the `Dec` operand's scale for arithmetic/comparison. Different scales need explicit conversion. Floats and `Byte` never mix implicitly.
+- `DecN ^ Int` requires a non-negative exponent, never silently converted to `Dec`. Context reaches the base but never the exponent. A typed `Uint` exponent needs an explicit handled cast to `Int`.
+- `Int`, `Uint` and fixed integers scale exactly into the `Dec` operand's scale for arithmetic/comparison. Different scales need explicit conversion. Floats and `Byte` never mix implicitly.
+- A `Dec` or `Uint` receiver types unresolved literal arithmetic at its scale or unsigned width before operator selection. Their exponent rules differ: a `Dec` exponent stays `Int`, a `Uint` exponent stays `Uint`. See @../numbers/#numeric-literals (Numeric literals) for the receiving and peer contract.
 
 Decimal text trims fractional trailing zeroes, includes a leading zero before fractions and uses neither exponent notation nor negative zero.
 
@@ -237,13 +241,15 @@ Decimal text trims fractional trailing zeroes, includes a leading zero before fr
 
 Fallibility follows the complete source and target types, not a known safe value.
 
-- Integer-to-integer conversion preserves the value. It is infallible only when the complete source range fits the target.
-- Integer-to-`F32`/`F64` conversion is infallible and may round. Integer-to-`F16` conversion is infallible only when the complete source range fits its finite range.
+- Integer-to-integer conversion preserves the value. It is infallible only when the complete source range fits the target. `Uint` and `Int` need an explicit cast between each other in both directions, even when the values would fit.
+- Integer-to-`F32`/`F64` conversion is infallible and may round. `Uint64` converts directly without a binary64 intermediate. Integer-to-`F16` conversion is infallible only when the complete source range fits its finite range.
+- `Uint -> Float` is infallible and direct at the selected precision, and also available implicitly at value-receiving and mixed-operator boundaries.
 - Binary-float precision widening is infallible. Narrowing is fallible and rounds directly to the destination, once, to nearest with ties to even. Precision loss alone succeeds. A rounded non-finite result fails.
-- Float-to-integer conversion is fallible: truncate towards zero, then check the destination range.
-- `Byte <-> U8` is infallible. Other numeric and text conversions involving `Byte` go through `U8`.
+- Float-to-integer conversion is fallible: truncate towards zero, then check the destination range. `Float -> Uint` rejects negative results below zero, while `-0.5` truncates to zero and succeeds.
+- `Uint -> Dec`/`DecN` is exact and infallible. `Dec`/`DecN -> Uint` is exact-or-fail with integrality and unsigned range checks.
+- `Byte <-> U8` is infallible. Other numeric and text conversions involving `Byte` go through `U8`. `Uint` has no direct conversion with `Byte`, `Char` or `Bool`.
 - Integer-to-`Dec`/`DecN` and decimal scale widening are exact and infallible. Scale narrowing and decimal-to-integer conversion are exact-or-fail, never rounded.
-- Numeric text casts are fallible and consume the whole string. They reject surrounding whitespace, unary `+`, uppercase `E`, malformed separators or exponents, `NaN` and infinities. Numeric formatting to `String` is infallible, with `Byte` going through `U8`.
+- Numeric text casts are fallible and consume the whole string. They reject surrounding whitespace, unary `+`, uppercase `E`, malformed separators or exponents, `NaN` and infinities. Unsigned `Uint` text additionally rejects a leading `-`, including `-0`. Numeric formatting to `String` is infallible, with `Byte` going through `U8`. `Uint` zero formats as `0`.
 - `String -> Bool` trims surrounding whitespace and accepts only lowercase `true` or `false`. `String -> Char` requires exactly one Unicode scalar. Both are fallible.
 - `Char -> Int` produces its code point. `Int -> Char` is fallible and requires a Unicode scalar. `Bool` and `Char` convert infallibly to `String`.
 - `String -> Error` creates a message with code `0`. `Error -> String` returns its message. Both are infallible.
@@ -568,7 +574,7 @@ Range rules:
 - `to` excludes the end, `to &` includes it. `loop to n` starts at zero.
 - Direction follows the bounds. `by` supplies a magnitude, regardless of sign. Integer steps default to one. Any floating range needs explicit `by`.
 - Start, end and explicit step evaluate once, left to right. Static zero steps are invalid. Dynamic zero fails before iteration.
-- `Int`, `Float`, fixed integer and fixed float operands use normal promotion. The value binding takes the common type, the optional index `Int`. `Byte`/`Dec` have no range domain.
+- `Int`, `Uint`, `Float`, fixed integer and fixed float operands use normal promotion. All-`Uint` bounds with an optional `Uint` step bind `Uint`. Integer-only headers mixing `Uint` and `Int` need an explicit conversion. A `Float` bound or step instead selects `Float` through the direct `Uint`-to-`Float` rule, still needing an explicit `by` step. The value binding takes the common type, the optional index `Int`. `Byte`/`Dec` have no range domain.
 - Checked updates stop at the last valid value, including inclusive maxima and unsigned descent to zero. Floating candidates round before endpoint checks. Non-finite/out-of-range candidates end the loop. An in-range candidate rounded back to the current value fails.
 
 `break` exits the nearest ordinary loop. `continue` advances its check, item or step. Neither takes values or labels. `return`/`return!` exit the function.
@@ -776,9 +782,9 @@ Using `Label` above, provide a same-file receiver method and explicit conformanc
     text String = cast label
 ]
 
-The six source-authored families target `Int`, `Float`, `Bool`, `String`, `Char` and `Error`. `CASTABLE_TO_*` requires `to_* |This| -> Target`. `TRY_CASTABLE_TO_*` requires `try_to_* |This| -> Target, Error!`. Implement with lowercase `this` and the concrete type. The same-file and generic conformance rules also apply.
+The six source-authored families target `Int`, `Float`, `Bool`, `String`, `Char` and `Error`. `CASTABLE_TO_*` requires `to_* |This| -> Target`. `TRY_CASTABLE_TO_*` requires `try_to_* |This| -> Target, Error!`. Implement with lowercase `this` and the concrete type. The same-file and generic conformance rules also apply. This six-family scope is intentional: `Uint` carries compiler-owned builtin evidence rather than gaining source-authorable traits.
 
-A method alone supplies no cast. Infallible and fallible conformance to one target conflict. These predeclared traits cannot be imported, exported, aliased or redeclared. Fixed numeric types, `Byte` and `DecN` have no source-authored cast families.
+A method alone supplies no cast. Infallible and fallible conformance to one target conflict. These predeclared traits cannot be imported, exported, aliased or redeclared. `Uint`, fixed numeric types, `Byte` and `DecN` have no source-authored cast families.
 
 ## Collections
 
@@ -845,7 +851,7 @@ Indices use `Int`. Arguments are positional-only. Failures use `Error!` and need
 
 `{Key = Value}` requires one key/value entry form throughout. Bare key names read variables. `{}` always denotes a collection. Empty `{=}` needs a known map type.
 
-Keys: `String`, `Int`, `Bool`, `Char`, fixed integers or `Byte`. Typed keys cannot cross nominal/width boundaries. Contextual literals use the declared key type. Floats, `Dec`, user types and generic parameters are invalid keys.
+Keys: `String`, `Int`, `Uint`, `Bool`, `Char`, fixed integers or `Byte`. Typed keys cannot cross nominal/width boundaries. Contextual literals use the declared key type. Floats, `Dec`, user types and generic parameters are invalid keys.
 
 Replacement preserves insertion position and stored key. Removal then reinsertion appends.
 
@@ -1098,7 +1104,7 @@ Use exactly one `$project` and, for HTML directory projects, one `$html_builder`
     label #String?
 ]
 
-Initialisers provide fallbacks. Without one, non-optional inputs are required and optional inputs resolve to `none`. Input types are `String`, `Int`, `Float`, `Bool`, `Char` and one optional layer. Inferred `#=`, local, parameter, field and mutable declarations cannot declare inputs.
+Initialisers provide fallbacks. Without one, non-optional inputs are required and optional inputs resolve to `none`. Input types are `String`, `Int`, `Float`, `Bool`, `Char` and one optional layer. This `Int`-only scope is intentional: there is no `Uint`, `Dec` or fixed-width input, even though those types accept ordinary literals elsewhere. Inferred `#=`, local, parameter, field and mutable declarations cannot declare inputs.
 
 Config-file fallbacks may use earlier permitted helpers. Module-source fallbacks accept primitive literals or `none`. Matching input names within a project/package must agree on type, optionality, required/default state and default value. Ordinary constants and `$project` fields neither declare nor satisfy inputs. Dependencies own separate input namespaces.
 
@@ -1194,7 +1200,7 @@ Annotated JavaScript files expose typed free functions:
     ;
 ]
 
-Annotations name Moth functions independently of JS exports. Signatures use positional typed parameters and either zero/one success result with an optional final `Error!`, or the whole `-> !` contract. Declare opaque types with `@moth.opaque` before use. This surface rejects JS constants, receiver methods, callbacks, async, options, collections, generics and multiple success results.
+Annotations name Moth functions independently of JS exports. Signatures use positional typed parameters and either zero/one success result with an optional final `Error!`, or the whole `-> !` contract. Numeric signatures accept `Int`, `Uint` and `Float` alongside the other supported types: `Uint32` crosses as a `Number` integer, while `Uint64` crosses as a `BigInt` inside Moth JavaScript and through the safe-`Number` foreign bridge only. Declare opaque types with `@moth.opaque` before use. This surface rejects JS constants, receiver methods, callbacks, async, options, collections, generics and multiple success results.
 
 Foreign code cannot retain Moth-storage references. Opaque handles represent foreign identities with declared resource lifecycles. WIT provides a value-only foreign Wasm boundary, separate from native Moth imports.
 

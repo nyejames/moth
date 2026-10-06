@@ -228,10 +228,6 @@ macro_rules! emit_diagnostic_payload_enum {
                 lhs: TypeId,
                 rhs: Option<TypeId>,
             },
-            InvalidRangeOperand {
-                operand: RangeOperandKind,
-                found_type: TypeId,
-            },
             UnsupportedBuilderPackage {
                 package_path: StringId,
             },

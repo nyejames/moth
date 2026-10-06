@@ -14,7 +14,7 @@
 //!
 //! ## Supported Operations
 //!
-//! - **Arithmetic**: Checked Int, Float and fixed-width numeric arithmetic, plus exact Dec
+//! - **Arithmetic**: Checked Int, Uint, Float and fixed-width numeric arithmetic, plus exact Dec
 //!   arithmetic, with domain-specific rounding
 //! - **Boolean**: Logical AND, OR, NOT operations
 //! - **Comparison**: Exact integer and Dec ordering, numeric float comparisons, and equality
@@ -29,6 +29,7 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
+use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
 #[cfg(test)]
 use crate::compiler_frontend::ast::expressions::expression::FallibleCarrierVariant;
 use crate::compiler_frontend::ast::expressions::expression::{
@@ -218,6 +219,16 @@ pub fn constant_fold(
     // The input vector is consumed: every item either moves onto the fold stack unchanged or is
     // replaced by the value it folded to. Nothing here copies an `Expression`.
     for item in output_stack {
+        // Pending syntax never survives evaluation; constant folding consumes only completed
+        // RPN, so an escaped pending item is a broken compiler invariant on the existing
+        // infrastructure lane rather than a foldable or preservable operand.
+        if matches!(
+            item,
+            ExpressionRpnItem::PendingNumericLiteral { .. }
+                | ExpressionRpnItem::PendingGroup { .. }
+        ) {
+            return Err(pending_expression_item_bug("constant folding").into());
+        }
         // Operands move straight onto the stack; only operators need inspection.
         let ExpressionRpnItem::Operator { operator, span, .. } = &item else {
             stack.push(item);
@@ -872,6 +883,7 @@ fn builtin_cast_literal_from_expression(
     match &value.kind {
         ExpressionKind::Bool(value) => Ok(Some(BuiltinCastLiteral::Bool(*value))),
         ExpressionKind::Int(int) => Ok(Some(BuiltinCastLiteral::Int(*int))),
+        ExpressionKind::Uint(uint) => Ok(Some(BuiltinCastLiteral::Uint(*uint))),
         ExpressionKind::Float(float) => Ok(Some(BuiltinCastLiteral::Float(*float))),
         ExpressionKind::FixedScalar(fixed) => Ok(Some(BuiltinCastLiteral::Fixed(*fixed))),
         ExpressionKind::Number(value) => Ok(Some(BuiltinCastLiteral::Number(value.clone()))),
@@ -903,6 +915,9 @@ fn builtin_cast_expression_from_literal(
         }
         BuiltinCastLiteral::Int(value) => {
             Some(Expression::int(*value, span, ValueMode::ImmutableOwned))
+        }
+        BuiltinCastLiteral::Uint(value) => {
+            Some(Expression::uint(*value, span, ValueMode::ImmutableOwned))
         }
         BuiltinCastLiteral::Float(value) => {
             Some(Expression::float(*value, span, ValueMode::ImmutableOwned))
@@ -1115,6 +1130,7 @@ fn invalid_operator_for_compile_time_type<T>(
 fn numeric_scalar_for_expression(expression: &Expression) -> Option<NumericScalar> {
     match &expression.kind {
         ExpressionKind::Int(_) => Some(NumericScalar::Int),
+        ExpressionKind::Uint(_) => Some(NumericScalar::Uint),
         ExpressionKind::Float(_) => Some(NumericScalar::Float),
         ExpressionKind::FixedScalar(value) if value.scalar() != FixedScalar::Byte => {
             Some(NumericScalar::Fixed(value.scalar()))
@@ -1127,6 +1143,9 @@ fn numeric_scalar_for_expression(expression: &Expression) -> Option<NumericScala
 fn integer_value_from_expression(expression: &Expression) -> Option<i128> {
     match &expression.kind {
         ExpressionKind::Int(value) => Some(i128::from(*value)),
+        // The `u64` payload widens exactly into `i128`, so values above `i64::MAX`
+        // keep their full unsigned value through checked folding and comparison.
+        ExpressionKind::Uint(value) => Some(i128::from(*value)),
         ExpressionKind::FixedScalar(value) => match value.scalar().class() {
             FixedScalarClass::SignedInteger => value.as_i64().map(i128::from),
             FixedScalarClass::UnsignedInteger => value.as_u64().map(i128::from),
@@ -1167,6 +1186,11 @@ fn integer_result_expression(
             let value = i64::try_from(value).expect("Int result fits its i64 expression carrier");
             Expression::int(value, span, value_mode)
         }
+        NumericScalar::Uint => {
+            // The profile-specific unsigned range check immediately precedes construction.
+            let value = u64::try_from(value).expect("Uint result fits its u64 expression carrier");
+            Expression::uint(value, span, value_mode)
+        }
         NumericScalar::Fixed(scalar) => match scalar.class() {
             FixedScalarClass::SignedInteger => {
                 // The fixed-domain range check immediately precedes construction.
@@ -1205,7 +1229,10 @@ fn float_result_expression(
                 .expect("rounded finite result fits the fixed float domain");
             Expression::fixed_scalar(value, span, value_mode)
         }
-        NumericScalar::Int | NumericScalar::Fixed(_) | NumericScalar::Number(_) => {
+        NumericScalar::Int
+        | NumericScalar::Uint
+        | NumericScalar::Fixed(_)
+        | NumericScalar::Number(_) => {
             unreachable!("float result domain must be a binary float scalar")
         }
     }
@@ -1217,7 +1244,9 @@ fn number_operand_in_domain(
 ) -> Option<Cow<'_, NumberValue>> {
     match &expression.kind {
         ExpressionKind::Number(value) if value.scale() == scale => Some(Cow::Borrowed(value)),
-        ExpressionKind::Int(_) | ExpressionKind::FixedScalar(_) => {
+        // `Uint` joins the exact mixed-integer rule with its full unsigned value,
+        // without an `Int` intermediary, including values above `i64::MAX`.
+        ExpressionKind::Int(_) | ExpressionKind::Uint(_) | ExpressionKind::FixedScalar(_) => {
             integer_value_from_expression(expression)
                 .map(|integer| Cow::Owned(NumberValue::from_integer(integer, scale)))
         }
@@ -1409,7 +1438,12 @@ fn fold_numeric_comparison(
     }
 
     let ordering = match (left_domain, right_domain) {
-        (NumericScalar::Int, NumericScalar::Int) => {
+        (NumericScalar::Int, NumericScalar::Int)
+        | (NumericScalar::Uint, NumericScalar::Uint)
+        | (NumericScalar::Uint, NumericScalar::Int)
+        | (NumericScalar::Int, NumericScalar::Uint) => {
+            // Both values widen exactly into `i128`, so a negative `Int` compares
+            // less than every `Uint` and values above `i64::MAX` stay exact.
             integer_value_from_expression(lhs)?.cmp(&integer_value_from_expression(rhs)?)
         }
         (NumericScalar::Fixed(left), NumericScalar::Fixed(right))
@@ -1427,14 +1461,18 @@ fn fold_numeric_comparison(
         | (NumericScalar::Fixed(_), NumericScalar::Fixed(_)) => {
             float_value_from_expression(lhs)?.partial_cmp(&float_value_from_expression(rhs)?)?
         }
-        (NumericScalar::Int, NumericScalar::Float) => {
+        (NumericScalar::Int, NumericScalar::Float)
+        | (NumericScalar::Uint, NumericScalar::Float) => {
             let integer = integer_value_from_expression(lhs)?;
             let precision: BinaryFloatPrecision = numeric_profile.float_precision.into();
+            // The unsigned value converts directly at the profile precision, inheriting
+            // the same Float rounding as `Int`/`Float` comparisons.
             precision
                 .round_integer(integer)
                 .partial_cmp(&float_value_from_expression(rhs)?)?
         }
-        (NumericScalar::Float, NumericScalar::Int) => {
+        (NumericScalar::Float, NumericScalar::Int)
+        | (NumericScalar::Float, NumericScalar::Uint) => {
             let integer = integer_value_from_expression(rhs)?;
             let precision: BinaryFloatPrecision = numeric_profile.float_precision.into();
             float_value_from_expression(lhs)?.partial_cmp(&precision.round_integer(integer))?

@@ -1,0 +1,4 @@
+reject_fixed_mix |value Uint, narrow U8| -> String:
+    result = value + narrow
+    return [result]
+;

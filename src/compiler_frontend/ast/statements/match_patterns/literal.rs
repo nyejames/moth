@@ -16,6 +16,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::numeric_text::parse::{
     materialize_fixed_scalar, materialize_float, materialize_int, materialize_number,
+    materialize_uint,
 };
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::SourceSpan;
@@ -139,6 +140,21 @@ fn materialize_current_numeric_literal(
                 span,
                 ValueMode::ImmutableOwned,
             ));
+        }
+
+        if subject_type_id == type_environment.builtins().uint
+            && token.kind == NumericLiteralKind::WholeNumber
+        {
+            let value = materialize_uint(&token, sign, numeric_profile.int_width, string_table)
+                .map_err(|reason| {
+                    ExpressionParseError::from(CompilerDiagnostic::invalid_number_literal(
+                        token.source_text,
+                        reason,
+                        span,
+                    ))
+                })?;
+
+            return Ok(Expression::uint(value, span, ValueMode::ImmutableOwned));
         }
 
         let float_subject = subject_type_id == type_environment.builtins().float;

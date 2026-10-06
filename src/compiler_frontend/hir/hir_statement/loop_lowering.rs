@@ -18,7 +18,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::{
-    NumericOperator, binary_operation_domain,
+    NumericOperator, range_iteration_domain,
 };
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
@@ -1227,11 +1227,9 @@ impl<'a> HirBuilder<'a> {
 
         self.set_current_block(block, span_ref)?;
         let region = self.current_region_or_error(span_ref)?;
-        let crosses_zero = if matches!(
-            types.domain,
-            NumericScalar::Fixed(scalar)
-                if scalar.class() == FixedScalarClass::UnsignedInteger
-        ) {
+        let crosses_zero = if matches!(types.domain, NumericScalar::Fixed(scalar) if scalar.class() == FixedScalarClass::UnsignedInteger)
+            || matches!(types.domain, NumericScalar::Uint)
+        {
             self.make_expression(
                 span_ref,
                 HirExpressionKind::Bool(false),
@@ -1482,6 +1480,7 @@ impl<'a> HirBuilder<'a> {
     ) -> HirExpression {
         let kind = match types.domain {
             NumericScalar::Int => HirExpressionKind::Int(0),
+            NumericScalar::Uint => HirExpressionKind::Uint(0),
             NumericScalar::Float => HirExpressionKind::Float(0.0),
             NumericScalar::Fixed(scalar) => {
                 let zero = match scalar.class() {
@@ -1508,6 +1507,7 @@ impl<'a> HirBuilder<'a> {
     ) -> HirExpression {
         let kind = match types.domain {
             NumericScalar::Int => HirExpressionKind::Int(1),
+            NumericScalar::Uint => HirExpressionKind::Uint(1),
             NumericScalar::Float => HirExpressionKind::Float(1.0),
             NumericScalar::Fixed(scalar) => {
                 let one = match scalar.class() {
@@ -1865,32 +1865,26 @@ impl<'a> HirBuilder<'a> {
                 self.hir_error_location(span_ref)
             );
         };
-        let Some(mut domain) =
-            binary_operation_domain(NumericOperator::Add, start_domain, end_domain)
-        else {
+        let step_domain = match step_ty {
+            Some(step_ty) => {
+                let Some(step_domain) =
+                    NumericScalar::from_type_id(step_ty, &self.type_environment)
+                else {
+                    return_hir_transformation_error!(
+                        "Range loop step did not lower to a numeric scalar type",
+                        self.hir_error_location(span_ref)
+                    );
+                };
+                Some(step_domain)
+            }
+            None => None,
+        };
+        let Some(domain) = range_iteration_domain(start_domain, end_domain, step_domain) else {
             return_hir_transformation_error!(
-                "Range loop bounds have no common numeric promotion domain",
+                "Range loop operands have no common numeric promotion domain",
                 self.hir_error_location(span_ref)
             );
         };
-
-        if let Some(step_ty) = step_ty {
-            let Some(step_domain) = NumericScalar::from_type_id(step_ty, &self.type_environment)
-            else {
-                return_hir_transformation_error!(
-                    "Range loop step did not lower to a numeric scalar type",
-                    self.hir_error_location(span_ref)
-                );
-            };
-            let Some(promoted) = binary_operation_domain(NumericOperator::Add, domain, step_domain)
-            else {
-                return_hir_transformation_error!(
-                    "Range loop step has no common numeric promotion domain",
-                    self.hir_error_location(span_ref)
-                );
-            };
-            domain = promoted;
-        }
 
         Ok(domain.type_id(&self.type_environment))
     }

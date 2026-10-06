@@ -465,6 +465,13 @@ fn map_key_families_preserve_order_and_reject_duplicates_and_mismatches() {
             "10",
         ),
         (
+            SchemaType::Uint,
+            [Value::Uint(2), Value::Uint(1)],
+            "{2 = 20, 1 = 10}",
+            "{10 = 20, 1_0 = 10}",
+            "10",
+        ),
+        (
             SchemaType::I8,
             [Value::I8(2), Value::I8(1)],
             "{2 = 20, 1 = 10}",
@@ -1083,5 +1090,531 @@ fn outside_crate_profiled_round_trip_example() {
         fields
             .iter()
             .any(|(name, value)| { name == "seq" && *value == Value::U64(u64::MAX) })
+    );
+}
+
+#[test]
+fn uint_captures_the_profile_int_width_through_public_paths() {
+    use moth_mon::{
+        Field, FloatPrecision, IntWidth, MonErrorCode, NumericProfile, PathSegment, Schema,
+        SchemaType, Span, Value, decode_document, decode_document_bytes, encode_document,
+    };
+
+    let profiles = [
+        (
+            "int32_float64",
+            NumericProfile {
+                int_width: IntWidth::Bits32,
+                float_precision: FloatPrecision::Bits64,
+            },
+        ),
+        (
+            "int32_float32",
+            NumericProfile {
+                int_width: IntWidth::Bits32,
+                float_precision: FloatPrecision::Bits32,
+            },
+        ),
+        (
+            "int64_float64",
+            NumericProfile {
+                int_width: IntWidth::Bits64,
+                float_precision: FloatPrecision::Bits64,
+            },
+        ),
+        (
+            "int64_float32",
+            NumericProfile {
+                int_width: IntWidth::Bits64,
+                float_precision: FloatPrecision::Bits32,
+            },
+        ),
+    ];
+
+    for (name, profile) in profiles {
+        let schema = Schema::record(vec![Field::required("count", SchemaType::Uint)])
+            .with_profile(profile)
+            .prepare()
+            .expect("Uint schema prepares");
+        assert_eq!(schema.profile(), profile, "{name}");
+        let maximum = profile.int_width.unsigned_max_value();
+
+        // Zero, separators, signed-max-plus-one and the profile maximum decode exactly.
+        let mut accepted: Vec<(String, u64)> = vec![
+            ("0".into(), 0),
+            ("4_294_967_295".into(), u32::MAX as u64),
+            ("2147483648".into(), 2_147_483_648),
+            (maximum.to_string(), maximum),
+        ];
+        if profile.int_width == IntWidth::Bits64 {
+            accepted.push(("9007199254740993".into(), 9_007_199_254_740_993));
+            accepted.push(("9223372036854775807".into(), i64::MAX as u64));
+            accepted.push(("9223372036854775808".into(), 9_223_372_036_854_775_808));
+        }
+        for (spelling, expected) in &accepted {
+            let source = format!("count = {spelling}");
+            let decoded = decode_document(&source, &schema).expect("in-range Uint decodes");
+            drop(source);
+            let expected_value = Value::Record(vec![("count".into(), Value::Uint(*expected))]);
+            assert_eq!(decoded, expected_value, "{name}, {spelling}");
+            let encoded = encode_document(&decoded, &schema).expect("Uint encodes");
+            let round_trip =
+                decode_document_bytes(encoded.as_bytes(), &schema).expect("Uint bytes decode");
+            drop(encoded);
+            drop(decoded);
+            assert_eq!(round_trip, expected_value, "{name}, {spelling}");
+        }
+
+        // The other width's maximum and text overflow reject with range, path and span.
+        let mut range_rejected: Vec<String> = vec![
+            maximum
+                .checked_add(1)
+                .map_or("18446744073709551616".to_string(), |next| next.to_string()),
+        ];
+        if profile.int_width == IntWidth::Bits32 {
+            range_rejected.push(u64::MAX.to_string());
+            range_rejected.push("9223372036854775808".into());
+        }
+        for spelling in &range_rejected {
+            let source = format!("count = {spelling}");
+            let error = decode_document(&source, &schema).expect_err("Uint overflow rejects");
+            assert_eq!(error.code, MonErrorCode::NumericRange, "{name}, {spelling}");
+            assert_eq!(
+                error.path,
+                vec![PathSegment::Field("count".into())],
+                "{name}, {spelling}"
+            );
+            assert_eq!(
+                error.span,
+                Some(Span {
+                    start: 8,
+                    end: 8 + spelling.len() as u32,
+                }),
+                "{name}, {spelling}"
+            );
+        }
+
+        // Negative spellings, including `-0`, and non-whole spellings reject.
+        for spelling in ["-1", "-0", "1.0", "1e2"] {
+            let source = format!("count = {spelling}");
+            let error = decode_document(&source, &schema).expect_err("non-Uint spelling rejects");
+            let expected_code = if spelling.starts_with('-') {
+                MonErrorCode::NumericRange
+            } else {
+                MonErrorCode::NumericType
+            };
+            assert_eq!(error.code, expected_code, "{name}, {spelling}");
+            assert_eq!(
+                error.path,
+                vec![PathSegment::Field("count".into())],
+                "{name}, {spelling}"
+            );
+            assert_eq!(
+                error.span,
+                Some(Span {
+                    start: 8,
+                    end: 8 + spelling.len() as u32,
+                }),
+                "{name}, {spelling}"
+            );
+        }
+
+        // Programmatic values validate against the captured profile too.
+        let supplied = Value::Record(vec![("count".into(), Value::Uint(maximum))]);
+        assert_eq!(
+            encode_document(&supplied, &schema).and_then(|text| decode_document(&text, &schema)),
+            Ok(supplied.clone()),
+            "{name}",
+        );
+        let overflow = maximum
+            .checked_add(1)
+            .map(|next| Value::Record(vec![("count".into(), Value::Uint(next))]));
+        if profile.int_width == IntWidth::Bits32 {
+            let overflow = overflow.expect("Uint32 maximum has a successor");
+            let error =
+                encode_document(&overflow, &schema).expect_err("Uint32 rejects u64 above max");
+            assert_eq!(error.code, MonErrorCode::NumericRange, "{name}");
+            assert_eq!(
+                error.path,
+                vec![PathSegment::Field("count".into())],
+                "{name}"
+            );
+            assert_eq!(error.span, None, "{name}");
+        } else {
+            assert!(overflow.is_none(), "{name}");
+        }
+    }
+}
+
+#[test]
+fn uint_keeps_strict_category_identity_through_public_paths() {
+    use moth_mon::{
+        Field, MonErrorCode, PathSegment, Schema, SchemaType, Value, decode_document,
+        encode_document,
+    };
+
+    let schema = Schema::record(vec![
+        Field::required("profiled", SchemaType::Uint),
+        Field::required("signed", SchemaType::Int),
+        Field::required("fixed", SchemaType::U64),
+        Field::required("narrow", SchemaType::U32),
+    ])
+    .prepare()
+    .expect("mixed integer schema prepares");
+    let document = Value::Record(vec![
+        ("profiled".into(), Value::Uint(2_147_483_648)),
+        ("signed".into(), Value::Int(2_147_483_647)),
+        ("fixed".into(), Value::U64(u64::MAX)),
+        ("narrow".into(), Value::U32(u32::MAX)),
+    ]);
+    let encoded = encode_document(&document, &schema).expect("distinct integer values encode");
+    assert_eq!(decode_document(&encoded, &schema), Ok(document));
+
+    // Equal carriers never alias another integer family, in either direction.
+    let families: [(SchemaType, Value); 4] = [
+        (SchemaType::Uint, Value::Uint(7)),
+        (SchemaType::Int, Value::Int(7)),
+        (SchemaType::U64, Value::U64(7)),
+        (SchemaType::U32, Value::U32(7)),
+    ];
+    for (index, (own_type, own_value)) in families.iter().enumerate() {
+        let own_schema = Schema::record(vec![Field::required("value", own_type.clone())])
+            .prepare()
+            .expect("integer schema prepares");
+        let own_document = Value::Record(vec![("value".into(), own_value.clone())]);
+        assert_eq!(
+            encode_document(&own_document, &own_schema)
+                .and_then(|text| decode_document(&text, &own_schema)),
+            Ok(own_document),
+            "{own_type:?}",
+        );
+        for (other_index, (other_type, other_value)) in families.iter().enumerate() {
+            if other_index == index {
+                continue;
+            }
+            let crossed = Value::Record(vec![("value".into(), other_value.clone())]);
+            let error =
+                encode_document(&crossed, &own_schema).expect_err("integer families never alias");
+            assert_eq!(
+                error.code,
+                MonErrorCode::TypeMismatch,
+                "{own_type:?}/{other_type:?}"
+            );
+            assert_eq!(
+                error.path,
+                vec![PathSegment::Field("value".into())],
+                "{own_type:?}/{other_type:?}"
+            );
+            let default_error = Schema::record(vec![Field::with_default(
+                "value",
+                own_type.clone(),
+                other_value.clone(),
+            )])
+            .prepare()
+            .expect_err("integer defaults never alias");
+            assert_eq!(default_error.code, MonErrorCode::InvalidDefault);
+        }
+    }
+
+    // Explicit U32/U64 stay distinct and profile-independent.
+    for int_width in [moth_mon::IntWidth::Bits32, moth_mon::IntWidth::Bits64] {
+        let profile = moth_mon::NumericProfile {
+            int_width,
+            float_precision: moth_mon::FloatPrecision::Bits64,
+        };
+        let explicit = Schema::record(vec![
+            Field::required("narrow", SchemaType::U32),
+            Field::required("wide", SchemaType::U64),
+        ])
+        .with_profile(profile)
+        .prepare()
+        .expect("explicit widths prepare under any profile");
+        let source = "narrow = 4294967295, wide = 18446744073709551615";
+        assert_eq!(
+            decode_document(source, &explicit),
+            Ok(Value::Record(vec![
+                ("narrow".into(), Value::U32(u32::MAX)),
+                ("wide".into(), Value::U64(u64::MAX)),
+            ])),
+            "{int_width:?}",
+        );
+    }
+}
+
+#[test]
+fn uint_defaults_optionals_nesting_and_map_keys_round_trip_through_public_paths() {
+    use moth_mon::{
+        Field, IntWidth, MonErrorCode, NumericProfile, PathSegment, Schema, SchemaType, Value,
+        decode_document, encode_document,
+    };
+
+    let schema = Schema::record(vec![
+        Field::with_default("total", SchemaType::Uint, Value::Uint(2_147_483_648)),
+        Field::required("maybe", SchemaType::Optional(Box::new(SchemaType::Uint))),
+        Field::required(
+            "pair",
+            SchemaType::Record {
+                fields: vec![Field::required("inner", SchemaType::Uint)],
+            },
+        ),
+        Field::required(
+            "counts",
+            SchemaType::Map {
+                key: Box::new(SchemaType::Uint),
+                value: Box::new(SchemaType::Uint),
+            },
+        ),
+        Field::required(
+            "batch",
+            SchemaType::Collection {
+                element: Box::new(SchemaType::Uint),
+            },
+        ),
+    ])
+    .prepare()
+    .expect("Uint default/optional/nested/map schema prepares");
+    let expected = Value::Record(vec![
+        ("total".into(), Value::Uint(2_147_483_648)),
+        ("maybe".into(), Value::None),
+        (
+            "pair".into(),
+            Value::Record(vec![("inner".into(), Value::Uint(0))]),
+        ),
+        (
+            "counts".into(),
+            Value::Map(vec![
+                (Value::Uint(u64::MAX), Value::Uint(1)),
+                (Value::Uint(0), Value::Uint(2)),
+            ]),
+        ),
+        ("batch".into(), Value::Collection(vec![Value::Uint(3)])),
+    ]);
+    // The delivered default is Uint32: the `u64::MAX` map key is out of range here, so this
+    // first decode must fail before the profiled schema below. The `2147483648` default is
+    // signed-max-plus-one and fits Uint32, so preparation already accepted it.
+    let standard_error = decode_document(
+        "maybe = none, pair = (inner = 0), counts = {18446744073709551615 = 1, 0 = 2}, batch = {3}",
+        &schema,
+    )
+    .expect_err("Uint64-scale keys reject under the Uint32 default");
+    assert_eq!(standard_error.code, MonErrorCode::NumericRange);
+
+    let profiled = Schema::record(vec![
+        Field::with_default("total", SchemaType::Uint, Value::Uint(2_147_483_648)),
+        Field::required("maybe", SchemaType::Optional(Box::new(SchemaType::Uint))),
+        Field::required(
+            "pair",
+            SchemaType::Record {
+                fields: vec![Field::required("inner", SchemaType::Uint)],
+            },
+        ),
+        Field::required(
+            "counts",
+            SchemaType::Map {
+                key: Box::new(SchemaType::Uint),
+                value: Box::new(SchemaType::Uint),
+            },
+        ),
+        Field::required(
+            "batch",
+            SchemaType::Collection {
+                element: Box::new(SchemaType::Uint),
+            },
+        ),
+    ])
+    .with_profile(NumericProfile {
+        int_width: IntWidth::Bits64,
+        float_precision: moth_mon::FloatPrecision::Bits64,
+    })
+    .prepare()
+    .expect("Uint64-scale schema prepares");
+    let decoded = decode_document(
+        "maybe = none, pair = (inner = 0), counts = {18446744073709551615 = 1, 0 = 2}, batch = {3}",
+        &profiled,
+    )
+    .expect("Uint64-scale document decodes");
+    assert_eq!(decoded, expected);
+    let encoded = encode_document(&decoded, &profiled).expect("Uint document encodes");
+    assert_eq!(decode_document(&encoded, &profiled), Ok(expected.clone()));
+    // The same prepared schema decodes again unchanged.
+    assert_eq!(
+        decode_document(
+            "total = 1, maybe = 2, pair = (inner = 3), counts = {=}, batch = {}",
+            &profiled
+        ),
+        Ok(Value::Record(vec![
+            ("total".into(), Value::Uint(1)),
+            ("maybe".into(), Value::Uint(2)),
+            (
+                "pair".into(),
+                Value::Record(vec![("inner".into(), Value::Uint(3))]),
+            ),
+            ("counts".into(), Value::Map(vec![])),
+            ("batch".into(), Value::Collection(vec![])),
+        ])),
+    );
+    // An omitted field completes from its prepared Uint default.
+    assert_eq!(
+        decode_document(
+            "maybe = 2, pair = (inner = 3), counts = {=}, batch = {}",
+            &profiled
+        ),
+        Ok(Value::Record(vec![
+            ("total".into(), Value::Uint(2_147_483_648)),
+            ("maybe".into(), Value::Uint(2)),
+            (
+                "pair".into(),
+                Value::Record(vec![("inner".into(), Value::Uint(3))]),
+            ),
+            ("counts".into(), Value::Map(vec![])),
+            ("batch".into(), Value::Collection(vec![])),
+        ])),
+    );
+
+    // Duplicate Uint keys report the decoded key path.
+    let duplicate = decode_document(
+        "maybe = none, pair = (inner = 0), counts = {7 = 1, 0_7 = 2}, batch = {3}",
+        &profiled,
+    )
+    .expect_err("decoded-equivalent Uint keys are duplicates");
+    assert_eq!(duplicate.code, MonErrorCode::DuplicateMapKey);
+    assert_eq!(
+        duplicate.path,
+        vec![
+            PathSegment::Field("counts".into()),
+            PathSegment::MapKey("7".into()),
+        ],
+    );
+
+    // An out-of-range Uint default fails during preparation, not at first use.
+    let invalid_default = Schema::record(vec![Field::with_default(
+        "total",
+        SchemaType::Uint,
+        Value::Uint(u64::MAX),
+    )])
+    .prepare()
+    .expect_err("Uint default above Uint32 rejects");
+    assert_eq!(invalid_default.code, MonErrorCode::InvalidDefault);
+    assert_eq!(
+        invalid_default.path,
+        vec![PathSegment::Field("total".into())]
+    );
+    assert_eq!(invalid_default.span, None);
+
+    // A Uint64 default prepares under a 64-bit profile and completes on omission.
+    let widened = Schema::record(vec![Field::with_default(
+        "total",
+        SchemaType::Uint,
+        Value::Uint(u64::MAX),
+    )])
+    .with_profile(NumericProfile {
+        int_width: IntWidth::Bits64,
+        float_precision: moth_mon::FloatPrecision::Bits64,
+    })
+    .prepare()
+    .expect("Uint64-scale default prepares");
+    assert_eq!(
+        decode_document("", &widened),
+        Ok(Value::Record(vec![("total".into(), Value::Uint(u64::MAX))])),
+    );
+}
+
+#[test]
+fn uint_scalar_value_encodes_through_public_paths() {
+    use moth_mon::{
+        IntWidth, MonErrorCode, NumericProfile, Schema, SchemaType, Value, encode_value,
+    };
+
+    let profile = NumericProfile {
+        int_width: IntWidth::Bits64,
+        float_precision: moth_mon::FloatPrecision::Bits64,
+    };
+    let scalar = Schema::value(SchemaType::Uint)
+        .with_profile(profile)
+        .prepare()
+        .expect("scalar Uint schema prepares");
+    assert_eq!(
+        encode_value(&Value::Uint(u64::MAX), &scalar),
+        Ok(u64::MAX.to_string()),
+    );
+    let narrow = Schema::value(SchemaType::Uint)
+        .prepare()
+        .expect("scalar Uint32 schema prepares");
+    assert_eq!(
+        encode_value(&Value::Uint(u64::MAX), &narrow)
+            .expect_err("scalar Uint32 rejects u64 above max")
+            .code,
+        MonErrorCode::NumericRange,
+    );
+}
+
+#[test]
+fn uint_rejects_source_arithmetic_and_keeps_bounded_failures_through_public_paths() {
+    use moth_mon::{Field, Limits, MonErrorCode, Schema, SchemaType, decode_document};
+
+    let schema = Schema::record(vec![Field::required("count", SchemaType::Uint)])
+        .prepare()
+        .expect("Uint schema prepares");
+
+    // Source arithmetic is literal data here, not an expression to evaluate. The first input
+    // fails while scanning the root entry, so it carries no field path; the parenthesised
+    // input parses as a record value first, so its comma failure lands on the field path.
+    for (source, code, path, start, end) in [
+        (
+            "count = 1 + 2",
+            MonErrorCode::MissingComma,
+            Vec::new(),
+            10,
+            11,
+        ),
+        (
+            "count = (0 - 1) + 2",
+            MonErrorCode::MissingComma,
+            vec![PathSegment::Field("count".into())],
+            11,
+            12,
+        ),
+    ] {
+        let error = decode_document(source, &schema).expect_err("arithmetic text is invalid MON");
+        assert_eq!(error.code, code, "{source}");
+        assert_eq!(error.path, path, "{source}");
+        assert_eq!(error.span, Some(moth_mon::Span { start, end }), "{source}");
+    }
+    // Bounded failures keep their budget lane, and the prepared schema reports the same
+    // bounded failure deterministically on every call.
+    let tight = Schema::record(vec![Field::required(
+        "values",
+        SchemaType::Collection {
+            element: Box::new(SchemaType::Uint),
+        },
+    )])
+    .with_limits(Limits {
+        max_nodes: 6,
+        ..Limits::default()
+    })
+    .prepare()
+    .expect("tight Uint schema prepares");
+    let input = "values = {1, 2, 3, 4, 5, 6, 7, 8}";
+    let budget_error = decode_document(input, &tight).expect_err("node budget binds reuse");
+    assert_eq!(budget_error.code, MonErrorCode::NodeBudget);
+    assert_eq!(
+        decode_document(input, &tight)
+            .expect_err("schema reuse is deterministic")
+            .code,
+        MonErrorCode::NodeBudget,
+    );
+    // A long Uint spelling charges its own unsigned-token bytes before range checking.
+    let byte_tight = Schema::record(vec![Field::required("count", SchemaType::Uint)])
+        .with_limits(Limits {
+            max_decoded_bytes: 8,
+            ..Limits::default()
+        })
+        .prepare()
+        .expect("byte-tight Uint schema prepares");
+    assert_eq!(
+        decode_document("count = 18446744073709551615", &byte_tight)
+            .expect_err("decoded-byte budget binds Uint input")
+            .code,
+        MonErrorCode::DecodedBudget,
     );
 }

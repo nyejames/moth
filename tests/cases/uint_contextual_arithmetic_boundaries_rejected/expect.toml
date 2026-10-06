@@ -1,0 +1,87 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001", "MOTH-TYPE-0001", "MOTH-RULE-0083", "MOTH-TYPE-0001", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-SYNTAX-0008", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0001", "MOTH-TYPE-0001"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 1
+path = "input/completed_float_receiver/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 2
+path = "input/decimal_leaf_receiver/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 3
+path = "input/named_int_constants/@mod.moth"
+line = 4
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 4
+path = "input/typed_int_sum/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 5
+path = "input/unresolved_generic_slot/@mod.moth"
+line = 5
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 1
+path = "input/byte_mix/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 2
+path = "input/dec_uint_exponent/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 3
+path = "input/fixed_mix/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 4
+path = "input/float_intdivide/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 5
+path = "input/int_arithmetic/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 6
+path = "input/unary_minus/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0008"
+occurrence = 1
+path = "input/oversized_leaf/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+occurrence = 1
+reason = "invalid_cast.fallible_evidence_requires_handling"
+path = "input/cast_operand/@mod.moth"
+line = 2
+column = 25

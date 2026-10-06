@@ -2589,6 +2589,13 @@ contract = "language.scalars.constructor_style_conversion_removed"
 role = "boundary"
 
 [[case]]
+id = "scalar_uint_constructor_removed"
+path = "scalar_uint_constructor_removed"
+tags = ["integration", "js-backend"]
+contract = "language.scalars.constructor_style_conversion_removed"
+role = "boundary"
+
+[[case]]
 id = "collection_mutating_method_requires_explicit_receiver_tilde"
 path = "collection_mutating_method_requires_explicit_receiver_tilde"
 tags = ["integration", "collections", "diagnostics"]
@@ -7543,6 +7550,20 @@ id = "int_promotion_to_float_via_function_call"
 path = "int_promotion_to_float_via_function_call"
 tags = ["integration", "type-coercion"]
 contract = "language.floats.int_promotion_acceptance"
+role = "boundary"
+
+[[case]]
+id = "int_promotion_to_float_via_function_call_release"
+path = "int_promotion_to_float_via_function_call_release"
+tags = ["integration", "type-coercion", "release"]
+contract = "language.floats.int_promotion_acceptance"
+role = "boundary"
+
+[[case]]
+id = "int_promotion_to_float32_success"
+path = "int_promotion_to_float32_success"
+tags = ["integration", "type-coercion", "float32"]
+contract = "language.floats.int_promotion_float32"
 role = "boundary"
 
 [[case]]
@@ -14148,6 +14169,27 @@ contract = "language.numbers.dynamic_arithmetic_rounding_and_power"
 role = "primary"
 
 [[case]]
+id = "dec_contextual_arithmetic_success"
+path = "dec_contextual_arithmetic_success"
+tags = ["integration", "language", "numeric", "number", "contextual-literals", "runtime"]
+contract = "language.numbers.dec_contextual_literal_arithmetic"
+role = "primary"
+
+[[case]]
+id = "dec_contextual_arithmetic_boundaries_rejected"
+path = "dec_contextual_arithmetic_boundaries_rejected"
+tags = ["integration", "language", "numeric", "number", "contextual-literals", "diagnostics"]
+contract = "language.numbers.dec_contextual_literal_arithmetic"
+role = "boundary"
+
+[[case]]
+id = "dec_static_arithmetic_failures_rejected"
+path = "dec_static_arithmetic_failures_rejected"
+tags = ["integration", "language", "numeric", "number", "arithmetic", "diagnostics", "errors"]
+contract = "language.numbers.dec_static_arithmetic_failures"
+role = "primary"
+
+[[case]]
 id = "number_mixed_integer_runtime"
 path = "number_mixed_integer_runtime"
 tags = ["integration", "language", "numeric", "number", "runtime", "mixed-integer", "comparisons", "numeric-profile", "int32", "float32"]
@@ -14621,4 +14663,354 @@ id = "implicit_failure_assert_release_checked"
 path = "implicit_failure_assert_release_checked"
 tags = ["integration", "language", "results", "runtime", "release", "js-backend", "html-wasm"]
 contract = "language.results.assert_stays_checked_in_release"
+role = "primary"
+
+[[case]]
+id = "uint_transport_success"
+path = "uint_transport_success"
+tags = ["integration", "language", "numeric", "runtime", "js-backend"]
+contract = "language.numbers.uint_transport"
+role = "primary"
+
+[[case]]
+id = "uint_transport_int64_large_value"
+path = "uint_transport_int64_large_value"
+tags = ["integration", "language", "numeric", "runtime", "js-backend"]
+contract = "language.numbers.uint_transport_int64_large_value"
+role = "primary"
+
+[[case]]
+id = "uint_contextual_arithmetic_success"
+path = "uint_contextual_arithmetic_success"
+tags = ["integration", "language", "numeric", "contextual-literals", "runtime"]
+contract = "language.numbers.uint_contextual_literal_arithmetic"
+role = "primary"
+
+[[case]]
+id = "uint_contextual_arithmetic_boundaries_rejected"
+path = "uint_contextual_arithmetic_boundaries_rejected"
+tags = ["integration", "language", "numeric", "contextual-literals", "diagnostics"]
+contract = "language.numbers.uint_contextual_literal_arithmetic"
+role = "boundary"
+
+[[case]]
+id = "uint_checked_arithmetic_failures_rejected"
+path = "uint_checked_arithmetic_failures_rejected"
+tags = ["integration", "language", "numeric", "checked-arithmetic", "diagnostics"]
+contract = "language.numbers.uint_checked_arithmetic"
+role = "boundary"
+
+[[case]]
+id = "uint_checked_arithmetic_success"
+path = "uint_checked_arithmetic_success"
+tags = ["integration", "language", "numeric", "checked-arithmetic", "runtime"]
+contract = "language.numbers.uint_checked_arithmetic"
+role = "primary"
+
+[[case]]
+id = "uint_checked_arithmetic_release"
+path = "uint_checked_arithmetic_release"
+tags = ["integration", "language", "numeric", "checked-arithmetic", "runtime", "release"]
+contract = "language.numbers.uint_checked_arithmetic"
+role = "boundary"
+
+[[case]]
+id = "uint_cast_conversions_success"
+path = "uint_cast_conversions_success"
+tags = ["integration", "language", "numeric", "casts", "runtime"]
+contract = "language.numbers.uint_cast_conversions"
+role = "primary"
+
+[[case]]
+id = "uint_cast_failures_rejected"
+path = "uint_cast_failures_rejected"
+tags = ["integration", "language", "numeric", "casts", "diagnostics"]
+contract = "language.numbers.uint_cast_conversions"
+role = "boundary"
+
+[[case]]
+id = "uint_checked_arithmetic_int64_success"
+path = "uint_checked_arithmetic_int64_success"
+tags = ["integration", "language", "numeric", "checked-arithmetic", "runtime", "int64"]
+contract = "language.numbers.uint_checked_arithmetic_int64"
+role = "primary"
+
+[[case]]
+id = "uint_checked_arithmetic_int64_release"
+path = "uint_checked_arithmetic_int64_release"
+tags = ["integration", "language", "numeric", "checked-arithmetic", "runtime", "int64", "release"]
+contract = "language.numbers.uint_checked_arithmetic_int64"
+role = "boundary"
+
+[[case]]
+id = "uint_type_used_as_value_rejected"
+path = "uint_type_used_as_value_rejected"
+tags = ["integration", "name-resolution", "namespace-misuse", "diagnostics"]
+contract = "language.bindings.uint_type_used_as_value_rejected"
+role = "primary"
+
+[[case]]
+id = "uint_reserved_name_collision_rejected"
+path = "uint_reserved_name_collision_rejected"
+tags = ["integration", "name-resolution", "diagnostics"]
+contract = "language.bindings.uint_reserved_name_collision_rejected"
+role = "primary"
+
+[[case]]
+id = "uint_literal_out_of_range_rejected"
+path = "uint_literal_out_of_range_rejected"
+tags = ["integration", "language", "numeric", "diagnostics"]
+contract = "language.numbers.uint_literal_out_of_range_rejected"
+role = "primary"
+
+[[case]]
+id = "uint_config_contract_unsupported_rejected"
+path = "uint_config_contract_unsupported_rejected"
+tags = ["integration", "config", "diagnostics"]
+contract = "language.numbers.uint_config_contract_unsupported_rejected"
+role = "primary"
+
+[[case]]
+id = "uint_negative_literal_rejected"
+path = "uint_negative_literal_rejected"
+tags = ["integration", "language", "numeric", "diagnostics"]
+contract = "language.numbers.uint_negative_literal_rejected"
+role = "primary"
+
+[[case]]
+id = "uint_float_comparison_float32_success"
+path = "uint_float_comparison_float32_success"
+tags = ["integration", "language", "numeric", "checked-arithmetic", "runtime", "float32"]
+contract = "language.numbers.uint_float_comparison_float32"
+role = "primary"
+
+[[case]]
+id = "uint_float_comparison_float32_release"
+path = "uint_float_comparison_float32_release"
+tags = ["integration", "language", "numeric", "checked-arithmetic", "runtime", "float32", "release"]
+contract = "language.numbers.uint_float_comparison_float32"
+role = "boundary"
+
+[[case]]
+id = "uint_js_execution_int32_float32_success"
+path = "uint_js_execution_int32_float32_success"
+tags = ["integration", "language", "numeric", "checked-arithmetic", "runtime", "float32"]
+contract = "language.numbers.uint_js_execution_int32_float32"
+role = "primary"
+
+[[case]]
+id = "uint_js_execution_int32_float32_release"
+path = "uint_js_execution_int32_float32_release"
+tags = ["integration", "language", "numeric", "checked-arithmetic", "runtime", "float32", "release"]
+contract = "language.numbers.uint_js_execution_int32_float32"
+role = "boundary"
+
+[[case]]
+id = "uint_js_execution_int64_float32_success"
+path = "uint_js_execution_int64_float32_success"
+tags = ["integration", "language", "numeric", "checked-arithmetic", "runtime", "int64", "float32"]
+contract = "language.numbers.uint_js_execution_int64_float32"
+role = "primary"
+
+[[case]]
+id = "uint_js_execution_int64_float32_release"
+path = "uint_js_execution_int64_float32_release"
+tags = ["integration", "language", "numeric", "checked-arithmetic", "runtime", "int64", "float32", "release"]
+contract = "language.numbers.uint_js_execution_int64_float32"
+role = "boundary"
+
+[[case]]
+id = "uint_wasm_scalar_int32_float64"
+path = "uint_wasm_scalar_int32_float64"
+tags = ["integration", "language", "numeric", "checked-arithmetic", "runtime", "html-wasm"]
+contract = "language.numbers.uint_wasm_scalar_int32_float64"
+role = "primary"
+
+[[case]]
+id = "uint_wasm_scalar_int64_float32"
+path = "uint_wasm_scalar_int64_float32"
+tags = ["integration", "language", "numeric", "checked-arithmetic", "runtime", "int64", "float32", "html-wasm"]
+contract = "language.numbers.uint_wasm_scalar_int64_float32"
+role = "primary"
+
+[[case]]
+id = "uint_wasm_scalar_int32_float32"
+path = "uint_wasm_scalar_int32_float32"
+tags = ["integration", "language", "numeric", "checked-arithmetic", "runtime", "float32", "html-wasm"]
+contract = "language.numbers.uint_wasm_scalar_int32_float32"
+role = "primary"
+
+[[case]]
+id = "uint_wasm_scalar_int64_float64"
+path = "uint_wasm_scalar_int64_float64"
+tags = ["integration", "language", "numeric", "checked-arithmetic", "runtime", "int64", "float64", "html-wasm"]
+contract = "language.numbers.uint_wasm_scalar_int64_float64"
+role = "primary"
+
+[[case]]
+id = "uint_wasm_recoverable_rejected"
+path = "uint_wasm_recoverable_rejected"
+tags = ["integration", "language", "numeric", "checked-arithmetic", "runtime", "html-wasm"]
+contract = "language.numbers.uint_wasm_recoverable_rejected"
+role = "primary"
+
+[[case]]
+id = "uint_wasm_statement_cast_rejected"
+path = "uint_wasm_statement_cast_rejected"
+tags = ["integration", "language", "numeric", "cast", "runtime", "html-wasm"]
+contract = "language.numbers.uint_wasm_statement_cast_rejected"
+role = "primary"
+
+[[case]]
+id = "uint_wasm_host_call_rejected"
+path = "uint_wasm_host_call_rejected"
+tags = ["integration", "language", "numeric", "runtime", "html-wasm", "backend_validation"]
+contract = "language.numbers.uint_wasm_host_call_rejected"
+role = "primary"
+
+[[case]]
+id = "uint_wasm_generic_runtime_rejected"
+path = "uint_wasm_generic_runtime_rejected"
+tags = ["integration", "language", "numeric", "runtime", "html-wasm", "generics"]
+contract = "language.numbers.uint_wasm_generic_runtime_rejected"
+role = "primary"
+
+[[case]]
+id = "external_native_uint32_roundtrip"
+path = "external_native_uint32_roundtrip"
+tags = ["integration", "numeric", "external", "runtime"]
+contract = "backend.html.external_native_uint32_roundtrip"
+role = "backend"
+
+[[case]]
+id = "external_native_uint64_roundtrip"
+path = "external_native_uint64_roundtrip"
+tags = ["integration", "numeric", "external", "runtime", "int64"]
+contract = "backend.html.external_native_uint64_safe_number_bridge"
+role = "backend"
+
+[[case]]
+id = "external_native_uint_boundary_rejected"
+path = "external_native_uint_boundary_rejected"
+tags = ["integration", "numeric", "external", "runtime", "errors"]
+contract = "backend.html.external_native_uint_boundary_failure_delivery"
+role = "backend"
+
+[[case]]
+id = "uint_range_runtime"
+path = "uint_range_runtime"
+tags = ["integration", "language", "numeric", "runtime"]
+contract = "language.numbers.uint_range_runtime"
+role = "primary"
+
+[[case]]
+id = "uint_range_runtime_int64"
+path = "uint_range_runtime_int64"
+tags = ["integration", "language", "numeric", "runtime", "int64"]
+contract = "language.numbers.uint_range_runtime_int64"
+role = "primary"
+
+[[case]]
+id = "uint_range_runtime_int64_release"
+path = "uint_range_runtime_int64_release"
+tags = ["integration", "language", "numeric", "runtime", "int64", "release"]
+contract = "language.numbers.uint_range_runtime_int64"
+role = "boundary"
+
+[[case]]
+id = "uint_range_source_order"
+path = "uint_range_source_order"
+tags = ["integration", "language", "numeric", "runtime"]
+contract = "language.numbers.uint_range_source_order"
+role = "primary"
+
+[[case]]
+id = "uint_map_key_success"
+path = "uint_map_key_success"
+tags = ["integration", "language", "numeric", "runtime", "int64"]
+contract = "language.numbers.uint_map_key_success"
+role = "primary"
+
+[[case]]
+id = "uint_map_key_release"
+path = "uint_map_key_release"
+tags = ["integration", "language", "numeric", "runtime", "int64", "release"]
+contract = "language.numbers.uint_map_key_success"
+role = "boundary"
+
+[[case]]
+id = "uint_range_zero_step"
+path = "uint_range_zero_step"
+tags = ["integration", "language", "numeric", "runtime", "html-wasm"]
+contract = "language.numbers.uint_range_zero_step_recovery"
+role = "primary"
+
+[[case]]
+id = "uint_map_duplicate_key"
+path = "uint_map_duplicate_key"
+tags = ["integration", "language", "numeric", "errors"]
+contract = "language.numbers.uint_map_duplicate_key_rejected"
+role = "primary"
+
+[[case]]
+id = "uint_map_key_mismatch"
+path = "uint_map_key_mismatch"
+tags = ["integration", "language", "numeric", "errors"]
+contract = "language.numbers.uint_map_key_mismatch_rejected"
+role = "primary"
+
+[[case]]
+id = "uint_binding_mismatch"
+path = "uint_binding_mismatch"
+tags = ["integration", "language", "numeric", "errors"]
+contract = "language.numbers.uint_binding_mismatch_rejected"
+role = "primary"
+
+[[case]]
+id = "uint_core_random_rejected"
+path = "uint_core_random_rejected"
+tags = ["integration", "language", "numeric", "errors"]
+contract = "language.numbers.uint_core_random_rejected"
+role = "primary"
+
+[[case]]
+id = "uint_index_type_mismatch"
+path = "uint_index_type_mismatch"
+tags = ["integration", "language", "numeric", "errors"]
+contract = "language.numbers.uint_index_type_mismatch_rejected"
+role = "primary"
+
+[[case]]
+id = "uint_capacity_rejected"
+path = "uint_capacity_rejected"
+tags = ["integration", "language", "numeric", "errors"]
+contract = "language.numbers.uint_capacity_rejected"
+role = "primary"
+
+[[case]]
+id = "uint_range_mixed_step"
+path = "uint_range_mixed_step"
+tags = ["integration", "language", "numeric", "errors"]
+contract = "language.numbers.uint_range_mixed_step_rejected"
+role = "primary"
+
+[[case]]
+id = "uint_template_const_range"
+path = "uint_template_const_range"
+tags = ["integration", "language", "numeric", "templates", "int64"]
+contract = "language.numbers.uint_template_const_range"
+role = "primary"
+
+[[case]]
+id = "uint_choice_payload_equality_success"
+path = "uint_choice_payload_equality_success"
+tags = ["integration", "language", "numeric", "runtime", "equality"]
+contract = "language.numbers.uint_choice_payload_equality"
+role = "primary"
+
+[[case]]
+id = "uint_choice_payload_equality_int64_success"
+path = "uint_choice_payload_equality_int64_success"
+tags = ["integration", "language", "numeric", "runtime", "equality", "int64"]
+contract = "language.numbers.uint_choice_payload_equality_int64"
 role = "primary"

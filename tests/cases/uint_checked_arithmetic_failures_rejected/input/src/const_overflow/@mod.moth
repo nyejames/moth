@@ -1,0 +1,4 @@
+fail_const || -> Uint, Error!:
+    k #Uint = 4294967295 + 1
+    return k
+;

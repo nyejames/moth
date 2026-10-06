@@ -1,0 +1,11 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "uint_choice_payload_equality same=true different=false pair_same=true pair_different=false variant_mismatch=false optional_same=true optional_different=false optional_missing=true optional_present_vs_missing=false nested_same=true nested_different=false field_same=true field_different=false element_same=true"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["function __moth_choice_eq("]

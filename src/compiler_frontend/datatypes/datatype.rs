@@ -78,6 +78,8 @@ pub enum DataType {
     // Scalar/runtime-leaf types.
     Bool,
     Int,
+    /// Profile-sized unsigned integer: `Uint32` under `Int32`, `Uint64` under `Int64`.
+    Uint,
     Float,
     /// Diagnostic spelling for one arbitrary-precision `Dec` scale identity.
     ///
@@ -197,6 +199,7 @@ impl DataType {
                 ..
             } => Some(ReceiverKey::Choice(*nominal_path)),
             DataType::Int => Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Int)),
+            DataType::Uint => Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Uint)),
             DataType::Float => Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Float)),
             DataType::Bool => Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Bool)),
             DataType::StringSlice => {
@@ -292,6 +295,7 @@ impl DataType {
             DataType::FixedScalar(scalar) => scalar.name().to_string(),
             DataType::Float => "Float".to_string(),
             DataType::Int => "Int".to_string(),
+            DataType::Uint => "Uint".to_string(),
             DataType::Number(scale) => scale.to_string(),
             DataType::Parameters(args) => {
                 let mut arg_str = String::new();
@@ -518,6 +522,7 @@ impl PartialEq for DataType {
             (DataType::FixedScalar(left), DataType::FixedScalar(right)) => left == right,
             (DataType::Float, DataType::Float) => true,
             (DataType::Int, DataType::Int) => true,
+            (DataType::Uint, DataType::Uint) => true,
             (DataType::Number(left), DataType::Number(right)) => left == right,
             (
                 DataType::FallibleCarrier {
@@ -650,6 +655,7 @@ fn type_id_to_data_type(type_id: ids::TypeId, type_environment: &TypeEnvironment
         Some(TypeDefinition::Builtin(builtin)) => match builtin.key {
             ids::BuiltinTypeKey::Bool => DataType::Bool,
             ids::BuiltinTypeKey::Int => DataType::Int,
+            ids::BuiltinTypeKey::Uint => DataType::Uint,
             ids::BuiltinTypeKey::Float => DataType::Float,
             ids::BuiltinTypeKey::Number(scale) => DataType::Number(scale),
             ids::BuiltinTypeKey::String => DataType::StringSlice,

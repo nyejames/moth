@@ -1,22 +1,27 @@
 Moth has one closed family of numeric types plus a nominal octet type.
+That family is `Int`, `Uint`, `Float`, the fixed-width integers and binary
+floats, and the `Dec` family.
 
-### `Int` and `Float`
+### `Int`, `Uint` and `Float`
 
-`Int` is Moth's ordinary signed integer type. `Float` is Moth's ordinary finite
+`Int` is Moth's ordinary signed integer type. `Uint` is Moth's ordinary
+unsigned integer type. `Float` is Moth's ordinary finite
 binary float type.
 
 They are distinct semantic identities. `Int` is not an alias for `I32` or
-`I64`, and `Float` is not an alias for `F32` or `F64`, even when the selected
+`I64`, `Uint` is not an alias for `U32` or `U64`, and `Float` is not an
+alias for `F32` or `F64`, even when the selected
 profile gives them the same physical precision.
 
-One compiler-owned numeric profile selects the two widths independently.
+One compiler-owned numeric profile selects the `Int` and `Float` widths independently.
+`Uint` follows the selected `Int` width. There is no separate `Uint` setting.
 
 [codeblock, $code("text"):
-    Int width    Float precision
-    32-bit       32-bit
-    32-bit       64-bit          (default)
-    64-bit       32-bit
-    64-bit       64-bit
+    Int width    Float precision    Uint width and range
+    32-bit       32-bit             Uint32, 0 through 4294967295
+    32-bit       64-bit             Uint32, 0 through 4294967295          (default)
+    64-bit       32-bit             Uint64, 0 through 18446744073709551615
+    64-bit       64-bit             Uint64, 0 through 18446744073709551615
 ]
 
 An `Int` value has the range of its selected width.
@@ -39,8 +44,18 @@ An incompatible precompiled Moth artefact is rebuilt or rejected, never
 silently adapted. Foreign components remain separate value boundaries with
 explicit foreign types.
 
-A profile can change `Int` overflow limits, `Float` rounding and folded results.
+A profile can change `Int` and `Uint` overflow limits, `Float` rounding and folded results.
 The same profile preserves behaviour across JavaScript and Wasm.
+
+[codeblock, $code("moth"):
+    count Uint = 1 + 2
+    large Uint = 3_000_000_000 + 1
+]
+
+`large` is valid in both integer profiles. Unannotated `1 + 2` remains
+`Int`. See @./#numeric-literals (Numeric literals) for the `Uint`
+receiving and peer contract, and @./#operators (Operators) for the
+`Uint` operator and comparison rules.
 
 ### Fixed-width numeric types
 
@@ -108,9 +123,11 @@ types, even for a value with no fractional digits. Leading-zero scales such as
 
 - Whole literals materialise exactly at any scale.
 - A decimal or exponent literal must be exactly representable at the receiving scale, including exact integrality at scale zero. `money Dec2 = 1.239` is invalid rather than rounded.
-- Integer-to-`Dec` conversion and scale widening are exact and infallible. Scale narrowing and `Dec`-to-integer conversion are exact or fail.
+- Integer-to-`Dec` conversion and scale widening are exact and infallible. Scale narrowing and `Dec`-to-integer conversion are exact or fail. `Uint` joins the exact mixed-integer category with its full unsigned value, including values above `Int` maximum.
 - Binary floats and `Byte` never participate in `Dec` arithmetic implicitly.
 - Canonical `Dec` text trims fractional trailing zeroes, never uses exponent notation or negative zero and always writes a leading zero before a fractional value.
+- A `Dec` receiver types unresolved literal arithmetic before operator selection. An explicit scale reaches through arithmetic and parentheses, and a typed `Dec` peer supplies its scale to a literal-only opposite operand from either side. Only `Dec` and `Uint` peers extend to compound literal subtrees, with different exponent rules: `Dec` keeps an `Int` exponent while a `Uint` exponent stays `Uint`. See @./#numeric-literals (Numeric literals) for the full contract.
+- `DecN ^ Int` keeps a non-negative `Int` exponent. A typed `Uint` exponent needs an explicit handled cast to `Int`.
 
 `Dec` is an immutable value. It is not a source-visible `BigInt` and it adds
 no numeric trait or overload system.
@@ -127,10 +144,16 @@ no numeric trait or overload system.
 Mixed `Int` and `Float` arithmetic produces `Float`. The conversion rounds at
 the selected `Float` precision.
 
+`Uint` may promote to `Float` at the same value-receiving and mixed-operator
+boundaries. The conversion is direct at the selected `Float` precision and
+infallible, although it can lose precision. There is no implicit `Uint`
+promotion to or from `Int`, and no implicit `Uint` mixing with fixed-width
+values, `Byte`, `Bool` or `Char`.
+
 There is no implicit `Float -> Int` conversion. Use a fallible explicit cast at
 an `Int` target.
 
-Typed `Int` and `Float` values do not implicitly mix with fixed-width values.
+Typed `Int`, `Uint` and `Float` values do not implicitly mix with fixed-width values.
 Fixed integers and fixed binary floats also require an explicit conversion to
 mix with each other. Compatible fixed integer `/` operands first select their
 common integer type, then divide as `F64`. `Byte` never participates in numeric
@@ -162,7 +185,7 @@ Same-scale comparisons stay exact, and templates and `String` share the exact
 Dec formatter.
 
 HTML-Wasm executes supported scalar arithmetic (fixed integers, `Byte`, fixed
-binary floats, profile-selected `Int`/`Float`) through values, comparisons and
+binary floats, profile-selected `Int`/`Float`/`Uint`) through values, comparisons and
 supported infallible numeric expression casts, including integer-to-`F16` and
 widening `F16`-to-`F32`/`F64`. Any operation that can actually fail and needs
 recoverable delivery is rejected with a structured backend capability
@@ -188,7 +211,7 @@ private helpers don't gate the target. Other builtin runtime casts stay gated,
 including conversions involving `Bool`, `Char` or `Error` (including
 `Char -> Int`) and statement-form casts. The frontend implements Dec
 arithmetic and exact negation; HTML-JS executes both, with exact mixed
-operations and comparisons against profile `Int` and all eight fixed integer
+operations and comparisons against profile `Int` and `Uint` and all eight fixed integer
 types, rounded half-even per operation. Integer-to-Dec and scale widening
 are infallible; scale narrowing and Dec-to-integer conversions are exact
 and fallible. HTML-JS `String`-to-`Dec` conversion is fallible and parses
@@ -199,7 +222,8 @@ the whole existing numeric grammar exactly; HTML-JS formats Dec canonically.
 MON literal data consumes the shared numeric facts from `moth-lexical` and keeps
 whole-number and decimal or exponent categories lossless until the receiving
 schema is known. Standalone Rust callers select a profile through
-`moth_mon::Schema::with_profile`. The convenience re-export `moth::mon` exposes
+`moth_mon::Schema::with_profile`, and `Uint` follows the profile `Int` width there too.
+The convenience re-export `moth::mon` exposes
 the same API and Rust types to compiler clients. `SchemaType::Integer` and
 `SchemaType::Decimal` name Rust data families, not additional Moth source types.
 Current source syntax uses `Dec` and `DecN`. MON conversion, profile handling

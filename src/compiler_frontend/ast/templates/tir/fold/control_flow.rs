@@ -4,6 +4,7 @@ use crate::compiler_frontend::ast::ast_nodes::RangeLoopSpec;
 use crate::compiler_frontend::ast::const_eval::{
     ConstantFoldError, ConstantFoldOutcome, constant_fold,
 };
+use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
@@ -114,8 +115,19 @@ fn has_resolved_source_constant_reference(
             ExpressionRpnItem::Operand(operand) => {
                 has_resolved_source_constant_reference(operand, fold_context)
             }
-            ExpressionRpnItem::Operator { .. }
-            | ExpressionRpnItem::PendingNumericLiteral { .. } => false,
+            ExpressionRpnItem::Operator { .. } => false,
+            // Pending syntax never survives evaluation. This predicate cannot return the
+            // canonical error, so it flags the broken invariant in debug builds and reports
+            // conservatively here; every fallible fold path below rejects the pending item
+            // with `pending_expression_item_bug` once it is actually visited.
+            ExpressionRpnItem::PendingNumericLiteral { .. }
+            | ExpressionRpnItem::PendingGroup { .. } => {
+                debug_assert!(
+                    false,
+                    "pending expression syntax reached TIR source-constant predicate"
+                );
+                true
+            }
         }),
         _ => false,
     }
@@ -155,6 +167,7 @@ fn fold_source_constant_initializer(
 ) -> Result<Option<Expression>, TemplateError> {
     match &expression.kind {
         ExpressionKind::Int(_)
+        | ExpressionKind::Uint(_)
         | ExpressionKind::Float(_)
         | ExpressionKind::FixedScalar(_)
         | ExpressionKind::Number(_) => Ok(Some(expression.clone())),
@@ -185,8 +198,15 @@ fn fold_source_constant_initializer(
                         };
                         items.push(ExpressionRpnItem::Operand(operand));
                     }
-                    ExpressionRpnItem::Operator { .. }
-                    | ExpressionRpnItem::PendingNumericLiteral { .. } => items.push(item.clone()),
+                    ExpressionRpnItem::Operator { .. } => items.push(item.clone()),
+                    // Pending syntax never survives evaluation; its presence here is a broken
+                    // compiler invariant, not a foldable position.
+                    ExpressionRpnItem::PendingNumericLiteral { .. }
+                    | ExpressionRpnItem::PendingGroup { .. } => {
+                        return Err(
+                            pending_expression_item_bug("TIR source-constant folding").into()
+                        );
+                    }
                 }
             }
             fold_source_constant_rpn(expression, items, fold_context)

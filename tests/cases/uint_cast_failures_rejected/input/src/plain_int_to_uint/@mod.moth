@@ -1,0 +1,3 @@
+widen |value Int| -> Uint:
+    return cast value
+;

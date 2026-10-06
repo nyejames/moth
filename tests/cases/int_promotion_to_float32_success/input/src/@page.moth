@@ -1,0 +1,25 @@
+-- Int32/Float32: implicit Int returns round directly at Float32 precision,
+-- exactly as an explicit cast of a runtime Int and the folded constants.
+-- 16777217 lands on 16777216; the snapshot row pins that the coerced Float
+-- binding is a copy, not an alias of the mutable Int.
+
+round |value Int| -> Float:
+    return value
+;
+
+explicit_round |value Int| -> Float:
+    return cast value
+;
+
+small Float = round(16777217)
+small_explicit Float = explicit_round(16777217)
+folded_small #Int = 16777217
+folded_eq #Bool = folded_small is 16777216.0
+dynamic_eq Bool = small is 16777216.0
+explicit_eq Bool = small_explicit is 16777216.0
+
+counter ~Int = 5
+snapshot Float = counter
+counter = 7
+
+[:coerced small=[small]/[small_explicit]/[folded_eq]/[dynamic_eq]/[explicit_eq] snapshot=[snapshot]/[counter]]

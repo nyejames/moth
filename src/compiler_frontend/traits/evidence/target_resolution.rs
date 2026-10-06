@@ -187,7 +187,10 @@ pub(super) fn resolve_conformance_target(
 
 fn is_builtin_scalar_target(name: StringId, string_table: &StringTable) -> bool {
     let resolved = string_table.resolve(name);
-    matches!(resolved, "Int" | "Float" | "Bool" | "String" | "Char")
+    matches!(
+        resolved,
+        "Int" | "Uint" | "Float" | "Bool" | "String" | "Char"
+    )
         // Explicit-width spellings and `Byte` are builtin scalar targets too, so user-authored
         // conformance on them is rejected through the same builtin-target diagnostic.
         || FixedScalar::from_name(resolved).is_some()

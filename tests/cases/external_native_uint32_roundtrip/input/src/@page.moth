@@ -1,0 +1,10 @@
+@external_uint.js identity_uint
+
+-- Uint32 rides an exact Number across the foreign boundary: zero, the
+-- unsigned maximum and the signed-max-plus-one value that separates the
+-- Uint32 range from Int32 all survive the round trip unchanged.
+zero Uint = identity_uint(0)
+small Uint = identity_uint(17)
+signed_max_plus_one Uint = identity_uint(2147483648)
+top Uint = identity_uint(4294967295)
+io.line([: external_native_uint32 zero=[zero] small=[small] above_signed=[signed_max_plus_one] max=[top]])

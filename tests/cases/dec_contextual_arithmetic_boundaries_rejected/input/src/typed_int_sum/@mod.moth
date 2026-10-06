@@ -1,0 +1,4 @@
+reject_typed_int_sum |left Int, right Int| -> String:
+    result Dec4 = left + right
+    return [result]
+;

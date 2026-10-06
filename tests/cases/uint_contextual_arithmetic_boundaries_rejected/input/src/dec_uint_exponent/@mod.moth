@@ -1,0 +1,4 @@
+reject_dec_uint_exponent |base Dec2, factor Uint| -> String:
+    result Dec2 = base ^ factor
+    return [result]
+;

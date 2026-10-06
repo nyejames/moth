@@ -1,0 +1,40 @@
+entry = "."
+numeric_profile = "Int64/Float32"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "uint-literal-incl-1;",
+    "uint-literal-incl-2;",
+    "uint-literal-incl-3;",
+    "uint-literal-desc-3;",
+    "uint-literal-desc-2;",
+    "uint-const-asc-1;",
+    "uint-const-asc-2;",
+    "uint-const-asc-3;",
+    "uint-const-desc-3;",
+    "uint-const-desc-2;",
+    "uint-const-desc-1;",
+    "uint-const-desc-to-zero-2;",
+    "uint-const-desc-to-zero-1;",
+    "uint-const-desc-to-zero-0;",
+    "uint-const-near-max-18446744073709551613;",
+    "uint-const-near-max-18446744073709551614;",
+    "uint-const-near-max-18446744073709551615;",
+    "uint-mixed-step-0;",
+    "uint-mixed-step-1;",
+    "uint-mixed-step-2;",
+    "uint-mixed-bound-0;",
+    "uint-mixed-bound-1;",
+    "uint-mixed-bound-2;",
+]
+must_not_contain = [
+    "uint-literal-incl-4;",
+    "uint-const-asc-4;",
+    "uint-const-desc-0;",
+]

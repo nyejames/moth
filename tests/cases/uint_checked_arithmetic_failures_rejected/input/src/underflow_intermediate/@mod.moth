@@ -1,0 +1,3 @@
+fail_underflow || -> Uint, Error!:
+    return (0 - 1) + 2
+;

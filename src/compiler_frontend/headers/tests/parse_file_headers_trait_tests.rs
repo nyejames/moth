@@ -112,6 +112,27 @@ fn builtin_type_conformance_headers_parse_as_trait_conformances() {
 }
 
 #[test]
+fn uint_conformance_header_parses_as_builtin_trait_conformance() {
+    let (headers, string_table) = parse_single_file_headers_with_table("Uint must DISPLAYABLE\n");
+
+    let conformance_header = headers
+        .headers
+        .iter()
+        .find(|header| matches!(header.kind, HeaderKind::TraitConformance { .. }))
+        .expect("expected builtin trait conformance header");
+
+    let HeaderKind::TraitConformance { conformance } = &conformance_header.kind else {
+        panic!("expected trait conformance header kind");
+    };
+
+    assert_eq!(string_table.resolve(conformance.target.name), "Uint");
+    assert_eq!(
+        string_table.resolve(conformance.traits[0].name),
+        "DISPLAYABLE"
+    );
+}
+
+#[test]
 fn trait_requirement_rejects_lowercase_this_receiver() {
     let result = parse_single_file_headers_with_entry(
         "BAD must:\n    wrong |this|\n;\n",

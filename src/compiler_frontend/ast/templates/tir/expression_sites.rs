@@ -15,6 +15,7 @@
 
 use std::collections::HashSet;
 
+use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::templates::template_control_flow::TemplateLoopHeader;
@@ -182,8 +183,17 @@ fn inspect_nested_expression_kind(
 
         ExpressionKind::Runtime(rpn) => {
             for item in &rpn.items {
-                if let ExpressionRpnItem::Operand(operand) = item {
-                    inspect_nested_expression_kind(operand, visitor, pending_template_views)?;
+                match item {
+                    ExpressionRpnItem::Operand(operand) => {
+                        inspect_nested_expression_kind(operand, visitor, pending_template_views)?;
+                    }
+                    ExpressionRpnItem::Operator { .. } => {}
+                    // Pending syntax never survives evaluation; this fallible TIR walk reports
+                    // the broken invariant instead of silently skipping the malformed operand.
+                    ExpressionRpnItem::PendingNumericLiteral { .. }
+                    | ExpressionRpnItem::PendingGroup { .. } => {
+                        return Err(pending_expression_item_bug("TIR expression walk"));
+                    }
                 }
             }
             Ok(())

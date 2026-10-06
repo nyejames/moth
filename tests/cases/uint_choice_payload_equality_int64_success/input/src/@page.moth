@@ -1,0 +1,22 @@
+-- Uint equality above the signed range under the Int64 profile: choice
+-- payloads, optional wrapping and scalar comparison all stay exact where
+-- a signed reinterpretation would fail.
+Holder ::
+    Single | value Uint |,
+;
+
+chosen Holder = Holder::Single(18446744073709551615)
+same = chosen is Holder::Single(18446744073709551615)
+different = chosen is Holder::Single(9223372036854775807)
+low Uint = 9223372036854775808
+high Uint = 18446744073709551615
+above_signed = low is low
+above_not_max = low is high
+
+maybe_huge Uint? = 18446744073709551615
+huge Uint = 18446744073709551615
+just_above_signed Uint = 9223372036854775807
+optional_same = maybe_huge is huge
+optional_different = maybe_huge is just_above_signed
+
+[:uint_int64_choice_equality same=[same] different=[different] above_signed=[above_signed] above_not_max=[above_not_max] optional_same=[optional_same] optional_different=[optional_different]]

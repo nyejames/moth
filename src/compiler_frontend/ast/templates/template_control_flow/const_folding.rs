@@ -16,9 +16,7 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::datatypes::numeric_operators::{
-    NumericOperator, binary_operation_domain,
-};
+use crate::compiler_frontend::datatypes::numeric_operators::range_iteration_domain;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -70,12 +68,12 @@ enum ConstRangeCursorKind {
         end_kind: RangeEndKind,
         step: i64,
     },
-    FixedInteger {
+    Integer {
         current: i128,
         end: i128,
         end_kind: RangeEndKind,
         step: i128,
-        scalar: FixedScalar,
+        output: ConstRangeIntegerOutput,
     },
     Float {
         current: f64,
@@ -93,9 +91,34 @@ enum ConstRangeCursorKind {
     },
 }
 
+/// Which identity a shared integer cursor materialises at counter emission.
+///
+/// WHAT: the candidate/termination mechanics run once on `i128`; only the
+///       emitted counter keeps the source identity (`Uint` payload versus a
+///       fixed-width scalar).
+/// WHY: `Uint` ranges reuse the existing unsigned candidate/termination logic
+///      instead of owning a parallel stepping path.
 #[derive(Clone, Copy)]
+enum ConstRangeIntegerOutput {
+    Uint,
+    Fixed(FixedScalar),
+}
+
+/// Inputs for the shared integer cursor constructor.
+struct ConstRangeIntegerInput<'range> {
+    output: ConstRangeIntegerOutput,
+    start: i128,
+    end: i128,
+    step: Option<(i128, Option<crate::compiler_frontend::source::SourceSpan>)>,
+    maximum_step_magnitude: i128,
+    range: &'range RangeLoopSpec,
+    limit: usize,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
+    float_precision: FloatPrecision,
+}
 pub(crate) enum ConstRangeIterationValue {
     Int(i64),
+    Uint(u64),
     Float(f64),
     Fixed(FixedScalarValue),
 }
@@ -146,6 +169,19 @@ impl ConstRangeCursor {
                 span,
                 float_precision,
             }),
+            (ConstNumericValue::Uint(start), ConstNumericValue::Uint(end), None) => {
+                Self::new_integer(ConstRangeIntegerInput {
+                    output: ConstRangeIntegerOutput::Uint,
+                    start: i128::from(start),
+                    end: i128::from(end),
+                    step: None,
+                    maximum_step_magnitude: i128::from(u64::MAX),
+                    range,
+                    limit,
+                    span,
+                    float_precision,
+                })
+            }
 
             (
                 ConstNumericValue::Int(start),
@@ -180,7 +216,21 @@ impl ConstRangeCursor {
                     float_precision,
                 })
             }
-
+            (
+                ConstNumericValue::Uint(start),
+                ConstNumericValue::Uint(end),
+                Some(ConstNumericValue::Uint(step)),
+            ) => Self::new_integer(ConstRangeIntegerInput {
+                output: ConstRangeIntegerOutput::Uint,
+                start: i128::from(start),
+                end: i128::from(end),
+                step: Some((i128::from(step), step_span)),
+                maximum_step_magnitude: i128::from(u64::MAX),
+                range,
+                limit,
+                span,
+                float_precision,
+            }),
             (start, end, step) => {
                 // Widened `Int` bounds convert at the boundary precision (never via an
                 // f64 intermediate under Bits32) and literal `Float` bounds round once,
@@ -245,6 +295,52 @@ impl ConstRangeCursor {
             }
         }
     }
+    /// Builds a shared `i128` integer cursor for fixed integers and `Uint`.
+    ///
+    /// WHAT: validates the step magnitude against the caller's maximum,
+    ///       normalises it to a positive magnitude and signs it by direction.
+    ///       Only the emitted counter keeps the source identity.
+    /// WHY: descending ranges subtract a magnitude without unary negation, the
+    ///      inclusive maximum and descending zero endpoints terminate through
+    ///      the in-range exit without ever computing an invalid successor.
+    fn new_integer(input: ConstRangeIntegerInput<'_>) -> Result<Self, TemplateError> {
+        let ConstRangeIntegerInput {
+            output,
+            start,
+            end,
+            step,
+            maximum_step_magnitude,
+            range,
+            limit,
+            span,
+            float_precision,
+        } = input;
+        let step_span = step.and_then(|(_, explicit)| explicit).or(span);
+        let magnitude = match step {
+            Some((value, _)) => value
+                .checked_abs()
+                .filter(|magnitude| *magnitude <= maximum_step_magnitude)
+                .ok_or_else(|| invalid_range_bounds(step_span))?,
+            None => 1,
+        };
+        if magnitude == 0 {
+            return Err(invalid_range_bounds(step_span));
+        }
+        Ok(Self {
+            kind: ConstRangeCursorKind::Integer {
+                current: start,
+                end,
+                end_kind: range.end_kind,
+                step: if start <= end { magnitude } else { -magnitude },
+                output,
+            },
+            emitted_iterations: 0,
+            finished: false,
+            limit,
+            span,
+            float_precision,
+        })
+    }
     fn new_fixed(
         scalar: FixedScalar,
         range_values: (
@@ -270,28 +366,25 @@ impl ConstRangeCursor {
                     .ok_or_else(|| invalid_range_bounds(span))?;
                 let maximum_step_magnitude = fixed_integer_max_magnitude(scalar)
                     .ok_or_else(|| invalid_range_bounds(span))?;
-                let step_magnitude = match step {
-                    Some(value) => value
-                        .to_fixed_integer()
-                        .and_then(i128::checked_abs)
-                        .filter(|magnitude| *magnitude <= maximum_step_magnitude)
-                        .ok_or_else(|| invalid_range_bounds(step_span.or(span)))?,
-                    None => 1,
-                };
-                if step_magnitude == 0 {
-                    return Err(invalid_range_bounds(step_span.or(span)));
-                }
-                ConstRangeCursorKind::FixedInteger {
-                    current,
+                let explicit_step = step
+                    .map(|value| {
+                        value
+                            .to_fixed_integer()
+                            .ok_or_else(|| invalid_range_bounds(step_span.or(span)))
+                    })
+                    .transpose()?
+                    .map(|magnitude| (magnitude, step_span));
+                return Self::new_integer(ConstRangeIntegerInput {
+                    output: ConstRangeIntegerOutput::Fixed(scalar),
+                    start: current,
                     end,
-                    end_kind,
-                    step: if current <= end {
-                        step_magnitude
-                    } else {
-                        -step_magnitude
-                    },
-                    scalar,
-                }
+                    step: explicit_step,
+                    maximum_step_magnitude,
+                    range,
+                    limit,
+                    span,
+                    float_precision,
+                });
             }
             FixedScalarClass::BinaryFloat => {
                 let (scalar, precision) =
@@ -396,12 +489,12 @@ impl ConstRangeCursor {
 
                 Ok(Some(counter))
             }
-            ConstRangeCursorKind::FixedInteger {
+            ConstRangeCursorKind::Integer {
                 current,
                 end,
                 end_kind,
                 step,
-                scalar,
+                output,
             } => {
                 let ascending = *step > 0;
                 if !fixed_integer_range_contains(*current, *end, *end_kind, ascending) {
@@ -418,9 +511,21 @@ impl ConstRangeCursor {
                     .into());
                 }
 
-                let counter = fixed_integer_scalar(*scalar, *current)
-                    .map(ConstRangeIterationValue::Fixed)
-                    .ok_or_else(|| invalid_range_bounds(self.span))?;
+                // Only counter materialisation keeps the source identity: the
+                // candidate/termination mechanics above run once on `i128`.
+                // The in-range exit below never computes an invalid successor,
+                // so the inclusive maximum and descending zero terminate.
+                let counter = match output {
+                    ConstRangeIntegerOutput::Uint => u64::try_from(*current)
+                        .ok()
+                        .map(ConstRangeIterationValue::Uint)
+                        .ok_or_else(|| invalid_range_bounds(self.span))?,
+                    ConstRangeIntegerOutput::Fixed(scalar) => {
+                        fixed_integer_scalar(*scalar, *current)
+                            .map(ConstRangeIterationValue::Fixed)
+                            .ok_or_else(|| invalid_range_bounds(self.span))?
+                    }
+                };
                 self.emitted_iterations += 1;
 
                 let next = current
@@ -552,6 +657,7 @@ fn int_step_magnitude(
 #[derive(Clone, Copy)]
 enum ConstNumericValue {
     Int(i64),
+    Uint(u64),
     Float(f64),
     Fixed(FixedScalarValue),
 }
@@ -560,6 +666,7 @@ impl ConstNumericValue {
     fn numeric_scalar(self) -> NumericScalar {
         match self {
             Self::Int(_) => NumericScalar::Int,
+            Self::Uint(_) => NumericScalar::Uint,
             Self::Float(_) => NumericScalar::Float,
             Self::Fixed(value) => NumericScalar::Fixed(value.scalar()),
         }
@@ -570,6 +677,7 @@ impl ConstNumericValue {
             // Widened `Int` bounds convert at the boundary precision (never via an
             // f64 intermediate under Bits32), while literal `Float` bounds round once.
             Self::Int(value) => Some(float_precision.round_int(value)),
+            Self::Uint(value) => Some(float_precision.round_uint(value)),
             Self::Float(value) => Some(float_precision.round(value)),
             Self::Fixed(value) => value.as_f64().map(|value| float_precision.round(value)),
         }
@@ -598,15 +706,11 @@ fn const_range_domain(
     end: ConstNumericValue,
     step: Option<ConstNumericValue>,
 ) -> Option<NumericScalar> {
-    let mut domain = binary_operation_domain(
-        NumericOperator::Add,
+    range_iteration_domain(
         start.numeric_scalar(),
         end.numeric_scalar(),
-    )?;
-    if let Some(step) = step {
-        domain = binary_operation_domain(NumericOperator::Add, domain, step.numeric_scalar())?;
-    }
-    Some(domain)
+        step.map(ConstNumericValue::numeric_scalar),
+    )
 }
 
 fn fixed_float_domain(scalar: FixedScalar) -> Option<(FixedScalar, BinaryFloatPrecision)> {
@@ -667,6 +771,7 @@ fn fixed_integer_range_contains(
 fn const_numeric_expression(expression: &Expression) -> Result<ConstNumericValue, TemplateError> {
     match &expression.kind {
         ExpressionKind::Int(value) => Ok(ConstNumericValue::Int(*value)),
+        ExpressionKind::Uint(value) => Ok(ConstNumericValue::Uint(*value)),
         ExpressionKind::Float(value) => Ok(ConstNumericValue::Float(*value)),
         ExpressionKind::FixedScalar(value) => Ok(ConstNumericValue::Fixed(*value)),
         ExpressionKind::Coerced { value, .. } => const_numeric_expression(value),
@@ -730,6 +835,9 @@ pub(crate) fn build_range_iteration_bindings(
         let value = match counter {
             ConstRangeIterationValue::Int(value) => {
                 Expression::int(value, item.value.span, ValueMode::ImmutableOwned)
+            }
+            ConstRangeIterationValue::Uint(value) => {
+                Expression::uint(value, item.value.span, ValueMode::ImmutableOwned)
             }
             ConstRangeIterationValue::Float(value) => {
                 Expression::float(value, item.value.span, ValueMode::ImmutableOwned)

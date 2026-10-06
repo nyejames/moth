@@ -1,4 +1,9 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["runtime int to float coercion passed"]
+rendered_output_exact = "coerced call=4 snapshot=5 reassigned=7"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "coerced call=4 snapshot=5 reassigned=7"

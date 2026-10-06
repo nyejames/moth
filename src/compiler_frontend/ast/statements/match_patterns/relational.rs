@@ -63,7 +63,8 @@ pub(super) fn parse_relational_pattern(
 }
 /// Ensure the subject type supports relational ordering.
 ///
-/// Int, Float, Char, fixed-width numeric scalars, Byte and the Dec family have ordered comparisons.
+/// Int, Uint, Float, Char, fixed-width numeric scalars, Byte and the Dec family have ordered
+/// comparisons.
 fn ensure_relational_subject_type(
     subject_type_id: TypeId,
     span: Option<SourceSpan>,
@@ -73,6 +74,7 @@ fn ensure_relational_subject_type(
     let builtins = type_environment.builtins();
 
     let is_ordered_scalar = subject_type_id == builtins.int
+        || subject_type_id == builtins.uint
         || subject_type_id == builtins.float
         || subject_type_id == builtins.char
         || type_environment.fixed_scalar(subject_type_id).is_some()

@@ -1,0 +1,27 @@
+-- Task 5A: a runtime Uint zero step fails recoverably like the fixed-int
+-- precedent. A Uint step variable is not a literal zero, so the static
+-- ZeroRangeStep arm does not fire; the HIR step guard reports code 306 and
+-- catch recovers without iterating.
+
+walk_uint |step Uint, flag ~Int| -> Int:
+    lower Uint = 0
+    upper Uint = 10
+    loop lower to upper by step |i|:
+        flag = flag + 1
+    ;
+    return flag
+;
+safe_walk |step Uint, flag ~Int| -> Int, Error!:
+    return walk_uint(step, ~flag)
+;
+flag ~= 0
+info ~= ""
+recovered = safe_walk(0, ~flag) catch |err|:
+    info = [: [err.code] [err.message]]
+    then 0 - 1
+;
+report = copy info
+exact_flag ~= 0
+exact = safe_walk(1, ~exact_flag) catch then 0 - 2
+
+[:uint_range_zero_step report=[report] recovered=[recovered] iterations=[flag] exact=[exact] exact-iters=[exact_flag]]

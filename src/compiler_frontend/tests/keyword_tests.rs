@@ -61,6 +61,7 @@ fn each_source_spelling_maps_to_its_exact_compiler_token() {
         ("U16", TokenTag::DATATYPE_U16, BuiltinType, None),
         ("U32", TokenTag::DATATYPE_U32, BuiltinType, None),
         ("U64", TokenTag::DATATYPE_U64, BuiltinType, None),
+        ("Uint", TokenTag::DATATYPE_UINT, BuiltinType, None),
         ("F16", TokenTag::DATATYPE_F16, BuiltinType, None),
         ("F32", TokenTag::DATATYPE_F32, BuiltinType, None),
         ("F64", TokenTag::DATATYPE_F64, BuiltinType, None),

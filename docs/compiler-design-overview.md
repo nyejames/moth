@@ -244,17 +244,17 @@ The canonical numeric and cast references routed by `docs/src/developer-docs/lan
 
 ### Canonical numeric identities
 
-The numeric types are `Int`, `Float`, `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`, `F16`, `F32`, `F64` and the `Dec` family, with scales `Dec0` through `Dec256`. `Byte` is a separate octet scalar, nominally distinct from `U8`, `I8` and `Char`, with no arithmetic.
+The numeric types are `Int`, `Uint`, `Float`, `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`, `F16`, `F32`, `F64` and the `Dec` family, with scales `Dec0` through `Dec256`. `Uint` follows the profile-selected `Int` width, so it is `Uint32` under `Int32` and `Uint64` under `Int64`. `Byte` is a separate octet scalar, nominally distinct from `U8`, `I8` and `Char`, with no arithmetic.
 
-`Int` and `Float` keep distinct canonical identities even when their selected precision matches a fixed-width type. `Dec0` aliases the scale-zero `Dec` identity. Other `DecN` types carry scale in identity. Leading-zero scales and scales above 256 are invalid.
+`Int`, `Uint` and `Float` keep distinct canonical identities even when their selected precision matches a fixed-width type. `Dec0` aliases the scale-zero `Dec` identity. Other `DecN` types carry scale in identity. Leading-zero scales and scales above 256 are invalid.
 
 ### Compilation-wide numeric profile
 
-`NumericProfile` independently selects 32- or 64-bit `Int` and `Float`. The default is 32-bit `Int` and 64-bit `Float`. The builder settles it before command-input materialisation and config compilation. It has no source, directive, build-input or command-line selection syntax.
+`NumericProfile` independently selects 32- or 64-bit `Int` and `Float`. The default is 32-bit `Int` and 64-bit `Float`, and therefore `Uint32`. `Uint` follows that selection with no separate setting. The builder settles it before command-input materialisation and config compilation. It has no source, directive, build-input or command-line selection syntax.
 
 The profile is fixed across directly linked Moth modules, generated functions, Core/Builder source packages and Moth-source dependencies. It never varies by function, target partition or development/release representation. Incompatible precompiled Moth artefacts require a matching build or rejection, never silent numeric adaptation. Foreign components retain explicit foreign types and separate value boundaries.
 
-The profile affects numeric materialisation, folding, overflow limits, rounding, diagnostics and ABI/layout facts. Every numeric compiler service consumes it, including synthetic sources, config, direct templates and MON schema preparation. Existing fingerprint and compatibility owners include profile-dependent facts, including private implementation behaviour. They do not form a separate numeric cache system.
+The profile affects numeric materialisation, folding, overflow limits, rounding, diagnostics and ABI/layout facts. `Uint` scalar element stride is 4 or 8 bytes where compact scalar storage is supported, following the selected `Int` width. Every numeric compiler service consumes it, including synthetic sources, config, direct templates and MON schema preparation. Existing fingerprint and compatibility owners include profile-dependent facts, including private implementation behaviour. They do not form a separate numeric cache system.
 
 ### Semantic and physical separation
 
@@ -510,18 +510,21 @@ Source misuse receives a typed arity/type diagnostic at its receiving site. A co
 
 #### Numeric typing and literal materialisation
 
-AST consumes the boundary `NumericProfile` for `Int` and `Float`. Fixed-width types, `Byte` and `Dec` scales are profile-independent.
+AST consumes the boundary `NumericProfile` for `Int`, `Uint` and `Float`. Fixed-width types, `Byte` and `Dec` scales are profile-independent.
 
 Numeric literals retain source-local spelling until a destination is known:
 
 - An unconstrained whole literal defaults to `Int`. Decimal/exponent spelling defaults to `Float`. Small values never infer a narrow type by size.
-- A direct typed receiver materialises the requested numeric type without an `Int` intermediate. A `U64` literal can therefore exceed the default `Int` range.
-- Whole literals may initialise binary floats. Decimal/exponent spelling never initialises an integer or `Byte` merely because its mathematical value is integral.
+- A direct typed receiver materialises a lone literal of the requested numeric type without an `Int` intermediate. A `U64` literal can therefore exceed the default `Int` range.
+- A concrete `Dec` or `Uint` receiver additionally types unresolved literal arithmetic before operator typing and folding. The `Dec` scale flows down raw arithmetic and parenthesised groups to pending literal leaves, which materialise directly at that scale; an explicit `Uint` receiver reaches unresolved whole-number leaves the same way at the selected unsigned width. Without an explicit receiver, a typed `Dec` peer supplies its scale to a wholly literal-only opposite subtree from either side, while a local typed `Uint` peer supplies `Uint` the same way. Only `Dec` and `Uint` peers extend to compound literal subtrees, with different exponent rules: `Dec` context never crosses a power exponent edge, a cast operand, a call argument, a comparison or logical operator, a typed suffix needing a completed value, or an unresolved generic slot, while a raw `Uint` exponent receives `Uint` context too.
+- Whole literals may initialise binary floats, `Uint` and the `Dec` family. Decimal/exponent spelling never initialises an integer, `Uint` or `Byte` merely because its mathematical value is integral.
 - Binary float literals round directly to the destination using round-to-nearest, ties-to-even. Inexact finite values are valid. Rounded non-finite results fail. Subnormals and signed zero are preserved.
 - Signed integer minima materialise with their sign without first rejecting the positive magnitude. Negative values cannot initialise unsigned types or `Byte`.
-- `Dec` uses its exact decimal scale rule, not binary literal rounding.
+- `Dec` uses its exact decimal scale rule, not binary literal rounding. Each leaf must fit the selected scale exactly. A `Uint` leaf must fit the selected unsigned width.
 
-An immediate concrete numeric peer may type an otherwise untyped literal before operator promotion. A literal outside that peer's range is diagnosed. A receiving annotation does not retrospectively retag an operator's result. Generic inference uses these local rules, without distant conversion search. Parentheses add no receiving boundary and already typed values keep their identities.
+An immediate concrete numeric peer may type an otherwise untyped lone literal before operator promotion. A literal outside that peer's range is diagnosed. A receiving annotation does not retrospectively retag an already typed operator result. Typed operands keep their identities. Generic inference uses these local rules, without distant conversion search. Parentheses preserve grouping without adding a receiving boundary.
+
+Groups retain their infix syntax as pending fragments until ordering flattens them into one RPN stream. Destination selection runs on the ordered stream before literal materialisation, materialisation runs before operator typing and operator typing runs before named-constant substitution and folding. Completed AST and HIR retain resolved semantic values only. Neither pending form survives there.
 
 Materialisation never routes through a fixed `i32`/`f64` bottleneck. Operator promotion, comparison and cast eligibility remain separate decisions. The canonical numeric and cast references own their matrices and checked result domains.
 
@@ -986,7 +989,7 @@ The literal reader uses a bounded MON cursor, not AST expression parsing, compil
 
 A caller prepares and validates its finite schema/default tree once, then reuses it immutably. Schema eligibility is transitive. Owned decoded values remain valid after the caller releases input, with no public borrowed document view, alias preservation or cyclic value graph. Internal borrowing during a call is permitted.
 
-Schema preparation captures `NumericProfile` for `Int`/`Float`, defaulting to the standard profile for standalone Rust callers. Explicit-width and Byte schemas are profile-independent. The accepted numeric extension covers all fixed widths, Byte and Dec scales through 256 without another numeric parser. Integer/Byte targets require whole-number spelling, fixed floats use direct binary rounding and Dec conversion remains exact. Encoding preserves typed round trips, including signed zero. Map-key schemas include fixed integers and Byte, while binary floats and Dec remain excluded.
+Schema preparation captures `NumericProfile` for `Int`/`Uint`/`Float`, defaulting to the standard profile for standalone Rust callers. `Uint` follows the profile `Int` width there too. Explicit-width and Byte schemas are profile-independent. The accepted numeric extension covers all fixed widths, `Uint`, Byte and Dec scales through 256 without another numeric parser. Integer/Byte targets require whole-number spelling, with `Uint` applying the shared unsigned policy and retaining the full `u64` payload, fixed floats use direct binary rounding and Dec conversion remains exact. Encoding preserves typed round trips, including signed zero. Map-key schemas include `Uint`, fixed integers and Byte, while binary floats and Dec remain excluded.
 
 ### Publication and receiving contracts
 

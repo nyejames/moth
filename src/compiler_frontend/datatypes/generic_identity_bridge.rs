@@ -41,6 +41,7 @@ pub enum BuiltinGenericType {
 pub enum BuiltinTypeKey {
     Bool,
     Int,
+    Uint,
     Float,
     /// One arbitrary-precision `Dec` scale identity; scale zero is the `Dec` alias.
     Number(NumberScale),
@@ -172,6 +173,7 @@ fn display_type_identity_key_with_resolver<R: PathNameResolver>(
         TypeIdentityKey::Builtin(builtin) => match builtin {
             BuiltinTypeKey::Bool => "Bool".to_owned(),
             BuiltinTypeKey::Int => "Int".to_owned(),
+            BuiltinTypeKey::Uint => "Uint".to_owned(),
             BuiltinTypeKey::Float => "Float".to_owned(),
             BuiltinTypeKey::Number(scale) => scale.to_string(),
             BuiltinTypeKey::String => "String".to_owned(),
@@ -236,6 +238,7 @@ pub fn data_type_to_type_identity_key(data_type: &DataType) -> Option<TypeIdenti
     match data_type {
         DataType::Bool => Some(TypeIdentityKey::Builtin(BuiltinTypeKey::Bool)),
         DataType::Int => Some(TypeIdentityKey::Builtin(BuiltinTypeKey::Int)),
+        DataType::Uint => Some(TypeIdentityKey::Builtin(BuiltinTypeKey::Uint)),
         DataType::Float => Some(TypeIdentityKey::Builtin(BuiltinTypeKey::Float)),
         DataType::Number(scale) => Some(TypeIdentityKey::Builtin(BuiltinTypeKey::Number(*scale))),
         DataType::StringSlice => Some(TypeIdentityKey::Builtin(BuiltinTypeKey::String)),
@@ -336,6 +339,7 @@ pub(crate) fn type_identity_key_to_type_id(
         TypeIdentityKey::Builtin(builtin) => Some(match builtin {
             BuiltinTypeKey::Bool => type_environment.builtins().bool,
             BuiltinTypeKey::Int => type_environment.builtins().int,
+            BuiltinTypeKey::Uint => type_environment.builtins().uint,
             BuiltinTypeKey::Float => type_environment.builtins().float,
             BuiltinTypeKey::Number(scale) => type_environment.intern_number(*scale),
             BuiltinTypeKey::String => type_environment.builtins().string,

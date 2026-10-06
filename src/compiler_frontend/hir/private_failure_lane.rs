@@ -997,7 +997,8 @@ fn note_expression_id(expression: &HirExpression, next_value: &mut u32) {
                 note_expression_id(&entry.value, next_value);
             }
         }
-        HirExpressionKind::Int(_)
+        HirExpressionKind::Uint(_)
+        | HirExpressionKind::Int(_)
         | HirExpressionKind::Float(_)
         | HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Number(_)

@@ -307,8 +307,8 @@ pub(crate) enum CallArgumentSyntaxContext {
 /// WHAT: passes an optional parameter type into expression parsing so a call argument such as
 ///      `message = none` can resolve its inner type before ordinary call validation runs.
 ///      Bare `none` keeps the baseline option slot; any other argument into a numeric
-///      (bare or optional) slot carries a direct-literal hint. The evaluator materialises a lone
-///      literal in that destination, and every other shape behaves exactly as inference.
+///      (bare or optional) slot carries a literal destination. Dec and Uint also contextualise
+///      raw arithmetic, while other numeric destinations only materialise lone literals.
 /// WHY: call arguments otherwise parse with natural-type inference, which is correct for most
 ///      values but rejects context-sensitive literals before the receiving slot is known.
 ///      Call validation keeps owning every argument type diagnostic.
@@ -326,7 +326,7 @@ fn expected_type_for_parameter_expectation(
     }
 
     if is_numeric_literal_destination_type_id(type_id, type_environment) {
-        return ExpectedType::DirectLiteral(type_id);
+        return ExpectedType::NumericLiteral(type_id);
     }
 
     ExpectedType::Infer

@@ -175,6 +175,8 @@ impl ModulePrivateNominalIdentity {
 pub(crate) enum CanonicalBuiltinType {
     Bool,
     Int,
+    /// Profile-sized unsigned integer, following the selected `Int` width.
+    Uint,
     Float,
     String,
     Char,
@@ -733,6 +735,7 @@ pub(crate) fn canonical_builtin_for_key(key: BuiltinTypeKey) -> CanonicalBuiltin
     match key {
         BuiltinTypeKey::Bool => CanonicalBuiltinType::Bool,
         BuiltinTypeKey::Int => CanonicalBuiltinType::Int,
+        BuiltinTypeKey::Uint => CanonicalBuiltinType::Uint,
         BuiltinTypeKey::Float => CanonicalBuiltinType::Float,
         BuiltinTypeKey::String => CanonicalBuiltinType::String,
         BuiltinTypeKey::Char => CanonicalBuiltinType::Char,
@@ -758,6 +761,7 @@ pub(crate) fn builtin_key_for_canonical_builtin(
     Some(match builtin {
         CanonicalBuiltinType::Bool => BuiltinTypeKey::Bool,
         CanonicalBuiltinType::Int => BuiltinTypeKey::Int,
+        CanonicalBuiltinType::Uint => BuiltinTypeKey::Uint,
         CanonicalBuiltinType::Float => BuiltinTypeKey::Float,
         CanonicalBuiltinType::String => BuiltinTypeKey::String,
         CanonicalBuiltinType::Char => BuiltinTypeKey::Char,

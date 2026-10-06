@@ -1,0 +1,7 @@
+-- Task 5A: Uint and Int keys are distinct types; an Int key does not
+-- satisfy a Uint-keyed map lookup.
+
+wide_map {Uint = Int} = {7 = 1}
+i64_key Int = 7
+bad = wide_map.contains(i64_key)
+[:test]

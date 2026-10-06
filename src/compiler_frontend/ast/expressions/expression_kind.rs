@@ -83,6 +83,8 @@ pub enum ExpressionKind {
     ///      RPN cannot smuggle statement bodies into value contexts.
     Runtime(ExpressionRpn),
     Int(i64),
+    /// One profile-sized unsigned integer value; follows the selected `Int` width.
+    Uint(u64),
     Float(f64),
     /// One materialised fixed-width scalar or `Byte` value.
     ///
@@ -332,6 +334,7 @@ impl ExpressionKind {
         if matches!(
             self,
             ExpressionKind::Int(_)
+                | ExpressionKind::Uint(_)
                 | ExpressionKind::Float(_)
                 | ExpressionKind::FixedScalar(_)
                 | ExpressionKind::Number(_)

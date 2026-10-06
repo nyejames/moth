@@ -1,0 +1,10 @@
+-- Task 5A: fixed-collection capacities stay Int; a `#Uint` capacity
+-- constant is not silently accepted. Mirrors the neighbouring non-Int
+-- capacity rejection (fixed_collection_capacity_non_int_constant_rejected).
+
+cap #Uint = 4
+
+render || -> String:
+    values ~{cap String} = {}
+    return ""
+;

@@ -79,6 +79,14 @@ impl ProofFixture {
         self.environment.builtins().int
     }
 
+    fn uint(&self) -> TypeId {
+        self.environment.builtins().uint
+    }
+
+    fn uint_literal(&mut self, value: u64, ty: TypeId) -> HirExpression {
+        self.expression(HirExpressionKind::Uint(value), ty, ValueKind::Const)
+    }
+
     fn float(&self) -> TypeId {
         self.environment.builtins().float
     }
@@ -361,6 +369,13 @@ fn int_op(operator: NumericOperator) -> HirNumericOp {
     HirNumericOp {
         operator,
         domain: NumericScalar::Int,
+    }
+}
+
+fn uint_op(operator: NumericOperator) -> HirNumericOp {
+    HirNumericOp {
+        operator,
+        domain: NumericScalar::Uint,
     }
 }
 
@@ -1457,4 +1472,188 @@ fn profile_mismatch_returns_false_and_empty_tables_retain_everything() {
     assert!(!proofs.integer_narrowing_is_safe(operation_id, PROFILE));
     assert!(!NumericProofs::default().integer_operation_is_safe(operation_id, PROFILE));
     assert!(!NumericProofs::default().integer_narrowing_is_safe(operation_id, PROFILE));
+}
+
+#[test]
+fn uint_singletons_prove_exact_arithmetic_and_reject_overflow() {
+    // Uint literals are exact singletons, so `1 + 2` proves while
+    // `profile_max - 1 + 2` keeps its check, mirroring the U64 edge test.
+    // `PROFILE` is Int32/Float64, so the overflowing operand is
+    // `u32::MAX - 1`; the Int64-profile test below covers the full Uint64
+    // bounds above `i64::MAX`.
+    let mut fixture = ProofFixture::new();
+    let uint = fixture.uint();
+    let profile_max = PROFILE.int_width.unsigned_max_value();
+    let (exact, overflow) = (LocalId(0), LocalId(1));
+    let exact_left = fixture.uint_literal(1, uint);
+    let exact_right = fixture.uint_literal(2, uint);
+    let exact_operation = fixture.numeric_op(
+        uint_op(NumericOperator::Add),
+        binary(exact_left, exact_right),
+        exact,
+        NumericFailureMode::Trap,
+    );
+    let overflow_left = fixture.uint_literal(profile_max - 1, uint);
+    let overflow_right = fixture.uint_literal(2, uint);
+    let overflow_operation = fixture.numeric_op(
+        uint_op(NumericOperator::Add),
+        binary(overflow_left, overflow_right),
+        overflow,
+        NumericFailureMode::Trap,
+    );
+    let exact_id = exact_operation.id;
+    let overflow_id = overflow_operation.id;
+    let terminator = fixture.return_unit();
+    let (module, environment) = fixture.finish(vec![(
+        vec![declared(exact, uint), declared(overflow, uint)],
+        vec![exact_operation, overflow_operation],
+        terminator,
+    )]);
+
+    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+
+    assert!(proofs.integer_operation_is_safe(exact_id, PROFILE));
+    assert!(!proofs.integer_operation_is_safe(overflow_id, PROFILE));
+}
+
+#[test]
+fn uint64_singletons_prove_exact_arithmetic_above_i64_max() {
+    // Under Int64/Float64 the Uint domain spans the whole u64
+    // range, so `u64::MAX - 1 + 1` proves exactly while `+ 2` overflows —
+    // the i128 interval path above `i64::MAX`.
+    let int64_profile = NumericProfile {
+        int_width: IntWidth::Bits64,
+        float_precision: FloatPrecision::Bits64,
+    };
+    let mut fixture = ProofFixture::new();
+    let uint = fixture.uint();
+    let (exact, overflow) = (LocalId(0), LocalId(1));
+    let exact_left = fixture.uint_literal(u64::MAX - 1, uint);
+    let exact_right = fixture.uint_literal(1, uint);
+    let exact_operation = fixture.numeric_op(
+        uint_op(NumericOperator::Add),
+        binary(exact_left, exact_right),
+        exact,
+        NumericFailureMode::Trap,
+    );
+    let overflow_left = fixture.uint_literal(u64::MAX - 1, uint);
+    let overflow_right = fixture.uint_literal(2, uint);
+    let overflow_operation = fixture.numeric_op(
+        uint_op(NumericOperator::Add),
+        binary(overflow_left, overflow_right),
+        overflow,
+        NumericFailureMode::Trap,
+    );
+    let exact_id = exact_operation.id;
+    let overflow_id = overflow_operation.id;
+    let terminator = fixture.return_unit();
+    let (module, environment) = fixture.finish(vec![(
+        vec![declared(exact, uint), declared(overflow, uint)],
+        vec![exact_operation, overflow_operation],
+        terminator,
+    )]);
+
+    let proofs = analyse_numeric_proofs(&module, &environment, int64_profile);
+
+    assert!(proofs.integer_operation_is_safe(exact_id, int64_profile));
+    assert!(!proofs.integer_operation_is_safe(overflow_id, int64_profile));
+}
+
+#[test]
+fn uint_subtraction_below_zero_is_never_proven() {
+    // `0 - 1` underflows Uint exactly like the unsigned fixed case.
+    let mut fixture = ProofFixture::new();
+    let uint = fixture.uint();
+    let difference = LocalId(0);
+    let left = fixture.uint_literal(0, uint);
+    let right = fixture.uint_literal(1, uint);
+    let operation = fixture.numeric_op(
+        uint_op(NumericOperator::Subtract),
+        binary(left, right),
+        difference,
+        NumericFailureMode::Trap,
+    );
+    let operation_id = operation.id;
+    let terminator = fixture.return_unit();
+    let (module, environment) = fixture.finish(vec![(
+        vec![declared(difference, uint)],
+        vec![operation],
+        terminator,
+    )]);
+
+    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+
+    assert!(!proofs.integer_operation_is_safe(operation_id, PROFILE));
+}
+
+#[test]
+fn uint_narrowing_is_proven_only_when_the_source_interval_fits() {
+    // A known-small Uint narrows to Int exactly; an unknown parameter
+    // Uint keeps its CastOp check.
+    let mut fixture = ProofFixture::new();
+    let uint = fixture.uint();
+    let int = fixture.int();
+    let (source, carrier, wide_source, wide_carrier) =
+        (LocalId(0), LocalId(1), LocalId(2), LocalId(3));
+    let policy = BuiltinCastPolicyId::NumericConversion {
+        source: NumericScalar::Uint,
+        target: NumericScalar::Int,
+    };
+    let carrier_type = fixture.carrier(int);
+    let literal = fixture.uint_literal(5, uint);
+    let write = fixture.assign_local(source, literal);
+    let proven_source = fixture.load(source, uint);
+    let proven_cast = fixture.cast_op(policy, proven_source, carrier);
+    let unproven_source = fixture.load(wide_source, uint);
+    let unproven_cast = fixture.cast_op(policy, unproven_source, wide_carrier);
+    let proven_id = proven_cast.id;
+    let unproven_id = unproven_cast.id;
+    let terminator = fixture.return_unit();
+    let (module, environment) = fixture.finish(vec![(
+        vec![
+            declared(source, uint),
+            declared(carrier, carrier_type),
+            declared(wide_source, uint),
+            declared(wide_carrier, carrier_type),
+        ],
+        vec![write, proven_cast, unproven_cast],
+        terminator,
+    )]);
+
+    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+
+    assert!(proofs.integer_narrowing_is_safe(proven_id, PROFILE));
+    assert!(!proofs.integer_narrowing_is_safe(unproven_id, PROFILE));
+}
+
+#[test]
+fn uint_proof_marks_recoverable_operation_safe_but_gate_still_rejects_delivery() {
+    // The analyser marks `1 + 2` safe even in `ReturnError` mode because the
+    // failure is impossible, but the Wasm gate must still reject the reachable
+    // recoverable statement: proofs discharge runtime checks, never delivery. The
+    // source-level pair is `uint_wasm_recoverable_rejected`; this pins the analysis
+    // half of that contract.
+    let mut fixture = ProofFixture::new();
+    let uint = fixture.uint();
+    let (carrier, exact) = (LocalId(0), LocalId(1));
+    let carrier_type = fixture.carrier(uint);
+    let left = fixture.uint_literal(1, uint);
+    let right = fixture.uint_literal(2, uint);
+    let operation = fixture.numeric_op(
+        uint_op(NumericOperator::Add),
+        binary(left, right),
+        carrier,
+        NumericFailureMode::ReturnError,
+    );
+    let operation_id = operation.id;
+    let terminator = fixture.return_unit();
+    let (module, environment) = fixture.finish(vec![(
+        vec![declared(carrier, carrier_type), declared(exact, uint)],
+        vec![operation],
+        terminator,
+    )]);
+
+    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+
+    assert!(proofs.integer_operation_is_safe(operation_id, PROFILE));
 }

@@ -14,15 +14,17 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticOperator, DiagnosticPayload, InvalidBuiltinCallReason,
-    TypeDiagnosticKind, TypeMismatchContext,
+    OperatorOperandPosition, TypeDiagnosticKind, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
+use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
@@ -291,6 +293,21 @@ fn float_constructor_is_rejected_with_removed_scalar_constructor_diagnostic() {
             ..
         }
     ));
+}
+
+#[test]
+fn uint_constructor_is_rejected_with_named_scalar_constructor_diagnostic() {
+    let diagnostic = parse_single_file_ast_diagnostic("value = Uint(\"42\")\n");
+    let DiagnosticPayload::InvalidBuiltinCall {
+        reason: InvalidBuiltinCallReason::ScalarConstructorRemoved,
+        builtin_name: Some(_),
+    } = diagnostic.payload
+    else {
+        panic!(
+            "expected named ScalarConstructorRemoved diagnostic, got {:?}",
+            diagnostic.payload
+        );
+    };
 }
 
 #[test]
@@ -771,7 +788,30 @@ fn profile_float_peer_materialises_whole_literals_without_int_range_narrowing() 
 }
 
 #[test]
-fn numeric_receiving_context_keeps_integer_rules_and_does_not_retag_operator_results() {
+fn compound_float_subtree_materialises_lone_peer_as_profile_float() {
+    // The baseline accepts every shape below: a compound Float subtree resolves naturally
+    // before the lone literal reads its Float peer, so no Int range narrowing applies. The
+    // comparison shape stays Bool while its Float side folds the same way.
+    for source in [
+        "value = 0.5 + 0.5 + 3000000000\n",
+        "value = (0.5 + 0.5) + 3000000000\n",
+        "value = 1.5 * 2.0 * 3000000000\n",
+        "value = 3000000000 * (1.5 + 0.5)\n",
+        "value Float = -(0.5) + 3000000000\n",
+    ] {
+        let expression = first_start_declaration_expression(source);
+        assert_eq!(
+            expression.type_id,
+            builtin_type_ids::FLOAT,
+            "compound Float peer should keep profile Float for {source:?}"
+        );
+    }
+    let comparison = first_start_declaration_expression("value = 0.5 + 0.5 < 3000000000\n");
+    assert_eq!(comparison.type_id, builtin_type_ids::BOOL);
+}
+
+#[test]
+fn int_and_fixed_receiving_context_keeps_integer_rules_and_does_not_retag_operator_results() {
     let int_overflow = parse_single_file_ast_diagnostic("large Int = 18_446_744_073_709_551_615\n");
     assert!(matches!(
         int_overflow.payload,
@@ -1186,28 +1226,559 @@ fn number_operator_domains_keep_scale_and_reject_invalid_families() {
         assert_binary_rejected(left, operator, right, diagnostic_operator);
     }
 }
-
 #[test]
-fn pending_number_literals_use_the_immediate_number_peer_in_both_orders() {
-    let source =
-        "base ~Dec2 = 1.25\nright = base + 1\nleft = 1 + base\nsame = base is 1\nnegated = -base\n";
+fn pending_literal_subtrees_use_the_local_dec_peer_in_both_orders() {
+    let source = concat!(
+        "base ~Dec2 = 1.25\n",
+        "right = base + 1\n",
+        "left = 1 + base\n",
+        "group_right = base + (0.1 + 0.2)\n",
+        "group_left = (0.1 + 0.2) + base\n",
+        "flat_left = 0.1 + 0.2 + base\n",
+        "product_right = base + 0.1 * 2\n",
+        "product_left = 0.1 * 2 + base\n",
+        "same = base is (0.1 + 0.2)\n",
+        "negated = -base\n",
+    );
     let base = first_start_declaration_expression(source);
-    let right = nth_start_declaration_expression(source, 1);
-    let left = nth_start_declaration_expression(source, 2);
-    let same = nth_start_declaration_expression(source, 3);
-    let negated = nth_start_declaration_expression(source, 4);
+    assert_number_literal(&base, base.type_id, "125", 2);
 
-    for expression in [&right, &left] {
+    for (index, coefficient) in [
+        (1, "100"),
+        (2, "100"),
+        (3, "30"),
+        (4, "30"),
+        (5, "30"),
+        (6, "20"),
+        (7, "20"),
+    ] {
+        let expression = nth_start_declaration_expression(source, index);
         assert_eq!(expression.type_id, base.type_id);
-        assert_runtime_contains_number_literal(expression, base.type_id, "100", 2);
+        assert_runtime_contains_number_literal(&expression, base.type_id, coefficient, 2);
     }
+    let same = nth_start_declaration_expression(source, 8);
     assert_eq!(same.type_id, builtin_type_ids::BOOL);
-    assert_runtime_contains_number_literal(&same, base.type_id, "100", 2);
+    assert_runtime_contains_number_literal(&same, base.type_id, "30", 2);
+    let negated = nth_start_declaration_expression(source, 9);
     assert_eq!(negated.type_id, base.type_id);
     assert!(matches!(
         &negated.diagnostic_type,
         DataType::Number(scale) if scale.get() == 2
     ));
+}
+
+#[test]
+fn uint_receiver_types_literal_arithmetic_before_evaluation() {
+    // The Uint receiver reaches whole-number leaves through
+    // arithmetic and groups; leaves materialise as Uint directly, never via Int.
+    // Literal-only Uint arithmetic folds to its checked value.
+    let source = concat!(
+        "count Uint = 1 + 2\n",
+        "large Uint = 3_000_000_000 + 1\n",
+        "grouped Uint = (1 + 2) * 3\n",
+    );
+    for (index, expected) in [3_u64, 3_000_000_001, 9].iter().enumerate() {
+        let expression = nth_start_declaration_expression(source, index);
+        assert_eq!(expression.type_id, builtin_type_ids::UINT);
+        assert!(
+            matches!(expression.diagnostic_type, DataType::Uint),
+            "expected Uint diagnostic type, got {:?}",
+            expression.diagnostic_type
+        );
+        assert!(
+            matches!(&expression.kind, ExpressionKind::Uint(value) if value == expected),
+            "expected folded Uint({expected}), got {:?}",
+            expression.kind
+        );
+        assert_no_pending_expression_items(&expression);
+    }
+
+    // The folded-Int analogue still folds.
+    let natural = first_start_declaration_expression("value = 1 + 2\n");
+    assert_eq!(natural.type_id, builtin_type_ids::INT);
+    assert!(matches!(natural.kind, ExpressionKind::Int(3)));
+}
+
+#[test]
+fn uint_peer_types_literal_only_subtree_from_either_side() {
+    // A mutable Uint base keeps the peer sum runtime, mirroring the Dec
+    // peer test: the literal-only side reads Uint context from the peer, and
+    // folds that side to its checked Uint value inside the runtime sum.
+    let source = concat!(
+        "peer ~Uint = 10\n",
+        "from_right = (1 + 2) + peer\n",
+        "from_left = peer + (1 + 2)\n",
+    );
+    let peer = first_start_declaration_expression(source);
+    assert_eq!(peer.type_id, builtin_type_ids::UINT);
+    assert!(matches!(peer.kind, ExpressionKind::Uint(10)));
+
+    for index in 1..=2 {
+        let expression = nth_start_declaration_expression(source, index);
+        assert_eq!(
+            expression.type_id, peer.type_id,
+            "a Uint peer must type the opposite literal-only subtree"
+        );
+        assert_no_pending_expression_items(&expression);
+        assert_runtime_contains_uint_literal(&expression, 3);
+    }
+
+    // A subtree holding a typed Int is not literal-only: the receiver still
+    // rejects the mixed pair instead of converting the Int operand.
+    let typed = parse_single_file_ast_diagnostic("signed Int = 1\ninvalid Uint = signed + 2\n");
+    assert!(
+        matches!(
+            typed.payload,
+            DiagnosticPayload::UnsupportedOperatorTypes {
+                operator: DiagnosticOperator::Add,
+                ..
+            }
+        ),
+        "typed Int beside Uint must keep its identity, got {:?}",
+        typed.payload
+    );
+
+    // Named Int constants stay typed under a Uint receiver for the same reason.
+    let named = parse_single_file_ast_diagnostic("left #Int = 1\nresult Uint = left + 2\n");
+    assert!(
+        matches!(
+            named.payload,
+            DiagnosticPayload::UnsupportedOperatorTypes {
+                operator: DiagnosticOperator::Add,
+                ..
+            }
+        ),
+        "named Int constants stay typed, got {:?}",
+        named.payload
+    );
+}
+
+#[test]
+fn uint_power_exponent_shares_the_uint_domain() {
+    // Uint power uses ordinary same-family arithmetic: the raw exponent
+    // receives Uint context, unlike the Dec exponent which keeps profile Int.
+    // A mutable base keeps the peer power shape runtime while folding
+    // the literal-only exponent to its checked Uint value inside it.
+    let source = concat!("base ~Uint = 2\n", "value = base ^ (1 + 2)\n");
+    let value = nth_start_declaration_expression(source, 1);
+    assert_eq!(value.type_id, builtin_type_ids::UINT);
+    assert_no_pending_expression_items(&value);
+    assert_runtime_contains_uint_literal(&value, 3);
+
+    // A Uint receiver types the whole power shape, base and grouped
+    // exponent alike, and folds it to the checked value itself.
+    let received = first_start_declaration_expression("value Uint = 2 ^ (1 + 2)\n");
+    assert_eq!(received.type_id, builtin_type_ids::UINT);
+    assert_no_pending_expression_items(&received);
+    assert!(
+        matches!(&received.kind, ExpressionKind::Uint(8)),
+        "expected folded Uint(8), got {:?}",
+        received.kind
+    );
+    // Dec power still keeps its exponent in profile Int.
+    let dec = nth_start_declaration_expression("base ~Dec2 = 1.5\npower = base ^ (1 + 2)\n", 1);
+    assert_runtime_number_power_keeps_int_exponent(&dec);
+}
+
+#[test]
+fn dec_receiver_keeps_uint_base_power_exponent_in_uint() {
+    // Under a Dec receiver the exponent edge follows the base type: a Uint
+    // base routes its grouped exponent through Uint context, so `3 ^ 2`
+    // stays a Uint input to the exact Dec mixed rule.
+    let source = concat!("base Dec2 = 1.5\n", "scaled Dec2 = base * 3 ^ 2\n",);
+    let scaled = nth_start_declaration_expression(source, 1);
+    assert_eq!(
+        scaled.diagnostic_type,
+        DataType::Number(NumberScale::new(2).expect("test Dec scale is valid"))
+    );
+    assert_no_pending_expression_items(&scaled);
+
+    // A Dec base under the same receiver keeps the exponent in profile Int.
+    let dec_base =
+        nth_start_declaration_expression("base Dec2 = 1.5\nscaled Dec2 = base * base ^ 2\n", 1);
+    assert_runtime_number_power_keeps_int_exponent(&dec_base);
+
+    // A typed Uint exponent is still not an implicit Dec exponent.
+    assert_unsupported_operator(
+        "base Dec2 = 1.5\nfactor Uint = 3\nscaled Dec2 = base ^ factor\n",
+        DiagnosticOperator::Exponent,
+    );
+}
+
+#[test]
+fn dec_receiver_left_nested_powers_resolve_each_level_once() {
+    // `((base ^ 1) ^ 1) ^ 1` with a typed Dec base under a Dec receiver:
+    // every exponent edge follows the Dec base, so each `1` stays profile
+    // Int. The receiver schedules each base once; resolving the exponent
+    // must not revisit an already-resolved base subtree.
+    let source = concat!("base Dec2 = 1.5\n", "cubed Dec2 = ((base ^ 1) ^ 1) ^ 1\n",);
+    let base = first_start_declaration_expression(source);
+    let cubed = nth_start_declaration_expression(source, 1);
+    assert_eq!(cubed.type_id, base.type_id);
+    assert_no_pending_expression_items(&cubed);
+    let ExpressionKind::Runtime(rpn) = &cubed.kind else {
+        panic!(
+            "nested Dec power keeps a runtime base, got {:?}",
+            cubed.kind
+        );
+    };
+    assert_eq!(
+        rpn.items
+            .iter()
+            .filter(|item| matches!(
+                item,
+                ExpressionRpnItem::Operator {
+                    operator: Operator::Exponent,
+                    ..
+                }
+            ))
+            .count(),
+        3,
+        "every nesting level keeps its power operator, got {:?}",
+        rpn.items
+    );
+    assert_eq!(
+        rpn.items
+            .iter()
+            .filter(|item| matches!(
+                item,
+                ExpressionRpnItem::Operand(operand)
+                    if operand.type_id == builtin_type_ids::INT
+                        && matches!(&operand.kind, ExpressionKind::Int(1))
+            ))
+            .count(),
+        3,
+        "every nested exponent stays a profile-Int one, got {:?}",
+        rpn.items
+    );
+    assert!(
+        !rpn.items.iter().any(|item| matches!(
+            item,
+            ExpressionRpnItem::Operand(operand)
+                if matches!(&operand.kind, ExpressionKind::Number(_))
+        )),
+        "no nested exponent may materialise as Number: {:?}",
+        rpn.items
+    );
+}
+
+#[test]
+fn uint_decimal_leaves_keep_float_typing_and_completed_float_rejects() {
+    // A decimal leaf beside a Uint peer keeps Float typing: the unannotated
+    // mix selects the mixed Uint/Float rule and folds to Float.
+    let source = "peer Uint = 10\nvalue = peer + 1.5\n";
+    let mixed = nth_start_declaration_expression(source, 1);
+    assert_eq!(mixed.type_id, builtin_type_ids::FLOAT);
+    assert_eq!(mixed.diagnostic_type, DataType::Float);
+    assert_no_pending_expression_items(&mixed);
+    // A Uint receiver does not convert the completed mixed-Float result either.
+    let declared = parse_single_file_ast_diagnostic("peer Uint = 10\nresult Uint = peer + 1.5\n");
+    assert!(
+        matches!(
+            declared.payload,
+            DiagnosticPayload::TypeMismatch {
+                context: TypeMismatchContext::Declaration,
+                ..
+            }
+        ),
+        "a Uint receiver must not convert the mixed-Float result, got {:?}",
+        declared.payload
+    );
+
+    // The completed Float result cannot coerce back into a Uint receiver.
+    let completed = parse_single_file_ast_diagnostic("result Uint = 1.5 + 2.5\n");
+    assert!(
+        matches!(
+            completed.payload,
+            DiagnosticPayload::TypeMismatch {
+                context: TypeMismatchContext::Declaration,
+                ..
+            }
+        ),
+        "completed Float must not coerce into Uint, got {:?}",
+        completed.payload
+    );
+
+    // Unary minus on a typed Uint is a compile error, including known zero.
+    assert_unsupported_operator(
+        "peer Uint = 10\nvalue = -peer\n",
+        DiagnosticOperator::Subtract,
+    );
+    assert_unsupported_operator(
+        "peer Uint = 0\nvalue = -peer\n",
+        DiagnosticOperator::Subtract,
+    );
+}
+
+#[test]
+fn uint_grouped_compound_exponent_keeps_uint_rhs() {
+    // Grouped `^=` on a Uint target keeps ordinary same-family arithmetic: the
+    // grouped right side receives Uint context, while Dec keeps the Int edge.
+    let source = concat!("powered ~Uint = 2\n", "powered ^= 1 + 2\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
+    let body = start_function_body(&ast, &path_fork, &string_table);
+    let NodeKind::Assignment { target, value } = &body[1].kind else {
+        panic!("expected grouped Uint exponent compound assignment");
+    };
+    assert_eq!(value.type_id, target.type_id);
+    assert!(
+        matches!(value.diagnostic_type, DataType::Uint),
+        "grouped Uint ^= must keep a Uint right side, got {:?}",
+        value.diagnostic_type
+    );
+    assert_no_pending_expression_items(value);
+}
+
+#[test]
+fn dec_peer_and_receiver_differ_on_partly_typed_inner_sums() {
+    // Without a receiver the inner `integer + 1` stays checked Int arithmetic: the peer is
+    // not a Dec and the subtree is not literal-only, so `1` keeps `ExpressionKind::Int`.
+    let peer_source = "value Dec4 = 1\ninteger Int = 7\nresult = value + (integer + 1)\n";
+    let peer_inner = nth_start_declaration_expression(peer_source, 2);
+    let ExpressionKind::Runtime(peer_rpn) = &peer_inner.kind else {
+        panic!(
+            "a partly typed peer sum should stay runtime, got {:?}",
+            peer_inner.kind
+        );
+    };
+    let mut int_literals = peer_rpn.items.iter().filter_map(|item| match item {
+        ExpressionRpnItem::Operand(operand)
+            if operand.type_id == builtin_type_ids::INT
+                && matches!(operand.kind, ExpressionKind::Int(_)) =>
+        {
+            Some(operand)
+        }
+        _ => None,
+    });
+    let one = int_literals
+        .next()
+        .expect("the inner Int sum should keep its `1` as ExpressionKind::Int");
+    assert!(matches!(one.kind, ExpressionKind::Int(1)));
+    assert!(int_literals.next().is_none());
+
+    // Under an explicit Dec4 receiver the context reaches `1`, so the inner operation is
+    // mixed Dec4 and `1` materialises as a Dec4 `Number`.
+    let received_source = "value Dec4 = 1\ninteger Int = 7\nresult Dec4 = value + (integer + 1)\n";
+    let received = nth_start_declaration_expression(received_source, 2);
+    assert_eq!(
+        received.type_id,
+        nth_start_declaration_expression(received_source, 0).type_id
+    );
+    assert_runtime_contains_number_literal(
+        &received,
+        nth_start_declaration_expression(received_source, 0).type_id,
+        "10000",
+        4,
+    );
+
+    // `(i + j) + 1` under a Dec4 receiver keeps the inner sum checked Int while the lone
+    // `1` reads the mixed outer peer as Dec4; `i + (j + 1)` lets the receiver reach `1`
+    // so both sums produce Dec4.
+    let grouped_source = "left Int = 3\nright Int = 4\nouter Dec4 = (left + right) + 1\n";
+    let outer = nth_start_declaration_expression(grouped_source, 2);
+    let ExpressionKind::Runtime(outer_rpn) = &outer.kind else {
+        panic!(
+            "a grouped inner-Int sum should stay runtime, got {:?}",
+            outer.kind
+        );
+    };
+    // The inner `left + right` keeps checked Int typing (both operands stay Int), while the
+    // lone `1` reads the mixed Dec4 outer peer as a Dec4 Number.
+    assert!(
+        outer_rpn
+            .items
+            .iter()
+            .filter(|item| matches!(
+                item,
+                ExpressionRpnItem::Operand(operand) if operand.type_id == builtin_type_ids::INT
+            ))
+            .count()
+            >= 2,
+        "the inner Int sum should keep both Int operands: {:?}",
+        outer_rpn.items
+    );
+    assert_runtime_contains_number_literal(
+        &outer,
+        nth_start_declaration_expression("anchor Dec4 = 0\n", 0).type_id,
+        "10000",
+        4,
+    );
+    let nested_source = "left Int = 3\nright Int = 4\nouter Dec4 = left + (right + 1)\n";
+    let nested = nth_start_declaration_expression(nested_source, 2);
+    assert_eq!(
+        nested.type_id,
+        nth_start_declaration_expression("anchor Dec4 = 0\n", 0).type_id
+    );
+}
+
+#[test]
+fn dec_contextual_arithmetic_preserves_literal_type_and_coefficient() {
+    let source = concat!(
+        "anchor Dec4 = 0\n",
+        "sum Dec4 = 0.1 + 0.2\n",
+        "grouped Dec4 = ((0.1 + 0.2))\n",
+        "product Dec4 = (1 + 2) * 3\n",
+        "negated Dec4 = -(0.1 + 0.2)\n",
+        "power Dec4 = 2 ^ (1 + 2)\n",
+        "right_power Dec4 = 2 ^ 3 ^ 2\n",
+        "left_power Dec4 = (2 ^ 3) ^ 2\n",
+        "base ~Dec4 = 2\n",
+        "runtime_power Dec4 = base ^ (1 + 2)\n",
+        "exponent ~Int = 3\n",
+        "runtime_base Dec4 = 2 ^ exponent\n",
+    );
+    let anchor = first_start_declaration_expression(source);
+    for (index, coefficient) in [
+        (1, "3000"),
+        (2, "3000"),
+        (3, "90000"),
+        (4, "-3000"),
+        (5, "80000"),
+        (6, "5120000"),
+        (7, "640000"),
+    ] {
+        let expression = nth_start_declaration_expression(source, index);
+        assert_number_literal(&expression, anchor.type_id, coefficient, 4);
+    }
+
+    for index in [9, 11] {
+        let expression = nth_start_declaration_expression(source, index);
+        assert_eq!(expression.type_id, anchor.type_id);
+        let ExpressionKind::Runtime(rpn) = &expression.kind else {
+            panic!("a mutable power operand should keep the expression runtime");
+        };
+        let [
+            ExpressionRpnItem::Operand(base),
+            ExpressionRpnItem::Operand(exponent),
+            ExpressionRpnItem::Operator {
+                operator: Operator::Exponent,
+                ..
+            },
+        ] = rpn.items.as_slice()
+        else {
+            panic!(
+                "power should retain its base and exponent operands: {:?}",
+                rpn.items
+            );
+        };
+        assert_eq!(base.type_id, anchor.type_id);
+        assert_eq!(exponent.type_id, builtin_type_ids::INT);
+        if index == 9 {
+            assert!(matches!(exponent.kind, ExpressionKind::Int(3)));
+        } else {
+            assert_number_literal(base, anchor.type_id, "20000", 4);
+        }
+    }
+}
+
+#[test]
+fn malformed_groups_keep_group_operand_diagnostics() {
+    // `x = 2 * (1 + )` must report the dangling `+`, not the outer `*`: eager group
+    // evaluation keeps the diagnostic at the group's own operator span.
+    let plus_source = "value = 2 * (1 + )\n";
+    let plus = parse_single_file_ast_diagnostic(plus_source);
+    let DiagnosticPayload::MissingOperatorOperand { position, operator } = &plus.payload else {
+        panic!(
+            "expected a missing-operand diagnostic, got {:?}",
+            plus.payload
+        );
+    };
+    assert_eq!(*position, OperatorOperandPosition::BinaryLeft);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let plus_span = LocalSpan::exact(
+        plus_source
+            .find(" + ")
+            .expect("dangling plus should be present") as u32
+            + 1,
+        1,
+        &mut span_builder,
+    )
+    .expect("the dangling operator span should fit inline");
+    assert_eq!(
+        plus.primary_span,
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, plus_span))
+    );
+    let _ = operator;
+
+    let star_source = "value = 5 + (* 2)\n";
+    let star = parse_single_file_ast_diagnostic(star_source);
+    let DiagnosticPayload::MissingOperatorOperand { position, .. } = &star.payload else {
+        panic!(
+            "expected a missing-operand diagnostic, got {:?}",
+            star.payload
+        );
+    };
+    assert_eq!(*position, OperatorOperandPosition::BinaryLeft);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let star_span = LocalSpan::exact(
+        star_source
+            .find("(* ")
+            .expect("dangling star should be present") as u32
+            + 1,
+        1,
+        &mut span_builder,
+    )
+    .expect("the dangling operator span should fit inline");
+    assert_eq!(
+        star.primary_span,
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, star_span))
+    );
+}
+#[test]
+fn completed_evaluator_results_contain_no_pending_syntax() {
+    let source = concat!(
+        "peer ~Dec4 = 1\n",
+        "received Dec4 = ((0.1 + 0.2))\n",
+        "right = peer + ((0.1 + 0.2) * 2)\n",
+        "left = ((0.1 + 0.2) * 2) + peer\n",
+        "power Dec4 = peer ^ ((1 + 2))\n",
+        "nested = peer + (peer + 1) * 2\n",
+    );
+    for index in 0..=5 {
+        let expression = nth_start_declaration_expression(source, index);
+        let visited = assert_no_pending_expression_items(&expression);
+        if index == 5 {
+            // Both `peer` leaves keep `nested` runtime, so the walker must visit the
+            // outer operands rather than only folded constants.
+            assert!(
+                visited >= 3,
+                "the walker must visit outer runtime operands, visited {visited}"
+            );
+        }
+    }
+}
+
+#[test]
+fn bounded_flat_and_nested_dec_arithmetic_have_identical_exact_results() {
+    const TERM_COUNT: usize = 128;
+    let flat = vec!["0.1"; TERM_COUNT].join(" + ");
+    // Bound parser nesting separately from expression length: ordering and typing own the
+    // long-expression invariant, not a general parser-depth refactor.
+    let mut groups = vec![String::from("0.1"); TERM_COUNT];
+    while groups.len() > 1 {
+        let mut next_groups = Vec::with_capacity(groups.len().div_ceil(2));
+        let mut pairs = groups.into_iter();
+        while let Some(left) = pairs.next() {
+            next_groups.push(match pairs.next() {
+                Some(right) => format!("({left} + {right})"),
+                None => left,
+            });
+        }
+        groups = next_groups;
+    }
+    let nested = &groups[0];
+    let source = format!("flat Dec4 = {flat}\nnested Dec4 = {nested}\n");
+    let flat = first_start_declaration_expression(&source);
+    let nested = nth_start_declaration_expression(&source, 1);
+
+    assert_number_literal(&flat, flat.type_id, "128000", 4);
+    assert_number_literal(&nested, flat.type_id, "128000", 4);
+    let (ExpressionKind::Number(flat_value), ExpressionKind::Number(nested_value)) =
+        (&flat.kind, &nested.kind)
+    else {
+        panic!("both bounded expressions should fold to exact Dec values");
+    };
+    assert_eq!(flat_value, nested_value);
 }
 
 #[test]
@@ -1318,6 +1889,23 @@ fn assert_runtime_contains_fixed_literal(expression: &Expression, expected: Fixe
     );
 }
 
+fn assert_runtime_contains_uint_literal(expression: &Expression, expected: u64) {
+    let ExpressionKind::Runtime(rpn) = &expression.kind else {
+        panic!("expected a runtime expression, got {:?}", expression.kind);
+    };
+
+    assert!(
+        rpn.items.iter().any(|item| matches!(
+            item,
+            ExpressionRpnItem::Operand(operand)
+                if operand.type_id == builtin_type_ids::UINT
+                    && matches!(&operand.kind, ExpressionKind::Uint(value) if *value == expected)
+        )),
+        "expected runtime RPN to contain Uint({expected}), got {:?}",
+        rpn.items
+    );
+}
+
 fn assert_runtime_contains_number_literal(
     expression: &Expression,
     expected_type_id: TypeId,
@@ -1369,4 +1957,43 @@ fn assert_runtime_number_power_keeps_int_exponent(expression: &Expression) {
         "pending power exponent must not be materialised as Number: {:?}",
         rpn.items
     );
+}
+
+fn assert_number_literal(
+    expression: &Expression,
+    expected_type_id: TypeId,
+    expected_coefficient: &str,
+    expected_scale: u16,
+) {
+    assert_eq!(expression.type_id, expected_type_id);
+    let ExpressionKind::Number(value) = &expression.kind else {
+        panic!("expected an exact Dec value, got {:?}", expression.kind);
+    };
+    assert_eq!(value.coefficient().to_string(), expected_coefficient);
+    assert_eq!(value.scale().get(), expected_scale);
+    assert_eq!(expression.diagnostic_type, DataType::Number(value.scale()));
+}
+
+fn assert_no_pending_expression_items(expression: &Expression) -> usize {
+    let mut visited_operands = 0;
+    let mut operands = vec![expression];
+    while let Some(expression) = operands.pop() {
+        let ExpressionKind::Runtime(rpn) = &expression.kind else {
+            continue;
+        };
+        for item in &rpn.items {
+            match item {
+                ExpressionRpnItem::Operand(operand) => {
+                    visited_operands += 1;
+                    operands.push(operand);
+                }
+                ExpressionRpnItem::Operator { .. } => {}
+                ExpressionRpnItem::PendingNumericLiteral { .. }
+                | ExpressionRpnItem::PendingGroup { .. } => {
+                    panic!("completed evaluator result retains pending syntax: {item:?}");
+                }
+            }
+        }
+    }
+    visited_operands
 }

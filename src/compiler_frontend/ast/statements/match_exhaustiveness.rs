@@ -76,6 +76,7 @@ pub(crate) struct MatchArmCoverageRecord {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum LiteralPatternKey {
     Int(i64),
+    Uint(u64),
     Float(u64),
     StringSlice(StringId),
     Bool(bool),
@@ -149,6 +150,7 @@ impl MatchArmCoverageTracker {
 fn extract_literal_key(expression: &Expression) -> Option<LiteralPatternKey> {
     match &expression.kind {
         ExpressionKind::Int(value) => Some(LiteralPatternKey::Int(*value)),
+        ExpressionKind::Uint(value) => Some(LiteralPatternKey::Uint(*value)),
         ExpressionKind::Float(value) => Some(LiteralPatternKey::Float(value.to_bits())),
         ExpressionKind::StringSlice(id) => Some(LiteralPatternKey::StringSlice(*id)),
         ExpressionKind::Bool(value) => Some(LiteralPatternKey::Bool(*value)),

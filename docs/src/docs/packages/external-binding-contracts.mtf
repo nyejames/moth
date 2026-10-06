@@ -84,11 +84,14 @@ Observable external resources require explicit close or teardown. Host finalisat
 
 ### Numeric signature types
 
-External numeric signatures distinguish fixed foreign ABI scalars from language-semantic `Int` and `Float`. `I32` is signed 32-bit and `F64` is binary64 regardless of the active numeric profile. Core and Builder signatures, and `@moth.sig` annotations using `Int` or `Float`, retain profile-selected native types; they do not silently become `I32` or `F64`. Annotated JavaScript signatures spell `Int` and `Float`; fixed `I32` and `F64` slots arise only from compiler-registered foreign bindings, and the HTML-JS rules below apply to those bindings.
+External numeric signatures distinguish fixed foreign ABI scalars from language-semantic `Int`, `Uint` and `Float`. `I32` is signed 32-bit and `F64` is binary64 regardless of the active numeric profile. Core and Builder signatures, and `@moth.sig` annotations using `Int`, `Uint` or `Float`, retain profile-selected native types; they do not silently become `I32` or `F64`. Annotated JavaScript signatures spell `Int`, `Uint` and `Float`; fixed `I32` and `F64` slots arise only from compiler-registered foreign bindings, and the HTML-JS rules below apply to those bindings.
 
 At the HTML-JS boundary:
 
 - A native `Int` in a 64-bit Int profile crosses annotated JavaScript as a `Number` only within the safe-integer range, from -9,007,199,254,740,991 through 9,007,199,254,740,991 inclusive. Values outside that range fail rather than silently losing precision.
+- A native `Uint32` crosses annotated JavaScript as a `Number` integer from `0` through 4294967295.
+- A native `Uint64` inside Moth JavaScript is a `BigInt` from `0` through 18446744073709551615. Across the existing `Number`-based foreign adapter it crosses only from `0` through 9007199254740991. That safe-`Number` restriction is a foreign-boundary policy, not the Moth `Uint` range.
+- The `Uint64` adapter rejects negative or unsafe values before precision can be lost. It validates one evaluated snapshot, canonicalises `Number` `-0` to integer `0`, and rejects fractions, non-finite values and wrong carrier types. Foreign contract violations throw like the existing `Int` adapters rather than creating a new implicit-failure or `Error` code.
 - A native `Float` result in a Float32 profile is rounded with `Math.fround` and rejected if the rounded value is non-finite. Native `Float` results in a Float64 profile are also checked for finiteness. Fixed `F64` results retain binary64 width and are checked for finiteness; a non-finite result from a fallible external function becomes built-in `Error` code `304`.
 - Native `Int` results in a 32-bit Int profile and fixed `I32` values must be JavaScript Numbers, integral and within -2,147,483,648 through 2,147,483,647. Invalid successful payloads fail at the wrapper boundary in both infallible and fallible calls. Integer ingress converts `-0` to `0`, while binary-float ingress preserves signed zero.
 - Opaque external types retain their package-specific identities and representations; numeric carrier adaptation does not reinterpret them.

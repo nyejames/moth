@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "uint casts int=41/1/41/-2/41 float=0/101/7/3000000001 fixed32=7 text=3000000001/42/7/8 fixed=3000000001/4000000000/200/9/250 dec=123/123/11/12/4294967295/true/true"

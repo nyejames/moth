@@ -74,6 +74,10 @@ fn builtin_seeding_creates_all_expected_ids() {
         env.type_kind(builtins.none),
         Some(super::super::queries::TypeKind::Builtin)
     );
+    assert_eq!(
+        env.type_kind(builtins.uint),
+        Some(super::super::queries::TypeKind::Builtin)
+    );
 }
 
 #[test]
@@ -1250,6 +1254,7 @@ fn runtime_equality_query_accepts_supported_scalar_types() {
     let env = TypeEnvironment::new();
 
     assert!(env.supports_runtime_equality(env.builtins().int));
+    assert!(env.supports_runtime_equality(env.builtins().uint));
     assert!(env.supports_runtime_equality(env.builtins().float));
     assert!(env.supports_runtime_equality(env.builtins().bool));
     assert!(env.supports_runtime_equality(env.builtins().char));

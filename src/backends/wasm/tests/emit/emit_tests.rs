@@ -26,10 +26,12 @@ use crate::backends::wasm::runtime::memory::{WasmMemoryPlan, WasmScalarStorageKi
 use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
 use crate::backends::wasm::tests::lowering::test_support::{
     build_module, build_type_environment, default_borrow_facts, default_numeric_proofs, expression,
-    int_expression, string_expression,
+    int_expression, load_local as hir_load_local, local as hir_local, statement as hir_statement,
+    string_expression,
 };
 use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::compiler_messages::compiler_errors::ErrorType;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
@@ -37,7 +39,12 @@ use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
 };
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, RegionId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
+use crate::compiler_frontend::hir::numeric::{
+    HirNumericOp, HirNumericOperands, NumericFailureMode,
+};
+use crate::compiler_frontend::hir::operators::HirBinOp;
+use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -3695,4 +3702,681 @@ fn proven_integer_operations_execute_with_aliased_destinations() {
         7,
         "node returned every expected line"
     );
+}
+
+/// Instantiated Uint scalar execution for the Wasm backend.
+///
+/// WHAT: lowers one HIR module with Uint parameters, locals and results through both integer
+///       profiles, instantiates the emitted bytes in Node and asserts exact values and trap
+///       statuses for unsigned arithmetic, exact Uint/Uint and Uint/Int comparisons and
+///       infallible Uint-to-Float conversion including the direct Float32 rounding witness.
+/// WHY: trap-mode Uint paths must execute with unsigned semantics and bit-pattern preservation
+///      above the signed maximum. Expected Wasm traps stay terminal `RuntimeError` assertions
+///      here; Moth `Error` codes belong to the JS/source recovery tests, never to this module.
+#[test]
+fn uint_scalar_operations_execute_with_unsigned_semantics_in_node() {
+    for profile in [uint_test_profile_32(), uint_test_profile_64()] {
+        let fixture = build_uint_scalar_fixture(profile);
+        let mut request = WasmBackendRequest {
+            numeric_profile: profile,
+            export_policy: uint_scalar_export_policy(&fixture.names),
+            ..WasmBackendRequest::default()
+        };
+        request.emit_options.validate_emitted_module = true;
+        let result = lower_hir_to_wasm_module(
+            &fixture.module,
+            &default_borrow_facts(),
+            &default_numeric_proofs(),
+            &request,
+            &fixture.string_table,
+            &fixture.type_environment,
+            &fixture.path_table,
+        )
+        .unwrap_or_else(|error| panic!("{profile:?} Uint fixture should emit: {error:?}"));
+        let bytes = result.wasm_bytes.expect("Uint fixture emits bytes");
+        validate_wasm(&bytes);
+        let actual = execute_wasm_uint_exports_in_node(&bytes, &uint_scalar_calls(profile));
+        for (name, status, value) in uint_scalar_expectations(profile) {
+            let found = actual
+                .iter()
+                .find(|(actual_name, _, _)| actual_name == &name)
+                .unwrap_or_else(|| panic!("{profile:?} missing Uint export result for {name}"));
+            assert_eq!(
+                found.1, status,
+                "{profile:?} {name} had an unexpected outcome"
+            );
+            if status == "trap" {
+                // Terminal Wasm traps surface as engine `RuntimeError`s, never as Moth `Error`
+                // codes: recovery expectations belong to the JS/source tests, not to this module.
+                assert!(
+                    !found.2.is_empty(),
+                    "{profile:?} {name} should report a trap"
+                );
+                assert!(
+                    !found.2.contains("MOTH-"),
+                    "{profile:?} {name} must not surface a Moth Error code: {:?}",
+                    found.2
+                );
+            } else {
+                assert_eq!(
+                    found.2, value,
+                    "{profile:?} {name} returned an unexpected result"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn uint_storage_maps_to_compact_carriers_with_natural_stride() {
+    let profiles = [
+        (
+            IntWidth::Bits32,
+            FloatPrecision::Bits32,
+            WasmScalarStorageKind::I32,
+        ),
+        (
+            IntWidth::Bits32,
+            FloatPrecision::Bits64,
+            WasmScalarStorageKind::I32,
+        ),
+        (
+            IntWidth::Bits64,
+            FloatPrecision::Bits32,
+            WasmScalarStorageKind::I64,
+        ),
+        (
+            IntWidth::Bits64,
+            FloatPrecision::Bits64,
+            WasmScalarStorageKind::I64,
+        ),
+    ];
+    for (int_width, float_precision, expected) in profiles {
+        let profile = NumericProfile {
+            int_width,
+            float_precision,
+        };
+        let kind = WasmScalarStorageKind::for_numeric_scalar(NumericScalar::Uint, profile)
+            .expect("Uint has scalar storage under every profile");
+        assert_eq!(kind, expected, "{profile:?} Uint storage");
+        let (size, carrier) = match int_width {
+            IntWidth::Bits32 => (4, WasmAbiType::I32),
+            IntWidth::Bits64 => (8, WasmAbiType::I64),
+        };
+        assert_eq!(kind.size(), size, "{profile:?} Uint size");
+        assert_eq!(kind.alignment(), size, "{profile:?} Uint alignment");
+        assert_eq!(kind.stride(), size, "{profile:?} Uint stride");
+        assert_eq!(kind.carrier(), carrier, "{profile:?} Uint carrier");
+    }
+    assert_eq!(
+        WasmScalarStorageKind::for_numeric_scalar(NumericScalar::Uint, NumericProfile::STANDARD,),
+        WasmScalarStorageKind::for_numeric_scalar(NumericScalar::Int, NumericProfile::STANDARD),
+        "Uint shares the Int width carrier without aliasing its semantic identity"
+    );
+}
+
+fn uint_test_profile_32() -> NumericProfile {
+    NumericProfile {
+        int_width: IntWidth::Bits32,
+        float_precision: FloatPrecision::Bits64,
+    }
+}
+
+fn uint_test_profile_64() -> NumericProfile {
+    NumericProfile {
+        int_width: IntWidth::Bits64,
+        float_precision: FloatPrecision::Bits64,
+    }
+}
+
+struct UintScalarFixture {
+    module: crate::compiler_frontend::hir::module::HirModule,
+    names: Vec<(FunctionId, String)>,
+    string_table: StringTable,
+    type_environment: crate::compiler_frontend::datatypes::environment::TypeEnvironment,
+    path_table: crate::compiler_frontend::symbols::path_interner::PathTable,
+}
+/// One exported Uint helper per behaviour under test; every arithmetic helper is a trap-mode
+/// `NumericOp` over its parameters so Node observes native values or terminal traps. The module
+/// keeps a dedicated entry-start `main` following the established start/export split; only the
+/// named Uint helpers are exported.
+fn build_uint_scalar_fixture(profile: NumericProfile) -> UintScalarFixture {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (type_environment, types) = build_type_environment();
+    let uint_type = builtin_type_ids::UINT;
+    let int_type = builtin_type_ids::INT;
+    let bool_type = builtin_type_ids::BOOL;
+    let float_type = builtin_type_ids::FLOAT;
+    let f32_type = builtin_type_ids::fixed_scalar(FixedScalar::F32);
+    let region = RegionId(0);
+
+    let mut functions = Vec::new();
+    let mut blocks = Vec::new();
+    let mut names: Vec<(FunctionId, String)> = Vec::new();
+    let start_path = path_fork
+        .try_intern_portable_path("main", &mut string_table)
+        .expect("test path fits");
+    blocks.push(HirBlock {
+        id: BlockId(100),
+        region,
+        locals: vec![],
+        statements: vec![],
+        terminator: HirTerminator::Return(int_expression(9000, 0, types.int, region)),
+    });
+    functions.push((
+        HirFunction {
+            id: FunctionId(0),
+            entry: BlockId(100),
+            params: vec![],
+            return_type: types.int,
+        },
+        start_path,
+        HirFunctionOrigin::EntryStart,
+    ));
+    let mut next_function_id: u32 = 1;
+    let mut intern = |name: &str| {
+        path_fork
+            .try_intern_portable_path(name, &mut string_table)
+            .expect("test path fits")
+    };
+    // Export order fixes the expected-result order asserted below.
+    let builders: Vec<(&str, NumericOperator)> = vec![
+        ("uadd", NumericOperator::Add),
+        ("usub", NumericOperator::Subtract),
+        ("umul", NumericOperator::Multiply),
+        ("udiv", NumericOperator::IntegerDivide),
+        ("urem", NumericOperator::Remainder),
+        ("upow", NumericOperator::Power),
+    ];
+    for (name, operator) in builders.into_iter() {
+        let id = FunctionId(next_function_id);
+        next_function_id += 1;
+        let path = intern(name);
+        let block_id = BlockId(1000 + id.0);
+        blocks.push(HirBlock {
+            id: block_id,
+            region,
+            locals: vec![
+                hir_local(0, uint_type, region),
+                hir_local(1, uint_type, region),
+                hir_local(2, uint_type, region),
+            ],
+            statements: vec![hir_statement(
+                id.0 * 100 + 10,
+                HirStatementKind::NumericOp {
+                    op: HirNumericOp {
+                        operator,
+                        domain: NumericScalar::Uint,
+                    },
+                    failure_mode: NumericFailureMode::Trap,
+                    operands: HirNumericOperands::Binary {
+                        left: hir_load_local(11, LocalId(0), uint_type, region),
+                        right: hir_load_local(12, LocalId(1), uint_type, region),
+                    },
+                    result: LocalId(2),
+                },
+                1,
+            )],
+            terminator: HirTerminator::Return(hir_load_local(13, LocalId(2), uint_type, region)),
+        });
+        functions.push((
+            HirFunction {
+                id,
+                entry: block_id,
+                params: vec![LocalId(0), LocalId(1)],
+                return_type: uint_type,
+            },
+            path,
+            HirFunctionOrigin::Normal,
+        ));
+        names.push((id, name.to_owned()));
+    }
+    // Above the signed maximum Uint/Uint order stays unsigned: the signed reinterpretation
+    // would invert every assertion below.
+    let ordered: Vec<(&str, HirBinOp)> = vec![
+        ("ucmp_lt", HirBinOp::Lt),
+        ("ucmp_ge", HirBinOp::Ge),
+        ("ucmp_eq", HirBinOp::Eq),
+    ];
+    for (name, operator) in ordered.into_iter() {
+        let id = FunctionId(next_function_id);
+        next_function_id += 1;
+        let path = intern(name);
+        let block_id = BlockId(1000 + id.0);
+        let body = expression(
+            id.0 * 100 + 33,
+            HirExpressionKind::BinOp {
+                left: Box::new(hir_load_local(31, LocalId(0), uint_type, region)),
+                op: operator,
+                right: Box::new(hir_load_local(32, LocalId(1), uint_type, region)),
+            },
+            bool_type,
+            region,
+            ValueKind::RValue,
+        );
+        blocks.push(HirBlock {
+            id: block_id,
+            region,
+            locals: vec![
+                hir_local(0, uint_type, region),
+                hir_local(1, uint_type, region),
+            ],
+            statements: vec![],
+            terminator: HirTerminator::Return(body),
+        });
+        functions.push((
+            HirFunction {
+                id,
+                entry: block_id,
+                params: vec![LocalId(0), LocalId(1)],
+                return_type: bool_type,
+            },
+            path,
+            HirFunctionOrigin::Normal,
+        ));
+        names.push((id, name.to_owned()));
+    }
+    // A negative Int is less than every Uint, including zero; a Uint above the signed maximum
+    // stays greater than the signed maximum in both operand orders.
+    let mixed: Vec<(&str, HirBinOp, bool)> = vec![
+        ("umix_lt", HirBinOp::Lt, false),
+        ("umix_gt", HirBinOp::Gt, true),
+    ];
+    for (name, operator, left_is_uint) in mixed.into_iter() {
+        let id = FunctionId(next_function_id);
+        next_function_id += 1;
+        let path = intern(name);
+        let block_id = BlockId(1000 + id.0);
+        let (left_type, right_type) = if left_is_uint {
+            (uint_type, int_type)
+        } else {
+            (int_type, uint_type)
+        };
+        let body = expression(
+            id.0 * 100 + 23,
+            HirExpressionKind::BinOp {
+                left: Box::new(hir_load_local(21, LocalId(0), left_type, region)),
+                op: operator,
+                right: Box::new(hir_load_local(22, LocalId(1), right_type, region)),
+            },
+            bool_type,
+            region,
+            ValueKind::RValue,
+        );
+        blocks.push(HirBlock {
+            id: block_id,
+            region,
+            locals: vec![
+                hir_local(0, left_type, region),
+                hir_local(1, right_type, region),
+            ],
+            statements: vec![],
+            terminator: HirTerminator::Return(body),
+        });
+        functions.push((
+            HirFunction {
+                id,
+                entry: block_id,
+                params: vec![LocalId(0), LocalId(1)],
+                return_type: bool_type,
+            },
+            path,
+            HirFunctionOrigin::Normal,
+        ));
+        names.push((id, name.to_owned()));
+    }
+    // Infallible Uint-to-Float conversions. The Float32 witness input exceeds the 32-bit Uint
+    // range, so it only joins 64-bit profiles; the profile Float conversion is always present.
+    // The witness rounds directly to 9007200000000000 (F32 bits 0x5a000001).
+    let mut conversions: Vec<(
+        &str,
+        u64,
+        NumericScalar,
+        crate::compiler_frontend::datatypes::ids::TypeId,
+    )> = vec![("uto_float", 3_000_000_001, NumericScalar::Float, float_type)];
+    if profile.int_width == IntWidth::Bits64 {
+        conversions.push((
+            "uto_f32",
+            9_007_199_791_611_905,
+            NumericScalar::Fixed(FixedScalar::F32),
+            f32_type,
+        ));
+    }
+    for (name, value, target, return_type) in conversions.into_iter() {
+        let id = FunctionId(next_function_id);
+        next_function_id += 1;
+        let path = intern(name);
+        let block_id = BlockId(1000 + id.0);
+        let source = expression(
+            id.0 * 100 + 41,
+            HirExpressionKind::Uint(value),
+            uint_type,
+            region,
+            ValueKind::Const,
+        );
+        let body = expression(
+            id.0 * 100 + 42,
+            HirExpressionKind::Cast {
+                source: Box::new(source),
+                policy: crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId::NumericConversion {
+                    source: NumericScalar::Uint,
+                    target,
+                },
+            },
+            return_type,
+            region,
+            ValueKind::RValue,
+        );
+        blocks.push(HirBlock {
+            id: block_id,
+            region,
+            locals: vec![],
+            statements: vec![],
+            terminator: HirTerminator::Return(body),
+        });
+        functions.push((
+            HirFunction {
+                id,
+                entry: block_id,
+                params: vec![],
+                return_type,
+            },
+            path,
+            HirFunctionOrigin::Normal,
+        ));
+        names.push((id, name.to_owned()));
+    }
+
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        functions,
+        blocks,
+        FunctionId(0),
+    );
+    let _ = next_function_id;
+    UintScalarFixture {
+        module,
+        names,
+        string_table,
+        type_environment,
+        path_table: path_fork.snapshot_table(),
+    }
+}
+
+fn uint_scalar_export_policy(names: &[(FunctionId, String)]) -> WasmExportPolicy {
+    let mut export_names = FxHashMap::default();
+    let mut exported_functions = Vec::new();
+    for (id, name) in names {
+        exported_functions.push(*id);
+        export_names.insert(*id, name.clone());
+    }
+    WasmExportPolicy {
+        exported_functions,
+        export_names,
+        helper_exports: Default::default(),
+    }
+}
+
+/// Calls use JS Numbers for 32-bit carriers and BigInts for 64-bit carriers; float results
+/// render as F32/F64 hex bits so the direct-rounding assertions are exact.
+fn uint_scalar_calls(profile: NumericProfile) -> Vec<(String, Vec<String>, Option<String>)> {
+    let big = profile.int_width == IntWidth::Bits64;
+    // Renders one Wasm integer parameter in its JS call shape.
+    let param = |value: &str| {
+        if big {
+            format!("{value}n")
+        } else {
+            value.to_owned()
+        }
+    };
+    let mut calls = Vec::new();
+    let arith: Vec<(&str, &str, &str)> = if big {
+        vec![
+            ("uadd", "9223372036854775808", "100"),
+            ("usub", "9223372036854775808", "1"),
+            ("umul", "1000000000", "18446744073"),
+            ("udiv", "18446744073709551615", "9223372036854775808"),
+            ("urem", "18446744073709551615", "9223372036854775808"),
+            ("upow", "2", "10"),
+        ]
+    } else {
+        vec![
+            ("uadd", "3000000001", "1000000000"),
+            ("usub", "5", "3"),
+            ("umul", "65535", "65537"),
+            ("udiv", "7", "2"),
+            ("urem", "7", "3"),
+            ("upow", "2", "3"),
+        ]
+    };
+    for (name, left, right) in arith {
+        calls.push((name.to_owned(), vec![param(left), param(right)], None));
+    }
+    let traps: Vec<(&str, &str, &str)> = if big {
+        vec![
+            ("uadd", "18446744073709551615", "1"),
+            ("usub", "0", "1"),
+            ("umul", "18446744073709551615", "2"),
+            ("udiv", "7", "0"),
+            ("upow", "2", "64"),
+        ]
+    } else {
+        vec![
+            ("uadd", "4294967295", "1"),
+            ("usub", "0", "1"),
+            ("umul", "100000", "100000"),
+            ("udiv", "7", "0"),
+            ("upow", "10", "10"),
+        ]
+    };
+    for (name, left, right) in traps {
+        calls.push((
+            format!("{name}_trap"),
+            vec![name.to_owned(), param(left), param(right)],
+            None,
+        ));
+    }
+    // Above-signed-maximum comparisons, mixed-sign comparisons and the infallible
+    // Uint-to-Float conversions (bit-exact F32/F64 rendering).
+    if big {
+        calls.push((
+            "ucmp_lt".to_owned(),
+            vec![param("9223372036854775807"), param("9223372036854775808")],
+            None,
+        ));
+        calls.push((
+            "ucmp_ge".to_owned(),
+            vec![param("9223372036854775808"), param("9223372036854775808")],
+            None,
+        ));
+        calls.push((
+            "ucmp_eq".to_owned(),
+            vec![param("18446744073709551615"), param("18446744073709551615")],
+            None,
+        ));
+        calls.push(("umix_lt".to_owned(), vec![param("-1"), param("0")], None));
+        calls.push((
+            "umix_gt".to_owned(),
+            vec![param("9223372036854775808"), param("9223372036854775807")],
+            None,
+        ));
+    } else {
+        calls.push((
+            "ucmp_lt".to_owned(),
+            vec![param("2147483647"), param("2147483648")],
+            None,
+        ));
+        calls.push((
+            "ucmp_ge".to_owned(),
+            vec![param("4294967295"), param("4294967295")],
+            None,
+        ));
+        calls.push((
+            "ucmp_eq".to_owned(),
+            vec![param("4294967295"), param("4294967295")],
+            None,
+        ));
+        calls.push(("umix_lt".to_owned(), vec![param("-1"), param("0")], None));
+        calls.push((
+            "umix_gt".to_owned(),
+            vec![param("2147483648"), param("2147483647")],
+            None,
+        ));
+    }
+    calls.push(("uto_float".to_owned(), vec![], Some("f64".to_owned())));
+    if big {
+        calls.push(("uto_f32".to_owned(), vec![], Some("f32".to_owned())));
+    }
+    calls
+}
+
+fn uint_scalar_expectations(profile: NumericProfile) -> Vec<(String, String, String)> {
+    // I64-carrier results render through the signed JS BigInt view, so values above the signed
+    // maximum observe as their signed reinterpretation: the assertions pin exact bit patterns.
+    let mut expected = if profile.int_width == IntWidth::Bits64 {
+        vec![
+            (
+                "uadd".to_owned(),
+                "ok".to_owned(),
+                "-9223372036854775708".to_owned(),
+            ),
+            (
+                "usub".to_owned(),
+                "ok".to_owned(),
+                "9223372036854775807".to_owned(),
+            ),
+            ("umul".to_owned(), "ok".to_owned(), "-709551616".to_owned()),
+            ("udiv".to_owned(), "ok".to_owned(), "1".to_owned()),
+            (
+                "urem".to_owned(),
+                "ok".to_owned(),
+                "9223372036854775807".to_owned(),
+            ),
+            ("upow".to_owned(), "ok".to_owned(), "1024".to_owned()),
+        ]
+    } else {
+        // I32-carrier results render through the signed JS Number view, so the unsigned
+        // maximum 4294967295 observes as -1: the assertion is on the exact bit pattern.
+        vec![
+            ("uadd".to_owned(), "ok".to_owned(), "-294967295".to_owned()),
+            ("usub".to_owned(), "ok".to_owned(), "2".to_owned()),
+            ("umul".to_owned(), "ok".to_owned(), "-1".to_owned()),
+            ("udiv".to_owned(), "ok".to_owned(), "3".to_owned()),
+            ("urem".to_owned(), "ok".to_owned(), "1".to_owned()),
+            ("upow".to_owned(), "ok".to_owned(), "8".to_owned()),
+        ]
+    };
+    for name in ["uadd", "usub", "umul", "udiv", "upow"] {
+        expected.push((
+            format!("{name}_trap"),
+            "trap".to_owned(),
+            "unreachable".to_owned(),
+        ));
+    }
+    expected.push(("ucmp_lt".to_owned(), "ok".to_owned(), "1".to_owned()));
+    expected.push(("ucmp_ge".to_owned(), "ok".to_owned(), "1".to_owned()));
+    expected.push(("ucmp_eq".to_owned(), "ok".to_owned(), "1".to_owned()));
+    expected.push(("umix_lt".to_owned(), "ok".to_owned(), "1".to_owned()));
+    expected.push(("umix_gt".to_owned(), "ok".to_owned(), "1".to_owned()));
+    // 3000000001 is exactly representable in F64; the Float32 witness input rounds directly
+    // to 9007200000000000 (F32 bits 0x5a000001).
+    expected.push((
+        "uto_float".to_owned(),
+        "ok".to_owned(),
+        "41e65a0bc0200000".to_owned(),
+    ));
+    if profile.int_width == IntWidth::Bits64 {
+        expected.push(("uto_f32".to_owned(), "ok".to_owned(), "5a000001".to_owned()));
+    }
+    expected
+}
+
+/// Executes named Uint exports in Node, distinguishing terminal Wasm traps from returned values.
+fn execute_wasm_uint_exports_in_node(
+    wasm_bytes: &[u8],
+    calls: &[(String, Vec<String>, Option<String>)],
+) -> Vec<(String, String, String)> {
+    const NODE_BODY: &str = r#"
+const results = [];
+for (const [name, args, float] of __CALLS__) {
+  const callName = args.length > 0 && typeof args[0] === "string" ? args[0] : name;
+  const callArgs = args.length > 0 && typeof args[0] === "string" ? args.slice(1) : args;
+  try {
+    const value = instance.exports[callName](...callArgs);
+    let rendered = String(value);
+    if (float === "f64") {
+      const view = new DataView(new ArrayBuffer(8));
+      view.setFloat64(0, value, true);
+      rendered = view.getBigUint64(0, true).toString(16).padStart(16, "0");
+    } else if (float === "f32") {
+      const view = new DataView(new ArrayBuffer(4));
+      view.setFloat32(0, value, true);
+      rendered = view.getUint32(0, true).toString(16).padStart(8, "0");
+    }
+    results.push(`${name}|ok|${rendered}`);
+  } catch (error) {
+    if (error !== null
+        && typeof error === "object"
+        && Object.getPrototypeOf(error) === WebAssembly.RuntimeError.prototype) {
+      results.push(`${name}|trap|${String(error.message)}`);
+    } else {
+      throw error;
+    }
+  }
+}
+process.stdout.write(results.join("\n"));
+"#;
+    let calls = calls
+        .iter()
+        .map(|(name, args, float)| {
+            let float = match float.as_deref() {
+                Some("f64") => "\"f64\"",
+                Some("f32") => "\"f32\"",
+                None => "null",
+                Some(other) => panic!("unsupported Uint float rendering {other}"),
+            };
+            let rendered = args
+                .iter()
+                .map(|argument| {
+                    if argument.ends_with('n')
+                        && argument[..argument.len() - 1].parse::<i128>().is_ok()
+                    {
+                        argument.trim_end_matches('n').to_owned() + "n"
+                    } else if argument.parse::<i128>().is_ok() {
+                        argument.clone()
+                    } else {
+                        format!("{argument:?}")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("[{name:?}, [{rendered}], {float}]")
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let node_body = NODE_BODY.replace("__CALLS__", &format!("[{calls}]"));
+    let output = run_wasm_node_script(wasm_bytes, "", &node_body);
+    String::from_utf8(output)
+        .expect("Node Uint results should be UTF-8")
+        .lines()
+        .map(|line| {
+            let mut parts = line.splitn(3, '|');
+            (
+                parts
+                    .next()
+                    .expect("result should include export name")
+                    .to_owned(),
+                parts
+                    .next()
+                    .expect("result should include outcome")
+                    .to_owned(),
+                parts
+                    .next()
+                    .expect("result should include value or trap")
+                    .to_owned(),
+            )
+        })
+        .collect()
 }

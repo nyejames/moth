@@ -46,8 +46,13 @@ separate facts. For the ordinary Wasm scalar layout:
     F16          2 bytes  f32
     F32          4 bytes  f32
     F64          8 bytes  f64
-    Int, Float   the boundary profile's scalar size   matching carrier
+    Int, Uint, Float   the boundary profile's scalar size   matching carrier
 ]
+
+`Uint` follows the profile `Int` width there too: 4 bytes on an `i32` carrier
+under `Int32`, 8 bytes on an `i64` carrier under `Int64`, each with unsigned
+interpretation. Carrier or storage width never changes canonical identity, so
+a `Uint32` value stays distinct from `U32` even where their bytes match.
 
 Natural alignment equals scalar byte size, and a scalar collection's stride is
 its scalar size. Narrow integer storage uses signed or unsigned narrow loads and

@@ -14,16 +14,14 @@ a check.
 A `U8 + U8` result of `256` is valid `U32` arithmetic. A later conversion
 back to `U8` is a separate check.
 
-### Failures
-
 Failures include:
 
-- integer overflow
-- division or remainder by zero
-- invalid integer exponents
+- integer overflow, including `Uint` overflow and underflow against the selected unsigned range
+- division or remainder by zero, including `Uint` `//` and `%` zero divisors
+- invalid integer exponents, including `Uint` power result overflow
 - non-finite binary float results
 - a `Dec` operation with a zero divisor
-- a compound assignment whose promoted result cannot convert back to the left-hand type
+- a compound assignment whose promoted result cannot convert back to the left-hand type, including a `Uint` `/=` float result that cannot convert back
 
 ### Failure delivery
 
@@ -87,8 +85,9 @@ This remains true inside a function with builtin `Error!` and inside an
 expression followed by `catch`.
 
 Statically rejected numeric forms are also diagnostics. They include unary minus
-on a typed `U*` value, a fixed integer operation with no common type, `//` on a
-binary float or a positive-scale `Dec`, and a literal that cannot materialise
+on a typed `U*` or `Uint` value, a fixed integer operation with no common type, `//` on a
+binary float or a positive-scale `Dec`, `Uint`/`Int` arithmetic without an
+explicit conversion, and a literal that cannot materialise
 at its receiving type. See @./#operators (Operators) and @./#numeric-literals
 (Numeric literals).
 
@@ -99,8 +98,8 @@ integer operation or narrowing cannot fail. The proof is conservative and
 semantic: it reasons from type domains, not from backend carrier widths, so
 `U8 + U8 -> U32` cannot fail and carries no recoverable obligation. Discharge
 covers `Add`, `Subtract`, `Multiply` and `Negate` over fixed-width integer
-operand and result domains with full-range containment. `Float`, `Dec`, `Int`
-and `Byte` are excluded from this discharge, not proven fallible by it;
+operand and result domains with full-range containment. `Float`, `Dec`, `Int`,
+`Uint` and `Byte` are excluded from this discharge, not proven fallible by it;
 whether such an operation can fail follows the failure catalogue above (exact
 `Dec` add, subtract, multiply and negate and binary-float negation carry no
 implicit failure; `Byte` has no arithmetic). `Divide`, `IntegerDivide`,

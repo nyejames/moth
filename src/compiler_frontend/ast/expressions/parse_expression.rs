@@ -342,15 +342,15 @@ fn validate_completed_typed_errors(expression: &Expression) -> Result<(), Expres
 
 /// One parsed expression before evaluation.
 pub(super) enum ExpressionFragment {
-    /// The flat infix fragment that `evaluate_expression` still has to order, type and fold.
+    /// An infix fragment, including pending groups, still awaiting ordering, typing and folding.
     Nodes(Vec<ExpressionRpnItem>),
     /// A value returned early by a template or `is:` guard; it never reaches evaluation.
     Value(Box<Expression>),
 }
 
-// WHAT: collects the flat infix AST fragment without evaluating it.
-// WHY: a parenthesised group must see whether it is exactly one pending literal
-//      before evaluation, so it can defer that literal to the outer fragment.
+// WHAT: collects the infix AST fragment without evaluating it.
+// WHY: ordinary parentheses retain unresolved syntax so receiving and peer contexts can reach
+//      literal leaves before ordering, operator typing and folding.
 pub(super) fn collect_expression_fragment(
     input: &mut ExpressionParseInput<'_, '_, '_>,
 ) -> Result<ExpressionFragment, ExpressionParseError> {
@@ -363,15 +363,15 @@ pub(super) fn collect_expression_fragment(
         " Expression"
     );
 
-    // Build the flat infix AST fragment first. `evaluate_expression` is the stage that turns
-    // this fragment into precedence-ordered RPN, resolves the final type, and folds constants.
+    // Collect the infix AST fragment, retaining nested group syntax. `evaluate_expression`
+    // orders deferred groups into one RPN stream, resolves the final type, and folds constants.
     let mut next_number_negative = false;
     while input.token_stream.position() < input.token_stream.length() {
         let token = input.token_stream.current_tag();
         if input.stop_at_named_entry
             && expression
                 .last()
-                .is_some_and(ExpressionRpnItem::is_operand_or_pending_literal)
+                .is_some_and(ExpressionRpnItem::is_operand_shape)
             && token == TokenTag::SYMBOL
             && input.token_stream.peek_next_tag() == Some(TokenTag::ASSIGN)
         {

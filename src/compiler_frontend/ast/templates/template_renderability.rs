@@ -13,12 +13,13 @@ use moth_lexical::numeric::fixed_scalar::FixedScalarClass;
 /// rendered directly into template output.
 ///
 /// WHAT: accepts the built-in scalar/textual types that the compiler
-///       supports for template rendering, plus fixed numeric scalars
-///       (`I8`-`U64` and `F16`-`F64`) and lazily interned `Dec` scales, which
-///       render through the canonical numeric text contract.
+///       supports for template rendering, plus the profile-sized `Uint`,
+///       fixed numeric scalars (`I8`-`U64` and `F16`-`F64`) and lazily
+///       interned `Dec` scales, which render through the canonical numeric
+///       text contract.
 /// WHY: positive list keeps the policy explicit and easy to extend.
 ///
-/// Allowed: String, Int, Float, Bool, Char, fixed numeric scalars and Dec scales.
+/// Allowed: String, Int, Uint, Float, Bool, Char, fixed numeric scalars and Dec scales.
 /// Rejected: `Byte`, structs, const records, choices, collections, functions,
 ///           external opaque types, trait names, generic instances,
 ///           generic parameters, and other builtin types such as Range and None.
@@ -29,6 +30,7 @@ pub(crate) fn is_template_renderable_type(
     let builtins = type_environment.builtins();
     if type_id == builtins.string
         || type_id == builtins.int
+        || type_id == builtins.uint
         || type_id == builtins.float
         || type_id == builtins.bool
         || type_id == builtins.char

@@ -20,7 +20,7 @@ use moth_lexical::numeric::grammar::NumericLiteralKind;
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 use moth_lexical::numeric::parse::{
     literal_kind_initialises, materialize_normalized_fixed_scalar, materialize_normalized_float,
-    materialize_normalized_int, parse_numeric_literal,
+    materialize_normalized_int, materialize_normalized_uint, parse_numeric_literal,
 };
 use moth_lexical::numeric::profile::{FloatPrecision, IntWidth};
 
@@ -1310,6 +1310,7 @@ fn validate_value(
             _ => type_mismatch(raw.span, path, "expected string"),
         },
         PreparedType::Int { width } => validate_int(raw, *width, budget, path),
+        PreparedType::Uint { width } => validate_uint(raw, *width, budget, path),
         PreparedType::Float { precision } => validate_float(raw, *precision, budget, path),
         PreparedType::Integer => validate_integer(raw, budget, path),
         PreparedType::Decimal { scale } => validate_decimal(raw, *scale, budget, path),
@@ -1412,6 +1413,53 @@ fn validate_int(
                 Some(span),
                 path,
                 format!("cannot materialise Int ({reason:?})"),
+            )
+        })
+}
+
+/// Decode one profile-width `Uint` literal through the shared unsigned policy.
+///
+/// WHAT: whole-number spelling only, including separators; every negative spelling (including
+///       `-0`) rejects, magnitudes parse as `u64` so Uint64 values above `i64::MAX` stay exact,
+///       and the captured profile width bounds the accepted range. Both the spelling rule and
+///       the materialisation come from the shared numeric-text owner, so a MON literal agrees
+///       with the same spelling reaching the same width from source.
+/// WHY:  the budget was already charged before the normalized magnitude was retained, and this
+///       arm only reads those facts, so a `Uint` literal needs no new budget kind.
+fn validate_uint(
+    raw: RawValue<'_>,
+    width: IntWidth,
+    _budget: &mut BudgetState<'_>,
+    path: &[PathSegment],
+) -> Result<Value, MonError> {
+    let span = raw.span;
+    let RawKind::Number(number) = raw.kind else {
+        return type_mismatch(span, path, "expected Uint numeric literal");
+    };
+    if number.kind != NumericLiteralKind::WholeNumber {
+        return Err(MonError::new(
+            MonErrorCode::NumericType,
+            Some(span),
+            path,
+            "Uint requires whole-number spelling",
+        ));
+    }
+
+    // The receiving node carries the profile the schema was prepared under, so a `Uint64`
+    // boundary materialises its own range instead of the delivered `Uint32` default.
+    materialize_normalized_uint(&number.normalized, number.text.starts_with('-'), width)
+        .map(Value::Uint)
+        .map_err(|reason| {
+            let code = match reason {
+                NumberLiteralErrorReason::OutsideUintRange(_)
+                | NumberLiteralErrorReason::NegativeUintLiteral(_) => MonErrorCode::NumericRange,
+                _ => MonErrorCode::NumericSyntax,
+            };
+            MonError::new(
+                code,
+                Some(span),
+                path,
+                format!("cannot materialise Uint ({reason:?})"),
             )
         })
 }

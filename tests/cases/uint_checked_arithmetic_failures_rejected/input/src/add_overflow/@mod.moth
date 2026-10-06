@@ -1,0 +1,3 @@
+fail_add || -> Uint, Error!:
+    return 4294967295 + 1
+;

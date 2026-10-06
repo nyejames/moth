@@ -1,0 +1,7 @@
+entry = "."
+numeric_profile = "Int64/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "uint int64 less=true greater=true signed=true/true neg=true equal=true arith=9223372036854775908/1/2/9223372036854775708/1 limit=5/18446744073709549568 dec=18446744073709551615/18446744073709551615 float=18446744073709552000/18446744000000000000 witness=9007200000000000 cmp=true/false/true/false implicit=9223372036854776000/18446744073709552000/9223372036854776000 prod=18446744073000000000/9 agree=true"

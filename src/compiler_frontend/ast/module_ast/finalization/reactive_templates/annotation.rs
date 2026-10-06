@@ -12,6 +12,7 @@ use super::types::{
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, LoopBindings, NodeKind};
 use crate::compiler_frontend::ast::expressions::assertion_message_effects::assertion_condition_is_statically_true;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
+use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, FallibleHandling, ReactiveTemplateMetadata,
 };
@@ -754,8 +755,12 @@ fn annotate_expression(
                         annotate_expression(expression, flows, value_environment, store)?;
                     }
                     ExpressionRpnItem::Operator { .. } => {}
-                    // Resolution removes pending literals before this stage.
-                    ExpressionRpnItem::PendingNumericLiteral { .. } => {}
+                    // Pending syntax never survives evaluation; its presence here is a broken
+                    // compiler invariant, not an annotatable position.
+                    ExpressionRpnItem::PendingNumericLiteral { .. }
+                    | ExpressionRpnItem::PendingGroup { .. } => {
+                        return Err(pending_expression_item_bug("reactive template annotation"));
+                    }
                 }
             }
         }
@@ -808,6 +813,7 @@ fn annotate_expression(
 
         ExpressionKind::NoValue
         | ExpressionKind::OptionNone
+        | ExpressionKind::Uint(_)
         | ExpressionKind::Int(_)
         | ExpressionKind::Float(_)
         | ExpressionKind::FixedScalar(_)

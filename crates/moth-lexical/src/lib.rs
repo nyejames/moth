@@ -7,7 +7,7 @@
 //! including fixed numeric names and the `Dec` family with any ASCII-digit suffix.
 //!
 //! [`numeric`] accepts literal text and explicit destination facts, then parses, materialises or
-//! formats fixed-width integers, `Byte`, F16/F32/F64 and profile-dependent `Int`/`Float`.
+//! formats fixed-width integers, `Byte`, F16/F32/F64 and profile-dependent `Int`/`Uint`/`Float`.
 //! [`numeric::profile::NumericProfile`] supports all four 32/64-bit width/precision combinations
 //! and defaults to Int32/Float64. Decimal text facts cover `Dec`/`Dec0` through `Dec256` without
 //! owning arbitrary-precision coefficient arithmetic.

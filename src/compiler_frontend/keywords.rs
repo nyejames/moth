@@ -56,6 +56,7 @@ pub(crate) fn token_tag_for_source_word(word: SourceWord) -> TokenTag {
         SourceWord::U16Type => TokenTag::DATATYPE_U16,
         SourceWord::U32Type => TokenTag::DATATYPE_U32,
         SourceWord::U64Type => TokenTag::DATATYPE_U64,
+        SourceWord::UintType => TokenTag::DATATYPE_UINT,
         SourceWord::F16Type => TokenTag::DATATYPE_F16,
         SourceWord::F32Type => TokenTag::DATATYPE_F32,
         SourceWord::F64Type => TokenTag::DATATYPE_F64,

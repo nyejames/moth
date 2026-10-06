@@ -949,6 +949,7 @@ fn rebind_parsed_type_ref_source_identity(type_ref: &mut ParsedTypeRef, file_id:
         | ParsedTypeRef::Qualified { span, .. }
         | ParsedTypeRef::BuiltinBool { span }
         | ParsedTypeRef::BuiltinInt { span }
+        | ParsedTypeRef::BuiltinUint { span }
         | ParsedTypeRef::BuiltinFloat { span }
         | ParsedTypeRef::BuiltinString { span }
         | ParsedTypeRef::BuiltinChar { span }
@@ -2318,6 +2319,7 @@ fn validate_parsed_type_ref(
         | ParsedTypeRef::Qualified { span, .. }
         | ParsedTypeRef::BuiltinBool { span }
         | ParsedTypeRef::BuiltinInt { span }
+        | ParsedTypeRef::BuiltinUint { span }
         | ParsedTypeRef::BuiltinFloat { span }
         | ParsedTypeRef::BuiltinString { span }
         | ParsedTypeRef::BuiltinChar { span }

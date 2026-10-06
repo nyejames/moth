@@ -188,7 +188,8 @@ impl<'a, 'b> WasmFunctionLoweringContext<'a, 'b> {
 ///
 /// The carriers are the Wasm value types that can hold each scalar without loss: 8/16/32-bit
 /// integers and `Byte` ride in I32, 64-bit integers in I64, 16/32-bit floats in F32, and 64-bit
-/// floats in F64. Profile-dependent `Int` and `Float` use their selected carrier from the request.
+/// floats in F64. Profile-dependent `Int`, `Uint` and `Float` use their selected carrier from the
+/// request (`Uint` follows the profile `Int` width).
 pub(crate) fn lower_type_to_abi(
     context: &WasmLirLoweringContext<'_>,
     type_id: TypeId,
@@ -199,6 +200,10 @@ pub(crate) fn lower_type_to_abi(
         HirTypeClass::Unit => WasmAbiType::Void,
         HirTypeClass::Bool | HirTypeClass::Char => WasmAbiType::I32,
         HirTypeClass::Int => match context.request.numeric_profile.int_width {
+            IntWidth::Bits32 => WasmAbiType::I32,
+            IntWidth::Bits64 => WasmAbiType::I64,
+        },
+        HirTypeClass::Uint => match context.request.numeric_profile.int_width {
             IntWidth::Bits32 => WasmAbiType::I32,
             IntWidth::Bits64 => WasmAbiType::I64,
         },

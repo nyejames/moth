@@ -13,18 +13,19 @@
 //!   schema-checked record.
 //! - [`decode_document_bytes`] also accepts raw bytes and reports invalid UTF-8 with a byte span.
 //! - [`Schema::with_profile`] selects any of the four combinations of 32/64-bit `Int` width and
-//!   32/64-bit `Float` precision. Schemas prepared without an explicit profile use
+//!   32/64-bit `Float` precision. `Uint` follows the profile's `Int` width, so the default is
+//!   Uint32. Schemas prepared without an explicit profile use
 //!   [`NumericProfile::STANDARD`] (`Int32`/`Float64`). Preparation captures the profile and validated
 //!   defaults in an immutable [`PreparedSchema`] reusable across reading and writing calls.
-//!   Fixed widths and `Byte` remain profile-independent and distinct from `Int` and `Float`.
+//!   Fixed widths and `Byte` remain profile-independent and distinct from `Int`, `Uint` and `Float`.
 //! - [`SchemaType::Integer`] preserves arbitrary-precision whole-number text. [`SchemaType::Decimal`]
 //!   carries an exact scale in `0..=256`; a scale-two target accepts `1.2` and rejects `1.239`.
 //!   These Rust data-family names do not introduce source types or numeric constructors.
 //! - Integer schemas and `Byte` require whole-number spelling. Binary floats round to nearest with
 //!   ties to even at their own precision and reject non-finite results.
-//! - Map keys follow one declared schema type: `String`, `Bool`, `Char`, `Int`, a fixed-width
-//!   integer, or `Byte`. Duplicate decoded keys and duplicate field or variant names fail rather
-//!   than keeping a first or last value.
+//! - Map keys follow one declared schema type: `String`, `Bool`, `Char`, `Int`, `Uint`, a
+//!   fixed-width integer, or `Byte`. Duplicate decoded keys and duplicate field or variant
+//!   names fail rather than keeping a first or last value.
 //!
 //! Encoding a [`Value::String`] always encodes string data. It never guesses that text resembles
 //! MON and should be inserted raw or decoded. Decoded values own their trees and outlive input text.
@@ -111,6 +112,10 @@ mod numeric;
 mod reader;
 mod schema;
 mod writer;
+
+#[cfg(test)]
+#[path = "tests/uint_tests.rs"]
+mod uint_tests;
 
 use budget::BudgetState;
 use map_keys::{MapKeyIndex, map_key_name, map_key_name_len};

@@ -19,6 +19,7 @@ use crate::compiler_frontend::ast::const_values::resolver::{
 };
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
+use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandling;
@@ -487,8 +488,12 @@ impl<'a> ConstFactCollector<'a> {
                             self.walk_expression_for_body_local(expression, env)?;
                         }
                         ExpressionRpnItem::Operator { .. } => {}
-                        // Resolution removes pending literals before this stage.
-                        ExpressionRpnItem::PendingNumericLiteral { .. } => {}
+                        // Pending syntax never survives evaluation; its presence here is a broken
+                        // compiler invariant, not a skipped non-const fact.
+                        ExpressionRpnItem::PendingNumericLiteral { .. }
+                        | ExpressionRpnItem::PendingGroup { .. } => {
+                            return Err(pending_expression_item_bug("const fact collection").into());
+                        }
                     }
                 }
             }
@@ -603,6 +608,7 @@ impl<'a> ConstFactCollector<'a> {
 
             ExpressionKind::NoValue
             | ExpressionKind::OptionNone
+            | ExpressionKind::Uint(_)
             | ExpressionKind::Int(_)
             | ExpressionKind::Float(_)
             | ExpressionKind::FixedScalar(_)

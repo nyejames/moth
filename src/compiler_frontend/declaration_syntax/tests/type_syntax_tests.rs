@@ -27,7 +27,8 @@ use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, Pars
 use crate::compiler_frontend::datatypes::{DataType, TypeId, builtin_type_ids};
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
-    ParsedNamedTypeReference, TypeAnnotationContext, parse_type_annotation_cursor,
+    ParsedNamedTypeReference, TypeAnnotationContext, builtin_scalar_type_name_for_tag,
+    parse_type_annotation_cursor,
 };
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
@@ -309,6 +310,39 @@ fn dec_family_spellings_parse_as_builtin_number_types() {
                 ParsedTypeRef::BuiltinNumber { scale, span: Some(_) } if scale == expected_scale
             ),
             "{spelling:?} should be the builtin scaled type at scale {expected_scale}, got {parsed:?}"
+        );
+    }
+}
+
+#[test]
+fn builtin_scalar_spelling_mapper_covers_every_scalar_keyword() {
+    // The mapper is the single spelling owner behind scalar-constructor diagnostics and
+    // builtin-target header classification, so every scalar keyword must keep its authored
+    // name here instead of falling through to a generic diagnostic.
+    for (tag, spelling) in [
+        (TokenTag::DATATYPE_INT, "Int"),
+        (TokenTag::DATATYPE_UINT, "Uint"),
+        (TokenTag::DATATYPE_FLOAT, "Float"),
+        (TokenTag::DATATYPE_BOOL, "Bool"),
+        (TokenTag::DATATYPE_STRING, "String"),
+        (TokenTag::DATATYPE_CHAR, "Char"),
+        (TokenTag::DATATYPE_I8, "I8"),
+        (TokenTag::DATATYPE_I16, "I16"),
+        (TokenTag::DATATYPE_I32, "I32"),
+        (TokenTag::DATATYPE_I64, "I64"),
+        (TokenTag::DATATYPE_U8, "U8"),
+        (TokenTag::DATATYPE_U16, "U16"),
+        (TokenTag::DATATYPE_U32, "U32"),
+        (TokenTag::DATATYPE_U64, "U64"),
+        (TokenTag::DATATYPE_F16, "F16"),
+        (TokenTag::DATATYPE_F32, "F32"),
+        (TokenTag::DATATYPE_F64, "F64"),
+        (TokenTag::DATATYPE_BYTE, "Byte"),
+    ] {
+        assert_eq!(
+            builtin_scalar_type_name_for_tag(tag),
+            Some(spelling),
+            "{tag:?} should keep its authored spelling"
         );
     }
 }

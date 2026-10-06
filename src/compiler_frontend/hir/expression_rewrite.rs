@@ -15,7 +15,8 @@ pub(crate) fn rewrite_expression_bottom_up(
     rewrite: &mut impl FnMut(&HirExpression) -> Option<HirExpression>,
 ) -> HirExpression {
     let kind = match &expression.kind {
-        HirExpressionKind::Int(_)
+        HirExpressionKind::Uint(_)
+        | HirExpressionKind::Int(_)
         | HirExpressionKind::Float(_)
         | HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Number(_)

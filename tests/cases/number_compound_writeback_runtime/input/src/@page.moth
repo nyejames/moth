@@ -44,4 +44,4 @@ converted_result = add_number_to_i8(~converted_target, ~converted_rhs_calls, 2.0
     then 0
 ;
 
-[:number compound range=[range_error_code]/[range_target]/[range_rhs_calls] fraction=[fraction_error_code]/[fraction_target]/[fraction_rhs_calls] power=[power_result]/[power_rhs_calls] converted=[converted_result]/[converted_target]/[converted_rhs_calls]]
+[:number compound range=[range_error_code]/[range_target]/[range_rhs_calls] fraction=[fraction_error_code]/[fraction_target]/[fraction_rhs_calls] power=[power_result]/[power_target]/[power_rhs_calls] converted=[converted_result]/[converted_target]/[converted_rhs_calls]]

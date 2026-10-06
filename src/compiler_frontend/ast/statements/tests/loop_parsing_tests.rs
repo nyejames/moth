@@ -10,10 +10,11 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidLoopHeaderReason, ReservedNameOwner, TypeMismatchContext,
+    DiagnosticPayload, InvalidLoopHeaderReason, InvalidRangeOperandReason, RangeOperandKind,
+    ReservedNameOwner, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::source::{LocalSpan, SourceId};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
 use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
@@ -358,8 +359,103 @@ fn rejects_byte_range_operand() {
 
     assert!(matches!(
         payload,
-        DiagnosticPayload::InvalidRangeOperand { .. }
+        DiagnosticPayload::InvalidRangeOperand {
+            operand: RangeOperandKind::End,
+            reason: InvalidRangeOperandReason::NotNumeric,
+            ..
+        }
     ));
+}
+
+/// Parse one range header that must fail on domain selection, returning the blamed role, reason
+/// and authored source text under the primary span.
+fn range_domain_failure(
+    loop_body_source: &str,
+) -> (RangeOperandKind, InvalidRangeOperandReason, String) {
+    let source = loop_fixture_source(loop_body_source);
+    let diagnostic = parse_single_file_ast_diagnostic(&source);
+    let DiagnosticPayload::InvalidRangeOperand {
+        operand, reason, ..
+    } = diagnostic.payload
+    else {
+        panic!(
+            "expected an invalid range operand, found {:?}",
+            diagnostic.payload
+        );
+    };
+    let range = diagnostic
+        .primary_span
+        .expect("range operand diagnostics carry the operand span")
+        .resolve_with(ExtendedSpanBuilder::new().resolver_for(SourceId::COMPILATION_ROOT));
+    let blamed = source[range.start() as usize..range.end() as usize].to_owned();
+    (operand, reason, blamed)
+}
+
+#[test]
+fn range_step_that_breaks_compatible_bounds_is_blamed_on_the_step() {
+    let uint_bounds_int_step = range_domain_failure(
+        "lo Uint = 0\nhi Uint = 10\nstep Int = 1\n\
+         loop lo to hi by step |value|:\n    io.line([: [value]])\n;",
+    );
+    let int_bounds_u8_step = range_domain_failure(
+        "lo Int = 0\nhi Int = 10\nstep U8 = 1\n\
+         loop lo to hi by step |value|:\n    io.line([: [value]])\n;",
+    );
+
+    for result in [uint_bounds_int_step, int_bounds_u8_step] {
+        assert_eq!(
+            result,
+            (
+                RangeOperandKind::Step,
+                InvalidRangeOperandReason::IncompatibleDomain,
+                "step".to_owned()
+            )
+        );
+    }
+}
+
+#[test]
+fn incompatible_range_bounds_without_float_step_are_blamed_on_the_bounds() {
+    let unstepped = range_domain_failure(
+        "lo Uint = 0\nhi Int = 10\nloop lo to hi |value|:\n    io.line([: [value]])\n;",
+    );
+    // The Uint step matches the start, so only the bounds disagree.
+    let stepped = range_domain_failure(
+        "lo Uint = 0\nhi Int = 10\nstep Uint = 1\n\
+         loop lo to hi by step |value|:\n    io.line([: [value]])\n;",
+    );
+
+    for result in [unstepped, stepped] {
+        assert_eq!(
+            result,
+            (
+                RangeOperandKind::End,
+                InvalidRangeOperandReason::IncompatibleDomain,
+                "hi".to_owned()
+            )
+        );
+    }
+}
+
+#[test]
+fn float_step_selects_float_for_mixed_uint_and_int_bounds_in_either_order() {
+    for (start_type, end_type) in [("Uint", "Int"), ("Int", "Uint")] {
+        let (ast, path_fork, string_table) = parse_loop_fixture(&format!(
+            "lo {start_type} = 0\nhi {end_type} = 3\nstep Float = 0.5\n\
+             loop lo to hi by step |value|:\n    io.line([: [value]])\n;"
+        ));
+        let body = loop_function_body(&ast, &path_fork, &string_table);
+        let NodeKind::RangeLoop { bindings, .. } = &body[3].kind else {
+            panic!("expected a Float range loop for {start_type}/{end_type} bounds");
+        };
+        assert!(
+            bindings
+                .item
+                .as_ref()
+                .is_some_and(|binding| matches!(binding.value.diagnostic_type, DataType::Float)),
+            "{start_type}/{end_type} bounds with a Float step must iterate as Float"
+        );
+    }
 }
 
 #[test]

@@ -1,0 +1,3 @@
+fail_power || -> Uint, Error!:
+    return 2 ^ 32
+;

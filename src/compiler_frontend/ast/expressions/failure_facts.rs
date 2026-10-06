@@ -341,6 +341,11 @@ impl ExpressionFailureFacts {
         match kind {
             ExpressionKind::Runtime(rpn) => {
                 for item in &rpn.items {
+                    // Pending syntax never survives evaluation. This infallible aggregation runs
+                    // inside `Expression::new` for every constructed expression, so it ignores
+                    // pending items like operators; the fallible consumers (type validation,
+                    // failure classification, constant folding, const resolution) report the
+                    // broken invariant with `pending_expression_item_bug` when they visit it.
                     if let ExpressionRpnItem::Operand(value) = item {
                         facts.merge_pending_from(&value.failure_facts);
                     }

@@ -245,8 +245,8 @@ macro_rules! token_schema {
 
             /// Whether this tag is a builtin scalar type spelling in source.
             ///
-            /// WHAT: the schema-owned fact behind type-position checks for `Int`, `Float`, `Bool`,
-            ///      `String`, `Char` and every explicit-width spelling (`I8`..`F64`, `Byte`).
+            /// WHAT: the schema-owned fact behind type-position checks for `Int`, `Uint`, `Float`,
+            ///      `Bool`, `String`, `Char` and every explicit-width spelling (`I8`..`F64`, `Byte`).
             /// WHY: every type-position parser must accept the same builtin scalar spelling set,
             ///      so the set is derived from the taxonomy class here instead of being repeated
             ///      tag by tag at each call site. `None`, `True` and `False` share the builtin-type
@@ -1097,6 +1097,16 @@ token_schema! {
         DATATYPE_BYTE,
         106,
         "`Byte`",
+        Static,
+        0,
+        TOKEN_CLASS_BUILTIN_TYPE,
+        None
+    ),
+    (
+        DatatypeUint,
+        DATATYPE_UINT,
+        107,
+        "`Uint`",
         Static,
         0,
         TOKEN_CLASS_BUILTIN_TYPE,

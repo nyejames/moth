@@ -65,6 +65,7 @@ fn register_builtin_cast_evidence_matches_lookup_policy_across_profiles() {
     let source_targets = [
         BuiltinCastTarget::Bool,
         BuiltinCastTarget::Int,
+        BuiltinCastTarget::Uint,
         BuiltinCastTarget::Float,
         BuiltinCastTarget::String,
         BuiltinCastTarget::Char,
@@ -783,6 +784,34 @@ fn dec_conformance_targets_report_builtin_target_with_exact_spans() {
             target
         );
     }
+}
+
+#[test]
+fn uint_conformance_target_reports_builtin_target_with_exact_span() {
+    let source = "DISPLAYABLE must:\n;\nUint must DISPLAYABLE\n";
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+    assert!(
+        matches!(
+            &diagnostic.payload,
+            DiagnosticPayload::InvalidTraitConformance {
+                reason: InvalidTraitConformanceReason::BuiltinTarget,
+                ..
+            }
+        ),
+        "Uint should be rejected as a builtin conformance target, got {:?}",
+        diagnostic.payload
+    );
+    let target_span = diagnostic
+        .primary_span
+        .expect("builtin-target diagnostics should retain their target span");
+    assert_eq!(target_span.source(), SourceId::COMPILATION_ROOT);
+
+    let span_builder = ExtendedSpanBuilder::new();
+    let range = target_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
+    assert_eq!(
+        &source[range.start() as usize..range.end() as usize],
+        "Uint"
+    );
 }
 
 #[test]

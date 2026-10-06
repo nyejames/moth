@@ -172,6 +172,44 @@ fn constant_record_owns_scalar_int_folded_value() {
 }
 
 #[test]
+fn constant_record_owns_scalar_uint_folded_value_above_i64_max() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let env = TypeEnvironment::new();
+    let uint_id = env.builtins().uint;
+
+    let value_path = path_fork
+        .try_intern_portable_path("value", &mut string_table)
+        .expect("test path fits");
+    let module_constants = vec![Declaration {
+        id: value_path,
+        value: Expression::uint(u64::MAX, None, ValueMode::ImmutableOwned),
+        binding_span: None,
+        config_qualifier: None,
+    }];
+
+    let root = constant_root("value", uint_id, &mut string_table, &mut path_fork);
+    let records = build_constant_records(
+        vec![root],
+        vec![constant_binding("value")],
+        &module_constants,
+        &FxHashMap::default(),
+        &env,
+        &string_table,
+        &path_fork,
+    )
+    .expect("join succeeds for a scalar uint constant");
+
+    assert_eq!(records.len(), 1);
+    let PublicDeclarationSemantics::Constant(semantics) = &records[0].semantics else {
+        panic!("expected constant semantics");
+    };
+    // A value above `i64::MAX` survives the `ConstValueStore -> PublicFoldedValue`
+    // projection with its exact u64 payload, never truncated to a signed carrier.
+    assert_eq!(semantics.folded_value, PublicFoldedValue::Uint(u64::MAX));
+}
+
+#[test]
 fn fixed_scalar_constants_project_with_exact_bits_and_scalar_identity() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();

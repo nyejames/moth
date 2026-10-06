@@ -8,12 +8,12 @@ power_number |base Dec1, exponent Int| -> Dec1, Error!:
 zero_division_code ~U32 = 0
 zero_division = divide_numbers(4.0, 0.0) catch |division_error|:
     zero_division_code = division_error.code
-    then 0.0
+    then 1 + 0.2
 ;
 negative_power_code ~U32 = 0
 negative_power = power_number(2.0, -1) catch |power_error|:
     negative_power_code = power_error.code
-    then 0.0
+    then 2.3
 ;
 
-[:number errors zero-divisor=[zero_division_code] negative-exponent=[negative_power_code]]
+[:number errors zero-divisor=[zero_division]/[zero_division_code] negative-exponent=[negative_power]/[negative_power_code]]

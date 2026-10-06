@@ -671,3 +671,67 @@ fn witness_candidates_yield_calls_then_one_terminal_origin_on_demand() {
     );
     assert_eq!(activity_checks.get(), 3);
 }
+
+#[test]
+fn uint_arithmetic_records_stable_integer_failure_codes() {
+    // Uint overflow, zero-divisor and power failures reuse the stable
+    // integer failure codes through the shared failure classification.
+    let mut add = ExpressionFailureFacts::default();
+    add.record_numeric_operation(
+        NumericOperator::Add,
+        NumericScalar::Uint,
+        Some(NumericScalar::Uint),
+        NumericScalar::Uint,
+        None,
+    );
+    assert_eq!(add.implicit[0].codes, &[BuiltinErrorCode::IntOverflow]);
+    assert_eq!(
+        add.summary.first_numeric, add.summary.first_implicit,
+        "the Uint add witness is the first implicit witness"
+    );
+
+    let mut floor_div = ExpressionFailureFacts::default();
+    floor_div.record_numeric_operation(
+        NumericOperator::IntegerDivide,
+        NumericScalar::Uint,
+        Some(NumericScalar::Uint),
+        NumericScalar::Uint,
+        None,
+    );
+    assert_eq!(
+        floor_div.implicit[0].codes,
+        &[
+            BuiltinErrorCode::DivideByZero,
+            BuiltinErrorCode::IntOverflow
+        ],
+    );
+
+    let mut power = ExpressionFailureFacts::default();
+    power.record_numeric_operation(
+        NumericOperator::Power,
+        NumericScalar::Uint,
+        Some(NumericScalar::Uint),
+        NumericScalar::Uint,
+        None,
+    );
+    assert_eq!(
+        power.implicit[0].codes,
+        &[
+            BuiltinErrorCode::IntOverflow,
+            BuiltinErrorCode::InvalidExponent
+        ],
+    );
+}
+
+#[test]
+fn uint_int_comparison_records_no_failure_witness() {
+    // Exact Uint/Int comparisons convert nothing, so they carry no
+    // failure edge even though both sides are checked integer domains.
+    let source = "compare |value Uint, limit Int| -> Bool:\n    return value > limit\n;\n";
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "compare");
+    let expression = returned_value(body);
+    assert!(expression.failure_facts.implicit.is_empty());
+    assert!(expression.failure_facts.summary.first_numeric.is_none());
+    assert!(!expression.failure_facts.checked_numeric_operation);
+}

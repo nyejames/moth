@@ -1,0 +1,7 @@
+entry = "."
+numeric_profile = "Int32/Float32"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "coerced small=16777216/16777216/true/true/true snapshot=5/7"

@@ -311,10 +311,9 @@ pub(super) fn parse_literal_expression(
 ///       a `name!` suffix) and option propagation (`?`). A literal passes offset 1
 ///       (the token after itself); a closed group passes offset 0.
 /// WHY: those suffixes resolve through `push_expression_operand`, which needs a typed
-///      `Expression`, so a literal (or a group of one literal) followed by one keeps the
-///      eager default path instead of deferring for destination-aware materialisation.
-///      Whole-expression `catch` completes after evaluation, so its literals retain
-///      destination-aware and immediate-peer materialisation.
+///      `Expression`, so a literal or group followed by one completes before outer context.
+///      Whole-expression `catch` completes after evaluation, so its unresolved arithmetic
+///      retains receiving and local-peer materialisation.
 pub(super) fn typed_suffix_follows(token_stream: &AstCursor, mut offset: usize) -> bool {
     while token_stream
         .token_ref_at_offset(offset)

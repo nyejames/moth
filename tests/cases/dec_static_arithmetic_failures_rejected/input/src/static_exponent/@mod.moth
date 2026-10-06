@@ -1,0 +1,3 @@
+fail_power || -> Dec1, Error!:
+    return 2 ^ -1
+;

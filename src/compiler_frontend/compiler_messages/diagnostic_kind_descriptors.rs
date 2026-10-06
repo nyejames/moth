@@ -307,11 +307,6 @@ fn rule_descriptor(kind: RuleDiagnosticKind) -> DiagnosticDescriptor {
             "Unsupported external function",
             DiagnosticSeverity::Error,
         ),
-        RuleDiagnosticKind::InvalidRangeOperand => DiagnosticDescriptor::new(
-            "MOTH-RULE-0059",
-            "Invalid range operand",
-            DiagnosticSeverity::Error,
-        ),
         RuleDiagnosticKind::UnsupportedBuilderPackage => DiagnosticDescriptor::new(
             "MOTH-RULE-0060",
             "Unsupported builder package",

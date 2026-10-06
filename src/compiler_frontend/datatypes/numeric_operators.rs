@@ -7,7 +7,8 @@
 //!      stage that later widths would have to re-teach.
 //!
 //! The computation domain is also the result type: both operands convert to it before the
-//! operation runs, except `Dec ^ Int` keeps its exponent in the profile `Int` domain.
+//! operation runs, except `Dec ^ Int` keeps its exponent in the profile `Int` domain while
+//! `Uint ^ Uint` keeps its exponent in `Uint`.
 //! `Byte` is outside `NumericScalar` and never reaches this policy.
 
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
@@ -61,10 +62,15 @@ impl NumericOperator {
 /// operand pair does not support the operator.
 ///
 /// - `Int` and `Float` retain their existing convenience rules.
+/// - `Uint` pairs compute in `Uint`, except `/` which converts directly to `Float`. Mixed
+///   `Uint`/`Float` pairs compute in `Float`, except `//` which is invalid. `Uint` never mixes
+///   with `Int` or fixed-width scalars: those pairs need an explicit conversion, with no
+///   transitive compatibility through `Float`.
 /// - Two fixed integers use their common integer type; compatible `/` uses `F64`.
 /// - Two fixed binary floats use the wider precision with a minimum of `F32`.
-/// - `Dec` operations retain the Dec operand's scale. They mix only with `Int` or fixed
-///   integers, except `Dec ^ Int`, whose exponent remains in the profile `Int` domain.
+/// - `Dec` operations retain the Dec operand's scale. They mix with `Int`, `Uint` or fixed
+///   integers, except `Dec ^ Int`, whose exponent remains in the profile `Int` domain. A typed
+///   `Uint` exponent is not an implicit `Dec` exponent.
 /// - Different Dec scales, Byte, binary floats and ordinary Int/fixed mixtures reject.
 pub(crate) fn binary_operation_domain(
     operator: NumericOperator,
@@ -85,6 +91,16 @@ pub(crate) fn binary_operation_domain(
             (operator != NumericOperator::IntegerDivide).then_some(NumericScalar::Float)
         }
 
+        (NumericScalar::Uint, NumericScalar::Uint) => Some(match operator {
+            NumericOperator::Divide => NumericScalar::Float,
+            _ => NumericScalar::Uint,
+        }),
+
+        (NumericScalar::Uint, NumericScalar::Float)
+        | (NumericScalar::Float, NumericScalar::Uint) => {
+            (operator != NumericOperator::IntegerDivide).then_some(NumericScalar::Float)
+        }
+
         (NumericScalar::Fixed(left), NumericScalar::Fixed(right)) => {
             fixed_binary_operation_domain(operator, left, right)
         }
@@ -99,16 +115,57 @@ pub(crate) fn binary_operation_domain(
         {
             number_binary_operation_domain(operator, scale)
         }
-        (NumericScalar::Number(scale), right) if is_integer_domain(right) => {
+        (NumericScalar::Number(scale), right) if right.is_integer() => {
             number_binary_operation_domain(operator, scale)
         }
-        (left, NumericScalar::Number(scale)) if is_integer_domain(left) => {
+        (left, NumericScalar::Number(scale)) if left.is_integer() => {
             number_binary_operation_domain(operator, scale)
         }
         _ => None,
     }
 }
 
+/// The selected iteration domain for a range header, or `None` when the operand
+/// mix has no range domain.
+///
+/// WHAT: any `Float` operand with only `Int`/`Uint`/`Float` peers selects `Float`
+///       through their direct `Float` conversions; every other mix keeps the
+///       existing pairwise `Add` table (fixed widths, `Dec`, Uint/Int-only).
+/// WHY: range headers combine three operands at once, while `Add` only sees
+///      pairs: combining start/end first would reject a `Uint`/`Int` pair before
+///      ever examining a `Float` step. AST parsing, HIR lowering and const
+///      folding derive the same answer from this one selector.
+pub(crate) fn range_iteration_domain(
+    start: NumericScalar,
+    end: NumericScalar,
+    step: Option<NumericScalar>,
+) -> Option<NumericScalar> {
+    let operands = [Some(start), Some(end), step];
+    let mut seen_float = false;
+    let mut seen_fixed = false;
+    for operand in operands.into_iter().flatten() {
+        match operand {
+            NumericScalar::Float => seen_float = true,
+            NumericScalar::Int | NumericScalar::Uint => {}
+            NumericScalar::Fixed(_) => seen_fixed = true,
+            NumericScalar::Number(_) => return None,
+        }
+    }
+    if seen_float {
+        // Any `Float` operand with only `Int`/`Uint`/`Float` peers selects
+        // `Float` through their direct `Float` conversions; a fixed peer keeps
+        // the existing rejection.
+        return (!seen_fixed).then_some(NumericScalar::Float);
+    }
+    // Fixed-width operands keep their existing pairwise table: mixed widths
+    // promote through their common integer/float type (e.g. I8/U16), while
+    // ordinary/fixed mixtures stay rejected.
+    binary_operation_domain(
+        NumericOperator::Add,
+        binary_operation_domain(NumericOperator::Add, start, end)?,
+        step.unwrap_or(start),
+    )
+}
 fn number_binary_operation_domain(
     operator: NumericOperator,
     scale: NumberScale,
@@ -160,6 +217,9 @@ fn fixed_binary_operation_domain(
 pub(crate) fn negation_domain(operand: NumericScalar) -> Option<NumericScalar> {
     match operand {
         NumericScalar::Int | NumericScalar::Float | NumericScalar::Number(_) => Some(operand),
+        // Unary minus on Uint is invalid, including a known zero: unsigned negation has no
+        // Uint result in the shared operator domain.
+        NumericScalar::Uint => None,
         NumericScalar::Fixed(scalar) => match scalar.class() {
             FixedScalarClass::SignedInteger => {
                 Some(NumericScalar::Fixed(if scalar == FixedScalar::I64 {
@@ -176,15 +236,20 @@ pub(crate) fn negation_domain(operand: NumericScalar) -> Option<NumericScalar> {
 
 /// Whether two numeric domains support equality and ordering with each other.
 ///
-/// `Int` and `Float` compare in any mix. Fixed integer pairs compare exactly, including `I64`
-/// with `U64`, and fixed binary floats compare by numeric value. `Dec` compares exactly at
-/// equal scales and with `Int` or any fixed integer; different scales and non-integer families
-/// reject.
+/// `Int` and `Float` compare in any mix. `Uint` compares exactly with `Uint` and `Int`, and
+/// through the profile `Float` conversion with `Float`. Fixed integer pairs compare exactly,
+/// including `I64` with `U64`, and fixed binary floats compare by numeric value. `Dec` compares
+/// exactly at equal scales and with `Int`, `Uint` or any fixed integer; different scales and
+/// non-integer families reject. `Uint` never mixes with fixed-width scalars, `Byte`, `Bool` or
+/// `Char`.
 pub(crate) fn comparison_supported(left: NumericScalar, right: NumericScalar) -> bool {
     match (left, right) {
         (NumericScalar::Int | NumericScalar::Float, NumericScalar::Int | NumericScalar::Float) => {
             true
         }
+        (NumericScalar::Uint, NumericScalar::Uint) => true,
+        (NumericScalar::Uint, NumericScalar::Int | NumericScalar::Float)
+        | (NumericScalar::Int | NumericScalar::Float, NumericScalar::Uint) => true,
         (NumericScalar::Fixed(left), NumericScalar::Fixed(right)) => {
             (is_fixed_integer(left) && is_fixed_integer(right))
                 || (is_fixed_float(left) && is_fixed_float(right))
@@ -192,9 +257,7 @@ pub(crate) fn comparison_supported(left: NumericScalar, right: NumericScalar) ->
         (NumericScalar::Number(left_scale), NumericScalar::Number(right_scale)) => {
             left_scale == right_scale
         }
-        (NumericScalar::Number(_), other) | (other, NumericScalar::Number(_)) => {
-            is_integer_domain(other)
-        }
+        (NumericScalar::Number(_), other) | (other, NumericScalar::Number(_)) => other.is_integer(),
         _ => false,
     }
 }
@@ -232,14 +295,6 @@ pub(crate) fn common_fixed_integer(left: FixedScalar, right: FixedScalar) -> Opt
     }
 }
 
-fn is_integer_domain(scalar: NumericScalar) -> bool {
-    match scalar {
-        NumericScalar::Int => true,
-        NumericScalar::Fixed(scalar) => is_fixed_integer(scalar),
-        NumericScalar::Float | NumericScalar::Number(_) => false,
-    }
-}
-
 /// `F16` computes in `F32`; `F32` and `F64` keep their own precision.
 fn fixed_float_domain(scalar: FixedScalar) -> FixedScalar {
     match scalar {
@@ -254,8 +309,8 @@ fn fixed_float_domain(scalar: FixedScalar) -> FixedScalar {
 ///       scalars and the complete canonical result range of `Add` / `Subtract` / `Multiply` /
 ///       `Negate` lies inside the result domain's range, computed with `i128` endpoint
 ///       arithmetic. `Divide`, `IntegerDivide`, `Remainder` and `Power` always return false,
-///       as does any operation involving profile `Int`, `Float`/binary floats, `Dec`/`Number`
-///       or `Byte`.
+///       as does any operation involving profile `Int`/`Uint`, `Float`/binary floats,
+///       `Dec`/`Number` or `Byte`.
 /// WHY: AST failure facts and HIR emission share one proof of infallibility so debug and
 ///      release (and every `NumericProfile`) accept the same source. Optional backend check
 ///      elision stays in `analysis/numeric_proofs` and never feeds this predicate.
@@ -314,7 +369,7 @@ pub(crate) fn numeric_operation_cannot_fail(
 /// WHAT: profile-free `(min, max)` widened to `i128`, mirroring `NumericScalar::integer_range`
 ///       without its `NumericProfile` parameter.
 /// WHY: the discharge predicate must give the same answer under every profile, so it reads
-///      fixed widths only and rejects profile `Int` outright.
+///      fixed widths only and rejects profile `Int`/`Uint` outright.
 fn fixed_integer_range(scalar: NumericScalar) -> Option<(i128, i128)> {
     let NumericScalar::Fixed(fixed) = scalar else {
         return None;

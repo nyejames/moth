@@ -1,0 +1,4 @@
+reject_cast_operand || -> String:
+    result Dec4 = cast (0.1 + 0.2)
+    return [result]
+;

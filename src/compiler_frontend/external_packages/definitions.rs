@@ -183,6 +183,9 @@ pub struct ExternalTypeDef {
 pub enum ExternalConstantValue {
     Float(f64),
     Int(i32),
+    /// Exact profile-sized unsigned payload for `NativeUint` constants, covering
+    /// the full `Uint64` range without signed reinterpretation.
+    Uint(u64),
     StringSlice(&'static str),
     Bool(bool),
 }
@@ -190,7 +193,10 @@ pub enum ExternalConstantValue {
 impl ExternalConstantValue {
     /// Returns true for scalar values that are valid in const contexts.
     pub fn is_scalar(self) -> bool {
-        matches!(self, Self::Float(_) | Self::Int(_) | Self::Bool(_))
+        matches!(
+            self,
+            Self::Float(_) | Self::Int(_) | Self::Uint(_) | Self::Bool(_)
+        )
     }
 }
 

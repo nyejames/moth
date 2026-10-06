@@ -12,7 +12,7 @@ use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use moth_lexical::numeric::grammar::NumericLiteralSign;
 use moth_lexical::numeric::parse::{
     NumberLiteralErrorReason, materialize_normalized_fixed_scalar, materialize_normalized_float,
-    materialize_normalized_int, parse_numeric_literal,
+    materialize_normalized_int, materialize_normalized_uint, parse_numeric_literal,
 };
 use moth_lexical::numeric::profile::{FloatPrecision, IntWidth};
 
@@ -24,6 +24,20 @@ pub(crate) fn materialize_int(
     string_table: &StringTable,
 ) -> Result<i64, NumberLiteralErrorReason> {
     materialize_normalized_int(
+        string_table.resolve(token.normalized_text),
+        sign == NumericLiteralSign::Negative,
+        width,
+    )
+}
+
+/// Resolve a token's normalized text and materialize it at the selected `Uint` width.
+pub(crate) fn materialize_uint(
+    token: &NumericLiteralToken,
+    sign: NumericLiteralSign,
+    width: IntWidth,
+    string_table: &StringTable,
+) -> Result<u64, NumberLiteralErrorReason> {
+    materialize_normalized_uint(
         string_table.resolve(token.normalized_text),
         sign == NumericLiteralSign::Negative,
         width,

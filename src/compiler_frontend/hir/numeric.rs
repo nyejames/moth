@@ -76,8 +76,8 @@ impl RangeStepFailureCause {
 
 /// A checked numeric operation: a backend-neutral operator plus its canonical numeric domain.
 ///
-/// WHAT: identifies scalar arithmetic and its result domain (`Int`, `Float`, a fixed scalar, or
-///       one exact `Dec` scale).
+/// WHAT: identifies scalar arithmetic and its result domain (`Int`, `Uint`, `Float`, a fixed
+///       scalar, or one exact `Dec` scale).
 /// WHY: backends consume one operator/domain fact rather than a target-specific operation family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HirNumericOp {

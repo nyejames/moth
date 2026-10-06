@@ -101,7 +101,8 @@ impl<'a> HirValidator<'a> {
     ) -> Result<(), CompilerError> {
         if !matches!(
             expression.kind,
-            HirExpressionKind::Int(_)
+            HirExpressionKind::Uint(_)
+                | HirExpressionKind::Int(_)
                 | HirExpressionKind::Float(_)
                 | HirExpressionKind::FixedScalar(_)
                 | HirExpressionKind::Number(_)
@@ -136,7 +137,8 @@ impl<'a> HirValidator<'a> {
 
         if !matches!(
             expression.kind,
-            HirExpressionKind::Int(_)
+            HirExpressionKind::Uint(_)
+                | HirExpressionKind::Int(_)
                 | HirExpressionKind::Float(_)
                 | HirExpressionKind::FixedScalar(_)
                 | HirExpressionKind::Number(_)
@@ -256,7 +258,8 @@ impl<'a> HirValidator<'a> {
             }
 
             // Leaf literals carry no sub-expressions; no further validation needed.
-            HirExpressionKind::Int(_)
+            HirExpressionKind::Uint(_)
+            | HirExpressionKind::Int(_)
             | HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)

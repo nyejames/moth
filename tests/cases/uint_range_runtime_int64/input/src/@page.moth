@@ -1,0 +1,87 @@
+-- Task 5A (Int64 profile): typed Uint ranges at Uint64 width. Same shape as
+-- uint_range_runtime but the terminal loop reaches the inclusive Uint64
+-- maximum and the above-i64 values exercise the BigInt carrier end to end.
+
+asc_lo Uint = 0
+asc_hi Uint = 5
+asc_total ~Uint = 0
+asc_count ~= 0
+asc_last_index ~= 0
+loop asc_lo to & asc_hi |value, index|:
+    asc_total = asc_total + value
+    asc_count = asc_count + 1
+    asc_last_index = index
+;
+
+step_two Uint = 2
+stepped_total ~Uint = 0
+stepped_count ~= 0
+loop asc_lo to & asc_hi by step_two |value|:
+    stepped_total = stepped_total + value
+    stepped_count = stepped_count + 1
+;
+
+desc_total ~Uint = 0
+desc_count ~= 0
+desc_last ~Uint = 99
+desc_first_val ~Uint = 99
+loop asc_hi to & asc_lo |item, idx|:
+    desc_total = desc_total + item
+    desc_count = desc_count + 1
+    if desc_count is 0 + 1:
+        desc_first_val = copy item
+    ;
+    desc_last = copy item
+;
+desc_step_total ~Uint = 0
+desc_step_count ~= 0
+loop asc_hi to & asc_lo by step_two |value|:
+    desc_step_total = desc_step_total + value
+    desc_step_count = desc_step_count + 1
+;
+
+above Uint = 9223372036854775808
+huge Uint = 18446744073709551615
+above_count ~= 0
+above_last ~Uint = 0
+loop above to & huge by huge |value|:
+    above_count = above_count + 1
+    above_last = value
+;
+max_lo Uint = 18446744073709551613
+max_last ~Uint = 0
+max_count ~= 0
+loop max_lo to & huge |value|:
+    max_last = value
+    max_count = max_count + 1
+;
+
+zero_terminal ~Uint = 99
+zero_count ~= 0
+loop step_two to & asc_lo by step_two |value|:
+    zero_terminal = value
+    zero_count = zero_count + 1
+;
+
+render |asc_total Uint, asc_count Int, asc_last_index Int, stepped_total Uint, stepped_count Int, desc_total Uint, desc_count Int, desc_last Uint, desc_first_val Uint, desc_step_total Uint, desc_step_count Int, above_count Int, above_last Uint, max_last Uint, max_count Int, zero_terminal Uint, zero_count Int| -> String:
+    assert(asc_total is 15)
+    assert(asc_count is 6)
+    assert(asc_last_index is 5)
+    assert(stepped_total is 6)
+    assert(stepped_count is 3)
+    assert(desc_total is 15)
+    assert(desc_count is 6)
+    assert(desc_first_val is 5)
+    assert(desc_last is 0)
+    assert(desc_step_total is 9)
+    assert(desc_step_count is 3)
+    assert(above_count is 1)
+    assert(above_last is 9223372036854775808)
+    assert(max_last is 18446744073709551615)
+    assert(max_count is 3)
+    assert(zero_terminal is 0)
+    assert(zero_count is 2)
+    return [:uint_range_runtime_int64 asc=[asc_total]/[asc_count]/[asc_last_index] step=[stepped_total]/[stepped_count] desc=[desc_total]/[desc_count]/[desc_first_val]/[desc_last] dstep=[desc_step_total]/[desc_step_count] above=[above_count]/[above_last] max=[max_last]/[max_count] zero=[zero_terminal]/[zero_count]]
+;
+
+[:[render(asc_total, asc_count, asc_last_index, stepped_total, stepped_count, desc_total, desc_count, desc_last, desc_first_val, desc_step_total, desc_step_count, above_count, above_last, max_last, max_count, zero_terminal, zero_count)]]

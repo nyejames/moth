@@ -1,0 +1,4 @@
+reject_cast_operand || -> String:
+    result Uint = cast (1 + 2)
+    return [result]
+;

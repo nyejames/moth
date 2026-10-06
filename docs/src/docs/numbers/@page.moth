@@ -31,8 +31,10 @@ page_head #= language_theme_head
 
     # Numbers
 
-    Moth uses `Int` for signed whole numbers and `Float` for finite real-number
+    Moth uses `Int` for signed whole numbers, `Uint` for unsigned whole numbers
+    and `Float` for finite real-number
     values. One compiler-selected numeric profile fixes their width and precision,
+    with `Uint` following the selected `Int` width,
     and the accepted design also includes fixed-width integers and binary floats,
     `Byte` and the exact `Dec` family. The numeric families have distinct
     identities and local promotion rules; other conversions use explicit casts.

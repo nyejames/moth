@@ -1,0 +1,4 @@
+consume || -> Uint, Error!:
+    maximum #Uint = 4294967295
+    return maximum + 1
+;

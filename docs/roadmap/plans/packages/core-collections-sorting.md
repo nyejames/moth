@@ -50,7 +50,7 @@ roadmap entry.
 - Core package capability identities and fingerprints are deterministic
 - unified numeric types, runtime Byte and profile-compatible scalar comparison/layout are delivered
 
-The required initial runtime surface is Int, finite Float, every fixed I*/U*/F*
+The required initial runtime surface is Int, Uint, finite Float, every fixed I*/U*/F*
 type, Byte and Char on HTML-JS and HTML-Wasm. Their ordering is already owned by
 the numeric/Char authorities. This plan does not wait for a Wasm Dec runtime
 or a public ordering trait and does not redesign numeric semantics.
@@ -212,7 +212,7 @@ Target validation separately decides whether the selected backend supports that 
 
 Required initial eligible types are:
 
-- Int and finite Float under the selected NumericProfile
+- Int, Uint and finite Float under the selected NumericProfile
 - I8/I16/I32/I64 and U8/U16/U32/U64
 - finite F16/F32/F64
 - Byte, ordered by unsigned octet value
@@ -331,7 +331,7 @@ add the smallest focused sort representation.
 
 A selected helper key includes target, element layout, natural-order kind, stability implementation,
 selected memory implementation and collection representation when layout differs. Profile-selected
-Int/Float comparison and layout compatibility are part of those delivered inputs, not a new
+Int/Uint/Float comparison and layout compatibility are part of those delivered inputs, not a new
 per-sort numeric choice.
 
 The raw source request and selected implementation are separate facts. When v1 maps both memory
@@ -455,7 +455,7 @@ Re-anchor the plan after mixed JavaScript and Wasm work lands.
 - [ ] Inventory final collection layouts, builtin parsing, AST, HIR, borrow facts, retained-edge
   summaries, link facts, target validation and helper emission.
 - [ ] Inventory compiler-owned choice identity and default folding for `SortMemory`.
-- [ ] Inventory natural scalar comparison classification on both targets, including fixed widths, Byte and profile-selected Int/Float.
+- [ ] Inventory natural scalar comparison classification on both targets, including fixed widths, Byte and profile-selected Int/Uint/Float.
 - [ ] Inventory `@core/collections` registration, tests and benchmarks.
 - [ ] Search for stale whole-module Wasm, private-memory or target-rejected collection paths.
 - [ ] Choose the smallest single HIR representation that retains the complete sort policy.
@@ -586,8 +586,8 @@ Run the source contract through HTML-JS with explicit Moth ordering and reachabl
 - [ ] Lower normalised policies to stable or unstable JavaScript helpers before runtime.
 - [ ] Reuse one helper when both memory policies select the same implementation.
 - [ ] Sort growable arrays and fixed wrapper item arrays without changing wrapper state.
-- [ ] Implement explicit Int/Float, fixed I*/U*/F*, Byte and Char comparison through the shared semantic classification.
-- [ ] Use delivered Dec comparison only when semantically classified and target-supported. Keep its Wasm runtime gate separate.
+- [ ] Implement explicit Int/Uint/Float, fixed I*/U*/F*, Byte and Char comparison through the shared semantic classification.
+- [ ] Use delivered Dec and Uint comparison only when semantically classified and target-supported. Keep the Dec Wasm runtime gate separate.
 - [ ] Emit no default JavaScript lexicographic sort and no subtraction-based numeric comparator.
 - [ ] Emit helpers only when reachable and share them across call sites.
 - [ ] Remove the replaced JavaScript target rejection.
@@ -717,7 +717,7 @@ The work is complete when:
 - natural-order eligibility has one target-independent compiler owner
 - v1 adds no comparator, key, ordering trait or String order
 - stable and unstable implementations meet their correctness and worst-case contracts
-- HTML-JS and HTML-Wasm lower supported reachable sorts for Int/Float, fixed numerics, Byte and Char
+- HTML-JS and HTML-Wasm lower supported reachable sorts for Int/Uint/Float, fixed numerics, Byte and Char
 - narrow scalar storage, exact 64-bit ordering and the numeric profile survive helper selection
 - borrow and lifetime systems model sorting as an exclusive permutation
 - helper reachability and deduplication are explicit

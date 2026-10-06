@@ -1,0 +1,4 @@
+reject_receiver_peer_conflict |value Dec2| -> String:
+    result Dec4 = value + (1 + 1)
+    return [result]
+;

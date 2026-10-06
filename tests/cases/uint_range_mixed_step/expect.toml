@@ -1,0 +1,15 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0059"]
+message_contains = ["Range step type 'Int'", "Uint or Int"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0059"
+reason = "invalid_range_operand.incompatible_domain"
+path = "input/@page.moth"
+line = 7
+column = 24
+count = 1

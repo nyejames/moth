@@ -9,11 +9,11 @@ Explicit casts target compiler-supported builtin types:
     Error
 ]
 
-Numeric targets are the profile-selected `Int` and `Float`, the fixed integer
+Numeric targets are the profile-selected `Int`, `Uint` and `Float`, the fixed integer
 and binary float types, `Byte` and the `Dec` family.
 
 [codeblock, $code("text"):
-    integers:      Int, I8, I16, I32, I64, U8, U16, U32, U64
+    integers:      Int, Uint, I8, I16, I32, I64, U8, U16, U32, U64
     binary floats: Float, F16, F32, F64
     other:         Byte, Dec, Dec0, Dec1 through Dec256
 ]
@@ -23,7 +23,9 @@ A type being a valid target does not mean every source type can convert to it.
 ### Builtin cast table
 
 - `Int -> Float` (infallible): Numeric conversion to finite `Float`
+- `Uint -> Float` (infallible): Direct unsigned conversion to finite `Float` at the selected precision, also available implicitly at value-receiving and mixed-operator boundaries
 - `Int -> String` (infallible): Base-10 signed integer text
+- `Uint -> String` (infallible): Base-10 unsigned integer text
 - `Float -> String` (infallible): Moth's stable float formatter
 - `Bool -> String` (infallible): `"true"` or `"false"`
 - `Char -> String` (infallible): One Unicode scalar as UTF-8 text
@@ -31,38 +33,51 @@ A type being a valid target does not mean every source type can convert to it.
 - `String -> Error` (infallible): Error message from the text with `U32` code `0`
 - `Error -> String` (infallible): The error message only
 - `Float -> Int` (fallible): Truncate toward zero, then require the `Int` range
+- `Float -> Uint` (fallible): Truncate toward zero, then require the selected unsigned range. `-0.5` truncates to zero and succeeds; `-1.0` fails
+- `Uint -> Int` (fallible): Exact conversion, requiring the selected signed range in every profile
+- `Int -> Uint` (fallible): Exact conversion, requiring the selected unsigned range in every profile
+- `Uint -> Dec` and `Uint -> DecN` (infallible): Exact integer conversion using the full unsigned value
+- `Dec` and `DecN -> Uint` (fallible): Exact integrality and unsigned range required
+- `String -> Uint` (fallible): Parse the complete unsigned whole-number grammar, rejecting `-0` and any non-whole spelling
 - `Int -> Char` (fallible): Require a valid Unicode scalar value
 - `String -> Int` (fallible): Parse the complete Moth integer text grammar
 - `String -> Float` (fallible): Parse the complete numeric grammar and require a finite result
 - `String -> Bool` (fallible): Trim surrounding whitespace, then accept exactly lowercase `true` or `false`
 - `String -> Char` (fallible): Require exactly one Unicode scalar
 
-Numeric conversion is then classified by the complete source and target types.
+`Uint` has no direct builtin conversion with `Byte`, `Char` or `Bool`.
+`Int` and `Uint` need an explicit cast between each other in both directions,
+even when the values would fit.
 
-- Fixed integer to fixed integer is infallible when the complete source range fits the target range and fallible otherwise. `U8 -> U16` and `U8 -> I16` are infallible. `U16 -> U8` and `I8 -> U8` are fallible.
-- `Int`, `Float` and fixed-width values require an explicit cast between distinct types, even at a matching representation. Infallibility follows the complete ranges, so `Int -> I32` is infallible only when the selected `Int` width fits `I32`.
-- Integer to `F32` or `F64` is infallible and may round. Integer to `F16` is infallible only when the complete source range fits the `F16` finite range, so `I32 -> F16` is a fallible finite-range conversion.
-- A conversion to a binary float of greater precision is infallible. A conversion to a narrower precision is fallible and rounds once, directly from the source precision. `F64 -> F32`, `F32 -> F16` and `F64 -> F16` are all fallible, and `F64 -> F16` is never a two-step `F64 -> F32 -> F16` conversion. `Float` uses the precision selected by the numeric profile.
-- Float to integer is fallible. It truncates toward zero, then checks the target range. `F64 -> I64` is one example.
-- `Byte -> U8` and `U8 -> Byte` are infallible in both directions. Other numeric `Byte` conversions compose through `U8` rather than forming a separate conversion lattice.
-- Integer to `Dec` or any `DecN` is exact and infallible. Scale widening is exact and infallible.
-- Scale narrowing and `Dec` or `DecN` to integer are fallible exact conversions. Removed fractional digits must be zero and the integer must fit its explicit or profile-selected target.
-- Every numeric target accepts `String` through the complete numeric text grammar (fallible). `Dec` and `DecN` parsing is exact at the target scale.
-- Every numeric target converts to `String` (infallible) through its canonical text. `Byte` text conversion composes through `U8`, covering parsing and formatting.
+Same-type casts are invalid, including `Uint -> Uint`.
 
 No other builtin source-target pair is implied by the target list.
 
-Same-type casts are invalid.
+Numeric conversion is then classified by the complete source and target types.
+
+- Fixed integer to fixed integer is infallible when the complete source range fits the target range and fallible otherwise. `U8 -> U16` and `U8 -> I16` are infallible. `U16 -> U8` and `I8 -> U8` are fallible.
+- `Uint` converts to and from fixed integers with an explicit cast, infallible exactly when the complete source range fits the target range.
+- `Int`, `Uint`, `Float` and fixed-width values require an explicit cast between distinct types, even at a matching representation. Infallibility follows the complete ranges, so `Int -> I32` is infallible only when the selected `Int` width fits `I32`, and `Uint -> U32` is infallible only under a 32-bit `Int` profile.
+- Integer to `F32` or `F64` is infallible and may round. This covers both `Int` and `Uint` sources, and `Uint64` converts directly without a binary64 intermediate that could double-round. Integer to `F16` is infallible only when the complete source range fits the `F16` finite range, so `I32 -> F16` is a fallible finite-range conversion.
+- A conversion to a binary float of greater precision is infallible. A conversion to a narrower precision is fallible and rounds once, directly from the source precision. `F64 -> F32`, `F32 -> F16` and `F64 -> F16` are all fallible, and `F64 -> F16` is never a two-step `F64 -> F32 -> F16` conversion. `Float` uses the precision selected by the numeric profile.
+- Float to integer is fallible. It truncates toward zero, then checks the target range. `F64 -> I64` is one example, and `Float -> Uint` additionally rejects negative results below zero while `-0.5` still truncates to zero and succeeds.
+- `Byte -> U8` and `U8 -> Byte` are infallible in both directions. Other numeric `Byte` conversions compose through `U8` rather than forming a separate conversion lattice.
+- Integer to `Dec` or any `DecN` is exact and infallible, including `Uint` with its full unsigned value. Scale widening is exact and infallible.
+- Scale narrowing and `Dec` or `DecN` to integer are fallible exact conversions, including to `Uint`. Removed fractional digits must be zero and the integer must fit its explicit or profile-selected target.
+- Every numeric target accepts `String` through the complete numeric text grammar (fallible), including `Uint` with unsigned whole-number spelling. `Dec` and `DecN` parsing is exact at the target scale.
+- Every numeric target converts to `String` (infallible) through its canonical text, including unsigned `Uint` formatting with zero as `0`. `Byte` text conversion composes through `U8`, covering parsing and formatting.
 
 ### Numeric conversion exactness
 
 A cast does not promise universal exactness. Binary float conversions round to
-nearest, ties-to-even. Float to integer truncates toward zero before the integer
+nearest, ties-to-even. `Uint64` converts directly at the destination precision
+without a binary64 intermediate that could double-round. Float to integer truncates toward zero before the integer
 range check, so this conversion does not use the float-narrowing failure rule.
 Precision loss alone never fails a binary-float precision narrowing, and only a
 rounded non-finite result fails one.
 
-Integer-to-integer conversion preserves the value exactly. `Dec` scale
+Integer-to-integer conversion preserves the value exactly, including both `Int`
+and `Uint` sources. `Dec` scale
 widening is exact; scale narrowing and `Dec`-to-integer conversion are exact
 or fail, never rounded. Same-type casts remain invalid.
 
@@ -72,15 +87,18 @@ No modulo, wrapping or saturating conversion is added to the language.
 
 This reference owns the accepted cast contract. @../progress (Progress) owns
 current compiler and backend support. The Alpha compiler resolves the `Bool`,
-`Int`, `Float`, `String`, `Char` and `Error` targets, plus the fixed-width
+`Int`, `Uint`, `Float`, `String`, `Char` and `Error` targets, plus the fixed-width
 integer, fixed binary float and `Byte` targets for numeric and text conversions.
 Fixed-width casts fold at compile time. The frontend implements compiler-owned
-`Dec` cast policies; HTML-JS executes fixed-width, `Byte` and `Dec`
+`Uint` and `Dec` cast policies; HTML-JS executes fixed-width, `Byte`, `Uint` and `Dec`
 runtime casts. The exercised HTML-JS `Dec` casts include infallible
 integer-to-`Dec` and scale widening; scale narrowing and
 `Dec`-to-integer conversions are exact and fallible. `String`-to-`Dec`
 parsing is fallible and consumes the whole existing numeric grammar exactly;
-`Dec`-to-`String` uses canonical formatting.
+`Dec`-to-`String` uses canonical formatting. The exercised HTML-JS `Uint`
+casts include `Uint`/`Int` and `Uint`/fixed-integer conversions in both
+directions, direct `Uint`-to-`Float` conversion, `Uint`/`Dec` conversions and
+`String`/`Uint` text conversion with unsigned formatting.
 
 HTML-Wasm executes infallible numeric expression casts that do not involve
 `F16`, as well as integer-to-`F16` and widening `F16`-to-`F32`/`F64`, plus
@@ -161,11 +179,12 @@ recovery happens before optional wrapping.
 
 ### Numeric and text details
 
-- `String -> Int`, `String -> Float` and every other numeric text conversion consume the whole string.
-- Numeric text rejects surrounding whitespace, uppercase exponent markers, unary plus, malformed separators, malformed exponents, `NaN` and infinity spellings.
+- `String -> Int`, `String -> Uint`, `String -> Float` and every other numeric text conversion consume the whole string.
+- Numeric text rejects surrounding whitespace, uppercase exponent markers, unary plus, malformed separators, malformed exponents, `NaN` and infinity spellings. Unsigned `Uint` text additionally rejects a leading `-`, including `-0`.
 - Binary float text conversion additionally rejects a grammar-valid non-finite result.
-- Every integer target materialises inside its own range. The `Int` range follows the selected profile.
+- Every integer target materialises inside its own range. The `Int` and `Uint` ranges follow the selected profile, with `Uint` spanning the unsigned width.
+- `Uint` formats as unsigned base-10 text, with zero always formatted as `0`.
 - Binary float to `String` normalises negative zero to `0` and uses lowercase exponent formatting when exponential notation is required.
 - `Dec` to `String` uses canonical `Dec` text with fractional trailing zeroes trimmed, no exponent notation, no negative zero and a leading zero before a fractional value.
 - `Byte` and `U8` remain nominally distinct. No receiving boundary widens one into the other silently.
-- Contextual `Int -> Float` promotion remains separate from explicit casting, though explicit `cast` is valid from a naturally `Int` source to a `Float` target.
+- Contextual `Int -> Float` promotion remains separate from explicit casting, though explicit `cast` is valid from a naturally `Int` source to a `Float` target. Contextual `Uint -> Float` promotion is likewise separate from its explicit cast form.

@@ -1,0 +1,4 @@
+reject_byte_mix |value Byte| -> String:
+    result Dec4 = value + 1
+    return [result]
+;

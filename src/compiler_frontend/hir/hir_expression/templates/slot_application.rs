@@ -387,8 +387,16 @@ fn dynamic_expression_guarantees_output(
                 dynamic_expression_guarantees_output(expression, string_table)
             }
             ExpressionRpnItem::Operator { .. } => true,
-            // Resolution removes pending literals before this stage.
-            ExpressionRpnItem::PendingNumericLiteral { .. } => true,
+            // Pending syntax never survives evaluation; flag it in debug builds so the invalid
+            // boundary is visible instead of silently assuming output.
+            ExpressionRpnItem::PendingNumericLiteral { .. }
+            | ExpressionRpnItem::PendingGroup { .. } => {
+                debug_assert!(
+                    false,
+                    "pending expression syntax reached HIR output-guarantee query"
+                );
+                true
+            }
         },
 
         _ => true,

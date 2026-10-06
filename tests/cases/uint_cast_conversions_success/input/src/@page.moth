@@ -1,0 +1,128 @@
+-- Task 2B: the Conversions-table rows for Uint: profile-sized, fixed-width,
+-- fixed-float, Dec-boundary and text pairs (Uint<->Byte/Char/Bool have no
+-- evidence; see uint_cast_failures_rejected). Fallible pairs use handled
+-- casts; infallible pairs use plain cast.
+@helpers to_int
+
+uint_to_int |value Uint| -> Int, Error!:
+    return cast! value
+;
+
+int_to_uint |value Int| -> Uint, Error!:
+    return cast! value
+;
+
+float_to_uint |value Float| -> Uint, Error!:
+    return cast! value
+;
+
+f32_to_uint |value F32| -> Uint, Error!:
+    return cast! value
+;
+
+uint_to_float |value Uint| -> Float:
+    return cast value
+;
+
+uint_to_wide |value Uint| -> U32:
+    return cast value
+;
+
+wide_to_uint |value U32| -> Uint:
+    return cast value
+;
+
+narrow_from_uint |value Uint| -> U8, Error!:
+    return cast! value
+;
+
+narrow_to_uint |value U8| -> Uint:
+    return cast value
+;
+
+uint_to_scaled |value Uint| -> Dec2:
+    return cast value
+;
+
+scaled_to_uint |value Dec2| -> Uint, Error!:
+    return cast! value
+;
+
+text_to_uint |text String| -> Uint, Error!:
+    return cast! text
+;
+
+uint_to_text |value Uint| -> String:
+    return cast value
+;
+
+small_int Int = 41
+small_uint Uint = int_to_uint(small_int) catch:
+    then 0
+;
+neg_uint Uint = int_to_uint(-7) catch:
+    then 1
+;
+back_int Int = uint_to_int(small_uint) catch:
+    then -1
+;
+big_back Int = uint_to_int(4294967295) catch:
+    then -2
+;
+
+-- Task 2B: Uint proves TRY_CASTABLE_TO_INT through the core-trait path.
+generic_back Int = to_int(small_uint) catch:
+    then -3
+;
+
+neg_half Uint = float_to_uint(-0.5) catch:
+    then 100
+;
+neg_one Uint = float_to_uint(-1.0) catch:
+    then 101
+;
+truncated Uint = float_to_uint(7.9) catch:
+    then 104
+;
+
+as_float Float = uint_to_float(3000000001)
+as_text String = uint_to_text(3000000001)
+parsed Uint = text_to_uint("42") catch:
+    then 0
+;
+parsed_neg_zero Uint = text_to_uint("-0") catch:
+    then 7
+;
+parsed_bad Uint = text_to_uint("4a") catch:
+    then 8
+;
+
+wide U32 = uint_to_wide(3000000001)
+back_wide Uint = wide_to_uint(4000000000)
+narrowed U8 = narrow_from_uint(200) catch:
+    then 0
+;
+narrow_fail U8 = narrow_from_uint(300) catch:
+    then 9
+;
+widened Uint = narrow_to_uint(250)
+
+scaled Dec2 = uint_to_scaled(123)
+scaled_back Uint = scaled_to_uint(123.00) catch:
+    then 0
+;
+scaled_fraction Uint = scaled_to_uint(123.45) catch:
+    then 11
+;
+scaled_range Uint = scaled_to_uint(9999999999.00) catch:
+    then 12
+;
+f32_truncated Uint = f32_to_uint(7.9) catch:
+    then 13
+;
+max_const #Uint = 4294967295
+max_dec Dec2 = uint_to_scaled(max_const)
+max_is_dec Bool = max_const is 4294967295.00
+max_less_dec Bool = max_const < 4294967296.00
+
+[:uint casts int=[small_uint]/[neg_uint]/[back_int]/[big_back]/[generic_back] float=[neg_half]/[neg_one]/[truncated]/[as_float] fixed32=[f32_truncated] text=[as_text]/[parsed]/[parsed_neg_zero]/[parsed_bad] fixed=[wide]/[back_wide]/[narrowed]/[narrow_fail]/[widened] dec=[scaled]/[scaled_back]/[scaled_fraction]/[scaled_range]/[max_dec]/[max_is_dec]/[max_less_dec]]

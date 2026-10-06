@@ -51,8 +51,7 @@ pub(crate) fn is_expression_statement(expression: &Expression) -> bool {
         // Runtime expressions are valid only when they contain at least one
         // call-like node (method, builtin, function, or host call).
         ExpressionKind::Runtime(rpn) => rpn.items.iter().any(|item| {
-            matches!(
-                item,
+            match item {
                 ExpressionRpnItem::Operand(expression)
                     if matches!(
                         expression.kind,
@@ -61,8 +60,22 @@ pub(crate) fn is_expression_statement(expression: &Expression) -> bool {
                             | ExpressionKind::MapBuiltinCall { .. }
                             | ExpressionKind::FunctionCall { .. }
                             | ExpressionKind::HostFunctionCall { .. }
-                    )
-            )
+                    ) =>
+                {
+                    true
+                }
+                ExpressionRpnItem::Operand(_) | ExpressionRpnItem::Operator { .. } => false,
+                // Pending syntax never survives evaluation; flag it in debug builds so the
+                // invalid boundary is visible instead of silently reporting no statement call.
+                ExpressionRpnItem::PendingNumericLiteral { .. }
+                | ExpressionRpnItem::PendingGroup { .. } => {
+                    debug_assert!(
+                        false,
+                        "pending expression syntax reached statement classification"
+                    );
+                    false
+                }
+            }
         }),
 
         _ => false,

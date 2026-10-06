@@ -9,7 +9,7 @@
 //! WHY: the policy owner is the single source of truth for the actual rules.
 //!      The constant folder and later backend phases can ask the policy owner
 //!      for the same answer instead of duplicating per-cast ad hoc match logic.
-//!      The boundary profile owns every `Int` range and `Float` rounding decision,
+//!      The boundary profile owns every `Int`/`Uint` range and `Float` rounding decision,
 //!      so policies that materialise numbers take it as an explicit parameter.
 
 use std::fmt::{self, Display, Formatter};
@@ -27,6 +27,7 @@ use moth_lexical::numeric::format::format_finite_float;
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 use moth_lexical::numeric::parse::{
     parse_numeric_text_to_fixed_scalar, parse_numeric_text_to_float, parse_numeric_text_to_int,
+    parse_numeric_text_to_uint,
 };
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
 use moth_lexical::numeric::profile::NumericProfile;
@@ -43,6 +44,8 @@ use moth_lexical::numeric::profile::NumericProfile;
 pub(crate) enum BuiltinCastLiteral {
     Bool(bool),
     Int(i64),
+    /// One profile-sized unsigned integer value; follows the selected `Int` width.
+    Uint(u64),
     Float(f64),
     String(String),
     Char(char),
@@ -81,6 +84,7 @@ impl BuiltinCastLiteral {
         match self {
             BuiltinCastLiteral::Bool(_) => BuiltinCastTypeName::Static("Bool"),
             BuiltinCastLiteral::Int(_) => BuiltinCastTypeName::Static("Int"),
+            BuiltinCastLiteral::Uint(_) => BuiltinCastTypeName::Static("Uint"),
             BuiltinCastLiteral::Float(_) => BuiltinCastTypeName::Static("Float"),
             BuiltinCastLiteral::String(_) => BuiltinCastTypeName::Static("String"),
             BuiltinCastLiteral::Char(_) => BuiltinCastTypeName::Static("Char"),
@@ -391,6 +395,9 @@ fn exact_numeric_value(
         (NumericScalar::Int, BuiltinCastLiteral::Int(value)) => {
             Some(ExactNumericValue::Integer(i128::from(*value)))
         }
+        (NumericScalar::Uint, BuiltinCastLiteral::Uint(value)) => {
+            Some(ExactNumericValue::Integer(i128::from(*value)))
+        }
 
         (NumericScalar::Float, BuiltinCastLiteral::Float(value)) => {
             Some(ExactNumericValue::BinaryFloat(*value))
@@ -426,6 +433,10 @@ fn integer_literal(
             .ok()
             .filter(|value| numeric_profile.int_width.contains(*value))
             .map(BuiltinCastLiteral::Int),
+        NumericScalar::Uint => u64::try_from(value)
+            .ok()
+            .filter(|value| *value <= numeric_profile.int_width.unsigned_max_value())
+            .map(BuiltinCastLiteral::Uint),
 
         NumericScalar::Fixed(fixed) => match fixed.class() {
             FixedScalarClass::SignedInteger => i64::try_from(value)
@@ -451,7 +462,7 @@ fn binary_float_literal(scalar: NumericScalar, rounded: f64) -> Option<BuiltinCa
         NumericScalar::Fixed(fixed) => {
             FixedScalarValue::binary_float(fixed, rounded).map(BuiltinCastLiteral::Fixed)
         }
-        NumericScalar::Int | NumericScalar::Number(_) => None,
+        NumericScalar::Int | NumericScalar::Uint | NumericScalar::Number(_) => None,
     }
 }
 
@@ -684,9 +695,10 @@ fn int_to_char(source: &BuiltinCastLiteral) -> Result<BuiltinCastLiteral, Builti
 
 /// Implements every text-to-numeric conversion.
 ///
-/// WHAT: parses the complete text at the destination domain: `Int` and `Float` follow the profile,
-///       fixed integers materialise inside their own range, fixed binary floats round once, and
-///       Dec uses exact scale materialisation after the shared whole-input grammar.
+/// WHAT: parses the complete text at the destination domain: `Int`, `Uint` and `Float` follow
+///       the profile, fixed integers materialise inside their own range, fixed binary floats
+///       round once, and Dec uses exact scale materialisation after the shared whole-input
+///       grammar.
 /// WHY: the destination domain owns the accepted range, precision or exact Dec scale, so no
 ///      parser routes through a different numeric type.
 fn string_to_numeric(
@@ -708,6 +720,8 @@ fn string_to_numeric(
         NumericScalar::Int => {
             parse_numeric_text_to_int(text, numeric_profile.int_width).map(BuiltinCastLiteral::Int)
         }
+        NumericScalar::Uint => parse_numeric_text_to_uint(text, numeric_profile.int_width)
+            .map(BuiltinCastLiteral::Uint),
         NumericScalar::Float => parse_numeric_text_to_float(text, numeric_profile.float_precision)
             .map(BuiltinCastLiteral::Float),
         NumericScalar::Fixed(fixed) => {
@@ -747,7 +761,7 @@ fn numeric_parse_error(
     // fixed binary floats report float parse codes, and every integer destination, including `Int`,
     // reports integer parse codes.
     let is_binary_float = match scalar {
-        NumericScalar::Int => false,
+        NumericScalar::Int | NumericScalar::Uint => false,
         NumericScalar::Number(_) => unreachable!("Number parse failures are classified above"),
         NumericScalar::Float => true,
         NumericScalar::Fixed(fixed) => fixed.class() == FixedScalarClass::BinaryFloat,
@@ -765,6 +779,8 @@ fn numeric_parse_error(
     } else {
         match reason {
             NumberLiteralErrorReason::OutsideIntRange
+            | NumberLiteralErrorReason::OutsideUintRange(_)
+            | NumberLiteralErrorReason::NegativeUintLiteral(_)
             | NumberLiteralErrorReason::OutsideFixedScalarRange(_)
             | NumberLiteralErrorReason::NegativeUnsignedLiteral(_)
             | NumberLiteralErrorReason::ParseOverflow => {

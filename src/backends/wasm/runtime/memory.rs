@@ -88,6 +88,10 @@ impl WasmScalarStorageKind {
                 IntWidth::Bits32 => Self::I32,
                 IntWidth::Bits64 => Self::I64,
             }),
+            NumericScalar::Uint => Some(match profile.int_width {
+                IntWidth::Bits32 => Self::I32,
+                IntWidth::Bits64 => Self::I64,
+            }),
             NumericScalar::Float => Some(match profile.float_precision {
                 FloatPrecision::Bits32 => Self::F32,
                 FloatPrecision::Bits64 => Self::F64,

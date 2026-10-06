@@ -71,6 +71,15 @@ impl<'hir> JsEmitter<'hir> {
                     },
                 )
             }
+            HirExpressionKind::Uint(value) => {
+                JsNumericCarrier::uint_literal(*value, self.config.numeric_profile).ok_or_else(
+                    || {
+                        CompilerError::compiler_error(
+                            "JS backend cannot format a Uint literal for its numeric profile",
+                        )
+                    },
+                )
+            }
             HirExpressionKind::FixedScalar(value) => {
                 JsNumericCarrier::fixed_literal(*value, self.config.numeric_profile).ok_or_else(
                     || {

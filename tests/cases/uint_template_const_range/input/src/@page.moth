@@ -1,0 +1,48 @@
+-- Task 5A (Int64 profile): const Uint ranges fold through the unsigned
+-- cursor. Both literal and `#Uint` constant bounds iterate, the inclusive
+-- Uint64 maximum terminates without a successor, and descending to zero
+-- stops without underflowing.
+
+uint_start #Uint = 1
+uint_end #Uint = 3
+uint_step #Uint = 1
+uint_two #Uint = 2
+uint_zero #Uint = 0
+uint_near_max #Uint = 18446744073709551613
+uint_max #Uint = 18446744073709551615
+mixed_start #Uint = 0
+mixed_end #Int = 2
+mixed_step #Float = 1.0
+mixed_bound #Float = 2.0
+mixed_bound_step #Uint = 1
+#[loop 1 to & 3 |i|:
+    uint-literal-incl-[i];
+]
+
+#[loop 3 to & 1 by 1 |i|:
+    uint-literal-desc-[i];
+]
+
+#[loop uint_start to & uint_end by uint_step |i|:
+    uint-const-asc-[i];
+]
+
+#[loop uint_end to & uint_start by uint_step |i|:
+    uint-const-desc-[i];
+]
+
+#[loop uint_two to & uint_zero by uint_step |i|:
+    uint-const-desc-to-zero-[i];
+]
+
+#[loop uint_near_max to & uint_max |i|:
+    uint-const-near-max-[i];
+]
+
+#[loop mixed_start to & mixed_end by mixed_step |i|:
+    uint-mixed-step-[i];
+]
+
+#[loop mixed_start to & mixed_bound by mixed_bound_step |i|:
+    uint-mixed-bound-[i];
+]

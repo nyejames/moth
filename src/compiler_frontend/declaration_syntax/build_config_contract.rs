@@ -196,6 +196,8 @@ pub(crate) fn build_input_type_from_parsed(parsed: &ParsedTypeRef) -> Option<Bui
     let primitive = match parsed {
         ParsedTypeRef::BuiltinString { .. } => PrimitiveBuildInputType::String,
         ParsedTypeRef::BuiltinInt { .. } => PrimitiveBuildInputType::Int,
+        // `Uint` stays outside the build-input domain; `#Config of Uint` keeps the
+        // existing unsupported-contract rejection.
         ParsedTypeRef::BuiltinFloat { .. } => PrimitiveBuildInputType::Float,
         ParsedTypeRef::BuiltinBool { .. } => PrimitiveBuildInputType::Bool,
         ParsedTypeRef::BuiltinChar { .. } => PrimitiveBuildInputType::Char,
@@ -232,6 +234,7 @@ pub(crate) fn parsed_type_span(parsed: &ParsedTypeRef) -> Option<SourceSpan> {
         | ParsedTypeRef::Qualified { span, .. }
         | ParsedTypeRef::BuiltinBool { span, .. }
         | ParsedTypeRef::BuiltinInt { span, .. }
+        | ParsedTypeRef::BuiltinUint { span, .. }
         | ParsedTypeRef::BuiltinFloat { span, .. }
         | ParsedTypeRef::BuiltinString { span, .. }
         | ParsedTypeRef::BuiltinChar { span, .. }

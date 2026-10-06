@@ -3,4 +3,4 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "number compound range=242/100/1 fraction=262/10/1 power=3.38/1 converted=12/12/1"
+rendered_output_exact = "number compound range=242/100/1 fraction=262/10/1 power=3.38/3.38/1 converted=12/12/1"

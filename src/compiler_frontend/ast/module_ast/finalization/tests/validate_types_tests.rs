@@ -5,6 +5,9 @@ use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, Declaration, LoopBindings, NodeKind, RangeEndKind, RangeLoopSpec,
 };
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_rpn::{
+    ExpressionRpn, ExpressionRpnItem,
+};
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{
@@ -580,6 +583,75 @@ fn invalid_bool_expression(value: bool, span: Option<SourceSpan>) -> Expression 
         DataType::Bool,
         ValueMode::ImmutableOwned,
     )
+}
+
+fn pending_runtime_expression(item: ExpressionRpnItem) -> Expression {
+    Expression::new(
+        ExpressionKind::Runtime(ExpressionRpn { items: vec![item] }),
+        None,
+        builtin_type_ids::BOOL,
+        DataType::Bool,
+        ValueMode::ImmutableOwned,
+    )
+}
+
+#[test]
+fn pending_numeric_literal_is_a_final_validation_invariant() {
+    let mut strings = StringTable::new();
+    let source_text = strings.intern("1");
+    let normalized_text = strings.intern("1");
+    let expression = pending_runtime_expression(ExpressionRpnItem::PendingNumericLiteral {
+        token: crate::compiler_frontend::numeric_text::token::NumericLiteralToken::new(
+            moth_lexical::numeric::grammar::NumericLiteralSign::Positive,
+            source_text,
+            normalized_text,
+            moth_lexical::numeric::grammar::NumericLiteralKind::WholeNumber,
+            1,
+            0,
+            0,
+            moth_lexical::numeric::grammar::NumericExponentSign::None,
+        ),
+        span: None,
+        value_mode: ValueMode::ImmutableOwned,
+    });
+    let type_environment = TypeEnvironment::new();
+    let store = TemplateIrStore::new();
+    let context = TypeValidationContext {
+        type_environment: &type_environment,
+        template_ir_store: &store,
+    };
+
+    let error = validate_expression(&expression, &context)
+        .expect_err("an escaped pending literal must fail final type validation");
+    assert!(
+        error
+            .msg
+            .contains("evaluate_expression must resolve it first"),
+        "unexpected invariant message: {error:?}"
+    );
+}
+
+#[test]
+fn pending_group_is_a_final_validation_invariant() {
+    let expression = pending_runtime_expression(ExpressionRpnItem::PendingGroup {
+        nodes: Vec::new(),
+        span: None,
+    });
+    let type_environment = TypeEnvironment::new();
+    let store = TemplateIrStore::new();
+    let context = TypeValidationContext {
+        type_environment: &type_environment,
+        template_ir_store: &store,
+    };
+
+    let error = validate_expression(&expression, &context)
+        .expect_err("an escaped pending group must fail final type validation");
+    assert!(
+        error
+            .msg
+            .contains("evaluate_expression must resolve it first"),
+        "unexpected invariant message: {error:?}"
+    );
 }
 
 #[test]

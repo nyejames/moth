@@ -1,6 +1,6 @@
 //! Expression ordering helpers for AST evaluation.
 //!
-//! WHAT: converts a flat infix fragment into RPN using a shunting-yard pass.
+//! WHAT: converts nested infix fragments into one RPN stream using a shunting-yard pass.
 //! WHY: operator typing and folding need deterministic precedence/associativity ordering before
 //! they can validate or reduce the expression.
 //!
@@ -24,47 +24,58 @@ pub(super) fn order_expression_nodes(
         return_compiler_error!("No nodes found in expression. This should never happen.");
     }
 
-    add_ast_counter(AstCounter::ExpressionOrderingInputItems, nodes.len());
-
-    // Every input node ends up in the output queue exactly once, so the input length is the
-    // exact capacity, not an estimate. A well-formed infix fragment of `n` items carries at most
-    // `(n - 1) / 2` operators, so the operator stack is bounded by half the input.
-    let mut output_queue: Vec<ExpressionRpnItem> = Vec::with_capacity(nodes.len());
-    let mut operator_stack: Vec<ExpressionRpnItem> = Vec::with_capacity(nodes.len() / 2);
     let span = extract_expression_span(&nodes)?;
+    // Groups can contain more items than the outer fragment. Grow the shared buffers rather
+    // than repeatedly walking or copying each child subtree to compute exact capacities.
+    let mut output_queue = Vec::with_capacity(nodes.len());
+    let mut operator_stack = Vec::with_capacity(nodes.len() / 2);
+    // Each frame saves the parent iterator and the parent's operator floor, so group-free
+    // fragments never allocate frame storage.
+    let mut frames = Vec::new();
+    let mut operator_floor = 0;
+    let mut current_nodes = nodes.into_iter();
+    let mut processed_items = 0;
 
-    // The parser already handled parentheses recursively, so this pass only needs to order the
-    // flat infix fragment by precedence and associativity before typing/folding it.
+    loop {
+        let Some(node) = current_nodes.next() else {
+            // A finished group releases its own operators, innermost first, before its parent
+            // resumes at the group's operand position.
+            output_queue.extend(operator_stack.drain(operator_floor..).rev());
+            let Some((parent_nodes, parent_floor)) = frames.pop() else {
+                break;
+            };
+            current_nodes = parent_nodes;
+            operator_floor = parent_floor;
+            continue;
+        };
 
-    for node in nodes {
         eval_log!("Evaluating node in expression: ", Pretty node);
-        match &node {
-            ExpressionRpnItem::Operand(..) | ExpressionRpnItem::PendingNumericLiteral { .. } => {
-                // Pending literals are typed immediately after ordering, before operator typing or
-                // folding can observe the RPN.
-                output_queue.push(node);
+        match node {
+            ExpressionRpnItem::PendingGroup { nodes, .. } => {
+                frames.push((current_nodes, operator_floor));
+                operator_floor = operator_stack.len();
+                current_nodes = nodes.into_iter();
             }
-
-            ExpressionRpnItem::Operator { operator, .. } => {
-                let current_precedence = operator.precedence();
-                let left_associative = operator.is_left_associative();
-
+            operand @ (ExpressionRpnItem::Operand(..)
+            | ExpressionRpnItem::PendingNumericLiteral { .. }) => {
+                processed_items += 1;
+                output_queue.push(operand);
+            }
+            operator_item @ ExpressionRpnItem::Operator { .. } => {
+                processed_items += 1;
+                let operator = operator_from_item(&operator_item)?;
                 pop_higher_precedence(
                     &mut operator_stack,
                     &mut output_queue,
-                    current_precedence,
-                    left_associative,
+                    operator.precedence(),
+                    operator.is_left_associative(),
+                    operator_floor,
                 )?;
-
-                operator_stack.push(node);
+                operator_stack.push(operator_item);
             }
         }
     }
-
-    // Drain any remaining operators onto the output queue.
-    while let Some(operator) = operator_stack.pop() {
-        output_queue.push(operator);
-    }
+    add_ast_counter(AstCounter::ExpressionOrderingInputItems, processed_items);
 
     Ok((output_queue, span))
 }
@@ -76,8 +87,13 @@ fn pop_higher_precedence(
     output_queue: &mut Vec<ExpressionRpnItem>,
     current_precedence: u32,
     left_associative: bool,
+    operator_floor: usize,
 ) -> Result<(), CompilerError> {
-    while let Some(top_operator) = operator_stack.last() {
+    while operator_stack.len() > operator_floor {
+        // The floor guard proves that the active group owns the top operator.
+        let top_operator = operator_stack
+            .last()
+            .expect("operator remains above group floor");
         let existing_precedence = operator_from_item(top_operator)?.precedence();
 
         let should_pop = if left_associative {
@@ -112,7 +128,7 @@ fn operator_from_item(item: &ExpressionRpnItem) -> Result<&Operator, CompilerErr
 /// Returns the authored span of the first non-operator node in the fragment.
 ///
 /// Falls back to the first node's span if every node is an operator.
-pub(super) fn extract_expression_span(
+pub(crate) fn extract_expression_span(
     nodes: &[ExpressionRpnItem],
 ) -> Result<Option<SourceSpan>, CompilerError> {
     if nodes.is_empty() {
@@ -121,10 +137,7 @@ pub(super) fn extract_expression_span(
 
     // Skip operator nodes and return the span of the first expression node.
     for node in nodes {
-        if matches!(
-            node,
-            ExpressionRpnItem::Operand(_) | ExpressionRpnItem::PendingNumericLiteral { .. }
-        ) {
+        if node.is_operand_shape() {
             return Ok(node.source_span());
         }
     }

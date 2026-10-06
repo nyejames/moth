@@ -208,6 +208,25 @@ export const add = (a, b) => {
 }
 
 #[test]
+fn uint_signature_parsed_with_existing_restrictions() {
+    let source = r#"
+/**
+ * @moth.sig identity_uint |value Uint| -> Uint
+ */
+export function identityUint(value) {
+    return value;
+}
+"#;
+    let parsed = parse(source);
+    assert_no_diagnostics(&parsed);
+    assert_free_functions(&parsed, &["identity_uint"]);
+    let func = &parsed.free_functions[0];
+    assert_eq!(func.signature.parameters[0].type_name, "Uint");
+    assert_eq!(func.signature.returns[0].type_name, "Uint");
+    assert_eq!(func.signature.abi_parameter_count(), 1);
+}
+
+#[test]
 fn const_export_must_be_arrow_function() {
     let source = r#"
 /**

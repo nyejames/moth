@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [" external_native_uint32 zero=0 small=17 above_signed=2147483648 max=4294967295"]

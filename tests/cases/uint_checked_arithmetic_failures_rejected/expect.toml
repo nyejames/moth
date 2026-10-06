@@ -1,0 +1,124 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0053", "MOTH-RULE-0051", "MOTH-TYPE-0003"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 1
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/add_overflow/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 2
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/caught_underflow/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 3
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/const_overflow/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 4
+reason = "compile_time_evaluation_error.divide_by_zero"
+path = "input/div_zero/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0051"
+occurrence = 1
+reason = "invalid_fallible_handling.unhandled_builtin_failure_in_exported_function"
+path = "input/exported_plain/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 5
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/known_catch/@mod.moth"
+line = 3
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 6
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/known_imported/@mod.moth"
+line = 4
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 7
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/known_local/@mod.moth"
+line = 3
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 8
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/known_plain/@mod.moth"
+line = 3
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 9
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/known_record/@mod.moth"
+line = 4
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 1
+path = "input/mixed_compound/@mod.moth"
+line = 3
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 10
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/mul_overflow/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 11
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/power_huge/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 12
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/power_overflow/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 13
+reason = "compile_time_evaluation_error.divide_by_zero"
+path = "input/rem_zero/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 14
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/sub_underflow/@mod.moth"
+line = 2
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 15
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/underflow_intermediate/@mod.moth"
+line = 2

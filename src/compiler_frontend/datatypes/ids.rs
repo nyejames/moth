@@ -42,12 +42,14 @@ pub mod builtin_type_ids {
     /// onto this same id. Callers must keep that deferred state separate from a
     /// resolved `None`.
     pub const NONE: TypeId = TypeId(6);
+    /// Seeded profile-sized unsigned integer, following the selected `Int` width.
+    pub const UINT: TypeId = TypeId(7);
 
-    /// First seeded fixed-scalar `TypeId`; fixed scalars occupy the ids after `None`.
+    /// First seeded fixed-scalar `TypeId`; fixed scalars occupy the ids after `Uint`.
     ///
     /// `Dec` types are NOT seeded here: their 257 scale identities intern lazily through
     /// `TypeEnvironment::intern_number`, so they take the ids after every fixed scalar.
-    const FIRST_FIXED_SCALAR: u32 = 7;
+    const FIRST_FIXED_SCALAR: u32 = 8;
 
     /// Deterministic `TypeId` for one fixed-width builtin scalar.
     ///
@@ -86,6 +88,8 @@ pub struct GenericParameterListId(pub u32);
 pub enum BuiltinTypeKey {
     Bool,
     Int,
+    /// Profile-sized unsigned integer identity, following the selected `Int` width.
+    Uint,
     Float,
     String,
     Char,

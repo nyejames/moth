@@ -1,0 +1,9 @@
+-- Task 5A: collection positions stay Int; a Uint index is rejected
+-- rather than silently converted.
+
+values = {10, 20, 30}
+at Uint = 1
+result = values.get(at) catch:
+    then -1
+;
+[:uint_index_type_mismatch result=[result]]

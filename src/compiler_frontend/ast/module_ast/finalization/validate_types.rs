@@ -14,6 +14,7 @@ use crate::compiler_frontend::ast::ast_nodes::{
 };
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
+use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, FallibleHandling,
 };
@@ -236,8 +237,12 @@ fn validate_expression(
                         validate_expression(expression, context)?;
                     }
                     ExpressionRpnItem::Operator { .. } => {}
-                    // Resolution removes pending literals before this stage.
-                    ExpressionRpnItem::PendingNumericLiteral { .. } => {}
+                    // Pending syntax never survives evaluation; its presence here is a broken
+                    // compiler invariant, not a source diagnostic.
+                    ExpressionRpnItem::PendingNumericLiteral { .. }
+                    | ExpressionRpnItem::PendingGroup { .. } => {
+                        return Err(pending_expression_item_bug("final type validation"));
+                    }
                 }
             }
             Ok(())
@@ -363,6 +368,7 @@ fn validate_expression(
 
         ExpressionKind::NoValue
         | ExpressionKind::OptionNone
+        | ExpressionKind::Uint(_)
         | ExpressionKind::Int(_)
         | ExpressionKind::Float(_)
         | ExpressionKind::FixedScalar(_)

@@ -370,7 +370,7 @@ Canonical package identity stays separate from a local alias. Aliases affect bin
 
 ### Core and Builder source package graphs
 
-Source-backed Core/Builder packages also compile as separate immutable graphs under the consuming numeric profile. They do not receive the project's globals. Moth-native `Int`/`Float` signatures remain native contracts rather than being rewritten to physical foreign carrier types.
+Source-backed Core/Builder packages also compile as separate immutable graphs under the consuming numeric profile. They do not receive the project's globals. Moth-native `Int`/`Uint`/`Float` signatures remain native contracts rather than being rewritten to physical foreign carrier types.
 
 A package needing project-specific compile-time input receives an explicit builder-owned synthetic interface declared in capability metadata. It is not `@project`, is never implicitly injected, carries provenance/fingerprints and makes the resulting artefact project-specific. Otherwise compatible pure package artefacts remain reusable.
 

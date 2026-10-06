@@ -1,0 +1,4 @@
+reject_inexact_cancellation || -> String:
+    result Dec2 = 0.001 - 0.001
+    return [result]
+;

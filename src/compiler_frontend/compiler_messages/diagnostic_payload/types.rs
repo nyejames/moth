@@ -1844,6 +1844,15 @@ pub enum RangeOperandKind {
     Step,
 }
 
+/// Why a range header rejected one operand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum InvalidRangeOperandReason {
+    /// The operand has no integer or binary-float domain.
+    NotNumeric,
+    /// The operand is numeric but no range domain combines it with the other operands.
+    IncompatibleDomain,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum OperatorOperandPosition {
     Unary,

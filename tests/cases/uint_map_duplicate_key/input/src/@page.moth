@@ -1,0 +1,6 @@
+-- Task 5A: duplicate Uint literal keys are rejected exactly like Int keys,
+-- including equal values under different underscore spellings.
+
+bad {Uint = String} = {7 = "a", 7 = "b"}
+spelled {Uint = String} = {1_000 = "a", 1000 = "b"}
+[:test]

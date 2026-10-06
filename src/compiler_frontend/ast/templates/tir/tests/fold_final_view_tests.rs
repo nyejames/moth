@@ -91,6 +91,9 @@ fn build_test_fold_context_with_profile<'a>(
 fn int_expression(value: i64) -> Expression {
     Expression::int(value, None, ValueMode::ImmutableOwned)
 }
+fn uint_expression(value: u64) -> Expression {
+    Expression::uint(value, None, ValueMode::ImmutableOwned)
+}
 fn float_expression(value: f64) -> Expression {
     Expression::float(value, None, ValueMode::ImmutableOwned)
 }
@@ -1156,6 +1159,9 @@ fn collect_float_counters(
             ConstRangeIterationValue::Int(value) => {
                 panic!("expected a float counter, got int {value}")
             }
+            ConstRangeIterationValue::Uint(value) => {
+                panic!("expected a float counter, got uint {value}")
+            }
             ConstRangeIterationValue::Fixed(value) => {
                 panic!("expected a float counter, got fixed value {value}")
             }
@@ -1255,6 +1261,112 @@ fn range_cursor_keeps_standard_float64_step_accumulation() {
         0.1 + 0.1 + 0.1,
         "STANDARD counters must keep f64 accumulation unchanged"
     );
+}
+
+/// Collects Uint counters from a const range cursor to completion.
+///
+/// WHAT: drives `ConstRangeCursor` directly so unsigned iteration is pinned
+///       without template rendering in the way.
+/// WHY: inclusive-maximum and descending-to-zero endpoints must terminate
+///      through the in-range exit without ever materialising an out-of-range
+///      `u64` successor.
+fn collect_uint_counters(
+    start: Expression,
+    end: Expression,
+    step: Option<Expression>,
+    end_kind: RangeEndKind,
+) -> Vec<u64> {
+    let range = RangeLoopSpec {
+        start,
+        end,
+        end_kind,
+        step,
+    };
+    let mut cursor = ConstRangeCursor::new(
+        &range,
+        crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        None,
+        FloatPrecision::Bits64,
+    )
+    .expect("range cursor should construct");
+    let mut counters = Vec::new();
+    while let Some(counter) = cursor.next_counter().expect("range cursor should advance") {
+        match counter {
+            ConstRangeIterationValue::Uint(value) => counters.push(value),
+            ConstRangeIterationValue::Int(value) => {
+                panic!("expected a uint counter, got int {value}")
+            }
+            ConstRangeIterationValue::Float(value) => {
+                panic!("expected a uint counter, got float {value}")
+            }
+            ConstRangeIterationValue::Fixed(value) => {
+                panic!("expected a uint counter, got fixed value {value}")
+            }
+        }
+    }
+    counters
+}
+
+#[test]
+fn range_cursor_terminates_at_inclusive_uint_maximum() {
+    let counters = collect_uint_counters(
+        uint_expression(u64::MAX - 2),
+        uint_expression(u64::MAX),
+        None,
+        RangeEndKind::Inclusive,
+    );
+
+    assert_eq!(
+        counters,
+        vec![u64::MAX - 2, u64::MAX - 1, u64::MAX],
+        "an inclusive Uint range must emit the maximum and stop without a successor"
+    );
+}
+
+#[test]
+fn range_cursor_terminates_descending_at_uint_zero() {
+    let counters = collect_uint_counters(
+        uint_expression(2),
+        uint_expression(0),
+        None,
+        RangeEndKind::Inclusive,
+    );
+
+    assert_eq!(
+        counters,
+        vec![2, 1, 0],
+        "a descending Uint range must reach zero and stop without underflowing"
+    );
+}
+
+#[test]
+fn range_cursor_rejects_zero_uint_step() {
+    let range = RangeLoopSpec {
+        start: uint_expression(0),
+        end: uint_expression(10),
+        end_kind: RangeEndKind::Inclusive,
+        step: Some(uint_expression(0)),
+    };
+    let error = match ConstRangeCursor::new(
+        &range,
+        crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        None,
+        FloatPrecision::Bits64,
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("a zero Uint step must not construct a const cursor"),
+    };
+    let TemplateError::Diagnostic(diagnostic) = error else {
+        panic!("a zero Uint step must stay on the source diagnostic lane");
+    };
+    match &diagnostic.payload {
+        DiagnosticPayload::InvalidTemplateStructure { reason } => assert_eq!(
+            *reason,
+            InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
+            "a zero Uint step must report non-const bounds"
+        ),
+        payload => panic!("expected invalid template structure payload, found {payload:?}"),
+    }
 }
 
 #[test]

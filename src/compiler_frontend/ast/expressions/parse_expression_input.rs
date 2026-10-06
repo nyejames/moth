@@ -166,7 +166,10 @@ impl<'a, 'env, 'tokens> ExpressionParseInput<'a, 'env, 'tokens> {
     ///      the open-parenthesis dispatch arm.
     ///
     /// The caller must supply a `CastTargetContext` reference; passing
-    /// `&mut CastTargetContext::None` is the intended usage.
+    /// `&mut CastTargetContext::None` is the intended usage. Newlines after the
+    /// closing delimiter stay on the outer expression: the inner fragment stops
+    /// at `)` and leaves the terminator for its own newline dispatch, so a
+    /// trailing group ends the enclosing expression like a trailing literal.
     pub(crate) fn grouped_without_cast_target(
         resources: ExpressionParseResources<'a, 'env, 'tokens>,
     ) -> Self {
@@ -174,7 +177,7 @@ impl<'a, 'env, 'tokens> ExpressionParseInput<'a, 'env, 'tokens> {
             resources,
             ExpressionTrailingPolicy {
                 consume_closing_parenthesis: true,
-                skip_trailing_newlines: true,
+                skip_trailing_newlines: false,
                 allow_boundary_catch: false,
                 allow_expected_result_evidence: true,
             },

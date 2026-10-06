@@ -1,0 +1,5 @@
+project #= (
+    name = "int_promotion_to_float_via_function_call_release",
+    entry_root = "src",
+)
+html #= ()

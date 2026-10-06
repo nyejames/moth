@@ -343,7 +343,10 @@ impl<'a> ParseOrchestrator<'a> {
 }
 
 fn is_builtin_signature_type(type_name: &str) -> bool {
-    matches!(type_name, "Int" | "Float" | "Bool" | "String" | "Char")
+    matches!(
+        type_name,
+        "Int" | "Uint" | "Float" | "Bool" | "String" | "Char"
+    )
 }
 
 fn should_validate_known_type_name(type_name: &str) -> bool {

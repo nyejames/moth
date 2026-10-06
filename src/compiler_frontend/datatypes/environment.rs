@@ -72,6 +72,8 @@ pub(crate) struct MapShape {
 pub struct BuiltinTypes {
     pub bool: TypeId,
     pub int: TypeId,
+    /// Seeded profile-sized unsigned integer, following the selected `Int` width.
+    pub uint: TypeId,
     pub float: TypeId,
     pub string: TypeId,
     pub char: TypeId,
@@ -290,6 +292,7 @@ impl TypeEnvironment {
             builtins: BuiltinTypes {
                 bool: TypeId(0),
                 int: TypeId(0),
+                uint: TypeId(0),
                 float: TypeId(0),
                 string: TypeId(0),
                 char: TypeId(0),
@@ -310,9 +313,17 @@ impl TypeEnvironment {
         let char_id = env.intern_builtin_key(BuiltinTypeKey::Char);
         let range_id = env.intern_builtin_key(BuiltinTypeKey::Range);
         let none_id = env.intern_builtin_key(BuiltinTypeKey::None);
+        // `Uint` seeds immediately after `None` so the profile-sized unsigned identity stays
+        // with the other seeded builtins; `builtin_type_ids::UINT` mirrors this position.
+        let uint_id = env.intern_builtin_key(BuiltinTypeKey::Uint);
+        debug_assert_eq!(
+            uint_id,
+            builtin_type_ids::UINT,
+            "uint seeding order must match builtin_type_ids::UINT"
+        );
 
         // Explicit-width scalars are profile-independent identities, so they are seeded once
-        // with the other builtins. Seeding happens after `None` to keep the builtin `TypeId`
+        // with the other builtins. Seeding happens after `Uint` to keep the builtin `TypeId`
         // layout stable; `builtin_type_ids::fixed_scalar` mirrors this sequence and the
         // invariant check below fails loudly if the two ever drift apart. `Dec` scales are
         // deliberately absent: they intern lazily through `intern_number` with no seeded ids.
@@ -328,6 +339,7 @@ impl TypeEnvironment {
         env.builtins = BuiltinTypes {
             bool: bool_id,
             int: int_id,
+            uint: uint_id,
             float: float_id,
             string: string_id,
             char: char_id,
@@ -1598,6 +1610,7 @@ impl TypeEnvironment {
                 builtin.key,
                 BuiltinTypeKey::Bool
                     | BuiltinTypeKey::Int
+                    | BuiltinTypeKey::Uint
                     | BuiltinTypeKey::Float
                     | BuiltinTypeKey::Char
                     | BuiltinTypeKey::Number(_)
@@ -1813,6 +1826,9 @@ impl TypeEnvironment {
         match self.get(id)? {
             TypeDefinition::Builtin(builtin) => match builtin.key {
                 BuiltinTypeKey::Int => Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Int)),
+                BuiltinTypeKey::Uint => {
+                    Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Uint))
+                }
                 BuiltinTypeKey::Float => {
                     Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Float))
                 }
@@ -1869,6 +1885,7 @@ impl TypeEnvironment {
             TypeDefinition::Builtin(builtin) => match builtin.key {
                 BuiltinTypeKey::Bool => Some(TypeIdentityKey::Builtin(BridgeBuiltinTypeKey::Bool)),
                 BuiltinTypeKey::Int => Some(TypeIdentityKey::Builtin(BridgeBuiltinTypeKey::Int)),
+                BuiltinTypeKey::Uint => Some(TypeIdentityKey::Builtin(BridgeBuiltinTypeKey::Uint)),
                 BuiltinTypeKey::Float => {
                     Some(TypeIdentityKey::Builtin(BridgeBuiltinTypeKey::Float))
                 }

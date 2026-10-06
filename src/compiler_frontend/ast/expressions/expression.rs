@@ -368,6 +368,7 @@ pub(crate) fn type_id_hint_for_diagnostic_type(data_type: &DataType) -> TypeId {
     match data_type {
         DataType::Bool | DataType::True | DataType::False => builtin_type_ids::BOOL,
         DataType::Int => builtin_type_ids::INT,
+        DataType::Uint => builtin_type_ids::UINT,
         DataType::Float => builtin_type_ids::FLOAT,
         // Dec scales are lazily interned in the receiving environment, so a diagnostic
         // spelling alone cannot supply a canonical hint.
@@ -598,6 +599,17 @@ impl Expression {
             ExpressionKind::Int(value),
             builtin_type_ids::INT,
             DataType::Int,
+            span,
+            value_mode,
+        )
+    }
+
+    /// Constructs one profile-sized unsigned integer literal expression.
+    pub fn uint(value: u64, span: Option<SourceSpan>, value_mode: ValueMode) -> Self {
+        Self::scalar_literal(
+            ExpressionKind::Uint(value),
+            builtin_type_ids::UINT,
+            DataType::Uint,
             span,
             value_mode,
         )
@@ -1448,6 +1460,7 @@ impl Expression {
     ) -> Result<ConstValueKind, TemplateError> {
         let kind = match &self.kind {
             ExpressionKind::Int(_)
+            | ExpressionKind::Uint(_)
             | ExpressionKind::Float(_)
             | ExpressionKind::FixedScalar(_)
             | ExpressionKind::Number(_)

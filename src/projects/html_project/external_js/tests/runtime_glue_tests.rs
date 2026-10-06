@@ -592,6 +592,117 @@ for (const value of [
 }
 
 #[test]
+fn native_uint_parameters_validate_before_foreign_calls() {
+    let uint32_wrapper = generate_infallible_wrapper(
+        "wrapNativeUintInput",
+        "rawNativeUintInput",
+        &[ExternalSignatureType::NativeUint],
+        &[ExternalSignatureType::NativeUint],
+        NumericProfile::STANDARD,
+    )
+    .expect("native Uint32 input wrapper generation should succeed");
+    let uint64_profile = NumericProfile {
+        int_width: IntWidth::Bits64,
+        ..NumericProfile::STANDARD
+    };
+    let uint64_wrapper = generate_infallible_wrapper(
+        "wrapNativeUint64Input",
+        "rawNativeUint64Input",
+        &[ExternalSignatureType::NativeUint],
+        &[ExternalSignatureType::NativeUint],
+        uint64_profile,
+    )
+    .expect("native Uint64 input wrapper generation should succeed");
+    let script = format!(
+        r#"
+import assert from "node:assert/strict";
+let uint32Calls = 0;
+let lastUint32;
+function rawNativeUintInput(value) {{
+    uint32Calls += 1;
+    lastUint32 = value;
+    return value;
+}}
+let uint64Calls = 0;
+let lastUint64;
+function rawNativeUint64Input(value) {{
+    uint64Calls += 1;
+    lastUint64 = value;
+    return value;
+}}
+{uint32_wrapper}
+{uint64_wrapper}
+
+// Uint32 accepts the unsigned endpoints and canonicalises integer -0; wrong
+// carriers, non-integers, negatives and neighbours of the range never call out.
+for (const value of [0, 4294967295]) {{
+    assert.equal(wrapNativeUintInput(value), value);
+    assert.equal(typeof lastUint32, "number");
+    assert.equal(lastUint32, value);
+}}
+assert.equal(uint32Calls, 2);
+assert.equal(Object.is(wrapNativeUintInput(-0), 0), true);
+assert.equal(Object.is(lastUint32, 0), true);
+assert.equal(uint32Calls, 3);
+for (const value of [-1, 4294967296, 1.5, NaN, Infinity, -Infinity, "7", 1n, null, undefined, true]) {{
+    assert.throws(() => wrapNativeUintInput(value), RangeError);
+}}
+assert.equal(uint32Calls, 3, "invalid Uint32 inputs must be rejected before the raw export call");
+
+// Uint64 crosses as a safe Number only: BigInt inputs inside the foreign range
+// forward exactly, while negatives, unsafe magnitudes and non-BigInt carriers fail.
+for (const value of [0n, 9007199254740991n]) {{
+    const expected = Number(value);
+    assert.equal(wrapNativeUint64Input(value), BigInt(expected));
+    assert.equal(typeof lastUint64, "number");
+    assert.equal(lastUint64, expected);
+}}
+assert.equal(uint64Calls, 2);
+assert.equal(wrapNativeUint64Input(0n), 0n);
+assert.equal(uint64Calls, 3);
+for (const value of [-1n, 9007199254740992n, 18446744073709551615n, 0, -0, 9007199254740991, "7", null, undefined, true]) {{
+    assert.throws(() => wrapNativeUint64Input(value), RangeError);
+}}
+assert.equal(uint64Calls, 3, "invalid Uint64 inputs must be rejected before the raw export call");
+"#
+    );
+    run_generated_node_script(&script);
+}
+
+#[test]
+fn fallible_native_uint32_adapter_reads_success_once_before_boundary_throw() {
+    let wrapper = generate_fallible_wrapper(
+        "wrapNativeUint",
+        "rawNativeUint",
+        false,
+        NumericProfile::STANDARD,
+        &[],
+        &[ExternalSignatureType::NativeUint],
+    )
+    .expect("fallible native Uint32 wrapper generation should succeed");
+    let script = format!(
+        r#"
+import assert from "node:assert/strict";
+let rawValue = 4294967295;
+let rawValueReads = 0;
+function rawNativeUint() {{
+    return {{ ok: true, get value() {{ rawValueReads += 1; return rawValue; }} }};
+}}
+{wrapper}
+let result = wrapNativeUint();
+assert.equal(result.tag, "ok");
+assert.equal(result.value, 4294967295);
+assert.equal(rawValueReads, 1);
+rawValueReads = 0;
+rawValue = 4294967296;
+assert.throws(() => wrapNativeUint(), RangeError);
+assert.equal(rawValueReads, 1, "the violating success value is evaluated once before rejection");
+"#
+    );
+    run_generated_node_script(&script);
+}
+
+#[test]
 fn native_float32_fallible_wrapper_rejects_non_numbers_and_preserves_signed_zero() {
     let profile = NumericProfile {
         float_precision: FloatPrecision::Bits32,
@@ -1031,6 +1142,24 @@ fn native_and_fixed_integer_results_validate_before_moth_observation() {
             WrapperLane::ReleaseFallible,
         ),
         (
+            "NativeUint32",
+            ExternalSignatureType::NativeUint,
+            standard_profile,
+            WrapperLane::Infallible,
+        ),
+        (
+            "NativeUint32",
+            ExternalSignatureType::NativeUint,
+            standard_profile,
+            WrapperLane::DebugFallible,
+        ),
+        (
+            "NativeUint32",
+            ExternalSignatureType::NativeUint,
+            standard_profile,
+            WrapperLane::ReleaseFallible,
+        ),
+        (
             "FixedI32",
             ExternalSignatureType::Abi(ExternalAbiType::I32),
             standard_profile,
@@ -1063,6 +1192,24 @@ fn native_and_fixed_integer_results_validate_before_moth_observation() {
         (
             "NativeInt64",
             ExternalSignatureType::NativeInt,
+            int64_profile,
+            WrapperLane::ReleaseFallible,
+        ),
+        (
+            "NativeUint64",
+            ExternalSignatureType::NativeUint,
+            int64_profile,
+            WrapperLane::Infallible,
+        ),
+        (
+            "NativeUint64",
+            ExternalSignatureType::NativeUint,
+            int64_profile,
+            WrapperLane::DebugFallible,
+        ),
+        (
+            "NativeUint64",
+            ExternalSignatureType::NativeUint,
             int64_profile,
             WrapperLane::ReleaseFallible,
         ),
@@ -1070,7 +1217,6 @@ fn native_and_fixed_integer_results_validate_before_moth_observation() {
         let suffix = lane_suffix(lane);
         let wrapper_name = format!("wrap{label}{suffix}");
         let export_name = format!("raw{label}{suffix}");
-
         let generated = match lane {
             WrapperLane::Infallible => generate_infallible_wrapper(
                 &wrapper_name,
@@ -1109,13 +1255,15 @@ fn native_and_fixed_integer_results_validate_before_moth_observation() {
             "\nlanes.set(\"{export_name}\", \"{lane_state}\");\nfunction {export_name}() {{ return rawPayload(\"{export_name}\"); }}\n{generated}\n"
         ));
         script.push_str(&format!(
-            "\nassertIntegerResultBehavior({wrapper_name}, \"{export_name}\", {});\n",
-            label == "NativeInt64"
+            "\nassertIntegerResultBehavior({wrapper_name}, \"{export_name}\", {}, {});\n",
+            label == "NativeInt64" || label == "NativeUint64",
+            label == "NativeUint32" || label == "NativeUint64",
         ));
     }
 
     // One assertion body runs per configuration; only the value carrier differs (BigInt for the
-    // Int64 bridge, exact Number for Int32/fixed I32).
+    // 64-bit bridge lanes, exact Number for 32-bit/fixed lanes) and only the unsigned lanes
+    // shift the valid/invalid integer window.
     script.push_str(
         r#"
 function unwrapIntegerResult(result) {
@@ -1126,10 +1274,10 @@ function unwrapIntegerResult(result) {
     return result;
 }
 
-function assertIntegerResultBehavior(wrapper, rawName, isBigInt) {
+function assertIntegerResultBehavior(wrapper, rawName, isBigInt, isUnsigned) {
     const endpoints = isBigInt
-        ? [-9007199254740991, 0, 9007199254740991]
-        : [-2147483648, 0, 2147483647];
+        ? (isUnsigned ? [0, 9007199254740991] : [-9007199254740991, 0, 9007199254740991])
+        : (isUnsigned ? [0, 4294967295] : [-2147483648, 0, 2147483647]);
     const invalids = isBigInt
         ? [
               1.5,
@@ -1137,7 +1285,7 @@ function assertIntegerResultBehavior(wrapper, rawName, isBigInt) {
               Infinity,
               -Infinity,
               9007199254740992,
-              -9007199254740992,
+              isUnsigned ? -1 : -9007199254740992,
               "7",
               1n,
               null,
@@ -1149,15 +1297,14 @@ function assertIntegerResultBehavior(wrapper, rawName, isBigInt) {
               NaN,
               Infinity,
               -Infinity,
-              2147483648,
-              -2147483649,
+              isUnsigned ? 4294967296 : 2147483648,
+              isUnsigned ? -1 : -2147483649,
               "7",
               1n,
               null,
               undefined,
               true,
           ];
-
     // Valid endpoints survive, and every wrapper call evaluates the raw result exactly once.
     for (const endpointValue of endpoints) {
         payloads.set(rawName, endpointValue);

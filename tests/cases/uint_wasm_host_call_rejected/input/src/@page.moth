@@ -1,0 +1,8 @@
+-- Task 4: a Uint formatted through the shared text path reaches the JS host
+-- call in HTML-JS, but the Wasm backend has no lowering metadata for the host
+-- call, so it rejects the external function with a structured diagnostic.
+
+top Uint = 4294967295 + 0
+top_text String = cast top
+
+io.line([:uint host [top]/[top_text]])

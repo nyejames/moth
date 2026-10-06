@@ -409,6 +409,9 @@ impl ExternalPackageRegistry {
                 ExternalSignatureType::NativeInt | ExternalSignatureType::Abi(ExternalAbiType::I32),
                 ExternalConstantValue::Int(_)
             ) | (
+                ExternalSignatureType::NativeUint,
+                ExternalConstantValue::Uint(_)
+            ) | (
                 ExternalSignatureType::NativeFloat
                     | ExternalSignatureType::Abi(ExternalAbiType::F64),
                 ExternalConstantValue::Float(_)

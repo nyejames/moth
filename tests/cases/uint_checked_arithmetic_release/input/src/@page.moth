@@ -1,0 +1,165 @@
+@imported shared_total
+
+-- Task 2B: checked Uint folding, failure recovery, comparison and compound
+-- write-back. Folded rows compute at compile time; dynamic rows recover
+-- through catch and builtin Error!.
+
+zero_power Uint = 0 ^ 0
+
+k #Uint = 1 + 2
+cu #Uint = 3
+k2 #Dec2 = cu + 0.5
+small_check #Bool = cu < 5
+imported_check #Bool = shared_total is 42
+
+dims #= (w = cu)
+total Uint = dims.w + (1 + 2)
+
+sub |a Uint, b Uint| -> Uint, Error!:
+    return a - b
+;
+
+floor_div |a Uint, b Uint| -> Uint, Error!:
+    return a // b
+;
+
+remainder_of |a Uint, b Uint| -> Uint, Error!:
+    return a % b
+;
+
+real_div |a Uint, b Uint| -> Float, Error!:
+    return a / b
+;
+
+under_code ~U32 = 0
+underflow Uint = sub(0, 1) catch |under_err|:
+    under_code = under_err.code
+    then 99
+;
+div_failure Uint = floor_div(7, 0) catch:
+    then 98
+;
+rem_failure Uint = remainder_of(7, 0) catch:
+    then 97
+;
+real_failure Float = real_div(7, 0) catch:
+    then -1.0
+;
+
+neg_less |value Uint, neg Int| -> Bool, Bool, Bool:
+    return neg < value, value > neg, value is 0
+;
+
+neg_before Bool, neg_after Bool, neg_equal Bool = neg_less(0, -1)
+
+add_checked |target ~Uint, delta Uint| -> Uint, Error!:
+    target += delta
+    return target
+;
+
+next |calls ~Int, value Uint| -> Uint:
+    calls += 1
+    return value
+;
+
+add_next |target ~Uint, calls ~Int, value Uint| -> Uint, Error!:
+    target += next(~calls, value)
+    return target
+;
+
+atomic_target ~Uint = 100
+atomic_calls ~Int = 0
+atomic_code ~U32 = 0
+atomic_result Uint = add_next(~atomic_target, ~atomic_calls, 4294967295) catch |atomic_err|:
+    atomic_code = atomic_err.code
+    then 0
+;
+
+overwrite |target ~Uint, a Uint, b Uint| -> Uint, Error!:
+    target += floor_div(a, b) catch:
+        then 1
+    ;
+    return target
+;
+
+wback ~Uint = 4294967295
+wback_code ~U32 = 0
+wback_result Uint = overwrite(~wback, 1, 0) catch |wback_err|:
+    wback_code = wback_err.code
+    then 0
+;
+
+halve |target ~Uint, divisor Uint| -> Uint, Error!:
+    target /= divisor
+    return target
+;
+
+sharp ~Uint = 10
+sharp_result = halve(~sharp, 4) catch:
+    then 0
+;
+tiny ~Uint = 1
+tiny_result = halve(~tiny, 2) catch:
+    then 0
+;
+
+floored ~Uint = 7
+floored //= 2
+remained ~Uint = 7
+remained %= 3
+reduced ~Uint = 10
+reduced -= 1 + 2
+
+-- Task 3: Uint32 values above the Int32 maximum execute through the shared
+-- Number-carrier helpers with unsigned bounds.
+add_wide |a Uint, b Uint| -> Uint, Error!:
+    return a + b
+;
+
+mul_wide |a Uint, b Uint| -> Uint, Error!:
+    return a * b
+;
+
+just_below Uint = add_wide(2147483647, 0) catch:
+    then 0
+;
+just_above Uint = add_wide(2147483648, 1) catch:
+    then 0
+;
+top Uint = add_wide(4294967295, 0) catch:
+    then 0
+;
+top_plus_one Uint = add_wide(4294967295, 1) catch:
+    then 7
+;
+-- 65535 * 65537 lands exactly on the Uint32 maximum.
+boundary_product Uint = mul_wide(65535, 65537) catch:
+    then 0
+;
+large_product Uint = mul_wide(100000, 100000) catch:
+    then 8
+;
+
+wide_below |edge Uint, limit Int| -> Bool, Bool:
+    return limit < edge, edge > limit
+;
+
+wide_low Bool, wide_high Bool = wide_below(2147483648, 2147483647)
+wide_top Bool, wide_top_after Bool = wide_below(4294967295, -1)
+
+-- Implicit Uint receiver to Float return converts at the profile precision.
+wide_to_float |value Uint| -> Float:
+    return value
+;
+
+wide_float Float = wide_to_float(3000000001)
+
+-- Folded and dynamic evaluation of the same boundary value agree.
+folded_top #Uint = 4294967295
+folded_top_plus_one Uint = folded_top + 0
+dynamic_top Uint = add_wide(4294967295, 0) catch:
+    then 0
+;
+folded_dynamic_agree Bool = folded_top_plus_one is dynamic_top
+
+[:uint checked zero=[zero_power] const=[k]/[cu]/[k2]/[small_check]/[imported_check] record=[dims.w]/[total] under=[underflow]/[under_code] div=[div_failure] rem=[rem_failure] real=[real_failure] neg=[neg_before]/[neg_after]/[neg_equal] atomic=[atomic_code]/[atomic_target]/[atomic_calls]/[atomic_result] wback=[wback_code]/[wback]/[wback_result] divassign=[sharp]/[sharp_result]/[tiny]/[tiny_result] floored=[floored] rem=[remained] reduced=[reduced] wide=[just_below]/[just_above]/[top]/[top_plus_one] prod=[boundary_product]/[large_product] compare=[wide_low]/[wide_high]/[wide_top]/[wide_top_after] implicit=[wide_float] agree=[folded_dynamic_agree]]

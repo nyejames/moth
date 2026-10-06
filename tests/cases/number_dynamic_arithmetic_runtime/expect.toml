@@ -4,7 +4,7 @@ numeric_profile = "Int32/Float64"
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "number arithmetic zero=125/75/42/-3/-2/-25 scale1=1.4/-1.4/0.4 tiny-ties=0/0 scale2=0.33/-1.25 scale256=true large=123456789012345678901234567891 operation-rounding=0.7 power=3.4/-3.4/3.3/1 float64=16777217 int32=2147483647/242"
+rendered_output_exact = "number arithmetic zero=125/75/42/-3/-2/-25 scale1=1.4/-1.4/0.4 tiny-ties=0/0 scale2=0.33/-1.25 scale256=true large=123456789012345678901234567891 operation-rounding=0.7 power=3.4/-3.4/3.3/1 integral-power=-8/-2/1/1024 float64=16777217 int32=2147483647/242"
 
 [backends.html_wasm]
 mode = "failure"

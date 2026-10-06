@@ -1,0 +1,62 @@
+-- Task 5A (Int64 profile): exact Uint map keys reuse the existing key
+-- eligibility, hashing and execution owners. Insertion, replacement, lookup,
+-- removal, containment and length run against small and full-Uint64 keys,
+-- including values above i64::MAX and the inclusive maximum.
+
+render || -> String:
+    scores ~{Uint = String} = {1 = "one", 7 = "seven"}
+    len_after_literal = scores.length
+
+    has_one_before = scores.contains(1)
+    has_nine_before = scores.contains(9)
+
+    ~scores.set(9, "nine") catch:
+    ;
+    len_after_insert = scores.length
+
+    ~scores.set(1, "uno") catch:
+    ;
+    len_after_replace = scores.length
+
+    one_value = scores.get(1) catch:
+        then "missing"
+    ;
+    missing_value = scores.get(42) catch:
+        then "missing"
+    ;
+
+    one_seen String = copy one_value
+    missing_seen String = copy missing_value
+    removed_map ~{Uint = String} = {1 = one_seen, 7 = "seven", 9 = "nine"}
+    removed = ~removed_map.remove(7) catch:
+        then "missing"
+    ;
+    removed_seen String = copy removed
+    len_after_remove = removed_map.length
+    has_seven_after = removed_map.contains(7)
+
+    above Uint = 9223372036854775808
+    huge Uint = 18446744073709551615
+    narrow Uint = 4294967295
+    wide ~{Uint = Int} = {above = 100, huge = 200}
+    wide_len = wide.length
+    narrow_seen = wide.get(narrow) catch:
+        then -1
+    ;
+    above_value = wide.get(above) catch:
+        then 0
+    ;
+    huge_value = wide.get(huge) catch:
+        then 0
+    ;
+    zero_value = wide.get(0) catch:
+        then -1
+    ;
+    above_contains = wide.contains(above)
+    huge_contains = wide.contains(huge)
+    missing_contains = wide.contains(1)
+
+    return [:uint_map_key_success lit=[len_after_literal] has=[has_one_before]/[has_nine_before] insert=[len_after_insert] replace=[len_after_replace]/[one_value] missing=[missing_value] remove=[removed_seen]/[len_after_remove]/[has_seven_after] wide=[wide_len]/[above_value]/[huge_value]/[zero_value]/[narrow_seen] contains=[above_contains]/[huge_contains]/[missing_contains]]
+;
+
+[:[render()]]

@@ -1,8 +1,8 @@
 //! Canonical numeric scalar vocabulary.
 //!
-//! WHAT: the HIR-level numeric domains `Int`, `Float`, the explicit-width fixed scalars
-//!       (`I8`..`F64`) and the exact decimal `Dec` domain, each derived from a
-//!       canonical frontend `TypeId`.
+//! WHAT: the HIR-level numeric domains `Int`, `Uint`, `Float`, the explicit-width fixed
+//!       scalars (`I8`..`F64`) and the exact decimal `Dec` domain, each derived from a
+//!       canonical frontend `TypeId`. `Uint` follows the profile-selected `Int` width.
 //! WHY: HIR numeric operations record a backend-neutral domain plus an operator instead of
 //!      duplicating one variant per width, so fixed-width domains share operator typing
 //!      without multiplying operation variants. Lowering, validation and backends share this one
@@ -36,6 +36,8 @@ use moth_lexical::numeric::profile::NumericProfile;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NumericScalar {
     Int,
+    /// Profile-sized unsigned integer, following the selected `Int` width.
+    Uint,
     Float,
     Fixed(FixedScalar),
     /// One exact decimal `Dec` scale.
@@ -52,6 +54,7 @@ impl Display for NumericScalar {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
         match self {
             Self::Int => write!(formatter, "Int"),
+            Self::Uint => write!(formatter, "Uint"),
             Self::Float => write!(formatter, "Float"),
             Self::Fixed(scalar) => write!(formatter, "{}", scalar.name()),
             Self::Number(scale) => write!(formatter, "{scale}"),
@@ -62,8 +65,8 @@ impl Display for NumericScalar {
 impl NumericScalar {
     /// Derives the numeric domain for a canonical type, if it is one.
     ///
-    /// WHAT: maps `Int`/`Float` builtins, direct fixed scalars (never options) and the lazy
-    ///       `Dec` scale identities, rejecting `Byte` and everything else.
+    /// WHAT: maps `Int`/`Uint`/`Float` builtins, direct fixed scalars (never options) and the
+    ///       lazy `Dec` scale identities, rejecting `Byte` and everything else.
     /// WHY: loop lowering and later promotion policy need one canonical derivation from `TypeId`
     ///      instead of re-matching builtins at each call site.
     pub(crate) fn from_type_id(type_id: TypeId, environment: &TypeEnvironment) -> Option<Self> {
@@ -71,6 +74,10 @@ impl NumericScalar {
 
         if type_id == builtins.int {
             return Some(NumericScalar::Int);
+        }
+
+        if type_id == builtins.uint {
+            return Some(NumericScalar::Uint);
         }
 
         if type_id == builtins.float {
@@ -98,6 +105,7 @@ impl NumericScalar {
     pub(crate) fn type_id(self, environment: &TypeEnvironment) -> TypeId {
         match self {
             NumericScalar::Int => environment.builtins().int,
+            NumericScalar::Uint => environment.builtins().uint,
             NumericScalar::Float => environment.builtins().float,
             NumericScalar::Fixed(scalar) => builtin_type_ids::fixed_scalar(scalar),
             NumericScalar::Number(scale) => environment
@@ -113,7 +121,7 @@ impl NumericScalar {
     /// `Dec` is exact decimal, not a bounded integer, so it stays outside this classifier.
     pub(crate) fn is_integer(self) -> bool {
         match self {
-            NumericScalar::Int => true,
+            NumericScalar::Int | NumericScalar::Uint => true,
             NumericScalar::Float | NumericScalar::Number(_) => false,
             NumericScalar::Fixed(scalar) => matches!(
                 scalar.class(),
@@ -127,7 +135,7 @@ impl NumericScalar {
     /// `Dec` is exact decimal, never a binary float.
     pub(crate) fn is_binary_float(self) -> bool {
         match self {
-            NumericScalar::Int | NumericScalar::Number(_) => false,
+            NumericScalar::Int | NumericScalar::Uint | NumericScalar::Number(_) => false,
             NumericScalar::Float => true,
             NumericScalar::Fixed(scalar) => {
                 matches!(scalar.class(), FixedScalarClass::BinaryFloat)
@@ -147,6 +155,7 @@ impl NumericScalar {
                 i128::from(profile.int_width.min_value()),
                 i128::from(profile.int_width.max_value()),
             )),
+            NumericScalar::Uint => Some((0, i128::from(profile.int_width.unsigned_max_value()))),
             // `Dec` is unbounded exact decimal; there is no bounded range fact to report, so
             // every range consumer rejects it instead of deriving an accidental Dec range.
             NumericScalar::Float | NumericScalar::Number(_) => None,
@@ -170,7 +179,7 @@ impl NumericScalar {
         profile: NumericProfile,
     ) -> Option<BinaryFloatPrecision> {
         match self {
-            NumericScalar::Int | NumericScalar::Number(_) => None,
+            NumericScalar::Int | NumericScalar::Uint | NumericScalar::Number(_) => None,
             NumericScalar::Float => Some(profile.float_precision.into()),
             NumericScalar::Fixed(scalar) => scalar.binary_float_precision(),
         }

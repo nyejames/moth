@@ -196,6 +196,31 @@ fn allows_number_exponent_assign_with_profile_int_rhs() {
 }
 
 #[test]
+fn grouped_rhs_ends_at_newline_for_plain_and_compound_assignment() {
+    // A trailing parenthesised group must not swallow the statement newline:
+    // the following statement parses on its own line.
+    let (ast, path_fork, string_table) =
+        parse_single_file_ast("value ~Int = 2\nvalue = (1 + 2)\nmarker Int = value\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
+    assert!(
+        matches!(&body[2].kind, NodeKind::VariableDeclaration(_)),
+        "a trailing grouped RHS must leave the next statement intact"
+    );
+
+    let (ast, path_fork, string_table) =
+        parse_single_file_ast("value ~Dec4 = 2\nvalue ^= (1 + 2)\nmarker Int = 1\n");
+    let body = start_function_body(&ast, &path_fork, &string_table);
+    let NodeKind::Assignment { target, value } = &body[1].kind else {
+        panic!("expected grouped Dec exponent compound assignment");
+    };
+    assert_eq!(value.type_id, target.type_id);
+    assert!(
+        matches!(&body[2].kind, NodeKind::VariableDeclaration(_)),
+        "a trailing grouped compound RHS must leave the next statement intact"
+    );
+}
+
+#[test]
 fn rejects_number_exponent_assign_with_non_int_rhs() {
     for (right_type, right_value) in [
         ("Dec2", "2.5"),

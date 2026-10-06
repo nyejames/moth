@@ -1,0 +1,5 @@
+hidden ||:
+    v Uint = 4294967296
+;
+
+[:unreachable]

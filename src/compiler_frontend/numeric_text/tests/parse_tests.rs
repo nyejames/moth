@@ -180,6 +180,79 @@ fn materialize_int_accepts_wider_values_under_bits64() {
 }
 
 #[test]
+fn materialize_uint_accepts_both_unsigned_maxima() {
+    let mut string_table = StringTable::new();
+
+    let max32 = whole_number_token(
+        "4294967295",
+        NumericLiteralSign::Positive,
+        &mut string_table,
+    );
+    assert_eq!(
+        materialize_uint(&max32, max32.sign, IntWidth::Bits32, &string_table).unwrap(),
+        u32::MAX as u64
+    );
+
+    let max64 = whole_number_token(
+        "18446744073709551615",
+        NumericLiteralSign::Positive,
+        &mut string_table,
+    );
+    assert_eq!(
+        materialize_uint(&max64, max64.sign, IntWidth::Bits64, &string_table).unwrap(),
+        u64::MAX
+    );
+}
+
+#[test]
+fn materialize_uint_keeps_values_above_signed_max_exact() {
+    let mut string_table = StringTable::new();
+
+    let above_signed = whole_number_token(
+        "9223372036854775808",
+        NumericLiteralSign::Positive,
+        &mut string_table,
+    );
+    assert_eq!(
+        materialize_uint(
+            &above_signed,
+            above_signed.sign,
+            IntWidth::Bits64,
+            &string_table
+        )
+        .unwrap(),
+        i64::MAX as u64 + 1
+    );
+}
+
+#[test]
+fn materialize_uint_rejects_out_of_range_and_negative_spellings() {
+    let mut string_table = StringTable::new();
+
+    let too_large = whole_number_token(
+        "4294967296",
+        NumericLiteralSign::Positive,
+        &mut string_table,
+    );
+    assert_eq!(
+        materialize_uint(&too_large, too_large.sign, IntWidth::Bits32, &string_table).unwrap_err(),
+        NumberLiteralErrorReason::OutsideUintRange(IntWidth::Bits32)
+    );
+
+    let minus_zero = whole_number_token("0", NumericLiteralSign::Negative, &mut string_table);
+    assert_eq!(
+        materialize_uint(
+            &minus_zero,
+            minus_zero.sign,
+            IntWidth::Bits32,
+            &string_table
+        )
+        .unwrap_err(),
+        NumberLiteralErrorReason::NegativeUintLiteral(IntWidth::Bits32)
+    );
+}
+
+#[test]
 fn materialize_float_rejects_non_finite_values() {
     let mut string_table = StringTable::new();
 

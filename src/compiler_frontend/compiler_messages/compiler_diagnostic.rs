@@ -18,15 +18,16 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidFallibleHandlingReason, InvalidFallibleOperandReason, InvalidFunctionSignatureReason,
     InvalidGenericParameterReason, InvalidImportPathReason, InvalidLoopHeaderReason,
     InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMatchArmReason,
-    InvalidMutableAccessReason, InvalidPageMetadataReason, InvalidSignatureMemberReason,
-    InvalidStandaloneStatementReason, InvalidStatementPositionReason, InvalidStringEscapeReason,
-    InvalidTemplateDirectiveReason, InvalidTemplateStructureReason, InvalidTraitConformanceReason,
-    InvalidTraitIncompatibilityReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
-    LegacyDependencyClauseReason, MalformedTemplateReason, NameNamespace,
-    NamespaceTypeValueMisuseKind, NamingConvention, OperatorOperandPosition, PathKind,
-    ProjectContextEscapeReason, RangeOperandKind, RuleDiagnosticKind, SourceSpanCapacityResource,
-    SyntaxDiagnosticKind, TypeAnnotationContext, TypeDiagnosticKind, TypeMismatchContext,
-    UnsupportedBackendFeatureReason, UnsupportedOperatorCategory,
+    InvalidMutableAccessReason, InvalidPageMetadataReason, InvalidRangeOperandReason,
+    InvalidSignatureMemberReason, InvalidStandaloneStatementReason, InvalidStatementPositionReason,
+    InvalidStringEscapeReason, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
+    InvalidTraitConformanceReason, InvalidTraitIncompatibilityReason,
+    InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason, LegacyDependencyClauseReason,
+    MalformedTemplateReason, NameNamespace, NamespaceTypeValueMisuseKind, NamingConvention,
+    OperatorOperandPosition, PathKind, ProjectContextEscapeReason, RangeOperandKind,
+    RuleDiagnosticKind, SourceSpanCapacityResource, SyntaxDiagnosticKind, TypeAnnotationContext,
+    TypeDiagnosticKind, TypeMismatchContext, UnsupportedBackendFeatureReason,
+    UnsupportedOperatorCategory,
 };
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -704,6 +705,7 @@ impl CompilerDiagnostic {
     pub(crate) fn invalid_range_operand(
         operand: RangeOperandKind,
         found_type: TypeId,
+        reason: InvalidRangeOperandReason,
         span: Option<SourceSpan>,
     ) -> Self {
         Self::new(
@@ -712,6 +714,7 @@ impl CompilerDiagnostic {
             DiagnosticPayload::InvalidRangeOperand {
                 operand,
                 found_type,
+                reason,
             },
         )
     }

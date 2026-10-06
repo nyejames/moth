@@ -1,0 +1,4 @@
+reject_oversized_leaf || -> String:
+    result Uint = 4_294_967_296 + 1
+    return [result]
+;

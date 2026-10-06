@@ -1,0 +1,4 @@
+reject_unary_minus |value Uint| -> String:
+    result = -value
+    return [result]
+;

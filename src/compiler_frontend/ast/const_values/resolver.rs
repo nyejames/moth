@@ -12,6 +12,7 @@ use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_eval::{ConstantFoldOutcome, constant_fold};
 use crate::compiler_frontend::ast::const_values::facts::ConstFactValueKind;
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
+use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, ExpressionRpnItem,
@@ -335,9 +336,17 @@ impl<'a> ConstValueResolver<'a> {
                     self.resolve_runtime_rvalue_operand(expression, environment)?
                 }
                 operator @ ExpressionRpnItem::Operator { .. } => operator.clone(),
-                // Resolution removes pending literals before this stage.
-                ExpressionRpnItem::PendingNumericLiteral { .. } => {
-                    return Err(ConstResolutionError::NonFoldableRuntimeExpression);
+                // Pending syntax never survives evaluation. This resolver reports it through
+                // the template-classification infrastructure lane so fact-collection skips
+                // (which swallow every other variant) propagate the broken invariant instead
+                // of recording it as an ordinary non-const fact.
+                ExpressionRpnItem::PendingNumericLiteral { .. }
+                | ExpressionRpnItem::PendingGroup { .. } => {
+                    return Err(ConstResolutionError::TemplateClassification(
+                        TemplateError::Infrastructure(Box::new(pending_expression_item_bug(
+                            "const resolution",
+                        ))),
+                    ));
                 }
             };
             substituted.push(new_item);

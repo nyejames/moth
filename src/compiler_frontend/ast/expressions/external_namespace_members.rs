@@ -28,6 +28,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 use moth_lexical::numeric::profile::NumericProfile;
 
 /// Input bundle for external namespace function member parsing.
@@ -219,8 +220,8 @@ pub(super) fn parse_external_namespace_constant_member(
 
 /// Projects an external constant using its semantic signature type.
 ///
-/// WHAT: keeps foreign I32/F64 values fixed-width while native Moth Int/Float values use
-///       their profile-selected literal constructors.
+/// WHAT: keeps foreign I32/F64 values fixed-width while native Moth Int/Uint/Float
+///       values use their profile-selected literal constructors.
 /// WHY: constants share the same ABI-versus-language distinction as external function slots.
 pub(super) fn project_external_constant(
     constant_definition: &ExternalConstantDef,
@@ -254,6 +255,21 @@ pub(super) fn project_external_constant(
         }
         (ExternalSignatureType::NativeInt, ExternalConstantValue::Int(value)) => {
             Ok(Expression::int(i64::from(value), span, value_mode))
+        }
+        (ExternalSignatureType::NativeUint, ExternalConstantValue::Uint(value)) => {
+            // Compiler-registered payloads are exact `u64`, so the selected Uint width
+            // gates them exactly like a source literal: Uint32 rejects 4294967296 and
+            // above with the source-level range diagnostic instead of an internal
+            // backend error at emission.
+            if value > numeric_profile.int_width.unsigned_max_value() {
+                let literal_text = string_table.intern(&value.to_string());
+                return Err(CompilerDiagnostic::invalid_number_literal(
+                    literal_text,
+                    NumberLiteralErrorReason::OutsideUintRange(numeric_profile.int_width),
+                    span,
+                ));
+            }
+            Ok(Expression::uint(value, span, value_mode))
         }
         (ExternalSignatureType::Abi(ExternalAbiType::I32), ExternalConstantValue::Int(value)) => {
             let value = FixedScalarValue::signed(FixedScalar::I32, i64::from(value))

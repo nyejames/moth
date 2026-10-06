@@ -209,8 +209,6 @@ impl DiagnosticPayload {
             DiagnosticPayload::EmptyCollectionTypeAmbiguity
             | DiagnosticPayload::UnsupportedOperatorTypes { .. } => {}
 
-            DiagnosticPayload::InvalidRangeOperand { .. } => {}
-
             DiagnosticPayload::UnsupportedBuilderPackage { package_path } => {
                 *package_path = remap.get(*package_path);
             }

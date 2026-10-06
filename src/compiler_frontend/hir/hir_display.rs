@@ -595,6 +595,7 @@ impl<'a> HirDisplayContext<'a> {
 
     pub(crate) fn render_expression_kind(&self, kind: &HirExpressionKind) -> String {
         match kind {
+            HirExpressionKind::Uint(value) => value.to_string(),
             HirExpressionKind::Int(value) => value.to_string(),
             HirExpressionKind::Float(value) => value.to_string(),
             HirExpressionKind::FixedScalar(value) => value.to_string(),
@@ -859,6 +860,7 @@ impl<'a> HirDisplayContext<'a> {
             TypeDefinition::Builtin(BuiltinTypeDefinition { key }) => match key {
                 BuiltinTypeKey::Bool => "Bool".to_owned(),
                 BuiltinTypeKey::Int => "Int".to_owned(),
+                BuiltinTypeKey::Uint => "Uint".to_owned(),
                 BuiltinTypeKey::Float => "Float".to_owned(),
                 BuiltinTypeKey::Number(scale) => scale.to_string(),
                 BuiltinTypeKey::Char => "Char".to_owned(),

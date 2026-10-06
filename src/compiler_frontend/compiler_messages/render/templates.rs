@@ -169,7 +169,7 @@ pub(crate) fn compile_time_evaluation_error_suggestion(
             "Constants may only contain compile-time values and constant references."
         }
         CompileTimeEvaluationErrorReason::ExternalNonScalarConstantInConstantContext => {
-            "Only scalar external constants (Int, Float, Bool) are supported in constant declarations and const templates"
+            "Only scalar external constants (Int, Uint, Float, Bool) are supported in constant declarations and const templates"
         }
         CompileTimeEvaluationErrorReason::ExternalFunctionCallInConstantContext => {
             "Use only compile-time constant values inside constants and const templates"

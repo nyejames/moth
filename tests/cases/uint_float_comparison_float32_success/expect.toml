@@ -1,0 +1,7 @@
+entry = "."
+numeric_profile = "Int32/Float32"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "uint float32 eq=true/true lt=false/false"

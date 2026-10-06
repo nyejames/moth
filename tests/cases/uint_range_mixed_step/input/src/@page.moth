@@ -1,0 +1,12 @@
+-- Task 5A: typed Uint bounds do not mix with an Int step; the operator
+-- table has no Uint/Int promotion so the header rejects the step.
+
+probe ||:
+    lo Uint = 0
+    hi Uint = 10
+    loop lo to & hi by 1 |i|:
+        io.line([: [i]])
+    ;
+;
+
+probe()

@@ -1,0 +1,7 @@
+identity type T |value T| -> T:
+    return value
+;
+reject_unresolved_generic_slot || -> String:
+    result Uint = identity(1 + 2)
+    return [result]
+;

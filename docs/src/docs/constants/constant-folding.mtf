@@ -67,7 +67,7 @@ Folding must preserve runtime language semantics.
 Examples:
 
 - a statically known checked-numeric failure is a compile-time diagnostic
-- `String -> Int` and `Float -> Int` enforce the selected `Int` range, which the numeric profile selects as 32 or 64 bits
+- `String -> Int`, `String -> Uint` and `Float -> Int` enforce the selected `Int`/`Uint` range, which the numeric profile selects as 32 or 64 bits
 - fixed-width numeric targets enforce their own declared ranges
 - `String -> Float` rejects non-finite materialization
 - `Float -> String` uses Moth's stable formatter

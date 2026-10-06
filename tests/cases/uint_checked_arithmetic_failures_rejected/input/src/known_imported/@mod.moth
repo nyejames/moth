@@ -1,0 +1,5 @@
+@imported shared_max
+
+consume || -> Uint, Error!:
+    return shared_max + 1
+;

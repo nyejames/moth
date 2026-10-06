@@ -1,0 +1,4 @@
+reject_typed_dec_result |left Dec2, right Dec2| -> String:
+    result Dec4 = left + right
+    return [result]
+;

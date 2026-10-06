@@ -128,7 +128,8 @@ impl HirExpression {
                     }
                 }
             }
-            HirExpressionKind::Int(_)
+            HirExpressionKind::Uint(_)
+            | HirExpressionKind::Int(_)
             | HirExpressionKind::Float(_)
             | HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Number(_)
@@ -206,6 +207,8 @@ pub enum HirExpressionKind {
     // -------------------------
     //  Literals
     // -------------------------
+    /// One unsigned 64-bit integer literal.
+    Uint(u64),
     Int(i64),
     Float(f64),
     /// One materialised fixed-width scalar or `Byte` value with exact-bit identity.

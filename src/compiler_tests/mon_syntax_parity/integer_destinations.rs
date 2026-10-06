@@ -35,6 +35,7 @@ fn single_box_value(number: Value) -> Value {
 fn schema_type(type_name: &str) -> SchemaType {
     match type_name {
         "Int" => SchemaType::Int,
+        "Uint" => SchemaType::Uint,
         "I8" => SchemaType::I8,
         "I16" => SchemaType::I16,
         "I32" => SchemaType::I32,
@@ -454,6 +455,147 @@ fn profiled_int_fixtures() -> Vec<ParityFixture> {
     fixtures
 }
 
+fn profiled_uint_fixtures() -> Vec<ParityFixture> {
+    let mut fixtures = Vec::new();
+    for (profile_name, profile) in profiles() {
+        let (maximum, maximum_text, above) = match profile.int_width {
+            IntWidth::Bits32 => (u32::MAX as u64, "4294967295", "4294967296"),
+            IntWidth::Bits64 => (u64::MAX, "18446744073709551615", "18446744073709551616"),
+        };
+        fixtures.push(accepted_number(
+            &format!("{profile_name}_uint_zero"),
+            "0",
+            "Uint",
+            Value::Uint(0),
+            Some(profile),
+        ));
+        fixtures.push(accepted_number(
+            &format!("{profile_name}_uint_signed_max_plus_one"),
+            "2147483648",
+            "Uint",
+            Value::Uint(2_147_483_648),
+            Some(profile),
+        ));
+        fixtures.push(accepted_number(
+            &format!("{profile_name}_uint_maximum"),
+            maximum_text,
+            "Uint",
+            Value::Uint(maximum),
+            Some(profile),
+        ));
+        let literal = format!("value = Box(number = {above})");
+        fixtures.push(rejected_number(
+            &format!("{profile_name}_uint_above_maximum"),
+            above,
+            "Uint",
+            source_invalid_number(
+                NumberLiteralErrorReason::OutsideUintRange(profile.int_width),
+                in_literal(&literal, above, 1),
+            ),
+            MonErrorCode::NumericRange,
+            Some(profile),
+        ));
+        for (suffix, spelling) in [("negative_one", "-1"), ("negative_zero", "-0")] {
+            let literal = format!("value = Box(number = {spelling})");
+            fixtures.push(rejected_number(
+                &format!("{profile_name}_uint_{suffix}"),
+                spelling,
+                "Uint",
+                source_invalid_number(
+                    NumberLiteralErrorReason::NegativeUintLiteral(profile.int_width),
+                    in_literal(&literal, spelling, 1),
+                ),
+                MonErrorCode::NumericRange,
+                Some(profile),
+            ));
+        }
+        if profile.int_width == IntWidth::Bits64 {
+            fixtures.push(accepted_number(
+                &format!("{profile_name}_uint_above_signed_max"),
+                "9223372036854775808",
+                "Uint",
+                Value::Uint(9_223_372_036_854_775_808),
+                Some(profile),
+            ));
+        } else {
+            let spelling = "9223372036854775808";
+            let literal = format!("value = Box(number = {spelling})");
+            fixtures.push(rejected_number(
+                &format!("{profile_name}_uint_above_signed_max"),
+                spelling,
+                "Uint",
+                source_invalid_number(
+                    NumberLiteralErrorReason::OutsideUintRange(IntWidth::Bits32),
+                    in_literal(&literal, spelling, 1),
+                ),
+                MonErrorCode::NumericRange,
+                Some(profile),
+            ));
+        }
+    }
+    fixtures
+}
+
+fn uint_spelling_fixtures() -> Vec<ParityFixture> {
+    let mut fixtures = Vec::new();
+    fixtures.push(accepted_number(
+        "uint_grouped_whole_spelling",
+        "1_0",
+        "Uint",
+        Value::Uint(10),
+        None,
+    ));
+    for (name, spelling) in [
+        ("decimal_spelling_into_uint", "1.0"),
+        ("exponent_spelling_into_uint", "1e2"),
+    ] {
+        let literal = format!("value = Box(number = {spelling})");
+        fixtures.push(rejected_number(
+            name,
+            spelling,
+            "Uint",
+            source_type_mismatch(
+                TypeMismatchContext::ConstructorArgument,
+                in_literal(&literal, spelling, 1),
+            ),
+            MonErrorCode::NumericType,
+            None,
+        ));
+    }
+    fixtures
+}
+
+fn uint_identity_fixture(name: &str, profile: NumericProfile) -> ParityFixture {
+    let literal = "value = UintTrio(profile = 42, narrow = 42, wide = 42)";
+    fixture(
+        name,
+        literal,
+        "UintTrio = | profile Uint, narrow U32, wide U64 |\n",
+        Schema::record(vec![Field::required(
+            "value",
+            SchemaType::Struct {
+                name: "UintTrio".into(),
+                fields: vec![
+                    Field::required("profile", SchemaType::Uint),
+                    Field::required("narrow", SchemaType::U32),
+                    Field::required("wide", SchemaType::U64),
+                ],
+            },
+        )]),
+        SourceExpectation::Accept,
+        MonExpectation::Accept(Value::Record(vec![(
+            "value".into(),
+            Value::Record(vec![
+                ("profile".into(), Value::Uint(42)),
+                ("narrow".into(), Value::U32(42)),
+                ("wide".into(), Value::U64(42)),
+            ]),
+        )])),
+    )
+    .with_profile(profile)
+    .with_source_nominal_type("value", "UintTrio")
+}
+
 fn fixed_profiles_fixture(name: &str, profile: NumericProfile) -> ParityFixture {
     let literal = "value = FixedSet(signed = -1, wide = 9007199254740993, octet = 255)";
     let fields = vec![
@@ -499,6 +641,30 @@ fn profile_int_destinations_keep_selected_width_and_exact_identity() {
     let _guard = lock_counter_test();
     for fixture in profiled_int_fixtures() {
         assert_fixture(fixture);
+    }
+}
+
+#[test]
+fn profile_uint_destinations_keep_selected_width_and_exact_identity() {
+    let _guard = lock_counter_test();
+    for fixture in profiled_uint_fixtures() {
+        assert_fixture(fixture);
+    }
+}
+
+#[test]
+fn uint_spellings_keep_whole_number_category_on_both_sides() {
+    let _guard = lock_counter_test();
+    for fixture in uint_spelling_fixtures() {
+        assert_fixture(fixture);
+    }
+}
+
+#[test]
+fn uint_stays_distinct_from_int_and_explicit_widths() {
+    let _guard = lock_counter_test();
+    for (name, profile) in profiles() {
+        assert_fixture(uint_identity_fixture(name, profile));
     }
 }
 

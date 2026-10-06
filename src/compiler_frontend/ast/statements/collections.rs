@@ -305,6 +305,7 @@ fn parse_collection_literal(
 enum KnownMapKey {
     String(StringId),
     Int(i64),
+    Uint(u64),
     FixedScalar(FixedScalarValue),
     Bool(bool),
     Char(char),
@@ -335,6 +336,7 @@ fn try_extract_known_map_key(
             KnownMapKey::String(id)
         }
         ExpressionKind::Int(v) => KnownMapKey::Int(*v),
+        ExpressionKind::Uint(v) => KnownMapKey::Uint(*v),
         ExpressionKind::FixedScalar(v) => KnownMapKey::FixedScalar(*v),
         ExpressionKind::Bool(v) => KnownMapKey::Bool(*v),
         ExpressionKind::Char(v) => KnownMapKey::Char(*v),

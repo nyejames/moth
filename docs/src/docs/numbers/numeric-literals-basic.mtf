@@ -34,18 +34,31 @@ and exact values need no intermediate `Int` or `Float`:
 [codeblock, $code("moth"):
     small U8 = 200
     large U64 = 18_000_000_000
+    count Uint = 1 + 2
     half F16 = 0.5
     raw Byte = 255
+    price Dec2 = 12.50
+]
+
+A `Dec` receiver also types literal arithmetic, not just lone literals.
+A `Uint` receiver does the same for whole-number arithmetic, while a `Uint`
+power exponent keeps `Uint` context where a `Dec` exponent stays `Int`:
+
+[codeblock, $code("moth"):
+    whole Dec4 = 1 + 1
+    fraction Dec4 = 0.1 + 0.2
+    total Uint = 1 + 2
 ]
 
 Whole literals can also initialise binary floats. Decimal or exponent spelling
-never initialises a fixed integer, `Int` or `Byte` merely because its value is
+never initialises a fixed integer, `Int`, `Uint` or `Byte` merely because its value is
 whole, and a literal that does not fit its destination is rejected. Small values
-never infer a narrow type by size.
+never infer a narrow type by size. See @./#numeric-literals (Numeric literals)
+for the complete receiving and peer rules.
 
-**Current versus accepted.** The frontend materialises fixed-width, `Byte` and
+**Current versus accepted.** The frontend materialises fixed-width, `Uint`, `Byte` and
 exact `Dec` literals with destination-aware range checks. HTML-JS executes
-fixed-width numeric, `Byte` and `Dec` runtime values. Experimental HTML-Wasm
-executes fixed integers, `Byte`, `F16`, `F32` and `F64` values. `F16` uses a finite
+fixed-width numeric, `Uint`, `Byte` and `Dec` runtime values. Experimental HTML-Wasm
+executes fixed integers, `Uint` scalars through `U32`/`U64` carriers in trap-mode-supported paths, `Byte`, `F16`, `F32` and `F64` values. `F16` uses a finite
 `F32` computation carrier and compact two-byte storage. Wasm rejects reachable
 `Dec` values. See @../progress (Progress) for current support.

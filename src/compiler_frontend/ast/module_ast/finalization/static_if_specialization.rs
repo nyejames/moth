@@ -14,6 +14,7 @@ use crate::compiler_frontend::ast::const_values::resolver::{
     ConstResolutionError, ConstValueEnvironment, ConstValueResolver,
 };
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandling;
@@ -354,8 +355,19 @@ impl StaticIfSpecializer<'_> {
         match &mut expression.kind {
             ExpressionKind::Runtime(rpn) => {
                 for item in &mut rpn.items {
-                    if let ExpressionRpnItem::Operand(operand) = item {
-                        self.specialize_expression(operand, environment)?;
+                    match item {
+                        ExpressionRpnItem::Operand(operand) => {
+                            self.specialize_expression(operand, environment)?;
+                        }
+                        ExpressionRpnItem::Operator { .. } => {}
+                        // Pending syntax never survives evaluation; this fallible specialization
+                        // reports the broken invariant instead of silently keeping it.
+                        ExpressionRpnItem::PendingNumericLiteral { .. }
+                        | ExpressionRpnItem::PendingGroup { .. } => {
+                            return Err(
+                                pending_expression_item_bug("static-if specialization").into()
+                            );
+                        }
                     }
                 }
             }
@@ -422,6 +434,7 @@ impl StaticIfSpecializer<'_> {
             }
             ExpressionKind::NoValue
             | ExpressionKind::OptionNone
+            | ExpressionKind::Uint(_)
             | ExpressionKind::Int(_)
             | ExpressionKind::Float(_)
             | ExpressionKind::FixedScalar(_)

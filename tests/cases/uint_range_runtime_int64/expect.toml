@@ -1,0 +1,6 @@
+numeric_profile = "Int64/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["uint_range_runtime_int64 asc=15/6/5 step=6/3 desc=15/6/5/0 dstep=9/3 above=1/9223372036854775808 max=18446744073709551615/3 zero=0/2"]

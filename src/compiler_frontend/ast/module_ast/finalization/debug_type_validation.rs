@@ -289,8 +289,15 @@ fn debug_validate_expression_type_id_with_context(
                         debug_validate_expression_type_id(expression, context);
                     }
                     ExpressionRpnItem::Operator { .. } => {}
-                    // Resolution removes pending literals before this stage.
-                    ExpressionRpnItem::PendingNumericLiteral { .. } => {}
+                    // Pending syntax never survives evaluation; flag it like every other
+                    // orphan-TypeId invariant this debug pass owns.
+                    ExpressionRpnItem::PendingNumericLiteral { .. }
+                    | ExpressionRpnItem::PendingGroup { .. } => {
+                        debug_assert!(
+                            false,
+                            "pending expression syntax reached debug TypeId validation"
+                        );
+                    }
                 }
             }
         }
@@ -538,6 +545,7 @@ fn debug_validate_expression_type_id_with_context(
 
         ExpressionKind::NoValue
         | ExpressionKind::OptionNone
+        | ExpressionKind::Uint(_)
         | ExpressionKind::Int(_)
         | ExpressionKind::Float(_)
         | ExpressionKind::FixedScalar(_)

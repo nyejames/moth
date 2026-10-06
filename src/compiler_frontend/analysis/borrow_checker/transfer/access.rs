@@ -680,6 +680,7 @@ fn record_shared_reads_in_expression(
 ) -> Result<(), BorrowCheckError> {
     match &expression.kind {
         HirExpressionKind::Number(_)
+        | HirExpressionKind::Uint(_)
         | HirExpressionKind::Int(_)
         | HirExpressionKind::Float(_)
         | HirExpressionKind::FixedScalar(_)
@@ -956,6 +957,7 @@ fn collect_expression_roots(
         }
 
         HirExpressionKind::Number(_)
+        | HirExpressionKind::Uint(_)
         | HirExpressionKind::Int(_)
         | HirExpressionKind::Float(_)
         | HirExpressionKind::FixedScalar(_)
@@ -1190,6 +1192,7 @@ pub(super) fn transfer_aggregate_expression_ownership(
         }
 
         HirExpressionKind::Number(_)
+        | HirExpressionKind::Uint(_)
         | HirExpressionKind::Int(_)
         | HirExpressionKind::Float(_)
         | HirExpressionKind::FixedScalar(_)

@@ -1,0 +1,5 @@
+fail_caught || -> Uint, Error!:
+    return (0 - 1) catch:
+        then 0
+    ;
+;

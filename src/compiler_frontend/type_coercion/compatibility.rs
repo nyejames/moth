@@ -177,8 +177,8 @@ pub(crate) fn is_postfix_error_compatible(
 /// expecting `expected_id`.
 ///
 /// WHAT: the compatibility predicate for `result T = expr` declarations.
-/// WHY: declarations accept exact structural matches plus the single implicit
-/// numeric promotion `Int → Float`.
+/// WHY: declarations accept exact structural matches plus the narrow implicit numeric
+/// promotions `Int → Float` and `Uint → Float`.
 pub(crate) fn is_declaration_compatible(
     expected_id: TypeId,
     actual_id: TypeId,
@@ -192,14 +192,16 @@ pub(crate) fn is_declaration_compatible(
 /// contextual numeric coercion.
 ///
 /// WHAT: the narrow set of implicit numeric promotions the language allows.
-/// WHY: only Int → Float is supported today. All other numeric combinations
-/// require explicit user casts (`Float(x)` / `Int(x)`).
+/// WHY: only `Int → Float` and `Uint → Float` are supported. All other numeric combinations
+/// require an explicit `cast` at a typed receiving boundary. There is no transitive
+/// `Uint`/`Int` compatibility through `Float`: each direction checks one exact pair.
 pub(crate) fn is_numeric_coercible_by_id(
     actual_id: TypeId,
     expected_id: TypeId,
     type_environment: &TypeEnvironment,
 ) -> bool {
-    actual_id == type_environment.builtins().int && expected_id == type_environment.builtins().float
+    let builtins = type_environment.builtins();
+    expected_id == builtins.float && (actual_id == builtins.int || actual_id == builtins.uint)
 }
 
 // --------------------------------------------------------

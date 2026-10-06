@@ -56,7 +56,6 @@ impl<'hir> JsEmitter<'hir> {
                 self.emit_numeric_conversion_helpers(conversion, &mut emitted);
             }
         }
-
         if policies.iter().any(|policy| {
             matches!(
                 policy,

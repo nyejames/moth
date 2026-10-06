@@ -276,6 +276,7 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
 ) -> Result<Expression, CompilerError> {
     let kind = match folded {
         PublicFoldedValue::Int(value) => ExpressionKind::Int(*value),
+        PublicFoldedValue::Uint(value) => ExpressionKind::Uint(*value),
         PublicFoldedValue::Number(value) => {
             if materialiser
                 .type_environment()

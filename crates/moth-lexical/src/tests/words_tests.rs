@@ -69,7 +69,7 @@ fn reservation_inventory_is_the_case_folded_exact_word_union() {
         "checked", "config", "continue", "copy", "else", "export", "f16", "f32", "f64", "false",
         "float", "fn", "i16", "i32", "i64", "i8", "if", "int", "is", "loop", "must", "none", "not",
         "of", "or", "return", "string", "then", "this", "to", "true", "type", "u16", "u32", "u64",
-        "u8", "yield",
+        "u8", "uint", "yield",
     ]
     .into_iter()
     .map(str::to_owned)

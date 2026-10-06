@@ -1,0 +1,6 @@
+reject_named_int_constants || -> String:
+    left #Int = 1
+    right #Int = 2
+    result Dec4 = left + right
+    return [result]
+;
