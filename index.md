@@ -228,6 +228,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [compiler design overview](docs/compiler-design-overview.md)
 - [build system design overview](docs/build-system-design.md)
 - [language semantics reference index](docs/src/developer-docs/language/overview.mtf)
+- [Wiring parameter and constructor-route contracts](docs/src/docs/wiring/wiring.mtf): accepted binding identity, contextual capture and bounded capability semantics; implementation support remains in the progress matrix.
 - [general directives](docs/src/docs/directives/directives.mtf); [directive contributor routing](docs/src/docs/directives/overview.mtf)
 - [entry metadata and page directives](docs/src/docs/project-structure/entry-config.mtf)
 - [memory management design](docs/src/developer-docs/memory-management/overview.mtf)
@@ -236,3 +237,4 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [docs website source](docs/src/docs/); [developer docs source](docs/src/developer-docs/); [generated output](docs/release/)
 - [language support progress matrix](docs/src/docs/progress/@page.moth)
 - [planned work and implementation plans](docs/roadmap/)
+- [typed semantic expression and dense compiler foundation plan](docs/roadmap/plans/typed-semantic-expressions-plan.md): post-Dec/Uint representation, lifetime, native result, Wiring and Core evaluation work.
