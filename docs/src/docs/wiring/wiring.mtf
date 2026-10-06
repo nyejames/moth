@@ -1,0 +1,276 @@
+# Wiring: parameter contracts and constructor routes
+
+This canonical reference owns the accepted Wiring syntax and observable semantics.
+It complements the ordinary function, generic, choice and binding references.
+`docs/compiler-design-overview.md` owns compiler-stage representation and handoffs.
+The progress matrix owns implementation and target support. Examples here describe
+the accepted contract, not a promise of an interactive UI package.
+
+## Terminology and scope
+
+A **wire** preserves a binding instance's continuing identity. A **constructor
+route** describes how future input completes a known choice constructor. A
+**message** remains an ordinary choice value. A **channel** transports ordinary
+values between async activities under its separately defined contract.
+
+A route supplies no destination. Constructing a message, delivering it and sending
+it through a channel remain different operations. Wiring introduces parameter
+capabilities without general closures, source-visible reference types or a
+prescribed rendering architecture.
+
+## Head-directed `of`
+
+The head before `of` determines the specification that follows:
+
+[table:
+    [th: [: Head] [: Specification] [: Meaning]]
+    [td:
+        [: User generic nominal, such as `Box`]
+        [: Existing concrete type arguments]
+        [: An ordinary specialised semantic type, such as `Box of String`]
+    ]
+    [td:
+        [: `Wire`]
+        [: One underlying value type]
+        [: A binding-identity parameter contract, such as `Wire of String`]
+    ]
+    [td:
+        [: `Route`]
+        [: An output, or one input followed by `->` and an output]
+        [: A constructor-route parameter contract]
+    ]
+    [td:
+        [: `Channel`]
+        [: One carried value type]
+        [: The future channel construction contract described below]
+    ]
+]
+
+`Wire` and `Route` are compiler-owned heads under the ordinary reserved-name and
+collision policy. User declarations cannot override them or register new `of`
+grammars. Generic arity, inference, alias and nested-application rules remain
+unchanged. This syntax adds no explicit generic call arguments, higher-kinded
+types, type values or arbitrary inline nesting.
+
+Use a named ordinary concrete alias when an underlying type needs a nested
+specialisation that the generic grammar rejects. A capability is not an ordinary
+type argument: `Box of Wire of T` does not create a wire container, and a route
+cannot become a collection element by applying `of`.
+
+## Wires
+
+A source function parameter may require `Wire of T`:
+
+[codeblock, $code("moth"):
+    read_name |value Wire of String| -> String:
+        return value
+    ;
+
+    forward_name |value Wire of String| -> String:
+        return read_name(value)
+    ;
+
+    name ~= "Priya"
+    label = forward_name(name)
+]
+
+The immediate receiving parameter chooses between an ordinary value read and
+identity forwarding. An ordinary `T` parameter reads the current value through
+normal access rules. A compatible `Wire of T` parameter preserves the same
+binding identity. Neither operation supplies exclusive mutation authority.
+
+### Eligible arguments
+
+- A named mutable or immutable local can acquire identity when a wire-receiving
+  call demands it. No special declaration or call-site marker is needed.
+- An existing wire parameter can forward unchanged to a compatible wire
+  parameter.
+- A field projection, collection lookup, literal, constructor call, function call
+  or computed expression cannot directly satisfy a V1 wire parameter.
+- An ordinary value parameter does not preserve its caller's identity. Inspecting
+  that function's body cannot infer a wire contract for it.
+
+Wiring an immutable local leaves it immutable. A mutable receiver or parameter
+still needs the ordinary exclusive authority. A wire supplies none.
+
+### Binding identity and reads
+
+Identity belongs to the binding instance, not its current contents, allocation
+address or source position. Reassigning an eligible mutable local preserves that
+binding's identity. Repeated function calls or loop executions create distinct
+local instances wherever ordinary binding semantics do so.
+
+Creating an ordinary local from a wire reads its value. Returning `T` read from a
+wire returns an ordinary value. Neither preserves a wire capability implicitly,
+and neither performs a deep copy. Aggregate reads can still create ordinary
+aliases under the existing access and lifetime rules. Use `copy` where an
+independent copy is required and the ordinary copy contract permits it.
+
+Wire identity is not an active long-lived value borrow. Actual reads and captured
+values remain subject to borrow validation. Identity metadata cannot prove that
+storage outlives a consumer or legalise an escape.
+
+There is no `Wire()` value constructor, `wire(...)` operation, `<value>`,
+`<>value` or `$` wiring marker. Persistent observation, source-change callbacks,
+UI ownership and cross-task retention require separate contracts.
+
+## Constructor routes
+
+V1 accepts zero or one future input:
+
+[codeblock, $code("text"):
+    on_click Route of FormMessage
+    on_input Route of String -> FormMessage
+    messages Route of EditorMessage -> AppMessage
+]
+
+`Route of Message` has zero future inputs. `Route of Input -> Message` has one.
+Multi-input route grammar remains unspecified. The route's arrow belongs to that
+parameter only. A function's ordinary return arrow follows the closing parameter
+list and keeps its existing meaning.
+
+### Immediate constructor context
+
+Only an immediate route-receiving parameter permits a direct choice constructor
+to leave payload fields for future input:
+
+[codeblock, $code("moth"):
+    FormMessage ::
+        NameChanged | value String |,
+        Submit,
+    ;
+
+    TodoMessage ::
+        Rename | id Int, value String |,
+        Delete | id Int |,
+    ;
+
+    todo_id = 42
+]
+
+[table:
+    [th: [: Expected contract] [: Argument] [: Future construction]]
+    [td:
+        [: `Route of FormMessage`]
+        [: `FormMessage::Submit`]
+        [: Construct the unit variant with no future payload]
+    ]
+    [td:
+        [: `Route of String -> FormMessage`]
+        [: `FormMessage::NameChanged`]
+        [: Future String supplies the sole payload field]
+    ]
+    [td:
+        [: `Route of String -> TodoMessage`]
+        [: `TodoMessage::Rename(todo_id)`]
+        [: Capture the ID now and fill the trailing String later]
+    ]
+    [td:
+        [: `Route of TodoMessage`]
+        [: `TodoMessage::Delete(todo_id)`]
+        [: Capture the ID now with no future payload]
+    ]
+]
+
+Captured arguments fill a contiguous leading payload prefix. Future input fills
+the remaining trailing fields in declaration order. Partial routes permit no
+holes, named omissions or arbitrary reordering. A fully supplied zero-input
+constructor can use ordinary complete-constructor argument rules, including
+legal named arguments.
+
+The root argument is a direct choice variant path/application or an unchanged
+compatible route parameter. Captures are ordinary expressions evaluated once
+when the route forms, in normal argument order and with normal failure and
+ownership rules. The route retains their resulting values, not executable
+expressions to rerun at a later event. Runtime captures remain runtime data even
+when the route signature and constructor are statically known.
+
+Outside that receiving boundary, ordinary constructors still require all payload
+fields. `message = TodoMessage::Rename(todo_id)` lacks the String field and is
+invalid. A zero-input route using that same incomplete constructor is also
+invalid, since it has no future input to supply the missing field. No `|>`,
+angle-bracket or `route` expression form changes these rules.
+
+### Type identity and forwarding
+
+Route contracts require exact input and output semantic types. Messages remain
+ordinary nominal choices without a Message base type or trait. The contract adds
+no variance, callable-trait solver or higher-order inference.
+
+An ordinary generic helper can accept `Route of String -> Message`. A supplied
+constructor establishes the concrete choice output through existing immediate
+generic inference. It does not become a first-class function, and no distant
+body inspection supplies missing inference evidence.
+
+A compatible route parameter forwards unchanged. For a choice variant declared
+with leading `id Int` and trailing `message EditorMessage`,
+`AppMessage::Editor(editor_id)` can satisfy
+`Route of EditorMessage -> AppMessage`. This describes child-message lifting.
+Composing it with an input-to-child route is a separate design question, with no
+V1 application or composition syntax.
+
+## Capability positions and lifetimes
+
+Wire and Route contracts annotate parameters only. They do not annotate ordinary
+locals, fields, choice payloads, collection/map elements, capability aliases,
+defaults or return slots. Ordinary aliases may name their underlying value types
+under the existing alias contract.
+
+A route cannot be stored, returned, compared, serialised or sent through a
+channel. A function name, closure, arithmetic expression or arbitrary block
+cannot replace a direct constructor argument. Routes have no general invocation
+or composition operation and introduce no implicit send or event registration.
+
+Actual reads and retained captures obey ordinary alias, `copy`, access and
+lifetime-topology rules. Identity forwarding does not grant mutation, change
+allocation ownership or excuse a retained reference outliving its source. V1
+introduces no external persistent consumer. Any later observer or event consumer
+needs its own explicit retention and lifecycle contract. Host garbage collection
+does not establish that a source escape is legal.
+
+Plain, Wire and Route parameters remain distinct through exports, imports and
+generic specialisation. Matching underlying types never permit a module boundary
+to turn a wire into a snapshot or a route into an already constructed message.
+
+## Templates and runtime consumers
+
+Templates produce ordinary String values. Returning, passing or assigning one
+carries no hidden wire, route, subscription or rerender recipe. Composition,
+control flow, slots, wrappers, formatting, folding and fragment insertion keep
+their ordinary contracts. Structural resource and site-root pieces retain their
+independent meaning until output placement supplies concrete characters.
+
+The foundation covers synchronous reads, identity/route forwarding and captured
+constructor facts. A target can execute those operations only with faithful
+lowering. A reachable unsupported runtime capability receives a structured target
+diagnostic before lowering. Frontend acceptance alone does not promise executable
+UI behaviour.
+
+Automatic observation, derived-state graphs, change handlers, two-way binding,
+live templates, route invocation, event queues, schedulers, mount lifecycles,
+rendering policy and channel bridges lie outside this foundation. These are not
+inherited obligations from the removed reactivity model.
+
+## Future channel boundary
+
+The accepted channel construction form is:
+
+[codeblock, $code("moth"):
+    reader, writer Channel of AppMessage = Channel()
+]
+
+The annotation supplies the carried type. `Channel()` receives that information
+from the immediate receiving contract, not a runtime type argument. The two
+results belong to one channel, reader first and writer second. They do not
+represent two independent channels or two bidirectional endpoints.
+
+Explicit send transfers an independent graph under the async memory contract.
+Wire identity is not channel data, and route formation performs no hidden send.
+The channel construction form settles no endpoint-parameter grammar, buffering,
+cancellation, close, selection, suspension or host-event ingress rules.
+
+Async operations, `>>`, `<<`, `spawn`, `yield` and structured `$async:` scopes keep
+their separately owned design boundaries. Channel implementation is not part of
+the Wiring foundation. Initialiser omission such as
+`reader, writer Channel of AppMessage` remains an open possibility, with no
+accepted zero-value initialisation or blanket constructor omission rule.

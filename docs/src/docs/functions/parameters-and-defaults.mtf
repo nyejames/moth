@@ -1,4 +1,5 @@
-Every function parameter has a name and an explicit type.
+Every function parameter has a name and an explicit value type or parameter
+capability contract.
 
 [codeblock, $code("moth"):
     describe |prefix String, subject String| -> String:
@@ -20,8 +21,10 @@ Every function parameter has a name and an explicit type.
 - Parameter names follow the no-shadowing rule.
 - Each parameter name must be unique in the signature.
 
-`$` is not a reactive parameter mode. Any future reactive parameter spelling remains
-owned by its accepted Wiring design rather than this function-parameter contract.
+`Wire of T` and the zero/one-input `Route of ...` forms are separate parameter
+contracts, not ordinary wrapper types or mutable access modes. They have no
+defaults and `$` supplies no parameter mode. Their exact receiving and forwarding
+rules belong to the @https://github.com/nyejames/moth/blob/main/docs/src/docs/wiring/wiring.mtf (Wiring reference).
 
 Directive calls share the ordinary argument parser and slot routing. Ordinary `f()`
 remains valid. Only directive syntax rejects an authored empty `()`.
