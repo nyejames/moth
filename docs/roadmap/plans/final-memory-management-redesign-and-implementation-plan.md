@@ -33,8 +33,28 @@ CURRENT_SCOPE: none active. Milestone A (Phases 0 and 1) is closed; Phases 2 thr
 NEXT_ACTION: Phase 0, the reopened Phase 1 consistency passes and the final memory model
   consistency closure are complete. Do not begin Phase 2 until the borrow and last-use
   implementation slice is explicitly activated on the roadmap.
-BLOCKERS: none for the documentation slice; implementation phases remain gated on its completion.
+BLOCKERS: none for the documentation slice; implementation phases require delivered dense HIR,
+  native result channels and explicit roadmap activation in addition to their own semantic prerequisites.
 ```
+
+## Compiler foundation handoff
+
+The typed semantic expression and dense compiler foundation work starts after the Dec contextual
+typing correction and the separate Uint addition. It owns the representation cutover: compact
+typed expression IDs, dense HIR values and places, native zero/one/multiple success slots with a
+separate error channel, mechanical analysis consumers and removal of Reactivity V1. This memory
+plan consumes those merged capabilities. It does not recreate owned expression trees, tuple-based
+multi-results or a semantic fallible carrier while waiting for another memory phase.
+
+That handoff does not activate Phases 2 through 18. Borrow precision, complete lifetime and
+retention summaries, region inference, REC and physical planning still require their explicit
+roadmap activation. A merged foundation checkpoint is sufficient when it provides the capability
+the active memory slice needs. Unrelated later foundation polish is not an additional gate.
+
+Key local facts by their issuing HIR owner and native result position. Public and generated
+summaries project stable semantic result positions and identities, never donor-local expression or
+HIR indexes. Separate success slots do not prove separate allocations: result-to-result aliasing,
+parameter aliases and unknown provenance stay conservative until the owning analysis proves more.
 
 ---
 
@@ -413,7 +433,7 @@ Borrow validation owns:
 - optional affine transfer eligibility
 - last-use facts
 - temporary alias safety
-- reactive invalidation facts
+- ordinary access facts for binding reads and captured values
 
 Borrow validation writes side tables and does not rewrite HIR.
 
@@ -718,10 +738,12 @@ Last-use precision is the primary early-reclamation mechanism. This phase streng
 
 ### Tasks
 
+- [ ] Confirm the dense HIR and native result-channel consumer checkpoint is merged. Reuse its exact call/result event order and success/error CFG edges rather than migrating representations again.
 - [ ] Confirm path-dependent optional transfer always falls back to borrowing rather than rejecting valid source.
 - [ ] Preserve branch-sensitive last use and fixed-point loop reasoning.
 - [ ] Add explicit last-use facts for aggregate insertion, field storage, returns and container-detachment sites.
 - [ ] Add result-to-result last-use handling for multiple aliased returns.
+- [ ] Keep a result slot's position separate from storage origin. Distinct positions alone prove neither freshness nor disjointness, and error-path analysis never reads undefined success slots.
 - [ ] Track projection use through the containing allocation family.
 - [ ] Expose final-iteration facts for collection and finite range loops when finality is knowable without changing evaluation order.
 - [ ] Keep conditional loops conservative when finality is only known after body execution.
@@ -764,6 +786,7 @@ Cross-function and cross-package topology cannot be inferred from the current `F
 ### Tasks
 
 - [ ] Replace the limited return alias vocabulary with the final result provenance categories.
+- [ ] Attach provenance and retention effects to the delivered native result positions and explicit success/error exits. Do not reconstruct a tuple or fallible semantic type to carry this summary.
 - [ ] Add allocation-family identity for local facts.
 - [ ] Add retained-parameter and retained-receiver facts.
 - [ ] Add outlives constraints.
@@ -803,7 +826,7 @@ This phase creates the backend-neutral constraint system that follows borrow val
 - [ ] Keep projections attached to their base family.
 - [ ] Record persistent retained-edge creation and destruction.
 - [ ] Distinguish temporary aliases from persistent retained edges.
-- [ ] Record retention domains for structs, choices, collections, maps and reactive state.
+- [ ] Record retention domains for structs, choices, collections, maps and supported retained captures or builder-owned state.
 - [ ] Produce local escape and outlives constraints.
 - [ ] Produce local SCC and cycle facts.
 - [ ] Produce cleanup-frontier candidates without deciding final intervals.
@@ -962,7 +985,7 @@ Internal impossible or inconsistent metadata uses `CompilerError`.
 - [ ] nested escape
 - [ ] cross-region cycle
 - [ ] live alias at exit
-- [ ] reactive escape
+- [ ] captured or builder-owned value escaping its declared region
 - [ ] external retention
 - [ ] missing common owner
 
@@ -1188,27 +1211,29 @@ Collector-free correctness does not require splitting, but the final performance
 
 ---
 
-## Phase 14: Integrate builder lifecycles and reactivity
+## Phase 14: Integrate builder lifecycles and retained captures
 
 ### Summary and reasoning
 
-Web workloads need page, mount, request and render lifetimes to avoid broad page-wide retention.
+Builder-owned state needs explicit lifecycle roots to avoid broad page-wide retention. Reactivity
+V1 must already be retired by the compiler foundation prerequisite. This phase consumes ordinary retained
+edges and the lifecycle contracts actually delivered by the selected builder. It does not add
+automatic observation, subscriptions, event delivery or a replacement scheduler.
 
 ### Tasks
 
 - [ ] Define builder-owned lifecycle root metadata.
-- [ ] Instantiate page, mount, request, frame and render-generation roots in link planning.
-- [ ] Attach reactive sources and mounted fragments to explicit lifecycle roots.
-- [ ] Treat subscriptions as retained-edge facts, not active borrow lifetimes.
-- [ ] End mount-owned regions on unmount.
-- [ ] End render-generation regions after the generation is no longer observable.
+- [ ] Instantiate the page, mount, request, frame or render-generation roots required by supported builder operations. Do not invent a root solely to legalise an otherwise invalid escape.
+- [ ] Attach retained state and captures to their actual lifecycle owners. A Route capture follows ordinary provenance, access and outlives rules. A Wire binding identity adds no observer or storage lifetime.
+- [ ] End each supported lifecycle region at its explicit teardown or final cleanup frontier.
+- [ ] Keep future Wiring observation and event lifecycles deferred until their own accepted contract exists. Do not migrate V1 subscription facts into a renamed runtime mechanism.
 - [ ] Preserve outgoing REC obligations at lifecycle teardown.
 - [ ] Keep builder lifecycles unable to change source legality.
 - [ ] Integrate the final topology with HTML JavaScript and Wasm partitioning.
 
 ### Audit and validation
 
-- [ ] No reactive state is freed while observable.
+- [ ] No retained state is freed while a supported capture or builder lifecycle can still access it.
 - [ ] No hidden closure-like retention graph is introduced.
 - [ ] JavaScript GC and collector-free Wasm accept the same source.
 - [ ] Run `just validate`.
@@ -1373,7 +1398,7 @@ Representative workloads must include:
 - long-lived cache with independent eviction
 - large parent with one retained small field
 - declared-region cyclic graph
-- reactive mount and unmount
+- supported builder lifecycle creation and teardown with retained captures
 - mixed package calls
 - mixed counted and uncounted collection operations
 
@@ -1480,12 +1505,12 @@ Accepted but implementation-deferred:
 - expression-site placement
 - declared-region-local graph construction and publication
 - direct source construction of reference cycles inside one declared region
-- builder lifecycle region metadata for reactivity
+- lifecycle integration for future Wiring observation, after its separate accepted contract
 
 Final-use interior projection detachment from an allocation family is not accepted
 design. Before it could become accepted architecture, a separate design must define partially moved
 aggregate semantics, the parent representation after detachment, invalidation of existing aliases
-and projections, control-flow joins, destruction of remaining fields, reactive and external
+and projections, control-flow joins, destruction of remaining fields, retained captures and external
 observers, aggregate invariants, and parity across GC, region, REC and collector-free backends.
 Until then, projections remain rooted in their containing allocation family, and a proven final use
 transfers the entire allocation family rather than detaching one child.
