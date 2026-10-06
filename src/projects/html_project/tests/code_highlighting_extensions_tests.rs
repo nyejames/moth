@@ -275,3 +275,35 @@ fn unfinished_moth_template_body_stays_plain_to_the_end_of_the_snippet() {
          unfinished ! π &lt;&amp;&gt;"
     );
 }
+
+#[test]
+fn rust_lifetimes_stay_plain_while_character_literals_are_strings() {
+    let highlighted = highlight_code_html(
+        "fn first<'a>(x: &'a str) -> &'static str { let c = 'x'; let n = '\\n'; let p = 'π'; }",
+        CodeLanguage::Rust,
+    );
+    for literal in ["'x'", "'\\n'", "'π'"] {
+        assert!(
+            highlighted.contains(&format!(
+                "<span class='moth-code-string'>{}</span>",
+                literal.replace('\'', "&#39;")
+            )),
+            "{literal} in: {highlighted}"
+        );
+    }
+    assert_eq!(highlighted.matches("moth-code-string").count(), 3);
+    assert!(highlighted.contains("&#39;static <span class='moth-code-type'>str</span>"));
+    assert!(!highlighted.contains("<span class='moth-code-keyword'>static</span>"));
+}
+
+#[test]
+fn javascript_template_literals_are_single_string_runs() {
+    for language in [CodeLanguage::JavaScript, CodeLanguage::TypeScript] {
+        assert_eq!(
+            highlight_code_html("`Hi ${name}! <&> \\` done`", language),
+            "<span class='moth-code-string'>`Hi ${name}! &lt;&amp;&gt; \\` done`</span>",
+            "{language:?}"
+        );
+    }
+    assert!(highlight_code_html("`ls`", CodeLanguage::Shell).contains("moth-code-operator"));
+}

@@ -257,7 +257,21 @@ impl<'source> CodeScanner<'source> {
 
     fn scan_ascii_byte(&mut self, byte: u8, output: &mut String) {
         match byte {
+            // A Rust lifetime or label (`'a`, `'static`) is not a character literal.
+            b'\''
+                if self.language == CodeLanguage::Rust && !self.rust_char_literal_starts_here() =>
+            {
+                self.skip_rust_lifetime();
+            }
             b'"' | b'\'' => self.scan_quoted_run(output),
+            // JavaScript and TypeScript template literals are strings, not operators.
+            b'`' if matches!(
+                self.language,
+                CodeLanguage::JavaScript | CodeLanguage::TypeScript
+            ) =>
+            {
+                self.scan_quoted_run(output)
+            }
             b'[' if self.language == CodeLanguage::Toml && self.toml_table_header_starts_here() => {
                 self.scan_toml_table_header(output);
             }
@@ -598,6 +612,30 @@ impl<'source> CodeScanner<'source> {
 
         self.expected_word_role = None;
         self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::Comment);
+    }
+
+    /// True when the `'` at the cursor opens a Rust character literal: an
+    /// escape, or exactly one scalar before the closing quote.
+    fn rust_char_literal_starts_here(&self) -> bool {
+        let after_quote = self.index + 1;
+        match self.bytes.get(after_quote) {
+            Some(b'\\') => true,
+            Some(_) => {
+                let scalar_len = self.source[after_quote..]
+                    .chars()
+                    .next()
+                    .map_or(1, char::len_utf8);
+                self.bytes.get(after_quote + scalar_len) == Some(&b'\'')
+            }
+            None => false,
+        }
+    }
+
+    /// Leaves a Rust lifetime or label in the plain run, so neither the quote
+    /// nor its name (such as `static`) takes a role.
+    fn skip_rust_lifetime(&mut self) {
+        self.index = self.word_end(self.index + 1);
+        self.expected_word_role = None;
     }
 
     fn scan_quoted_run(&mut self, output: &mut String) {
