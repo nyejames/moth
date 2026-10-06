@@ -906,7 +906,6 @@ The initial input may consume current summary facts for:
 - mutation effect
 - optional transfer eligibility/effect category
 - preliminary return aliasing
-- reactive effect
 - external boundary access rules
 
 When a local summary is unavailable, call arguments and results use the conservative contract. An
@@ -964,21 +963,28 @@ Boracle should preserve:
 
 - separate success and error paths
 - unwrap and catch joins
-- compiler-created result carriers
+- native result positions and success/error locals
 - return-success and return-error exits
 - branch-local captures and aliases
 
 Compiler scratch locals are CFG plumbing. They may carry provenance without becoming source-authored mutable aliases.
 
+The dense HIR/result cutover preserves these events and conservative provenance. Local compiler
+node IDs do not name dynamic runtime generations, and distinct result positions alone prove no
+freshness or disjointness. Richer per-result borrow summaries remain a separate research decision.
+
 A fallible failure path that does not store or return a value must not keep its success-only loan live.
 
-## Reactivity
+## Captures and legacy observation events
 
-Reactive subscriptions are read-only dependency metadata. They are not active borrow lifetimes.
+Ordinary reads, mutations and Route capture evaluation obey the same borrow rules as other values.
+Wire binding identity creates no observer, mutation authority or lifetime extension. Builder
+lifecycle roots and final retained-capture lifetime ownership belong to later analysis.
 
-Ordinary source reads and mutations still obey borrow rules. A stable observable reactive source may be ineligible for optional cleanup transfer because later mounted observation can depend on its identity.
-
-Boracle records the access and observability facts it needs. Builder lifecycle roots and final lifetime ownership belong to later analysis.
+Current extraction still has Reactivity V1 observation events. They are implementation debt
+retired with that source feature by the compiler foundation, not a required part of the stable
+borrow handoff or a model for future Wiring observation. Remove their obsolete fixtures with the
+event owner while preserving coverage of any ordinary access behaviour those fixtures also test.
 
 ## Structured witnesses
 
@@ -1090,7 +1096,7 @@ Boracle and the future production design should exploit these facts:
 - statically resolved calls
 - concrete generated generics before borrow validation
 - closed external boundary profiles
-- reactive subscriptions defined as dependencies rather than loans
+- no automatic observation or subscription semantics from Wire/Route parameter contracts
 - no current async suspension model in accepted borrow semantics
 
 These restrictions mean Boracle does not need to reproduce Rust's complete region-in-type, variance, closure-capture, async-generator, trait-object, unsafe or drop-check machinery.
@@ -1148,7 +1154,6 @@ Its reference handoff may include:
 - last potential use per path
 - optional transfer eligibility
 - preliminary call-result alias evidence
-- reactive observability facts
 - source mappings for later diagnostics
 
 Lifetime-region and escape validation later owns:

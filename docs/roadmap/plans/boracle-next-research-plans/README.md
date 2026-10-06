@@ -15,6 +15,24 @@ differential campaign.
 The roadmap currently has no owning implementation plan for packages 3 through 6. The retained
 proposal notes are design material only, not current implementation work.
 
+### Compiler foundation handoff
+
+The typed semantic expression foundation owns the mechanical Boracle migration to dense HIR
+value/place stores and native zero/one/multiple success slots with a separate error channel. That
+work updates extraction and source replay without promoting a solver experiment, changing reference
+acceptance or adding per-result alias precision. It also retires Reactivity V1 events and fixtures
+with their source contract instead of preserving them as future Wiring support.
+
+Future research consumes those merged capabilities and the current normalized event owner. It does
+not rebuild recursive HIR or introduce tuple/fallible wrapper bridges. A static expression ID is
+neither a runtime generation nor a binding instance; a distinct result position proves neither
+freshness nor disjointness. Preserve exact producer and receiving-write order, success/error edge
+availability and conservative provenance in the representation cutover.
+
+Packages 3 through 6 remain inactive. Merging the relevant foundation checkpoint satisfies only
+that capability prerequisite. Their explicit activation, current reproduction and individual proof
+requirements still apply, without adding a dependency on unrelated later foundation polish.
+
 `checked-proof-budget-integration.md` records a future open proposal for opt-in deeper analysis and
 the architecture each package should preserve. It is design awareness only, not an implementation
 requirement for checked source syntax.
@@ -221,7 +239,7 @@ A future checked caller may authorise more context-sensitive summary specialisat
 
 This package then uses the established relation, oracle, refinement and call-result vocabulary to model:
 
-* Distinct tuple and fixed-collection indexes
+* Distinct supported aggregate projections and fixed-collection indexes; native result positions are not tuple fields
 * Deep copies that preserve internal sharing
 * Source/result graph independence
 * `get`, `set`, `remove` and `clear`

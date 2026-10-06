@@ -259,13 +259,13 @@ Local module compilation produces local lifetime constraints and exported summar
     ]
 
     [td:
-        [: HIR, borrow checker, last-use facts, alias diagnostics or reactivity facts]
+        [: HIR, borrow checker, last-use facts, alias diagnostics or captured-value access]
         [: `docs/src/developer-docs/memory-management/borrow-validation/overview.mtf`]
         [: `docs/src/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`]
     ]
 
     [td:
-        [: Returns, escaping aliases, regions, non-lexical intervals, reactive lifetime roots, cross-region cycles or external retention]
+        [: Returns, escaping aliases, regions, non-lexical intervals, builder lifecycle roots, cross-region cycles or external retention]
         [:
             - `docs/src/developer-docs/memory-management/lifetime-regions-and-escape-validation/overview.mtf`
             - `docs/src/developer-docs/memory-management/borrow-validation/overview.mtf`

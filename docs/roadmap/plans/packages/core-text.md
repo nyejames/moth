@@ -22,11 +22,11 @@ BLOCKERS: the v1 expansion still waits for the compiler-owned native result-slot
 NEXT_ACTION: after the prerequisite lands, audit its final Text evaluator owner and run this plan's Phase 0 from current main
 ```
 
-The package-foundation baseline this plan waited on is merged, so the compiler-owned native
-result-slot and Core const-eval prerequisite is the only remaining blocker owned here. The umbrella
-package lane remains paused under the roadmap order for MON syntax, MON Rust tooling, Wiring V1
-and native result slots/Core const evaluation; data-layout Phase 3 closeout
-`4cfd9d492` is accepted.
+The package-foundation baseline this plan waited on is merged. This expansion waits for merged
+native success/error slots and trusted Core constant evaluation on the compact expression/dense
+HIR foundation. That compiler work starts after the Dec correction and Uint addition. The umbrella
+package programme remains active in parallel for work whose own prerequisites are satisfied.
+Historical data-layout Phase 3 closeout `4cfd9d492` remains accepted.
 
 The pre-checkpoint hardening slice is delivered. `__moth_text_length` now counts scalars with a
 single-pass `charCodeAt` scan, and both successful `tests/cases/core_text_*` cases assert their whole
@@ -44,10 +44,12 @@ five Text functions. This plan extends those delivered owners. It must not add a
 callback registry, package-name dispatch path or Text-specific `ExternalFunctionId` family just for
 constant evaluation.
 
-The planning-branch description of that prerequisite currently lives at
-`docs/roadmap/plans/native-result-slots-and-core-const-eval.md`. That ordinary plan is expected to be
-retired after implementation. At package activation, use the merged implementation and current
-canonical docs rather than preserving shapes only because that plan once named them.
+At activation, consume the merged capability contracts in `docs/compiler-design-overview.md`
+and the current compiler owners. Reconfirm Text signatures against the delivered numeric/Uint
+contract. Extend the same operation metadata, constant handles and native result receiver rather
+than restoring an old expression or tuple/carrier adapter. The prerequisite proves optional and
+multiple-result materialisation at the compiler boundary even though its five Text operations
+each return one result.
 
 ## Current surface
 

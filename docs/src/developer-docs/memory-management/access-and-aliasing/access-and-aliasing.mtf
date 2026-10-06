@@ -195,7 +195,7 @@ A mutable declaration initialized from a fresh value creates an independent muta
 - A copied cyclic graph must be allocated wholly into one declared region. Copying a cycle into an ordinary inferred region is invalid. Preserving internal alias topology does not override the rule that direct source-created cycles require one declared region.
 - The copied graph shares no mutable allocation with the source graph.
 - Immutable scalar storage may be physically reused only where identity and alias behaviour are unobservable.
-- A reactive source is copied as its current value, not as the same reactive source identity.
+- Copying through a Wire reads and copies the binding's current value. It does not copy or forward the binding capability.
 - External opaque handles and resources are non-copyable unless their semantic profile defines a genuine independent-copy operation.
 - A non-copyable graph member produces a source diagnostic. The compiler must not silently retain an alias.
 Expressions can construct new values from shared inputs: constructing a result doesn't implicitly copy the inputs. Template interpolation reads inputs and produces a new output string.
@@ -251,7 +251,7 @@ Fresh-rvalue materialisation applies only to ordinary mutable parameters. It doe
 
 Existing values stored in aggregates retain shared reference semantics by default. `copy` creates independent storage. At a proven final use, the compiler may realise the same source operation as an ownership transfer without changing source meaning.
 
-This applies to structs, choices, collections, maps, tuples, templates and other aggregates.
+This applies to structs, choices, collections, maps, templates and other supported aggregates.
 
 - Storing a value does not automatically make the aggregate an independent owner of a duplicated child.
 - Two aggregate fields may share one allocation.

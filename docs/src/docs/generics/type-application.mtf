@@ -1,5 +1,10 @@
 Concrete generic instances are created with `of` in type position.
 
+`of` takes its meaning from the head before it. This reference owns ordinary
+generic application. Compiler-owned `Wire` and `Route` heads instead describe
+parameter capabilities under the @https://github.com/nyejames/moth/blob/main/docs/src/docs/wiring/wiring.mtf (Wiring reference).
+They do not become ordinary type arguments or change generic nesting rules.
+
 ### Type application syntax
 
 [codeblock, $code("moth"):
@@ -54,7 +59,7 @@ A type alias may name a fully applied generic instance. The alias remains transp
 
 ### Constructed forms are compiler-owned
 
-Public `Option of T`, `Result of T, E`, `Option.Some` and `Result.Ok` are not language syntax. Options, fallible carriers and collections are compiler-owned constructed forms with their own source syntax.
+Public `Option of T`, `Result of T, E`, `Option.Some` and `Result.Ok` are not language syntax. Options and collections have their own compiler-owned type forms and source syntax. Function success slots and the separate error channel do not manufacture a semantic Result or tuple type.
 
 ### Concepts related to type application
 

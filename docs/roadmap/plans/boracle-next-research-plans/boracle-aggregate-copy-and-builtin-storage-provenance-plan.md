@@ -52,6 +52,7 @@ The active repository must already provide:
 - bounded operational graph copying
 - per-result preliminary provenance for calls that return values
 - exact call argument and result events
+- delivered dense HIR value/place extraction and native result channels, consumed without recursive-tree or tuple-result adapters
 - conservative collection and map place overlap
 - explicit borrow/lifetime ownership boundaries
 
@@ -64,7 +65,7 @@ The active repository must already provide:
 5. Copy destination ownership and copied-cycle placement remain lifetime-analysis decisions.
 6. Dynamic collection indexes and map entries remain conservative in the first slice.
 7. Distinct fixed struct fields are disjoint.
-8. Distinct tuple fields and fixed collection indexes may be proven disjoint only after their semantic categories are explicit.
+8. Distinct supported aggregate fields and fixed collection indexes may be proven disjoint only after their semantic categories are explicit. Native result positions are not tuple fields and do not independently prove disjointness.
 9. Builtin storage effects are compiler-known normalized facts. Boracle must not infer them from method names or rendered call labels.
 10. `get` creates a temporary shared alias. It is not a retained edge or REC count.
 11. `set`, structural mutation and `clear` require exclusive receiver access.
@@ -79,7 +80,6 @@ Refine projection categories where current HIR and types can prove the distincti
 ```rust
 pub(crate) enum ProjectionElem {
     Field(u32),
-    TupleIndex(u32),
     FixedCollectionIndex(u32),
     DynamicIndex,
     CollectionElement,
@@ -89,6 +89,8 @@ pub(crate) enum ProjectionElem {
 ```
 
 Exact variants may differ. Do not split categories that HIR cannot identify reliably.
+The compiler foundation owns mechanical extraction into these consumers. This research remains
+inactive until explicitly activated and owns only the stronger provenance and copy-graph reasoning.
 
 Copy graph concepts:
 
@@ -176,13 +178,13 @@ The normalized vocabulary should follow semantic categories already known by HIR
 - [ ] Inventory every producer and consumer of `ProjectionElem`.
 - [ ] Map HIR shapes for:
   - [ ] struct field
-  - [ ] tuple field
   - [ ] choice payload
   - [ ] fixed collection index
   - [ ] growable collection index
   - [ ] dynamic index
   - [ ] map entry
 - [ ] Inventory current aggregate child events.
+- [ ] Confirm native result positions remain result events, not aggregate projection categories or independent-storage proofs.
 - [ ] Inventory copy origin construction and every place that assumes one fresh outer origin is sufficient.
 - [ ] Inventory builtin collection and map effect metadata.
 - [ ] Identify operations currently lowered as generic calls.
@@ -216,7 +218,6 @@ Different fixed fields and indexes can be disjoint without proving anything abou
 - [ ] Update place interning and validation.
 - [ ] Update structural overlap:
   - [ ] different struct fields are disjoint
-  - [ ] different tuple fields are disjoint
   - [ ] different fixed collection indexes are disjoint
   - [ ] base versus child overlaps
   - [ ] dynamic indexes remain conservative
@@ -231,8 +232,7 @@ Different fixed fields and indexes can be disjoint without proving anything abou
 
 - [ ] two struct fields
 - [ ] nested fields
-- [ ] two tuple indexes
-- [ ] base and tuple index
+- [ ] reuse aliased native-result coverage to show result positions do not acquire aggregate-field disjointness
 - [ ] two fixed collection indexes
 - [ ] fixed versus dynamic index
 - [ ] growable element versus push
@@ -387,7 +387,7 @@ Finish with explicit decisions about fixed-place precision, copy graph semantics
 ### Work
 
 - [ ] Produce a promotion report for:
-  - [ ] tuple and fixed-index disjointness
+  - [ ] fixed-field and fixed-index disjointness
   - [ ] copy graph correspondence
   - [ ] storage-effect vocabulary
   - [ ] detached preliminary results

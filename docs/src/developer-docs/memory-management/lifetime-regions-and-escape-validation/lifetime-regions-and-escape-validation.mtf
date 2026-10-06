@@ -287,6 +287,11 @@ Function lifetime summaries cover:
 
 Multiple return values may alias one allocation when they remain under one caller lifetime owner.
 
+Summaries identify native success-result positions and the separate error outcome. A compiler
+expression or HIR ID names a local record, not an allocation family, and a new result position
+does not establish fresh or disjoint storage. Public summaries use stable semantic positions and
+identities rather than exporting those local indexes.
+
 A caller may place a fresh result root directly into a destination region only when every retained edge in the result is legal for that destination. An alias result remains tied to its existing lifetime owner. An independent acyclic result graph may enter an unrelated destination lifetime without retained edges to its source graph. A copied cyclic result graph must instead enter one declared region.
 
 ### Final result and retention summary ownership
@@ -415,13 +420,19 @@ Every real direct source-created retained-edge self-cycle or multi-family SCC st
 
 Last-use and future-use facts may prove that an edge is dead, that no source capable of recreating the edge survives, or that edge sets occur on disjoint paths or epochs. These facts can prevent a false cycle coexistence result, but they never reclaim a real retained-edge SCC.
 
-## Reactive and builder-owned lifetimes
-
-Reactive subscriptions are read-only dependencies, not active borrow lifetimes.
+## Retained captures and builder-owned lifetimes
 
 Builder-supplied page, mount, request, frame and arena roots are lifecycle inputs. They obey the same retained-edge rule as source regions. Builders supply lifecycle roots but cannot change source legality.
 
-Reactive storage that outlives a lexical function must still satisfy one lifetime owner and the stored-edge outlives rule. A collector-free path may use builder-owned lifecycle regions. A GC path may represent the same already-proven topology with ordinary reachability.
+Captured values and builder-owned state must satisfy one lifetime owner and the stored-edge
+outlives rule whenever they retain Moth references. A Route capture follows these ordinary rules.
+A Wire binding identity creates no subscription or lifetime extension. The bounded parameter
+contracts do not imply persistent observation or asynchronous delivery.
+
+A collector-free path may use explicit builder-owned lifecycle regions. A GC path may represent
+the same already-proven topology with ordinary reachability. Future Wiring observation and event
+lifecycles need their own accepted contract before they contribute retained edges or lifecycle
+roots. Reactivity V1 is not a required lifetime mechanism.
 
 ## External lifetime boundaries
 

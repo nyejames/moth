@@ -34,9 +34,11 @@ owns removing that suppression: when its diagnostic-layout phases complete, lowe
 the failures are gone at the default threshold. Historical records below that describe Clippy as
 red describe the pre-config state and must not be read as current blocking behaviour.
 
-After the Phase 3 closeout, this plan pauses through the roadmap order: MON
-syntax and nested const records, MON Rust tooling, Wiring V1, then native result slots and Core
-const evaluation, with Phase 4 resuming only after explicit reactivation.
+After the Phase 3 closeout, this plan remains paused. MON syntax, nested const records and MON Rust
+tooling are delivered. The next prerequisite work starts after the Dec contextual correction and
+Uint addition and delivers compact typed expressions, dense HIR, native success slots with separate
+error channels, Wiring foundations and the bounded Core evaluator checkpoint. Phase 4 then requires
+explicit reactivation and a fresh inventory of those delivered owners.
 
 ## Purpose
 
@@ -79,9 +81,12 @@ The implementation must converge on:
 - separate user-diagnostic, operational-infrastructure and compiler-bug lanes
 - isolated tooling workers that discard failed compiler state
 
-The diagnostics-improvement plan remains paused until this plan is complete. It resumes at its
-recorded Phase 4.1c slice after the layout migration, not during it; Phase 4 is the only phase
-that continues user-facing diagnostics work, and that continuation is preserved there.
+Broad diagnostics-improvement work remains paused until this plan is complete. The typed semantic
+expression and native result cutover owns the pending multiple-success postfix `?` reason,
+enclosing propagation-boundary facts and single-target/multiple-result rejection. Those narrow
+semantic requirements land before this layout work. After completion, diagnostics work refreshes
+its inventory and resumes at catch-recovery type context, preserving the earlier delivered reasons
+instead of implementing them again.
 
 ---
 
@@ -115,15 +120,15 @@ ACTIVE_PLAN:
   live/peak bytes for clean, warning, diagnosed, generic-heavy and early-malformed smokes.
 - Closeout status: R3 diagnostic projection, R4 preparation ownership and R5 evidence disposition
   are complete; deferred large-error carriers remain owned by later diagnostic-layout phases.
-- NEXT_SUBSTEP: remain paused while MON syntax, MON Rust tooling, Wiring and native
-  result-slot/Core const-eval checkpoints land, then explicitly reactivate Phase 4.
+- NEXT_SUBSTEP: remain paused until the compact typed-expression, dense-HIR, native result-channel,
+  Wiring foundation and bounded Core evaluator capabilities are delivered, then explicitly
+  reactivate Phase 4 with a fresh diagnostic and lifetime inventory.
 - Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
   `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`, `98040fbd0`, `fbbe0119a`, `6309adf6d`,
   `4cfd9d492`.
-- Non-goals: diagnostic compact-record work; package implementation; MON syntax and nested const
-  records, MON Rust tooling, Wiring V1 and native result-slot/Core const-eval
-  implementation before their owning roadmap checkpoints; Phase 4 reactivation before the explicit
-  gate.
+- Non-goals before reactivation: diagnostic compact-record work, package implementation and the
+  prerequisite typed-expression, dense-HIR, native result-channel, Wiring and Core evaluator
+  implementation. No prerequisite merge automatically activates Phase 4.
 
 Phase 1 code closeout is `3c9c776a8`; Phase 2 continuation acceptance is `c17672bb5`, with
 diagnostic correction `e7d9a7ab5`; Phase 3F5/3G acceptance is `98040fbd0`, implementation
@@ -146,10 +151,9 @@ CURRENT_WORKSPACE_STATE:
   the Phase 3 checkpoint's `CompilerMessages` result boundaries, including `Err` variants at least
   128 bytes. The later diagnostic-layout phases own the compact representation; no boxing or lint suppression is
   accepted, and fresh validation is required when the next implementation checkpoint activates.
-- After Phase 3 closeout, this plan pauses through the roadmap order: MON
-  syntax and nested const records, MON Rust tooling, Wiring V1, then native result slots and Core
-  evaluation. Phase 4 resumes only after this branch is rebased and Phase 4 is explicitly
-  reactivated (see the Phase 4 reactivation gate in the Phase 4 section).
+- After Phase 3 closeout, this plan remains paused through the delivered semantic-foundation
+  capabilities named in the Phase 4 reactivation gate. Phase 4 resumes only after rebasing onto
+  those capabilities, refreshing the diagnostic inventory and explicit reactivation.
 
 HISTORICAL_PHASE_3_MERGE_STATE:
 - branch: `diagnostic-data-layout-changes`
@@ -259,7 +263,8 @@ BLOCKERS / RISKS:
 
 - Phase 3 is accepted at implementation checkpoint `6309adf6d` with R5 closeout checkpoint
   `4cfd9d492`; the post-Phase-3 compiler tidy-up is also accepted on main.
-- User-facing diagnostic improvement remains paused until the Phase 4 reactivation gate is satisfied.
+- Broad user-facing diagnostic improvement remains paused until this migration completes. The
+  earlier native semantic cutover owns its transferred result-arity and propagation-context fixes.
 - release/profiling currently use aborting panics, which conflicts with thread-isolated tooling recovery.
 - compact-ID merge order must remain deterministic across file and module parallelism.
 - The first source-freeze experiment was deliberately rejected after mapping the final owner
@@ -298,8 +303,8 @@ DOCS_IMPACT:
   exception
 - authorised docs updates for this 3H closeout: the plan, the architecture status, the compiler
   implementation overview and the benchmark evidence
-- next action: preserve the MON syntax, MON Rust tooling, Wiring and native result-slot/Core
-  const-eval sequence before Phase 4
+- next action: preserve the prerequisite typed-expression, dense-HIR, native result-channel,
+  Wiring foundation and bounded Core evaluator capabilities before Phase 4
 - `R10a`–`R10d` remain prerequisites for their owning later phases (see the integrated list in the
   Phase 1 standing-contracts section).
 
@@ -456,8 +461,9 @@ Test Suite Hardening was delivered in `03168082d`. This plan was the active repr
 through Phase 3, with implementation checkpoint `6309adf6d` and R5 closeout checkpoint `4cfd9d492`.
 The canonical `SourceTokens` owner, bounded parser views, typed payload stores and preparation
 lifecycle are complete; Phase 3 is accepted with its explicitly recorded inherited generic-scaling
-exception before the plan pauses through the roadmap sequence toward Phase 4. The diagnostics plan
-remains paused until that gate.
+exception before the plan pauses through the roadmap sequence toward Phase 4. Broad diagnostic
+improvement remains paused until this migration completes. The native semantic cutover separately
+owns result-arity and propagation-context correctness needed before the layout migration.
 
 ### Approved private discovery-finalization contract
 
@@ -961,16 +967,24 @@ checkpoint-scoped as described above; the generic scaling exception and deferred
 
 ### Phase 4 reactivation gate
 
-Phase 4 starts only when all of the following are true. Until then the plan pauses after accepted
-Phase 3 and the completed post-Phase-3 tidy-up through the roadmap order: MON syntax and nested const
-records, MON Rust tooling, Wiring V1, then native result slots and Core const evaluation.
+Phase 4 starts only when all of the following are true. Until then the plan remains paused after
+accepted Phase 3 and the completed post-Phase-3 tidy-up. MON syntax, nested const records and MON
+Rust tooling remain delivered prerequisites. The following capabilities are delivered after the
+Dec contextual correction and Uint addition, in their owning semantic work.
 
-- [ ] rebase `diagnostic-data-layout-changes` onto a main that contains the accepted MON syntax and
-  nested const records checkpoint, then the accepted MON Rust tooling checkpoint, then the accepted
-  Wiring V1 checkpoint and then the accepted native result-slot and Core const-eval checkpoint
+- [ ] rebase the implementation branch onto a main containing compact typed-expression ownership
+  and lifetime boundaries, dense HIR, native zero/one/multiple success slots with a separate error
+  channel, retired Reactivity V1, accepted Wire/Route parameter foundations and the bounded Core
+  evaluator checkpoint
+- [ ] verify the result-arity and propagation-context diagnostics transferred into that semantic
+  cutover are delivered and retain one implementation and primary test owner
+- [ ] explicitly reactivate Phase 4 against those delivered capabilities. Their merge alone does
+  not activate this plan or claim its 32-byte record and 48-byte draft model is implemented
 - [ ] re-run the owning validation gate after the rebase
 - [ ] fresh inventory of diagnostic producers, result boundaries, warnings, type environments and
-  generated functions as they exist after those semantic checkpoints merged
+  generated functions as they exist after those semantic checkpoints merged. Include compact
+  expression-store disposal, TIR view lifetimes, generated donor/requester domains and native
+  signature/result-shape facts. Do not revive removed expression or transport-type owners
 - [ ] stale name refresh: update schema inventories and slice wording for any diagnostic family,
   result shape or owner renamed or moved by the rebase
 - [ ] every locked architecture decision in `docs/compiler-data-layout-design.md` is preserved.
@@ -1038,13 +1052,17 @@ this slice defines it before 4D.
   read-only view from `datatypes/display.rs` so live and frozen types share one formatter
 - [ ] **4C2 — compact store:** implement `TypeDisplayId`, fixed records and typed child ranges for
   every currently rendered builtin, nominal, choice, generic, function, option, collection, map,
-  tuple/multi-value, fallible and external shape
+  genuine aggregate and external type. Represent callable zero/one/multiple success slots and
+  independent error channels as signature facts with typed slot ranges, without recreating a tuple
+  or fallible-carrier type for transport
 - [ ] **4C3 — snapshot algorithm:** while the producing `TypeEnvironment` is live, collect
   schema-marked `TypeId`s, reserve before recursion, copy only transitive display/query facts and
   rewrite draft words to batch-local `TypeDisplayId`s before the environment can be released
 - [ ] **4C4 — type-lifetime proof:** prove the snapshot algorithm captures every schema-marked `TypeId`
   while its `TypeEnvironment` is live; leave prepared-batch stage integration to 4D/4E, after its
-  contract exists
+  contract exists. Earlier expression-store disposal does not prove the complete environment can
+  be released. Cover rendering after expression/TIR disposal and preserve every still-live report
+  dependency until this migration captures it
 - [ ] **4C5 — equivalence and dedup policy:** add exhaustive live/snapshot formatting and
   query-equivalence tests; a valid frozen report never falls back to a raw internal ID.
   `TypeId` -> `TypeDisplayId` memoization is mandatory; cross-identity structural deduplication is
@@ -1475,8 +1493,9 @@ For each experiment:
 - [ ] remove duplicate deferred bullets owned by another plan
 - [ ] update the existing Structured diagnostics matrix row to the implemented report/failure
   contract
-- [ ] unpause the user-facing diagnostics improvement work immediately after this plan, preserving
-  its final continuation at its recorded Phase 4.1c checkpoint
+- [ ] unpause broad user-facing diagnostics improvement immediately after this plan, refresh the
+  inventory and resume at catch-recovery type context. Confirm the earlier result-arity and
+  propagation-context capabilities remain delivered instead of scheduling their old slices again
 - [ ] refresh its paths, capsule and next semantic slice against the schema/store APIs
 - [ ] remove old payload, label, token and type-context assumptions from that plan
 - [ ] require future diagnostics to fit the 32-byte schema and side-store policy

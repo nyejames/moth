@@ -983,7 +983,7 @@ A route parameter accepts only a direct choice constructor or an unchanged compa
 
 These contracts annotate parameters only, never locals, fields, choice payloads, collections/maps, aliases, defaults or return slots. Normal access and lifetime rules apply. Routes cannot be invoked, composed, compared, serialised or sent through channels. Wiring adds no automatic observation, template updates or event delivery.
 
-See @https://github.com/nyejames/moth/blob/69313d8896cca28b4174f1935428e5ceae15b234/docs/roadmap/plans/wiring-v1-cleanup-and-foundations.md (Wiring contract).
+See @https://github.com/nyejames/moth/blob/main/docs/src/docs/wiring/wiring.mtf (Wiring contract).
 
 ## Dependencies and aliases
 
@@ -1202,6 +1202,6 @@ See @../packages/core/io (Core IO) and @../packages (Foreign binding contracts).
 
 ## Language boundaries and further reference
 
-Moth has no general closures/function values, macros, reflection/type values or operator overloading. For choice narrowing, nested payload patterns, recursive choices and async/channel design, consult @../design-scope (Design scope) and the @https://github.com/nyejames/moth/blob/69313d8896cca28b4174f1935428e5ceae15b234/docs/roadmap/plans/wiring-v1-cleanup-and-foundations.md (Wiring and channel contract).
+Moth has no general closures/function values, macros, reflection/type values or operator overloading. For choice narrowing, nested payload patterns, recursive choices and async/channel design, consult @../design-scope (Design scope) and the @https://github.com/nyejames/moth/blob/main/docs/src/docs/wiring/wiring.mtf (Wiring and channel contract).
 
 For exact rules beyond this cheatsheet, start with @../language-overview (Language overview), @../memory (Memory) and the topic links above.

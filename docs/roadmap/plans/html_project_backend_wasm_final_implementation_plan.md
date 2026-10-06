@@ -8,7 +8,7 @@ Implement the HTML project builder mixed JavaScript and Wasm backend strategy, f
 
 - Status: queued.
 - Current slice: activation inventory not started.
-- Blockers: delivered canonical module/link inputs, unified numeric semantics and the required physical-layout/runtime capabilities.
+- Blockers: delivered canonical module/link inputs, dense HIR with native result channels, unified numeric semantics and the required physical-layout/runtime capabilities.
 - Next action: refresh owners and record the activation revision and validation results in local working notes.
 
 ## Hard prerequisites
@@ -16,7 +16,14 @@ Implement the HTML project builder mixed JavaScript and Wasm backend strategy, f
 - delivered final TIR one-store/exact-view architecture
 - canonical module compilation with immutable artefacts and graph-aware backend handoff
 - per-function link facts and target validation roots
+- dense HIR values and places, native zero/one/multiple success slots and separate error CFG channels, with the supported JS/Wasm consumers migrated
+- removal of Reactivity V1 without a replacement observation or scheduler runtime
 - unified numeric types with a compilation-wide NumericProfile, fixed scalar JS/Wasm execution, runtime Byte and U32 Error.code
+
+These are capability gates, not a requirement to wait for every later optimisation in the compiler
+foundation work. Confirm the required checkpoints have merged and refresh actual target support at
+activation. This plan retains ownership of full mixed-target, aggregate, memory and structured Wasm
+lowering. A completed expression/result cutover does not claim those capabilities are delivered.
 
 ## Required authority documents
 
@@ -79,8 +86,26 @@ Consume these completed compiler/build inputs. The referenced permanent document
 - explicit root-only HTML entry metadata and purpose facts from compiled module metadata (see `docs/build-system-design.md` "Root metadata and purpose directives" and "Entry candidates and selection")
 - validated `$layout` representation contracts when delivered. ABI and struct-lowering phases honour offsets, alignment and those contracts without inventing a new nominal type category
 - the early-selected NumericProfile, canonical numeric identities, scalar size/alignment/stride facts and explicit numeric failure/conversion HIR
+- dense HIR stores and typed ranges, native result shapes and the final success/error CFG after private failure-channel convergence
+
+### Expression and result handoff
+
+The compiler foundation supplies validated HIR. Its local IDs and typed ranges belong to that
+module or generated owner and cannot become cross-module ABI identity. Derived structured views
+refer to those records or project the required facts once. They do not rebuild an owned recursive
+semantic expression tree or retain AST/TIR stores after the compiler handoff.
+
+Calls, returns and joins already carry native result positions. Success locals exist only on the
+success edge and the error value only on its error edge. Backend arrays, records or envelopes may
+encode a physical ABI where needed, but never become synthetic semantic tuple or fallible types.
+Preserve exactly-once producer evaluation and evaluate all receiving RHS values before assignment.
+Slot identity alone proves no fresh allocation, disjointness or ownership transfer.
 
 ### Numeric handoff
+
+Refresh this inventory against the completed Dec correction and Uint addition. Consume their
+canonical numeric identities, profile rules and target-support decisions directly. Do not infer
+unsigned support or change a public signature from the physical carrier of a signed sibling.
 
 Consume the scalar implementation already delivered by the numeric checkpoint:
 I8/U8/Byte use one memory byte, I16/U16 two, I32/U32/F32 four and I64/U64/F64
@@ -184,7 +209,7 @@ Each phase must leave one coherent path. Reference `docs/build-system-design.md`
 
 Context: refresh all code anchors and establish a test baseline before the structural refactor.
 
-- Confirm final TIR, canonical module compilation and the numeric scalar checkpoint are accepted.
+- Confirm final TIR, canonical module compilation, the dense HIR/native result checkpoint and the numeric scalar checkpoint are merged.
 - Confirm the backend consumes only neutral owned runtime template payloads and ordinary HIR string operations. No TIR identity, view, overlay or preparation state reaches link planning or lowering.
 - Record `git rev-parse HEAD`, branch and `git status --short` in local working notes.
 - Inventory current `BackendBuilder::build_backend`, `HtmlProjectBuilder`, JS backend, Wasm backend, LIR, emission and runtime owners.
@@ -258,6 +283,7 @@ Context: replace flat basic-block LIR with structured, emission-shaped IR.
 See `docs/build-system-design.md` "Runtime and memory" for the LIR contract.
 
 - Add a backend-neutral structured HIR view derived for structured lowerers (cached as derived data only).
+- Consume dense value IDs and child/place ranges directly while preserving the delivered native success/error CFG. The derived view does not own expression semantics or a second value graph.
 - Replace `WasmLirBlock` flat block model with structured body-tree LIR.
 - Remove `Jump` and `Branch` terminators from final LIR.
 - Make Wasm LIR structured and backend-owned. It is not a second frontend semantic authority.
@@ -270,7 +296,7 @@ Context: consume the delivered scalar ABI and complete aggregate/runtime lowerin
 
 - Remove any remaining unconditional Int-as-I64 bridge. Int uses i32 or i64 according to NumericProfile. Keep I64/U64 and legitimate 64-bit formatting support.
 - Consolidate the profile-Int `StringFromI64` instruction into semantic numeric formatting when general scalar formatting lands. Preserve its complete signed-64-bit decimal helper and direct profile-Int32 input adaptation rather than replacing every 64-bit formatter with `StringFromI32`.
-- Remove `Void` as a real ABI type. Represent no result as `results: []`.
+- Preserve the delivered no-result contract as an empty result list. Extend the supported aggregate and cross-target ABI from native zero/one/multiple success slots plus the separate error channel, without reintroducing `Void` or a semantic carrier.
 - Consume scalar ABI mappings and complete mappings for handles, strings, collections, structs, choices, options and errors.
 - Consume compiler-owned physical struct layouts: field offsets, alignment, scalar widths/strides and representation constraints. Lower construction, field access, mutation and ownership hooks from those facts.
 - Honour compiler-owned `$layout` contracts when present. Do not manufacture a new nominal type category, a universal C ABI or SoA layout here.
@@ -372,6 +398,9 @@ Cover:
 - WIT components remain separate external bindings and `MothSource` packages are not reclassified
 - generated JavaScript companions
 - structured Wasm LIR emission
+- native zero/one/multiple results across selected-function wrappers, success/error joins and returns, with undefined success slots inaccessible on error paths
+- exactly-once calls and RHS-before-assignment order, including aliasing results
+- direct dense HIR consumption with no AST/TIR lifetime extension or owned semantic-tree reconstruction
 - imported runtime memory
 - explicit selected-function, import, export, capability and layout plans
 - fixed integer/float and Byte wrapper parity, including I64/U64 extremes, F16 rounding and every numeric profile

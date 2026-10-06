@@ -29,6 +29,20 @@ This plan owns the detailed compiler and runtime contract for Retained Edge Coun
 
 Physical layout refinement may later consume validated `$layout` representation constraints. REC does not define those contracts; the later struct-layout TODO plan and language authority do.
 
+## Compiler foundation prerequisite
+
+Consume the merged dense HIR and native result-channel capabilities before implementation. The
+typed semantic expression foundation owns that representation cutover and the mechanical borrow
+and lifetime consumer migration. REC does not repeat it or retain tuple/fallible wrapper adapters.
+These capabilities do not activate REC: complete lifetime topology, retained-edge effects,
+target-aware physical planning and explicit roadmap activation remain prerequisites.
+
+Local expression and HIR IDs name records in one compiler owner. They are not allocation-family
+identities, persistent-edge obligations or runtime handles. Native success-slot positions and the
+separate error channel identify outcomes without proving fresh or disjoint storage. Consume the
+owning analysis's provenance and outcome effects, preserving result aliases and conservative
+unknowns until that analysis resolves them. Only stable semantic summaries cross module boundaries.
+
 ## Purpose
 
 Moth statically validates one legal lifetime topology for every accepted allocation. Full-memory-control release backends lower that topology without a tracing collector. Last-use analysis, affine cleanup responsibility and inferred regions handle most values without runtime alias counting.
@@ -1443,6 +1457,7 @@ REC planning requires precise semantic effects before any counter can be emitted
 - [ ] Define retention cardinality, including `RuntimeMany`.
 - [ ] Add `DetachedStoredValue` provenance for container-detached results.
 - [ ] Add result-to-result family alias relationships where missing.
+- [ ] Key result effects by the delivered native result positions and CFG outcomes. Do not count a result position or compiler node ID as a retained edge.
 - [ ] Add retained receiver and parameter relationships.
 - [ ] Preserve successful and error-path retention effects as separate exits.
 - [ ] Add cleanup-frontier candidate facts.

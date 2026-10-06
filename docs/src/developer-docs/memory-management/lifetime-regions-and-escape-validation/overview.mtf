@@ -4,7 +4,7 @@ One lifetime owner, retained-edge legality, escape validation and region topolog
 
 ## Contract
 
-- Input: validated HIR, borrow facts, function lifetime/effect summaries, external boundary profiles, reactive observability facts, and builder-supplied lifecycle roots
+- Input: validated HIR, borrow facts, function lifetime/effect summaries, external boundary profiles and builder-supplied lifecycle roots
 - Output: immutable lifetime-region, allocation-family, retained-edge, escape, cycle, outlives, non-lexical interval, retained-edge liveness and cleanup-frontier candidates, plus semantic commit points, committed retained-edge states and the may-coexist edge relation
 - Decides: semantic lifetime ownership and topology legality
 - Must not decide: source access syntax, HIR shape, target partition, physical memory strategy, handle-tag encoding, REC selection, or backend lowering

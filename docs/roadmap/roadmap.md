@@ -15,19 +15,15 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md). Partially complete and underway. **ACTIVE IN PARALLEL.**
 
-- [Boracle research plans](./plans/boracle-next-research-plans): Will be ongoing in parallel on its own branch `boracle-research` after native result slots plan completes. **PAUSED**
+- [Boracle research plans](./plans/boracle-next-research-plans): Resume on `boracle-research` only after merged dense HIR/native result-channel capabilities and the explicit research activation gate. Mechanical representation/extraction migration belongs to the compiler foundation, not a new precision experiment. **PAUSED**
 
 ## Sequenced work
 
-- [HIR/capacity heuristics refactor](./plans/hir-dense-storage-and-capacity-foundations-plan.md)
+- [Typed semantic expressions and dense compiler foundations](./plans/typed-semantic-expressions-plan.md) - **QUEUED.** Start immediately after the ongoing Dec contextual-materialisation correction and the separately planned Uint addition have merged. Consolidates the outstanding dense HIR/capacity, Wiring V1 and native result/Core constant-evaluation work. Retire Reactivity V1 first, investigate compact layouts and lifetimes, then deliver dense HIR, the coupled typed-expression/native-result cutover, reduced type/fold work, the bounded Wire/Route foundation and trusted Core evaluation. These are named capability checkpoints, not a claim that the superseded plans were implemented. Eligible package work stays active in parallel and consumes its specific merged prerequisites.
 
-- [Wiring V1: reactivity removal and semantic foundations](./plans/wiring-v1-cleanup-and-foundations.md) - Run on its own branch after delivered MON syntax/Rust tooling and the numeric checkpoint, and before the native result-slot checkpoint. Merge the accepted work before data-layout Phase 4 resumes.
+- [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Resume Phase 4 onward on `diagnostic-data-layout-changes` only after explicit reactivation. Consume merged MON/numeric prerequisites including Dec and Uint, compact typed expressions, dense HIR/native result channels, V1 retirement, the bounded Wiring foundation and Core constant evaluation. Run the fresh owner/lifetime inventory, verify transferred diagnostic capabilities and preserve the locked packed-span and diagnostic decisions. The plan's reactivation gate remains authoritative.
 
-- [Native result slots and Core constant evaluation](./plans/native-result-slots-and-core-const-eval.md) - Run after the Wiring checkpoint and before data-layout Phase 4. Package implementation that requires these capabilities remains blocked until they are merged.
-
-- [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Resume Phase 4 onward on `diagnostic-data-layout-changes` only after the plan is explicitly reactivated: rebase onto a main containing the accepted MON syntax/Rust tooling, unified numeric semantics, Wiring V1 and then native result slots/Core const evaluation, run the fresh reactivation inventory, refresh stale names and preserve the locked architecture decisions. The reactivation gate in the plan is the authority.
-
-- [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Paused until the diagnostics and tokens layout plan completes; resume at Phase 4.1c afterward
+- [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Paused until diagnostic layout completes. Native result arity and the narrow propagation-context work move into the earlier typed-expression cutover. Resume with a fresh inventory and the remaining catch-recovery diagnostics, without rebuilding those transferred fixes.
 
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
 
@@ -128,9 +124,12 @@ complete semantic key/invalidation model before any cache or scheduling implemen
 The final TIR completion plan remains the historical architecture source. The initial frontend arena
 and semantic-invariant optimisation programme is complete; its evidence remains in
 `benchmarks/frontend-optimization-results.md`, and the progress matrix continues to report the
-implemented surface as `Partial`. The remaining expression-scratch and HIR/borrow-fact
-compaction investigations are deferred until profiling shows material pressure and have no current
-implementation plan. Create a focused plan only when that evidence exists.
+implemented surface as `Partial`. Semantic expression/scratch separation and dense HIR
+expression/place storage now belong to the queued compiler foundation above. That work also owns
+unchanged-root reuse, constant handoffs and repeated type/fold work at the migrated boundaries.
+The deferred post-TIR owner retains independent cache, key, source-span text and scheduling
+investigations, refreshed against the delivered representation. Broad borrow-fact compaction and
+unrelated parser/statement storage changes still require evidence and their own bounded scope.
 
 ## Code-block highlighting follow-ups
 
@@ -166,7 +165,7 @@ performs semantic symbol resolution or syntax diagnostics.
 The last recorded replay sweep, at checkpoint `99ab43de2`, covered 1068 sources and left two failures. The current `tests/cases/` corpus has changed since that checkpoint, so later sources are unmeasured and these counts are historical rather than a current sweep. Both recorded failures are problem-extraction defects rather than oracle defects, and both also fail the `problem` dump, so extraction and validation reject them before the oracle runs. The subcommand exists only under the `boracle` feature, so each reproduction below runs as `cargo run --features boracle -- boracle <source> --dump problem`.
 
 - A `match` with guards can produce unsorted branch targets. The source is `tests/cases/result_match_guard_propagation_order/input/@page.moth`, and validation fails with `terminator target blocks references must be strictly sorted and unique: BlockId(12) then BlockId(7)`, so the builder's target mapping does not preserve the ascending unique order that problem validation requires.
-- Runtime reactive `if` metadata can leave a local unresolved. The source is `tests/cases/runtime_if_reactive_metadata_preserved/input/@page.moth`, and extraction fails with `unknown HIR local LocalId(1)`.
+- Runtime reactive `if` metadata can leave a local unresolved. The source is `tests/cases/runtime_if_reactive_metadata_preserved/input/@page.moth`, and extraction fails with `unknown HIR local LocalId(1)`. Reactivity retirement will classify this historical case with its owner: remove V1-only coverage and preserve any surviving control-flow contract in ordinary source coverage, rather than repair an obsolete observation model.
 
 ## Boracle reduction reachability
 
@@ -184,7 +183,7 @@ No plan owns this. The bounded operational oracle plan deliberately excluded CLI
 - explicit output transformation pipeline syntax
 - cross-page browser chunk sharing beyond physical variant reuse
 - direct normal-sibling dependencies if real project evidence justifies them
-- broader reactivity source design
+- later Wiring observation, route application and UI/runtime design beyond the bounded foundation
 - additional target builders and capability surfaces
 - profiling-backed frontend optimisations and the deferred post-TIR template investigations linked above
 - future Component Model integration
@@ -204,7 +203,12 @@ Permanent owners: `docs/src/docs/directives/directives.mtf`, `docs/src/docs/desi
 
 ## Wiring follow-ups
 
-Wiring replaces Reactivity V1. The queued foundation removes reactive bindings, subscriptions and implicit live-string behaviour. Later observation, route application and UI runtime work require explicit accepted contracts. The former reactivity follow-up list does not authorise restoring `$bind`, reactive binding modes or subscription expansion.
+Wiring replaces Reactivity V1. The queued compiler foundation removes reactive bindings,
+subscriptions and implicit live-string behaviour before expression storage changes. It implements
+the accepted parameter identity and constructor-route contracts only after native result channels
+and compact typed nodes are in place. Later observation, route application and UI runtime work
+require their own accepted contracts. The former reactivity follow-up list does not authorise
+restoring `$bind`, reactive binding modes or subscription expansion.
 
 ## Hash map follow-ups
 

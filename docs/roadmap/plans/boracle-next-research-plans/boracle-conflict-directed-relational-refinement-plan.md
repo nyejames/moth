@@ -67,6 +67,7 @@ The repository must already provide:
 - bounded operational checking and replay
 - deterministic conflict witnesses
 - exact event boundaries
+- delivered dense HIR/native result extraction, preserving event order and conservative alias facts without activating this experiment
 - mixed alias/slot origin alternatives
 - modular last-use analysis
 

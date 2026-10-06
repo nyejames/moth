@@ -158,14 +158,14 @@ Template-specific directive meanings stay in
 - `docs/src/docs/traits/core-cast-traits.mtf`
 - `docs/src/docs/traits/trait-design-scope.mtf`
 
-### Reactivity
+### Wiring
 
-- `docs/src/docs/reactivity/reactive-sources.mtf`
-- `docs/src/docs/reactivity/subscriptions.mtf`
-- `docs/src/docs/reactivity/reactive-parameters.mtf`
-- `docs/src/docs/reactivity/mutation-and-invalidation.mtf`
-- `docs/src/docs/reactivity/runtime-sinks.mtf`
-- `docs/src/docs/reactivity/reactivity-scope.mtf`
+- `docs/src/docs/wiring/wiring.mtf`
+
+This reference owns head-directed `of`, named-binding wires, contextual
+constructor routes, capability restrictions and the channel-construction
+boundary. Ordinary type, call, choice and memory contracts still apply outside
+its explicit parameter-context rules.
 
 ### Project structure
 
@@ -204,8 +204,9 @@ Template-specific directive meanings stay in
 - `docs/src/docs/markdown/rendering-contract.mtf`
 - `docs/src/docs/markdown/choosing-a-content-format.mtf`
 
-Each unsuffixed file has a paired `-basic.mtf` teaching version. Each public
-route imports both levels.
+Public routes import paired Basic teaching and unsuffixed reference levels.
+The accepted Wiring reference precedes its public teaching rollout. Its queued
+implementation work owns the matching Basic pages and website composition.
 
 ## Public documentation
 

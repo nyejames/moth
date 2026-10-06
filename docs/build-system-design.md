@@ -36,6 +36,7 @@ Use `index.md` and owning module entry points for code locations. Source-path in
 - Stage 0 owns source ownership, canonical project/package graphs, legal topology and deterministic scheduling. Each physical module compiles once per boundary.
 - Compiler-owned preparation retains syntax for graph construction and later binding. Build code neither parses a competing grammar nor assembles semantic stages.
 - Published modules, interfaces and generated sidecars are immutable. Diagnosed modules expose no partial interface. Builders receive success-only linkable inputs.
+- Compiler expression stores end at their owning semantic handoff. Build aggregation consumes owned values and validated artefacts with their required identity contexts, never AST expression IDs or live parser/TIR authority.
 - Entry activation, package assembly and target partitioning consume compiled facts without deferred source compilation.
 - Moth-source packages remain Moth-linked when emitted as Wasm. WIT supplies foreign bindings, not native semantic interfaces.
 - Physical file references establish conservative graph/input membership before executable selection. Exact output liveness does not change that membership.
@@ -65,6 +66,8 @@ Builder globals express stable semantic configuration. They never reveal a physi
 `config.moth` is one build-owned compile-time source, not a semantic module. It creates no `start`, HIR, runtime artefact or package interface. Bootstrap creates no config dependency graph, companion source set, package resolver or second project scan.
 
 The build system calls the named compiler config service with the source, capability surface and numeric profile. It consumes folded directive arguments, input-contract results, key locations and diagnostics, then applies validated project/builder settings. The compiler alone sequences preparation and folding.
+
+Completed config values use the compiler's ordinary constant projection. Applying them does not retain or reconstruct an expression graph. Source-span construction remains live for the later build validations described below, independently of the expression store's lifetime.
 
 The source identity is registered upfront. Its live span owner survives config application and output-path validation on success and diagnosis, then freezes at the last producer boundary. The compiler/data-layout authorities define that handoff.
 
@@ -447,6 +450,8 @@ The accepted static MON builder direction consumes the standalone codec and emit
 
 Each module receives an immutable view of published generated identities/summaries. The compiler returns its completed generated delta atomically with the module result. Build code publishes, stores, places and reuses complete sidecars without mutating base/generated HIR or installing summaries.
 
+The compiler completes native success/error channels, private failure rewrites and their final link-fact refresh before handing over the result. Canonical parameter contracts distinguish ordinary values, wires and constructor routes across publication. Module-local expression IDs, binding identities and capture storage never become build-level or cross-module keys. Frozen generic syntax/context remains compiler-owned and can support later materialisation after an earlier validation body's expression storage has been released.
+
 Nested requests converge within the compiler transaction. They create no extra source jobs or wave edges. Cross-package instances belong to the consuming boundary and retain numeric-profile compatibility. Active-request selection, semantic deduplication and diagnosed transaction rollback follow the compiler authority, not a build-side post-filter.
 
 ## Entry and package link planning
@@ -495,7 +500,7 @@ For each validated `$page` entry, the builder plans:
 4. Runtime fragment publication in source order, only after that invocation succeeds.
 5. Route HTML and companion outputs from folded page metadata and directory routes.
 
-This is generated runtime behaviour, not execution during semantic compilation. Plain JavaScript and mixed output share fragment/document assembly. Ordinary strings/templates carry no hidden subscriptions, reactive mount state or automatic rerendering.
+This is generated runtime behaviour, not execution during semantic compilation. Plain JavaScript and mixed output share one ordinary fragment insertion contract. Templates produce String values and retain structural resource/site-root pieces until their normal output context resolves them. Fragment insertion grants no persistent Wiring observation or event-delivery lifecycle.
 
 The generated caller branches on `start`'s typed outcome. Only success publishes that invocation's runtime fragments. Failure leaves static HTML in place and does not undo earlier explicit IO. Release output shows a fixed safe notice, never application `Error` markup. Development presentation stays local to the failing invocation and does not fail the completed compilation or other entries.
 
