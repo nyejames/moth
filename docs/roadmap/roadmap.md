@@ -33,6 +33,8 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - [HTML page directives and runtime title](./plans/html-page-directives-and-runtime-title-plan.md) - Queued: root-only $page, explicit root purposes, metadata cutover and browser title capability
 
+- [Constraints foundations and fast math](./plans/constraints-and-fast-math-plan.md) - Queued: compiler-owned `$fast_math`, transitive `$safe_math` and `$infallible`, a universal numeric backend contract V1, selected fast Core Math helpers and the corresponding documentation and optimisation work. Ordinary arithmetic remains checked. Fast arithmetic has specified wrapping and trapping while preserving numeric value invariants.
+
 - [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md) - Queued after shared MON syntax and unified numeric semantics, including fixed widths, Byte and Dec. Support recursive local anonymous records through ordinary hidden nominal structs, with explicit nominal children and transitive escape checks.
 
 - [Never return contracts](./plans/never-return-contract-plan.md)
@@ -276,3 +278,20 @@ The [package dependency declarations and package-manager foundations plan](./pla
     4. Lead dependencies do not meet these criteria and there is additional friction and checks before they can be added to a project.
 - Lead dependencies may not be eligible for the future official Moth package registry and will not be supported automatically by the package manager.
 - The package manager should be extremely strict about security and other things before something can become an official "package". Maybe the source code must pass a series of quality checks and be run through various bits of compiler tooling before it can be added.
+
+## Possible additional constraints
+
+The constraints foundation deliberately implements only `$fast_math`, `$safe_math` and
+`$infallible`. It need not grow into a general effects system. Future restrictions require
+their own design and cost justification, not reserved syntax or speculative compiler machinery.
+
+Explore `$pure`, `$no_io` and possibly `$no_wrap` later. A no-wrap restriction could allow fast
+trapping arithmetic while prohibiting possible modular overflow. Its exact proof rules are open.
+Purity needs a contract for observable mutation, ambient reads and nondeterminism. Isolate
+side-effect origins in designated compiler- or builder-provided packages with explicit trusted
+contracts. Arbitrary opaque foreign code cannot establish absence guarantees. Moth-source
+packages remain analysable through ordinary canonical summaries.
+
+The progress matrix should retain a labelled future-design reminder, separate from accepted
+implementation rows. These candidate names are not implemented, accepted directive syntax or
+permissions granted to source. Preserve the restriction-oriented name **constraints**.
