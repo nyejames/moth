@@ -49,6 +49,7 @@
   --moth-code-function: #82aaff;
   --moth-code-directive: #bcde8a;
   --moth-code-contract: #f5646b;
+  --moth-code-error: #ff5252;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -146,6 +147,9 @@ body {
 }
 .moth-code-contract {
   color: var(--moth-code-contract);
+}
+.moth-code-error {
+  color: var(--moth-code-error);
 }
 
 /* BASIC CSS RESET STUFF */
@@ -1071,7 +1075,7 @@ value <span class='moth-code-operator'>=</span> <span class='moth-code-function'
 <span class='moth-code-delimiter'>;</span>
 
 <span class='moth-code-contract'>FALLIBLE_TEXT</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-function'>try_text</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span>
+    <span class='moth-code-function'>try_text</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>, <span class='moth-code-type'>Error</span><span class='moth-code-error'>!</span>
 <span class='moth-code-delimiter'>;</span>
 
 <span class='moth-code-contract'>TEXT</span> <span class='moth-code-keyword'>must</span> <span class='moth-code-operator'>not</span> <span class='moth-code-contract'>FALLIBLE_TEXT</span></code></pre><p><code>TEXT</code> promises a <code>String</code> directly. <code>FALLIBLE_TEXT</code> promises a <code>String</code> or an error. A type cannot be both at once.</p><h3 id="symmetric">Symmetric</h3><p>The relation goes both ways. Saying <code>A must not B</code> also means <code>B must not A</code> in effect.</p>
@@ -1083,7 +1087,7 @@ value <span class='moth-code-operator'>=</span> <span class='moth-code-function'
 <span class='moth-code-delimiter'>;</span>
 
 <span class='moth-code-contract'>FALLIBLE_TEXT</span> <span class='moth-code-keyword'>must</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-function'>try_text</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span>
+    <span class='moth-code-function'>try_text</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>This</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span>, <span class='moth-code-type'>Error</span><span class='moth-code-error'>!</span>
 <span class='moth-code-delimiter'>;</span>
 
 <span class='moth-code-contract'>TEXT</span> <span class='moth-code-keyword'>must</span> <span class='moth-code-operator'>not</span> <span class='moth-code-contract'>FALLIBLE_TEXT</span></code></pre><h3 id="exact-trait-incompatibility-contract">Exact trait incompatibility contract</h3><ul><li>Incompatibility is trait metadata.</li><li>It is symmetric.</li><li>A concrete type cannot explicitly conform to both sides.</li><li>Several incompatible traits may be listed.</li><li>It affects conformance validation only.</li><li>It does not:<ul><li>add requirements</li><li>imply negative conformance</li><li>create trait composition</li><li>create inheritance</li><li>affect runtime dispatch</li></ul></li></ul><h3 id="compiler-owned-pairs">Compiler-owned pairs</h3><p>The compiler uses <code>must not</code> for incompatible core cast trait pairs. For example, <code>CASTABLE_TO_STRING</code> and <code>TRY_CASTABLE_TO_STRING</code> cannot both be claimed for the same source type. The conforming type is the cast source type. The trait name identifies the cast target.</p><h3 id="concepts-related-to-trait-incompatibility">Concepts related to trait incompatibility</h3><ul><li>For conformance see <a href="#conformance">Conformance</a>.</li><li>For core cast traits see <a href="#core-cast-traits">Core cast traits</a>.</li></ul>
@@ -1152,8 +1156,8 @@ value <span class='moth-code-type'>String</span> <span class='moth-code-operator
     text <span class='moth-code-type'>String</span>,
 <span class='moth-code-delimiter'>|</span>
 
-<span class='moth-code-function'>try_to_int</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-keyword'>return!</span> <span class='moth-code-type'>Error</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;not a number&quot;</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-function'>try_to_int</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span>, <span class='moth-code-type'>Error</span><span class='moth-code-error'>!</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span><span class='moth-code-error'>!</span> <span class='moth-code-type'>Error</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;not a number&quot;</span><span class='moth-code-delimiter'>)</span>
 <span class='moth-code-delimiter'>;</span>
 
 <span class='moth-code-nominal'>Label</span> <span class='moth-code-keyword'>must</span> <span class='moth-code-contract'>TRY_CASTABLE_TO_INT</span>
@@ -1182,8 +1186,8 @@ value <span class='moth-code-type'>String</span> <span class='moth-code-operator
     text <span class='moth-code-type'>String</span>,
 <span class='moth-code-delimiter'>|</span>
 
-<span class='moth-code-function'>try_to_int</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
-    value <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>cast!</span> <span class='moth-code-keyword'>this</span>.text
+<span class='moth-code-function'>try_to_int</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span>, <span class='moth-code-type'>Error</span><span class='moth-code-error'>!</span><span class='moth-code-delimiter'>:</span>
+    value <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>cast</span><span class='moth-code-error'>!</span> <span class='moth-code-keyword'>this</span>.text
     <span class='moth-code-keyword'>return</span> value
 <span class='moth-code-delimiter'>;</span>
 
@@ -1192,8 +1196,8 @@ value <span class='moth-code-type'>String</span> <span class='moth-code-operator
 <span class='moth-code-comment'>-- Local recovery with `cast ... catch`.</span>
 parsed_count <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>cast</span> <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;42&quot;</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span> <span class='moth-code-delimiter'>|</span>err<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>then</span> <span class='moth-code-number'>0</span>
-<span class='moth-code-delimiter'>;</span></code></pre><p>Propagation through a compatible <code>Error!</code> function uses <code>cast!</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>parse_label</span> <span class='moth-code-delimiter'>|</span>label <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
-    value <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>cast!</span> label
+<span class='moth-code-delimiter'>;</span></code></pre><p>Propagation through a compatible <code>Error!</code> function uses <code>cast!</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>parse_label</span> <span class='moth-code-delimiter'>|</span>label <span class='moth-code-nominal'>Label</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span>, <span class='moth-code-type'>Error</span><span class='moth-code-error'>!</span><span class='moth-code-delimiter'>:</span>
+    value <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>cast</span><span class='moth-code-error'>!</span> label
     <span class='moth-code-keyword'>return</span> value
 <span class='moth-code-delimiter'>;</span></code></pre><p><code>cast!</code> and <code>catch</code> are mutually exclusive. <code>cast! ... catch</code> is rejected.</p><h3 id="concepts-related-to-core-cast-traits">Concepts related to core cast traits</h3><ul><li>For cast target selection and fallible handling see <a href="../casts">Casts</a>.</li><li>For trait incompatibility see <a href="#trait-incompatibility">Trait incompatibility</a>.</li></ul>
 </div>

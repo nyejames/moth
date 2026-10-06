@@ -49,6 +49,7 @@
   --moth-code-function: #82aaff;
   --moth-code-directive: #bcde8a;
   --moth-code-contract: #f5646b;
+  --moth-code-error: #ff5252;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -146,6 +147,9 @@ body {
 }
 .moth-code-contract {
   color: var(--moth-code-contract);
+}
+.moth-code-error {
+  color: var(--moth-code-error);
 }
 
 /* BASIC CSS RESET STUFF */
@@ -785,7 +789,7 @@ td {
     └── greeting.moth</code></pre><h3 id="the-code">The code</h3><p><code>greeting.moth</code></p><pre style=""><code class='codeblock'>greeting_prefix <span class='moth-code-operator'>#=</span> <span class='moth-code-string'>&quot;Hello&quot;</span>
 
 <span class='moth-code-function'>greet</span> <span class='moth-code-delimiter'>|</span>name <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>greeting_prefix<span class='moth-code-delimiter'>]</span>, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>]</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>greeting_prefix<span class='moth-code-delimiter'>]</span>, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-error'>!</span><span class='moth-code-delimiter'>]</span>
 <span class='moth-code-delimiter'>;</span></code></pre><br><p><code>@page.moth</code></p><pre style=""><code class='codeblock'><span class='moth-code-string'>@greeting</span> <span class='moth-code-nominal'>greet</span>
 
 visitor <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;Priya&quot;</span>

@@ -49,6 +49,7 @@
   --moth-code-function: #82aaff;
   --moth-code-directive: #bcde8a;
   --moth-code-contract: #f5646b;
+  --moth-code-error: #ff5252;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -146,6 +147,9 @@ body {
 }
 .moth-code-contract {
   color: var(--moth-code-contract);
+}
+.moth-code-error {
+  color: var(--moth-code-error);
 }
 
 /* BASIC CSS RESET STUFF */
@@ -481,8 +485,8 @@ Holder     -&gt; Blob</code></pre><p>Inserting a <code>Holder</code> adds one di
 </table><p>Consider a map whose key and value point to the same allocation family:</p><p>Source <code>{=}</code> is accepted empty-map syntax but is not implemented yet; see <a href="../../../docs/progress">Progress matrix</a> for current support.</p><pre style=""><code class='codeblock'>text <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> large value<span class='moth-code-delimiter'>]</span>
 values <span class='moth-code-operator'>~</span><span class='moth-code-delimiter'>{</span><span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-operator'>=</span><span class='moth-code-delimiter'>}</span>
 
-<span class='moth-code-operator'>~</span>values.<span class='moth-code-function'>set</span><span class='moth-code-delimiter'>(</span>text, text<span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>!</span> <span class='moth-code-comment'>-- final use of text</span>
-removed <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>~</span>values.<span class='moth-code-function'>remove</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;large value&quot;</span><span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>!</span></code></pre><p>The new-key insertion creates two direct persistent obligations to the same allocation family, one from the stored key and one from the stored value. Because this was the final use of <code>text</code>, its affine root can be reclassified into exactly one of those two edges. The second edge is a genuinely new obligation.</p><pre style=""><code class='codeblock'>fresh text root:
+<span class='moth-code-operator'>~</span>values.<span class='moth-code-function'>set</span><span class='moth-code-delimiter'>(</span>text, text<span class='moth-code-delimiter'>)</span><span class='moth-code-error'>!</span> <span class='moth-code-comment'>-- final use of text</span>
+removed <span class='moth-code-operator'>=</span> <span class='moth-code-operator'>~</span>values.<span class='moth-code-function'>remove</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;large value&quot;</span><span class='moth-code-delimiter'>)</span><span class='moth-code-error'>!</span></code></pre><p>The new-key insertion creates two direct persistent obligations to the same allocation family, one from the stored key and one from the stored value. Because this was the final use of <code>text</code>, its affine root can be reclassified into exactly one of those two edges. The second edge is a genuinely new obligation.</p><pre style=""><code class='codeblock'>fresh text root:
     affine root = 1
     persistent edges = 0
     count = 1
@@ -622,11 +626,11 @@ net transition     0</code></pre><p>Temporary aliases cannot race the count to z
         </tr>
             
 </table><p>The one-edge fast path stays cheap and remains the common case:</p><pre style=""><code class='codeblock'>N = 1 final-use insertion -&gt; 0
-N = 1 extraction to root  -&gt; 0</code></pre><p>These <code>0</code> results are scoped to <code>N = 1</code>. There is no unconditional general rule that final-use insertion or extraction to an affine root leaves the count unchanged.</p><pre style=""><code class='codeblock'>blob <span class='moth-code-operator'>=</span> <span class='moth-code-function'>load_blob</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>!</span>
+N = 1 extraction to root  -&gt; 0</code></pre><p>These <code>0</code> results are scoped to <code>N = 1</code>. There is no unconditional general rule that final-use insertion or extraction to an affine root leaves the count unchanged.</p><pre style=""><code class='codeblock'>blob <span class='moth-code-operator'>=</span> <span class='moth-code-function'>load_blob</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span><span class='moth-code-error'>!</span>
 
-<span class='moth-code-operator'>~</span>index.<span class='moth-code-function'>set</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;a&quot;</span>, blob<span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>!</span>
+<span class='moth-code-operator'>~</span>index.<span class='moth-code-function'>set</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;a&quot;</span>, blob<span class='moth-code-delimiter'>)</span><span class='moth-code-error'>!</span>
 <span class='moth-code-function'>use</span><span class='moth-code-delimiter'>(</span>blob<span class='moth-code-delimiter'>)</span>
-<span class='moth-code-operator'>~</span>index.<span class='moth-code-function'>set</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;b&quot;</span>, blob<span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>!</span> <span class='moth-code-comment'>-- final use of blob</span></code></pre><pre style=""><code class='codeblock'>start:
+<span class='moth-code-operator'>~</span>index.<span class='moth-code-function'>set</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;b&quot;</span>, blob<span class='moth-code-delimiter'>)</span><span class='moth-code-error'>!</span> <span class='moth-code-comment'>-- final use of blob</span></code></pre><pre style=""><code class='codeblock'>start:
     root
     count 1
 

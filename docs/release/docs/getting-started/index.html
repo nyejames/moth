@@ -49,6 +49,7 @@
   --moth-code-function: #82aaff;
   --moth-code-directive: #bcde8a;
   --moth-code-contract: #f5646b;
+  --moth-code-error: #ff5252;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -146,6 +147,9 @@ body {
 }
 .moth-code-contract {
   color: var(--moth-code-contract);
+}
+.moth-code-error {
+  color: var(--moth-code-error);
 }
 
 /* BASIC CSS RESET STUFF */
@@ -960,7 +964,7 @@ moth dev . <span class='moth-code-operator'>-</span><span class='moth-code-opera
     white-space: pre;
     overflow-x: auto;
 "><code class='codeblock'><span class='moth-code-nominal'>E</span><span class='moth-code-operator'>|</span>type<span class='moth-code-operator'>|</span>src<span class='moth-code-operator'>/</span><span class='moth-code-operator'>@</span>page.moth<span class='moth-code-operator'>|</span><span class='moth-code-number'>4</span><span class='moth-code-operator'>:</span><span class='moth-code-number'>12</span><span class='moth-code-operator'>|</span><span class='moth-code-nominal'>Expected</span> <span class='moth-code-nominal'>Bool</span>, found <span class='moth-code-nominal'>Int</span><span class='moth-code-operator'>|</span>help<span class='moth-code-operator'>=</span><span class='moth-code-nominal'>Use</span> a <span class='moth-code-nominal'>Bool</span> expression here.
-<span class='moth-code-nominal'>W</span><span class='moth-code-operator'>|</span>identifier_naming_convention<span class='moth-code-operator'>|</span>src<span class='moth-code-operator'>/</span>button.moth<span class='moth-code-operator'>|</span><span class='moth-code-number'>1</span><span class='moth-code-operator'>:</span><span class='moth-code-number'>1</span><span class='moth-code-operator'>|</span><span class='moth-code-nominal'>Dependency</span> alias case mismatch</code></pre></section>
+<span class='moth-code-nominal'>W</span><span class='moth-code-operator'>|</span>identifier_naming_convention<span class='moth-code-operator'>|</span>src<span class='moth-code-operator'>/</span>button.moth<span class='moth-code-operator'>|</span><span class='moth-code-number'>1</span><span class='moth-code-operator'>:</span><span class='moth-code-number'>1</span><span class='moth-code-operator'>|</span><span class='moth-code-nominal'>Dependency</span> alias <span class='moth-code-keyword'>case</span> mismatch</code></pre></section>
 <section class="container"><h2 id="reading-compiler-errors">Reading compiler errors</h2><p>Moth uses the same formatted diagnostic system across the compiler front end and backend builders. That means syntax errors, type errors, config errors, file errors, borrow-checker errors, dev-server errors and backend errors use the same basic shape.</p><p>A normal diagnostic contains:</p><ul><li>the error kind</li><li>the main message</li><li>the source file path, line, and column</li><li>the source line when available</li><li>a caret underline for the offending span</li><li>guidance lines when the compiler has a useful suggestion</li></ul><p>Example shape:</p><pre style="
     padding-left: 1em;
     border-radius: 5px;
