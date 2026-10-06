@@ -17,6 +17,8 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - [Boracle research plans](./plans/boracle-next-research-plans): Resume on `boracle-research` only after merged dense HIR/native result-channel capabilities and the explicit research activation gate. Mechanical representation/extraction migration belongs to the compiler foundation, not a new precision experiment. **PAUSED**
 
+- [Collecting bad diagnostics examples to be improved later](./plans/bad-diagnostics-log.md): **ONGOING**
+
 ## Sequenced work
 
 - [Typed semantic expressions and dense compiler foundations](./plans/typed-semantic-expressions-plan.md) - **QUEUED.** Start immediately after the ongoing Dec contextual-materialisation correction and the separately planned Uint addition have merged. Consolidates the outstanding dense HIR/capacity, Wiring V1 and native result/Core constant-evaluation work. Retire Reactivity V1 first, investigate compact layouts and lifetimes, then deliver dense HIR, the coupled typed-expression/native-result cutover, reduced type/fold work, the bounded Wire/Route foundation and trusted Core evaluation. These are named capability checkpoints, not a claim that the superseded plans were implemented. Eligible package work stays active in parallel and consumes its specific merged prerequisites.
@@ -26,8 +28,6 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 - [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Paused until diagnostic layout completes. Native result arity and the narrow propagation-context work move into the earlier typed-expression cutover. Resume with a fresh inventory and the remaining catch-recovery diagnostics, without rebuilding those transferred fixes.
 
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
-
-- Improve the `tmp/test_brackets.mtf` error example.
 
 - [General directives and project configuration](./plans/general-directives-and-project-config-plan.md) - Queued: consume the shared MON argument owner for general directives, explicit $config contracts and strict $project/$html_builder configuration
 
