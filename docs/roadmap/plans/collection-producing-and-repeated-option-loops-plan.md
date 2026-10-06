@@ -45,6 +45,7 @@ Before activation, confirm these capabilities are already delivered and stable:
 - the single `loop` keyword and its conditional, collection and range header forms
 - one shared loop-header parser for statement and template loop syntax
 - closed receiving value production through `then`
+- compact typed semantic expression IDs, dense HIR values/places and native result shapes with mechanical consumers migrated
 - declaration, assignment and return receiving-context typing for value-producing control flow
 - option-present capture through `is |name|`
 - ordinary growable collection construction and growable `push`
@@ -529,14 +530,16 @@ If the exact HIR vocabulary changes before activation, preserve this boundary ra
 
 It is acceptable and expected for AST to retain explicit source meaning.
 
-On the current architecture, the natural direction is to keep producing loops inside the closed `ExpressionKind::ValueBlock` family with a loop-specific AST payload.
+Extend the delivered typed semantic expression store's closed value-producing control-flow form
+with a loop-specific payload. Use child IDs and typed ranges under its existing owner rather than
+restoring the old owned `ExpressionKind::ValueBlock` tree.
 
 Do not lock the final Rust enum name now.
 
 The important contracts are:
 
 - a producing loop is represented as closed value-producing control flow
-- the AST payload retains the ordinary loop source, typed result collection identity and body
+- the semantic payload retains the ordinary loop source, typed result collection identity and body IDs under their issuing owner
 - repeated option capture is represented as one typed loop-header form
 - `then` inside the producing body has one active collection-production target
 - all AST finalization walkers visit the new value-block payload
@@ -551,7 +554,7 @@ At minimum inspect:
 - static Bool specialization
 - generated-request retention and discard
 - const fact collection
-- reactive or Wiring annotation
+- resolved Wire/Route parameter and capture facts where the ordinary expression consumers require them
 - assertion-message effect classification
 - debug type validation
 - const classification
@@ -982,7 +985,7 @@ At minimum verify:
 - [ ] provisional generic-request discard
 - [ ] const classification
 - [ ] body-local constant fact collection
-- [ ] Wiring or reactive annotation
+- [ ] resolved Wire/Route parameter and capture facts, without a V1 reactive annotation path
 - [ ] assertion-message effect classification
 - [ ] debug type validation
 - [ ] any remap, clone or traversal code added since this plan was written

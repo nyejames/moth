@@ -14,8 +14,8 @@ This plan also replaces the current duplicated terminality logic with one AST-ow
 ACTIVE_PLAN: docs/roadmap/plans/never-return-contract-plan.md
 STATUS: queued
 CURRENT_SLICE: Phase 0 - refresh callable, terminality, HIR, analysis and backend owners
-BLOCKERS: runtime anonymous records must be delivered first
-NEXT_ACTION: activate after runtime anonymous records, record the live repository state and rerun the owner inventory
+BLOCKERS: compact typed expressions, dense HIR and native result channels are prerequisites; runtime anonymous records must then be delivered first
+NEXT_ACTION: activate after the named capabilities and runtime anonymous records, record the live repository state and rerun the owner inventory
 ```
 
 Keep this block concise. Establish the active revision, branch, worktree state and validation baseline in untracked working notes when implementation starts. Do not pin a queued plan to a commit.
@@ -26,11 +26,22 @@ This plan runs after runtime anonymous records and immediately before the HTML m
 
 The order is deliberate. The Wasm implementation must consume a settled HIR function return contract and terminating Never call. It must not invent Never semantics from missing results or backend `unreachable` instructions.
 
+The earlier typed semantic expression work delivers ordinary zero/one/multiple success slots and a
+separate error channel, retires Reactivity V1 and separates expression values from callable
+contracts. This plan consumes those foundations and adds explicit Never and consolidated
+terminality. It does not rebuild the old unit/tuple/fallible-carrier representation or move Never
+implementation into the expression refactor.
+
 At closeout, delete this plan and remove its roadmap entry in the same commit. Keep the delivered capability before the Wasm implementation in the roadmap order.
 
 ## Hard prerequisites
 
 - runtime anonymous records are delivered and their HIR, borrow and lifetime integration is stable
+- compact typed-expression IDs, dense HIR values and typed argument ranges are delivered
+- ordinary native success-slot shape and the independent error channel are canonical across
+  callable descriptors, HIR, public/generated summaries and current backend boundaries
+- Reactivity V1 is retired and supported Wire/Route parameter contracts retain their ordinary
+  argument access, capture and lifetime facts
 - canonical module compilation and immutable public semantic interfaces are delivered
 - generated concrete functions use sidecars and stable callable identities
 - Stage 4 static Bool specialisation selects active AST control flow before terminality and durable executable facts
@@ -143,7 +154,9 @@ Moth does not add:
 - a fake `None` or unit value for divergence
 - a multi-return slot containing Never
 
-`None` remains the unit-like representation for ordinary no-value completion. It has one trivial runtime meaning. A Never callable has no normal return at all.
+Ordinary no-value completion has zero success slots and can return control normally. It does not
+manufacture a unit expression or optional `none` value. A Never callable has no normal return at
+all, even though its backend ABI also has no value results.
 
 The current compiler also stores named callable values as function types in `TypeEnvironment`. Such a function value may carry a function signature whose return contract is Never. The value's type is still the existing function type. This does not create a Never value. Invoking that value remains subject to the standalone-statement rule.
 
@@ -333,14 +346,17 @@ Do not present those constraints as future roadmap promises.
 
 # Intended compiler model
 
-Exact Rust names may change. The distinctions may not.
+Exact Rust names may change. The distinctions may not. The ordinary shape names below refer to the
+already-delivered signature/result owners, including compact zero/one/multiple success slots and
+an independent error channel. Reuse those owners and their accessors rather than adding a second
+return-shape record or reconstructing a transport `TypeId`.
 
 ## Neutral signature syntax
 
 ```rust
 pub(crate) enum FunctionReturnContractSyntax {
     Returns(Vec<ReturnSlotSyntax>),
-    Never { location: SourceLocation },
+    Never { location: SourceSpan },
 }
 ```
 
@@ -350,8 +366,8 @@ pub(crate) enum FunctionReturnContractSyntax {
 
 ```rust
 pub(crate) enum FunctionReturnContract {
-    Returns(Vec<ReturnSlot>),
-    Never { location: SourceLocation },
+    Returns(ResolvedCallableReturnShape),
+    Never { location: SourceSpan },
 }
 ```
 
@@ -359,14 +375,12 @@ Provide named queries for `is_never`, success returns, error return and resolved
 
 ## Function type metadata
 
-The current `TypeEnvironment` stores callable signatures inside `TypeDefinition::Function`. Replace `FunctionTypeDefinition`'s direct success and error fields with a function-type return contract when those signatures can describe Never:
+Callable type metadata retains its existing canonical ordinary result-shape owner. Add an explicit
+return-contract variant when those signatures can describe Never:
 
 ```rust
 pub enum FunctionTypeReturnContract {
-    Returns {
-        success: Box<[TypeId]>,
-        error: Option<TypeId>,
-    },
+    Returns(CallableReturnShape),
     Never,
 }
 ```
@@ -409,23 +423,28 @@ A binding marked Never has no success aliases and no error slot. Validate that i
 
 ```rust
 pub enum HirFunctionReturnContract {
-    Returns(TypeId),
+    Returns(HirReturnShape),
     Never,
 }
 ```
 
-The ordinary variant retains the existing unit, single, tuple or fallible-carrier type. Never carries no type ID and produces no ABI result.
+The ordinary variant retains native zero/one/multiple success slots and the independent error
+channel from the delivered HIR contract. Never carries no success shape or error slot and produces
+no ABI result. Real aggregate types may occupy individual success slots, but a transport tuple or
+fallible-carrier type is not restored.
 
 ## HIR terminating call
 
 ```rust
 HirTerminator::NeverCall {
     target: CallTarget,
-    args: Vec<HirExpression>,
+    args: HirValueList,
 }
 ```
 
-The terminator retains the ordinary stable target and evaluated arguments. It has no result local, result type or successor.
+`HirValueList` denotes the existing typed range of argument `HirValueId`s in the owning HIR store,
+not a recursive expression vector or a new list abstraction. The terminator retains the ordinary
+stable target and evaluated arguments. It has no result local, result shape or successor.
 
 Do not encode Never as `Call { result: None }` followed by a source-level failure. HIR owns one semantic call with no continuation. A backend may lower that operation to a call followed by defensive unreachable machinery.
 
@@ -459,24 +478,26 @@ The analysis should answer named consumer questions:
 
 Keep diagnostic policy outside the pure summary calculation where practical.
 
-# Reviewed current repository shape
+# Prerequisite owner map to refresh at activation
 
-Reverify all paths at activation. These are navigation facts, not permanent architecture.
+Reverify all paths at activation. These are navigation starting points, not a claim that the older
+field names survive the prerequisite work. Inventory the delivered ordinary signature and result
+owners before extending them. Do not restore a superseded representation to match this map.
 
 ## Signature and callable owners
 
 - `src/compiler_frontend/declaration_syntax/signature_members.rs` stores `FunctionSignatureSyntax.returns: Vec<ReturnSlotSyntax>` and parses a type before a trailing error-channel `!`
-- `src/compiler_frontend/ast/statements/functions.rs` stores `FunctionSignature.returns: Vec<ReturnSlot>` and `ReturnChannel`
-- `src/compiler_frontend/datatypes/definitions.rs` stores `FunctionTypeDefinition { parameters, returns, error_return }` inside `TypeDefinition::Function`
-- `src/compiler_frontend/public_interface/model.rs` stores success returns and optional error return directly on public functions and receiver methods
+- AST callable descriptors own resolved parameter contracts, native success shape and the separate error channel
+- `src/compiler_frontend/datatypes/definitions.rs` owns canonical callable type metadata
+- `src/compiler_frontend/public_interface/model.rs` owns stable public function and receiver contracts
 - trait definitions and conformance matching store typed requirement return slots
-- `src/compiler_frontend/external_packages/definitions.rs` stores `returns` plus `error_return_type` on external definitions and specs
-- generic materialisation, import projection, receiver catalogues and reactive metadata inspect current return vectors
+- `src/compiler_frontend/external_packages/definitions.rs` owns binding-backed callable contracts
+- generic materialisation, import projection, receiver catalogues and Wire/Route parameter contracts consume those signature facts
 
 ## AST and terminality owners
 
-- every `Expression` owns a semantic `TypeId`
-- ordinary function, method and host call expressions carry result type IDs
+- compact semantic expression nodes use typed IDs and one authoritative native result shape
+- ordinary function, method and host calls consume resolved callable descriptors
 - `src/compiler_frontend/ast/statements/body_expr_stmt.rs` parses standalone calls through the value-expression path
 - `src/compiler_frontend/ast/statements/terminality.rs` owns ordinary function terminality and recognises false assertions
 - `src/compiler_frontend/ast/statements/value_production/completeness.rs` separately owns branch exits and separately recognises false assertions
@@ -485,10 +506,10 @@ Reverify all paths at activation. These are navigation facts, not permanent arch
 
 ## HIR and analysis owners
 
-- `HirFunction` currently carries `return_type: TypeId`
-- HIR declaration lowering manufactures unit, tuple and fallible-carrier return types
-- ordinary calls are `HirStatementKind::Call { target, args, result }`
-- `HirTerminator` owns branches, returns and unrecoverable failures but has no call terminator
+- HIR function contracts own native success slots and a separate error channel
+- HIR declaration lowering consumes resolved slot facts without manufacturing transport types
+- ordinary calls use dense argument values and explicit native result/channel facts
+- inventory the delivered ordinary call/invoke continuation owner in `HirTerminator` and adjacent HIR records; this work adds only the dedicated no-continuation Never call, without assuming native fallible calls still use statements
 - HIR validation, display, remapping, reachability, borrow transfer, call summaries, problem extraction and backend validation exhaustively match current terminators
 - result and lifetime summaries assume normal exit/result vocabulary even when a body currently only fails
 
@@ -552,7 +573,7 @@ Do not add:
 - Do not add a Never type definition or builtin to `TypeEnvironment`. Update only the existing function-type signature payload where callable function types need the return contract.
 - Keep one call-shaped parser and one parameter-slot routing owner (the delivered MON shared owner).
 - Parse and resolve arguments once, then construct either a value call or terminating statement from the resolved callable contract and source context.
-- Do not let HIR, analyses, link planning or backends infer Never from an empty return vector, unit type, missing result local or all-failure body.
+- Do not let HIR, analyses, link planning or backends infer Never from zero success slots, a missing result local or an all-failure body.
 - Do not let source validity depend on inlining or ordinary callee implementation inspection.
 - Delete replaced fields, vector-only assumptions and duplicate terminality helpers during the cutover.
 - Use `CompilerDiagnostic` for malformed source and `CompilerError` for impossible post-AST/HIR states.
@@ -590,7 +611,8 @@ Re-anchor the plan after runtime anonymous records land. Produce a complete curr
 - [ ] Record HEAD, branch, status and worktrees in untracked working notes.
 - [ ] Inventory active workers and local changes touching this surface.
 - [ ] Reconfirm runtime anonymous records are complete and the queued Wasm implementation has not started.
-- [ ] Inventory every direct return-vector, error-return and HIR return-type consumer.
+- [ ] Inventory every native success-shape, error-channel and ordinary callable-contract consumer.
+  Refresh the search terms below to the names delivered by the prerequisite refactor.
 - [ ] Inventory `FunctionTypeDefinition` interning, equality, hashing, substitution, display and canonical projection.
 - [ ] Inventory every call constructor and statement-expression entry point.
 - [ ] Inventory terminality, branch-exit, false-assert and loop-exit classifiers.
@@ -637,14 +659,16 @@ just validate
 
 ## Goal
 
-Replace vector-only return state with explicit `Returns` versus `Never` vocabulary through every semantic layer while preserving current ordinary source behaviour. Public `-> !` syntax remains inactive until the representation is complete.
+Extend the delivered ordinary callable return shape with explicit `Returns` versus `Never`
+vocabulary through every semantic layer while preserving ordinary source behaviour. Public `-> !`
+syntax remains inactive until the representation is complete.
 
 ## Work
 
 ### Neutral and AST signatures
 
 - [ ] Add neutral and resolved return-contract enums.
-- [ ] Move existing ordinary slots into `Returns`.
+- [ ] Reuse the delivered ordinary slot owner inside `Returns`, retaining compact shape and accessors.
 - [ ] Preserve current success/error rules inside `Returns`.
 - [ ] Add named queries for success slots, error slot, ordinary no-value completion and Never.
 - [ ] Make ordinary-return queries reject or explicitly handle Never rather than returning empty collections.
@@ -652,7 +676,7 @@ Replace vector-only return state with explicit `Returns` versus `Never` vocabula
 
 ### Function types
 
-- [ ] Replace `FunctionTypeDefinition.returns` plus `error_return` with a function-type return contract.
+- [ ] Extend canonical callable type metadata with an ordinary-shape versus Never return contract.
 - [ ] Keep the containing function type's ordinary `TypeId`.
 - [ ] Include the return-contract variant in function-type interning, equality, hashing and cache keys.
 - [ ] Preserve it through generic substitution and inherited generated environments.
@@ -670,14 +694,16 @@ Replace vector-only return state with explicit `Returns` versus `Never` vocabula
 
 ### HIR function metadata
 
-- [ ] Replace `HirFunction::return_type: TypeId` with `HirFunctionReturnContract`.
-- [ ] Thread `Returns(TypeId)` through HIR registration, validation, display, fixtures and backend ABI queries.
+- [ ] Extend the delivered native HIR return shape with `HirFunctionReturnContract`.
+- [ ] Thread `Returns(HirReturnShape)` through HIR registration, validation, display, fixtures and
+  backend ABI queries, retaining separate success slots and error-channel facts.
 - [ ] Add a dormant `Never` variant without mapping it to `None`.
-- [ ] Remove the direct field and ambiguous compatibility accessors.
+- [ ] Remove superseded direct fields and ambiguous compatibility accessors without restoring a
+  unit, tuple or fallible-carrier transport type.
 
 ### External metadata
 
-- [ ] Replace top-level `returns` plus `error_return_type` state with one external return contract.
+- [ ] Extend the binding-backed ordinary result contract with explicit Never, keeping one owner.
 - [ ] Preserve readable builder construction for ordinary functions without parallel legacy constructors.
 - [ ] Make return aliases impossible on Never.
 - [ ] Update registry, clone accounting, provider conversion and tests.
@@ -806,7 +832,8 @@ Activate complete source syntax, body validation, exact interfaces and standalon
 
 ### Call construction and placement
 
-- [ ] Add an AST statement shape for a resolved Never call. It carries target or receiver plus routed arguments but no `Expression` or `TypeId`.
+- [ ] Add an AST statement shape for a resolved Never call. It carries the target or receiver and
+  routed argument IDs, but creates no result expression or result `TypeId`.
 - [ ] Refactor call construction to return a named value-call versus terminating-call outcome.
 - [ ] Parse and validate arguments once.
 - [ ] Let statement context accept the terminating outcome.
@@ -884,12 +911,13 @@ Give HIR an explicit Never function contract and dedicated terminating call with
 - [ ] Emit no implicit return for Never functions.
 - [ ] Treat surviving Never fallthrough as `CompilerError` because AST should diagnose it.
 - [ ] Reject return terminators in Never functions during HIR validation.
-- [ ] Keep ordinary unit functions distinct.
+- [ ] Keep ordinary zero-success functions distinct.
 
 ### NeverCall
 
 - [ ] Add the dedicated HIR terminator.
 - [ ] Reuse ordinary target resolution and argument lowering.
+- [ ] Store the arguments in the existing typed HIR value range and validate its owning domain.
 - [ ] Evaluate receiver and arguments once in current left-to-right order.
 - [ ] Preserve fresh-rvalue materialisation for mutable arguments.
 - [ ] Emit no result local and no continuation block.
@@ -910,7 +938,7 @@ Give HIR an explicit Never function contract and dedicated terminating call with
 ### Link facts
 
 - [ ] Record NeverCall as a normal call edge.
-- [ ] Collect argument resource, project-context, capability, reactive and target facts once.
+- [ ] Collect argument resource, project-context, parameter-capability and target facts once.
 - [ ] Preserve deterministic source order.
 - [ ] Emit no result provenance or result resource facts.
 
@@ -952,7 +980,8 @@ Teach every downstream semantic consumer that NeverCall is a terminating call wi
 - [ ] Apply mutation and optional final-use transfer effects before divergence where the call contract requires them.
 - [ ] Create no result local, result origin, return alias or post-call state.
 - [ ] End liveness at the terminator using existing block-exit rules.
-- [ ] Preserve reactive invalidation and argument effects.
+- [ ] Preserve ordinary argument effects and supported Wire/Route access and capture facts. Do not
+  restore Reactivity V1 invalidations or introduce later observation/event-delivery semantics.
 - [ ] Update use and metadata collectors.
 
 ### Lifetime and escape analysis
@@ -968,7 +997,7 @@ Teach every downstream semantic consumer that NeverCall is a terminating call wi
 
 - [ ] Keep parameter access and mutation summaries for Never callables.
 - [ ] Represent normal-return/result state as absent through the explicit contract.
-- [ ] Never use an empty result vector as unit/Never ambiguity.
+- [ ] Never use zero success slots as ordinary-completion/Never ambiguity.
 - [ ] Keep generated summaries and public interfaces aligned.
 
 ### Reachability and generated functions
@@ -992,7 +1021,7 @@ Teach every downstream semantic consumer that NeverCall is a terminating call wi
 
 - [ ] Confirm argument effects are neither dropped nor duplicated.
 - [ ] Confirm no result facts or post-call state exist.
-- [ ] Confirm summaries distinguish Never from unit.
+- [ ] Confirm summaries distinguish Never from ordinary zero-success completion.
 - [ ] Confirm reachability includes callee and argument dependencies.
 - [ ] Confirm analyses consume HIR without source inspection.
 - [ ] Confirm Boracle models call-before-divergence ordering.
@@ -1029,7 +1058,7 @@ Support Never on every current target before the larger Wasm rewrite. Make conti
 - [ ] Immediately emit a compiler-owned unrecoverable throw if control returns.
 - [ ] Use a message that identifies a violated `-> !` contract without internal IDs.
 - [ ] Preserve external-module imports and glue.
-- [ ] Preserve argument effects and reactive invalidations before the call.
+- [ ] Preserve argument evaluation, mutation and supported parameter-capability effects before the call.
 - [ ] Ensure dispatcher control cannot continue afterward.
 
 Conceptual output:
@@ -1088,7 +1117,7 @@ just validate
 
 - [ ] Prove JS throws if a test external Never function returns.
 - [ ] Prove emitted Wasm validates and contains unreachable.
-- [ ] Confirm ordinary unit calls retain previous lowering.
+- [ ] Confirm ordinary zero-success calls retain their native channel lowering.
 
 # Phase 7 - Complete integration coverage
 
@@ -1159,7 +1188,7 @@ Prove the full contract across local, cross-module, function-value, generic, tra
 - [ ] function-type matching distinguishes the contracts
 - [ ] public fingerprint changes when the contract changes
 - [ ] same-file and cross-module callers do not infer divergence from ordinary typed callee bodies
-- [ ] external function with no returns remains ordinary unit unless explicitly Never
+- [ ] external function with zero success slots remains ordinary completion unless explicitly Never
 
 ## Test ownership
 

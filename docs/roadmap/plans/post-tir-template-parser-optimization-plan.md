@@ -7,6 +7,12 @@ template parsing, formatting, fold scheduling, incremental reuse and backend str
 the final TIR architecture. This plan may optimise each established owner, but it must not create a
 second template representation, preparation pass, fold entry or AST-to-HIR boundary.
 
+Compact semantic expression nodes, constant-value adapters, immutable expression reuse and
+ownership-taking folded-text handoffs belong to the earlier typed semantic expression and dense
+compiler foundation work. This plan consumes those delivered representations. It retains the
+independent source-text, parser, formatter, cache, invalidation, scheduling and backend-assembly
+investigations described below.
+
 ## Current-state capsule
 
 ```text
@@ -17,8 +23,8 @@ CARRIED_EVIDENCE: template construction is 67% of frontend.ast.environment on do
 FINAL_TIR_REVIEW_COMMIT: 1298da468
 LAST_GOOD_COMMIT: none until the first profiling or implementation slice is accepted
 BRANCH: main
-IMPLEMENTATION_SCOPE: Moth Templates preparation, template parser/formatter, TIR fold scheduling, cache prerequisites and backend string assembly
-ACTIVATION_GATE: representative profiling or counters must identify a material bottleneck in one named owner. Partially evidenced: one owner (template construction) is attributed on one project and one stage; the fixture coverage Phase 0 lists is still owed
+IMPLEMENTATION_SCOPE: source-backed template text, template parser/formatter, TIR fold scheduling, cache prerequisites and independent backend string assembly
+ACTIVATION_GATE: representative profiling or counters must identify a material bottleneck in one remaining named owner. Refresh against delivered expression/constant ownership before investigating that boundary. Historical construction evidence narrows Phase 0 but does not satisfy it
 ```
 
 ## Required authority documents
@@ -33,8 +39,7 @@ ACTIVATION_GATE: representative profiling or counters must identify a material b
 - `docs/src/docs/progress/@page.moth` for current support and backend coverage
 - delivered canonical module compilation and scoped packages, for stable source and
   module identities required by persistent reuse
-- `docs/roadmap/plans/html_project_backend_wasm_final_implementation_plan.md` for backend output and
-  runtime-string ownership
+- the build and memory authorities' mixed-target output and runtime-string ownership contracts
 
 ## Final architecture constraints
 
@@ -46,8 +51,8 @@ Every slice must preserve these accepted owners:
 - `prepare_tir_view` as the sole exhaustive semantic preparation owner, with explicit `Value` or
   `ConstRequired` mode
 - `fold_prepared_template` as the sole template fold entry
-- folded owned strings or neutral owned `runtime_handoff` payloads as the only values crossing out
-  of AST
+- completed folded values or neutral owned runtime handoff payloads as the only values crossing out
+  of AST, using the delivered constant and HIR owners rather than exposing AST expression IDs
 - no TIR store, identity, view, overlay or preparation type in HIR, a backend, a compiled module
   artefact or a cache boundary outside AST
 - parser, formatter, fold scheduler, incremental build system, HIR runtime append and backend output
@@ -88,6 +93,12 @@ are written and reviewed.
 
 Phase 0 must re-read this map and replace stale paths before implementation.
 
+Do not take ownership of no-change operand cloning, authored-AST specialisation copies,
+constant-to-expression-to-HIR expansion, constant classification reuse or the final owned-string
+interning handoff. Their cutover belongs with the compact typed-expression and constant stores.
+Formatter scratch buffers, source-backed body text and backend output buffers remain eligible here
+when they are distinct costs after that cutover.
+
 ## Accepted evidence at creation
 
 The final TIR R6C checkpoint recorded six end-to-end suites at `1298da468`. Suite averages were
@@ -98,8 +109,9 @@ current means were approximately 9.010ms for template stress, 6.745ms for wrappe
 
 Earlier frontend-arena evidence found the template-render-plan fixture near 7ms and docs AST
 emit/finalize pressure, but it did not isolate template clone or render-plan allocation pressure.
-That evidence defers broad arena conversion; it is not permission to implement this plan without a
-fresh profile.
+That historical evidence did not select a representation by itself. Compact typed nodes with IDs
+and dense HIR now have their own approved implementation owner. This plan still requires a fresh
+profile for the independent work it retains.
 
 ## Evidence carried in from the constant-folding work (2026-08-24)
 
@@ -174,11 +186,20 @@ project will not see this.
   `53` failing tests and was erroring out early, skipping most of the stage. A large unexplained
   win is evidence of a bug before it is evidence of a win.
 
-### Non-goal reaffirmed
+### Evidence after the expression ownership cutover
 
-The constant-folding plan does not take this work. Its remaining phases address none of the `67%`,
-and it says so explicitly rather than letting phase order imply otherwise. This plan remains the
-owner, and remains queued until its own Phase 0 runs.
+The old `67%` attribution must be measured again after compact semantic expressions and constant
+ownership are delivered. Some construction cost may move with those representations. This plan
+owns only the remaining preparation/parser/formatter work and remains queued until its own Phase 0
+identifies that cost.
+
+The durable performance record also rejects two tempting repeat investigations. The corrected
+owned-folder candidate still slowed constant-chain-512 by `0.560%` and `0.534%` in two independent
+five-pair batches on 2026-10-01. Substitution-key normalisation measured `39–56ns`, at most `0.19%`
+of check time, on 2026-10-02 and did not justify a second key form. Neither result selects the new
+expression representation, but neither experiment should restart from a clone count or API shape
+alone. A fresh profile must name the changed cost and the new hypothesis. Preserve the existing
+cache keys and invalidation rules until that evidence supports a coherent replacement.
 
 ## Cache and reuse key requirements
 
@@ -205,7 +226,7 @@ preparation remains uncached unless binding identity is explicit and complete.
 - no language syntax or template semantic changes
 - no second TIR representation, store, view, preparation owner or fold entry
 - no TIR identity in HIR, backends or persistent module artefacts
-- no broad frontend arena migration without separate evidence in its existing owner
+- no duplicate expression, constant or dense-HIR representation migration
 - no replacement for canonical module identities, fingerprints or dependency graphs
 - no transfer of HTML/JS/Wasm output ownership from the backend plan
 - no general JavaScript minification, tree shaking or package-manager cache
@@ -214,6 +235,9 @@ preparation remains uncached unless binding identity is explicit and complete.
 ## Phase 0 - Baseline, profile and select one owner
 
 - Refresh the owner map against the current repository and record the reviewed commit.
+- Identify which earlier expression/constant capabilities are delivered. Use the post-cutover
+  baseline for costs at those boundaries and transfer any remaining cutover obligation back to its
+  owner instead of creating a second migration here.
 - Use `just bench-check` for non-recording evidence and Samply or existing detailed counters for
   attribution.
 - Cover template stress, wrapper/slot churn, control-flow templates, collection templates, docs and
@@ -261,6 +285,8 @@ exist.
 
 - Profile Markdown formatter allocation, temporary buffers, whitespace transforms and output
   reservation separately.
+- Treat already-delivered ownership-taking folded-text interning as an input. Do not reopen that
+  handoff merely to count fewer source-level clones.
 - Prefer local buffer sizing/reuse before a cache when it solves the measured cost.
 - A formatter-output cache must key formatter/version, exact input text/anchors, whitespace policy,
   directives/configuration and all semantic dependencies.
@@ -301,6 +327,8 @@ Backtrack if scheduling overhead, synchronization or deterministic replay remove
 
 - Attribute runtime append/coercion, JS helper output, JS source assembly and HTML document assembly
   separately.
+- Consume dense HIR and completed constant payloads directly. Constant re-expansion and expression
+  adapters belong to the earlier semantic cutover, while independent output assembly remains here.
 - Keep HIR runtime string operations backend-neutral.
 - Keep JS runtime/helper emission with the JS backend and HTML document assembly with the HTML
   project owner.
@@ -328,7 +356,8 @@ the experiment and retain the evidence.
 ## Roadmap relationship
 
 This plan is the single owner for the deferred post-TIR source-text, template-parser, formatter,
-template-cache, invalidation and fold-scheduling investigations. It is queued/deferred and does not
-block canonical module compilation or the ordered implementation chain. Phases that require stable
-module/source identities wait for the canonical module plan; backend assembly work waits for or
-coordinates with its owning backend plan.
+template-cache, invalidation and fold-scheduling investigations that remain after the typed
+semantic expression and constant ownership cutover. It is queued/deferred and does not block the
+ordered implementation chain. Stable source/module identity and fingerprint requirements are named
+capability gates. Backend assembly consumes its owning target and memory contracts. No completion
+of the expression work automatically activates these cache or scheduling experiments.

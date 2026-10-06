@@ -4,7 +4,7 @@
 
 - Status: queued. The canonical and Basic runtime references are published.
 - Current slice: implementation not started.
-- Blockers: shared MON syntax and Rust tooling are delivered. Unified numeric semantics and the required ordinary-struct validation paths must be delivered.
+- Blockers: shared MON syntax and Rust tooling are delivered. Unified numeric semantics, compact typed expression/dense HIR construction and the required ordinary-struct validation paths must be delivered.
 - Next action: establish the activation tree and complete Phase 0.
 
 ## Purpose and prerequisites
@@ -13,18 +13,21 @@ Enable named-only parenthesised MON construction in runtime receiving contexts. 
 
 Reuse the shared argument parser, type environment, struct construction, field access, copy, borrow and lifetime owners. This work introduces no structural typing, anonymous-specific runtime IR or MON serialisation implementation.
 
-Run after shared MON syntax and unified numeric semantics, before the HTML mixed JavaScript/Wasm backend work that consumes this capability. The main roadmap owns ordering. Establish the revision, worktree status and baseline at activation in local working notes, not in this queued plan.
+Run after shared MON syntax, unified numeric semantics and the typed semantic expression/dense HIR checkpoint, before the HTML mixed JavaScript/Wasm backend work that consumes this capability. The main roadmap owns ordering. Establish the revision, worktree status and baseline at activation in local working notes, not in this queued plan.
 
 Required capabilities:
 
 - one shared argument-list owner, delivered by MON syntax, with named-only and compile-time policies, receiving-context diagnostics and recursive value parsing
 - parenthesised anonymous const records, delivered by MON syntax, with folded field projection and public-value handling
 - ordinary nominal identity, resolved field types and field lookup in `TypeEnvironment`
+- compact typed expression IDs and resolved constructor descriptors, with dense HIR field/child ranges and native result shapes
 - ordinary struct HIR construction, projections, copy, borrow validation and lifetime/escape validation
 - public-surface rejection of hidden runtime identities
-- canonical Int/Float identities with the compilation-wide NumericProfile, fixed I*/U*/F* types, non-numeric Byte and the Dec family
+- post-Dec/Uint canonical numeric identities with the compilation-wide NumericProfile, fixed I*/U*/F* types and non-numeric Byte, consuming each type's delivered target support
 
-Use the activation tree's current APIs. Reuse delivered MON parsing rather than reconstructing a predecessor record parser.
+Use the activation tree's current APIs. Reuse delivered MON parsing and constructor descriptors
+rather than reconstructing a predecessor record parser or owned expression tree. The required
+merged capabilities are sufficient; unrelated later foundation polish adds no prerequisite.
 
 ## Required authorities
 
