@@ -880,9 +880,7 @@ impl<'source> CodeScanner<'source> {
                 if depth == 0 {
                     break;
                 }
-            } else if self.language == CodeLanguage::Rust
-                && self.bytes[end..].starts_with(b"/*")
-            {
+            } else if self.language == CodeLanguage::Rust && self.bytes[end..].starts_with(b"/*") {
                 depth += 1;
                 end += 2;
             } else {

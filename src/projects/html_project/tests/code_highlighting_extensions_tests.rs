@@ -10,13 +10,22 @@ fn final_moth_placement_and_decimal_names_have_distinct_roles() {
         highlight_code_html("into", CodeLanguage::Moth),
         "<span class='moth-code-keyword'>into</span>"
     );
-    for name in std::iter::once("Dec".to_owned()).chain((0..=256).map(|scale| format!("Dec{scale}"))) {
+    for name in
+        std::iter::once("Dec".to_owned()).chain((0..=256).map(|scale| format!("Dec{scale}")))
+    {
         assert_eq!(
             highlight_code_html(&name, CodeLanguage::Moth),
             format!("<span class='moth-code-type'>{name}</span>")
         );
     }
-    for name in ["Dec01", "Dec257", "Decimal", "dec2", "Dec２", "Dec999999999999"] {
+    for name in [
+        "Dec01",
+        "Dec257",
+        "Decimal",
+        "dec2",
+        "Dec２",
+        "Dec999999999999",
+    ] {
         assert!(!highlight_code_html(name, CodeLanguage::Moth).contains("moth-code-type"));
     }
     assert_eq!(
@@ -27,9 +36,12 @@ fn final_moth_placement_and_decimal_names_have_distinct_roles() {
 
 #[test]
 fn moth_error_bangs_are_separate_from_keywords_types_and_delimiters() {
-    let highlighted = highlight_code_html("return! cast! Error! read()! !: -> !", CodeLanguage::Moth);
+    let highlighted =
+        highlight_code_html("return! cast! Error! read()! !: -> !", CodeLanguage::Moth);
     assert_eq!(
-        highlighted.matches("<span class='moth-code-error'>!</span>").count(),
+        highlighted
+            .matches("<span class='moth-code-error'>!</span>")
+            .count(),
         6
     );
     for keyword in ["return", "cast"] {
@@ -102,22 +114,36 @@ fn foreign_profiles_share_error_keywords_without_reclassifying_negation() {
         }
     }
     for language in [
-        CodeLanguage::JavaScript, CodeLanguage::TypeScript, CodeLanguage::Rust,
-        CodeLanguage::C, CodeLanguage::Shell,
+        CodeLanguage::JavaScript,
+        CodeLanguage::TypeScript,
+        CodeLanguage::Rust,
+        CodeLanguage::C,
+        CodeLanguage::Shell,
     ] {
         let highlighted = highlight_code_html("!ready", language);
         assert!(!highlighted.contains("moth-code-error"));
         assert!(highlighted.contains("<span class='moth-code-operator'>!</span>"));
     }
-    assert!(!highlight_code_html("println!(\"hi\")", CodeLanguage::Rust).contains("moth-code-error"));
+    assert!(
+        !highlight_code_html("println!(\"hi\")", CodeLanguage::Rust).contains("moth-code-error")
+    );
 }
 
 #[test]
 fn foreign_profiles_cover_missing_control_and_declaration_words() {
     for (language, words) in [
-        (CodeLanguage::JavaScript, "async await class extends import export switch try finally"),
-        (CodeLanguage::TypeScript, "async await class implements readonly keyof infer satisfies"),
-        (CodeLanguage::Python, "async await with yield lambda pass try finally"),
+        (
+            CodeLanguage::JavaScript,
+            "async await class extends import export switch try finally",
+        ),
+        (
+            CodeLanguage::TypeScript,
+            "async await class implements readonly keyof infer satisfies",
+        ),
+        (
+            CodeLanguage::Python,
+            "async await with yield lambda pass try finally",
+        ),
         (CodeLanguage::Rust, "loop as"),
         (CodeLanguage::Shell, "case esac until select"),
     ] {
@@ -134,8 +160,12 @@ fn foreign_profiles_cover_missing_control_and_declaration_words() {
 #[test]
 fn block_comments_shield_keywords_and_html_in_c_style_profiles() {
     for language in [
-        CodeLanguage::JavaScript, CodeLanguage::TypeScript, CodeLanguage::Rust,
-        CodeLanguage::C, CodeLanguage::Css, CodeLanguage::Sql,
+        CodeLanguage::JavaScript,
+        CodeLanguage::TypeScript,
+        CodeLanguage::Rust,
+        CodeLanguage::C,
+        CodeLanguage::Css,
+        CodeLanguage::Sql,
     ] {
         assert_eq!(
             highlight_code_html("/* throw ! <&>\r\nreturn */", language),
@@ -158,9 +188,9 @@ fn rust_comments_nest_while_javascript_closes_at_the_first_terminator() {
         "<span class='moth-code-comment'>/* outer /* inner */ tail */</span>"
     );
     let javascript = highlight_code_html(source, CodeLanguage::JavaScript);
-    assert!(javascript.starts_with(
-        "<span class='moth-code-comment'>/* outer /* inner */</span> tail "
-    ));
+    assert!(
+        javascript.starts_with("<span class='moth-code-comment'>/* outer /* inner */</span> tail ")
+    );
     assert_eq!(
         highlight_code_html("/* outer /* inner */", CodeLanguage::Rust),
         "<span class='moth-code-comment'>/* outer /* inner */</span>"

@@ -152,9 +152,9 @@ pub(super) fn classify_non_moth_word(language: CodeLanguage, word: &str) -> NonM
         CodeLanguage::JavaScript | CodeLanguage::TypeScript => match word {
             "if" | "else" | "return" | "break" | "continue" | "for" | "while" | "in" | "const"
             | "let" | "var" | "do" | "switch" | "case" | "default" | "try" | "finally"
-            | "extends" | "new" | "this" | "super" | "import" | "export" | "from" | "as"
-            | "of" | "async" | "await" | "yield" | "debugger" | "with" | "typeof"
-            | "instanceof" | "delete" => role = Some(CodeHighlightRole::Keyword),
+            | "extends" | "new" | "this" | "super" | "import" | "export" | "from" | "as" | "of"
+            | "async" | "await" | "yield" | "debugger" | "with" | "typeof" | "instanceof"
+            | "delete" => role = Some(CodeHighlightRole::Keyword),
             "throw" | "catch" => role = Some(CodeHighlightRole::Error),
             "true" | "false" | "null" | "undefined" => {
                 role = Some(CodeHighlightRole::Literal);
@@ -171,13 +171,17 @@ pub(super) fn classify_non_moth_word(language: CodeLanguage, word: &str) -> NonM
                 role = Some(CodeHighlightRole::Keyword);
                 next_identifier_role = Some(CodeHighlightRole::Contract);
             }
-            "number" | "string" | "boolean" | "unknown" | "never" | "void" | "any"
-            | "bigint" | "object" | "symbol" if language == CodeLanguage::TypeScript => {
+            "number" | "string" | "boolean" | "unknown" | "never" | "void" | "any" | "bigint"
+            | "object" | "symbol"
+                if language == CodeLanguage::TypeScript =>
+            {
                 role = Some(CodeHighlightRole::Type);
             }
             "type" | "enum" | "implements" | "readonly" | "abstract" | "declare" | "namespace"
             | "module" | "public" | "private" | "protected" | "override" | "keyof" | "infer"
-            | "asserts" | "is" | "satisfies" | "unique" if language == CodeLanguage::TypeScript => {
+            | "asserts" | "is" | "satisfies" | "unique"
+                if language == CodeLanguage::TypeScript =>
+            {
                 role = Some(CodeHighlightRole::Keyword);
             }
             "void" => role = Some(CodeHighlightRole::Keyword),
@@ -226,9 +230,7 @@ pub(super) fn classify_non_moth_word(language: CodeLanguage, word: &str) -> NonM
         },
         CodeLanguage::Shell => match word {
             "if" | "then" | "else" | "elif" | "fi" | "for" | "while" | "do" | "done" | "in"
-            | "case" | "esac" | "until" | "select" => {
-                role = Some(CodeHighlightRole::Keyword)
-            }
+            | "case" | "esac" | "until" | "select" => role = Some(CodeHighlightRole::Keyword),
             "true" | "false" => role = Some(CodeHighlightRole::Literal),
             "function" => {
                 role = Some(CodeHighlightRole::Keyword);

@@ -307,9 +307,7 @@ fn moth_operator_fallbacks_keep_single_char_spans() {
         CodeLanguage::Moth,
     );
 
-    for operator in [
-        "=", "+", "-", "*", "/", "%", "^", "~", "#", "$", "?", "@",
-    ] {
+    for operator in ["=", "+", "-", "*", "/", "%", "^", "~", "#", "$", "?", "@"] {
         assert!(
             highlighted.contains(&format!(
                 "<span class='moth-code-operator'>{operator}</span>"
@@ -701,11 +699,15 @@ fn moth_highlighter_separates_attached_error_bangs_from_keywords() {
     let highlighted = highlight_code_html("return! value cast! value", CodeLanguage::Moth);
 
     assert!(
-        highlighted.contains("<span class='moth-code-keyword'>return</span><span class='moth-code-error'>!</span>"),
+        highlighted.contains(
+            "<span class='moth-code-keyword'>return</span><span class='moth-code-error'>!</span>"
+        ),
         "return! must separate the error marker from its keyword, got: {highlighted}"
     );
     assert!(
-        highlighted.contains("<span class='moth-code-keyword'>cast</span><span class='moth-code-error'>!</span>"),
+        highlighted.contains(
+            "<span class='moth-code-keyword'>cast</span><span class='moth-code-error'>!</span>"
+        ),
         "cast! must separate the error marker from its keyword, got: {highlighted}"
     );
 }
