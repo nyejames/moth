@@ -158,6 +158,26 @@ fn foreign_profiles_cover_missing_control_and_declaration_words() {
 }
 
 #[test]
+fn class_name_lookahead_skips_reserved_words_and_typescript_words_stay_isolated() {
+    assert_eq!(
+        highlight_code_html("class point extends Base", CodeLanguage::JavaScript),
+        "<span class='moth-code-keyword'>class</span> <span class='moth-code-nominal'>point</span> \
+         <span class='moth-code-keyword'>extends</span> <span class='moth-code-nominal'>Base</span>"
+    );
+    assert_eq!(
+        highlight_code_html("class extends base", CodeLanguage::JavaScript),
+        "<span class='moth-code-keyword'>class</span> <span class='moth-code-keyword'>extends</span> base"
+    );
+    assert_eq!(
+        highlight_code_html(
+            "type interface readonly number is",
+            CodeLanguage::JavaScript
+        ),
+        "type interface readonly number is"
+    );
+}
+
+#[test]
 fn block_comments_shield_keywords_and_html_in_c_style_profiles() {
     for language in [
         CodeLanguage::JavaScript,

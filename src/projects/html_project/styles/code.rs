@@ -483,8 +483,12 @@ impl<'source> CodeScanner<'source> {
         word_start: usize,
         word_end: usize,
     ) -> Option<CodeHighlightRole> {
+        // A reserved word in the name slot keeps its own role, so an anonymous
+        // `class extends Base` does not colour `extends` as the class name.
+        let class = classify_non_moth_word(self.language, word);
         if let Some(expected) = self.expected_word_role.take()
             && expected.start == word_start
+            && class.role.is_none()
         {
             return Some(expected.role);
         }
@@ -515,7 +519,6 @@ impl<'source> CodeScanner<'source> {
             return Some(CodeHighlightRole::Nominal);
         }
 
-        let class = classify_non_moth_word(self.language, word);
         if let Some(next_role) = class.next_identifier_role
             && let Some(next_start) = self.next_identifier_start(word_end)
         {

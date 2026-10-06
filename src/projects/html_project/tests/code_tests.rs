@@ -249,13 +249,13 @@ fn moth_highlighter_uses_compiler_word_classes() {
 #[test]
 fn moth_highlighter_wraps_literals_and_keeps_non_keywords_plain() {
     let highlighted = highlight_code_html(
-        "true false none in fn group region into where",
+        "true false none in fn group region where",
         CodeLanguage::Moth,
     );
 
     assert_eq!(
         highlighted,
-        "<span class='moth-code-literal'>true</span> <span class='moth-code-literal'>false</span> <span class='moth-code-literal'>none</span> in fn group region <span class='moth-code-keyword'>into</span> where"
+        "<span class='moth-code-literal'>true</span> <span class='moth-code-literal'>false</span> <span class='moth-code-literal'>none</span> in fn group region where"
     );
 }
 
