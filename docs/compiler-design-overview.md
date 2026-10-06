@@ -27,7 +27,7 @@ For every compiler task, read the authority text and `Architectural invariants`.
 |---|---|---|
 | Module inputs, outcomes, root roles and artefact lanes | `Compiler input and result boundary` | Build design > `Deterministic scheduling and graph outcomes` |
 | Source identities, diagnostics and failure handling | `Diagnostics and deterministic identity` | Data-layout design and the style guide's diagnostic rules |
-| Dense IR, HIR ownership and capacity estimates | `Compiler storage and capacity` and Stage 5 > `Dense HIR ownership` | Data-layout design for its separately owned records |
+| Dense IR, expression ownership and capacity estimates | `Compiler storage and capacity`, Stage 4 > `Typed semantic expression ownership` and Stage 5 > `Dense HIR ownership` | Data-layout design for its separately owned records |
 | Declaration, type, builtin or binding identity | `Stable semantic identities` | `Public semantic interfaces` |
 | Public surfaces, effects, evidence and provenance | `Public semantic interfaces` | Relevant canonical language and memory references |
 | Fingerprints and compiler reuse facts | `Fingerprints and reuse facts` | Build design > `Incremental and persistent artefacts` |
@@ -51,6 +51,7 @@ For every compiler task, read the authority text and `Architectural invariants`.
 
 - One directory-scoped `@*.moth` or `+*.moth` module is the canonical semantic compilation unit. A boundary compiles it once, including dormant root work, before entry activation.
 - Each semantic fact has one producing owner. Later stages consume retained syntax and validated facts rather than reconstructing meaning from source or another representation.
+- AST semantics builds compact typed expression nodes addressed by owner-local IDs. Parser scratch, declarations, callable contracts, constants and diagnostic facts keep their own lifetimes rather than sharing one universal expression record.
 - Stage 0 schedules compiler services. The compiler alone sequences local semantic stages and owns their outputs. Build code never mutates HIR or installs semantic summaries.
 - Source preparation and provider binding are separate. Each preparation lane retains its token and declaration syntax for all later consumers.
 - Shared argument parsing supports distinct signature-slot and record-field routing. Sharing punctuation never merges their semantic contracts.
@@ -70,7 +71,13 @@ For every compiler task, read the authority text and `Architectural invariants`.
 
 Long-lived, high-volume graph-like IR defaults to stage-owned dense stores addressed by compact typed IDs and ranges. Fixed-arity edges store IDs inline. Variable-arity edges use ranges into typed side stores. Construction uses growable storage and freezes to fixed dense ownership when later structural growth is no longer required. Recursive owning graph trees need a specific semantic or measured reason.
 
-This rule does not require flattening parser-owned AST trees. Source/token/diagnostic sizes and exceptions remain under the data-layout authority. HIR's concrete contract is in Stage 5.
+The rule includes retained typed semantic expressions in the AST stage. Parsing and receiving-context resolution may use short-lived scratch forms, but completed expression graphs do not retain recursive owning trees or unresolved parse states. Stage 4 defines their semantic ownership and HIR's concrete contract is in Stage 5. Source/token/diagnostic sizes and exceptions remain under the data-layout authority.
+
+Each store names its issuing owner and the consumers that determine its lifetime. An index is meaningful only with that owner, not as a global identity or a persistent key. Typed ranges address entries in their owning side store, not an assumed contiguous run of child-node IDs. Shared nodes are immutable. A transformation reuses an unchanged node or produces a replacement root and isolated changed data, without mutating another candidate's view.
+
+Discarding a handle does not reclaim append-only storage. Construction, failed candidates, folding scratch and generic validation have explicit release boundaries. Retained dead nodes, spare capacity, overlapping old/new forms and final destruction count towards the representation's memory cost. Freeze and publication are separate barriers: a store stops growing at its last structural producer, while validated remapping and summary-dependent finalisation finish before immutable publication. The chosen representation preserves those legitimate producers rather than freezing early and rebuilding a parallel store.
+
+Compact encodings use typed accessors with one codec owner. Tag bits, optional-ID niches and short inline lists require checked capacities and measured common-path benefit. Full numeric payloads and exact spans remain lossless. The final encoding is selected from complete workload and retention evidence, not from record size alone. Type checking and folding throughput are primary consumers of this storage contract.
 
 Capacity estimates are allocation policy, never semantic facts or hard limits. Reuse `FrontendArenaCapacityEstimate`, cheap statistics from parallel tokenization/preparation and existing header aggregation. Use naturally available exact counts, but add no counting traversal or duplicate lowering logic solely to predict capacity. Underestimation grows normally. Published HIR retains no unnecessary spare capacity. Compact-ID overflow uses the owning capacity diagnostic rather than truncation.
 
@@ -465,6 +472,30 @@ Expressions have natural semantic types. Only an explicit receiving-boundary own
 
 Compiler and binding-backed calls use the same rule. AST carries `TypeId` through fields, receivers, calls, operators and compatibility checks. A receiving annotation does not retroactively change an already typed operator result.
 
+#### Typed semantic expression ownership
+
+The AST stage constructs a typed semantic expression IR while parsing, resolving receiving contexts and folding. It does not add an untyped whole-program AST or defer these decisions to HIR. A completed node records its resolved operation, ordered child IDs and one result shape. Resolved numeric domain, conversions, cast evidence and failure disposition remain owned facts for folding and HIR lowering to consume.
+
+Separate these responsibilities at their real owners:
+
+| Owner | Retained facts |
+|---|---|
+| Parser and receiving-context scratch | Unresolved numeric spelling, operator stacks and incomplete construction while their immediate context is being resolved. These states do not escape as completed semantic expressions. |
+| Declarations and symbols | Declaration identity, visibility, binding mode, receiver identity and links to any real initialiser. A declaration without an initialiser does not manufacture a `NoValue` expression. |
+| Callable and constructor contracts | Resolved parameter types, access/capability requirements, defaults, receiver information and success/error signature. Parsing, inference and validation borrow the same contract and retain one argument-slot mapping. |
+| Semantic expression store | Resolved value-producing operations, compact graph edges and authoritative result shapes. Zero results remain a real shape, distinct from a missing default. |
+| Constant owner | Immutable value content and its resolved classification, including exact numeric values and structural strings. Repeated uses refer to content without expanding it into owned expression subtrees. |
+| Occurrence and cold facts | Authored locations, diagnostic evidence, failure contributors, catch eligibility, const-record classification and synthetic-interface provenance where required. Shared constant content does not absorb occurrence-specific evidence. |
+| TIR | Template structure and exact-view authority during AST semantics, under `Templates and TIR`. |
+
+The common expression record does not carry declaration-only fields, cloned diagnostic `DataType` trees, absent-default sentinels or rare feature payloads. Underlying semantic types remain `TypeId`s. Authored type syntax stays with retained declarations and source ranges. Diagnostic compaction captures needed display facts before their type owner can be released, under the data-layout authority.
+
+Cold facts retain their semantic meaning through folding and replacement. An empty contributor list is not by itself proof that all facts are absent: catch eligibility, typed producer conflicts, explicit exits and deferred assertion/catch evidence can still matter. Failure summaries do not repeatedly rescan expression subtrees to reconstruct origin lists. Facts needed after expression storage ends move into the consuming HIR or diagnostic owner first.
+
+Store domains follow actual lifetimes. TIR-referenced expressions stay available for all exact-view consumers in their module build. Validation of an unused generic body need not keep that body's expression graph until later materialisation. The immutable generic template retains its own canonical syntax and context, from which a concrete body gets a distinct local graph. Candidate specialisations share unchanged immutable data without leaking replacements between candidates.
+
+Module compilation, generated materialisation, config and direct-template services consume the same semantic builders and fold owners through their defined entry points. Each service releases its scratch and expression stores after producing the owned values, executable data and diagnostic context needed by its outcome. Public interfaces contain canonical value/type facts, never expression IDs. HIR receives a deliberate projection and retains no AST/TIR authority.
+
 #### Result slots and receiving boundaries
 
 An expression produces zero, one or multiple ordered result slots. The common zero/single representation is allocation-free. A multiple-result payload contains at least two slot types. There is one authoritative resolved result shape per expression, not a duplicated call-local return list.
@@ -475,7 +506,7 @@ Single-value consumers validate exactly one slot. Multi-bind, returns and value-
 
 All right-hand results are computed before assigning existing multi-bind targets. Distinct result slots preserve result-to-parameter and result-to-result provenance. They do not prove separate allocations or pairwise disjointness, including when a summary classifies results as fresh.
 
-The accepted detailed contract is `docs/roadmap/plans/native-result-slots-and-core-const-eval.md` > `Final representation contracts`. Physical result packing belongs only to ABI owners.
+Source misuse receives a typed arity/type diagnostic at its receiving site. A completed semantic node with an invalid shape violates a compiler invariant. No consumer silently selects the first slot, substitutes an optional `none` for zero results or manufactures a tuple to fit a single-value API. Physical result packing belongs only to ABI owners.
 
 #### Numeric typing and literal materialisation
 
@@ -508,7 +539,9 @@ A fully folded call contributes no runtime call, helper or asset requirement, bu
 
 A missing evaluator or runtime argument produces a required-constant diagnostic where constness is required and retains the runtime call otherwise. The same distinction applies to a bounded evaluation refusal. An observing operation on an unresolved structural resource string cannot guess its characters: required folding diagnoses it, while opportunistic evaluation keeps the runtime operation. Checked-value failures retain the language's established compile-time failure policy rather than silently becoming runtime work.
 
-Operations use deterministic work/output limits and checked capacities. Fallible calls, mutable execution, arbitrary source-function interpretation and user-selected evaluators are outside V1. See `docs/roadmap/plans/native-result-slots-and-core-const-eval.md` > `External constant-evaluation contract`.
+Operations use deterministic work/output limits and checked capacities through the shared constant-evaluation owner. Refusal carries a typed reason and produces no partial output. Optional absence remains an ordinary successful value, distinct from refusal, zero results and an error channel. Fallible calls, mutable execution, arbitrary source-function interpretation and user-selected evaluators are outside V1.
+
+The closed operation vocabulary contains only registered operations with real consumers. Registration checks the complete signature before installation, and evaluation validates every returned slot. Provider JavaScript, Builder and Dependency registrations cannot select compiler-owned Rust evaluation. A runtime call may retain individually folded arguments without losing their evaluation order or effects.
 
 #### Call-shaped syntax and assertion intrinsics
 
@@ -690,7 +723,7 @@ The direct `.mtf` service has no containing output artefact or route. It returns
 
 Wiring has two constrained parameter contracts. A **wire** preserves a binding instance's continuing identity. A **constructor route** records how future input completes a known choice constructor. These routes are unrelated to HTML URL routes. Messages remain ordinary choice values.
 
-`of` is head-directed: the preceding compiler-known head determines whether the specification describes an ordinary generic type, a wire parameter or a constructor-route parameter. Sharing syntax adds neither user-defined specification grammars nor first-class capability containers. The accepted contract is `docs/roadmap/plans/wiring-v1-cleanup-and-foundations.md` > `Accepted language contract to publish`.
+`of` is head-directed: the preceding compiler-known head determines whether the specification describes an ordinary generic type, a wire parameter or a constructor-route parameter. Sharing syntax adds neither user-defined specification grammars nor first-class capability containers. `docs/src/docs/wiring/wiring.mtf` owns the exact Wiring source contract and its channel boundary.
 
 A V1 `Wire of T` parameter accepts a named local binding or a compatible existing wire parameter. An ordinary local acquires identity only when a wire-receiving call needs it, with no `Wire()` constructor or call-site marker. Mutable and immutable locals are eligible. Projections, indexed places and fresh/computed expressions are not. An ordinary `T` receiver reads the current value under normal access rules. A compatible wire receiver forwards identity. An ordinary value parameter does not preserve its caller's identity merely because its body could use one.
 
@@ -706,6 +739,8 @@ Wire/Route capabilities are not ordinary stored or returned values. V1 capabilit
 
 AST resolves parameter contracts, binding identity, constructor identity and capture semantics. HIR retains the minimal neutral facts and ordinary captured values. Public interfaces and generated materialisation preserve contract kinds and canonical underlying types. Target validation rejects a reachable contract it cannot realise rather than silently reducing it to value-only behaviour.
 
+The normal argument owner knows the immediate receiving parameter before validating constructor completeness. It never retries a failed ordinary constructor as a route. Capability arguments use the same typed expression, native result-slot and ordinary captured-value owners as other calls. Static expression IDs are not runtime binding-instance identities. Public signatures, fingerprints, imports and generic remapping preserve the distinction between an ordinary value parameter, a wire and a route without exporting local identities or capture storage.
+
 Templates remain ordinary strings with no hidden wire, route, subscription or rerender recipe. Structural resource pieces follow their independent contract. Persistent observation, event delivery, UI scheduling and route application require separately defined consumer/lifetime contracts. This foundation supplies none implicitly.
 
 ### Stage 5: HIR and validation
@@ -720,7 +755,7 @@ HIR expressions live in module-owned dense storage addressed by `HirValueId`. St
 
 A place consists of a root local and an ordered projection range. Indexed projections refer to expression IDs rather than owning recursive expressions. One builder appends during construction. IDs/ranges survive vector reallocation and compact conversions reject overflow. Completed HIR freezes to fixed dense ownership before publication.
 
-All visitors, remappers, validators, side tables and lowerers consume the same store. Numeric value payloads retain their full width/precision/scale and are not mistaken for expression graph edges. The storage change creates no persistent-cache, mmap, unsafe-pointer or general allocator contract. See `Compiler storage and capacity` and `docs/roadmap/plans/hir-dense-storage-and-capacity-foundations-plan.md` for the complete storage/capacity contract.
+All visitors, remappers, validators, side tables and lowerers consume the same store. Numeric value payloads retain their full width/precision/scale and are not mistaken for expression graph edges. The storage contract creates no persistent-cache, mmap, unsafe-pointer or general allocator framework. `Compiler storage and capacity` owns capacity estimation and lifetime barriers. Summary-dependent private failure rewrites complete before final immutable publication, and published link facts describe the resulting CFG.
 
 #### Lowering boundary
 
@@ -728,7 +763,7 @@ HIR owns explicit control flow, local/place access, lexical regions and terminat
 
 Effectful expression work is linearised into ordered statement preludes and temporary locals before its final value is used. Plain binary expressions remain valid for booleans and comparisons. Scalar arithmetic and negation use explicit checked numeric operations. Template strings use explicit append operations. Validation rejects work left in the wrong representation.
 
-HIR contains no unresolved generic/trait work, TIR, compile-time page fragments, config evaluation, target-selected source branches, absolute source paths, routes, rendered URLs, content hashes, output paths or builder names. It does not choose lifetime topology, runtime ownership or physical layout.
+HIR contains no unresolved generic/trait work, TIR, compile-time page fragments, config evaluation, target-selected source branches, absolute source paths, HTML URL routes, rendered URLs, content hashes, output paths or builder names. It does not choose lifetime topology, runtime ownership or physical layout.
 
 Structural String constants retain ordered Text/Resource/SiteRoot pieces. Folded fragments retain the same value shape plus insertion indexes in metadata. Per-function and metadata walks collect resource uses and a separate site-root-use fact, since SiteRoot has no `ResourceId`. The builder supplies a validated URL map for each physical variant. Lowering materialises final characters from that map without mutating canonical HIR. Inactive static branches contribute no executable uses.
 
@@ -742,7 +777,9 @@ Value-producing branches and catch recovery join individual slots through ordina
 
 HIR makes implicit-failure edges, handler joins and built-in `Error` materialisation explicit. The private inferred lane preserves the same success/failure exclusion: success slots do not exist on failure edges. Handlers and propagation consume frontend-owned contracts rather than reconstructing expression coverage or error compatibility.
 
-The private same-module failure transport reuses the existing fallible carrier and ABI as an internal lane rather than a public or foreign result contract, with no global last-error variable and no fabricated aggregate extraction.
+The private same-module failure lane uses the same explicit success/error control-flow contract. Any shared physical carrier belongs to the target ABI only. The lane adds no public or foreign result contract, global last-error variable, semantic aggregate or fabricated payload extraction. Installing the lane and pruning obsolete handlers preserve slot definitions, CFG validation and final link facts.
+
+JavaScript may pack results into a private array/object and external wrappers may translate their success/error envelope at the ABI boundary. Supported Wasm result types use native ordered results through function types, calls and returns. Unsupported aggregate, handle or fallible ABI capabilities receive the normal target diagnostic until their lowering contract exists. ABI storage alone creates no source allocation family and merges no result lifetimes.
 
 #### Lazy assertion failure messages
 
