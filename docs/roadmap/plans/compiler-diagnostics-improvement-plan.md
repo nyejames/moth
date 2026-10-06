@@ -38,31 +38,43 @@ Do not implement config-block syntax, inactive-section folding or legacy-name mi
 
 ## Current state
 
-ACTIVE_PLAN: `docs/roadmap/plans/compiler-diagnostics-improvement-plan.md`
+```text
+ACTIVE_PLAN: docs/roadmap/plans/compiler-diagnostics-improvement-plan.md
 STATUS: paused
-CURRENT_SLICE: Phase 4.1b+d complete; 4.1c (multiple-success return-shape reason) remains
-LAST_ACCEPTED_COMMIT: `d7fb3654f` (Phase 4.1d)
-WORKTREE: main @ `e56dba9da` was clean before this documentation tidy; no linked worktrees (the boracle tree matched main and its detached shell was pruned; this tidy intentionally changes roadmap docs)
-REQUIRED_RELOADS: startup files, this plan and current source/diff
-RELEVANT_CONTEXT_NOW:
-- docs: access-and-aliasing and assignment contracts distinguish immutable root bindings from assignment-target syntax; no general documentation edits are allowed
-- code: Phase 3.2 renamed NotMutablePlace→TemporaryNotAssignable and ImmutableVariable→ImmutableBinding, added ImmutableFieldRoot for field writes through an immutable root binding, extended the payload with field_name and root_binding_name, and preserved the authored binding location in the scope-frame so ImmutableBinding and ImmutableFieldRoot carry a secondary label at the original immutable declaration; ExpectedAssignmentOperator says binding not variable
-ACCEPTANCE_CRITERIA:
-- temporary, immutable direct-binding and immutable field-root assignment targets use distinct reasons and clean wording without `place`/`rvalue`/`variable` terminology
-- field-write diagnostics name the field and root binding; a generic fallback exists when the root cannot be named
-- `~` is never suggested on assignment targets; reassignment guidance uses ordinary `=`
-- stable `MOTH-RULE-0044` is preserved; no new diagnostic code
-VALIDATION_STATE:
-- Phases 1–2.6b and 3.1a–3.1b: every checkpoint passed its focused checks and `just validate`; completed phase notes retain design and correction details
-- Phase 3.2a Ollama patch: passed `cargo fmt`, 3,609 Rust tests, 1,777 integration cases and library Clippy
-- Phase 3.2a parent probes: `p.x = 99` (immutable root) renders `ImmutableFieldRoot` naming field `x` and root `p`; `value = 200` (immutable direct) renders `ImmutableBinding` with ordinary `=` guidance and no `~`; `Point(1,2).x = 5` (temporary) renders `TemporaryNotAssignable`; mutable `p ~= Point(1,2)` + `p.x = 99` compiles cleanly
-- Phase 3.2a `just validate`: passed cross-target Clippy, 3,609 Rust tests, 1,777 integration cases, docs check and 28 benchmark cases
-DOCS_IMPACT: diagnostics-plan tracking only; general design and language docs remain unchanged unless they explicitly name a diagnostic being changed
-BLOCKERS_OR_OPEN_DECISIONS: paused until the compiler source, token and diagnostic data layout plan completes
-DELEGATION_DECISION: Ollama - explicitly required for every implementation worker slice
-NEXT_WORKER_ORDER: Ollama only for implementation slices
-STOP_REASON: paused by the roadmap dependency; no implementation work resumes until the layout plan completes
-NEXT_RESUME_ACTION: after the layout plan completes, launch Phase 4.1c (multiple-success return-shape reason + ScopeContext boundary fact), then Phase 4.2
+NEXT_SLICE: Phase 4.2, catch-recovery type context
+BLOCKERS: delivered compact diagnostic records, frozen type-display snapshots and failure-lane migration
+TRANSFERRED: pending 4.1c and 4.4 belong to the typed semantic expression and native result cutover
+RESUME_ACTION: reload routed authorities and current source, refresh producers/schema APIs and confirm the transferred capabilities are delivered before starting Phase 4.2
+```
+
+The transfers below are pending implementation, not completed diagnostics. The typed semantic
+expression and native result cutover owns their implementation, coverage and source-visible
+messages because it removes the ambiguous result representation. This plan retains their design
+record and owns the remaining diagnostic improvements after the layout migration.
+
+### Historical implementation and validation
+
+Phase 4.1b+d completed, with the last accepted diagnostic slice recorded at `d7fb3654f`
+(Phase 4.1d). The following records describe those earlier implementation checkpoints, not the
+current workspace or validation of this documentation change.
+
+Phase 3.2 renamed `NotMutablePlace` to `TemporaryNotAssignable` and `ImmutableVariable` to
+`ImmutableBinding`. It added `ImmutableFieldRoot`, field/root names and the authored binding
+location so immutable-binding failures carry a related declaration label. `ExpectedAssignmentOperator`
+uses binding terminology. Those changes preserve `MOTH-RULE-0044`, distinguish temporary/direct/field
+targets, name field roots when available and give ordinary `=` guidance without suggesting `~` on
+assignment targets.
+
+- Phases 1–2.6b and 3.1a–3.1b passed their focused checks and `just validate` at each recorded
+  checkpoint. Completed phase notes retain the design and correction details.
+- The Phase 3.2a implementation passed `cargo fmt`, 3,609 Rust tests, 1,777 integration cases and
+  library Clippy.
+- Phase 3.2a independent probes confirmed that immutable `p.x = 99` reports `ImmutableFieldRoot`
+  naming `x` and `p`, immutable `value = 200` reports `ImmutableBinding` with ordinary assignment
+  guidance, `Point(1,2).x = 5` reports `TemporaryNotAssignable` and a mutable `p` permits `p.x = 99`.
+- Phase 3.2a `just validate` passed cross-target Clippy, 3,609 Rust tests, 1,777 integration cases,
+  the docs check and 28 benchmark cases.
+
 ## Confirmed design decisions
 
 - Quoted strings support exactly these escapes:
@@ -627,13 +639,15 @@ tests. Rename the diagnostic family outright to fallible-operand terminology, re
 as `Unhandled fallible operand` and delete the dead optional reason rather than preserving an
 unused parallel path. Keep `MOTH-TYPE-0004`.
 
-**Additional confirmed propagation-shape gap:** postfix `?` requires exactly one optional success
-return slot. The current validator collapses top-level code, zero-return functions, non-optional
-functions and functions with multiple success slots into `FunctionHasNoOptionalReturn`. Add a
-distinct multiple-success return-shape reason carrying the authored success-slot count. Preserve a
-narrow enclosing-boundary fact in `ScopeContext` so `?` and `!` inside nested branches can still
-distinguish a real function from top-level module work without guessing from the immediate
-`ContextKind`.
+**Phase 4.1c transfer, pending implementation:** postfix `?` requires exactly one optional success
+return slot. The typed semantic expression and native result cutover owns the distinct
+multiple-success return-shape reason and its authored success-slot count. It also owns the narrow
+enclosing callable/entry contract fact used by `?` and `!` inside nested branches, without guessing
+from the immediate `ContextKind` or rebuilding the signature. The selected top-level `start`
+contract has built-in `Error!`, so compatible top-level `!` remains legal. Diagnose an incompatible
+entry error separately from a real function without a compatible error slot. Postfix `?` still
+requires a compatible single optional success slot. Do not implement a second boundary-fact owner
+when this diagnostics plan resumes.
 
 **Additional confirmed terminology gap:** `InvalidBuiltinCallReason::MustHandleFallibleResult`
 still names an internal Result despite rendering a fallible call, and cast diagnostics say
@@ -655,7 +669,7 @@ enum InvalidFallibleHandlingReason {
     BangOnOptional,
     QuestionOnNonOptional,
     QuestionOnFallible,
-    ErrorPropagationAtTopLevel,
+    ErrorPropagationInIncompatibleEntry,
     ErrorPropagationInNonFallibleFunction,
     OptionPropagationAtTopLevel,
     OptionPropagationInNonOptionalFunction,
@@ -664,7 +678,10 @@ enum InvalidFallibleHandlingReason {
 }
 ```
 
-Names may differ, but each branch must encode the authored handler, operand carrier and propagation boundary.
+Names may differ, but each branch must encode the authored handler, operand channel and propagation
+boundary. This is the semantic reason inventory, not an instruction to recreate an already
+delivered diagnostic family. Phase 4.1c's pending shape and boundary facts belong to the earlier
+native semantic cutover.
 
 Delete `RemovedBangFallbackSyntax` and `RemovedBangCatchHandlerSyntax`, their dedicated parser
 recognisers, unit tests and `result_removed_err_bang_syntax_rejected` fixture. Those paths exist
@@ -769,42 +786,30 @@ Tests need:
 - valid value-producing match at a declaration receiver
 - exhaustive choice coverage or `else` so the fixture does not fail for an unrelated reason
 
-### 4.4 Reject multi-return values received by one target
+### 4.4 Single-target/multiple-result rejection transferred to native results
 
 **Original finding:** DIAG-031
 
-A direct probe confirms `value = pair()` currently compiles when `pair` returns two success
-slots. Call expressions retain those slots in `ExpressionKind::*Call::result_type_ids`, but their
-general `Expression::type_id` becomes an internal tuple. Declaration, assignment, return and
-produced-`then` receivers must check the typed slot count before coercion or lowering can treat that
-tuple as one source value.
+**Disposition: transferred, pending implementation.** The typed semantic expression and native
+result cutover owns this correction for every declaration, assignment, return and produced-`then`
+receiver. The original finding came from an internal tuple that let two success slots appear to be
+one expression value. Native result shape removes that ambiguity and is the right place to enforce
+arity before coercion or lowering.
 
-Do not silently discard success slots.
+The owning cutover must preserve these requirements:
 
-#### Implementation
+- one factual value-receiver diagnostic family, without misusing `InvalidMultiBind` for source
+  that has no multi-bind
+- receiver kind, target count, produced success-slot count and authored producer location
+- guidance to receive one target per success slot, without `_`, implicit discards, fabricated names
+  or a suggestion that multiple results are a source tuple
+- negative declaration, assignment, return and nested value-producing receiver coverage at their
+  distinct semantic boundaries, plus accepted matching multi-bind and multi-result forwarding
+- all right-hand results computed before any existing assignment target is written
 
-Add a dedicated value-receiver diagnostic family rather than misusing `InvalidMultiBind`, because the invalid source has no multi-bind.
-
-Carry:
-
-- receiver kind: declaration, assignment or return
-- target count
-- produced slot count
-- call or value-block location
-
-Message:
-
-> This expression produces 2 values, but the declaration has 1 target. Use one target per return slot with a multi-bind declaration.
-
-Do not suggest `_` or another discard syntax. None is part of the current language.
-Do not fabricate target or callee names that the diagnostic payload does not own.
-
-Tests should cover declaration, assignment and nested value-producing block receivers if those paths are distinct.
-Keep `left, right = pair()` as positive multi-bind coverage. This diagnostic slice does not add
-tuple values, implicit slot discards or multi-return forwarding.
-
-Implement this as two reviewable slices: introduce the diagnostic and protect declaration plus
-assignment receivers first, then extend the accepted family to return and nested `then` receivers.
+This plan has no remaining implementation slice for DIAG-031. On reactivation, consume the
+delivered family and its primary tests through the compact diagnostic schema. Do not recreate the
+old tuple-based receiver check or duplicate its tests under a diagnostics-only owner.
 
 ### 4.5 Use the same `then` diagnostic at top level and in functions
 
@@ -1196,26 +1201,24 @@ from Phase 2.5 unused for normal local bindings.
 
 **Additional confirmed dispatch gap:** the existing-symbol branch recognises only builtin type
 tokens and the mutable marker as declaration starts. A redeclaration with a nominal, alias,
-generic, qualified or collection annotation, the current postfix compile-time marker or a reactive
-marker can fall through to expression parsing. Declaration-shape detection must reuse the canonical
+generic, qualified or collection annotation or the postfix compile-time marker can fall through
+to expression parsing. Declaration-shape detection must reuse the canonical
 binding-target parser rather than grow another token whitelist. Plain `name = value` remains
 reassignment, not a second inferred declaration.
-
-A second reactive declaration is not invalid because `$` is unexpected. It is invalid because the visible name already exists.
 
 - Delete `RuleDiagnosticKind::ShadowedName`, its descriptor, payload, constructor, remapping and
   renderer branch.
 - Route ordinary body-local typed and mutable redeclarations through `DuplicateDeclaration`.
 - Parse every unambiguous current body-local binding declaration shape before duplicate
   registration rejects it, including user-defined/constructed type annotations and postfix
-  compile-time or reactive binding markers. Keep plain `name = value` on reassignment.
+  compile-time markers. Keep plain `name = value` on reassignment.
 - Reuse `DuplicateDeclaration`.
-- Reuse the scope-neutral duplicate-name message established in Phase 2.5. Do not reintroduce a
-  reactive-specific renderer branch.
+- Reuse the scope-neutral duplicate-name message established in Phase 2.5.
 - Use the authored binding location preserved by Phase 3.2 and label both declarations.
 - Update the existing `MOTH-RULE-0038` fixtures to `MOTH-RULE-0002`. Do not reserve or retain the
   superseded code through an alias.
-- Do not invent a separate reactive uniqueness rule.
+- Consume the surviving binding grammar after Reactivity V1 retirement. Do not preserve removed
+  declaration syntax or a migration-specific uniqueness rule.
 
 ### 7.1b Pattern captures should use the normal no-shadowing path
 
@@ -1328,7 +1331,8 @@ Implement in this order to avoid parallel diagnostic paths:
 1. Phase 1 render fallback, terminology cleanup and compatibility deletion
 2. Phase 2 tokenizer and parser boundary reasons
 3. Phase 3 mutable access, assignment and copy reasons
-4. Phase 4 fallible/optional handling and value receivers
+4. Remaining Phase 4 fallible/optional handling and value receivers, consuming transferred native
+   result-arity and propagation-context diagnostics rather than implementing them again
 5. Phase 5 visibility-aware suggestions and match payload facts
 6. Phase 6 template compatibility and external-JS scanner binding
 7. Phase 7 remaining focused improvements
@@ -1354,7 +1358,7 @@ Use `tests/cases/` for:
 - mutable calls and receiver calls
 - assignment and copy syntax
 - result/option handling
-- multi-return receiving
+- multi-return receiving through its delivered native semantic owner, without a duplicate fixture
 - namespace and type suggestions where rendered wording is contractual
 - match patterns
 - template directive conflicts
@@ -1424,7 +1428,8 @@ Also perform the manual diagnostic audit required by the compiler style guide:
 - No deleted syntax has a dedicated compatibility surface.
 - Every incompatible directive diagnostic names both items and explains the conflict.
 - Mutable diagnostics distinguish missing `~`, immutable places, fresh values and invalid assignment markers.
-- Fallible and optional diagnostics name the authored operator and correct Moth carrier.
+- Fallible and optional diagnostics name the authored operator and correct error channel or
+  optional value shape.
 - Terse diagnostics never have an empty message field.
 - Malformed user source in this plan never produces `MOTH-INFRA-0001`.
 - `just validate` passes.

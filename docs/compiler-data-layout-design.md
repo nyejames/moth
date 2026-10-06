@@ -7,9 +7,12 @@
 > at `4cfd9d492`. The owning plan records constant and nominal fits within their locked budgets and
 > explicitly accepts the inherited generic `n^1.70` exception (`n^1.770`) without raising or
 > loosening that budget or claiming no worsening. The post-Phase-3 compiler tidy-up is accepted on
-> main. The MON syntax and Rust tooling checkpoints are implemented; Wiring and native result-slot
-> checkpoints still precede explicit Phase 4 reactivation.
-> User-facing diagnostic improvement work remains paused until that gate.
+> main. The MON syntax and Rust tooling checkpoints are implemented. Delivery of compact typed
+> expressions, dense HIR, native success slots and separate error channels, Wiring foundations and
+> the bounded Core evaluator checkpoint is still required before explicit Phase 4 reactivation. That work
+> starts after the Dec contextual correction and Uint addition. Broad user-facing diagnostic
+> improvement remains paused until the diagnostic-layout migration completes. Native result-arity
+> and propagation-context diagnostics belong to the earlier semantic cutover.
 >
 > **Activation baseline (historical, as of plan activation):** `b6f81fe58` on
 > `token-and-diagnostic-data-layout-changes`, with the delivered Compiler Test Suite Hardening
@@ -1429,13 +1432,17 @@ The store must represent every current user-visible type spelling:
 - options
 - growable and fixed collections
 - ordered maps
-- fallible carriers and multi-success signatures
-- tuple/internal multi-value display where required by an existing diagnostic
-- function parameters, returns and error return
+- ordinary aggregate types that remain real semantic values
+- callable parameters, zero/one/multiple success slots and the independent error channel
 - generic parameters
 - concrete generic nominal instances
 - external types with useful package/name identity
 - unknown external types only where the existing semantic model explicitly permits them
+
+Callable result shape is a signature fact, not a synthetic tuple or fallible-carrier `TypeId`.
+Display records preserve slot order, arity and each slot's type separately from the error channel.
+They must not reconstruct removed transport types merely to render a diagnostic. Genuine aggregate
+types still use their normal type-display records.
 
 ### Snapshot algorithm
 
@@ -1463,6 +1470,11 @@ internal numeric ID.
 Before full `TypeEnvironment` retention is deleted, tests must compare the old and new rendering for
 every supported type shape and for representative nested combinations. The new store must preserve
 user-visible spelling unless an explicitly authorized diagnostics-improvement slice changes it.
+
+The compact typed-expression cutover can release expression stores after copying their diagnostic
+facts into the existing report boundary. It does not by itself deliver this snapshot architecture
+or authorise dropping a type environment still needed by a current report. That final retention
+change belongs to the diagnostic-layout migration and its complete type-lifetime proof.
 
 ## Frozen render context and cloning policy
 
