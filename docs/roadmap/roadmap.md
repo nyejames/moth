@@ -144,6 +144,7 @@ SQL profiles on one shared role palette. The current baseline includes:
 - maximal-munch Moth operators
 - a general language-neutral palette shared by every profile
 - bounded Moth lexical and contextual roles for contracts, functions, directives, paths and `io`
+- plain Moth template bodies around highlighted heads and interpolations
 
 Future formats should extend the single `CodeLanguage` owner in
 `src/projects/html_project/styles/code.rs`, including its aliases, comment syntax,
@@ -158,7 +159,8 @@ Prefer the conventional short and long aliases where both are widely used, such 
 Only add a profile when its language-specific rules improve on the generic formatter; preserve
 HTML escaping and add tests for aliases, comments, keywords and the rendered span classes.
 
-Stateful Moth template-body-aware highlighting remains deferred. Full semantic or editor grammar
+Directive-aware body highlighting, such as colouring a `$code` or `$md` body by the language its
+directive will format, remains deferred. Full semantic or editor grammar
 parity stays owned by editor tooling, not the compile-time formatter. The built-in formatter never
 performs semantic symbol resolution or syntax diagnostics.
 

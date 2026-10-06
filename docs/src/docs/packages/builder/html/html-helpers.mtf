@@ -213,7 +213,8 @@ only. It never validates the snippet, resolves names or reports diagnostics.
 Every language profile shares the same general role palette, and the Moth
 profile uses the compiler-owned source-word classification plus bounded lexical
 roles for contracts, functions, directives, dependency paths and the `io` namespace.
-Stateful template-body-aware highlighting stays deferred.
+Moth template bodies stay plain authored text around their highlighted heads and
+nested templates. A body is not re-highlighted by the directive that will format it.
 
 ### Canvas wrapper
 
