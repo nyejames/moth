@@ -4,7 +4,7 @@ Status: proposed, inactive
 
 Current slice: not started
 
-Prerequisites: typed provenance relations, conflict-directed refinement and the bounded operational oracle must be complete; no current implementation owner is active
+Prerequisites: typed provenance relations, conflict-directed refinement, the bounded operational oracle and the dense HIR/native result extraction checkpoint must be delivered; no current implementation owner is active
 
 Next action: if approved, create a current owning plan from this note, re-anchor it against the active repository, then inventory current local, generated, cross-module and external call-summary producers and every HIR multiple-result representation
 
@@ -53,7 +53,24 @@ The active repository must already provide:
 - exact call-argument and call-effect events
 - compiler-owned local and generated semantic convergence
 - stable call targets and provider summaries
+- merged dense HIR and native result-channel extraction, including exact success/error slot availability
 - normal build-system isolation from semantic stage sequencing
+
+The compiler foundation owns mechanical extraction changes. This proposal owns the later
+algorithmic improvement to per-result provenance and outcome-sensitive summaries. Delivery of the
+representation checkpoint does not activate this research or prove independent storage for two
+result positions. Consume the checkpoint directly without waiting for unrelated foundation polish.
+
+### Native-result investigation matrix
+
+Preserve the transferred native-result follow-up when this proposal activates.
+Compare independent results and aliases of the same or different inputs, including
+projections, copies, unknown and joined origins. Exercise partial result use,
+different last uses, overwrite/rebinding, loops, recursion, catch and cross-module
+or generated calls. Compare named precision experiments against the bounded
+operational oracle while keeping reference mode conservative. Native slot order
+does not prove freshness or disjointness, and lifetime topology remains owned by
+lifetime analysis. This matrix records deferred investigation, not activation.
 
 ## Locked decisions
 
@@ -194,12 +211,13 @@ Do not design a new result table until the current HIR and summary lanes are map
 
 ### Summary and reasoning
 
-Separate result slots before adding recursion or outcome sensitivity.
+Add precise provenance to the already separated native result positions before adding recursion
+or outcome sensitivity. Do not repeat the compiler foundation's representation migration.
 
 ### Work
 
-- [ ] Add a Boracle-owned result-slot identity.
-- [ ] Evolve normalized call effects to expose every semantic result slot needed by borrow analysis.
+- [ ] Reuse the normalized result-event identity and its mapping to native semantic result positions. Add an analysis-local identity only if the current owner cannot express a required relation, with one explicit owner-domain boundary.
+- [ ] Extend normalized call effects with per-result provenance without changing the delivered slot layout, evaluation order or success/error availability.
 - [ ] Preserve exact result-write event order.
 - [ ] Add result provenance for:
   - [ ] fresh

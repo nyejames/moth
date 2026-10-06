@@ -47,6 +47,7 @@ This package also adds edge-sensitive last-use queries. A value can have a futur
 The repository must already provide:
 
 - exact normalized CFG event order
+- delivered dense HIR/native result extraction with the same runtime event order, not a static expression ID treated as a runtime generation
 - typed provenance overlap evidence
 - explicit precision-loss reasons
 - bounded operational loop replay
@@ -332,7 +333,7 @@ The useful outcome is not a magical final-iteration operator. It is precise evid
 - [ ] Record when a transfer candidate is blocked by:
   - [ ] back-edge use
   - [ ] prior-generation alias
-  - [ ] reactive observation
+  - [ ] ordinary retained capture or builder-owned use represented by the active contract, without a retired V1 reactive observation event
   - [ ] unknown call effect
   - [ ] retained aggregate relationship
 - [ ] Keep transfer as a later consumer decision.

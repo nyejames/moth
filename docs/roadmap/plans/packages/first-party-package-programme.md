@@ -19,7 +19,7 @@ plans under this directory.
 ```text
 STATUS: active in parallel under the main roadmap
 CURRENT_SLICE: select the next eligible package slice from the tracker; delivered Math and Time work remains complete
-BLOCKERS: result-slot/Core const-eval-dependent slices retain their capability gates; shared numeric/ABI changes require coordination with the serial numeric checkpoint
+BLOCKERS: result-slot/Core const-eval-dependent slices retain their capability gates; shared numeric/ABI/expression changes require coordination with their serial compiler owners
 NEXT_ACTION: refresh current main and the intended package's living plan, then run the complete package gate for an eligible isolated slice
 ```
 
@@ -35,9 +35,11 @@ own Phase 2 (`@core/text` v1) has not started, and its capability prerequisites 
 
 The main roadmap makes this programme active in parallel. That scheduling state
 supersedes the earlier programme-wide pause recorded during MON and data-layout
-integration. MON syntax and Rust tooling v1 are now delivered. Unified numeric
-semantics is the next serial compiler checkpoint, followed by HIR storage,
-Wiring and native result slots/Core constant evaluation.
+integration. MON syntax and Rust tooling v1 are now delivered. After the Dec
+contextual typing correction and separate Uint addition, the next serial compiler
+foundation consolidates dense HIR, typed semantic expressions, native result
+channels, Reactivity V1 retirement, bounded Wire/Route contracts and Core constant
+evaluation. Package slices consume its delivered capability checkpoints.
 
 Parallel status does not remove a package's own capability gate. Text v1 and any
 slice requiring result slots or Core folding still wait for those deliveries.
@@ -85,8 +87,9 @@ The accepted collection sorting plan lives at
 `docs/roadmap/plans/packages/core-collections-sorting.md`. Treat that plan as the specialised
 implementation companion for sorting and do not reconstruct its contract from this umbrella.
 
-The compiler-owned native result-slot and Core constant-evaluation checkpoint is a hard prerequisite
-before the first Text implementation phase. Package work consumes the merged
+The compiler-owned native result-slot and Core constant-evaluation checkpoints are hard prerequisites
+before the first Text implementation phase. The typed semantic expression foundation owns their
+delivery. Package work consumes the merged
 compiler capability and its canonical documentation rather than preserving
 transient shapes from a short-lived plan file.
 
@@ -124,6 +127,7 @@ This programme does not own:
 - a Core cryptography package or cryptography package examples
 - broad compiler diagnostic or source-layout refactors
 - compatibility wrappers around stale shared compiler shapes
+- reintroducing Reactivity V1 or implementing future Wiring observation, subscriptions or event delivery
 
 ## Confirmed package model
 
@@ -738,15 +742,20 @@ programme-wide pause. It gates the `@core/text` v1 slice and any other package s
 truthful result slots or compile-time Core evaluation. Package work on the existing external ABI,
 including hardening and current-surface expansion of an already registered package, is not gated by
 this checkpoint. Coordinate shared numeric/ABI changes through the policy above.
-The checkpoint must provide:
+The required merged checkpoints must provide:
 
-- truthful zero/one/many result slots through AST/HIR/backend-neutral analysis
+- typed semantic expression owners and dense HIR with truthful zero/one/multiple success slots and a separate error channel through backend-neutral analysis and supported lowering
 - the typed `ExternalConstEvalOp` metadata and one AST-owned dispatch path
 - Rust evaluation of the existing five `@core/text` operations
 - JS/Rust semantic parity tests and runtime-helper elimination for folded calls
+- required versus opportunistic fold refusal, deterministic evaluator limits and ordinary constant materialisation, including optional and multiple-result boundary coverage
 
-Start a result-slot-dependent phase only from `main` containing that checkpoint. Adopt its final
-owners directly and remove any planning assumptions made obsolete by the implementation.
+Start a result-slot-dependent phase only from `main` containing the native result capability. A
+Core-folding-dependent phase additionally requires the Core evaluator checkpoint. Text v1 requires
+both. The remaining hardening of the umbrella is not a new package gate once these capabilities
+have merged and the package's own prerequisites pass. Adopt their final owners directly and remove
+any planning assumptions made obsolete by the implementation. Do not build a package-local evaluator,
+rehydrate an old expression tree or add tuple/fallible result wrappers to bridge unfinished work.
 The main roadmap's active parallel status permits other eligible package slices.
 It does not authorise competing edits while a shared result or numeric
 representation is actively being replaced.
