@@ -48,7 +48,8 @@
   --moth-code-delimiter: #c6b760;
   --moth-code-function: #82aaff;
   --moth-code-directive: #bcde8a;
-  --moth-code-contract: #f5646b;
+  --moth-code-contract: #30d5b5;
+  --moth-code-error: #ff5252;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -146,6 +147,9 @@ body {
 }
 .moth-code-contract {
   color: var(--moth-code-contract);
+}
+.moth-code-error {
+  color: var(--moth-code-error);
 }
 
 /* BASIC CSS RESET STUFF */
@@ -754,7 +758,7 @@ td {
 wave <span class='moth-code-operator'>=</span> <span class='moth-code-function'>sin</span><span class='moth-code-delimiter'>(</span>PI <span class='moth-code-operator'>/</span> <span class='moth-code-number'>2.0</span><span class='moth-code-delimiter'>)</span>
 bounded <span class='moth-code-operator'>=</span> <span class='moth-code-function'>clamp</span><span class='moth-code-delimiter'>(</span>wave, <span class='moth-code-number'>0.0</span>, <span class='moth-code-number'>1.0</span><span class='moth-code-delimiter'>)</span>
 
-<span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span>bounded<span class='moth-code-operator'>=</span><span class='moth-code-delimiter'>[</span>bounded<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span></code></pre><p>You can also bind the whole namespace and access members through field access.</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@core/math</span>
+<span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span>bounded=<span class='moth-code-delimiter'>[</span>bounded<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span></code></pre><p>You can also bind the whole namespace and access members through field access.</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@core/math</span>
 
 angle <span class='moth-code-operator'>=</span> math.PI <span class='moth-code-operator'>/</span> <span class='moth-code-number'>2.0</span>
 result <span class='moth-code-operator'>=</span> math.<span class='moth-code-function'>sin</span><span class='moth-code-delimiter'>(</span>angle<span class='moth-code-delimiter'>)</span></code></pre><h3 id="basic-constants">Basic constants</h3><p><code>PI</code>, <code>TAU</code>, <code>E</code>, <code>SQRT_2</code>, <code>LN_2</code> and <code>LN_10</code> form compile-time <code>Float</code> values. Use them directly in expressions.</p><h3 id="common-functions">Common functions</h3><ul><li><code>sin</code>, <code>cos</code>, <code>tan</code> for trigonometry</li><li><code>atan2(y, x)</code> for arc tangent of two values</li><li><code>sqrt</code>, <code>pow</code>, <code>log</code> for powers and logarithms</li><li><code>abs</code>, <code>floor</code>, <code>ceil</code>, <code>round</code>, <code>trunc</code> for rounding</li><li><code>asin</code>, <code>acos</code>, <code>atan</code> for inverse trigonometry</li><li><code>cbrt</code>, <code>hypot(x, y)</code> for roots and norms</li><li><code>expm1</code>, <code>log1p</code> for precise small-value helpers</li><li><code>sinh</code>, <code>cosh</code>, <code>tanh</code>, <code>asinh</code>, <code>acosh</code>, <code>atanh</code> for the hyperbolics</li><li><code>min(a, b)</code>, <code>max(a, b)</code>, <code>clamp(x, min, max)</code> for comparisons</li></ul><p>All functions take <code>Float</code> values and return <code>Float</code>. For the full function list, backend behaviour and deferred surfaces, see <a href="./">Core math advanced</a>.</p>

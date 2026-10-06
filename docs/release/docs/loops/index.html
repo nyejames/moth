@@ -48,7 +48,8 @@
   --moth-code-delimiter: #c6b760;
   --moth-code-function: #82aaff;
   --moth-code-directive: #bcde8a;
-  --moth-code-contract: #f5646b;
+  --moth-code-contract: #30d5b5;
+  --moth-code-error: #ff5252;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -146,6 +147,9 @@ body {
 }
 .moth-code-contract {
   color: var(--moth-code-contract);
+}
+.moth-code-error {
+  color: var(--moth-code-error);
 }
 
 /* BASIC CSS RESET STUFF */
@@ -752,7 +756,7 @@ td {
         <p>A conditional loop keeps repeating while a condition is <code>true</code>.</p><p>The condition is checked before each trip through the loop. This means the body might not run at all.</p><pre style=""><code class='codeblock'>count <span class='moth-code-operator'>~=</span> <span class='moth-code-number'>0</span>
 
 <span class='moth-code-keyword'>loop</span> count <span class='moth-code-operator'>&lt;</span> <span class='moth-code-number'>3</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Count</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>count<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> Count: <span class='moth-code-delimiter'>[</span>count<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
     count <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span>
 <span class='moth-code-delimiter'>;</span></code></pre><p>This prints three lines. Once <code>count &lt; 3</code> becomes <code>false</code>, the loop ends and the program continues after it.</p><h3 id="make-sure-the-condition-can-change">Make sure the condition can change</h3><p>A condition that never becomes <code>false</code> keeps the loop running forever.</p><pre style=""><code class='codeblock'>running <span class='moth-code-operator'>~=</span> <span class='moth-code-literal'>true</span>
 
@@ -826,11 +830,11 @@ td {
         <p>A collection loop visits each value in a collection, from the first item to the last.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Rob&quot;</span>, <span class='moth-code-string'>&quot;Emmy&quot;</span><span class='moth-code-delimiter'>}</span>
 
 <span class='moth-code-keyword'>loop</span> names <span class='moth-code-delimiter'>|</span>name<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Hello</span>, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> Hello, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
 <span class='moth-code-delimiter'>;</span></code></pre><p>The name inside <code>|...|</code> is created for the loop body. On each iteration it refers to the current item.</p><h3 id="add-an-index-when-you-need-one">Add an index when you need one</h3><p>A second name receives the zero-based position of the item.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Rob&quot;</span>, <span class='moth-code-string'>&quot;Emmy&quot;</span><span class='moth-code-delimiter'>}</span>
 
 <span class='moth-code-keyword'>loop</span> names <span class='moth-code-delimiter'>|</span>name, index<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>index<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>index<span class='moth-code-delimiter'>]</span>: <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
 <span class='moth-code-delimiter'>;</span></code></pre><p>The first item has index <code>0</code>.</p><h3 id="ignore-the-item-when-only-the-repetition-matters">Ignore the item when only the repetition matters</h3><p>Bindings are optional.</p><pre style=""><code class='codeblock'>items <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-number'>10</span>, <span class='moth-code-number'>20</span>, <span class='moth-code-number'>30</span><span class='moth-code-delimiter'>}</span>
 count <span class='moth-code-operator'>~=</span> <span class='moth-code-number'>0</span>
 
@@ -843,7 +847,7 @@ count <span class='moth-code-operator'>~=</span> <span class='moth-code-number'>
     <p>A collection loop visits the values in a Moth collection in collection order.</p><pre style=""><code class='codeblock'>names <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-string'>&quot;Priya&quot;</span>, <span class='moth-code-string'>&quot;Rob&quot;</span>, <span class='moth-code-string'>&quot;Emmy&quot;</span><span class='moth-code-delimiter'>}</span>
 
 <span class='moth-code-keyword'>loop</span> names <span class='moth-code-delimiter'>|</span>name, index<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>index<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>index<span class='moth-code-delimiter'>]</span>: <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
 <span class='moth-code-delimiter'>;</span></code></pre><h3 id="forms-of-collection-loops">Forms of collection loops</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>loop</span> items<span class='moth-code-delimiter'>:</span>
     count <span class='moth-code-operator'>+=</span> <span class='moth-code-number'>1</span>
 <span class='moth-code-delimiter'>;</span>
@@ -927,7 +931,7 @@ count <span class='moth-code-operator'>~=</span> <span class='moth-code-number'>
 
 <div class="doc-level__panel doc-level__panel--advanced">
     <p>A range loop generates numeric values directly from its loop header.</p><pre style=""><code class='codeblock'><span class='moth-code-keyword'>loop</span> <span class='moth-code-number'>0</span> <span class='moth-code-keyword'>to</span> <span class='moth-code-number'>10</span> <span class='moth-code-keyword'>by</span> <span class='moth-code-number'>2</span> <span class='moth-code-delimiter'>|</span>value, index<span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>index<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>value<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>index<span class='moth-code-delimiter'>]</span>: <span class='moth-code-delimiter'>[</span>value<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
 <span class='moth-code-delimiter'>;</span></code></pre><h3 id="forms-of-range-loops">Forms of range loops</h3><pre style=""><code class='codeblock'><span class='moth-code-keyword'>loop</span> start <span class='moth-code-keyword'>to</span> end<span class='moth-code-delimiter'>:</span>
     <span class='moth-code-operator'>..</span>.
 

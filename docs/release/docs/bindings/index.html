@@ -48,7 +48,8 @@
   --moth-code-delimiter: #c6b760;
   --moth-code-function: #82aaff;
   --moth-code-directive: #bcde8a;
-  --moth-code-contract: #f5646b;
+  --moth-code-contract: #30d5b5;
+  --moth-code-error: #ff5252;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -146,6 +147,9 @@ body {
 }
 .moth-code-contract {
   color: var(--moth-code-contract);
+}
+.moth-code-error {
+  color: var(--moth-code-error);
 }
 
 /* BASIC CSS RESET STUFF */
@@ -952,8 +956,8 @@ independent_items <span class='moth-code-operator'>~=</span> <span class='moth-c
 
 <span class='moth-code-operator'>~</span>items.<span class='moth-code-function'>push</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;c&quot;</span><span class='moth-code-delimiter'>)</span>
 
-<span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> original length<span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>items.<span class='moth-code-function'>length</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
-<span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> copied length<span class='moth-code-delimiter'>:</span> <span class='moth-code-delimiter'>[</span>independent_items.<span class='moth-code-function'>length</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span></code></pre><h3 id="copy-targets">Copy targets</h3><p>The operand must be a place with stable storage:</p><ul><li>a visible value binding</li><li>a field projection such as <code>copy config.title</code></li><li>a parenthesised place such as <code>copy (items)</code></li></ul><p>Literals, templates, constructor calls, function calls and computed expressions are not copy targets.</p><pre style=""><code class='codeblock'>copied_title <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>copy</span> config.title
+<span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> original length: <span class='moth-code-delimiter'>[</span>items.<span class='moth-code-function'>length</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
+<span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> copied length: <span class='moth-code-delimiter'>[</span>independent_items.<span class='moth-code-function'>length</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span></code></pre><h3 id="copy-targets">Copy targets</h3><p>The operand must be a place with stable storage:</p><ul><li>a visible value binding</li><li>a field projection such as <code>copy config.title</code></li><li>a parenthesised place such as <code>copy (items)</code></li></ul><p>Literals, templates, constructor calls, function calls and computed expressions are not copy targets.</p><pre style=""><code class='codeblock'>copied_title <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>copy</span> config.title
 copied_items <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>copy</span> <span class='moth-code-delimiter'>(</span>items<span class='moth-code-delimiter'>)</span></code></pre><p>These forms are invalid:</p><pre style=""><code class='codeblock'>copied_number <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>copy</span> <span class='moth-code-number'>42</span>
 copied_result <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>copy</span> <span class='moth-code-function'>make_value</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
 copied_template <span class='moth-code-operator'>=</span> <span class='moth-code-keyword'>copy</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> text<span class='moth-code-delimiter'>]</span></code></pre><p>Fresh expressions already create their own result values.</p><h3 id="contract-for-explicit-copies">Contract for explicit copies</h3><ul><li>Source code does not silently copy an existing value when another name is created.</li><li>When a stored value is copyable and an independent value is required, write <code>copy</code>.</li><li>The copied value keeps the same semantic type.</li><li>The receiving binding chooses its own mutability.</li><li>Copying is separate from ownership transfer and separate from exclusive access.</li></ul><p>Expressions that construct a new result from existing inputs are not implicit copies of one input.</p><pre style=""><code class='codeblock'>total <span class='moth-code-operator'>=</span> unit_price <span class='moth-code-operator'>+</span> shipping

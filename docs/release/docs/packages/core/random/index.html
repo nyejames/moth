@@ -48,7 +48,8 @@
   --moth-code-delimiter: #c6b760;
   --moth-code-function: #82aaff;
   --moth-code-directive: #bcde8a;
-  --moth-code-contract: #f5646b;
+  --moth-code-contract: #30d5b5;
+  --moth-code-error: #ff5252;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -146,6 +147,9 @@ body {
 }
 .moth-code-contract {
   color: var(--moth-code-contract);
+}
+.moth-code-error {
+  color: var(--moth-code-error);
 }
 
 /* BASIC CSS RESET STUFF */
@@ -754,7 +758,7 @@ td {
 value <span class='moth-code-operator'>=</span> <span class='moth-code-function'>random_float</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span>
 die_roll <span class='moth-code-operator'>=</span> <span class='moth-code-function'>random_int</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>6</span><span class='moth-code-delimiter'>)</span>
 
-<span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span>roll<span class='moth-code-operator'>=</span><span class='moth-code-delimiter'>[</span>die_roll<span class='moth-code-delimiter'>]</span> value<span class='moth-code-operator'>=</span><span class='moth-code-delimiter'>[</span>value<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span></code></pre><h3 id="available-functions">Available functions</h3><ul><li><code>random_float()</code> returns a <code>Float</code> between <code>0.0</code> and <code>1.0</code></li><li><code>random_int(min, max)</code> returns an <code>Int</code> from <code>min</code> to <code>max</code> inclusive</li></ul><p>If <code>min</code> exceeds <code>max</code> in <code>random_int</code>, the bounds swap. For the full function contract, backend behaviour and deferred surfaces, see <a href="./">Core random advanced</a>.</p>
+<span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span>roll=<span class='moth-code-delimiter'>[</span>die_roll<span class='moth-code-delimiter'>]</span> value=<span class='moth-code-delimiter'>[</span>value<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span></code></pre><h3 id="available-functions">Available functions</h3><ul><li><code>random_float()</code> returns a <code>Float</code> between <code>0.0</code> and <code>1.0</code></li><li><code>random_int(min, max)</code> returns an <code>Int</code> from <code>min</code> to <code>max</code> inclusive</li></ul><p>If <code>min</code> exceeds <code>max</code> in <code>random_int</code>, the bounds swap. For the full function contract, backend behaviour and deferred surfaces, see <a href="./">Core random advanced</a>.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">

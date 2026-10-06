@@ -17,7 +17,9 @@
 //! The production scanner is one byte-indexed pass over borrowed source slices. It batches plain
 //! runs, escapes directly into one owned output string per text piece and uses maximal munch for
 //! compound Moth operators. Moth contextual roles (contracts, functions, directives, paths and the
-//! `io` namespace) are bounded lexical presentation heuristics, never semantic analysis.
+//! `io` namespace) are bounded lexical presentation heuristics, never semantic analysis. A small
+//! template-frame stack keeps Moth template bodies as plain authored text around their highlighted
+//! heads and `[...]` interpolations.
 
 use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterInput, FormatterInputPiece, FormatterOutput, FormatterOutputPiece,
@@ -41,7 +43,7 @@ pub(crate) use language_profiles::CodeLanguage;
 #[cfg(test)]
 pub(crate) use language_profiles::LANGUAGE_ALIASES;
 use language_profiles::classify_non_moth_word;
-use moth_scanner::{ContractState, DependencyHighlightState};
+use moth_scanner::{ContractState, DependencyHighlightState, TemplateFrame};
 
 /// One language-neutral presentation role shared by every code language profile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,6 +60,8 @@ enum CodeHighlightRole {
     Function,
     Directive,
     Contract,
+    /// Error-handling syntax, not a claim that the source is invalid.
+    Error,
 }
 
 impl CodeHighlightRole {
@@ -75,6 +79,7 @@ impl CodeHighlightRole {
             Self::Function => "moth-code-function",
             Self::Directive => "moth-code-directive",
             Self::Contract => "moth-code-contract",
+            Self::Error => "moth-code-error",
         }
     }
 }
@@ -212,6 +217,7 @@ struct CodeScanner<'source> {
     css_brace_depth: usize,
     expected_word_role: Option<ExpectedWordRole>,
     dependency_state: DependencyHighlightState,
+    template_frames: Vec<TemplateFrame>,
 }
 
 impl<'source> CodeScanner<'source> {
@@ -230,13 +236,16 @@ impl<'source> CodeScanner<'source> {
             css_brace_depth: 0,
             expected_word_role: None,
             dependency_state: DependencyHighlightState::None,
+            template_frames: Vec::new(),
         }
     }
 
     fn scan(&mut self, output: &mut String) {
         while self.index < self.bytes.len() {
             let byte = self.bytes[self.index];
-            if byte.is_ascii() {
+            if self.in_template_body() && !matches!(byte, b'[' | b']') {
+                self.skip_template_body_text();
+            } else if byte.is_ascii() {
                 self.scan_ascii_byte(byte, output);
             } else {
                 self.scan_non_ascii_scalar(output);
@@ -248,7 +257,21 @@ impl<'source> CodeScanner<'source> {
 
     fn scan_ascii_byte(&mut self, byte: u8, output: &mut String) {
         match byte {
+            // A Rust lifetime or label (`'a`, `'static`) is not a character literal.
+            b'\''
+                if self.language == CodeLanguage::Rust && !self.rust_char_literal_starts_here() =>
+            {
+                self.skip_rust_lifetime();
+            }
             b'"' | b'\'' => self.scan_quoted_run(output),
+            // JavaScript and TypeScript template literals are strings, not operators.
+            b'`' if matches!(
+                self.language,
+                CodeLanguage::JavaScript | CodeLanguage::TypeScript
+            ) =>
+            {
+                self.scan_quoted_run(output)
+            }
             b'[' if self.language == CodeLanguage::Toml && self.toml_table_header_starts_here() => {
                 self.scan_toml_table_header(output);
             }
@@ -282,11 +305,8 @@ impl<'source> CodeScanner<'source> {
                     }
                 }
 
-                // Block comments cover CSS and multi-line C/SQL comments.
-                if matches!(
-                    self.language,
-                    CodeLanguage::Css | CodeLanguage::C | CodeLanguage::Sql
-                ) && self.bytes[self.index..].starts_with(b"/*")
+                // A block comment shields its contents from every other role.
+                if self.language.has_block_comments() && self.bytes[self.index..].starts_with(b"/*")
                 {
                     self.scan_block_comment(output);
                     return;
@@ -475,8 +495,12 @@ impl<'source> CodeScanner<'source> {
         word_start: usize,
         word_end: usize,
     ) -> Option<CodeHighlightRole> {
+        // A reserved word in the name slot keeps its own role, so an anonymous
+        // `class extends Base` does not colour `extends` as the class name.
+        let class = classify_non_moth_word(self.language, word);
         if let Some(expected) = self.expected_word_role.take()
             && expected.start == word_start
+            && class.role.is_none()
         {
             return Some(expected.role);
         }
@@ -507,7 +531,6 @@ impl<'source> CodeScanner<'source> {
             return Some(CodeHighlightRole::Nominal);
         }
 
-        let class = classify_non_moth_word(self.language, word);
         if let Some(next_role) = class.next_identifier_role
             && let Some(next_start) = self.next_identifier_start(word_end)
         {
@@ -591,6 +614,30 @@ impl<'source> CodeScanner<'source> {
         self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::Comment);
     }
 
+    /// True when the `'` at the cursor opens a Rust character literal: an
+    /// escape, or exactly one scalar before the closing quote.
+    fn rust_char_literal_starts_here(&self) -> bool {
+        let after_quote = self.index + 1;
+        match self.bytes.get(after_quote) {
+            Some(b'\\') => true,
+            Some(_) => {
+                let scalar_len = self.source[after_quote..]
+                    .chars()
+                    .next()
+                    .map_or(1, char::len_utf8);
+                self.bytes.get(after_quote + scalar_len) == Some(&b'\'')
+            }
+            None => false,
+        }
+    }
+
+    /// Leaves a Rust lifetime or label in the plain run, so neither the quote
+    /// nor its name (such as `static`) takes a role.
+    fn skip_rust_lifetime(&mut self) {
+        self.index = self.word_end(self.index + 1);
+        self.expected_word_role = None;
+    }
+
     fn scan_quoted_run(&mut self, output: &mut String) {
         let quote = self.bytes[self.index];
         let run_start = self.index;
@@ -660,6 +707,7 @@ impl<'source> CodeScanner<'source> {
 
         if self.language == CodeLanguage::Moth {
             self.update_moth_delimiter_depth();
+            self.update_template_frames();
             if matches!(self.bytes[self.index], b'|' | b':') {
                 self.end_loop_header_at_top_level();
             }
@@ -857,14 +905,27 @@ impl<'source> CodeScanner<'source> {
         self.scan_delimiter(output);
     }
 
-    /// Scans one `/* ... */` block comment through the first `*/`.
+    /// Scans a block comment, including nested Rust comments and unfinished snippets.
     fn scan_block_comment(&mut self, output: &mut String) {
         let run_start = self.index;
-        let end = self.bytes[self.index + 2..]
-            .windows(2)
-            .position(|window| window == b"*/")
-            .map(|offset| self.index + 2 + offset + 2)
-            .unwrap_or(self.bytes.len());
+        let mut end = self.index + 2;
+        let mut depth = 1usize;
+
+        // Only ASCII delimiters or EOF end the run, so byte scanning cannot split UTF-8.
+        while end < self.bytes.len() {
+            if self.bytes[end..].starts_with(b"*/") {
+                end += 2;
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            } else if self.language.block_comments_nest() && self.bytes[end..].starts_with(b"/*") {
+                depth += 1;
+                end += 2;
+            } else {
+                end += 1;
+            }
+        }
 
         self.expected_word_role = None;
         self.emit_highlighted_range(output, run_start, end, CodeHighlightRole::Comment);

@@ -48,7 +48,8 @@
   --moth-code-delimiter: #c6b760;
   --moth-code-function: #82aaff;
   --moth-code-directive: #bcde8a;
-  --moth-code-contract: #f5646b;
+  --moth-code-contract: #30d5b5;
+  --moth-code-error: #ff5252;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -146,6 +147,9 @@ body {
 }
 .moth-code-contract {
   color: var(--moth-code-contract);
+}
+.moth-code-error {
+  color: var(--moth-code-error);
 }
 
 /* BASIC CSS RESET STUFF */
@@ -759,8 +763,8 @@ previous <span class='moth-code-operator'>=</span> current
 
 seconds <span class='moth-code-operator'>=</span> <span class='moth-code-function'>as_seconds</span><span class='moth-code-delimiter'>(</span>delta<span class='moth-code-delimiter'>)</span></code></pre><p>This shape works for frame-delta style code without requiring a scheduler or animation package. Durations also compose directly: <code>duration_add</code>, <code>duration_subtract</code> and <code>duration_scale</code> combine elapsed amounts without converting through seconds.</p><h3 id="utc-timestamps">UTC timestamps</h3><p>Use <code>Timestamp</code> for real-world UTC instants that may be logged, stored or exchanged with external systems.</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@core/time</span> <span class='moth-code-nominal'>Timestamp</span>, <span class='moth-code-nominal'>timestamp_from_iso_string</span>, <span class='moth-code-nominal'>timestamp_from_unix_milliseconds</span>, <span class='moth-code-nominal'>to_iso_string</span>
 
-<span class='moth-code-function'>parse_created</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-nominal'>Timestamp</span>, <span class='moth-code-type'>Error</span><span class='moth-code-operator'>!</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-keyword'>return</span> <span class='moth-code-function'>timestamp_from_iso_string</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;1970-01-01T00:00:00.000Z&quot;</span><span class='moth-code-delimiter'>)</span><span class='moth-code-operator'>!</span>
+<span class='moth-code-function'>parse_created</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-nominal'>Timestamp</span>, <span class='moth-code-type'>Error</span><span class='moth-code-error'>!</span><span class='moth-code-delimiter'>:</span>
+    <span class='moth-code-keyword'>return</span> <span class='moth-code-function'>timestamp_from_iso_string</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;1970-01-01T00:00:00.000Z&quot;</span><span class='moth-code-delimiter'>)</span><span class='moth-code-error'>!</span>
 <span class='moth-code-delimiter'>;</span>
 
 created <span class='moth-code-operator'>=</span> <span class='moth-code-function'>parse_created</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>)</span> <span class='moth-code-keyword'>catch</span><span class='moth-code-delimiter'>:</span>

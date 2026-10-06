@@ -48,7 +48,8 @@
   --moth-code-delimiter: #c6b760;
   --moth-code-function: #82aaff;
   --moth-code-directive: #bcde8a;
-  --moth-code-contract: #f5646b;
+  --moth-code-contract: #30d5b5;
+  --moth-code-error: #ff5252;
 }
 
 /* where: is used here for less specificity, allowing easier overriding */
@@ -146,6 +147,9 @@ body {
 }
 .moth-code-contract {
   color: var(--moth-code-contract);
+}
+.moth-code-error {
+  color: var(--moth-code-error);
 }
 
 /* BASIC CSS RESET STUFF */
@@ -779,7 +783,7 @@ td {
 </nav>
 <section class="container"><p><a href="../">Compiler design</a> / 09. Templates and TIR</p><p>First-class templates keep structure in AST-local TIR, then hand folded strings or neutral runtime data downstream.</p></section>
 <section class="container"><h1 id="why-templates-need-their-own-temporary-ir">Why templates need their own temporary IR</h1><p>Look at the page fragment again:</p><pre style=""><code class='codeblock'><span class='moth-code-delimiter'>[</span><span class='moth-code-directive'>$html</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-operator'>&lt;</span>p<span class='moth-code-operator'>&gt;</span><span class='moth-code-delimiter'>[</span><span class='moth-code-function'>greet</span><span class='moth-code-delimiter'>(</span>visitor<span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>]</span><span class='moth-code-operator'>&lt;</span><span class='moth-code-operator'>/</span>p<span class='moth-code-operator'>&gt;</span>
+    &lt;p&gt;<span class='moth-code-delimiter'>[</span><span class='moth-code-function'>greet</span><span class='moth-code-delimiter'>(</span>visitor<span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>]</span>&lt;/p&gt;
 <span class='moth-code-delimiter'>]</span></code></pre><p>A template is not a string with holes poked by hope. It contains structure: wrappers, slots, child values, control flow and placement order. Flatten it too early and you lose the skeleton the checker and the runtime both need.</p><p>Moth gives templates a first-class home and a temporary <strong>Template IR (TIR)</strong> that lives only while AST work runs.</p><h2 id="template-structure">Template structure</h2><p>The fragment wants a paragraph wrapper, an interpolation of a string-producing call and a stable place in the page&#39;s fragment order.</p><p>If the compiler treated the body as blind concatenation, it could still emit characters on a happy path. It would struggle to:</p><ul><li>type-check slot contents</li><li>fold pure pieces while keeping dynamic pieces honest</li><li>preserve source locations for diagnostics</li><li>attach constrained reactivity metadata</li><li>hand a neutral runtime plan to HIR without smuggling parser state</li></ul><p>Structure earns its keep.</p><h2 id="tir-phases">TIR phases</h2><p>One module AST build owns one <code>TemplateIrStore</code>. Parser emission writes text, expressions, child templates, slots, inserts, wrappers and control-flow roots directly into that store.</p><p>The phase sequence is:</p><pre style=""><code class='codeblock'>Parsed -&gt; Composed -&gt; Formatted -&gt; Finalized</code></pre><p>Teaching names for the parts:</p><ul><li><strong>slots</strong> name holes that receive values or nested content</li><li><strong>wrappers</strong> wrap content in outer structure such as tags</li><li><strong>control-flow edges</strong> capture template-local <code>if</code> and loop structure before it becomes ordinary CFG in HIR</li></ul><p>Exact view identity includes root, phase and value context. Consumers read through that authority rather than inventing parallel overlay stacks.</p><p>Folding requires <code>Composed</code> or later. AST-to-HIR handoff requires <code>Finalized</code>.</p><figure class="moth-flow" aria-label=" TIR lives and dies inside AST">
         <div class="moth-flow__pipeline">
             <section class="moth-flow__stage">

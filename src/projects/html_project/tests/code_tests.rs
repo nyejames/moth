@@ -249,13 +249,13 @@ fn moth_highlighter_uses_compiler_word_classes() {
 #[test]
 fn moth_highlighter_wraps_literals_and_keeps_non_keywords_plain() {
     let highlighted = highlight_code_html(
-        "true false none in fn group region into where",
+        "true false none in fn group region where",
         CodeLanguage::Moth,
     );
 
     assert_eq!(
         highlighted,
-        "<span class='moth-code-literal'>true</span> <span class='moth-code-literal'>false</span> <span class='moth-code-literal'>none</span> in fn group region into where"
+        "<span class='moth-code-literal'>true</span> <span class='moth-code-literal'>false</span> <span class='moth-code-literal'>none</span> in fn group region where"
     );
 }
 
@@ -307,9 +307,7 @@ fn moth_operator_fallbacks_keep_single_char_spans() {
         CodeLanguage::Moth,
     );
 
-    for operator in [
-        "=", "+", "-", "*", "/", "%", "^", "~", "#", "$", "!", "?", "@",
-    ] {
+    for operator in ["=", "+", "-", "*", "/", "%", "^", "~", "#", "$", "?", "@"] {
         assert!(
             highlighted.contains(&format!(
                 "<span class='moth-code-operator'>{operator}</span>"
@@ -317,6 +315,7 @@ fn moth_operator_fallbacks_keep_single_char_spans() {
             "expected operator span for {operator:?} in: {highlighted}"
         );
     }
+    assert!(highlighted.contains("<span class='moth-code-error'>!</span>"));
 
     for (operator, escaped) in [("<", "&lt;"), (">", "&gt;"), ("&", "&amp;")] {
         assert!(
@@ -341,9 +340,9 @@ fn moth_scanner_does_not_invent_equality_or_logical_operators() {
     let inequality = highlight_code_html("a != b", CodeLanguage::Moth);
     assert!(
         inequality.contains(
-            "<span class='moth-code-operator'>!</span><span class='moth-code-operator'>=</span>"
+            "<span class='moth-code-error'>!</span><span class='moth-code-operator'>=</span>"
         ),
-        "!= must stay separate operator spans, got: {inequality}"
+        "!= must stay separate punctuation spans, got: {inequality}"
     );
 
     let logical_and = highlight_code_html("a && b", CodeLanguage::Moth);
@@ -696,16 +695,20 @@ fn moth_highlighter_keeps_non_directive_dollar_forms_as_operators() {
 }
 
 #[test]
-fn moth_highlighter_keeps_attached_bang_keywords_together() {
+fn moth_highlighter_separates_attached_error_bangs_from_keywords() {
     let highlighted = highlight_code_html("return! value cast! value", CodeLanguage::Moth);
 
     assert!(
-        highlighted.contains("<span class='moth-code-keyword'>return!</span>"),
-        "return! must be one keyword span, got: {highlighted}"
+        highlighted.contains(
+            "<span class='moth-code-keyword'>return</span><span class='moth-code-error'>!</span>"
+        ),
+        "return! must separate the error marker from its keyword, got: {highlighted}"
     );
     assert!(
-        highlighted.contains("<span class='moth-code-keyword'>cast!</span>"),
-        "cast! must be one keyword span, got: {highlighted}"
+        highlighted.contains(
+            "<span class='moth-code-keyword'>cast</span><span class='moth-code-error'>!</span>"
+        ),
+        "cast! must separate the error marker from its keyword, got: {highlighted}"
     );
 }
 
@@ -851,6 +854,7 @@ fn highlighted_output_preserves_every_source_byte_exactly_once() {
         "@core/io print, line",
         "a //= b += c .. d :: e -> f => g",
         "return! cast! value",
+        "record Dec2 into scratch = cast! value",
         "Label must DISPLAY_TEXT",
         "value 42\n-- note",
     ];
@@ -1238,6 +1242,10 @@ active: yes
 int main(void) { return 0; }"#,
         ),
         (CodeLanguage::Sql, "SELECT name FROM users; -- note"),
+        (CodeLanguage::JavaScript, "/* <&> ! */ throw error;"),
+        (CodeLanguage::TypeScript, "try { work(); } catch (error) {}"),
+        (CodeLanguage::Python, "raise ValueError('π <&>')"),
+        (CodeLanguage::Rust, "/* outer /* inner */ π */ fn main() {}"),
     ];
 
     for (language, source) in cases {

@@ -89,6 +89,34 @@
         error_message #= Error("failed")
         return! value
         cast! value
+
+        -- final placement, decimal scales and error markers
+        parsed ParsedPost into scratch = parse_post(post)!
+        price Dec2 = 19.99
+        legacy Dec01 = 1
+        load |path String| -> String, Error!:
+        fatal |message String| -> !:
+        note = "return! into Dec2" -- cast! into Dec2
+
+        -- template bodies are authored text around interpolations
+        greeting = [: Hello, [name]! Don't panic -- really]
+    ]
+
+    [codeblock, $code("text"):
+        return! into Dec2 <&>
+    ]
+
+    [codeblock, $code("js"):
+        /* throw <&> */
+        try { work(); } catch (error) { throw error; }
+        const ready = !done;
+    ]
+
+    [codeblock, $code("py"):
+        try:
+            raise ValueError("π")
+        except ValueError:
+            pass
     ]
 
     [codeblock, $code("rust"):
