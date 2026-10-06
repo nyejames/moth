@@ -48,7 +48,7 @@
   --moth-code-delimiter: #c6b760;
   --moth-code-function: #82aaff;
   --moth-code-directive: #bcde8a;
-  --moth-code-contract: #f5646b;
+  --moth-code-contract: #30d5b5;
   --moth-code-error: #ff5252;
 }
 
@@ -759,7 +759,7 @@ name <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&q
 count <span class='moth-code-operator'>=</span> <span class='moth-code-function'>length</span><span class='moth-code-delimiter'>(</span>name<span class='moth-code-delimiter'>)</span>
 has_stalk <span class='moth-code-operator'>=</span> <span class='moth-code-function'>contains</span><span class='moth-code-delimiter'>(</span>name, <span class='moth-code-string'>&quot;stalk&quot;</span><span class='moth-code-delimiter'>)</span>
 
-<span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span>count<span class='moth-code-operator'>=</span><span class='moth-code-delimiter'>[</span>count<span class='moth-code-delimiter'>]</span> has_stalk<span class='moth-code-operator'>=</span><span class='moth-code-delimiter'>[</span>has_stalk<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span></code></pre><h3 id="available-functions">Available functions</h3><ul><li><code>length(text)</code> returns the number of Unicode scalar values as <code>Int</code></li><li><code>is_empty(text)</code> returns <code>Bool</code></li><li><code>contains(text, substring)</code> returns <code>Bool</code></li><li><code>starts_with(text, prefix)</code> returns <code>Bool</code></li><li><code>ends_with(text, suffix)</code> returns <code>Bool</code></li></ul><p>All functions take <code>String</code> values and return <code>Int</code> or <code>Bool</code>. For the full function contract, backend behaviour and deferred surfaces, see <a href="./">Core text advanced</a>.</p>
+<span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span>count=<span class='moth-code-delimiter'>[</span>count<span class='moth-code-delimiter'>]</span> has_stalk=<span class='moth-code-delimiter'>[</span>has_stalk<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span></code></pre><h3 id="available-functions">Available functions</h3><ul><li><code>length(text)</code> returns the number of Unicode scalar values as <code>Int</code></li><li><code>is_empty(text)</code> returns <code>Bool</code></li><li><code>contains(text, substring)</code> returns <code>Bool</code></li><li><code>starts_with(text, prefix)</code> returns <code>Bool</code></li><li><code>ends_with(text, suffix)</code> returns <code>Bool</code></li></ul><p>All functions take <code>String</code> values and return <code>Int</code> or <code>Bool</code>. For the full function contract, backend behaviour and deferred surfaces, see <a href="./">Core text advanced</a>.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">

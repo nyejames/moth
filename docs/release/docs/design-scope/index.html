@@ -48,7 +48,7 @@
   --moth-code-delimiter: #c6b760;
   --moth-code-function: #82aaff;
   --moth-code-directive: #bcde8a;
-  --moth-code-contract: #f5646b;
+  --moth-code-contract: #30d5b5;
   --moth-code-error: #ff5252;
 }
 
@@ -754,7 +754,7 @@ td {
 
 
         <p>Moth is a small language by design. Every feature has to earn its place.</p><h3 id="how-moth-decides">How Moth decides</h3><p>The language prefers one clear mechanism over many specialised syntax forms. When a problem can be solved with an existing feature, the language doesn&#39;t add a second way to do it.</p><pre style=""><code class='codeblock'><span class='moth-code-comment'>-- Templates handle text composition</span>
-greeting <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Hello</span>, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span>
+greeting <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> Hello, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span>
 
 <span class='moth-code-comment'>-- Choices handle runtime heterogeneity</span>
 <span class='moth-code-nominal'>Status</span> <span class='moth-code-operator'>::</span> <span class='moth-code-nominal'>Ready</span>, <span class='moth-code-nominal'>Waiting</span> <span class='moth-code-delimiter'>|</span> reason <span class='moth-code-type'>String</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>;</span>

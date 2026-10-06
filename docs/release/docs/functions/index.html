@@ -48,7 +48,7 @@
   --moth-code-delimiter: #c6b760;
   --moth-code-function: #82aaff;
   --moth-code-directive: #bcde8a;
-  --moth-code-contract: #f5646b;
+  --moth-code-contract: #30d5b5;
   --moth-code-error: #ff5252;
 }
 
@@ -754,7 +754,7 @@ td {
 
 
         <p>A function gives a reusable block of code a name.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>greet</span> <span class='moth-code-delimiter'>|</span>name <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Hello</span>, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> Hello, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
 <span class='moth-code-delimiter'>;</span></code></pre><p>The function name comes first. Parameters live inside <code>|...|</code>.</p><p>Use <code>||</code> when there are no parameters:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>say_hello</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Hello&quot;</span><span class='moth-code-delimiter'>)</span>
 <span class='moth-code-delimiter'>;</span></code></pre><p>Add an arrow when the function returns a value:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>double</span> <span class='moth-code-delimiter'>|</span>value <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>:</span>
@@ -764,7 +764,7 @@ td {
 
 <div class="doc-level__panel doc-level__panel--advanced">
     <p>A source function forms a named top-level declaration.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>greet</span> <span class='moth-code-delimiter'>|</span>name <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
-    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Hello</span>, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
+    <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> Hello, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
 <span class='moth-code-delimiter'>;</span>
 
 <span class='moth-code-function'>double</span> <span class='moth-code-delimiter'>|</span>value <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>:</span>
@@ -832,7 +832,7 @@ and multiple values</a> and <a href="../progress">Progress</a> for the contract 
 
         <p>Parameters describe the values a function needs.</p><pre style=""><code class='codeblock'><span class='moth-code-function'>greet</span> <span class='moth-code-delimiter'>|</span>name <span class='moth-code-type'>String</span>, excited <span class='moth-code-type'>Bool</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>if</span> excited<span class='moth-code-delimiter'>:</span>
-        <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> <span class='moth-code-nominal'>Hello</span>, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span><span class='moth-code-error'>!</span><span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
+        <span class='moth-code-type'>io</span>.<span class='moth-code-function'>line</span><span class='moth-code-delimiter'>(</span><span class='moth-code-delimiter'>[</span><span class='moth-code-delimiter'>:</span> Hello, <span class='moth-code-delimiter'>[</span>name<span class='moth-code-delimiter'>]</span>!<span class='moth-code-delimiter'>]</span><span class='moth-code-delimiter'>)</span>
     <span class='moth-code-delimiter'>;</span>
 <span class='moth-code-delimiter'>;</span></code></pre><p>Each parameter has a name and a type.</p><p>A default makes a parameter optional at the call site:</p><pre style=""><code class='codeblock'><span class='moth-code-function'>describe</span> <span class='moth-code-delimiter'>|</span>prefix <span class='moth-code-type'>String</span> <span class='moth-code-operator'>=</span> <span class='moth-code-string'>&quot;item&quot;</span>, subject <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>String</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>return</span> <span class='moth-code-delimiter'>[</span>prefix, <span class='moth-code-string'>&quot;: &quot;</span>, subject<span class='moth-code-delimiter'>]</span>
