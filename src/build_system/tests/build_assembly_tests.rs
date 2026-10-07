@@ -389,6 +389,7 @@ fn package_facade_rejects_project_context_declaration_provenance() {
         project_boundary,
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
+        Vec::new(),
     )
     .expect("synthetic frontend should satisfy retained-boundary invariants");
     let check_error = validate_frontend_facade_boundaries(&frontend)

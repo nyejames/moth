@@ -1,0 +1,13 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["generic-type-application-member-separator second| pair:7:10| holder:8| compact:11| int:12:number| choice:9"]
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.generic_runtime_values"

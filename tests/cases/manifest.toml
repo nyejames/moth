@@ -1945,6 +1945,13 @@ contract = "language.generics.type_used_as_value_rejected"
 role = "primary"
 
 [[case]]
+id = "generic_type_application_member_separator_success"
+path = "generic_type_application_member_separator_success"
+tags = ["integration", "generics", "functions", "structs", "choices", "collections"]
+contract = "language.generics.type_application_member_separators_preserved"
+role = "primary"
+
+[[case]]
 id = "generic_type_application_value_rejected"
 path = "generic_type_application_value_rejected"
 tags = ["integration","generics","diagnostics"]
@@ -7791,10 +7798,45 @@ contract = "language.structs.mutable_receiver_method_acceptance"
 role = "primary"
 
 [[case]]
+id = "receiver_method_copy_this_places_independent"
+path = "receiver_method_copy_this_places_independent"
+tags = ["integration", "receiver-methods", "borrows", "copies"]
+contract = "language.structs.receiver_copy_this_places_independent"
+role = "primary"
+
+[[case]]
+id = "receiver_method_generic_mutable_this_put_success"
+path = "receiver_method_generic_mutable_this_put_success"
+tags = ["integration", "receiver-methods", "generics", "collections"]
+contract = "language.structs.generic_mutable_receiver_this_put"
+role = "primary"
+
+[[case]]
 id = "receiver_method_nested_struct_success"
 path = "receiver_method_nested_struct_success"
 tags = ["integration", "receiver-methods", "structs"]
 contract = "language.structs.nested_struct_receiver_method_acceptance"
+role = "primary"
+
+[[case]]
+id = "receiver_method_mutable_this_nested_collection_set_success"
+path = "receiver_method_mutable_this_nested_collection_set_success"
+tags = ["integration", "receiver-methods", "collections", "borrows"]
+contract = "language.structs.mutable_receiver_this_nested_collection_set"
+role = "primary"
+
+[[case]]
+id = "receiver_method_shared_this_mutation_rejected"
+path = "receiver_method_shared_this_mutation_rejected"
+tags = ["integration", "receiver-methods", "collections", "diagnostics"]
+contract = "language.structs.shared_receiver_collection_mutation_rejected"
+role = "primary"
+
+[[case]]
+id = "receiver_method_shared_this_method_marker_rejected"
+path = "receiver_method_shared_this_method_marker_rejected"
+tags = ["integration", "receiver-methods", "diagnostics"]
+contract = "language.structs.shared_receiver_method_marker_rejected"
 role = "primary"
 
 [[case]]
@@ -10658,6 +10700,27 @@ role = "boundary"
 id = "invalid_this_usage_rejected"
 path = "invalid_this_usage_rejected"
 tags = ["integration", "name-resolution", "receiver-methods", "diagnostics"]
+contract = "language.structs.this_reserved_identifier_rejected"
+role = "boundary"
+
+[[case]]
+id = "mutable_receiver_marker_invalid_operand_span_rejected"
+path = "mutable_receiver_marker_invalid_operand_span_rejected"
+tags = ["integration", "receiver-methods", "diagnostics", "source-spans"]
+contract = "language.syntax.mutable_marker_invalid_operand_span"
+role = "primary"
+
+[[case]]
+id = "copy_receiver_outside_method_rejected"
+path = "copy_receiver_outside_method_rejected"
+tags = ["integration", "receiver-methods", "copies", "diagnostics"]
+contract = "language.structs.this_reserved_identifier_rejected"
+role = "boundary"
+
+[[case]]
+id = "mutable_receiver_outside_method_rejected"
+path = "mutable_receiver_outside_method_rejected"
+tags = ["integration", "receiver-methods", "diagnostics"]
 contract = "language.structs.this_reserved_identifier_rejected"
 role = "boundary"
 

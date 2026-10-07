@@ -19,7 +19,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
-use crate::compiler_frontend::source::{LocalSpan, SourceId};
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{
@@ -313,4 +313,53 @@ fn bounded_expression_missing_delimiter_reaches_eof() {
         DiagnosticPayload::UnexpectedToken { found }
             if found == DiagnosticToken::from_static_tag(TokenTag::EOF)
     ));
+}
+
+#[test]
+fn mutable_receiver_unexpected_operand_reports_full_operand_span() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (_scope, context) = test_scope(&mut string_table, &mut path_fork);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let marker_span =
+        LocalSpan::exact(0, 1, &mut span_builder).expect("mutable marker span should fit inline");
+    let operand_span = LocalSpan::exact(1, 5, &mut span_builder)
+        .expect("five-character operand span should fit inline");
+
+    let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
+    builder
+        .push_static(TokenTag::MUTABLE, marker_span)
+        .expect("mutable marker token should build");
+    builder
+        .push_bool(TokenTag::BOOL_LITERAL, false, operand_span)
+        .expect("boolean operand token should build");
+    static_token(&mut builder, TokenTag::EOF);
+    let owner = finish_tokens(builder);
+    let range = owner
+        .full_range()
+        .expect("test token stream must expose a checked full range");
+    let mut stream = AstCursor::from_source_tokens(&owner, range)
+        .expect("test token stream must expose an AST cursor");
+    let mut data_type = ExpectedType::Infer;
+
+    let error = create_expression_until_for_test(
+        &mut stream,
+        &context,
+        &mut data_type,
+        &ValueMode::ImmutableOwned,
+        &[],
+        &mut string_table,
+        &mut path_fork,
+    )
+    .expect_err("a boolean cannot be a mutable receiver place");
+
+    let ExpressionParseError::Diagnostic(diagnostic) = error else {
+        panic!("expected user diagnostic, found infrastructure error: {error:?}");
+    };
+    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0002");
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, operand_span)),
+        "the diagnostic should underline the whole `false` operand, not `~`",
+    );
 }

@@ -1,0 +1,24 @@
+Bucket = |
+    inner Container,
+|
+
+Container = |
+    values {Int},
+|
+
+set_seven |this ~Bucket| -> Error!:
+    ~this.inner.values.set(0, 7)!
+;
+
+set_first |this ~Bucket| -> Error!:
+    ~this.set_seven()!
+;
+
+run || -> String, Error!:
+    bucket ~= Bucket(Container({0}))
+    ~bucket.set_first()!
+    value = bucket.inner.values.get(0)!
+    return [:[value]]
+;
+
+[:[run()!]]

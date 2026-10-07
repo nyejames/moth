@@ -30,7 +30,7 @@ use crate::compiler_frontend::builtins::casts::traits::is_core_cast_trait_name;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidAssignmentTargetReason,
-    InvalidTemplateSlotReason, InvalidThisUsageReason, NameNamespace,
+    InvalidTemplateSlotReason, NameNamespace,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -485,27 +485,8 @@ fn parse_this_reference(
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     let this_id = string_table.intern("this");
-
-    if context.is_assignment_target_unavailable(this_id) {
-        return Err(CompilerDiagnostic::invalid_assignment_target(
-            InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
-            Some(this_id),
-            None,
-            None,
-            None,
-            None,
-            Some(token_stream.current_span()),
-        )
-        .into());
-    }
-
-    let Some(receiver_declaration) = context.get_reference(&this_id) else {
-        return Err(CompilerDiagnostic::invalid_this_usage(
-            InvalidThisUsageReason::NotInReceiverMethod,
-            Some(token_stream.current_span()),
-        )
-        .into());
-    };
+    let receiver_declaration =
+        context.resolve_this_reference(this_id, token_stream.current_span())?;
 
     let reference_span = Some(token_stream.current_span());
     let reference_expression = reference_expression_from_declaration(

@@ -1,0 +1,13 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0040"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0040"
+reason = "invalid_this_usage.not_in_receiver_method"
+path = "input/@page.moth"
+line = 2
+column = 17
