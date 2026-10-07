@@ -1,0 +1,3 @@
+snapshot || -> Int:
+    return copy this
+;

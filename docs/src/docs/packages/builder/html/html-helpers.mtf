@@ -245,11 +245,9 @@ nested templates. A body is not re-highlighted by the directive that will format
 The `Canvas` struct provides receiver methods for drawing: `set_fill_style`, `fill_rect`, `clear_rect` and `stroke_rect`. Each takes `~Canvas` (mutable receiver) and delegates to the underlying `@web/canvas` free functions.
 
 [codeblock, $code("moth"):
-    @html get_canvas
+    @html Canvas, get_canvas
 
-    canvas ~= get_canvas("my-canvas") catch:
-        assert(false, "canvas not found")
-    ;
+    canvas ~= get_canvas("my-canvas")!
 
     ~canvas.set_fill_style("red")
     ~canvas.fill_rect(10.0, 10.0, 50.0, 50.0)

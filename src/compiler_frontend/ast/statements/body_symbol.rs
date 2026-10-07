@@ -81,28 +81,7 @@ pub(crate) fn parse_this_statement(
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     let this_id = string_table.intern("this");
-
-    // `this` cannot be assigned when we are recovering inside a catch block.
-    if context.is_assignment_target_unavailable(this_id) {
-        return Err(CompilerDiagnostic::invalid_assignment_target(
-            InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
-            Some(this_id),
-            None,
-            None,
-            None,
-            None,
-            Some(token_stream.current_span()),
-        )
-        .into());
-    }
-
-    let Some(this_reference) = context.get_reference(&this_id) else {
-        return Err(CompilerDiagnostic::invalid_this_usage(
-            InvalidThisUsageReason::NotInReceiverMethod,
-            Some(token_stream.current_span()),
-        )
-        .into());
-    };
+    let this_reference = context.resolve_this_reference(this_id, token_stream.current_span())?;
 
     match token_stream.peek_next_tag() {
         // Direct reassignment of `this` is never allowed.

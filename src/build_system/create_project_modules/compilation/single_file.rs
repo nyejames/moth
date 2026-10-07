@@ -9,27 +9,22 @@ use crate::{timing_scope, timing_scope_attributed};
 #[cfg(feature = "boracle")]
 use crate::compiler_frontend::module_compilation::BoracleModuleInput;
 #[cfg(feature = "boracle")]
+use crate::compiler_frontend::module_compilation::ModuleCompilationContext;
+#[cfg(feature = "boracle")]
 use crate::compiler_frontend::module_compilation::compile_module_for_boracle;
-use crate::compiler_frontend::module_compilation::{
-    ModuleCompilationContext, ModuleCompilationOutcome, ProviderMaterialisationRegistry,
-    compile_module,
-};
 
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, ModuleDiagnostics, PremergeDiagnosticBatch, PremergeFailure,
-    SourceSpanCapacityResource,
+    CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure, SourceSpanCapacityResource,
 };
-use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
     ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
 };
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
-use crate::compiler_frontend::public_interface::SourceProviderDependencySet;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
@@ -48,16 +43,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::super::FrontendCompilationMode;
-use super::super::compiled_boundary::{
-    CompiledGraphBoundary, CompletedSourcePackageRegistry, DiagnosedModule,
-    ProjectFrontendCompilation,
-};
+use super::super::compiled_boundary::ProjectFrontendCompilation;
 use super::super::config_boundary;
 use super::super::file_reference_resolution::{
     SingleFileReferenceOutcome, SingleFileResolvedReference,
 };
+#[cfg(feature = "boracle")]
 use super::super::generated_store::BoundaryGeneratedFunctionStore;
+#[cfg(feature = "boracle")]
 use super::super::module_artifact_store::ModuleArtifactStore;
+use super::super::module_inventory::ModuleCompilationJob;
+use super::super::module_namespace::ModuleNamespaceSet;
 use super::super::module_preparation::{ModulePreparationContext, record_module_input_counters};
 use super::super::prepared_module::PreparedModule;
 use super::super::project_module_graph::ProjectModuleGraph;
@@ -66,7 +62,10 @@ use super::super::resource_inputs::ResourceInputRegistry;
 use super::super::source_discovery;
 use super::super::source_package_discovery::build_source_package_boundary_indexes;
 use super::super::source_tree_index::SourceTreeIndex;
-use super::{append_finish_failure, publish_compiled_module};
+use super::{
+    BoundaryPremergeFailure, append_finish_failure, canonical, compile_source_package_inventories,
+    discover_source_package_inventories, prepare_source_package_check_only_jobs,
+};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compile_single_file_frontend_with_inputs(
@@ -96,8 +95,14 @@ pub(crate) fn compile_single_file_frontend_with_inputs(
     ) {
         Ok(result) => result,
         Err(failure) => {
-            let mut messages = failure.into_messages(string_table);
-            if let Some(source_database) = project_source_files.as_ref() {
+            if let Some(package_source) = failure.package_source {
+                return Err((*failure.failure)
+                    .into_messages_with_source(string_table, Arc::new(*package_source)));
+            }
+            let mut messages = (*failure.failure).into_messages(string_table);
+            if messages.source_database_for_diagnostic(0).is_none()
+                && let Some(source_database) = project_source_files.as_ref()
+            {
                 messages.set_source_database(Arc::clone(source_database));
             }
             return Err(messages);
@@ -141,8 +146,14 @@ pub(crate) fn compile_single_file_boracle_frontend(
     ) {
         Ok(result) => result,
         Err(failure) => {
-            let mut messages = failure.into_messages(string_table);
-            if let Some(source_database) = project_source_files.as_ref() {
+            if let Some(package_source) = failure.package_source {
+                return Err((*failure.failure)
+                    .into_messages_with_source(string_table, Arc::new(*package_source)));
+            }
+            let mut messages = (*failure.failure).into_messages(string_table);
+            if messages.source_database_for_diagnostic(0).is_none()
+                && let Some(source_database) = project_source_files.as_ref()
+            {
                 messages.set_source_database(Arc::clone(source_database));
             }
             return Err(messages);
@@ -151,12 +162,22 @@ pub(crate) fn compile_single_file_boracle_frontend(
 
     match result {
         SingleFileFrontendResult::Boracle(input) => Ok(*input),
-        SingleFileFrontendResult::Project(_) => Err(CompilerMessages::from_error_ref(
-            CompilerError::compiler_error(
-                "Boracle source compilation unexpectedly returned a complete project payload",
-            ),
-            string_table,
-        )),
+        SingleFileFrontendResult::Project(compilation) => {
+            if !compilation.has_diagnosed_or_blocked() {
+                return Err(CompilerMessages::from_error_ref(
+                    CompilerError::compiler_error(
+                        "Boracle source compilation unexpectedly returned a clean project payload",
+                    ),
+                    string_table,
+                ));
+            }
+            // The canonical scheduler retains failed package reports and blocks their consumer.
+            // Render only after the synthetic source owner has finalised its span tables.
+            let messages = compilation
+                .into_render_messages_with_frozen_identity(string_table, project_source_files, None)
+                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            Err(messages)
+        }
     }
 }
 enum SingleFileFrontendResult {
@@ -183,13 +204,10 @@ fn compile_single_file_frontend_with_target(
     string_table: &mut StringTable,
     project_source_files: &mut Option<Arc<SourceDatabase>>,
     build_config_inputs: &BuildConfigInputSet,
-    // WHY: directory Check mode uses module_inventory::discover_*_with_check_only classification,
-    // ModuleCompilationSchedule::prepare_check_only_jobs, and deferred_check_only::compile_check_only_jobs_after_canonical
-    // / canonical::compile_check_only_batches; a synthetic one-node graph has no unselected owned sources,
-    // schedule or package facades, so every mechanism is vacuous here.
-    _mode: FrontendCompilationMode,
+    // Only the synthetic consumer has no unselected sources. Packages retain ordinary Check policy.
+    mode: FrontendCompilationMode,
     target: SingleFileFrontendTarget,
-) -> Result<SingleFileFrontendResult, PremergeFailure> {
+) -> Result<SingleFileFrontendResult, BoundaryPremergeFailure> {
     let mut resource_inputs = ResourceInputRegistry::new();
     let mut discovery_path_fork = PathInternerFork::empty();
     // 1. Verify standard Moth file extension.
@@ -212,30 +230,30 @@ fn compile_single_file_frontend_with_target(
         {
             Ok(path) => path,
             Err(PathInternError::NonUtf8(non_utf8)) => {
-                return Err(PremergeFailure::from(non_utf8_filesystem_name_error(
-                    &non_utf8.path,
-                    "single-file entry path",
-                )));
+                return Err(BoundaryPremergeFailure::from(
+                    non_utf8_filesystem_name_error(&non_utf8.path, "single-file entry path"),
+                ));
             }
             Err(PathInternError::TableFull) => {
                 // Authored exhaustion of the compact path table: the typed capacity diagnostic
                 // travels without a path snapshot, because the exhausted table owns no further
                 // PathId to render.
-                return Err(PremergeFailure::Diagnosed(
-                    PremergeDiagnosticBatch::from_diagnostic(
+                return Err(
+                    PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
                         CompilerDiagnostic::source_table_capacity(
                             SourceSpanCapacityResource::LogicalPath,
                         ),
                         std::mem::take(string_table),
-                    ),
-                ));
+                    ))
+                    .into(),
+                );
             }
             Err(PathInternError::BaseMismatch { .. }) => {
                 return Err(PremergeFailure::Infrastructure(
                     CompilerError::compiler_error(
                         "logical path merge base is not a structural prefix of the destination table",
                     ),
-                ));
+                ).into());
             }
         };
         let extension = string_table.intern(extension_text);
@@ -249,9 +267,9 @@ fn compile_single_file_frontend_with_target(
         if let Err(error) =
             batch.attach_path_table_if_missing(Arc::new(discovery_path_fork.snapshot_table()))
         {
-            return Err(PremergeFailure::Infrastructure(error));
+            return Err(PremergeFailure::Infrastructure(error).into());
         }
-        return Err(PremergeFailure::Diagnosed(batch));
+        return Err(PremergeFailure::Diagnosed(batch).into());
     }
 
     timing_scope!(
@@ -278,21 +296,19 @@ fn compile_single_file_frontend_with_target(
     // Build one independent source-package boundary index per registered package. The traversal
     // owns direct root discovery and sibling collision checks, so the resolver view is derived
     // from indexed facts and no separate package-root or package-tree scan remains.
-    let prepared_source_package_roots = build_source_package_boundary_indexes(
+    let source_package_indexes = build_source_package_boundary_indexes(
         &builder_surface.source_packages,
         &builder_surface.source_file_kinds,
         &builder_surface.external_import_providers,
         string_table,
-    )?
-    .prepared_source_package_roots();
-
+    )?;
+    let prepared_source_package_roots = source_package_indexes.prepared_source_package_roots();
     let entry_file_name = match entry_path.file_name().and_then(|name| name.to_str()) {
         Some(name) => name,
         None => {
-            return Err(PremergeFailure::from(non_utf8_filesystem_name_error(
-                &entry_path,
-                "single-file entry name",
-            )));
+            return Err(BoundaryPremergeFailure::from(
+                non_utf8_filesystem_name_error(&entry_path, "single-file entry name"),
+            ));
         }
     };
 
@@ -315,6 +331,11 @@ fn compile_single_file_frontend_with_target(
         &builder_surface.source_file_kinds,
         module_roots,
     )?;
+    let namespace_set = ModuleNamespaceSet::for_single_file(
+        source_package_indexes,
+        &builder_surface.binding_packages,
+        &project_path_resolver,
+    )?;
     // 4. Discover all transitively reachable files.
     let mut external_imports = source_discovery::ExternalImportDiscoveryState {
         external_packages: &mut builder_surface.binding_packages,
@@ -322,6 +343,18 @@ fn compile_single_file_frontend_with_target(
         cache: &mut builder_surface.external_import_cache,
         resolution_table: &mut builder_surface.external_dependency_resolution_table,
     };
+
+    let mut source_package_inventories = discover_source_package_inventories(
+        config,
+        numeric_profile,
+        &namespace_set,
+        &project_path_resolver,
+        style_directives,
+        &mut external_imports,
+        &mut resource_inputs,
+        string_table,
+        mode,
+    )?;
 
     // Register the synthetic main-project boundary before its inventory so the human summary can
     // attribute reachable discovery and module compilation as accumulated boundary work.
@@ -337,6 +370,7 @@ fn compile_single_file_frontend_with_target(
     );
     let collected = match source_discovery::collect_reachable_input_files(
         &entry_path,
+        &namespace_set,
         &project_path_resolver,
         style_directives,
         &mut external_imports,
@@ -351,9 +385,19 @@ fn compile_single_file_frontend_with_target(
             if let Some(source_database) = source_database {
                 *project_source_files = Some(Arc::new(source_database));
             }
-            return Err(failure);
+            return Err(failure.into());
         }
     };
+    if mode.includes_check_only() {
+        prepare_source_package_check_only_jobs(
+            &mut source_package_inventories,
+            &namespace_set,
+            style_directives,
+            &mut external_imports,
+            string_table,
+        )?;
+    }
+    let source_package_dependencies = collected.source_package_dependencies;
     let mut source_owner = collected.source_files;
     let input_files = collected.input_files;
     let resolved_file_references = collected.resolved_file_references;
@@ -371,8 +415,18 @@ fn compile_single_file_frontend_with_target(
     // Every stage after the split runs inside one scoped pipeline. Its early returns funnel
     // through the single finalization tail below, so a diagnosed or infrastructure failure can
     // never drop the builder with live span owners or an unfinalized table.
-    let result = (|| -> Result<SingleFileFrontendResult, PremergeFailure> {
-        add_frontend_counter(FrontendCounter::ModuleCompilationSerialCount, 1);
+    let result = (|| -> Result<SingleFileFrontendResult, BoundaryPremergeFailure> {
+        let (completed_source_packages, transient_batches) = compile_source_package_inventories(
+            config,
+            build_profile,
+            numeric_profile,
+            style_directives,
+            builder_surface,
+            &external_packages,
+            source_package_inventories,
+            &mut resource_inputs,
+            string_table,
+        )?;
 
         let string_table_fork = string_table.fork_for_module();
         let (local_table, base_len) = string_table_fork.into_parts();
@@ -463,6 +517,11 @@ fn compile_single_file_frontend_with_target(
         let fixed_project_facts =
             config_boundary::fixed_project_contract_facts(&effective_project_fields);
         let direct_project_facts = config_boundary::input_contract_facts(&effective_project_fields);
+        let project_globals = config_boundary::build_project_globals_interface(
+            config,
+            &effective_project_fields,
+            string_table,
+        )?;
         let fallback_span = None;
         let build_config_values = config_boundary::resolve_boundary_build_config(
             &source_facts,
@@ -474,142 +533,123 @@ fn compile_single_file_frontend_with_target(
             string_table,
             numeric_profile,
         )?;
-        // Semantic compilation is one compiler service call. A synthetic single-file module has no
-        // completed providers, so it binds against empty provider and materialisation views.
-        let source_provider_dependencies = SourceProviderDependencySet::default();
-        let mut provider_materialisations = ProviderMaterialisationRegistry::default();
-        let mut generated_store = BoundaryGeneratedFunctionStore::default();
-        let compile_context = ModuleCompilationContext {
-            options: config.frontend_options(numeric_profile),
-            build_profile,
-            root_role_override: None,
-            project_path_resolver: Some(&project_path_resolver),
-            source_files,
-            style_directives,
-            global_string_table: None,
-            global_path_table: None,
-            external_packages: Arc::clone(&external_packages),
-            build_config_values: Arc::new(build_config_values),
-            external_dependency_resolution_table: &builder_surface
-                .external_dependency_resolution_table,
-            source_provider_dependencies: &source_provider_dependencies,
-            provider_materialisations: &provider_materialisations,
-            builder_runtime_packages: &builder_surface.builder_runtime_packages,
-        };
-        let semantic = prepared.semantic;
-
-        timing_scope_attributed!(
-            timing_guard_frontend_module_semantic_total,
-            crate::timing::TimingMetric::FrontendModuleSemanticTotal,
-            timing_module_context,
-        );
-        #[cfg(feature = "boracle")]
-        if target == SingleFileFrontendTarget::Boracle {
-            #[cfg(feature = "timers")]
-            let boracle_result = compile_module_for_boracle(
-                &compile_context,
-                semantic,
-                generated_store.known_generated(),
-                timing_module_context,
-            );
-            #[cfg(not(feature = "timers"))]
-            let boracle_result = compile_module_for_boracle(
-                &compile_context,
-                semantic,
-                generated_store.known_generated(),
-            );
-            #[cfg(feature = "timers")]
-            timing_guard_frontend_module_semantic_total.finish();
-            #[cfg(feature = "timers")]
-            timing_guard_boundary_compile.finish();
-            // The Boracle service consumed its retained payload and no span producer remains; the
-            // enclosing finalization tail installs every table before this result escapes.
-            return boracle_result.map(|input| SingleFileFrontendResult::Boracle(Box::new(input)));
-        }
-        #[cfg(not(feature = "boracle"))]
-        let _ = target;
-        #[cfg(feature = "timers")]
-        let semantic_result = compile_module(
-            &compile_context,
-            semantic,
-            generated_store.known_generated(),
-            timing_module_context,
-        );
-        #[cfg(not(feature = "timers"))]
-        let semantic_result = compile_module(
-            &compile_context,
-            semantic,
-            generated_store.known_generated(),
-        );
-        #[cfg(feature = "timers")]
-        timing_guard_frontend_module_semantic_total.finish();
-        let outcome = semantic_result?;
         let graph = ProjectModuleGraph::from_normal_roots(vec![(
             graph_stable_origin.clone(),
             source_root,
             entry_path,
         )]);
-        let module_id = graph
-            .entry_modules()
-            .first()
-            .copied()
-            .expect("a single-module graph has one normal entry");
-        let mut modules = ModuleArtifactStore::new(1);
-        let diagnosed = match outcome {
-            ModuleCompilationOutcome::Success(compiled) => {
+        let module_id = graph.entry_modules()[0];
+        let boundary_context = canonical::BoundaryCompilationContext::new(
+            config,
+            build_profile,
+            numeric_profile,
+            &project_path_resolver,
+            Arc::clone(source_files),
+            style_directives,
+            &external_packages,
+            builder_surface,
+            &completed_source_packages,
+            build_config_values,
+            source_facts,
+            build_config_inputs.clone(),
+            builder_surface.config_globals().clone(),
+            fixed_project_facts,
+            direct_project_facts,
+            project_globals.as_ref(),
+        );
+        #[cfg(feature = "boracle")]
+        if target == SingleFileFrontendTarget::Boracle
+            && !completed_source_packages.has_diagnosed_or_blocked()
+            && !transient_batches
+                .iter()
+                .any(|transient| transient.batch.has_errors())
+        {
+            let modules = ModuleArtifactStore::new(1);
+            let generated_store = BoundaryGeneratedFunctionStore::default();
+            let provider_materialisations =
+                super::seed_completed_package_materialisations(&completed_source_packages)?;
+            let provider_binding_index = super::build_provider_binding_index(&[])?;
+            let package_binding_index = super::build_source_package_dependency_index(
+                &provider_binding_index,
+                &source_package_dependencies,
+            )?;
+            let module_context = canonical::DirectoryModuleCompileContext::new(
+                &boundary_context,
+                &modules,
+                &provider_materialisations,
+                &[],
+                &provider_binding_index,
+                &source_package_dependencies,
+                &package_binding_index,
+                string_table,
+            );
+            let source_provider_dependencies = module_context
+                .build_source_provider_dependencies(module_id, &prepared, None, None)?;
+            let compile_context = ModuleCompilationContext {
+                options: config.frontend_options(numeric_profile),
+                build_profile,
+                root_role_override: None,
+                project_path_resolver: Some(&project_path_resolver),
+                source_files,
+                style_directives,
+                global_string_table: Some(string_table),
+                global_path_table: Some(path_interner.paths()),
+                external_packages: Arc::clone(&external_packages),
+                build_config_values: boundary_context.build_config_values(),
+                external_dependency_resolution_table: &builder_surface
+                    .external_dependency_resolution_table,
+                source_provider_dependencies: &source_provider_dependencies,
+                provider_materialisations: &provider_materialisations,
+                builder_runtime_packages: &builder_surface.builder_runtime_packages,
+            };
+            let boracle_result = compile_module_for_boracle(
+                &compile_context,
+                prepared.semantic,
+                generated_store.known_generated(),
                 #[cfg(feature = "timers")]
-                timing_guard_boundary_compile.finish();
-                publish_compiled_module(
-                    &mut modules,
-                    &mut generated_store,
-                    &mut provider_materialisations,
-                    &mut resource_inputs,
-                    module_id,
-                    &graph_stable_origin,
-                    *compiled,
-                    base_len,
-                    path_base_len,
-                    string_table,
-                    &mut path_interner,
-                )?;
-                Vec::new()
-            }
-            ModuleCompilationOutcome::Diagnosed(diagnostics) => {
-                // Retain the module-local table; the final render tail merges it exactly
-                // once via `append_messages_preserving_context`.
-                let batch = diagnostics.into_batch()?;
-                let diagnostics = ModuleDiagnostics::from_batch(batch)?;
-                modules.mark_diagnosed(module_id)?;
-                vec![DiagnosedModule {
-                    module_id,
-                    diagnostics,
-                }]
-            }
+                timing_module_context,
+            );
+            return boracle_result
+                .map(|input| SingleFileFrontendResult::Boracle(Box::new(input)))
+                .map_err(BoundaryPremergeFailure::from);
+        }
+        #[cfg(not(feature = "boracle"))]
+        let _ = target;
+        let job = ModuleCompilationJob {
+            module_id,
+            #[cfg(test)]
+            stable_origin: graph_stable_origin,
+            string_table_base_len: base_len,
+            path_base_len,
+            prepared,
+            #[cfg(feature = "timers")]
+            timing_module_key,
         };
-        let mut boundary = CompiledGraphBoundary {
-            structure: graph,
-            modules,
-            generated: generated_store,
-            diagnosed,
-            blocked: Vec::new(),
-        };
-        // The synthetic single-file boundary is the final project/package boundary, so its
-        // one publication already completed before this tail. The install shares one final
-        // table across the base artefact and every generated sidecar, and the local registry
-        // has been dropped by scope end, so the retained contexts install without a clone.
-        drop(provider_materialisations);
-        let frozen_path_table = path_interner.clone().freeze();
-        boundary.install_boundary_identity(
-            Arc::new(frozen_path_table),
-            Arc::new(string_table.clone().freeze()),
+        // The same readiness and publication owner handles package failures and binds their
+        // immutable facades, while the synthetic graph still contains exactly one consumer.
+        let (boundary, project_batches) = canonical::compile_module_waves_in_premerge_lane(
+            boundary_context,
+            graph,
+            vec![vec![job]],
+            Vec::new(),
+            &[],
+            &source_package_dependencies,
+            &mut resource_inputs,
+            string_table,
+            &mut path_interner,
+        )?;
+        debug_assert!(
+            project_batches.is_empty(),
+            "synthetic consumer has no check-only sources"
         );
         ProjectFrontendCompilation::new(
-            boundary.finish()?,
-            CompletedSourcePackageRegistry::new(),
+            boundary,
+            completed_source_packages,
             resource_inputs,
+            transient_batches,
         )
         .map(|compilation| SingleFileFrontendResult::Project(Box::new(compilation)))
-        .map_err(PremergeFailure::from)
+        .map_err(BoundaryPremergeFailure::from)
     })();
     // Finalize the source owner beside the semantic result. A finished source keeps
     // current attachment behavior; a failed finish keeps the semantic failure
@@ -620,10 +660,13 @@ fn compile_single_file_frontend_with_target(
     let (result, finalized) = match (result, finish_outcome) {
         (result, Ok(finished)) => (result, Arc::new(finished)),
         (Ok(_), Err(finish_error)) => {
-            return Err(PremergeFailure::Infrastructure(finish_error));
+            return Err(PremergeFailure::Infrastructure(finish_error).into());
         }
         (Err(failure), Err(finish_error)) => {
-            return Err(append_finish_failure(failure, finish_error));
+            return Err(BoundaryPremergeFailure {
+                failure: Box::new(append_finish_failure(*failure.failure, finish_error)),
+                package_source: failure.package_source,
+            });
         }
     };
     *project_source_files = Some(finalized);

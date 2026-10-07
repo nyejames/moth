@@ -1,0 +1,5 @@
+project #= (
+    name = "generic_type_application_member_separator_success",
+    entry_root = "src",
+)
+html #= ()

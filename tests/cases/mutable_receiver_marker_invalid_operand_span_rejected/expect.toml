@@ -1,0 +1,13 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0002"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0002"
+path = "input/@page.moth"
+line = 2
+column = 13
+count = 1

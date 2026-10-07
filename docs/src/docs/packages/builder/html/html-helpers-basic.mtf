@@ -53,11 +53,9 @@ profiles share the same palette.
 `@html` wraps `@web/canvas` drawing into a `Canvas` struct with methods.
 
 [codeblock, $code("moth"):
-    @html get_canvas
+    @html Canvas, get_canvas
 
-    canvas ~= get_canvas("my-canvas") catch:
-        assert(false, "canvas not found")
-    ;
+    canvas ~= get_canvas("my-canvas")!
 
     ~canvas.set_fill_style("red")
     ~canvas.fill_rect(10.0, 10.0, 50.0, 50.0)

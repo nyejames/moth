@@ -42,7 +42,7 @@ pub(crate) struct SourcePackageBoundaryIndex {
 /// compile as separate graphs with their own source indexes. This owner is the single Stage 0
 /// home for those indexes, and the resolver's narrow package-root view is derived from it
 /// without another filesystem scan.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct SourcePackageBoundaryIndexes {
     indexes: Vec<SourcePackageBoundaryIndex>,
 }

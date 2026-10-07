@@ -1,0 +1,15 @@
+Grid type Item = |
+    values {Item},
+|
+
+put type Item |this ~Grid of Item, index Int, value Item| -> Error!:
+    ~this.values.set(index, value)!
+;
+
+run || -> Int, Error!:
+    grid ~= Grid({0})
+    ~grid.put(0, 7)!
+    return grid.values.get(0)!
+;
+
+[:[run()!]]

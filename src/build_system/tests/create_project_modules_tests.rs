@@ -860,6 +860,7 @@ fn collect_synthetic_inputs_for_test(
 
     let collected = super::source_discovery::collect_reachable_input_files(
         entry_file_path,
+        &super::module_namespace::ModuleNamespaceSet::default(),
         resolver,
         style_directives,
         &mut external_imports,

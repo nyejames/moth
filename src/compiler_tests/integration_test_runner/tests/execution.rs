@@ -14,13 +14,16 @@ use super::super::{BackendId, SuccessExpectation, WarningExpectation};
 use super::synthetic_build_results::success_test_case;
 use crate::backends::js::ENTRY_FAILURE_NOTICE;
 use crate::build_system::BuildProfile;
-use crate::build_system::build::{BuildResult, FileKind, ProjectBuilder, build_project};
+use crate::build_system::build::{
+    BackendBuilder, BuildResult, FileKind, ProjectBuilder, build_project,
+};
 use crate::build_system::create_project_modules::{
     ProjectFrontendCompilation, compile_project_frontend,
 };
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
+use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidControlFlowStatementReason, TypeMismatchContext,
     UnsupportedBackendFeatureReason,
@@ -30,6 +33,8 @@ use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::utils::terminator_targets;
 use crate::compiler_frontend::module_compilation::Module;
+use crate::compiler_frontend::source::line_index::LinePosition;
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_support::frontend_test_style_directives;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
@@ -86,6 +91,12 @@ impl EntryFixture {
         }
     }
 
+    fn select_ordinary_page_file(&mut self) {
+        let ordinary_page = self.root_source.with_file_name("page.moth");
+        fs::copy(&self.root_source, &ordinary_page).expect("should copy root into ordinary page");
+        self.entry = ordinary_page;
+    }
+
     fn frontend(&self) -> ProjectFrontendCompilation {
         let mut config = Config::new(self.entry.clone());
         // This config-free compiler seam consumes settings rather than loading config.moth.
@@ -122,14 +133,56 @@ impl EntryFixture {
         frontend
     }
 
-    fn build(&self, flags: &[Flag]) -> BuildResult {
+    fn html_frontend(&self) -> ProjectFrontendCompilation {
+        let mut config = Config::new(self.entry.clone());
+        config.project_name = "entry_contract".to_owned();
+        if self.entry.is_dir() {
+            config.entry_root = PathBuf::from("src");
+        }
+
+        let builder = HtmlProjectBuilder::new();
+        let style_directives = StyleDirectiveRegistry::merged(&builder.frontend_style_directives())
+            .expect("HTML style directives should merge");
+        let mut builder_surface = builder.frontend_surface();
+        let mut string_table = StringTable::new();
+        let mut frontend = compile_project_frontend(
+            &mut config,
+            BuildProfile::Dev,
+            None,
+            &style_directives,
+            &mut builder_surface,
+            &mut string_table,
+        )
+        .expect("HTML entry frontend should complete without infrastructure failure");
+        if frontend.has_diagnosed_or_blocked() {
+            let source_database = frontend.project_source_database.take();
+            let messages = frontend
+                .into_render_messages_with_frozen_identity(&mut string_table, source_database, None)
+                .expect("frontend diagnostics must retain their frozen source identity");
+            let rendered = crate::compiler_frontend::compiler_messages::render::terse::
+                format_terse_compiler_messages(&messages);
+            panic!(
+                "HTML entry source must compile: {}\ndiagnostics:\n{}\nstructured: {:?}",
+                self.entry.display(),
+                rendered.join("\n"),
+                messages.error_diagnostics().collect::<Vec<_>>(),
+            );
+        }
+        frontend
+    }
+
+    fn build_result(&self, flags: &[Flag]) -> Result<BuildResult, CompilerMessages> {
         build_project(
             &ProjectBuilder::new(Box::new(HtmlProjectBuilder::new())),
             self.entry.to_str().expect("fixture entry should be UTF-8"),
             flags,
             &BuildConfigInputSet::new(),
         )
-        .expect("entry project should build")
+    }
+
+    fn build(&self, flags: &[Flag]) -> BuildResult {
+        self.build_result(flags)
+            .expect("entry project should build")
     }
 }
 
@@ -201,6 +254,347 @@ fn output_expectation(text: &str) -> SuccessExpectation {
             ..Default::default()
         },
         artifacts_must_not_exist: Vec::new(),
+    }
+}
+
+#[test]
+fn synthetic_single_file_registered_html_package_matches_directory_build() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    for (entry_mode, directory_entry, ordinary_page_entry) in [
+        ("directory", true, false),
+        ("selected @page.moth", false, false),
+        ("selected page.moth", false, true),
+    ] {
+        let mut fixture = EntryFixture::new(
+            "@html p, center, canvas\n\
+             @wrappers draw\n\
+             #[p, center: source-package-wrapper]\n\
+             #[canvas:\n\
+                 [$insert(\"id\"):game_canvas]\n\
+             ]\n\
+             result = draw(\"game_canvas\")!\n\
+             [:[result]]\n",
+            directory_entry,
+        );
+        if ordinary_page_entry {
+            fixture.select_ordinary_page_file();
+        }
+        fs::write(
+            fixture.directory.path().join("src/wrappers.moth"),
+            "@html Canvas, get_canvas\n\
+             @labels marker\n\
+             paint |drawing ~Canvas|:\n\
+                 ~drawing.set_fill_style(\"#202020\")\n\
+                 ~drawing.fill_rect(0.0, 0.0, 10.0, 10.0)\n\
+             ;\n\
+             draw |id String| -> String, Error!:\n\
+                 drawing ~= get_canvas(id)!\n\
+                 paint(~drawing)\n\
+                 return marker\n\
+             ;\n",
+        )
+        .expect("should write Canvas wrapper module");
+        fs::write(
+            fixture.directory.path().join("src/labels.moth"),
+            "marker #String = \"remapped-label\"\n",
+        )
+        .expect("should write source dependency");
+        fs::write(
+            fixture.directory.path().join("src/unused.moth"),
+            "@missing/unreferenced Missing\n",
+        )
+        .expect("should write unreferenced source with a missing dependency");
+
+        let frontend = fixture.html_frontend();
+        assert!(!frontend.has_diagnosed_or_blocked());
+        assert_eq!(
+            frontend.project.structure.nodes().len(),
+            1,
+            "{entry_mode}: the selected page and its ordinary source dependencies belong to one consumer module"
+        );
+        assert_eq!(
+            frontend.project.successful_module_views().count(),
+            1,
+            "the consumer graph must not absorb the source-backed @html package"
+        );
+        assert_eq!(frontend.source_packages.len(), 1);
+        let html_package = frontend
+            .source_packages
+            .get(0)
+            .expect("the registered HTML source package should publish separately");
+        assert_eq!(html_package.package_prefix(), "html");
+        assert!(
+            html_package
+                .boundary
+                .successful_module_views()
+                .any(|module| module
+                    .metadata
+                    .entry_point
+                    .ends_with("packages/html/@mod.moth")),
+            "the HTML package root must remain in its own compilation boundary"
+        );
+        let source_root = fs::canonicalize(fixture.directory.path().join("src"))
+            .expect("source root should canonicalize");
+        let project_sources = frontend
+            .project_source_database
+            .as_ref()
+            .expect("project consumer should retain its source inventory");
+        assert!(
+            project_sources.iter().all(|slot| slot
+                .canonical_os_path
+                .as_deref()
+                .is_some_and(|path| path.starts_with(&source_root))),
+            "the synthetic consumer source inventory must stay below the selected source root"
+        );
+        assert_eq!(
+            project_sources.iter().any(|slot| slot
+                .canonical_os_path
+                .as_deref()
+                .is_some_and(|path| path.ends_with("unused.moth"))),
+            directory_entry,
+            "directory inventory sees the orphan, while bounded single-file discovery excludes it"
+        );
+        assert_eq!(
+            project_sources
+                .iter()
+                .any(
+                    |slot| slot.canonical_os_path.as_deref().is_some_and(|path| {
+                        path.file_name().and_then(|name| name.to_str()) == Some("page.moth")
+                    })
+                ),
+            ordinary_page_entry,
+            "{entry_mode}: bounded single-file inventory includes only its selected ordinary page"
+        );
+        assert_eq!(
+            project_sources.iter().any(|slot| slot
+                .canonical_os_path
+                .as_deref()
+                .is_some_and(|path| path.ends_with("@page.moth"))),
+            !ordinary_page_entry || directory_entry,
+            "{entry_mode}: an unselected @page.moth stays outside ordinary-file discovery"
+        );
+
+        let built = fixture.build(&[]);
+        let html = built
+            .project
+            .output_files
+            .iter()
+            .find_map(|output| {
+                if let FileKind::Html(html) = output.file_kind() {
+                    Some(html)
+                } else {
+                    None
+                }
+            })
+            .expect("registered HTML package should emit a page");
+        assert!(html.contains("source-package-wrapper"));
+        assert!(html.contains("text-align: center"));
+        assert!(html.contains("<canvas id=\"game_canvas\""));
+        assert!(html.contains("<script type=\"importmap\">"));
+        assert!(
+            html.contains("__moth_src_fn_"),
+            "the source-owned Canvas wrapper functions must be linked into the page bundle"
+        );
+        let canvas_glue_is_emitted = built.project.output_files.iter().any(|output| {
+            if let FileKind::Js(script) = output.file_kind() {
+                script.contains("getCanvas as __moth_external_fn")
+                    && script.contains("context2d as __moth_external_fn")
+                    && script.contains("setFillStyle as __moth_external_fn")
+                    && script.contains("fillRect as __moth_external_fn")
+            } else {
+                false
+            }
+        });
+        assert!(
+            canvas_glue_is_emitted,
+            "the reachable source-owned Canvas methods must select their browser runtime wrappers"
+        );
+    }
+}
+
+fn assert_ambiguous_package_diagnostic(
+    fixture: &EntryFixture,
+    dependency_clause: &str,
+    dependency_path: &str,
+    scenario: &str,
+) {
+    let messages = match fixture.build_result(&[]) {
+        Err(messages) => messages,
+        Ok(_) => panic!("{scenario}: conflicting local target unexpectedly built"),
+    };
+    assert!(
+        !messages.has_infrastructure_error(),
+        "{scenario}: {messages:?}"
+    );
+    let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
+    assert_eq!(diagnostics.len(), 1, "{scenario}: {messages:?}");
+    assert_eq!(
+        diagnostics[0].kind.code(),
+        "MOTH-IMPORT-0006",
+        "{scenario}: {messages:?}"
+    );
+
+    let position = messages
+        .diagnostic_render_context(0)
+        .primary_position(diagnostics[0])
+        .expect("ambiguous package diagnostic should retain its authored span");
+    assert_eq!(position.line, dependency_clause, "{scenario}");
+    assert_eq!(
+        position.start,
+        LinePosition { line: 0, column: 0 },
+        "{scenario}"
+    );
+    assert_eq!(
+        position.end,
+        LinePosition {
+            line: 0,
+            column: dependency_path.chars().count() as u32,
+        },
+        "{scenario}"
+    );
+}
+
+#[test]
+fn synthetic_entry_modes_reject_registered_package_namespace_collisions() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let html_clause = "@html p";
+    let html_dependency_path = "@html";
+    let html_collisions = [
+        ("html.moth", "p #String = \"local html\"\n"),
+        ("html.mtf", "[:local html content]\n"),
+        ("html.md", "Local html content\n"),
+        ("Html.moth", "p #String = \"case-only local html\"\n"),
+    ];
+
+    // A direct @page entry and an ordinary selected filename both use bounded synthetic discovery.
+    for (entry_mode, directory_entry, ordinary_page_entry) in [
+        ("selected @page.moth", false, false),
+        ("selected page.moth", false, true),
+        ("directory", true, false),
+    ] {
+        for (local_file, local_source) in html_collisions {
+            let mut fixture = EntryFixture::new(
+                &format!("{html_clause}\n[:collision reproduction]\n"),
+                directory_entry,
+            );
+            if ordinary_page_entry {
+                fixture.select_ordinary_page_file();
+            }
+            fs::write(
+                fixture.directory.path().join("src").join(local_file),
+                local_source,
+            )
+            .expect("should write local HTML namespace collision");
+
+            assert_ambiguous_package_diagnostic(
+                &fixture,
+                html_clause,
+                html_dependency_path,
+                &format!("{entry_mode} with {local_file}"),
+            );
+        }
+    }
+
+    let binding_clause = "@core/math PI";
+    let binding_dependency_path = "@core/math";
+    for (entry_mode, directory_entry, ordinary_page_entry) in [
+        ("selected @page.moth", false, false),
+        ("selected page.moth", false, true),
+        ("directory", true, false),
+    ] {
+        let mut fixture = EntryFixture::new(
+            &format!("{binding_clause}\n[:binding collision reproduction]\n"),
+            directory_entry,
+        );
+        if ordinary_page_entry {
+            fixture.select_ordinary_page_file();
+        }
+        fs::write(
+            fixture.directory.path().join("src/core.moth"),
+            "placeholder #String = \"local core\"\n",
+        )
+        .expect("should write local Core namespace collision");
+
+        assert_ambiguous_package_diagnostic(
+            &fixture,
+            binding_clause,
+            binding_dependency_path,
+            &format!("{entry_mode} with core.moth"),
+        );
+    }
+}
+
+#[test]
+fn synthetic_entry_modes_reject_child_local_package_namespace_collisions() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let child_clause = "@html p";
+    for (entry_mode, directory_entry) in [("selected @page.moth", false), ("directory", true)] {
+        let fixture = EntryFixture::new("@child label\n[:[label]]\n", directory_entry);
+        let child_directory = fixture.directory.path().join("src/child");
+        fs::create_dir(&child_directory).expect("should create child module directory");
+        fs::write(
+            child_directory.join("@child.moth"),
+            format!("{child_clause}\nexport:\n    label #String = \"child\"\n;\n"),
+        )
+        .expect("should write child module dependency");
+        fs::write(
+            child_directory.join("html.moth"),
+            "p #String = \"child-local html\"\n",
+        )
+        .expect("should write child-local HTML namespace collision");
+
+        assert_ambiguous_package_diagnostic(
+            &fixture,
+            child_clause,
+            "@html",
+            &format!("{entry_mode} child module with html.moth"),
+        );
+    }
+}
+
+#[test]
+fn synthetic_single_file_missing_package_keeps_its_authored_diagnostic_span() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let import_clause = "@missing/graphics Canvas";
+    let dependency_path = "@missing/graphics";
+    for directory_entry in [true, false] {
+        let fixture = EntryFixture::new(
+            &format!("{import_clause}\n[:missing dependency reproduction]\n"),
+            directory_entry,
+        );
+        let messages = match fixture.build_result(&[]) {
+            Err(messages) => messages,
+            Ok(_) => panic!("unregistered source package unexpectedly built"),
+        };
+        assert!(!messages.has_infrastructure_error(), "{messages:?}");
+        let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
+        assert_eq!(diagnostics.len(), 1, "{messages:?}");
+        assert_eq!(diagnostics[0].kind.code(), "MOTH-IMPORT-0005");
+
+        let position = messages
+            .diagnostic_render_context(0)
+            .primary_position(diagnostics[0])
+            .expect("missing package diagnostic should retain its authored span");
+        assert_eq!(position.line, import_clause);
+        assert_eq!(position.start, LinePosition { line: 0, column: 0 });
+        assert_eq!(
+            position.end,
+            LinePosition {
+                line: 0,
+                column: dependency_path.chars().count() as u32,
+            }
+        );
+
+        let rendered = crate::compiler_frontend::compiler_messages::render::dev_server::
+            render_compiler_messages_html(&messages, fixture.directory.path());
+        assert!(rendered.contains("data-diagnostic-code=\"MOTH-IMPORT-0005\""));
+        assert!(rendered.contains(&format!(
+            "<span class=\"source-line\">{import_clause}</span>"
+        )));
+        assert!(rendered.contains(&format!(
+            "<span class=\"source-caret\">{}</span>",
+            "^".repeat(dependency_path.chars().count())
+        )));
     }
 }
 

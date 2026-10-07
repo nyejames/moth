@@ -1,0 +1,28 @@
+Bucket = |
+    values {Int},
+|
+
+snapshot |this Bucket| -> Bucket:
+    return copy this
+;
+
+snapshot_values |this Bucket| -> {Int}:
+    return copy this.values
+;
+
+run || -> String, Error!:
+    original ~= Bucket({1})
+    whole_copy ~= original.snapshot()
+    field_copy ~= original.snapshot_values()
+
+    ~original.values.set(0, 7)!
+    ~whole_copy.values.set(0, 8)!
+    ~field_copy.set(0, 9)!
+
+    original_value = original.values.get(0)!
+    whole_copy_value = whole_copy.values.get(0)!
+    field_copy_value = field_copy.get(0)!
+    return [:[original_value]|[whole_copy_value]|[field_copy_value]]
+;
+
+[:[run()!]]

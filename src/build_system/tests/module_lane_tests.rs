@@ -449,6 +449,7 @@ fn test_frontend_from_project_modules(modules: Vec<Module>) -> ProjectFrontendCo
         project,
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
+        Vec::new(),
     )
     .expect("test project boundary should validate")
 }
@@ -469,6 +470,7 @@ fn test_frontend_with_source_package(
             boundary: package,
         }]),
         ResourceInputRegistry::new(),
+        Vec::new(),
     )
     .expect("test frontend should validate")
 }
@@ -707,11 +709,15 @@ fn same_generated_declaration_across_project_and_package_boundaries_fails() {
         boundary: package,
     }]);
 
-    let error =
-        match ProjectFrontendCompilation::new(project, registry, ResourceInputRegistry::new()) {
-            Ok(_) => panic!("one declaration identity must not cross boundaries"),
-            Err(error) => error,
-        };
+    let error = match ProjectFrontendCompilation::new(
+        project,
+        registry,
+        ResourceInputRegistry::new(),
+        Vec::new(),
+    ) {
+        Ok(_) => panic!("one declaration identity must not cross boundaries"),
+        Err(error) => error,
+    };
     assert!(error.msg.contains("both project"));
 }
 
@@ -759,6 +765,7 @@ fn source_package_boundaries_never_cross_address_overlapping_module_ids() {
             },
         ]),
         ResourceInputRegistry::new(),
+        Vec::new(),
     )
     .expect("overlapping package module ids should stay isolated");
 
@@ -986,6 +993,7 @@ fn project_and_package_boundaries_may_contain_equal_generated_identities() {
             boundary: package,
         }]),
         ResourceInputRegistry::new(),
+        Vec::new(),
     )
     .expect("equal generated identities across boundaries should validate");
 
@@ -1106,6 +1114,7 @@ fn package_cannot_resolve_an_unrelated_package_sidecar() {
             },
         ]),
         ResourceInputRegistry::new(),
+        Vec::new(),
     )
     .expect("frontend boundaries should validate");
 
@@ -1200,6 +1209,7 @@ fn independent_packages_publish_equal_generated_identities_in_any_order() {
             test_graph_boundary(vec![project_module], "test", "page"),
             test_package_registry(packages),
             ResourceInputRegistry::new(),
+            Vec::new(),
         )
         .expect("frontend should validate")
     };
@@ -1292,6 +1302,7 @@ fn independent_packages_publish_equal_generated_identities_in_any_order() {
                 boundary,
             }]),
             ResourceInputRegistry::new(),
+            Vec::new(),
         )
         .expect("single-package frontend should validate");
         let compilation = ProjectCompilation::from_frontend(frontend, NumericProfile::STANDARD)
@@ -1433,6 +1444,7 @@ fn frontend_boundary_rejects_unfinished_module_slots() {
         boundary,
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
+        Vec::new(),
     ) {
         Ok(_) => panic!("an unfinished module slot must reject the frontend boundary"),
         Err(error) => error,
@@ -1511,6 +1523,7 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
         boundary,
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
+        Vec::new(),
     )
     .expect("mixed outcomes are a valid retained frontend result for check");
     assert!(frontend.has_diagnosed_or_blocked());
@@ -1593,6 +1606,7 @@ fn frontend_with_sidecar_warnings(string_table: &mut StringTable) -> ProjectFron
             boundary: package,
         }]),
         ResourceInputRegistry::new(),
+        Vec::new(),
     )
     .expect("warning package frontend should validate")
 }
@@ -2146,6 +2160,7 @@ fn generated_names_stay_stable_under_sidecar_publication_reordering() {
                 project,
                 CompletedSourcePackageRegistry::new(),
                 ResourceInputRegistry::new(),
+                Vec::new(),
             )
             .expect("frontend should validate"),
             NumericProfile::STANDARD,

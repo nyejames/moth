@@ -278,6 +278,7 @@ fn synthetic_module_root_resolution_prefers_owning_nested_module() {
 
     let collected = super::source_discovery::collect_reachable_input_files(
         &child.join("renderer.moth"),
+        &super::module_namespace::ModuleNamespaceSet::default(),
         &resolver,
         &style_directives,
         &mut external_imports,
@@ -915,6 +916,7 @@ fn synthetic_stage0_resolves_content_and_resource_references() {
 
     let collected = super::source_discovery::collect_reachable_input_files(
         &entry,
+        &super::module_namespace::ModuleNamespaceSet::default(),
         &resolver,
         &style_directives,
         &mut external_imports,
@@ -1053,6 +1055,7 @@ fn ordinary_synthetic_stage0_rejects_child_and_support_boundaries() {
     let mut resource_inputs = ResourceInputRegistry::new();
     let collected = super::source_discovery::collect_reachable_input_files(
         &entry,
+        &super::module_namespace::ModuleNamespaceSet::default(),
         &resolver,
         &style_directives,
         &mut external_imports,

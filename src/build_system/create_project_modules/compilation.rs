@@ -20,6 +20,7 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages}
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure, SourceSpanCapacityResource,
 };
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::paths::module_resources::ResourceSourceAssociation;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::{
@@ -51,12 +52,14 @@ use super::generated_store::BoundaryGeneratedFunctionStore;
 use super::module_artifact_store::ModuleArtifactStore;
 use super::module_identity::ModuleId;
 use super::module_inventory;
-use super::module_namespace::DirectoryDependencyResolution;
+use super::module_namespace::{DirectoryDependencyResolution, ModuleNamespaceSet};
 use super::project_module_graph::ProjectModuleGraph;
 use super::project_roots;
 use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery;
-use super::source_discovery::{ResolvedDependencyEdge, ResolvedSourcePackageDependency};
+use super::source_discovery::{
+    ExternalImportDiscoveryState, ResolvedDependencyEdge, ResolvedSourcePackageDependency,
+};
 use super::source_loading::SelectedSourceTextMap;
 
 mod canonical;
@@ -259,7 +262,7 @@ pub(crate) use single_file::compile_single_file_frontend_with_inputs;
 //  Directory Compilation
 // -------------------------
 
-struct SourcePackageModuleInventory {
+pub(super) struct SourcePackageModuleInventory {
     dependency_prefix: String,
     package_identity: StablePackageIdentity,
     root_module_id: ModuleId,
@@ -295,27 +298,27 @@ struct SourcePackageCheckOnlyInventory {
     batches: Vec<PremergeDiagnosticBatch>,
 }
 
-/// Typed directory-orchestration failure retaining its source owner.
+/// Typed boundary-orchestration failure retaining its source owner.
 ///
 /// WHAT: pairs the premerge lane with the finished package database when the failure is
 ///       package-scoped, so the single public tail can attach the correct snapshot once.
 /// WHY: package failures must render against their own snapshot while project failures render
 ///      against the project database finalized by the outer tail; carrying the owner here keeps
 ///      every intermediate site typed until that deliberate final conversion.
-struct DirectoryPremergeFailure {
-    failure: Box<PremergeFailure>,
-    package_source: Option<Box<SourceDatabase>>,
+pub(super) struct BoundaryPremergeFailure {
+    pub(super) failure: Box<PremergeFailure>,
+    pub(super) package_source: Option<Box<SourceDatabase>>,
 }
 
-impl DirectoryPremergeFailure {
-    fn project(failure: PremergeFailure) -> Self {
+impl BoundaryPremergeFailure {
+    pub(super) fn project(failure: PremergeFailure) -> Self {
         Self {
             failure: Box::new(failure),
             package_source: None,
         }
     }
 
-    fn package(failure: PremergeFailure, source: SourceDatabase) -> Self {
+    pub(super) fn package(failure: PremergeFailure, source: SourceDatabase) -> Self {
         Self {
             failure: Box::new(failure),
             package_source: Some(Box::new(source)),
@@ -323,19 +326,19 @@ impl DirectoryPremergeFailure {
     }
 }
 
-impl From<PremergeFailure> for DirectoryPremergeFailure {
+impl From<PremergeFailure> for BoundaryPremergeFailure {
     fn from(failure: PremergeFailure) -> Self {
         Self::project(failure)
     }
 }
 
-impl From<CompilerError> for DirectoryPremergeFailure {
+impl From<CompilerError> for BoundaryPremergeFailure {
     fn from(error: CompilerError) -> Self {
         Self::project(PremergeFailure::Infrastructure(error))
     }
 }
 
-impl From<SourceDatabaseError> for DirectoryPremergeFailure {
+impl From<SourceDatabaseError> for BoundaryPremergeFailure {
     fn from(error: SourceDatabaseError) -> Self {
         match error {
             SourceDatabaseError::Capacity(capacity) => Self::project(PremergeFailure::Diagnosed(
@@ -369,11 +372,11 @@ impl From<SourceDatabaseError> for DirectoryPremergeFailure {
 fn finalize_package_failure(
     failure: PremergeFailure,
     builder: SourceDatabaseBuilder,
-) -> DirectoryPremergeFailure {
+) -> BoundaryPremergeFailure {
     match builder.finish() {
-        Ok(source) => DirectoryPremergeFailure::package(failure, source),
+        Ok(source) => BoundaryPremergeFailure::package(failure, source),
         Err(finish_error) => {
-            DirectoryPremergeFailure::project(append_finish_failure(failure, finish_error))
+            BoundaryPremergeFailure::project(append_finish_failure(failure, finish_error))
         }
     }
 }
@@ -652,6 +655,447 @@ pub(crate) fn order_packages_by_dependency(
     Ok(ordered)
 }
 
+/// Discover each registered source-backed package within its own indexed boundary.
+///
+/// WHAT: builds the package-local graph, source owner and canonical/check-only schedule using the
+///       already completed namespace index and shared provider-discovery state.
+/// WHY: directory and synthetic consumers must use the same Stage 0 package boundary path; only
+///      the consumer's source discovery differs.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "package discovery keeps immutable boundary inputs and independently borrowed import/resource/string services explicit"
+)]
+pub(super) fn discover_source_package_inventories(
+    config: &Config,
+    numeric_profile: NumericProfile,
+    namespace_set: &ModuleNamespaceSet,
+    project_path_resolver: &ProjectPathResolver,
+    style_directives: &StyleDirectiveRegistry,
+    external_imports: &mut ExternalImportDiscoveryState<'_>,
+    resource_inputs: &mut ResourceInputRegistry,
+    string_table: &mut StringTable,
+    mode: FrontendCompilationMode,
+) -> Result<Vec<SourcePackageModuleInventory>, BoundaryPremergeFailure> {
+    let mut inventories = Vec::new();
+    for (dependency_prefix, package_index) in namespace_set.source_package_boundaries() {
+        // Register the package boundary before its inventory so inventory and compile
+        // observations share one dense id for the human boundary total.
+        #[cfg(feature = "timers")]
+        let timing_boundary = crate::timing::register_timing_boundary(
+            crate::timing::TimingBoundaryKind::SourcePackage,
+            || format!("@{dependency_prefix}"),
+        );
+        let mut package_graph = ProjectModuleGraph::from_source_tree_index(package_index);
+        let package_path_resolver = project_path_resolver.for_source_package_boundary(
+            package_index.entry_root().to_path_buf(),
+            package_index
+                .module_identities()
+                .derive_compilation_root_table(),
+        );
+        let package_registration_index = package_index.source_registration_index();
+        let package_source_files = SourceDatabase::from_ordered_registration_index(
+            &package_registration_index,
+            package_path_resolver.entry_root(),
+            Some(&package_path_resolver),
+            string_table,
+        )?;
+        let mut package_sources = SourceDatabaseBuilder::new(package_source_files);
+        let mut package_selected_source_texts = SelectedSourceTextMap::default();
+        let (package_source_files, mut package_source_spans) = package_sources.split();
+        let mut path_interner = package_source_files.clone_path_builder();
+        let package_path_fork = path_interner.fork_source().fork_for_module();
+        let package_resolution = DirectoryDependencyResolution::package(
+            namespace_set,
+            dependency_prefix,
+            package_index,
+            &package_path_fork,
+        );
+        timing_scope_attributed!(
+            timing_guard_build_boundary_inventory_2,
+            crate::timing::TimingMetric::BoundaryInventory,
+            Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
+        );
+        let package_waves_result =
+            module_inventory::discover_all_modules_in_package_with_check_only(
+                config,
+                &package_path_resolver,
+                package_source_files,
+                &mut package_source_spans,
+                &mut package_graph,
+                style_directives,
+                external_imports,
+                package_resolution,
+                resource_inputs,
+                mode.includes_check_only(),
+                &mut package_selected_source_texts,
+                string_table,
+                &mut path_interner,
+                #[cfg(feature = "timers")]
+                timing_boundary,
+            );
+        let _ = package_source_spans;
+        let package_retain_result =
+            package_selected_source_texts.retain_into(package_sources.sources_mut());
+        package_sources.adopt_pending_span_builders();
+        if let Err(error) = package_retain_result {
+            return Err(finalize_package_failure(
+                PremergeFailure::Infrastructure(error),
+                package_sources,
+            ));
+        }
+        let package_waves = match package_waves_result {
+            Ok(module_waves) => module_waves,
+            Err(failure) => {
+                return Err(finalize_package_failure(failure, package_sources));
+            }
+        };
+        // Merge canonical contract spans before any transient package job forks its string
+        // table. Every later transient fact can then share this boundary prefix safely.
+        let canonical_source_facts = match config_boundary::source_contract_facts_from_module_waves(
+            package_waves.waves(),
+            string_table,
+            numeric_profile,
+        ) {
+            Ok(facts) => facts,
+            Err(failure) => return Err(finalize_package_failure(failure, package_sources)),
+        };
+        let Some(root_module_id) = package_index
+            .module_identities()
+            .module_id_for_directory(package_index.entry_root())
+        else {
+            return Err(finalize_package_failure(
+                PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
+                    "Source package @{dependency_prefix} has no module rooted at its indexed entry root"
+                ))),
+                package_sources,
+            ));
+        };
+        inventories.push(SourcePackageModuleInventory {
+            dependency_prefix: dependency_prefix.to_owned(),
+            package_identity: package_index.stable_package_identity().clone(),
+            root_module_id,
+            path_resolver: package_path_resolver,
+            source_files: package_sources,
+            path_interner,
+            graph: package_graph,
+            schedule: package_waves,
+            canonical_source_facts,
+            #[cfg(feature = "timers")]
+            timing_boundary,
+        });
+    }
+
+    Ok(inventories)
+}
+
+/// Prepare package check-only jobs after every canonical package/provider discovery is complete.
+///
+/// Check-only package dependencies remain outside canonical ordering. Preparing them after the
+/// discovery barrier gives each transient job the final provider registry without making its
+/// dependencies affect which canonical facades publish first.
+pub(super) fn prepare_source_package_check_only_jobs(
+    inventories: &mut Vec<SourcePackageModuleInventory>,
+    namespace_set: &ModuleNamespaceSet,
+    style_directives: &StyleDirectiveRegistry,
+    external_imports: &mut ExternalImportDiscoveryState<'_>,
+    string_table: &mut StringTable,
+) -> Result<(), BoundaryPremergeFailure> {
+    for index in 0..inventories.len() {
+        let inventory = &mut inventories[index];
+        let Some((_, package_index)) = namespace_set
+            .source_package_boundaries()
+            .find(|(prefix, _)| *prefix == inventory.dependency_prefix.as_str())
+        else {
+            return Err(CompilerError::compiler_error(format!(
+                "Source package @{} disappeared before deferred check-only preparation",
+                inventory.dependency_prefix
+            ))
+            .into());
+        };
+        let package_path_fork = inventory.path_interner.fork_source().fork_for_module();
+        let package_resolution = DirectoryDependencyResolution::package(
+            namespace_set,
+            inventory.dependency_prefix.as_str(),
+            package_index,
+            &package_path_fork,
+        );
+        let (_, mut source_spans) = inventory.source_files.split();
+        let mut selected_source_texts = SelectedSourceTextMap::default();
+        let preparation_result = inventory.schedule.prepare_check_only_jobs(
+            style_directives,
+            &mut source_spans,
+            &inventory.path_resolver,
+            external_imports,
+            package_resolution,
+            string_table,
+            &mut inventory.path_interner,
+            &mut selected_source_texts,
+        );
+        let _ = source_spans;
+        let retain_result = selected_source_texts.retain_into(inventory.source_files.sources_mut());
+        inventory.source_files.adopt_pending_span_builders();
+        match (preparation_result, retain_result) {
+            (Ok(()), Ok(())) => {}
+            (Ok(()), Err(error)) => {
+                let inventory = inventories.swap_remove(index);
+                return Err(finalize_package_failure(
+                    PremergeFailure::Infrastructure(error),
+                    inventory.source_files,
+                ));
+            }
+            (Err(failure), Ok(())) => {
+                let inventory = inventories.swap_remove(index);
+                return Err(finalize_package_failure(failure, inventory.source_files));
+            }
+            (Err(failure), Err(error)) => {
+                let inventory = inventories.swap_remove(index);
+                return Err(finalize_package_failure(
+                    append_finish_failure(failure, error),
+                    inventory.source_files,
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Compile source packages in provider order and publish their completed facades.
+///
+/// The package lane owns canonical publication, deferred check-only work and the package source
+/// snapshots needed by later consumers. It returns only after all package owners are finalized.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "package publication borrows compilation settings, builder services and mutable resource/string owners separately"
+)]
+pub(super) fn compile_source_package_inventories(
+    config: &Config,
+    build_profile: FrontendBuildProfile,
+    numeric_profile: NumericProfile,
+    style_directives: &StyleDirectiveRegistry,
+    builder_surface: &BuilderSurface,
+    external_packages: &Arc<ExternalPackageRegistry>,
+    inventories: Vec<SourcePackageModuleInventory>,
+    resource_inputs: &mut ResourceInputRegistry,
+    string_table: &mut StringTable,
+) -> Result<(CompletedSourcePackageRegistry, Vec<TransientPremergeBatch>), BoundaryPremergeFailure>
+{
+    let inventories = order_source_package_inventories(inventories)?;
+    let config_globals = builder_surface.config_globals().clone();
+    let mut completed_source_packages = CompletedSourcePackageRegistry::new();
+    let mut transient_batches = Vec::new();
+    let mut check_only_inventories = Vec::new();
+
+    // Publish every canonical package before compiling transient package jobs. This keeps
+    // check-only dependencies out of canonical package ordering and gives each job the complete
+    // immutable facade registry.
+    for inventory in inventories {
+        let SourcePackageModuleInventory {
+            package_identity,
+            root_module_id,
+            path_resolver,
+            mut source_files,
+            mut path_interner,
+            graph,
+            schedule,
+            canonical_source_facts: source_facts,
+            dependency_prefix,
+            #[cfg(feature = "timers")]
+            timing_boundary,
+        } = inventory;
+        let (module_waves, provider_bindings, source_package_dependencies, check_only_jobs) =
+            schedule.into_parts();
+        let result: Result<_, PremergeFailure> = (|| {
+            let package_inputs = BuildConfigInputSet::new();
+            let package_fallback_span = None;
+            let build_config_values = config_boundary::resolve_boundary_build_config(
+                &source_facts,
+                &[],
+                &[],
+                &package_inputs,
+                &config_globals,
+                package_fallback_span,
+                string_table,
+                numeric_profile,
+            )?;
+            let deferred_build_config_values = build_config_values.clone();
+            timing_scope_attributed!(
+                timing_guard_build_boundary_compile,
+                crate::timing::TimingMetric::BoundaryCompile,
+                Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
+            );
+            // Canonical package compilation stays independent of the transient lane. Convert its
+            // typed batches once at the package source-owner tail below.
+            let (boundary, package_transient_batches) =
+                canonical::compile_module_waves_in_premerge_lane(
+                    canonical::BoundaryCompilationContext::new(
+                        config,
+                        build_profile,
+                        numeric_profile,
+                        &path_resolver,
+                        Arc::clone(source_files.sources()),
+                        style_directives,
+                        external_packages,
+                        builder_surface,
+                        &completed_source_packages,
+                        build_config_values,
+                        source_facts.clone(),
+                        BuildConfigInputSet::new(),
+                        config_globals.clone(),
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                    ),
+                    graph,
+                    module_waves,
+                    Vec::new(),
+                    &provider_bindings,
+                    &source_package_dependencies,
+                    resource_inputs,
+                    string_table,
+                    &mut path_interner,
+                )?;
+            let mut dependency_prefixes = Vec::new();
+            let mut seen_dependency_prefixes = FxHashSet::default();
+            for dependency in &source_package_dependencies {
+                // Several modules may depend on the same provider. Publication records one direct
+                // package edge, while module-level bindings retain every consumer binding.
+                if seen_dependency_prefixes.insert(dependency.dependency_prefix.clone()) {
+                    dependency_prefixes.push(dependency.dependency_prefix.clone());
+                }
+            }
+            // The package boundary owns its identity pair from here on: canonical publications
+            // share one final table across base artefacts, generated sidecars and retained contexts.
+            // Later boundaries seed from these contexts and mark them cross-boundary, so this
+            // install must precede that seed and no re-install is possible.
+            let package = CompiledSourcePackage {
+                package_identity,
+                root_module_id,
+                boundary,
+            };
+            let publication =
+                completed_source_packages.preflight(&package, &dependency_prefixes)?;
+            completed_source_packages.reserve_commit(&publication);
+            completed_source_packages.commit(publication, package);
+            Ok((deferred_build_config_values, package_transient_batches))
+        })();
+        let (build_config_values, batches) = match result {
+            Ok(value) => value,
+            Err(failure) => {
+                source_files.sources_mut().adopt_path_builder(path_interner);
+                return Err(finalize_package_failure(failure, source_files));
+            }
+        };
+        check_only_inventories.push(SourcePackageCheckOnlyInventory {
+            dependency_prefix,
+            path_resolver,
+            source_files,
+            check_only_jobs,
+            provider_bindings,
+            source_package_dependencies,
+            canonical_source_facts: source_facts,
+            build_config_values,
+            batches,
+            path_interner,
+        });
+    }
+
+    completed_source_packages.validate_dependency_edges()?;
+    for inventory in check_only_inventories {
+        let SourcePackageCheckOnlyInventory {
+            dependency_prefix,
+            mut source_files,
+            path_resolver,
+            check_only_jobs,
+            provider_bindings,
+            source_package_dependencies,
+            canonical_source_facts,
+            build_config_values,
+            mut batches,
+            mut path_interner,
+        } = inventory;
+        let result: Result<_, PremergeFailure> = (|| {
+            let package_id = completed_source_packages
+                .by_prefix(dependency_prefix.as_str())
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "deferred check-only source package @{} was not published",
+                        dependency_prefix
+                    ))
+                })?;
+            let package = completed_source_packages.package(package_id)?;
+            let check_only_batches = deferred_check_only::compile_check_only_jobs_after_canonical(
+                canonical::BoundaryCompilationContext::new(
+                    config,
+                    build_profile,
+                    numeric_profile,
+                    &path_resolver,
+                    Arc::clone(source_files.sources()),
+                    style_directives,
+                    external_packages,
+                    builder_surface,
+                    &completed_source_packages,
+                    build_config_values,
+                    canonical_source_facts,
+                    BuildConfigInputSet::new(),
+                    config_globals.clone(),
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                ),
+                &package.boundary.modules,
+                &package.boundary.generated,
+                check_only_jobs,
+                &provider_bindings,
+                &source_package_dependencies,
+                string_table,
+                &mut path_interner,
+            )?;
+            Ok((package_id, check_only_batches))
+        })();
+        // Finish the package source owner beside the deferred result so success batches and
+        // failures convert/attach exactly once with this snapshot. A failed finish has no snapshot,
+        // so the deferred failure stays authoritative and the finish failure is chained beside it.
+        source_files.sources_mut().adopt_path_builder(path_interner);
+        let finish_outcome = source_files.finish();
+        let (result, finalized_source) = match (result, finish_outcome) {
+            (result, Ok(finished)) => (result, finished),
+            (Ok(_), Err(finish_error)) => {
+                return Err(BoundaryPremergeFailure::project(
+                    PremergeFailure::Infrastructure(finish_error),
+                ));
+            }
+            (Err(failure), Err(finish_error)) => {
+                return Err(BoundaryPremergeFailure::project(append_finish_failure(
+                    failure,
+                    finish_error,
+                )));
+            }
+        };
+        let finalized = Arc::new(finalized_source);
+        let (package_id, check_only_batches) = match result {
+            Ok(value) => value,
+            Err(failure) => {
+                let database = Arc::try_unwrap(finalized).map_err(|_| {
+                    CompilerError::compiler_error(
+                        "package source database was unexpectedly shared before failure attach",
+                    )
+                })?;
+                return Err(BoundaryPremergeFailure::package(failure, database));
+            }
+        };
+        // The registry holds the sole owner used by later frozen-identity extraction. Transient
+        // batches keep their local tables and domain tags until the final render tail merges them.
+        completed_source_packages.set_source_database(package_id, finalized)?;
+        batches.extend(check_only_batches);
+        for batch in batches {
+            transient_batches.push(TransientPremergeBatch::package(package_id, batch));
+        }
+    }
+
+    Ok((completed_source_packages, transient_batches))
+}
+
 /// Discover all entry modules in a directory project and compile each one.
 ///
 /// WHAT: owns the single final conversion from the premerge lane into the boundary vessel.
@@ -718,7 +1162,7 @@ fn compile_directory_frontend_in_premerge_lane(
     project_source_files: &mut Option<Arc<SourceDatabase>>,
     build_config_inputs: &BuildConfigInputSet,
     mode: FrontendCompilationMode,
-) -> Result<ProjectFrontendCompilation, DirectoryPremergeFailure> {
+) -> Result<ProjectFrontendCompilation, BoundaryPremergeFailure> {
     // Directory inventory owns graph construction, source-package discovery,
     // and deterministic package ordering before any module semantics run.
     timing_scope!(
@@ -740,7 +1184,7 @@ fn compile_directory_frontend_in_premerge_lane(
     ) {
         Ok(resolver) => resolver,
         Err(failure) => {
-            return Err(DirectoryPremergeFailure::project(failure));
+            return Err(BoundaryPremergeFailure::project(failure));
         }
     };
     let project_path_resolver = project_setup.resolver;
@@ -749,7 +1193,7 @@ fn compile_directory_frontend_in_premerge_lane(
         Some(cached) => match Arc::try_unwrap(cached) {
             Ok(database) => database,
             Err(_) => {
-                return Err(DirectoryPremergeFailure::project(
+                return Err(BoundaryPremergeFailure::project(
                     PremergeFailure::Infrastructure(CompilerError::compiler_error(
                         "project source database was unexpectedly shared before registration",
                     )),
@@ -759,7 +1203,7 @@ fn compile_directory_frontend_in_premerge_lane(
         None => SourceDatabase::empty(),
     };
     let mut project_sources = SourceDatabaseBuilder::new(cached_source);
-    let result = (|| -> Result<ProjectFrontendCompilation, DirectoryPremergeFailure> {
+    let result = (|| -> Result<ProjectFrontendCompilation, BoundaryPremergeFailure> {
         project_sources
             .sources_mut()
             .append_ordered_registration_index(
@@ -785,115 +1229,17 @@ fn compile_directory_frontend_in_premerge_lane(
         };
         let mut resource_inputs = ResourceInputRegistry::new();
 
-        let mut source_package_inventories = Vec::new();
-        for (dependency_prefix, package_index) in project_setup
-            .module_namespace_set
-            .source_package_boundaries()
-        {
-            // Register the package boundary before its inventory so inventory and compile
-            // observations share one dense id for the human boundary total.
-            #[cfg(feature = "timers")]
-            let timing_boundary = crate::timing::register_timing_boundary(
-                crate::timing::TimingBoundaryKind::SourcePackage,
-                || format!("@{dependency_prefix}"),
-            );
-            let mut package_graph = ProjectModuleGraph::from_source_tree_index(package_index);
-            let package_path_resolver = project_path_resolver.for_source_package_boundary(
-                package_index.entry_root().to_path_buf(),
-                package_index
-                    .module_identities()
-                    .derive_compilation_root_table(),
-            );
-            let package_registration_index = package_index.source_registration_index();
-            let package_source_files = SourceDatabase::from_ordered_registration_index(
-                &package_registration_index,
-                package_path_resolver.entry_root(),
-                Some(&package_path_resolver),
-                string_table,
-            )?;
-            let mut package_sources = SourceDatabaseBuilder::new(package_source_files);
-            let mut package_selected_source_texts = SelectedSourceTextMap::default();
-            let (package_source_files, mut package_source_spans) = package_sources.split();
-            let mut path_interner = package_source_files.clone_path_builder();
-            let package_path_fork = path_interner.fork_source().fork_for_module();
-            let package_resolution = DirectoryDependencyResolution::package(
-                &project_setup.module_namespace_set,
-                dependency_prefix,
-                package_index,
-                &package_path_fork,
-            );
-            timing_scope_attributed!(
-                timing_guard_build_boundary_inventory_2,
-                crate::timing::TimingMetric::BoundaryInventory,
-                Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
-            );
-            let package_waves_result =
-                module_inventory::discover_all_modules_in_package_with_check_only(
-                    config,
-                    &package_path_resolver,
-                    package_source_files,
-                    &mut package_source_spans,
-                    &mut package_graph,
-                    style_directives,
-                    &mut external_imports,
-                    package_resolution,
-                    &mut resource_inputs,
-                    mode.includes_check_only(),
-                    &mut package_selected_source_texts,
-                    string_table,
-                    &mut path_interner,
-                    #[cfg(feature = "timers")]
-                    timing_boundary,
-                );
-            let _ = package_source_spans;
-            let package_retain_result =
-                package_selected_source_texts.retain_into(package_sources.sources_mut());
-            package_sources.adopt_pending_span_builders();
-            if let Err(error) = package_retain_result {
-                return Err(finalize_package_failure(
-                    PremergeFailure::Infrastructure(error),
-                    package_sources,
-                ));
-            }
-            let package_waves = match package_waves_result {
-                Ok(module_waves) => module_waves,
-                Err(failure) => {
-                    return Err(finalize_package_failure(failure, package_sources));
-                }
-            };
-            // Merge canonical contract spans before any transient package job forks its string
-            // table. Every later transient fact can then share this boundary prefix safely.
-            let canonical_source_facts = config_boundary::source_contract_facts_from_module_waves(
-                package_waves.waves(),
-                string_table,
-                numeric_profile,
-            )
-            .map_err(DirectoryPremergeFailure::project)?;
-            let Some(root_module_id) = package_index
-                .module_identities()
-                .module_id_for_directory(package_index.entry_root())
-            else {
-                return Err(finalize_package_failure(
-                    PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
-                        "Source package @{dependency_prefix} has no module rooted at its indexed entry root"
-                    ))),
-                    package_sources,
-                ));
-            };
-            source_package_inventories.push(SourcePackageModuleInventory {
-                dependency_prefix: dependency_prefix.to_owned(),
-                package_identity: package_index.stable_package_identity().clone(),
-                root_module_id,
-                path_resolver: package_path_resolver,
-                source_files: package_sources,
-                path_interner,
-                graph: package_graph,
-                schedule: package_waves,
-                canonical_source_facts,
-                #[cfg(feature = "timers")]
-                timing_boundary,
-            });
-        }
+        let mut source_package_inventories = discover_source_package_inventories(
+            config,
+            numeric_profile,
+            &project_setup.module_namespace_set,
+            &project_path_resolver,
+            style_directives,
+            &mut external_imports,
+            &mut resource_inputs,
+            string_table,
+            mode,
+        )?;
 
         // Register the main-project boundary before its inventory so its accumulated total is
         // attributed separately from every source package.
@@ -943,7 +1289,7 @@ fn compile_directory_frontend_in_premerge_lane(
                     Ok(()) => failure,
                     Err(error) => append_finish_failure(failure, error),
                 };
-                return Err(DirectoryPremergeFailure::project(failure));
+                return Err(BoundaryPremergeFailure::project(failure));
             }
         };
         let effective_project_fields =
@@ -956,64 +1302,13 @@ fn compile_directory_frontend_in_premerge_lane(
         // jobs only after that global provider-discovery barrier so each job forks final canonical
         // external package/cache/resolution state.
         if mode.includes_check_only() {
-            for index in 0..source_package_inventories.len() {
-                let inventory = &mut source_package_inventories[index];
-                let Some((_, package_index)) = project_setup
-                    .module_namespace_set
-                    .source_package_boundaries()
-                    .find(|(prefix, _)| *prefix == inventory.dependency_prefix.as_str())
-                else {
-                    return Err(CompilerError::compiler_error(format!(
-                        "Source package @{} disappeared before deferred check-only preparation",
-                        inventory.dependency_prefix
-                    ))
-                    .into());
-                };
-                let package_path_fork = inventory.path_interner.fork_source().fork_for_module();
-                let package_resolution = DirectoryDependencyResolution::package(
-                    &project_setup.module_namespace_set,
-                    inventory.dependency_prefix.as_str(),
-                    package_index,
-                    &package_path_fork,
-                );
-                let (_, mut source_spans) = inventory.source_files.split();
-                let mut selected_source_texts = SelectedSourceTextMap::default();
-                let preparation_result = inventory.schedule.prepare_check_only_jobs(
-                    style_directives,
-                    &mut source_spans,
-                    &inventory.path_resolver,
-                    &mut external_imports,
-                    package_resolution,
-                    string_table,
-                    &mut inventory.path_interner,
-                    &mut selected_source_texts,
-                );
-                let _ = source_spans;
-                let retain_result =
-                    selected_source_texts.retain_into(inventory.source_files.sources_mut());
-                inventory.source_files.adopt_pending_span_builders();
-                match (preparation_result, retain_result) {
-                    (Ok(()), Ok(())) => {}
-                    (Ok(()), Err(error)) => {
-                        let inventory = source_package_inventories.swap_remove(index);
-                        return Err(finalize_package_failure(
-                            PremergeFailure::Infrastructure(error),
-                            inventory.source_files,
-                        ));
-                    }
-                    (Err(failure), Ok(())) => {
-                        let inventory = source_package_inventories.swap_remove(index);
-                        return Err(finalize_package_failure(failure, inventory.source_files));
-                    }
-                    (Err(failure), Err(error)) => {
-                        let inventory = source_package_inventories.swap_remove(index);
-                        return Err(finalize_package_failure(
-                            append_finish_failure(failure, error),
-                            inventory.source_files,
-                        ));
-                    }
-                }
-            }
+            prepare_source_package_check_only_jobs(
+                &mut source_package_inventories,
+                &project_setup.module_namespace_set,
+                style_directives,
+                &mut external_imports,
+                string_table,
+            )?;
         }
         let project_check_only_result = if mode.includes_check_only() {
             project_schedule.prepare_check_only_jobs(
@@ -1036,15 +1331,15 @@ fn compile_directory_frontend_in_premerge_lane(
         match (project_check_only_result, project_retain_result) {
             (Ok(()), Ok(())) => {}
             (Ok(()), Err(error)) => {
-                return Err(DirectoryPremergeFailure::project(
+                return Err(BoundaryPremergeFailure::project(
                     PremergeFailure::Infrastructure(error),
                 ));
             }
             (Err(failure), Ok(())) => {
-                return Err(DirectoryPremergeFailure::project(failure));
+                return Err(BoundaryPremergeFailure::project(failure));
             }
             (Err(failure), Err(error)) => {
-                return Err(DirectoryPremergeFailure::project(append_finish_failure(
+                return Err(BoundaryPremergeFailure::project(append_finish_failure(
                     failure, error,
                 )));
             }
@@ -1062,7 +1357,7 @@ fn compile_directory_frontend_in_premerge_lane(
             string_table,
             numeric_profile,
         )
-        .map_err(DirectoryPremergeFailure::project)?;
+        .map_err(BoundaryPremergeFailure::project)?;
         let mut all_project_source_facts = project_source_facts.clone();
         if mode.includes_check_only() {
             all_project_source_facts.extend(
@@ -1071,7 +1366,7 @@ fn compile_directory_frontend_in_premerge_lane(
                     string_table,
                     numeric_profile,
                 )
-                .map_err(DirectoryPremergeFailure::project)?,
+                .map_err(BoundaryPremergeFailure::project)?,
             );
         }
         // Canonical resolution must use only canonical source facts, but explicit inputs are checked
@@ -1092,7 +1387,7 @@ fn compile_directory_frontend_in_premerge_lane(
             string_table,
             numeric_profile,
         )
-        .map_err(DirectoryPremergeFailure::project)?;
+        .map_err(BoundaryPremergeFailure::project)?;
         if let Some(input) = config_boundary::first_unknown_build_config_input(
             build_config_inputs,
             &all_project_source_facts,
@@ -1105,243 +1400,35 @@ fn compile_directory_frontend_in_premerge_lane(
                 project_fallback,
                 string_table,
             );
-            return Err(DirectoryPremergeFailure::project(failure));
+            return Err(BoundaryPremergeFailure::project(failure));
         }
         let project_globals = config_boundary::build_project_globals_interface(
             config,
             &effective_project_fields,
             string_table,
         )?;
-        let source_package_inventories =
-            order_source_package_inventories(source_package_inventories)?;
+        let external_packages = Arc::new(builder_surface.binding_packages.clone());
         #[cfg(feature = "timers")]
         timing_guard_stage0_directory_inventory.finish();
 
-        // Share the effective external package registry immutably across all boundary compilations;
-        // the serial module scheduler can safely read the same Arc for every directory module.
-        let external_packages = Arc::new(builder_surface.binding_packages.clone());
-
-        // 3. Compile source packages in package-dependency order, then compile the project against
-        // their immutable facade interfaces. Each boundary owns independent dense IDs, graphs and
-        // provider stores; only the stable public interface crosses into a consuming boundary.
+        // Compile every registered source package through the same boundary path used by
+        // synthetic consumers, then compile this project's modules against the published facades.
         timing_scope!(
             timing_guard_stage0_directory_compile,
             crate::timing::TimingMetric::Stage0DirectoryCompile
         );
-        let mut completed_source_packages = CompletedSourcePackageRegistry::new();
-        let mut transient_batches: Vec<TransientPremergeBatch> = Vec::new();
-        let mut source_package_check_only_inventories = Vec::new();
-        for inventory in source_package_inventories {
-            let SourcePackageModuleInventory {
-                package_identity,
-                root_module_id,
-                path_resolver,
-                mut source_files,
-                mut path_interner,
-                graph,
-                schedule,
-                canonical_source_facts: source_facts,
-                dependency_prefix,
-                #[cfg(feature = "timers")]
-                timing_boundary,
-            } = inventory;
-            let (module_waves, provider_bindings, source_package_dependencies, check_only_jobs) =
-                schedule.into_parts();
-            let result: Result<_, PremergeFailure> = (|| {
-                let package_inputs = BuildConfigInputSet::new();
-                let package_fallback_span = None;
-                let build_config_values = config_boundary::resolve_boundary_build_config(
-                    &source_facts,
-                    &[],
-                    &[],
-                    &package_inputs,
-                    &config_globals,
-                    package_fallback_span,
-                    string_table,
-                    numeric_profile,
-                )?;
-                let deferred_build_config_values = build_config_values.clone();
-                timing_scope_attributed!(
-                    timing_guard_build_boundary_compile,
-                    crate::timing::TimingMetric::BoundaryCompile,
-                    Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
-                );
-                // Canonical package compilation is deliberately independent of the transient lane.
-                // The typed lane returns batches; conversion happens once at the package
-                // source-owner tail below.
-                let (boundary, package_transient_batches) =
-                    canonical::compile_module_waves_in_premerge_lane(
-                        canonical::BoundaryCompilationContext::new(
-                            config,
-                            build_profile,
-                            numeric_profile,
-                            &path_resolver,
-                            Arc::clone(source_files.sources()),
-                            style_directives,
-                            &external_packages,
-                            builder_surface,
-                            &completed_source_packages,
-                            build_config_values,
-                            source_facts.clone(),
-                            BuildConfigInputSet::new(),
-                            config_globals.clone(),
-                            Vec::new(),
-                            Vec::new(),
-                            None,
-                        ),
-                        graph,
-                        module_waves,
-                        Vec::new(),
-                        &provider_bindings,
-                        &source_package_dependencies,
-                        &mut resource_inputs,
-                        string_table,
-                        &mut path_interner,
-                    )?;
-                let mut dependency_prefixes = Vec::new();
-                let mut seen_dependency_prefixes = FxHashSet::default();
-                for dependency in &source_package_dependencies {
-                    // Several modules may depend on the same provider. Publication records one direct
-                    // package edge, while module-level dependency bindings retain every consumer binding.
-                    if seen_dependency_prefixes.insert(dependency.dependency_prefix.clone()) {
-                        dependency_prefixes.push(dependency.dependency_prefix.clone());
-                    }
-                }
-                // The package boundary owns its identity pair from here on: the canonical
-                // publications completed inside the wave coordinator and its install tail
-                // already shared one final table across this boundary's base artefacts,
-                // generated sidecars and retained contexts. The project boundary later seeds
-                // its registry from these contexts and marks them cross-boundary, so this
-                // install must precede that seed and no re-install is possible.
-                let package = CompiledSourcePackage {
-                    package_identity,
-                    root_module_id,
-                    boundary,
-                };
-                let publication =
-                    completed_source_packages.preflight(&package, &dependency_prefixes)?;
-                completed_source_packages.reserve_commit(&publication);
-                completed_source_packages.commit(publication, package);
-                Ok((deferred_build_config_values, package_transient_batches))
-            })();
-            let (build_config_values, batches) = match result {
-                Ok(value) => value,
-                Err(failure) => {
-                    source_files.sources_mut().adopt_path_builder(path_interner);
-                    return Err(finalize_package_failure(failure, source_files));
-                }
-            };
-            source_package_check_only_inventories.push(SourcePackageCheckOnlyInventory {
-                dependency_prefix,
-                path_resolver,
-                source_files,
-                check_only_jobs,
-                provider_bindings,
-                source_package_dependencies,
-                canonical_source_facts: source_facts,
-                build_config_values,
-                batches,
-                path_interner,
-            });
-        }
-        completed_source_packages.validate_dependency_edges()?;
-        // Every canonical package facade is now published. Run the deferred transient package jobs
-        // against those immutable boundaries so their package providers can never affect Kahn
-        // ordering or surface as a readiness infrastructure failure.
-        for inventory in source_package_check_only_inventories {
-            let SourcePackageCheckOnlyInventory {
-                dependency_prefix,
-                mut source_files,
-                path_resolver,
-                check_only_jobs,
-                provider_bindings,
-                source_package_dependencies,
-                canonical_source_facts,
-                build_config_values,
-                mut batches,
-                mut path_interner,
-            } = inventory;
-            let result: Result<_, PremergeFailure> = (|| {
-                let package_id = completed_source_packages
-                    .by_prefix(dependency_prefix.as_str())
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(format!(
-                            "deferred check-only source package @{} was not published",
-                            dependency_prefix
-                        ))
-                    })?;
-                let package = completed_source_packages.package(package_id)?;
-                let check_only_batches =
-                    deferred_check_only::compile_check_only_jobs_after_canonical(
-                        canonical::BoundaryCompilationContext::new(
-                            config,
-                            build_profile,
-                            numeric_profile,
-                            &path_resolver,
-                            Arc::clone(source_files.sources()),
-                            style_directives,
-                            &external_packages,
-                            builder_surface,
-                            &completed_source_packages,
-                            build_config_values,
-                            canonical_source_facts,
-                            BuildConfigInputSet::new(),
-                            config_globals.clone(),
-                            Vec::new(),
-                            Vec::new(),
-                            None,
-                        ),
-                        &package.boundary.modules,
-                        &package.boundary.generated,
-                        check_only_jobs,
-                        &provider_bindings,
-                        &source_package_dependencies,
-                        string_table,
-                        &mut path_interner,
-                    )?;
-                Ok((package_id, check_only_batches))
-            })();
-            // Finish the package source owner beside the deferred result so success batches
-            // and failures convert/attach exactly once with this snapshot. A finished
-            // source keeps a failure package-scoped; a failed finish keeps the deferred
-            // failure authoritative and chains the finish failure beside it.
-            source_files.sources_mut().adopt_path_builder(path_interner);
-            let finish_outcome = source_files.finish();
-            let (result, finalized_source) = match (result, finish_outcome) {
-                (result, Ok(finished)) => (result, finished),
-                (Ok(_), Err(finish_error)) => {
-                    return Err(DirectoryPremergeFailure::project(
-                        PremergeFailure::Infrastructure(finish_error),
-                    ));
-                }
-                (Err(failure), Err(finish_error)) => {
-                    return Err(DirectoryPremergeFailure::project(append_finish_failure(
-                        failure,
-                        finish_error,
-                    )));
-                }
-            };
-            let finalized = Arc::new(finalized_source);
-            let (package_id, check_only_batches) = match result {
-                Ok(value) => value,
-                Err(failure) => {
-                    let database = Arc::try_unwrap(finalized).map_err(|_| {
-                        CompilerError::compiler_error(
-                            "package source database was unexpectedly shared before failure attach",
-                        )
-                    })?;
-                    return Err(DirectoryPremergeFailure::package(failure, database));
-                }
-            };
-            // Publish the package snapshot for later frozen-identity extraction. The
-            // registry holds the sole owner; transient batches retain only their local
-            // tables and domain tags until the final render tail merges them exactly once.
-            completed_source_packages.set_source_database(package_id, finalized)?;
-            batches.extend(check_only_batches);
-            for batch in batches {
-                transient_batches.push(TransientPremergeBatch::package(package_id, batch));
-            }
-        }
+        let (completed_source_packages, mut transient_batches) =
+            compile_source_package_inventories(
+                config,
+                build_profile,
+                numeric_profile,
+                style_directives,
+                builder_surface,
+                &external_packages,
+                source_package_inventories,
+                &mut resource_inputs,
+                string_table,
+            )?;
 
         timing_scope_attributed!(
             timing_guard_build_boundary_compile_2,
@@ -1389,7 +1476,7 @@ fn compile_directory_frontend_in_premerge_lane(
         project_sources
             .sources_mut()
             .adopt_path_builder(project_path_interner);
-        Ok(ProjectFrontendCompilation::new_with_transient_messages(
+        Ok(ProjectFrontendCompilation::new(
             project_boundary,
             completed_source_packages,
             resource_inputs,
@@ -1405,13 +1492,13 @@ fn compile_directory_frontend_in_premerge_lane(
     let (result, finalized) = match (result, finish_outcome) {
         (result, Ok(finished)) => (result, Arc::new(finished)),
         (Ok(_), Err(finish_error)) => {
-            return Err(DirectoryPremergeFailure::project(
+            return Err(BoundaryPremergeFailure::project(
                 PremergeFailure::Infrastructure(finish_error),
             ));
         }
         (Err(directory_failure), Err(finish_error)) => {
             let combined = append_finish_failure(*directory_failure.failure, finish_error);
-            return Err(DirectoryPremergeFailure {
+            return Err(BoundaryPremergeFailure {
                 failure: Box::new(combined),
                 package_source: directory_failure.package_source,
             });

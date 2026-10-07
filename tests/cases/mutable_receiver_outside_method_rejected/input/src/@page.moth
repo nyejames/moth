@@ -1,0 +1,3 @@
+mutate || -> Error!:
+    ~this.values.set(0, 7)!
+;

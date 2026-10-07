@@ -1,0 +1,13 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0047"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0047"
+reason = "invalid_receiver_call.unneeded_mutable_access_marker"
+path = "input/@page.moth"
+line = 8
+column = 12

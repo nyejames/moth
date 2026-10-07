@@ -92,6 +92,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 pub(crate) use crate::compiler_frontend::ast::receiver_methods::{
     ReceiverMethodCatalog, ReceiverMethodEntry,
 };
+pub(crate) use lookup::ScopeDeclarationRef;
 
 mod builders;
 mod diagnostic_sinks;
