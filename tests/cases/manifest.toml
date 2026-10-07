@@ -5186,6 +5186,20 @@ contract = "language.results.catch_handler_binding_conflict_rejected"
 role = "primary"
 
 [[case]]
+id = "catch_handler_binding_scoped_to_handler"
+path = "catch_handler_binding_scoped_to_handler"
+tags = ["integration", "results"]
+contract = "language.results.catch_handler_binding_scoped_to_handler"
+role = "primary"
+
+[[case]]
+id = "catch_handler_nested_binding_reuse_rejected"
+path = "catch_handler_nested_binding_reuse_rejected"
+tags = ["integration", "results", "diagnostics"]
+contract = "language.results.catch_handler_binding_conflict_rejected"
+role = "boundary"
+
+[[case]]
 id = "explicit_propagation_catch_conflict_rejected"
 path = "explicit_propagation_catch_conflict_rejected"
 tags = ["integration", "results", "diagnostics"]
@@ -10949,6 +10963,20 @@ contract = "backend.html_wasm.external_js_function_unsupported"
 role = "backend"
 
 [[case]]
+id = "web_graphics_empty_package_resolves"
+path = "web_graphics_empty_package_resolves"
+tags = ["integration", "external-imports", "web-graphics", "positive", "js-backend"]
+contract = "language.dependencies.web_graphics_empty_package_resolves"
+role = "primary"
+
+[[case]]
+id = "web_graphics_missing_symbol_rejected"
+path = "web_graphics_missing_symbol_rejected"
+tags = ["integration", "external-imports", "web-graphics", "diagnostics"]
+contract = "language.dependencies.web_graphics_missing_symbol_rejected"
+role = "primary"
+
+[[case]]
 id = "html_wasm_unused_html_canvas_constant"
 path = "html_wasm_unused_html_canvas_constant"
 tags = ["integration", "external-imports", "web-canvas", "html-wasm", "reachability"]
@@ -11199,6 +11227,48 @@ path = "value_if_block_nested_produce_and_return"
 tags = ["integration", "language", "value-blocks", "if", "regression"]
 contract = "language.expressions.value_if_mixed_produce_terminate_acceptance"
 role = "primary"
+
+[[case]]
+id = "value_block_inferred_local_receiver_ownership"
+path = "value_block_inferred_local_receiver_ownership"
+tags = ["integration", "language", "value-blocks", "declaration", "regression"]
+contract = "language.expressions.value_block_inferred_local_receiver_ownership"
+role = "primary"
+
+[[case]]
+id = "value_block_inferred_local_branch_mismatch_rejected"
+path = "value_block_inferred_local_branch_mismatch_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "declaration", "regression"]
+contract = "language.expressions.value_if_type_mismatch_rejected"
+role = "boundary"
+
+[[case]]
+id = "value_block_inferred_local_function_arity_rejected"
+path = "value_block_inferred_local_function_arity_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "declaration", "regression"]
+contract = "language.expressions.value_block_inferred_local_single_value_rejected"
+role = "primary"
+
+[[case]]
+id = "value_block_local_invalid_function_return_rejected"
+path = "value_block_local_invalid_function_return_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "return", "regression"]
+contract = "language.functions.return_value_type_mismatch_rejected"
+role = "boundary"
+
+[[case]]
+id = "value_block_inferred_local_cast_target_rejected"
+path = "value_block_inferred_local_cast_target_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "cast", "regression"]
+contract = "language.casts.missing_builtin_target_rejected"
+role = "boundary"
+
+[[case]]
+id = "value_block_inferred_local_generic_evidence_rejected"
+path = "value_block_inferred_local_generic_evidence_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "generics", "regression"]
+contract = "language.generics.ambiguous_inference_rejected"
+role = "boundary"
 
 [[case]]
 id = "value_if_return_inline"
@@ -12490,11 +12560,11 @@ contract = "language.numeric.nonfinite_float_literal_rejected"
 role = "primary"
 
 [[case]]
-id = "core_io_console_print_success"
-path = "core_io_console_print_success"
+id = "core_io_console_print_line_records"
+path = "core_io_console_print_line_records"
 tags = ["integration", "core_io", "console"]
-contract = "backend.html.console_print_helper_emission"
-role = "backend"
+contract = "language.core_io.console_print_line_records"
+role = "primary"
 
 [[case]]
 id = "core_io_console_debug_success"
@@ -12567,18 +12637,11 @@ contract = "language.external.optional_type_identity_acceptance"
 role = "primary"
 
 [[case]]
-id = "core_io_input_new_success"
-path = "core_io_input_new_success"
-tags = ["integration", "core_io", "input"]
-contract = "backend.html.input_new_helper_emission"
-role = "backend"
-
-[[case]]
-id = "core_io_input_update_close_success"
-path = "core_io_input_update_close_success"
-tags = ["integration", "core_io", "input"]
-contract = "backend.html.input_update_close_helper_emission"
-role = "backend"
+id = "core_io_input_new_unsupported_host"
+path = "core_io_input_new_unsupported_host"
+tags = ["integration", "core_io", "input", "errors"]
+contract = "language.core_io.input_new_unsupported_host_error"
+role = "primary"
 
 [[case]]
 id = "core_io_input_reads_success"

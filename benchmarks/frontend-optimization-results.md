@@ -4981,7 +4981,7 @@ pre-hardening snapshot, not the current tree. The source summary and coverage de
 `phase3/dense-hir-cost-corpus-quiet/summary.json` and
 `phase3/dense-hir-cost-corpus-quiet/root-provenance.json`.
 
-### Current correctness and integration checkpoint
+### Correctness checkpoint before package integration
 
 - The focused feature-library run passed 6,060/6,060 tests in 16.64 seconds
   (local-write-library-tests-12.log).
@@ -4991,12 +4991,32 @@ pre-hardening snapshot, not the current tree. The source summary and coverage de
   15.21 seconds. The documentation check reported no errors or warnings in
   1.51 seconds. The workspace Moth and xtask runs passed 5,913 and 854 tests
   (local-write-routine-validation-4.log).
-- The current Boracle lane passed 257 selected tests in 9.67 seconds, with
+- The Boracle lane passed 257 selected tests in 9.67 seconds, with
   normalization and last-use smoke checks passing (local-write-boracle.log).
 - The all-target campaign passed Clippy in 30.64 seconds. Its generated
   differential campaign passed 1/1 in 42.78 seconds
   (local-write-boracle-campaign.log).
 - Fresh dense-HIR, default, normalized/oracle, backend and documentation/status/deletion audits found no unresolved required correctness finding.
+
+### Package integration validation
+
+The combined tree includes the nine committed package fixes through
+`dcfb170cc`, preserving explicit HIR definition/update semantics and the loop
+rebinding regression. Owning corrections add empty-graphics resolution and
+missing-selection coverage, and classify throwing Canvas context creation as
+the documented host error 500.
+
+- `just validate` passed on this tree: 5,922 Moth and 854 xtask workspace tests,
+  2,413/2,413 integration expectations in 13.12 seconds, source audit with zero
+  findings across 1,485 files, and first-party audit with zero findings across
+  24 files and 82 JavaScript sources. The documentation check reported no errors
+  or warnings (`packages-integrated-routine-validation-final.log`).
+- `just boracle` passed formatting, feature-enabled all-target Clippy, 44
+  normalization tests, five last-use tests and 257 Boracle tests in 9.06 seconds
+  (`packages-integrated-boracle.log`).
+- Independent AST, runtime and correction reviews found no unresolved required
+  finding. Both graphics cases and the Canvas exception test passed separately
+  with the repository Node release.
 
 ### Current status
 

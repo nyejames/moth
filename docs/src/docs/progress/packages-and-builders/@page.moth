@@ -168,9 +168,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Core IO package]
             [: Partial]
-            [: Broad console helpers, prelude/explicit namespace dependencies, old callable rejection, removed public IO, input metadata/type-checking, HTML-JS input helper emission and backend unsupported-call diagnostics. Generated input helpers execute unavailable-host errors with U32 code 500 under both Int widths in [$html:<code>src/backends/js/tests/runtime_helpers.rs</code>].]
+            [: Broad console helpers, prelude/explicit namespace dependencies, old callable rejection, removed public IO, input metadata/type-checking, HTML-JS input helper reachability and backend unsupported-call diagnostics. Executable Node tests with a fake browser host cover snapshot publication, press/release transitions, repeat suppression, coalescing, [$html:<code>last_*</code>] reads, modifier-safe key release, focus and visibility release, teardown and bounded storage in [$html:<code>src/backends/js/tests/io_input_runtime.rs</code>]. An integration case observes the [$html:<code>Unsupported</code>] code 1 from [$html:<code>io.input.new</code>] on a host without input.]
             [: Frontend / JS / HTML-Wasm validation]
-            [: [$html:<code>@core/io</code>] exposes [$html:<code>io.print</code>], [$html:<code>io.line</code>], [$html:<code>io.debug</code>], [$html:<code>io.warn</code>], [$html:<code>io.error</code>] and [$html:<code>io.input.*</code>]. The prelude injects [$html:<code>io</code>] as a compile-time namespace alias, not a runtime value. Its future scope and the surface that should remain permanently preluded require a dedicated design pass before major expansion. Filesystem, network, timers, event queues and targeted input sources remain candidate inputs to that review rather than pre-assigned additions or separate packages. Queued [$html:<code>io.set_title</code>] is a later browser-capability document-title call, not current IO support; see the deferred row below.]
+            [: [$html:<code>@core/io</code>] exposes [$html:<code>io.print</code>], [$html:<code>io.line</code>], [$html:<code>io.debug</code>], [$html:<code>io.warn</code>], [$html:<code>io.error</code>] and [$html:<code>io.input.*</code>]. The prelude injects [$html:<code>io</code>] as a compile-time namespace alias, not a runtime value. It is the broad host-capability facade and the only preluded Core package. Input polling follows the published snapshot contract: [$html:<code>update</code>] is the only publication point, transitions coalesce per key and button, focus loss releases held input and [$html:<code>close</code>] leaves the handle inert. HTML-JS emits [$html:<code>print</code>] and [$html:<code>line</code>] as one browser console entry each. Portable snapshot additions are the next candidates. An ordered event queue waits for a final Moth event value that crosses the binding boundary. Timers, sleep, event waits, network events and callbacks wait for structured async and a host-ingress contract. Targeted browser event control belongs to future [$html:<code>@web/*</code>] surfaces. Queued [$html:<code>io.set_title</code>] is a later host-title call, not current IO support; see the deferred row below.]
         ]
 
         [data:
@@ -367,6 +367,13 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Deferred]
             [: None]
             [: Queued Core IO call: one String-content input, no value result, HTML-JS host capability, pre-lowering rejection on unsupported reachable targets. Not a silent no-op. Current IO helpers are unchanged.]
+        ]
+
+        [data:
+            [: WebGL2 package [$html:<code>@web/graphics</code>]]
+            [: Deferred]
+            [: The HTML builder registers the package with no public symbols. Targeted source cases cover namespace resolution without runtime asset/glue emission and missing-symbol diagnostics at the authored selection. No placeholder or temporary API is published.]
+            [: Accepted Builder binding-backed WebGL2 package. WebGL1 is outside current scope. [$html:<code>graphics.gl</code>] is the initial implementation area. [$html:<code>graphics.frame</code>] is accepted scope that waits for an accepted host-to-Moth execution mechanism, never a polling stand-in. The first API waits for cross-package opaque type references for the [$html:<code>@web/canvas</code>] canvas handle, nested annotated symbol paths, typed closed domains and bulk numeric and byte data transfer, which is required for a useful v1.]
         ]
 
         [data:

@@ -312,7 +312,6 @@ fn inline_visible_constant_references(
                 scope.scope.to_owned(),
                 Rc::clone(scope.declaration_table),
                 Arc::new(ExternalPackageRegistry::new()),
-                Vec::new(),
                 0,
                 Rc::clone(template_ir_store),
                 scope.numeric_profile,

@@ -38,7 +38,7 @@ page_head #= language_theme_head
     [doc_pager:
         [$insert("previous_path"):../html/]
         [$insert("previous_title"):@html]
-        [$insert("next_path"):../../../memory/]
-        [$insert("next_title"):Memory and lifetimes]
+        [$insert("next_path"):../graphics/]
+        [$insert("next_title"):@web/graphics]
     ]
 ]

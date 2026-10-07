@@ -908,7 +908,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             header.declaration_path.to_owned(),
             Rc::clone(&self.declaration_table),
             Arc::clone(&self.context.external_package_registry),
-            vec![],
             0,
             Rc::clone(&self.context.template_ir_store),
             self.context.numeric_profile,

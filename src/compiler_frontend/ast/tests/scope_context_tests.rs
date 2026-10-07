@@ -41,7 +41,6 @@ fn scope_context_new_leaves_no_visibility_gate() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
     assert!(
@@ -72,7 +71,6 @@ fn add_var_extends_visibility_gate_when_gate_is_set() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
 
@@ -129,7 +127,6 @@ fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     )
     .with_visible_declarations(Arc::new(FxHashSet::default()));
@@ -186,7 +183,6 @@ fn new_template_parsing_context_preserves_constant_kind() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
     let template_context = context.new_template_parsing_context();
@@ -210,7 +206,6 @@ fn new_template_parsing_context_converts_function_kind_to_template() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
     let template_context = context.new_template_parsing_context();
@@ -234,7 +229,6 @@ fn new_template_parsing_context_propagates_expected_error_type() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
     let string_type_id = TypeEnvironment::new().builtins().string;
@@ -265,7 +259,6 @@ fn new_child_control_flow_increments_loop_depth_for_loop_kind() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
     assert_eq!(context.loop_depth, 0);
@@ -302,7 +295,6 @@ fn new_constant_inherits_parent_visibility_gate() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
 
@@ -350,7 +342,6 @@ fn parent_frame_lookup_finds_ancestor_declaration() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
 
@@ -406,7 +397,6 @@ fn child_frame_declaration_is_not_visible_to_parent() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
 
@@ -468,7 +458,6 @@ fn child_function_frame_does_not_capture_parent_locals() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
 
@@ -529,7 +518,6 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
 
@@ -601,7 +589,6 @@ fn no_shadowing_across_ancestor_frames() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
 
@@ -651,7 +638,6 @@ fn new_child_control_flow_inherits_visibility_gate() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
 
@@ -692,7 +678,6 @@ fn child_scope_local_does_not_leak_into_the_shared_visibility_gate() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
 
@@ -757,7 +742,6 @@ fn new_child_expression_propagates_expected_result_type_ids() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
 
@@ -798,7 +782,6 @@ fn cloned_context_does_not_share_current_frame() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
 
@@ -853,7 +836,6 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
 

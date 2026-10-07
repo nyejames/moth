@@ -517,7 +517,6 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
                 &PathInternerFork::empty(),
             )),
             Arc::new(ExternalPackageRegistry::new()),
-            vec![],
             0,
         )
         .with_declaring_file_id(file_id);

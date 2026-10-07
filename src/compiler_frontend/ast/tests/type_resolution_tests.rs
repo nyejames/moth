@@ -304,7 +304,6 @@ fn constant_capacity_resolves_to_fixed_collection() {
         PathId::ROOT,
         declaration_table.clone(),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
     let constant_declaration = Declaration {

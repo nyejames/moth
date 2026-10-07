@@ -2438,7 +2438,6 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
         parent_source_path,
         Rc::new(TopLevelDeclarationTable::new(vec![declaration], &path_fork)),
         Arc::new(ExternalPackageRegistry::default()),
-        vec![],
         0,
     )
     .with_template_ir_store(Rc::clone(&shared_store));
@@ -2558,7 +2557,6 @@ fn parser_tir_records_template_valued_head_reference_as_child_template() {
         parent_source_path,
         Rc::new(TopLevelDeclarationTable::new(vec![declaration], &path_fork)),
         Arc::new(ExternalPackageRegistry::default()),
-        vec![],
         0,
     )
     .with_template_ir_store(Rc::clone(&shared_store));

@@ -1,7 +1,9 @@
 use crate::projects::html_project::external_js::parser::{
     parse_js_module, parsed_js_module::JsDiagnosticKind,
 };
-use crate::projects::html_project::external_js::runtime_module_registry::RuntimeModuleRegistry;
+use crate::projects::html_project::external_js::runtime_module_registry::{
+    RUNTIME_ERROR_CODE_EXPORTS, RuntimeModuleRegistry,
+};
 
 // ------------------------
 //  Helpers
@@ -890,6 +892,29 @@ export function doThing() {
 }
 
 #[test]
+fn runtime_error_code_exports_are_exact_named_imports() {
+    let error_code_names = RUNTIME_ERROR_CODE_EXPORTS
+        .iter()
+        .map(|(export_name, _)| *export_name)
+        .collect::<Vec<_>>();
+    let source = format!(
+        "import {{ mothErr, {} }} from \"@moth/runtime\";\n",
+        error_code_names.join(", ")
+    );
+    let parsed = parse(&source);
+    assert_no_diagnostics(&parsed);
+    let mut expected_names = error_code_names.clone();
+    expected_names.push("mothErr");
+    expected_names.sort_unstable();
+    assert_runtime_imports(&parsed, &[("@moth/runtime", &expected_names)]);
+
+    // The allowlist is the generated name set, not a `MOTH_ERROR_` prefix rule.
+    let parsed = parse("import { MOTH_ERROR_NOT_REGISTERED } from \"@moth/runtime\";\n");
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::UnknownRuntimeImportName]);
+    assert!(parsed.runtime_imports.is_empty());
+}
+
+#[test]
 fn multiline_registered_runtime_import_accepted() {
     let source = r#"
 import {
@@ -1495,7 +1520,20 @@ fn builtin_web_canvas_package_parses_expanded_surface() {
             "CanvasTextMetrics",
         ],
     );
-    assert_runtime_imports(&parsed, &[("@moth/runtime", &["mothErr", "mothOk"])]);
+    assert_runtime_imports(
+        &parsed,
+        &[(
+            "@moth/runtime",
+            &[
+                "MOTH_ERROR_HOST_INVALID_ARGUMENT",
+                "MOTH_ERROR_HOST_OPERATION_FAILED",
+                "MOTH_ERROR_HOST_RESOURCE_NOT_FOUND",
+                "MOTH_ERROR_HOST_RESOURCE_UNAVAILABLE",
+                "mothErr",
+                "mothOk",
+            ],
+        )],
+    );
 
     let free_function_names: Vec<&str> = parsed
         .free_functions

@@ -1,0 +1,28 @@
+non_negative |count Int| -> Int, Error!:
+    if count < 0:
+        return! Error("negative")
+    ;
+    return count
+;
+
+-- Sibling handlers in one function each own their binding.
+recover_pair |left Int, right Int| -> String:
+    first = non_negative(left) catch |err|:
+        io.line([:first=[err.message]])
+        then 0
+    ;
+    second = non_negative(right) catch |err| then 1
+    return [:[first]/[second]]
+;
+
+-- Top-level sibling handlers, then an ordinary local reusing the name.
+top_first = non_negative(-1) catch |err|:
+    io.line([:top=[err.message]])
+    then 10
+;
+top_second = non_negative(-2) catch |err| then 20
+err = "after"
+
+io.line([:pair=[recover_pair(-1, -2)]])
+io.line([:kept=[recover_pair(3, 4)]])
+io.line([:top=[top_first]/[top_second]/[err]])

@@ -1,0 +1,11 @@
+empty_labels type A || -> {A}:
+    return {}
+;
+
+-- The function's {String} result is not evidence for this unannotated local.
+choose_labels |ready Bool| -> {String}:
+    labels = if ready then empty_labels() else {"seeded"}
+    return labels
+;
+
+labels = choose_labels(true)

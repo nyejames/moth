@@ -1172,14 +1172,14 @@ Modular project builders supply packages, capabilities and output conventions. H
 
 ## Core IO and foreign functions
 
-The prelude exposes `io` as `@core/io`. `io.print`, `io.line`, `io.debug`, `io.warn` and `io.error` each take one String and return nothing. `io.line` adds a newline. Format other values with templates:
+The prelude exposes `io` as `@core/io`. `io.print`, `io.line`, `io.debug`, `io.warn` and `io.error` each take one String and return nothing. `io.line` completes a line or output record and `io.print` doesn't request line termination. Format other values with templates:
 
 [codeblock, $code("moth"):
     count = 3
     io.line([: Count: [count]])
 ]
 
-`io.set_title(text)` takes one String, returns nothing, declares no error channel and requires browser document-title capability. It sets the exact live title without initial prefix/postfix, leaving static metadata and routes unchanged.
+`io.set_title(text)` takes one String, returns nothing and declares no error channel. It sets the title of the current user-facing host surface and requires a host title capability. HTML-JS realises it as the live document title, without initial prefix/postfix, leaving static metadata and routes unchanged.
 
 Annotated JavaScript files expose typed free functions:
 

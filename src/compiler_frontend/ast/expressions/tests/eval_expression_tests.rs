@@ -87,7 +87,6 @@ fn ordinary_expression_rejects_path_string_concatenation() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     )
     .with_source_file_scope(source_scope);
@@ -157,7 +156,6 @@ fn structural_string_equality_is_refused_only_in_a_constant_context() {
                 &PathInternerFork::empty(),
             )),
             Arc::new(ExternalPackageRegistry::new()),
-            vec![],
             0,
         )
     };

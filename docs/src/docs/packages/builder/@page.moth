@@ -1,7 +1,7 @@
 @styles navbar, section, language_theme_head, doc_pager
 
 page_title #= "Builder packages"
-page_description #= "HTML builder helpers and canvas drawing packages provided by the HTML builder."
+page_description #= "HTML builder helpers, canvas drawing and WebGL2 graphics packages provided by the HTML builder."
 page_head #= language_theme_head
 
 #[navbar]
@@ -15,7 +15,8 @@ page_head #= language_theme_head
     This keeps browser and rendering APIs out of the core language.
 
     The HTML builder provides source-backed compile-time helpers through
-    `@html` and binding-backed runtime drawing through `@web/canvas`. The
+    `@html`, binding-backed runtime drawing through `@web/canvas` and WebGL2
+    rendering through `@web/graphics`. The
     @../../progress/packages-and-builders (packages and builders progress matrix)
     records current support and accepted next gaps.
 
@@ -23,6 +24,7 @@ page_head #= language_theme_head
 
     - @./html/ (@html)
     - @./canvas/ (@web/canvas)
+    - @./graphics/ (@web/graphics)
 ]
 
 #[section:

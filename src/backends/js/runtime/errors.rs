@@ -7,6 +7,19 @@
 use crate::backends::js::{
     JsEmitter, builtin_error_code_js_field_name, builtin_error_message_js_field_name,
 };
+use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
+
+/// Formats a `__moth_error_result(message, code)` call for one builtin error.
+///
+/// WHY: generated helper sources embed `Error.code` from `BuiltinErrorCode`, its single Rust
+/// owner, so collection and Core package helpers never hard-code a number in JavaScript.
+pub(crate) fn error_result_source(error: BuiltinErrorCode) -> String {
+    format!(
+        "__moth_error_result(\"{}\", {})",
+        error.default_message(),
+        error.as_u32()
+    )
+}
 
 impl<'hir> JsEmitter<'hir> {
     /// Assertion identity is structural so hosts never infer it from application text.

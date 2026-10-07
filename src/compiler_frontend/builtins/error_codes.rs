@@ -49,6 +49,14 @@ pub enum BuiltinErrorCode {
     TimeInvalidTimestampText = 310,
     /// Time rendering uses this when an instant lies outside the renderable range.
     TimeTimestampOutOfRange = 311,
+    /// A host binding rejected an argument outside the operation's accepted domain.
+    HostInvalidArgument = 400,
+    /// A host binding could not find the named host resource, such as a document element.
+    HostResourceNotFound = 404,
+    /// A host resource exists but is not in a usable state, such as an unloaded image.
+    HostResourceUnavailable = 409,
+    /// A host operation failed or threw for a reason the binding cannot classify further.
+    HostOperationFailed = 500,
 }
 
 impl BuiltinErrorCode {
@@ -123,6 +131,10 @@ impl BuiltinErrorCode {
             BuiltinErrorCode::TimeTimestampOutOfRange => {
                 "Timestamp instant is outside the renderable range"
             }
+            BuiltinErrorCode::HostInvalidArgument => "Host operation received an invalid argument",
+            BuiltinErrorCode::HostResourceNotFound => "Host resource not found",
+            BuiltinErrorCode::HostResourceUnavailable => "Host resource is unavailable",
+            BuiltinErrorCode::HostOperationFailed => "Host operation failed",
         }
     }
 }

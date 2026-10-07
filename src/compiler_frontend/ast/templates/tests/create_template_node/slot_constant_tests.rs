@@ -290,7 +290,6 @@ fn constant_context_template_head_with_constant_references_folds_to_string_slice
                 &path_fork,
             )),
             Arc::new(ExternalPackageRegistry::default()),
-            vec![],
             0,
         ),
         &scope,

@@ -1,0 +1,14 @@
+Summary = | label String |
+
+-- A return inside a local's value block exits the function, so it is checked
+-- against Summary rather than the local's String annotation.
+make_summary |count Int| -> Summary:
+    label String = if count < 0:
+        return "negative"
+    else
+        then "positive"
+    ;
+    return Summary(label)
+;
+
+summary = make_summary(2)

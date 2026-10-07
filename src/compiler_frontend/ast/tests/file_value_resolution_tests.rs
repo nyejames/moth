@@ -706,7 +706,6 @@ fn resolve_file_value_fixture(
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     )
     .with_file_value_resolution(Rc::new(FileValueResolutionServices {

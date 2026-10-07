@@ -1,0 +1,11 @@
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0055"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0055"
+reason = "invalid_return_shape.too_many_return_values"
+path = "input/@page.moth"
+line = 5

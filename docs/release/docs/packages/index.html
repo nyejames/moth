@@ -1116,7 +1116,7 @@ internal_value <span class='moth-code-operator'>#=</span> <span class='moth-code
         </tr><tr style="">
             <p> <td style=""><p><code>@core/collections</code>, <code>@core/io</code>, <code>@core/math</code>, <code>@core/text</code>, <code>@core/random</code>, <code>@core/time</code></p></td>  <td style=""><p> Core</p></td>  <td style=""><p> ExternalBinding</p></td></p>
         </tr><tr style="">
-            <p> <td style=""><p><code>@web/canvas</code></p></td>  <td style=""><p> Builder</p></td>  <td style=""><p> ExternalBinding</p></td></p>
+            <p> <td style=""><p><code>@web/canvas</code>, <code>@web/graphics</code></p></td>  <td style=""><p> Builder</p></td>  <td style=""><p> ExternalBinding</p></td></p>
         </tr><tr style="">
             <p> <td style=""><p> Scoped <code>+*.moth</code> support package</p></td>  <td style=""><p> ProjectLocal</p></td>  <td style=""><p> MothSource</p></td></p>
         </tr><tr style="">
@@ -1125,7 +1125,7 @@ internal_value <span class='moth-code-operator'>#=</span> <span class='moth-code
             <p> <td style=""><p> Annotated project-local <code>.js</code> file</p></td>  <td style=""><p> ProjectLocal</p></td>  <td style=""><p> ExternalBinding</p></td></p>
         </tr>
             
-</table><p>Origin and backing don&#39;t change dependency clause syntax or module visibility. Source-backed packages contain ordinary modules with strict <code>export:</code> public surfaces. Binding-backed packages expose typed external symbols registered by the builder.</p><h3 id="prelude-is-visibility-policy">Prelude is visibility policy</h3><p>The prelude is implicit dependency policy, not an origin or backing. It exposes the bare <code>io</code> namespace as an alias to <code>@core/io</code>. Package metadata belongs to <code>@core/io</code>, while bare-name visibility belongs to the prelude.</p><h3 id="builder-selected-availability">Builder-selected availability</h3><p>The builder decides which packages exist. Unsupported packages are rejected with an unsupported-by-builder diagnostic. The HTML builder opts into <code>@html</code>, <code>@web/canvas</code> and current optional Core packages.</p><h3 id="binding-backed-package-constraints">Binding-backed package constraints</h3><p>Binding-backed packages expose free functions, constants and opaque types. They don&#39;t expose source-style receiver methods. Use a source-backed wrapper type for method-style APIs. External calls are positional-only because named arguments and default parameters are source-function features.</p><p>The HTML-Wasm mode has a stricter backend surface. A reachable JS-backed package needs a Wasm lowering before that backend can use it.</p><h3 id="no-package-manager-yet">No package manager yet</h3><p>There is no remote fetching, lockfile or version resolution yet. Use <code>+*.moth</code> support packages for project-local source-backed packages, builder-provided package dependency clauses for built-in capabilities and annotated <code>.js</code> wrappers for direct browser integration.</p><h3 id="concepts-related-to-package-origins-and-backing">Concepts related to package origins and backing</h3><ul><li>For project-local packages see <a href="#project-local-packages">Project-local packages</a>.</li><li>For dependency path families see <a href="#dependency-paths">Dependency paths</a>.</li><li>For Core package API details see <a href="./core">Core packages</a>.</li></ul>
+</table><p>Origin and backing don&#39;t change dependency clause syntax or module visibility. Source-backed packages contain ordinary modules with strict <code>export:</code> public surfaces. Binding-backed packages expose typed external symbols registered by the builder.</p><h3 id="prelude-is-visibility-policy">Prelude is visibility policy</h3><p>The prelude is implicit dependency policy, not an origin or backing. It exposes the bare <code>io</code> namespace as an alias to <code>@core/io</code>. Package metadata belongs to <code>@core/io</code>, while bare-name visibility belongs to the prelude.</p><h3 id="builder-selected-availability">Builder-selected availability</h3><p>The builder decides which packages exist. Unsupported packages are rejected with an unsupported-by-builder diagnostic. The HTML builder opts into <code>@html</code>, <code>@web/canvas</code>, <code>@web/graphics</code> and current optional Core packages.</p><h3 id="binding-backed-package-constraints">Binding-backed package constraints</h3><p>Binding-backed packages expose free functions, constants and opaque types. They don&#39;t expose source-style receiver methods. Use a source-backed wrapper type for method-style APIs. External calls are positional-only because named arguments and default parameters are source-function features.</p><p>The HTML-Wasm mode has a stricter backend surface. A reachable JS-backed package needs a Wasm lowering before that backend can use it.</p><h3 id="no-package-manager-yet">No package manager yet</h3><p>There is no remote fetching, lockfile or version resolution yet. Use <code>+*.moth</code> support packages for project-local source-backed packages, builder-provided package dependency clauses for built-in capabilities and annotated <code>.js</code> wrappers for direct browser integration.</p><h3 id="concepts-related-to-package-origins-and-backing">Concepts related to package origins and backing</h3><ul><li>For project-local packages see <a href="#project-local-packages">Project-local packages</a>.</li><li>For dependency path families see <a href="#dependency-paths">Dependency paths</a>.</li><li>For Core package API details see <a href="./core">Core packages</a>.</li></ul>
 </div>
 </fieldset></section>
 <section class="container"><fieldset class="doc-level">
@@ -1238,9 +1238,13 @@ return __moth_binding(value);
 if (value.__moth_kind === "binding") {
 return value;
 }
+return __moth_alias_binding(value);
+}
+
+function __moth_alias_binding(ref) {
 const binding = __moth_binding(undefined);
 binding.__moth_mode = "alias";
-binding.__moth_target = value;
+binding.__moth_target = ref;
 return binding;
 }
 
@@ -1512,7 +1516,7 @@ return String(value);
 function b_fn0() {
 let b_l0 = __moth_binding(undefined);
 
-__moth_assign_value(b_l0, []);
+b_l0 = __moth_binding([]);
 return __moth_read(b_l0);
 }
 

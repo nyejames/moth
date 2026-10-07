@@ -1,10 +1,22 @@
-`@core/io` owns console output and input polling. The prelude injects the bare `io` namespace as a compile-time alias to `@core/io`, so normal source files can call `io.line(...)` without an explicit dependency clause. An explicit `@core/io` clause binds the same `io` namespace. An alias such as `@core/io as output` creates a file-local namespace name.
+`@core/io` is Moth's broad, high-level host IO package. It owns console output, global input polling and the queued title helper. The prelude injects the bare `io` namespace as a compile-time alias to `@core/io`, so normal source files can call `io.line(...)` without an explicit dependency clause. An explicit `@core/io` clause binds the same `io` namespace. An alias such as `@core/io as output` creates a file-local namespace name.
 
 `@core/io` belongs to the binding-backed Core package family. It exposes free functions and one opaque type. It does not expose source-defined receiver methods. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
 
+### Host capabilities
+
+Each `io` operation describes what the program wants from its environment, not the platform API that provides it. `io.set_title("Editor")` means "set the title of the current user-facing host surface". A browser host realises that as the document title and a native application host could realise it as its window title.
+
+Every operation still has one observable Moth contract. A backend chooses how to realise that contract but can't redefine it. A host that can't provide a capability rejects reachable calls through normal target validation.
+
+`io` favours a simple, opinionated surface for common tasks over the most flexible or lowest-level API for each capability. Related operations share a namespace such as `io.input`. `io` is the only Core package in the prelude because ordinary programs need these interactions immediately. See @../prelude (Prelude policy).
+
+### Relationship to focused packages
+
+`io` may offer the convenient common operation of a domain that a focused package covers in detail. It doesn't duplicate that package's complete API or reimplement its semantics, and both use the same underlying owner where practical. `@core/time` owns `Duration`, `TimeMark` and `Timestamp`, so `io` doesn't provide a second set of time values. Targeted browser input belongs to future `@web/*` packages, while `io.input` provides a portable global view.
+
 ### Console helpers
 
-Console helpers write string content to the backend output surface. Each helper takes one `String` value and returns nothing.
+Console helpers write string content to the host's output surface. Each helper takes one `String` value and returns nothing.
 
 [table:
     [th:
@@ -14,12 +26,12 @@ Console helpers write string content to the backend output surface. Each helper 
 
     [td:
         [: `io.print(text)`]
-        [: plain output]
+        [: text without requesting line termination]
     ]
 
     [td:
         [: `io.line(text)`]
-        [: output with a trailing newline]
+        [: text as a completed line or output record]
     ]
 
     [td:
@@ -37,6 +49,8 @@ Console helpers write string content to the backend output surface. Each helper 
         [: error-level output]
     ]
 ]
+
+Hosts preserve the content and order of every call. A stream-oriented host such as a terminal can realise `print` and `line` as an ordinary write and a write followed by a newline. A record-oriented host such as a browser console shows each call as its own entry, so `print` and `line` look the same there. Moth doesn't buffer output to join `print` calls or render a newline the host doesn't show.
 
 The output boundary accepts `String` values only. Templates produce `String` values, so template interpolation provides the way to format non-string content for output.
 
@@ -60,7 +74,9 @@ Passing a non-string value directly to a console helper fails at the output boun
 
 Input polling lives under `io.input.*`. The handle type `io.input.Input` stays opaque. Pass it to the input functions. Do not construct it with struct syntax or inspect its fields.
 
-`io.input.new()` returns `Input, Error!` because backend input support can be unavailable. `update` and `close` require mutable access through `~`. Polling reads use shared access.
+The host owns the listeners that observe keyboard and pointer events and records their effect inside the handle. Moth never receives a host callback. A program observes recorded input only through explicit `update` and query calls, which run synchronously like any other call.
+
+`io.input.new()` returns `Input, Error!` because input support can be unavailable. A host without the facilities input polling needs returns builtin error code 1, `Unsupported`, through `Error!`. `update` and `close` require mutable access through `~`. Polling reads use shared access.
 
 [codeblock, $code("moth"):
     input ~= io.input.new()!
@@ -87,9 +103,30 @@ Input polling lives under `io.input.*`. The handle type `io.input.Input` stays o
     io.input.close(~input)
 ]
 
+### Snapshots and transitions
+
+`io.input.update(~input)` publishes a snapshot and is the only point where observable input state changes. Every read observes the snapshot from the last completed `update`, including held keys, held buttons and pointer coordinates. Repeated reads without an `update` return the same answers. Before the first `update`, boolean reads return `false`, optional reads return `none` and pointer coordinates are `0.0`.
+
+- `key_down` and `pointer_down` report whether a key or button was held at the last `update`.
+- `key_pressed` and `pointer_pressed` report at least one up-to-down transition since the previous `update`.
+- `key_released` and `pointer_released` report at least one down-to-up transition since the previous `update`.
+- Pressed and released can both be true in one snapshot. A key pressed and released between two updates reports both and isn't down.
+- Holding a key produces one press, however many repeat events the host sends.
+- `last_key_pressed`, `last_key_released`, `last_pointer_pressed` and `last_pointer_released` return the most recent transition of their kind since the previous `update`, or `none`.
+
+Each `update` clears the transitions it published and keeps held state. The handle records whether each key or button changed, not how often, so its storage depends on the distinct keys and buttons involved rather than the number of host events. Polling doesn't provide an ordered history of events.
+
+When the host surface loses focus or becomes hidden, every held key and button is released. The releases appear at the next `update` like any other transition. Pointer coordinates keep their last value.
+
+### Polling and execution
+
+Recording input doesn't schedule Moth execution. Input that arrives after Moth returns control to the host stays in the handle until something runs Moth code again, such as the next tick of a host-driven update loop, and that code calls `update`.
+
+A loop that polls until input arrives never observes it. On HTML-JS the browser can't deliver events while Moth code runs, so the loop blocks the delivery it waits for.
+
 ### Keyboard helpers
 
-Keyboard helpers track down, pressed, released and last-edge states.
+Keyboard helpers track down, pressed, released and last-transition states.
 
 [table:
     [th:
@@ -129,7 +166,9 @@ Keyboard helpers track down, pressed, released and last-edge states.
     ]
 ]
 
-Single alphabetic key strings normalise to lowercase. Space uses `"Space"`. Special keys use logical names such as `"ArrowLeft"`, `"Enter"`, `"Escape"`, `"Backspace"` and `"Shift"`.
+Keys use logical names. ASCII letters `A` to `Z` normalise to lowercase in recorded input and in queries. Other key names keep the host's spelling, including non-ASCII letters, with no Unicode case conversion. Space uses `"Space"`. Special keys use logical names such as `"ArrowLeft"`, `"Enter"`, `"Escape"`, `"Backspace"` and `"Shift"`.
+
+A key releases under the name it had when pressed. Pressing `1`, then Shift, then releasing both reports `"1"` and `"Shift"` as released, never `"!"`. Two keys that share a name, such as left and right Shift, keep that name down while either is held.
 
 ### Pointer helpers
 
@@ -185,13 +224,19 @@ Pointer helpers track button state and position.
     ]
 ]
 
-Pointer buttons use `"left"`, `"middle"` and `"right"`. Pointer coordinates use `Float` values.
+Pointer buttons use `"left"`, `"middle"` and `"right"`. Other buttons record no transitions.
+
+Pointer coordinates are `Float` logical host-client coordinates. The origin is the top-left corner of the host surface's client area, X increases rightward and Y increases downward. HTML-JS uses viewport-relative CSS pixels from the pointer event's `clientX` and `clientY`. A native host may use equivalent window-client logical coordinates. Canvas-local, physical-pixel and DPI-scaled coordinates belong to specialised APIs.
 
 ### Teardown
 
-`io.input.close(~input)` releases the input handle. Call it when the input handle no longer needs polling. The handle requires mutable access for close because teardown mutates the underlying host state.
+`io.input.close(~input)` stops observing input, clears every recorded and published state and leaves the handle permanently inert. Call it when the input handle no longer needs polling. The handle requires mutable access for close because teardown mutates the underlying host state.
 
-### Queued document-title helper
+Calling `close` again or calling `update` after `close` does nothing. After `close`, boolean reads return `false`, optional reads return `none` and pointer coordinates return `0.0`. Input the host delivers after `close` can't change those answers.
+
+Teardown is explicit. Host garbage collection doesn't define when a handle stops observing input.
+
+### Queued title helper
 
 **Accepted queued design.** `io.set_title(text)` takes one ordinary shared
 `String`, returns no source-visible value and has no recoverable error channel.
@@ -202,16 +247,18 @@ Pointer buttons use `"left"`, `"middle"` and `"right"`. Pointer coordinates use 
     io.set_title("Loaded")
 ]
 
-The call sets the live document title to exactly the supplied String content.
-It does not reapply the initial title prefix or postfix, mutate `$page`
-metadata, change the route or rewrite the static output file.
+The call sets the title of the current user-facing host surface to exactly the
+supplied String content. HTML-JS realises it as the live document title. It does
+not reapply the initial title prefix or postfix, mutate `$page` metadata, change
+the route or rewrite the static output file.
 
-A stable binding identity carries a browser document-title requirement in
-per-function link facts. HTML-JS will supply that capability. A standalone or
-embedded JavaScript host is eligible only when it explicitly supplies the same
-host contract. The existing whole-module HTML-Wasm path rejects reachable calls
-before lowering. Later mixed output may keep the call on its JavaScript side
-through ordinary affinity rules, without a Wasm title bridge in this work.
+A stable binding identity carries a title-capability requirement in
+per-function link facts. HTML-JS will supply that capability through the browser
+document title. A standalone or embedded JavaScript host is eligible only when it
+explicitly supplies the same host contract. The existing whole-module HTML-Wasm
+path rejects reachable calls before lowering. Later mixed output may keep the call
+on its JavaScript side through ordinary affinity rules, without a Wasm title
+bridge in this work.
 
 Emit the helper only for reachable calls on a capable host and use Moth's
 canonical String-content conversion. An unreachable call or one removed by
@@ -221,7 +268,7 @@ violates its host contract. Unsupported hosts never receive a silent no-op.
 
 ### Backend behaviour
 
-HTML-JS maps console helpers to the browser console and input helpers to window and document-level keyboard and pointer polling. HTML-Wasm rejects reachable Core IO calls before lowering until it gains equivalent support.
+HTML-JS maps console helpers to the browser console, one entry per call, and input helpers to global keyboard and pointer listeners on the browser window. HTML-Wasm rejects reachable Core IO calls before lowering until it gains equivalent support.
 
 ### Unsupported source forms
 
@@ -231,9 +278,15 @@ HTML-JS maps console helpers to the browser console and input helpers to window 
 - Do not pass the `io` namespace record itself as a runtime value.
 - Direct symbol-path clauses such as `@core/io/line` face rejection. Use direct selections or a namespace clause.
 
-### Deferred IO surfaces
+### Scope boundaries
 
-Deferred IO domains include filesystem and path IO, fetch and network IO, timers, sleep, intervals, frame and tick APIs, targeted DOM and canvas input sources, physical key-code APIs, typed key and button choices, text entry and IME or composition, touch gestures, gamepads, drag and drop, clipboard, wheel scrolling, file picker APIs, full ordered event queues, pressed and released collections, relative or DPI-scaled pointer coordinates, configurable default suppression and non-JS lowerings. See @../../../progress (progress matrix) for current target availability.
+Operations that wait, suspend or run Moth code later need structured async and a host-ingress contract. They include sleep, timeouts, intervals, frame callbacks, event waits, fetch and network IO, WebSocket and server-sent events, listeners that call into Moth and asynchronous file selection or image loading. `io` provides no synchronous-looking forms of them and no general callback mechanism.
+
+Browser-specific event control belongs to future `@web/*` packages. This covers targeted DOM and canvas input sources, propagation, default suppression, composition and IME events, clipboard access and drag and drop.
+
+Complete filesystem, path and networking APIs belong to focused packages. `io` may later offer a few common high-level file operations.
+
+Further global input is deferred: a physical key or scancode API, typed key and button values, modifier state, wheel scrolling, pointer deltas, focus queries, touch gestures, gamepads, pressed and released collections and an ordered event queue. Non-JS lowerings are also deferred. See @../../../progress (progress matrix) for current target availability.
 
 ### Related concepts
 

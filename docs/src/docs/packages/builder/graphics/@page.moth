@@ -1,0 +1,44 @@
+@graphics content as graphics_advanced
+
+@graphics-basic content as graphics_basic
+
+@styles navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager
+
+page_title #= "@web/graphics"
+page_description #= "WebGL2 rendering as a builder binding-backed runtime package."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../../../ (Documentation) / @../ (Builder packages) / @web/graphics
+
+    # @web/graphics
+
+    `@web/graphics` is the HTML builder's WebGL2 package. Its API will expose GPU
+    resources, render state and draw calls through typed opaque handles while
+    keeping WebGL's explicit graphics model.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):graphics]
+        [$insert("title"):Graphics]
+        [$insert("advanced"):[graphics_advanced]]
+
+        [graphics_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../canvas/]
+        [$insert("previous_title"):@web/canvas]
+        [$insert("next_path"):../../../memory/]
+        [$insert("next_title"):Memory and lifetimes]
+    ]
+]

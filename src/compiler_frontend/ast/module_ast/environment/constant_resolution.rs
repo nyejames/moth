@@ -460,7 +460,6 @@ impl ConstantResolutionSession {
             header.declaration_path.to_owned(),
             top_level_declarations,
             Arc::clone(&module_view.external_package_registry),
-            vec![],
             0,
             Rc::clone(&module_view.template_ir_store),
             module_view.numeric_profile,

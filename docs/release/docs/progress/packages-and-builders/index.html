@@ -580,9 +580,9 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Core IO package</td>
  <td style="padding: 0.1em 0.5em; "> Partial</td>
- <td style="padding: 0.1em 0.5em; "> Broad console helpers, prelude/explicit namespace dependencies, old callable rejection, removed public IO, input metadata/type-checking, HTML-JS input helper emission and backend unsupported-call diagnostics. Generated input helpers execute unavailable-host errors with U32 code 500 under both Int widths in <code>src/backends/js/tests/runtime_helpers.rs</code>.</td>
+ <td style="padding: 0.1em 0.5em; "> Broad console helpers, prelude/explicit namespace dependencies, old callable rejection, removed public IO, input metadata/type-checking, HTML-JS input helper reachability and backend unsupported-call diagnostics. Executable Node tests with a fake browser host cover snapshot publication, press/release transitions, repeat suppression, coalescing, <code>last_*</code> reads, modifier-safe key release, focus and visibility release, teardown and bounded storage in <code>src/backends/js/tests/io_input_runtime.rs</code>. An integration case observes the <code>Unsupported</code> code 1 from <code>io.input.new</code> on a host without input.</td>
  <td style="padding: 0.1em 0.5em; "> Frontend / JS / HTML-Wasm validation</td>
- <td style="padding: 0.1em 0.5em; "> <code>@core/io</code> exposes <code>io.print</code>, <code>io.line</code>, <code>io.debug</code>, <code>io.warn</code>, <code>io.error</code> and <code>io.input.*</code>. The prelude injects <code>io</code> as a compile-time namespace alias, not a runtime value. Its future scope and the surface that should remain permanently preluded require a dedicated design pass before major expansion. Filesystem, network, timers, event queues and targeted input sources remain candidate inputs to that review rather than pre-assigned additions or separate packages. Queued <code>io.set_title</code> is a later browser-capability document-title call, not current IO support; see the deferred row below.</td>
+ <td style="padding: 0.1em 0.5em; "> <code>@core/io</code> exposes <code>io.print</code>, <code>io.line</code>, <code>io.debug</code>, <code>io.warn</code>, <code>io.error</code> and <code>io.input.*</code>. The prelude injects <code>io</code> as a compile-time namespace alias, not a runtime value. It is the broad host-capability facade and the only preluded Core package. Input polling follows the published snapshot contract: <code>update</code> is the only publication point, transitions coalesce per key and button, focus loss releases held input and <code>close</code> leaves the handle inert. HTML-JS emits <code>print</code> and <code>line</code> as one browser console entry each. Portable snapshot additions are the next candidates. An ordered event queue waits for a final Moth event value that crosses the binding boundary. Timers, sleep, event waits, network events and callbacks wait for structured async and a host-ingress contract. Targeted browser event control belongs to future <code>@web/*</code> surfaces. Queued <code>io.set_title</code> is a later host-title call, not current IO support; see the deferred row below.</td>
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
@@ -792,6 +792,13 @@ td {
         </tr>
 
 <tr style="border-bottom: 1px dotted grey;">
+             <td style="padding: 0.1em 0.5em; "> WebGL2 package <code>@web/graphics</code></td>
+ <td style="padding: 0.1em 0.5em; "> Deferred</td>
+ <td style="padding: 0.1em 0.5em; "> The HTML builder registers the package with no public symbols, so symbol selections are missing-symbol diagnostics. No placeholder or temporary API is published.</td>
+ <td style="padding: 0.1em 0.5em; "> Accepted Builder binding-backed WebGL2 package. WebGL1 is outside current scope. <code>graphics.gl</code> is the initial implementation area. <code>graphics.frame</code> is accepted scope that waits for an accepted host-to-Moth execution mechanism, never a polling stand-in. The first API waits for cross-package opaque type references for the <code>@web/canvas</code> canvas handle, nested annotated symbol paths, typed closed domains and bulk numeric and byte data transfer, which is required for a useful v1.</td>
+        </tr>
+
+<tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> MON static project builder</td>
  <td style="padding: 0.1em 0.5em; "> Deferred</td>
  <td style="padding: 0.1em 0.5em; "> None</td>
@@ -817,9 +824,13 @@ return __moth_binding(value);
 if (value.__moth_kind === "binding") {
 return value;
 }
+return __moth_alias_binding(value);
+}
+
+function __moth_alias_binding(ref) {
 const binding = __moth_binding(undefined);
 binding.__moth_mode = "alias";
-binding.__moth_target = value;
+binding.__moth_target = ref;
 return binding;
 }
 
@@ -1091,7 +1102,7 @@ return String(value);
 function b_fn0() {
 let b_l0 = __moth_binding(undefined);
 
-__moth_assign_value(b_l0, []);
+b_l0 = __moth_binding([]);
 return __moth_read(b_l0);
 }
 

@@ -106,7 +106,6 @@ fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
             scope,
             Rc::new(TopLevelDeclarationTable::new(vec![declaration], &path_fork)),
             Arc::new(ExternalPackageRegistry::default()),
-            vec![],
             0,
         ),
         &scope,

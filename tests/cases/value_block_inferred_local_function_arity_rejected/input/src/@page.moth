@@ -1,0 +1,12 @@
+-- An inferred local receives one value, even inside a function with two
+-- success results.
+describe |count Int| -> String, Int:
+    label = if count > 2:
+        then "many", count
+    else
+        then "few", 0
+    ;
+    return label, count
+;
+
+label, count = describe(3)

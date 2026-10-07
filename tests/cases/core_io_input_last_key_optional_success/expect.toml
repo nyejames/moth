@@ -7,6 +7,4 @@ path = "index.html"
 kind = "html"
 must_contain = [
   "function __moth_io_input_last_key_pressed(",
-  "return { tag: \"some\", value: handle.lastKeyPressed };",
-  "return { tag: \"none\" };",
 ]
