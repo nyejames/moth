@@ -4,12 +4,6 @@ Boracle's operational oracle is a bounded executor for normalized `BorrowProblem
 
 The reference solver this oracle deliberately differs from is specified in `docs/src/developer-docs/memory-management/boracle/boracle-reference-solver.mtf`.
 
-The `ReactiveObserve` entries below document the current legacy normalized event. The compiler
-foundation retires that event, its source producer and obsolete cases with Reactivity V1. These
-entries do not require a subscription model in the final borrow handoff or authorise replacement
-Wiring observation. Until the owner is removed, the oracle must still execute its actual input
-faithfully. Update this event catalogue in the same implementation slice that deletes the event.
-
 ## Purpose and locked constraints
 
 The oracle is a second, deliberately different executable semantics for a normalized `BorrowProblem`. It executes concrete events with concrete dynamic value generations and concrete control flow. It exists to find likely soundness defects, precision candidates, malformed normalized inputs and minimal counterexamples.
@@ -287,14 +281,9 @@ capability appears under both roles:
         [: control-flow choice]
         [: `Terminator`]
     ]
-
-    [td:
-        [: metadata-only event]
-        [: `ReactiveObserve`]
-    ]
 ]
 
-Per-event runtime meaning, complete for all 17 `EventKind` variants:
+Per-event runtime meaning, complete for all 16 `EventKind` variants:
 
 [table:
     [th:
@@ -372,11 +361,6 @@ Per-event runtime meaning, complete for all 17 `EventKind` variants:
     [td:
         [: `ScopeExit { bindings }`]
         [: see the scope exit section]
-    ]
-
-    [td:
-        [: `ReactiveObserve { place }`]
-        [: metadata only. Recorded in the trace. No capability, no access check and no conflict. The place must be initialized.]
     ]
 
     [td:
@@ -704,7 +688,6 @@ Unsupported normalized shapes return typed `Inconclusive`. They never become imp
 Malformed or impossible normalized input returns `CompilerError`:
 
 - A non-defining access to an `Unavailable` place.
-- A `ReactiveObserve` whose place is uninitialized.
 - An `EventKind::Projection` whose `origin` row is not `OriginKind::Projection`.
 - An access that exercises a capability after its explicit end.
 - A `LoanKill` for a loan with no live capability on the executed path.

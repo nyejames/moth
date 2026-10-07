@@ -465,7 +465,6 @@ fn authored_assign_with_no_initializer_rejects_explicit_type_and_binding_modes()
         ("value Int =", "explicit type at EOF boundary"),
         ("value ~=\n", "mutable binding"),
         ("value #=\n", "compile-time binding"),
-        ("value $Int =\n", "reactive binding"),
     ];
 
     for (source, case) in cases {
@@ -480,7 +479,6 @@ fn omitted_assign_rejects_at_each_boundary_and_binding_mode() {
     let cases = [
         ("value\n", "inferred declaration at newline boundary"),
         ("value Int", "explicit type at EOF boundary"),
-        ("value $Int", "reactive binding"),
     ];
 
     for (source, case) in cases {

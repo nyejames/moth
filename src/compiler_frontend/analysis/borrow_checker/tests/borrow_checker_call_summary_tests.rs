@@ -10,7 +10,6 @@ use crate::compiler_frontend::ast::expressions::call_argument::{
 };
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, FallibleExpressionHandling, HandledFallibleHostFunctionCallInput, Operator,
-    ReactiveSource, ReactiveSourceKind,
 };
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, ExpressionRpnItem,
@@ -45,8 +44,7 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, fresh_success_returns, function_node, make_test_variable, node,
-    param_with_datatype, param_with_type_id, reference_expr_with_datatype, symbol,
-    test_source_location,
+    param_with_datatype, reference_expr_with_datatype, symbol, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
     assert_borrow_error_kind, assert_infrastructure_error_contains,
@@ -64,7 +62,7 @@ use std::sync::Arc;
 
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
-    PublicCallReactiveEffect, PublicCallTransferEffect, PublicCallTransferEligibility,
+    PublicCallTransferEffect,
 };
 
 fn function_call_node(
@@ -111,13 +109,6 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
         &mut path_fork,
         &mut string_table,
     );
-    let reactive_parameter = symbol("reactive_parameter", &mut path_fork, &mut string_table);
-    let mut reactive_parameter_declaration =
-        param_with_type_id(reactive_parameter, builtin_type_ids::INT, false, None);
-    reactive_parameter_declaration.value.reactive_source = Some(ReactiveSource {
-        path: reactive_parameter,
-        kind: ReactiveSourceKind::Parameter,
-    });
 
     let target = function_node(
         summary_target,
@@ -144,7 +135,6 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
                     true,
                     test_source_location(1),
                 ),
-                reactive_parameter_declaration,
             ],
             returns: vec![],
         },
@@ -202,7 +192,7 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
         .get(&target_id)
         .expect("every local function should have one retained summary");
 
-    assert_eq!(target_summary.parameters.len(), 4);
+    assert_eq!(target_summary.parameters.len(), 3);
     assert_eq!(
         target_summary.parameters[0].access,
         PublicCallParameterAccess::Shared
@@ -210,10 +200,6 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
     assert_eq!(
         target_summary.parameters[0].mutation,
         PublicCallMutationEffect::NoWrite
-    );
-    assert_eq!(
-        target_summary.parameters[0].transfer_eligibility,
-        PublicCallTransferEligibility::Eligible
     );
     assert_eq!(
         target_summary.parameters[0].transfer_effect,
@@ -240,23 +226,6 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
     assert_eq!(
         target_summary.parameters[2].mutation,
         PublicCallMutationEffect::NoWrite
-    );
-
-    assert_eq!(
-        target_summary.parameters[3].access,
-        PublicCallParameterAccess::Reactive
-    );
-    assert_eq!(
-        target_summary.parameters[3].transfer_eligibility,
-        PublicCallTransferEligibility::Ineligible
-    );
-    assert_eq!(
-        target_summary.parameters[3].transfer_effect,
-        PublicCallTransferEffect::NeverConsumes
-    );
-    assert_eq!(
-        target_summary.parameters[3].reactive_effect,
-        PublicCallReactiveEffect::None
     );
 
     let start_id = hir
@@ -815,7 +784,6 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
             returns: vec![ReturnSlot {
                 value: DataType::Int,
                 type_id: Some(builtin_type_ids::INT),
-                reactive_template: None,
                 channel: ReturnChannel::Success,
             }],
         },
@@ -951,13 +919,11 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
                 ReturnSlot {
                     value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
-                    reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
                     value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
-                    reactive_template: None,
                     channel: ReturnChannel::Error,
                 },
             ],
@@ -1018,13 +984,11 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
                 ReturnSlot {
                     value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
-                    reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
                     value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
-                    reactive_template: None,
                     channel: ReturnChannel::Error,
                 },
             ],
@@ -1235,19 +1199,16 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
                 ReturnSlot {
                     value: DataType::Int,
                     type_id: Some(builtin_type_ids::INT),
-                    reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
                     value: DataType::Int,
                     type_id: Some(builtin_type_ids::INT),
-                    reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
                     value: DataType::Int,
                     type_id: Some(builtin_type_ids::INT),
-                    reactive_template: None,
                     channel: ReturnChannel::Error,
                 },
             ],
@@ -1280,19 +1241,16 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
                 ReturnSlot {
                     value: DataType::Int,
                     type_id: Some(builtin_type_ids::INT),
-                    reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
                     value: DataType::Int,
                     type_id: Some(builtin_type_ids::INT),
-                    reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
                     value: DataType::Int,
                     type_id: Some(builtin_type_ids::INT),
-                    reactive_template: None,
                     channel: ReturnChannel::Error,
                 },
             ],

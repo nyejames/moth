@@ -24,14 +24,14 @@ OptionalPayload ::
     Empty,
 ;
 
-word_suffix $String = "x"
+word_suffix String = "x"
 
-make_reactive_word |suffix $String| -> String:
-    return [:same[$(suffix)]]
+make_word |suffix String| -> String:
+    return [:same[suffix]]
 ;
 
-reactive_word = make_reactive_word(word_suffix)
-reactive_word_option String? = reactive_word
+runtime_word = make_word(word_suffix)
+runtime_word_option String? = runtime_word
 
 unit_same = Outer::First is Outer::First
 unit_different = Outer::First is Outer::Second
@@ -41,8 +41,8 @@ unit_vs_payload = Outer::First is Outer::Word("hi")
 different_payload_variants = Outer::Word("hi") is Outer::Count(7)
 nested_same = Outer::Wrapped(Inner::A(1)) is Outer::Wrapped(Inner::A(1))
 nested_different = Outer::Wrapped(Inner::A(1)) is Outer::Wrapped(Inner::A(2))
-choice_template_same_payload = Outer::Word(reactive_word) is Outer::Word("samex")
-option_template_same_payload = reactive_word_option is "samex"
+choice_template_same_payload = Outer::Word(runtime_word) is Outer::Word("samex")
+option_template_same_payload = runtime_word_option is "samex"
 optional_payload_same = OptionalPayload::Present("x") is OptionalPayload::Present("x")
 optional_payload_different = OptionalPayload::Present("x") is OptionalPayload::Present("y")
 optional_none String? = none

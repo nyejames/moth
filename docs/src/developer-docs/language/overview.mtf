@@ -204,9 +204,9 @@ its explicit parameter-context rules.
 - `docs/src/docs/markdown/rendering-contract.mtf`
 - `docs/src/docs/markdown/choosing-a-content-format.mtf`
 
-Public routes import paired Basic teaching and unsuffixed reference levels.
-The accepted Wiring reference precedes its public teaching rollout. Its queued
-implementation work owns the matching Basic pages and website composition.
+The public Wiring route pairs Basic teaching with the canonical unsuffixed
+reference at `docs/src/docs/wiring/wiring.mtf`. Wire and Route implementation
+remains deferred until Phase 6; the reference owns accepted semantics.
 
 ## Public documentation
 

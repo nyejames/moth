@@ -179,12 +179,6 @@ fn block_terminator(problem: &BorrowProblem, block: usize) -> &TerminatorEventKi
 
 #[test]
 fn boracle_generated_seed_digits_select_independent_choices() {
-    let has_observation = |problem: &BorrowProblem| {
-        problem
-            .events()
-            .iter()
-            .any(|event| matches!(&event.kind, EventKind::ReactiveObserve { .. }))
-    };
     let fresh_event_count = |problem: &BorrowProblem| {
         problem
             .events()
@@ -293,8 +287,6 @@ fn boracle_generated_seed_digits_select_independent_choices() {
                     block_terminator(&variant.problem, 1),
                     "branch-shape digit did not change the branch successor family"
                 );
-                assert!(!has_observation(&baseline.problem));
-                assert!(has_observation(&variant.problem));
             }
             2 => assert_ne!(
                 block_terminator(&baseline.problem, 1),

@@ -852,16 +852,11 @@ fn get_token_tag(
         //  Style directives
         // -------------------
 
-        if current_char == '$' {
-            if stream.mode == TokenizeMode::TemplateHead {
-                if stream.peek() == Some(&'(') {
-                    return emit_static(stream, TokenTag::REACTIVE);
-                }
-
-                return tokenize_style_directive(stream, style_directives, string_table);
-            }
-
-            return emit_static(stream, TokenTag::REACTIVE);
+        if current_char == '$'
+            && stream.mode == TokenizeMode::TemplateHead
+            && stream.peek() != Some(&'(')
+        {
+            return tokenize_style_directive(stream, style_directives, string_table);
         }
 
         if current_char == END_SCOPE_CHAR {

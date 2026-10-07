@@ -16,12 +16,11 @@ use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::ids::{BlockId, FieldId, FunctionId, HirValueId, LocalId};
+use crate::compiler_frontend::hir::ids::{BlockId, FieldId, FunctionId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::patterns::HirPattern;
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::reactivity::ReactiveSourceId;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::path_interner::PathTable;
@@ -80,12 +79,6 @@ pub(crate) struct JsEmitter<'hir> {
     /// Builtin cast policies collected pre-emission by `collect_used_cast_policies`.
     /// Used to conditionally emit the matching runtime helpers.
     pub(crate) used_cast_policies: HashSet<BuiltinCastPolicyId>,
-    /// Whether emitted reachable JS uses reactive sources.
-    /// Used to conditionally emit the reactive binding and scheduler helpers.
-    pub(crate) used_reactive_sources: bool,
-    /// Whether emitted reachable JS uses reactive template values.
-    /// Used to conditionally emit the template-string runtime helpers.
-    pub(crate) used_reactive_templates: bool,
 }
 
 impl<'hir> JsEmitter<'hir> {
@@ -125,8 +118,6 @@ impl<'hir> JsEmitter<'hir> {
             used_choice_equality: false,
             used_assertions: false,
             used_cast_policies: HashSet::new(),
-            used_reactive_sources: false,
-            used_reactive_templates: false,
         }
     }
 
@@ -144,7 +135,6 @@ impl<'hir> JsEmitter<'hir> {
         let emitted_code_uses_maps = self.emitted_functions_use_maps(&functions)?;
         let mut emitted_code_uses_numeric_helpers =
             self.emitted_functions_use_numeric_helpers(&functions)?;
-        self.emitted_functions_use_reactivity(&functions)?;
         self.collect_used_cast_policies(&functions)?;
         for policy in &self.used_cast_policies {
             if let BuiltinCastPolicyId::NumericToString(scalar) = *policy
@@ -153,12 +143,7 @@ impl<'hir> JsEmitter<'hir> {
                 emitted_code_uses_numeric_helpers.require_float_formatter(precision);
             }
         }
-        self.emit_runtime_prelude(
-            emitted_code_uses_maps,
-            emitted_code_uses_numeric_helpers,
-            self.used_reactive_sources,
-            self.used_reactive_templates,
-        );
+        self.emit_runtime_prelude(emitted_code_uses_maps, emitted_code_uses_numeric_helpers);
 
         for (index, function) in functions.into_iter().enumerate() {
             if index > 0 {
@@ -422,316 +407,6 @@ impl<'hir> JsEmitter<'hir> {
                 self.expression_uses_maps(left) || self.expression_uses_maps(right)
             }
         }
-    }
-
-    /// Scans the emitted reachable function subset to discover which reactivity runtime helpers are
-    /// needed.
-    ///
-    /// WHAT: sets `used_reactive_sources` when emitted code declares a reactive source or has a
-    /// borrow-analysis invalidation fact; sets `used_reactive_templates` when any emitted
-    /// expression is a reactive template value.
-    /// WHY: reactivity helpers add runtime surface and globals; emitting them only for the features
-    ///      actually used keeps non-reactive bundles unchanged and avoids dragging template-string
-    ///      helpers into source-only reactive programs.
-    fn emitted_functions_use_reactivity(
-        &mut self,
-        functions: &[&'hir HirFunction],
-    ) -> Result<(), CompilerError> {
-        self.used_reactive_sources = self.emitted_functions_use_reactive_sources(functions)?;
-        self.used_reactive_templates = false;
-
-        for function in functions {
-            let reachable_blocks = self.collect_reachable_blocks(function.entry)?;
-            for block_id in reachable_blocks {
-                let block = self.block_by_id(block_id)?;
-
-                for statement in &block.statements {
-                    self.record_statement_reactivity(statement)?;
-                }
-
-                self.record_terminator_reactivity(&block.terminator)?;
-            }
-        }
-
-        if self.used_reactive_templates {
-            self.used_reactive_sources = true;
-        }
-
-        Ok(())
-    }
-
-    fn emitted_functions_use_reactive_sources(
-        &self,
-        functions: &[&'hir HirFunction],
-    ) -> Result<bool, CompilerError> {
-        for function in functions {
-            let reachable_blocks = self.collect_reachable_blocks(function.entry)?;
-            for block_id in reachable_blocks {
-                let block = self.block_by_id(block_id)?;
-
-                if block
-                    .locals
-                    .iter()
-                    .any(|local| self.local_is_reactive_source(local.id))
-                {
-                    return Ok(true);
-                }
-
-                if block.statements.iter().any(|statement| {
-                    self.borrow_analysis
-                        .analysis
-                        .reactive_invalidations
-                        .contains_key(&statement.id)
-                }) {
-                    return Ok(true);
-                }
-            }
-        }
-
-        Ok(false)
-    }
-
-    pub(crate) fn reactive_source_id_for_local(
-        &self,
-        local_id: LocalId,
-    ) -> Option<ReactiveSourceId> {
-        self.hir.side_table.reactive_source_id_for_local(local_id)
-    }
-
-    pub(crate) fn local_is_reactive_source(&self, local_id: LocalId) -> bool {
-        self.reactive_source_id_for_local(local_id).is_some()
-    }
-
-    fn record_statement_reactivity(
-        &mut self,
-        statement: &crate::compiler_frontend::hir::statements::HirStatement,
-    ) -> Result<(), CompilerError> {
-        if self
-            .borrow_analysis
-            .analysis
-            .reactive_invalidations
-            .contains_key(&statement.id)
-        {
-            self.used_reactive_sources = true;
-        }
-
-        match &statement.kind {
-            HirStatementKind::Assign { value, .. } => {
-                self.record_expression_reactivity(value)?;
-            }
-
-            HirStatementKind::Call { args, .. } => {
-                for argument in args {
-                    self.record_expression_reactivity(argument)?;
-                }
-            }
-
-            HirStatementKind::CastOp { source, .. } => {
-                self.record_expression_reactivity(source)?;
-            }
-
-            HirStatementKind::FormatFloat { source, .. }
-            | HirStatementKind::ValidateFloat { source, .. } => {
-                self.record_expression_reactivity(source)?;
-            }
-
-            HirStatementKind::Expr(value) | HirStatementKind::PushRuntimeFragment { value, .. } => {
-                self.record_expression_reactivity(value)?;
-            }
-
-            HirStatementKind::MapOp { receiver, args, .. } => {
-                self.record_expression_reactivity(receiver)?;
-                for argument in args {
-                    self.record_expression_reactivity(argument)?;
-                }
-            }
-
-            HirStatementKind::NumericOp { operands, .. } => match operands {
-                HirNumericOperands::Unary { operand } => {
-                    self.record_expression_reactivity(operand)?;
-                }
-                HirNumericOperands::Binary { left, right } => {
-                    self.record_expression_reactivity(left)?;
-                    self.record_expression_reactivity(right)?;
-                }
-            },
-
-            HirStatementKind::FloatRangeCandidate {
-                current,
-                step,
-                end,
-                ascending,
-                ..
-            } => {
-                self.record_expression_reactivity(current)?;
-                self.record_expression_reactivity(step)?;
-                self.record_expression_reactivity(end)?;
-                self.record_expression_reactivity(ascending)?;
-            }
-            HirStatementKind::RangeStepFailure { .. } | HirStatementKind::Drop(_) => {}
-        }
-
-        Ok(())
-    }
-
-    fn record_terminator_reactivity(
-        &mut self,
-        terminator: &HirTerminator,
-    ) -> Result<(), CompilerError> {
-        match terminator {
-            HirTerminator::If { condition, .. } => {
-                self.record_expression_reactivity(condition)?;
-            }
-
-            HirTerminator::FallibleBranch { result, .. } => {
-                self.record_expression_reactivity(result)?;
-            }
-
-            HirTerminator::Match { scrutinee, arms } => {
-                self.record_expression_reactivity(scrutinee)?;
-                for arm in arms {
-                    if let Some(guard) = &arm.guard {
-                        self.record_expression_reactivity(guard)?;
-                    }
-                    self.record_pattern_reactivity(&arm.pattern)?;
-                }
-            }
-
-            HirTerminator::Return(value)
-            | HirTerminator::ReturnSuccess(value)
-            | HirTerminator::ReturnError(value) => {
-                self.record_expression_reactivity(value)?;
-            }
-
-            HirTerminator::AssertFailure { message, .. } => {
-                self.record_expression_reactivity(message)?;
-            }
-
-            HirTerminator::Jump { .. }
-            | HirTerminator::Break { .. }
-            | HirTerminator::Continue { .. }
-            | HirTerminator::Uninitialized
-            | HirTerminator::RuntimeFailure { .. } => {}
-        }
-
-        Ok(())
-    }
-
-    fn record_pattern_reactivity(&mut self, pattern: &HirPattern) -> Result<(), CompilerError> {
-        match pattern {
-            HirPattern::Literal(value)
-            | HirPattern::OptionValue { value }
-            | HirPattern::OptionRelational { value, .. }
-            | HirPattern::Relational { value, .. } => {
-                self.record_expression_reactivity(value)?;
-            }
-
-            HirPattern::OptionNone
-            | HirPattern::OptionPresent
-            | HirPattern::Wildcard
-            | HirPattern::ChoiceVariant { .. } => {}
-        }
-
-        Ok(())
-    }
-
-    fn record_expression_reactivity(
-        &mut self,
-        expression: &HirExpression,
-    ) -> Result<(), CompilerError> {
-        if self.value_is_reactive_template(expression.id) {
-            self.used_reactive_templates = true;
-        }
-
-        match &expression.kind {
-            HirExpressionKind::BinOp { left, right, .. } => {
-                self.record_expression_reactivity(left)?;
-                self.record_expression_reactivity(right)?;
-            }
-
-            HirExpressionKind::UnaryOp { operand, .. } => {
-                self.record_expression_reactivity(operand)?;
-            }
-
-            HirExpressionKind::StructConstruct { fields, .. } => {
-                for (_, field_value) in fields {
-                    self.record_expression_reactivity(field_value)?;
-                }
-            }
-
-            HirExpressionKind::Collection(elements)
-            | HirExpressionKind::TupleConstruct { elements } => {
-                for element in elements {
-                    self.record_expression_reactivity(element)?;
-                }
-            }
-
-            HirExpressionKind::MapLiteral(entries) => {
-                for entry in entries {
-                    self.record_expression_reactivity(&entry.key)?;
-                    self.record_expression_reactivity(&entry.value)?;
-                }
-            }
-
-            HirExpressionKind::Range { start, end } => {
-                self.record_expression_reactivity(start)?;
-                self.record_expression_reactivity(end)?;
-            }
-
-            HirExpressionKind::TupleGet { tuple, .. } => {
-                self.record_expression_reactivity(tuple)?;
-            }
-
-            HirExpressionKind::FallibleUnwrapSuccess { result }
-            | HirExpressionKind::FallibleUnwrapError { result } => {
-                self.record_expression_reactivity(result)?;
-            }
-
-            HirExpressionKind::Cast { source, .. } => {
-                self.record_expression_reactivity(source)?;
-            }
-
-            HirExpressionKind::VariantConstruct { fields, .. } => {
-                for field in fields {
-                    self.record_expression_reactivity(&field.value)?;
-                }
-            }
-
-            HirExpressionKind::VariantPayloadGet { source, .. } => {
-                self.record_expression_reactivity(source)?;
-            }
-
-            HirExpressionKind::Load(_)
-            | HirExpressionKind::Copy(_)
-            | HirExpressionKind::Int(_)
-            | HirExpressionKind::Uint(_)
-            | HirExpressionKind::Float(_)
-            | HirExpressionKind::FixedScalar(_)
-            | HirExpressionKind::Number(_)
-            | HirExpressionKind::Bool(_)
-            | HirExpressionKind::Char(_)
-            | HirExpressionKind::StringLiteral(_)
-            | HirExpressionKind::StructuralString { .. } => {}
-        }
-
-        Ok(())
-    }
-
-    pub(crate) fn value_is_reactive_template(&self, value_id: HirValueId) -> bool {
-        let Some(template) = self.hir.side_table.reactive_template_for_value(value_id) else {
-            return false;
-        };
-
-        if !template.dependencies.is_empty() {
-            return true;
-        }
-
-        // Ordinary `String` parameters can carry placeholder template metadata so reactive
-        // template values preserve dependencies when passed through helper functions. In a module
-        // with no emitted reactive source, those placeholders cannot resolve to a live template
-        // object, so non-reactive programs should keep their plain-string lowering and avoid
-        // pulling in the template runtime helpers.
-        self.used_reactive_sources && !template.template_value_parameters.is_empty()
     }
 
     /// Records builtin cast policies used by the functions that will be emitted.

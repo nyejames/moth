@@ -12,7 +12,7 @@ use std::rc::Rc;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{
-    ReactiveSubscription, SlotPlaceholder, Style, TemplateSegmentOrigin, TemplateType,
+    SlotPlaceholder, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateElseMarker, TemplateLoopControlKind, TemplateLoopHeader,
@@ -88,7 +88,7 @@ impl TemplateConstructionContext {
         byte_len: usize,
         span: Option<SourceSpan>,
     ) {
-        self.record_text_segment(text, byte_len, TemplateSegmentOrigin::Body, None, span);
+        self.record_text_segment(text, byte_len, TemplateSegmentOrigin::Body, span);
     }
 
     pub(crate) fn record_head_text(
@@ -97,23 +97,7 @@ impl TemplateConstructionContext {
         byte_len: usize,
         span: Option<SourceSpan>,
     ) {
-        self.record_text_segment(text, byte_len, TemplateSegmentOrigin::Head, None, span);
-    }
-
-    pub(crate) fn record_reactive_head_text(
-        &mut self,
-        text: StringId,
-        byte_len: usize,
-        reactive_subscription: Option<ReactiveSubscription>,
-        span: Option<SourceSpan>,
-    ) {
-        self.record_text_segment(
-            text,
-            byte_len,
-            TemplateSegmentOrigin::Head,
-            reactive_subscription,
-            span,
-        );
+        self.record_text_segment(text, byte_len, TemplateSegmentOrigin::Head, span);
     }
 
     fn record_text_segment(
@@ -121,27 +105,18 @@ impl TemplateConstructionContext {
         text: StringId,
         byte_len: usize,
         origin: TemplateSegmentOrigin,
-        reactive_subscription: Option<ReactiveSubscription>,
         span: Option<SourceSpan>,
     ) {
         let node_id = {
             let mut store = self.store.borrow_mut();
-            let node_id = store.push_node(TemplateIrNode::new(
+            store.push_node(TemplateIrNode::new(
                 TemplateIrNodeKind::Text {
                     text,
                     byte_len,
                     origin,
                 },
                 span,
-            ));
-
-            if let Some(subscription) = reactive_subscription {
-                store
-                    .set_node_reactive_subscription(node_id, subscription)
-                    .expect("a just-pushed text node must accept a reactive subscription");
-            }
-
-            node_id
+            ))
         };
 
         self.children.push(node_id);
@@ -155,7 +130,6 @@ impl TemplateConstructionContext {
     pub(crate) fn record_head_dynamic_expression(
         &mut self,
         expression: Expression,
-        reactive_subscription: Option<ReactiveSubscription>,
         span: Option<SourceSpan>,
     ) {
         let node_id = {
@@ -165,7 +139,6 @@ impl TemplateConstructionContext {
                 TemplateIrNodeKind::DynamicExpression {
                     expression: Box::new(expression),
                     origin: TemplateSegmentOrigin::Head,
-                    reactive_subscription,
                     site_id,
                 },
                 span,

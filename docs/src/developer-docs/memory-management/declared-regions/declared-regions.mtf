@@ -394,7 +394,6 @@ those explicit roots but may not invent a page or mount owner to avoid a source 
 backend may use ordinary reachability only for the same already-legal topology.
 
 Future Wiring observation and event delivery require a separate accepted lifecycle design.
-Reactivity V1 subscriptions and reactive declarations are not part of declared-region semantics.
 
 ## Diagnostics
 

@@ -318,7 +318,7 @@ pub(crate) fn project_receiver_method_signatures(
                 )?;
                 let folded_default =
                     project_folded_default(&declaration.value, context.folded_value_context)?;
-                let access = project_parameter_access(declaration)?;
+                let access = project_parameter_access(declaration);
                 Ok(PublicParameterTypeSlot {
                     name,
                     type_identity,

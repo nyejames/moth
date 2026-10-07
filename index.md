@@ -129,15 +129,15 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [field_access](src/compiler_frontend/ast/field_access/): fields, receiver calls, collection/map builtins.
 - [statements](src/compiler_frontend/ast/statements/): bodies, declarations, returns, loops, matches, catch, value production.
     - [fallible_handling/catch_handler.rs](src/compiler_frontend/ast/statements/fallible_handling/catch_handler.rs): shared `catch:` and `catch |err|:` handler parsing with `then` value-production bodies.
-- [templates](src/compiler_frontend/ast/templates/): template parse/compose/fold/format/render plans/slots/control flow/reactive metadata.
-    - [template_head_parser](src/compiler_frontend/ast/templates/template_head_parser/): directives, subscriptions, suffix control flow.
+- [templates](src/compiler_frontend/ast/templates/): template parse/compose/fold/format/render plans/slots/control flow.
+    - [template_head_parser](src/compiler_frontend/ast/templates/template_head_parser/): directives, expression heads, suffix control flow.
     - [template_control_flow](src/compiler_frontend/ast/templates/template_control_flow/): const eval/folding/validation/remap.
     - [template_slots](src/compiler_frontend/ast/templates/template_slots/): slot schema, contributions, runtime plan construction.
     - [styles](src/compiler_frontend/ast/templates/styles/): directive-owned formatters (markdown, raw, whitespace).
     - [template_types.rs](src/compiler_frontend/ast/templates/template_types.rs), [template_folding.rs](src/compiler_frontend/ast/templates/template_folding.rs).
     - [template_render_units.rs](src/compiler_frontend/ast/templates/template_render_units.rs), [template_renderability.rs](src/compiler_frontend/ast/templates/template_renderability.rs).
     - [create_template_node.rs](src/compiler_frontend/ast/templates/create_template_node.rs), [top_level_templates.rs](src/compiler_frontend/ast/templates/top_level_templates.rs), [doc_fragments.rs](src/compiler_frontend/ast/templates/doc_fragments.rs), [error.rs](src/compiler_frontend/ast/templates/error.rs).
-    - [runtime_handoff.rs](src/compiler_frontend/ast/templates/runtime_handoff.rs): neutral owned AST-to-HIR template handoff vocabulary; [reactive_template_metadata/mod.rs](src/compiler_frontend/ast/templates/reactive_template_metadata/mod.rs): shared reactive metadata policy with representation-specific TIR and owned-handoff reducers.
+    - [runtime_handoff.rs](src/compiler_frontend/ast/templates/runtime_handoff.rs): neutral owned AST-to-HIR template handoff vocabulary.
     - [tir](src/compiler_frontend/ast/templates/tir/): Template IR — AST-local authoritative template representation. kw: TemplateIrStore.
         - [store.rs](src/compiler_frontend/ast/templates/tir/store.rs), [store/control_flow.rs](src/compiler_frontend/ast/templates/tir/store/control_flow.rs), [store/slot_plans.rs](src/compiler_frontend/ast/templates/tir/store/slot_plans.rs), [store/overlays.rs](src/compiler_frontend/ast/templates/tir/store/overlays.rs), [ids.rs](src/compiler_frontend/ast/templates/tir/ids.rs), [node.rs](src/compiler_frontend/ast/templates/tir/node.rs), [summary.rs](src/compiler_frontend/ast/templates/tir/summary.rs): central owned storage, checked mutation and shape metadata.
         - [construction_context.rs](src/compiler_frontend/ast/templates/tir/construction_context.rs): parser-facing TIR emission into the shared store.
@@ -161,7 +161,6 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [hir_expression](src/compiler_frontend/hir/hir_expression/), [hir_statement](src/compiler_frontend/hir/hir_statement/): lowering implementation owners.
     - [validation](src/compiler_frontend/hir/validation/): executable-HIR internal invariant checks only; non-HIR module metadata is validated by [module_metadata.rs](src/compiler_frontend/module_metadata.rs).
     - [reachability.rs](src/compiler_frontend/hir/reachability.rs): function/block/external/map/runtime-cast feature facts.
-    - [reactivity.rs](src/compiler_frontend/hir/reactivity.rs): HIR reactive metadata.
     - [failure_facts.rs](src/compiler_frontend/hir/failure_facts.rs): immutable per-function failure facts projected once from typed AST bodies.
     - [private_failure_lane.rs](src/compiler_frontend/hir/private_failure_lane.rs): internal failure lane for inferred-failure private functions over the existing fallible carrier.
     - [hir_expression/fallible/catch.rs](src/compiler_frontend/hir/hir_expression/fallible/catch.rs): expression-local catch CFG lowering into one shared handler.
@@ -229,7 +228,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [compiler design overview](docs/compiler-design-overview.md)
 - [build system design overview](docs/build-system-design.md)
 - [language semantics reference index](docs/src/developer-docs/language/overview.mtf)
-- [Wiring parameter and constructor-route contracts](docs/src/docs/wiring/wiring.mtf): accepted binding identity, contextual capture and bounded capability semantics; implementation support remains in the progress matrix.
+- [Wiring](docs/src/docs/wiring/@page.moth), Basic lessons and the sole canonical reference [wiring.mtf](docs/src/docs/wiring/wiring.mtf): accepted parameter contracts; Wire and Route source syntax remains unsupported until Phase 6, as recorded in the progress matrix.
 - [general directives](docs/src/docs/directives/directives.mtf); [directive contributor routing](docs/src/docs/directives/overview.mtf)
 - [entry metadata and page directives](docs/src/docs/project-structure/entry-config.mtf)
 - [memory management design](docs/src/developer-docs/memory-management/overview.mtf)

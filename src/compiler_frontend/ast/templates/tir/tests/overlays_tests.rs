@@ -5,8 +5,9 @@ use std::mem::size_of;
 use super::super::ids::{TemplateIrId, TemplateWrapperSetId};
 use super::super::overlays::{
     TemplateViewContext, TirExpressionOverlay, TirExpressionOverlayId, TirSlotResolution,
-    TirSlotResolutionOverlay, TirSlotResolutionOverlayId, TirWrapperApplicationMode,
-    TirWrapperContext, TirWrapperContextOverlay, TirWrapperContextOverlayId,
+    TirSlotResolutionKind, TirSlotResolutionOverlay, TirSlotResolutionOverlayId,
+    TirWrapperApplicationMode, TirWrapperContext, TirWrapperContextOverlay,
+    TirWrapperContextOverlayId,
 };
 use super::super::refs::{
     TemplateTirChildReference, TemplateTirReference, TemplateWrapperReference,
@@ -100,7 +101,12 @@ fn slot_resolution_payload_preserves_replay_sources() {
     let source = TemplateIrId::new(3);
     let resolution = TirSlotResolution::resolved(SlotKey::Default, vec![source]);
 
-    assert_eq!(resolution.sources(), &[source]);
+    assert_eq!(
+        resolution.kind,
+        TirSlotResolutionKind::Resolved {
+            sources: vec![source],
+        }
+    );
 }
 
 #[test]

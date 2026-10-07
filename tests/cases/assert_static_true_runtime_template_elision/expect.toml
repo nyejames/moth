@@ -6,7 +6,7 @@ rendered_output_contains = ["runtime"]
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_not_contain = ["__assert_message_0", "__moth_template_string"]
+must_not_contain = ["inactive"]
 
 [backends.html_wasm]
 mode = "success"

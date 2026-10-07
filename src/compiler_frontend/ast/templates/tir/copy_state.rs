@@ -124,9 +124,8 @@ impl TirCopyState {
     }
 
     /// Records a dynamic expression node.
-    pub(crate) fn record_dynamic_expression(&mut self, has_reactive_subscription: bool) {
-        self.summary
-            .record_dynamic_expression(has_reactive_subscription);
+    pub(crate) fn record_dynamic_expression(&mut self) {
+        self.summary.record_dynamic_expression();
         self.update_depth();
     }
 

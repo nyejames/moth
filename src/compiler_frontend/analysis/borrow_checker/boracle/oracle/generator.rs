@@ -293,14 +293,6 @@ pub(crate) fn generated_problem(seed: u32, cyclic: bool) -> GeneratedProblem {
         },
     );
 
-    if digits.branch_shape == 1 {
-        builder.event(
-            BlockId::new(1),
-            EventKind::ReactiveObserve {
-                place: copied_place,
-            },
-        );
-    }
     let block_one_terminator = if cyclic {
         if digits.back_edge_shape == 0 {
             TerminatorEventKind::Branch {

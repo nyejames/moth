@@ -326,7 +326,6 @@ pub(super) fn create_header(
                 declaration_name,
                 declaration_order,
                 context,
-                span_builder,
             )?;
             let cursor_position = trait_cursor.position();
             set_cursor_position(
@@ -436,7 +435,6 @@ pub(super) fn create_header(
                     context.string_table,
                     full_name,
                     context.path_fork,
-                    span_builder,
                 )?;
                 let cursor_position = declaration_cursor.canonical_cursor().position();
                 (signature, cursor_position)
@@ -513,7 +511,6 @@ pub(super) fn create_header(
                         context.warnings,
                         full_name,
                         context.path_fork,
-                        span_builder,
                     )?;
                     let cursor_position = declaration_cursor.canonical_cursor().position();
                     (fields, cursor_position)
@@ -604,7 +601,6 @@ pub(super) fn create_header(
                     context.path_fork,
                     context.string_table,
                     context.warnings,
-                    span_builder,
                 )?;
                 let cursor_position = declaration_cursor.canonical_cursor().position();
                 (choice_header, cursor_position)

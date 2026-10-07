@@ -163,7 +163,7 @@ total %= 5
 total ^= 2
 mask #= 0
 value ~= 2
-budget $= 100
+budget ~= 100
 
 -- structural and control forms
 match status:
@@ -530,11 +530,11 @@ footer #= [: <footer>[version]</footer> ]
 card #= [: <div class="card">[label.text]</div> ]
 list_item #= [: <li>[name]</li> ]
 
--- reactive markers
-count $= 0
-@count + 1
-[$count]
-[$name]
+-- ordinary binding and exclusive mutation
+count ~= 0
+count += 1
+name ~= "Priya"
+name = "Rob"
 
 -- imports with paths and resources
 @core/io print
@@ -699,7 +699,7 @@ operator_line_6 = k %= l
 operator_line_7 = m ^= n
 operator_line_8 = o #= p
 operator_line_9 = q ~= r
-operator_line_10 = s $= t
+operator_line_10 = s + t
 operator_line_11 = u <= v
 operator_line_12 = w >= x
 operator_line_13 = y << z
@@ -915,10 +915,10 @@ load_config |path String| -> config:
 ;
 
 -- mutable state
-counter = 0
-~counter += 1
-~counter = counter * 2
-~counter -= 1
+counter ~= 0
+counter += 1
+counter = counter * 2
+counter -= 1
 
 -- shared access
 copy first = label
@@ -1033,16 +1033,6 @@ local_io = io
 [$note]
 [$todo]
 [$doc]
-
--- reactive markers in context
-[$count]
-[$name]
-[$title]
-[$status]
-[$progress]
-[$selected]
-[$hovered]
-[$dragging]
 
 -- long plain text paragraphs inside comments
 -- The quick brown fox jumps over the lazy dog while the compiler scans every word boundary.
@@ -1327,25 +1317,9 @@ validate_all |value String| -> Bool:
     return true
 ;
 
--- Example: simple reactive counter
-counter_state $= 0
-increment $:
-    ~counter_state += 1
-;
-
-decrement $:
-    ~counter_state -= 1
-;
-
-reset $:
-    ~counter_state = 0
-;
-
--- Example: subscriptions
-[$counter_state]
-[$counter_state * 2]
-[$counter_state >= 10]
-[$counter_state + 1]
+-- Example: ordinary exclusive mutation
+counter_state ~= 0
+counter_state += 1
 
 -- Example: template components
 component_button #= [$children(:<button class="btn">[$slot]</button>):

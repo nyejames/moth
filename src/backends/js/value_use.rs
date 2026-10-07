@@ -50,29 +50,10 @@ impl<'hir> JsEmitter<'hir> {
         use_context: JsValueUse,
     ) -> Result<String, CompilerError> {
         match use_context {
-            JsValueUse::PlainExpression | JsValueUse::HostCallArgument => {
-                // Ordinary string contexts receive a plain string snapshot.
-                self.lower_concrete_value(expression)
-            }
-
-            JsValueUse::AssignmentValue => {
-                // Assignment preserves reactive template values so they can be inserted later.
-                if self.value_is_reactive_template(expression.id) {
-                    self.lower_reactive_template_value(expression)
-                } else {
-                    self.lower_concrete_value(expression)
-                }
-            }
-
-            JsValueUse::MothCallArgument => {
-                // String parameters that receive reactive templates should pass the template value
-                // object, not a binding wrapper, so the callee can preserve reactivity.
-                if self.value_is_reactive_template(expression.id) {
-                    self.lower_reactive_template_value(expression)
-                } else {
-                    self.lower_call_argument_value(expression)
-                }
-            }
+            JsValueUse::PlainExpression
+            | JsValueUse::AssignmentValue
+            | JsValueUse::HostCallArgument => self.lower_concrete_value(expression),
+            JsValueUse::MothCallArgument => self.lower_call_argument_value(expression),
         }
     }
 
@@ -80,20 +61,13 @@ impl<'hir> JsEmitter<'hir> {
     ///
     /// WHAT: produces the raw JS value that the caller will receive in a fresh binding.
     /// WHY: ordinary returns preserve allocation identity by reading the raw value. Only
-    /// explicit `copy` requests an independent graph via `__moth_clone_value`. Reactive
-    /// template values preserve their specialised representation. This name avoids "fresh"
-    /// to prevent confusion with the semantic `FunctionReturnAliasSummary::Fresh` lattice
+    /// explicit `copy` requests an independent graph via `__moth_clone_value`. This name avoids
+    /// "fresh" to prevent confusion with the semantic `FunctionReturnAliasSummary::Fresh` lattice
     /// value, which describes whether the returned root aliases a parameter root.
     pub(crate) fn lower_moth_return_value(
         &mut self,
         expression: &HirExpression,
     ) -> Result<String, CompilerError> {
-        // Reactive template values preserve their specialised representation. They must not
-        // pass through generic deep-object cloning or template snapshotting.
-        if self.value_is_reactive_template(expression.id) {
-            return self.lower_reactive_template_value(expression);
-        }
-
         match &expression.kind {
             // Ordinary return: read the raw value. This preserves allocation identity. The
             // caller receives it in a fresh binding, but the underlying allocation is shared.

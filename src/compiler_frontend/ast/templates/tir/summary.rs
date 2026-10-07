@@ -51,7 +51,6 @@ pub(crate) struct TemplateIrSummary {
     pub(crate) wrapper_count: u32,
     pub(crate) max_depth: usize,
     pub(crate) has_control_flow: bool,
-    pub(crate) has_reactivity: bool,
 }
 
 impl TemplateIrSummary {
@@ -70,7 +69,6 @@ impl TemplateIrSummary {
             wrapper_count: 0,
             max_depth: 0,
             has_control_flow: false,
-            has_reactivity: false,
         }
     }
 
@@ -93,11 +91,8 @@ impl TemplateIrSummary {
         self.estimated_output_bytes += byte_len;
     }
 
-    pub(crate) fn record_dynamic_expression(&mut self, has_reactive_subscription: bool) {
+    pub(crate) fn record_dynamic_expression(&mut self) {
         self.dynamic_expression_count += 1;
-        if has_reactive_subscription {
-            self.has_reactivity = true;
-        }
     }
 
     pub(crate) fn record_child_template(&mut self) {
@@ -122,10 +117,6 @@ impl TemplateIrSummary {
 
     pub(crate) fn record_insert_contribution(&mut self) {
         self.insert_contribution_count += 1;
-    }
-
-    pub(crate) fn record_reactivity(&mut self) {
-        self.has_reactivity = true;
     }
 }
 
@@ -252,17 +243,9 @@ fn accumulate_nodes(
 
             TemplateIrNodeKind::Text { byte_len, .. } => {
                 summary.record_text_node(*byte_len);
-                if store.node_reactive_subscription(node_id)?.is_some() {
-                    summary.record_reactivity();
-                }
             }
 
-            TemplateIrNodeKind::DynamicExpression {
-                reactive_subscription,
-                ..
-            } => {
-                summary.record_dynamic_expression(reactive_subscription.is_some());
-            }
+            TemplateIrNodeKind::DynamicExpression { .. } => summary.record_dynamic_expression(),
 
             TemplateIrNodeKind::ChildTemplate { reference, .. } => {
                 validate_child_template(

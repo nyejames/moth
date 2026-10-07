@@ -504,7 +504,7 @@ fn boracle_fixture_skeleton_renders_every_normalized_variant() {
 
     for expected in [
         "CfgEdge::new(BlockId::new(0), BlockId::new(8))",
-        "Loan { id: LoanId::new(0), kind: AccessKind::Shared, issued_at: PointId::new(18), place: PlaceId::new(0), origins: vec![ValueOriginId::new(0)].into_boxed_slice(), holders: vec![PlaceId::new(0)].into_boxed_slice(), uses: vec![].into_boxed_slice(), kills: vec![PointId::new(19)].into_boxed_slice() }",
+        "Loan { id: LoanId::new(0), kind: AccessKind::Shared, issued_at: PointId::new(17), place: PlaceId::new(0), origins: vec![ValueOriginId::new(0)].into_boxed_slice(), holders: vec![PlaceId::new(0)].into_boxed_slice(), uses: vec![].into_boxed_slice(), kills: vec![PointId::new(18)].into_boxed_slice() }",
         "Call { id: CallId::new(0), label: \"renderer-call\".to_string() }",
         "Binding::new(BindingId::new(8), None, None, true, false, EventSource::none())",
         "Call { id: CallId::new(1), label: \"renderer-alias-call\".to_string() }",
@@ -521,19 +521,18 @@ fn boracle_fixture_skeleton_renders_every_normalized_variant() {
         "Event::new(EventId::new(5), PointId::new(6), EventKind::Copy { source: PlaceId::new(0), destination: PlaceId::new(5), origin: ValueOriginId::new(5) }, EventSource::none()),",
         "Event::new(EventId::new(6), PointId::new(7), EventKind::Projection { source: PlaceId::new(0), destination: PlaceId::new(6), origin: ValueOriginId::new(6) }, EventSource::none()),",
         "Event::new(EventId::new(11), PointId::new(12), EventKind::ScopeExit { bindings: vec![BindingId::new(0)].into_boxed_slice() }, EventSource::none()),",
-        "Event::new(EventId::new(12), PointId::new(13), EventKind::ReactiveObserve { place: PlaceId::new(0) }, EventSource::none()),",
-        "Event::new(EventId::new(15), PointId::new(16), EventKind::Access { use_id: UseId::new(1) }, EventSource::none()),",
-        "Event::new(EventId::new(17), PointId::new(18), EventKind::LoanIssue { loan: LoanId::new(0) }, EventSource::none()),",
-        "Event::new(EventId::new(42), PointId::new(43), EventKind::Terminator { kind: TerminatorEventKind::Return }, EventSource::none()),",
+        "Event::new(EventId::new(14), PointId::new(15), EventKind::Access { use_id: UseId::new(1) }, EventSource::none()),",
+        "Event::new(EventId::new(16), PointId::new(17), EventKind::LoanIssue { loan: LoanId::new(0) }, EventSource::none()),",
+        "Event::new(EventId::new(41), PointId::new(42), EventKind::Terminator { kind: TerminatorEventKind::Return }, EventSource::none()),",
         "EventKind::CallArgument { call: CallId::new(0), index: 0, argument: CallArgument { place: PlaceId::new(0), access: AccessKind::Shared, use_id: UseId::new(0) } }",
         "EventKind::CallEffect(CallEffect { call: CallId::new(0), arguments: vec![CallArgument { place: PlaceId::new(0), access: AccessKind::Shared, use_id: UseId::new(0) }].into_boxed_slice(), result: Some(CallResult { place: PlaceId::new(8), origin: ValueOriginId::new(8) }) })",
-        "Event::new(EventId::new(27), PointId::new(28), EventKind::CallEffect(CallEffect { call: CallId::new(1), arguments: vec![].into_boxed_slice(), result: Some(CallResult { place: PlaceId::new(9), origin: ValueOriginId::new(9) }) }), EventSource::none()),",
-        "Event::new(EventId::new(28), PointId::new(29), EventKind::CallArgument { call: CallId::new(2), index: 0, argument: CallArgument { place: PlaceId::new(0), access: AccessKind::Exclusive, use_id: UseId::new(3) } }, EventSource::none()),",
-        "Event::new(EventId::new(29), PointId::new(30), EventKind::CallEffect(CallEffect { call: CallId::new(2), arguments: vec![CallArgument { place: PlaceId::new(0), access: AccessKind::Exclusive, use_id: UseId::new(3) }].into_boxed_slice(), result: Some(CallResult { place: PlaceId::new(10), origin: ValueOriginId::new(10) }) }), EventSource::none()),",
-        "Event::new(EventId::new(30), PointId::new(31), EventKind::CallEffect(CallEffect { call: CallId::new(3), arguments: vec![].into_boxed_slice(), result: Some(CallResult { place: PlaceId::new(11), origin: ValueOriginId::new(11) }) }), EventSource::none()),",
-        "Event::new(EventId::new(31), PointId::new(32), EventKind::CallEffect(CallEffect { call: CallId::new(4), arguments: vec![].into_boxed_slice(), result: Some(CallResult { place: PlaceId::new(12), origin: ValueOriginId::new(12) }) }), EventSource::none()),",
-        "Event::new(EventId::new(32), PointId::new(33), EventKind::CallEffect(CallEffect { call: CallId::new(5), arguments: vec![].into_boxed_slice(), result: Some(CallResult { place: PlaceId::new(13), origin: ValueOriginId::new(13) }) }), EventSource::none()),",
-        "Event::new(EventId::new(33), PointId::new(34), EventKind::CallEffect(CallEffect { call: CallId::new(6), arguments: vec![].into_boxed_slice(), result: None }), EventSource::none()),",
+        "Event::new(EventId::new(26), PointId::new(27), EventKind::CallEffect(CallEffect { call: CallId::new(1), arguments: vec![].into_boxed_slice(), result: Some(CallResult { place: PlaceId::new(9), origin: ValueOriginId::new(9) }) }), EventSource::none()),",
+        "Event::new(EventId::new(27), PointId::new(28), EventKind::CallArgument { call: CallId::new(2), index: 0, argument: CallArgument { place: PlaceId::new(0), access: AccessKind::Exclusive, use_id: UseId::new(3) } }, EventSource::none()),",
+        "Event::new(EventId::new(28), PointId::new(29), EventKind::CallEffect(CallEffect { call: CallId::new(2), arguments: vec![CallArgument { place: PlaceId::new(0), access: AccessKind::Exclusive, use_id: UseId::new(3) }].into_boxed_slice(), result: Some(CallResult { place: PlaceId::new(10), origin: ValueOriginId::new(10) }) }), EventSource::none()),",
+        "Event::new(EventId::new(29), PointId::new(30), EventKind::CallEffect(CallEffect { call: CallId::new(3), arguments: vec![].into_boxed_slice(), result: Some(CallResult { place: PlaceId::new(11), origin: ValueOriginId::new(11) }) }), EventSource::none()),",
+        "Event::new(EventId::new(30), PointId::new(31), EventKind::CallEffect(CallEffect { call: CallId::new(4), arguments: vec![].into_boxed_slice(), result: Some(CallResult { place: PlaceId::new(12), origin: ValueOriginId::new(12) }) }), EventSource::none()),",
+        "Event::new(EventId::new(31), PointId::new(32), EventKind::CallEffect(CallEffect { call: CallId::new(5), arguments: vec![].into_boxed_slice(), result: Some(CallResult { place: PlaceId::new(13), origin: ValueOriginId::new(13) }) }), EventSource::none()),",
+        "Event::new(EventId::new(32), PointId::new(33), EventKind::CallEffect(CallEffect { call: CallId::new(6), arguments: vec![].into_boxed_slice(), result: None }), EventSource::none()),",
         "EventKind::Aggregate { destination: PlaceId::new(7), origin: ValueOriginId::new(0), fields: vec![AggregateField { projection: ProjectionElem::Field(0), source: PlaceId::new(0) }, AggregateField { projection: ProjectionElem::FixedIndex(1), source: PlaceId::new(0) }, AggregateField { projection: ProjectionElem::DynamicIndex, source: PlaceId::new(0) }, AggregateField { projection: ProjectionElem::CollectionElement, source: PlaceId::new(0) }, AggregateField { projection: ProjectionElem::MapEntry, source: PlaceId::new(0) }].into_boxed_slice() }",
         "EventKind::Rebind { destination: PlaceId::new(0), value: RebindValue::Fresh(ValueOriginId::new(1)) }",
         "EventKind::Rebind { destination: PlaceId::new(0), value: RebindValue::Alias(vec![ValueOriginId::new(0)].into_boxed_slice()) }",
@@ -1118,12 +1117,6 @@ fn renderer_coverage_problem() -> BorrowProblem {
         &mut events,
         EventKind::ScopeExit {
             bindings: vec![BindingId::new(0)].into_boxed_slice(),
-        },
-    );
-    renderer_event(
-        &mut events,
-        EventKind::ReactiveObserve {
-            place: PlaceId::new(0),
         },
     );
     let call_argument_point = renderer_event(

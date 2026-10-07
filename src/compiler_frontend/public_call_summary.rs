@@ -1,6 +1,6 @@
 //! Shared semantic call-summary vocabulary.
 //!
-//! WHAT: owns backend-neutral parameter, effect, transfer, reactive, return-alias and escaping
+//! WHAT: owns backend-neutral parameter, mutation, transfer, return-alias and escaping
 //! builtin-failure facts shared by semantic convergence and the public-interface draft.
 //! WHY: both stages consume the same semantic contract. Keeping the vocabulary at the frontend
 //! boundary prevents either stage from becoming the source of a second interpretation.
@@ -12,7 +12,6 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 pub(crate) enum PublicCallParameterAccess {
     Shared,
     Mutable,
-    Reactive,
 }
 
 /// The mutation effect observed for one parameter's root during borrow validation.
@@ -22,17 +21,9 @@ pub(crate) enum PublicCallMutationEffect {
     Writes,
 }
 
-/// Whether final-use analysis may grant optional transfer responsibility to one parameter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PublicCallTransferEligibility {
-    Ineligible,
-    Eligible,
-}
-
 /// The analysis/lowering transfer category for one parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PublicCallTransferEffect {
-    NeverConsumes,
     MayConsume,
     /// Reserved for a specialised already-proven path. Ordinary local source calls remain
     /// optional and use `MayConsume` instead.
@@ -40,41 +31,12 @@ pub(crate) enum PublicCallTransferEffect {
     AlwaysConsumes,
 }
 
-/// Reactive dependency and invalidation facts for one parameter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PublicCallReactiveEffect {
-    None,
-    Subscribes,
-    Invalidates,
-    SubscribesAndInvalidates,
-}
-
-impl PublicCallReactiveEffect {
-    pub(crate) fn with_subscription(self) -> Self {
-        match self {
-            Self::None | Self::Subscribes => Self::Subscribes,
-            Self::Invalidates => Self::SubscribesAndInvalidates,
-            Self::SubscribesAndInvalidates => Self::SubscribesAndInvalidates,
-        }
-    }
-
-    pub(crate) fn with_invalidation(self) -> Self {
-        match self {
-            Self::None | Self::Invalidates => Self::Invalidates,
-            Self::Subscribes => Self::SubscribesAndInvalidates,
-            Self::SubscribesAndInvalidates => Self::SubscribesAndInvalidates,
-        }
-    }
-}
-
 /// Owned semantic facts for one parameter, retained in source parameter order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PublicCallParameterSummary {
     pub access: PublicCallParameterAccess,
     pub mutation: PublicCallMutationEffect,
-    pub transfer_eligibility: PublicCallTransferEligibility,
     pub transfer_effect: PublicCallTransferEffect,
-    pub reactive_effect: PublicCallReactiveEffect,
 }
 
 /// User-function return alias metadata consumed by call transfer.
@@ -110,9 +72,8 @@ pub(crate) enum PublicCallSummaryTransition {
 /// WHAT: checks the AST signature and borrow-summary join plus the canonical shape of mutation,
 /// transfer and return-alias facts before the summary crosses the public-interface boundary.
 /// WHY: declared access remains stable for generic and concrete callables, while borrow validation
-/// owns executable effects, including reactive propagation. This boundary rejects impossible
-/// access/transfer combinations without making either producer inspect the other's source
-/// representation.
+/// owns executable effects. This boundary rejects impossible access/transfer combinations
+/// without making either producer inspect the other's source representation.
 pub(crate) fn validate_public_call_summary(
     declared_parameter_access: &[PublicCallParameterAccess],
     summary: &PublicCallSummary,
@@ -138,7 +99,7 @@ pub(crate) fn validate_public_call_summary(
 
 /// Validate that a newly computed call summary preserves the finite widening order.
 ///
-/// WHAT: checks invariant fields and the mutation, reactive-effect, return-alias and escaping
+/// WHAT: checks invariant fields and the mutation, return-alias and escaping
 ///       builtin-failure partial orders before a summary replaces an already retained summary.
 /// WHY: convergence must make progress through one explicit finite order. Silently accepting a
 ///      narrowing or incomparable transition would make scheduling order observable and hide an
@@ -176,11 +137,6 @@ pub(in crate::compiler_frontend) fn validate_public_call_summary_transition(
                 "public call summary transition changed parameter {parameter_index} access"
             )));
         }
-        if previous.transfer_eligibility != next.transfer_eligibility {
-            return Err(CompilerError::compiler_error(format!(
-                "public call summary transition changed parameter {parameter_index} transfer eligibility"
-            )));
-        }
         if previous.transfer_effect != next.transfer_effect {
             return Err(CompilerError::compiler_error(format!(
                 "public call summary transition changed parameter {parameter_index} transfer effect"
@@ -199,15 +155,6 @@ pub(in crate::compiler_frontend) fn validate_public_call_summary_transition(
                 )));
             }
         }
-
-        if !reactive_effect_is_widening(previous.reactive_effect, next.reactive_effect) {
-            return Err(CompilerError::compiler_error(format!(
-                "public call summary transition narrowed parameter {parameter_index} reactive effect"
-            )));
-        }
-        if previous.reactive_effect != next.reactive_effect {
-            widened = true;
-        }
     }
 
     if !return_alias_is_widening(&previous.return_alias, &next.return_alias) {
@@ -224,24 +171,6 @@ pub(in crate::compiler_frontend) fn validate_public_call_summary_transition(
     } else {
         PublicCallSummaryTransition::Unchanged
     })
-}
-
-fn reactive_effect_is_widening(
-    previous: PublicCallReactiveEffect,
-    next: PublicCallReactiveEffect,
-) -> bool {
-    let (previous_subscription, previous_invalidation) = reactive_effect_bits(previous);
-    let (next_subscription, next_invalidation) = reactive_effect_bits(next);
-    (!previous_subscription || next_subscription) && (!previous_invalidation || next_invalidation)
-}
-
-fn reactive_effect_bits(effect: PublicCallReactiveEffect) -> (bool, bool) {
-    match effect {
-        PublicCallReactiveEffect::None => (false, false),
-        PublicCallReactiveEffect::Subscribes => (true, false),
-        PublicCallReactiveEffect::Invalidates => (false, true),
-        PublicCallReactiveEffect::SubscribesAndInvalidates => (true, true),
-    }
 }
 
 fn return_alias_is_widening(
@@ -283,17 +212,10 @@ fn validate_parameter_summary(
     let valid = match declared_access {
         PublicCallParameterAccess::Shared => {
             parameter.mutation == PublicCallMutationEffect::NoWrite
-                && parameter.transfer_eligibility == PublicCallTransferEligibility::Eligible
                 && parameter.transfer_effect == PublicCallTransferEffect::MayConsume
         }
         PublicCallParameterAccess::Mutable => {
-            parameter.transfer_eligibility == PublicCallTransferEligibility::Eligible
-                && parameter.transfer_effect == PublicCallTransferEffect::MayConsume
-        }
-        PublicCallParameterAccess::Reactive => {
-            parameter.mutation == PublicCallMutationEffect::NoWrite
-                && parameter.transfer_eligibility == PublicCallTransferEligibility::Ineligible
-                && parameter.transfer_effect == PublicCallTransferEffect::NeverConsumes
+            parameter.transfer_effect == PublicCallTransferEffect::MayConsume
         }
     };
 

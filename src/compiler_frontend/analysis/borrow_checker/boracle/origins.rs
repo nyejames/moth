@@ -1383,7 +1383,6 @@ fn apply_event(
         }
         EventKind::CallArgument { .. }
         | EventKind::Access { .. }
-        | EventKind::ReactiveObserve { .. }
         | EventKind::Terminator { .. } => Ok((OriginTraceRule::Noop, None, Vec::new())),
         EventKind::LoanIssue { .. } | EventKind::LoanKill { .. } => {
             Ok((OriginTraceRule::Noop, None, Vec::new()))

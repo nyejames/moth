@@ -278,7 +278,7 @@ fn tir_tree_is_const_evaluable_standalone_value(
             }
             Ok(true)
         }
-        TemplateIrNodeKind::Text { .. } => Ok(store.node_reactive_subscription(node_id)?.is_none()),
+        TemplateIrNodeKind::Text { .. } => Ok(true),
         TemplateIrNodeKind::Slot { .. }
         | TemplateIrNodeKind::AggregateOutput
         | TemplateIrNodeKind::LoopControl { .. } => Ok(true),
@@ -449,7 +449,7 @@ fn tir_tree_is_const_evaluable_value(
             }
             Ok(true)
         }
-        TemplateIrNodeKind::Text { .. } => Ok(store.node_reactive_subscription(node_id)?.is_none()),
+        TemplateIrNodeKind::Text { .. } => Ok(true),
         TemplateIrNodeKind::Slot { .. }
         | TemplateIrNodeKind::AggregateOutput
         | TemplateIrNodeKind::LoopControl { .. } => Ok(true),

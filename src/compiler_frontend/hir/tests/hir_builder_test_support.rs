@@ -495,8 +495,6 @@ fn expression_to_owned_node(
     match &expression.kind {
         ExpressionKind::StringSlice(text) => OwnedRuntimeTemplateNode::Text {
             text: OwnedFoldedString::Text(string_table.resolve(*text).to_owned()),
-            reactive_subscription: None,
-            span: expression.span,
         },
 
         // WHAT: mirrors the runtime handoff: a structural string converts to a piece-bearing
@@ -509,16 +507,11 @@ fn expression_to_owned_node(
             let text = owned_folded_string_from_const_string(&value, resources, string_table)
                 .expect("fixture structural string must convert against the resource table that issued its resource handles");
 
-            OwnedRuntimeTemplateNode::Text {
-                text,
-                reactive_subscription: None,
-                span: expression.span,
-            }
+            OwnedRuntimeTemplateNode::Text { text }
         }
 
         _ => OwnedRuntimeTemplateNode::DynamicExpression {
             expression: Box::new(expression.clone()),
-            reactive_subscription: None,
             span: expression.span,
         },
     }
@@ -592,13 +585,7 @@ fn structural_string_fixture_materializes_a_piece_bearing_text_node() {
     let [single] = children.as_slice() else {
         panic!("one fixture expression should map to one owned node");
     };
-    let OwnedRuntimeTemplateNode::Text {
-        text,
-        reactive_subscription: None,
-        span: node_span,
-        ..
-    } = single
-    else {
+    let OwnedRuntimeTemplateNode::Text { text } = single else {
         panic!("structural string fixture should map to a piece-bearing text node, got {single:?}");
     };
 
@@ -611,7 +598,6 @@ fn structural_string_fixture_materializes_a_piece_bearing_text_node() {
             OwnedFoldedStringPiece::Text("after".to_owned()),
         ])
     );
-    assert_eq!(node_span, &None);
 }
 
 #[test]
@@ -631,12 +617,7 @@ fn all_text_structural_fixture_keeps_pieces_without_a_resource_table() {
     let [single] = children.as_slice() else {
         panic!("one fixture expression should map to one owned node");
     };
-    let OwnedRuntimeTemplateNode::Text {
-        text,
-        reactive_subscription: None,
-        ..
-    } = single
-    else {
+    let OwnedRuntimeTemplateNode::Text { text, .. } = single else {
         panic!("site-root fixture should map to a piece-bearing text node, got {single:?}");
     };
 

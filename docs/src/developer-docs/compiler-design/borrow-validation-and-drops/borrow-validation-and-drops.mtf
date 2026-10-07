@@ -81,7 +81,6 @@ Borrow validation reads validated HIR and publishes a solver-independent handoff
 - proof that a persistent edge or affine root cannot disappear while a dependent temporary borrow remains usable
 - proof that no capable source alias survives a candidate cleanup frontier
 - preliminary return-root alias and projection evidence
-- reactive invalidation and observability facts
 - resolved external access-boundary classifications
 
 These are stable semantic outputs, not a required lattice, root table or solver storage format. Branches and loops remain path-sensitive, but a different solver may derive the same handoff differently. Borrow validation supplies facts without rewriting HIR or choosing lifetime topology or physical representation.
@@ -102,7 +101,6 @@ Borrow-owned summaries cover:
 - mutation effects
 - optional transfer eligibility and effect category
 - preliminary return-root alias evidence
-- reactive effects
 - external function access rules
 
 Lifetime and retained-edge analysis adds complete result provenance, retained parameters, cardinality, detached stored-result effects, whole-domain kills, frontier-enabling effects, outcome-sensitive retention effects and outlives constraints. Cross-module call transfer consumes both summary layers through stable semantic metadata.
@@ -200,7 +198,6 @@ Borrow validation reads validated HIR and supplies the next analysis with:
 - proof that a persistent edge or affine root cannot disappear while a dependent temporary borrow remains usable
 - proof that no capable source alias survives a candidate cleanup frontier
 - preliminary return-root alias and projection evidence
-- reactive invalidation and observability facts
 - resolved external access-boundary classifications
 - path- and epoch-sensitive evidence about which committed edge sets may coexist
 
@@ -259,11 +256,13 @@ Debug and GC-native representations may erase individual cleanup operations when
 
 `ValidatedMemoryPlan` is the single final physical authority for cleanup and count transitions. Borrow facts are validated context, not an alternate lowering authority.
 
-## Reactive liveness
+## Builder lifecycle roots
 
-Observable state that a template subscription can still see must remain live for that observation model. Borrow validation treats subscriptions as **read-only dependencies**, not active borrow lifetimes that freeze the whole heap.
-
-Builder lifecycle roots later connect reactive observability to page, mount, request, frame or arena lifetimes. A backend may use a garbage-collected representation for those already-proven facts, but garbage collection does not define them.
+Page, mount, request, frame and arena roots are accepted future inputs to lifetime topology. They
+must be explicit when a builder-owned consumer retains Moth values. Wire and Route parameters by
+themselves create no observer, retained consumer or lifetime extension. Any future observation or
+event lifecycle needs its own accepted contract before borrow and lifetime analyses receive facts
+for it.
 
 ## Future-concurrency context
 

@@ -146,14 +146,6 @@ impl TirSlotResolution {
             kind: TirSlotResolutionKind::Missing,
         }
     }
-
-    /// Returns contribution sources, or an empty slice for a missing slot.
-    pub(crate) fn sources(&self) -> &[TemplateIrId] {
-        match &self.kind {
-            TirSlotResolutionKind::Resolved { sources } => sources,
-            TirSlotResolutionKind::Missing => &[],
-        }
-    }
 }
 
 // -------------------------

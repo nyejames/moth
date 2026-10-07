@@ -145,12 +145,4 @@ impl<'a> MalformedTirStore<'a> {
         };
         node.kind = kind;
     }
-
-    pub(crate) fn truncate_reactive_side_table(&mut self) {
-        self.store.node_reactive_subscriptions.pop();
-    }
-
-    pub(crate) fn clear_expression_overlays(&mut self) {
-        self.store.expression_overlays.clear();
-    }
 }

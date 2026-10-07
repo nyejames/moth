@@ -29,7 +29,6 @@ fn empty_summary_has_zero_counts_and_false_flags() {
     assert!(!summary.has_slots());
     assert_eq!(summary.insert_contribution_count, 0);
     assert!(!summary.has_control_flow);
-    assert!(!summary.has_reactivity);
 }
 
 #[test]
@@ -37,8 +36,8 @@ fn record_helpers_preserve_summary_shape_contracts() {
     let mut summary = TemplateIrSummary::empty();
     summary.record_text_node(10);
     summary.record_text_node(5);
-    summary.record_dynamic_expression(false);
-    summary.record_dynamic_expression(true);
+    summary.record_dynamic_expression();
+    summary.record_dynamic_expression();
     summary.record_child_template();
     summary.record_child_template();
     summary.record_control_flow();
@@ -54,7 +53,6 @@ fn record_helpers_preserve_summary_shape_contracts() {
     assert!(!summary.has_slots());
     assert!(summary.has_control_flow);
     assert_eq!(summary.insert_contribution_count, 1);
-    assert!(summary.has_reactivity);
 
     let mut unresolved_slot_summary = TemplateIrSummary::empty();
     unresolved_slot_summary.record_slot();

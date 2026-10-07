@@ -17,8 +17,8 @@ use super::super::ids::{
 use super::super::node::TemplateIrNodeKind;
 use super::super::overlays::{
     TemplateViewContext, TirExpressionOverlay, TirExpressionOverlayId, TirSlotResolution,
-    TirSlotResolutionOverlay, TirSlotResolutionOverlayId, TirWrapperApplicationMode,
-    TirWrapperContext, TirWrapperContextOverlay,
+    TirSlotResolutionKind, TirSlotResolutionOverlay, TirSlotResolutionOverlayId,
+    TirWrapperApplicationMode, TirWrapperContext, TirWrapperContextOverlay,
 };
 use super::super::refs::{
     TemplateTirChildReference, TemplateTirReference, TemplateWrapperReference,
@@ -52,8 +52,6 @@ fn bool_expression() -> Expression {
         function_receiver: None,
         value_mode: ValueMode::ImmutableOwned,
         span: None,
-        reactive_source: None,
-        reactive_template: None,
         const_record_state: ConstRecordState::RuntimeValue,
         contains_regular_division: false,
         synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
@@ -68,12 +66,8 @@ fn build_template_with_dynamic_expression(
     store: &mut super::super::store::TemplateIrStore,
 ) -> (TemplateIrId, TemplateIrNodeId) {
     let mut builder = TemplateIrBuilder::new(store);
-    let root = builder.push_dynamic_expression_node(
-        bool_expression(),
-        TemplateSegmentOrigin::Body,
-        None,
-        None,
-    );
+    let root =
+        builder.push_dynamic_expression_node(bool_expression(), TemplateSegmentOrigin::Body, None);
     let template_id = builder.finish_template(
         root,
         Style::default(),
@@ -391,7 +385,12 @@ fn effective_slot_resolution_resolves_present_and_none_cases() {
         .effective_slot_resolution(occurrence_id)
         .expect("slot resolution lookup should succeed")
         .expect("resolution should be present");
-    assert_eq!(resolution.sources(), &[source]);
+    assert_eq!(
+        resolution.kind,
+        TirSlotResolutionKind::Resolved {
+            sources: vec![source],
+        }
+    );
 
     // None: an empty context returns Ok(None) for any occurrence.
     let none_view = TirView::new(
@@ -1181,7 +1180,6 @@ fn build_template_with_dynamic_expression_at(
     let expr_node = builder.push_dynamic_expression_node(
         bool_expression_with_span(expression_span),
         TemplateSegmentOrigin::Body,
-        None,
         Some(expression_span),
     );
     let root = builder.push_sequence_node(vec![expr_node], None);
@@ -1214,8 +1212,6 @@ fn bool_expression_with_span(span: SourceSpan) -> Expression {
         function_receiver: None,
         value_mode: ValueMode::ImmutableOwned,
         span: Some(span),
-        reactive_source: None,
-        reactive_template: None,
         const_record_state: ConstRecordState::RuntimeValue,
         contains_regular_division: false,
         synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),

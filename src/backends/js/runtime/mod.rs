@@ -7,7 +7,7 @@
 //! The collection group is the compiler-owned JavaScript implementation of `@core/collections`.
 //! [`collection_javascript_helpers`] is consumed by both runtime emission and first-party
 //! dependency validation. The remaining prelude groups — binding, alias, computed-place, clone,
-//! error, result, map, string, cast, numeric, choice, and reactivity — are compiler-runtime
+//! error, result, map, string, cast, numeric, and choice — are compiler-runtime
 //! infrastructure rather than first-party package implementations. They intentionally stay out of
 //! the first-party package inventory; new package-facing JS must not be added here without an
 //! inventory source.
@@ -30,7 +30,6 @@ mod errors;
 mod maps;
 mod numeric;
 mod places;
-mod reactivity;
 mod results;
 mod strings;
 
@@ -105,11 +104,10 @@ impl<'hir> JsEmitter<'hir> {
     ///   result helpers          — `?` propagation and `or` fallback helpers
     ///   collection helpers      — guarded get/push/remove/length for ordered collections
     ///   map helpers             — guarded get/set/remove and infallible contains/clear/length for ordered maps
-    ///   string helpers          — canonical String conversion, equality, and map-key handling
+    ///   string helpers          — generic value-to-string conversion
     ///   cast helpers            — numeric and string casting with Result-typed errors
     ///   numeric helpers         — checked Number/BigInt integer and profile-precision Float arithmetic
     ///   choice helpers          — structural equality for nominal choice carriers
-    ///   reactivity helpers      — reactive source bindings, scheduler, and template-string values
     ///
     /// Most groups use hoisted JS `function` declarations. Float power also initialises
     /// top-level constants, so the complete prelude must precede emitted user functions and start.
@@ -117,8 +115,6 @@ impl<'hir> JsEmitter<'hir> {
         &mut self,
         emitted_code_uses_maps: bool,
         emitted_code_uses_numeric_helpers: NumericRuntimeHelperUsage,
-        emitted_code_uses_reactive_sources: bool,
-        emitted_code_uses_reactive_templates: bool,
     ) {
         self.emit_runtime_binding_helpers();
         self.emit_runtime_alias_helpers();
@@ -134,13 +130,6 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_runtime_cast_helpers();
         if emitted_code_uses_numeric_helpers.any() {
             self.emit_runtime_numeric_helpers(emitted_code_uses_numeric_helpers);
-        }
-        if emitted_code_uses_reactive_sources {
-            self.emit_runtime_reactive_source_helpers();
-        }
-        if emitted_code_uses_reactive_templates {
-            self.emit_runtime_template_string_helpers();
-            self.emit_runtime_mount_helper();
         }
     }
 }

@@ -8,9 +8,6 @@
 //!       unreachable, including signed-zero normalization and required carrier shapes.
 
 use super::support::*;
-use crate::compiler_frontend::analysis::borrow_checker::{
-    ReactiveInvalidationFact, ReactiveInvalidationKind,
-};
 use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
@@ -31,7 +28,6 @@ use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::reactivity::ReactiveSourceId;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::validate_hir_module;
@@ -951,7 +947,7 @@ fn proven_return_error_lowers_to_native_carrier_with_unchanged_branch() {
     let config = JsLoweringConfig::direct_js(false, NumericProfile::STANDARD);
     let analysed_module = lower_hir_to_js(
         &module,
-        &reactive_invalidation_report(&[1, 2]),
+        &BorrowCheckReport::default(),
         &analysed_table,
         &string_table,
         config.clone(),
@@ -961,7 +957,7 @@ fn proven_return_error_lowers_to_native_carrier_with_unchanged_branch() {
     .expect("analysed-table lowering should succeed");
     let retained_module = lower_hir_to_js(
         &module,
-        &reactive_invalidation_report(&[1, 2]),
+        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         config,
@@ -987,26 +983,16 @@ fn proven_return_error_lowers_to_native_carrier_with_unchanged_branch() {
         "a proven ReturnError operation must not emit the trap machinery"
     );
 
-    // The runtime's own flush hook observes the executed scheduler effects, and the executed
-    // caller serializes the returned fallible carrier — tag plus exact value — from the
-    // function's success slot, with the per-statement dirty sources in statement order.
     let function_name = analysed_module
         .function_name_by_id
         .get(&FunctionId(0))
         .cloned()
         .expect("emitted module carries its function name");
-    let driver = format!(
-        "__moth_reactive_flush_hook = (dirty) => console.log(dirty.join(\":\"));\nconsole.log(JSON.stringify({}()));",
-        function_name
-    );
+    let driver = format!("console.log(JSON.stringify({}()));", function_name);
     let analysed = run_javascript(&format!("{}\n{}", analysed_module.source, driver));
     let retained = run_javascript(&format!("{}\n{}", retained_module.source, driver));
     assert_same_runtime(&analysed, &retained, "proven ReturnError carrier branch");
-    assert_eq!(
-        analysed.stdout.trim(),
-        r#"{"tag":"ok","value":5}
-0:1"#
-    );
+    assert_eq!(analysed.stdout.trim(), r#"{"tag":"ok","value":5}"#);
 }
 
 /// Verifies that a ReturnError sibling the analysis must decline keeps the checked helper family
@@ -1408,32 +1394,13 @@ fn proven_u64_remainder_stays_on_bigint_carrier() {
     assert_eq!(analysed.stdout.trim(), "1n");
 }
 
-fn reactive_invalidation_report(statement_ids: &[u32]) -> BorrowCheckReport {
-    let mut report = BorrowCheckReport::default();
-    for (index, id) in statement_ids.iter().enumerate() {
-        let statement_id = HirNodeId(*id);
-        report.analysis.reactive_invalidations.insert(
-            statement_id,
-            vec![ReactiveInvalidationFact {
-                statement_id,
-                source: ReactiveSourceId(index as u32),
-                kind: ReactiveInvalidationKind::Assignment,
-                span: None,
-            }],
-        );
-    }
-    report
-}
-
-/// Verifies that proven lowering preserves the per-statement invalidation effects — one dirty
-/// source per statement in statement order, observed through the executed runtime flush hook —
-/// and the exact runtime result of the same chain.
+/// Verifies that proven lowering preserves the exact runtime result of a sequential numeric chain.
 #[test]
-fn proven_lowering_preserves_statement_effect_order() {
+fn proven_lowering_preserves_numeric_statement_order() {
     let lowered = lower_numeric_fixture(
-        "proven_effects",
+        "proven_numeric_chain",
         NumericProfile::STANDARD,
-        reactive_invalidation_report(&[1, 2, 3, 4, 5, 6]),
+        BorrowCheckReport::default(),
         |types, _environment, region| {
             let (locals, local_names) = named_locals(
                 &[
@@ -1518,13 +1485,8 @@ fn proven_lowering_preserves_statement_effect_order() {
         },
     );
 
-    // The runtime's own flush hook observes the executed scheduler effects: one dirty source
-    // per statement, in statement order, followed by the exact chain result.
-    let driver = format!(
-        "__moth_reactive_flush_hook = (dirty) => console.log(dirty.join(\":\"));\nconsole.log({}());",
-        lowered.function_name
-    );
+    let driver = format!("console.log({}());", lowered.function_name);
     let (analysed, retained) = run_both_tables(&lowered, &driver);
-    assert_same_runtime(&analysed, &retained, "proven effect chain");
-    assert_eq!(analysed.stdout.trim(), "3\n0:1:2:3:4:5");
+    assert_same_runtime(&analysed, &retained, "proven numeric chain");
+    assert_eq!(analysed.stdout.trim(), "3");
 }

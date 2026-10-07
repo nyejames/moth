@@ -73,7 +73,6 @@ fn prepared_runtime(view: &TirView<'_>) -> TemplatePreparation {
             wrapper_foldable: false,
             has_runtime_slot_plan: false,
             has_runtime_slot_sites: false,
-            has_reactive_dependence: false,
             final_value_kind: TemplateConstValueKind::NonConst,
         },
         outcome: TemplatePreparationOutcome::Runtime(RuntimeTemplateReason::RuntimeExpression),
@@ -387,7 +386,6 @@ fn build_expression_wrapper_template(
                 "original",
             )),
             origin: TemplateSegmentOrigin::Body,
-            reactive_subscription: None,
             site_id: expression_site_id,
         },
         None,
@@ -678,7 +676,6 @@ fn owned_handoff_preserves_structural_string_pieces() {
         TemplateIrNodeKind::DynamicExpression {
             expression: Box::new(structural_expression),
             origin: TemplateSegmentOrigin::Body,
-            reactive_subscription: None,
             site_id,
         },
         None,
@@ -887,7 +884,6 @@ fn parent_root_expression_overlay_applies_inside_child() {
             TemplateIrNodeKind::DynamicExpression {
                 expression: Box::new(child_expression),
                 origin: TemplateSegmentOrigin::Body,
-                reactive_subscription: None,
                 site_id: child_site_id,
             },
             None,
@@ -947,7 +943,6 @@ fn prepared_handoff_preserves_root_overlay_through_nested_children() {
                     ValueMode::ImmutableOwned,
                 )),
                 origin: TemplateSegmentOrigin::Body,
-                reactive_subscription: None,
                 site_id: leaf_site_id,
             },
             None,
@@ -1026,7 +1021,6 @@ fn runtime_child_reference_uses_structural_handoff() {
             TemplateIrNodeKind::DynamicExpression {
                 expression: Box::new(child_expression),
                 origin: TemplateSegmentOrigin::Body,
-                reactive_subscription: None,
                 site_id: child_site_id,
             },
             None,

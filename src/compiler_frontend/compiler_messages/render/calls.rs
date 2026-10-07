@@ -129,13 +129,6 @@ pub(crate) fn invalid_call_shape_message(
                 string_table,
             )
         }
-        InvalidCallShapeReason::ReactiveSourceRequired {
-            parameter_name,
-            parameter_index,
-        } => {
-            let label = parameter_label(parameter_name, parameter_index, string_table);
-            format!("{prefix} requires an existing reactive source for {label}. Pass a value declared with `$Type` or `$=` instead of an ordinary value.")
-        }
     }
 }
 

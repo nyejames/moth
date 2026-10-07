@@ -222,10 +222,8 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         })?;
 
         if static_candidate.has_selections() {
-            // Normalize and validate the untouched authored tree first. Its provisional reactive
-            // summaries may include both branches because this copy is never published.
-            self.propagate_reactive_template_metadata(&mut emitted.ast)
-                .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+            // Normalize and validate the untouched authored tree first. This copy is never
+            // published, but must still satisfy the ordinary AST-to-HIR boundary.
             self.normalize_ast_templates_for_hir(&mut emitted.ast, string_table)
                 .map_err(|error| {
                     self.template_normalization_error_messages(
@@ -239,8 +237,6 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
 
             // The candidate owns its exact annotated TIR contexts. Normalize those active views,
             // validate the completed HIR-boundary shape and publish the candidate atomically.
-            self.propagate_reactive_template_metadata(static_candidate.ast_mut())
-                .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
             self.normalize_ast_templates_for_hir(static_candidate.ast_mut(), string_table)
                 .map_err(|error| {
                     self.template_normalization_error_messages(
@@ -257,10 +253,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
         } else {
             // The common runtime-only path retains the existing single normalization owner. The
-            // unchanged projection is discarded without allocating reactive or normalization
-            // overlays.
-            self.propagate_reactive_template_metadata(&mut emitted.ast)
-                .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+            // unchanged projection is discarded without allocating normalization overlays.
             self.normalize_ast_templates_for_hir(&mut emitted.ast, string_table)
                 .map_err(|error| {
                     self.template_normalization_error_messages(
@@ -327,19 +320,10 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         )?;
 
         // ----------------------------
-        //  Publish active reactive metadata
-        // ----------------------------
-        // Template normalization above validates and materialises both authored branches. The
-        // durable flow pass runs only after static selection, so inactive returns cannot pollute
-        // function signatures, surviving calls or runtime handoffs.
-        self.propagate_reactive_template_metadata(&mut emitted.ast)
-            .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
-
-        // ----------------------------
         //  Synchronize finalized public defaults
         // ----------------------------
-        // The emitted AST now carries normalized defaults and active reactive return metadata.
-        // Synchronize that one completed copy into public roots and receiver root entries.
+        // The emitted AST now carries normalized defaults. Synchronize that one completed copy
+        // into public roots and receiver root entries.
         // Generic declarations without emitted nodes normalize their retained defaults here as
         // before.
         self.synchronize_normalized_public_defaults(&emitted.ast, string_table)

@@ -444,7 +444,6 @@ fn event_nested_size(event: &Event) -> usize {
         | EventKind::Projection { .. }
         | EventKind::Rebind { .. }
         | EventKind::ScopeExit { .. }
-        | EventKind::ReactiveObserve { .. }
         | EventKind::Terminator { .. }
         | EventKind::Access { .. }
         | EventKind::LoanIssue { .. }
@@ -898,9 +897,6 @@ fn remap_event_kind(
         }),
         EventKind::ScopeExit { bindings } => Some(EventKind::ScopeExit {
             bindings: remap_values(bindings, |binding| mapped(binding_map, binding.index()))?,
-        }),
-        EventKind::ReactiveObserve { place: place_id } => Some(EventKind::ReactiveObserve {
-            place: place(*place_id)?,
         }),
         EventKind::CallArgument {
             call: call_id,
@@ -1469,7 +1465,6 @@ fn event_kind_references_origin(kind: &EventKind, origin_id: ValueOriginId) -> b
         EventKind::AliasFromPlace { .. }
         | EventKind::ExclusiveAliasFromPlace { .. }
         | EventKind::ScopeExit { .. }
-        | EventKind::ReactiveObserve { .. }
         | EventKind::CallArgument { .. }
         | EventKind::Terminator { .. }
         | EventKind::Access { .. }
@@ -1566,7 +1561,6 @@ fn event_kind_references_place(kind: &EventKind, place_id: PlaceId) -> bool {
             fields,
             ..
         } => *destination == place_id || fields.iter().any(|field| field.source == place_id),
-        EventKind::ReactiveObserve { place } => *place == place_id,
         EventKind::CallArgument { argument, .. } => argument.place == place_id,
         EventKind::CallEffect(effect) => {
             effect
@@ -2089,10 +2083,6 @@ fn render_event_kind(kind: &EventKind) -> String {
         EventKind::ScopeExit { bindings } => format!(
             "EventKind::ScopeExit {{ bindings: {} }}",
             render_boxed(bindings, |id| render_binding_id(*id))
-        ),
-        EventKind::ReactiveObserve { place } => format!(
-            "EventKind::ReactiveObserve {{ place: {} }}",
-            render_place_id(*place)
         ),
         EventKind::CallArgument {
             call,

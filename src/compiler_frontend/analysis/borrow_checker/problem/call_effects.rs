@@ -101,9 +101,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             .iter()
             .map(|parameter| match parameter.access {
                 PublicCallParameterAccess::Mutable => AccessKind::Exclusive,
-                PublicCallParameterAccess::Shared | PublicCallParameterAccess::Reactive => {
-                    AccessKind::Shared
-                }
+                PublicCallParameterAccess::Shared => AccessKind::Shared,
             })
             .collect();
         let provenance = match &summary.return_alias {

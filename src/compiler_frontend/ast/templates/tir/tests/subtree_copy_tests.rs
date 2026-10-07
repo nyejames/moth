@@ -182,7 +182,6 @@ fn copied_child_remaps_retained_expression_and_slot_context() {
                 TemplateIrNodeKind::DynamicExpression {
                     expression: Box::new(bool_expression(true)),
                     origin: TemplateSegmentOrigin::Body,
-                    reactive_subscription: None,
                     site_id: expression_site,
                 },
                 None,

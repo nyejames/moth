@@ -31,8 +31,7 @@ use crate::compiler_frontend::external_packages::{
 };
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
-    PublicCallParameterSummary, PublicCallReactiveEffect, PublicCallSummary,
-    PublicCallTransferEffect, PublicCallTransferEligibility,
+    PublicCallParameterSummary, PublicCallSummary, PublicCallTransferEffect,
 };
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, ModuleRootRole, OriginDeclarationId, OriginFunctionId, OriginTraitId,
@@ -55,9 +54,7 @@ fn shared_summary(parameter_count: usize) -> PublicCallSummary {
             .map(|_| PublicCallParameterSummary {
                 access: PublicCallParameterAccess::Shared,
                 mutation: PublicCallMutationEffect::NoWrite,
-                transfer_eligibility: PublicCallTransferEligibility::Eligible,
                 transfer_effect: PublicCallTransferEffect::MayConsume,
-                reactive_effect: PublicCallReactiveEffect::None,
             })
             .collect(),
         return_alias: FunctionReturnAliasSummary::Fresh,

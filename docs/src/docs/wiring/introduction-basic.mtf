@@ -1,0 +1,65 @@
+Wiring is an accepted design for parameter contracts. The current Alpha
+compiler does not support Wire or Route syntax yet; that implementation is
+planned for Phase 6.
+
+The word before `of` chooses the meaning of the following list:
+
+[codeblock, $code("moth"):
+    Box of String
+    value Wire of String
+    submit Route of AppMessage
+]
+
+`Box of String` is an ordinary generic type application. `Wire of String` and
+`Route of AppMessage` describe contracts on function parameters. They are not
+runtime wrapper types, general values or constructor expressions.
+
+Several Moth declarations use pipe-delimited lists, but their positions keep
+different contracts:
+
+[codeblock, $code("moth"):
+    show |value String| -> String:
+        return value
+    ;
+
+    Point = |
+        x Int,
+        y Int,
+    |
+
+    Status ::
+        Ready,
+        Failed | message String |,
+    ;
+]
+
+Function parameters receive call arguments. Struct fields describe named
+runtime value storage. Choice payloads describe immutable data carried by one
+variant. Similar list shapes do not make these positions interchangeable:
+Wire and Route contracts are parameters only, never fields or payloads.
+
+Use the @../functions (Functions), @../structs (Structs),
+@../choices (Choices) and @../generics (Generics) references for those existing
+contracts. The detailed Wiring reference owns the accepted future syntax and
+edge cases.
+
+The receiving type must be immediate. The same boundary rule applies to
+ordinary generic calls, optional values and casts:
+
+[codeblock, $code("moth"):
+    empty type Item || -> {Item}:
+        return {}
+    ;
+
+    items {Int} = empty()
+    maybe_name String? = none
+    wide I64 = cast 1
+]
+
+`empty()` needs a concrete collection type, `none` needs an optional type, and
+`cast` gets its target from the annotated receiving type. A later use cannot
+fill in missing evidence, and an outer function parameter does not infer a
+nested generic call. Annotate an intermediate value when needed. Wiring adds
+no general higher-order inference or retry rule. See
+@../generics/#generic-inference (Generic inference),
+@../errors/#options (Options) and @../casts/#cast-syntax (Casts).

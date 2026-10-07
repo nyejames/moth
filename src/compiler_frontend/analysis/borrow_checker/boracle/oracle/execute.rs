@@ -208,24 +208,6 @@ fn dispatch_event<'problem, 'path>(
             Ok(EventExecutionResult::Continue)
         }
 
-        EventKind::ReactiveObserve { place } => {
-            require_place(context.problem, *place, "reactive observation")?;
-            // The contract makes this event metadata-only: no capability, no access check and
-            // no conflict. The observation never resolves a runtime target, so the availability
-            // check must not descend the observed path either. A materialising resolution would
-            // create generations for a missing Field or FixedIndex, which consumes the
-            // generation bound and reidentifies every later dynamic position, so a complete safe
-            // execution could turn into GenerationBound at a tight bound.
-            if is_place_available_without_materialising(context.problem, context.state, *place)? {
-                Ok(EventExecutionResult::Continue)
-            } else {
-                Err(oracle_error(format!(
-                    "reactive observation reads unavailable place {:?}",
-                    place
-                )))
-            }
-        }
-
         EventKind::CallArgument {
             call,
             index,

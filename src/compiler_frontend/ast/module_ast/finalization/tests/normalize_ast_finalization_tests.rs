@@ -54,7 +54,6 @@ fn finalization_normalizes_dynamic_expression_payloads_into_expression_overlay()
                 dynamic_expression,
                 TemplateSegmentOrigin::Body,
                 None,
-                None,
             );
             let template_id = builder.finish_template(
                 dynamic_node_id,
@@ -165,7 +164,6 @@ fn finalization_merges_expression_overrides_without_duplicate_sites() {
             Expression::int(1, None, ValueMode::ImmutableOwned),
             TemplateSegmentOrigin::Body,
             None,
-            None,
         );
         builder.finish_template(
             dynamic_node,
@@ -257,7 +255,6 @@ fn finalization_does_not_mark_parsed_expression_overlay_reference_finalized() {
             dynamic_expression,
             TemplateSegmentOrigin::Body,
             None,
-            None,
         );
         builder.finish_template(
             dynamic_node_id,
@@ -313,7 +310,6 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
             builder.push_dynamic_expression_node(
                 Expression::int(1, None, ValueMode::ImmutableOwned),
                 TemplateSegmentOrigin::Body,
-                None,
                 None,
             )
         };
@@ -663,7 +659,6 @@ fn finalization_fold_uses_finalized_expression_overlay_view() {
             Expression::string_slice(structural_text, None, ValueMode::ImmutableOwned),
             TemplateSegmentOrigin::Body,
             None,
-            None,
         );
         let root = builder.push_sequence_node(vec![dynamic_node], None);
         let template_id = builder.finish_template(
@@ -769,7 +764,6 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
                     ConstRecordState::RuntimeValue,
                 ),
                 TemplateSegmentOrigin::Body,
-                None,
                 None,
             );
             let branch_text_node = builder.push_text_node(
@@ -972,7 +966,6 @@ fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() 
             let dynamic_node = builder.push_dynamic_expression_node(
                 Expression::string_slice(structural_text, None, ValueMode::ImmutableOwned),
                 TemplateSegmentOrigin::Body,
-                None,
                 None,
             );
             let root = builder.push_sequence_node(vec![dynamic_node], None);
@@ -1253,14 +1246,10 @@ fn runtime_handoff_shape_uses_root_slot_plan_not_preparation_reason() {
         TemplatePreparationOutcome::Runtime(_)
     ));
 
-    let normalized = super::materialize_runtime_template_handoff_for_hir(
-        &template,
-        &mut context,
-        &prepared,
-        None,
-    )
-    .expect("prepared runtime handoff should materialize")
-    .expect("runtime template should produce a normalized handoff");
+    let normalized =
+        super::materialize_runtime_template_handoff_for_hir(&template, &mut context, &prepared)
+            .expect("prepared runtime handoff should materialize")
+            .expect("runtime template should produce a normalized handoff");
 
     assert!(
         matches!(

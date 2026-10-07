@@ -49,7 +49,7 @@ use crate::compiler_frontend::ast::expressions::assertion_message_effects::{
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
 use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, FallibleHandling, ReactiveTemplateMetadata,
+    Expression, ExpressionKind, FallibleHandling,
 };
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpnItem, PlaceExpression, PlaceExpressionKind,
@@ -62,7 +62,6 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::reactive_template_metadata;
 use crate::compiler_frontend::ast::templates::runtime_handoff;
 use crate::compiler_frontend::ast::templates::runtime_handoff::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
@@ -1229,7 +1228,7 @@ fn discard_inactive_assertion_messages_in_loop_header(
 /// Replaces a fully validated inactive assertion message with the canonical typed `none` shape.
 ///
 /// WHAT: removes the normalized executable message, including any owned runtime handoff,
-///       reactive metadata, synthetic provenance, and TIR-backed expression identity.
+///       synthetic provenance, and TIR-backed expression identity.
 /// WHY: a compile-time-true assertion remains frontend-valid but publishes no message value or
 ///      downstream executable fact. The existing resolved optional type identity is retained.
 fn replace_inactive_assertion_message(message: &mut Expression) -> Result<(), CompilerError> {
@@ -1441,12 +1440,7 @@ fn normalize_expression_templates_with_context(
                 }
 
                 FinalizedTemplateValue::Runtime(prepared) => {
-                    materialize_runtime_template_handoff_for_hir(
-                        template,
-                        context,
-                        &prepared,
-                        reactive_template_metadata_from_current_store(template, context)?,
-                    )?
+                    materialize_runtime_template_handoff_for_hir(template, context, &prepared)?
                 }
 
                 FinalizedTemplateValue::Helper(kind) => {
@@ -1592,87 +1586,32 @@ fn normalize_expression_templates_with_context(
             };
             expression.diagnostic_type = DataType::StringSlice;
             expression.value_mode = ValueMode::ImmutableOwned;
-            expression.reactive_template = None;
             expression.synthetic_interface_provenance = outer_provenance.union(&fold_provenance);
         }
 
-        Some(NormalizedTemplateExpression::RuntimeSlotApplication(handoff, reactive_template)) => {
+        Some(NormalizedTemplateExpression::RuntimeSlotApplication(handoff)) => {
             let value_mode = expression.value_mode.clone();
             let synthetic_interface_provenance = expression.synthetic_interface_provenance.clone();
             *expression = Expression::runtime_slot_application_handoff(handoff, value_mode);
-            expression.reactive_template = reactive_template;
             expression.synthetic_interface_provenance = synthetic_interface_provenance;
         }
 
-        Some(NormalizedTemplateExpression::RuntimeTemplate(handoff, reactive_template)) => {
+        Some(NormalizedTemplateExpression::RuntimeTemplate(handoff)) => {
             let value_mode = expression.value_mode.clone();
             let synthetic_interface_provenance = expression.synthetic_interface_provenance.clone();
             *expression = Expression::runtime_template_handoff(handoff, value_mode);
-            expression.reactive_template = reactive_template;
             expression.synthetic_interface_provenance = synthetic_interface_provenance;
         }
 
-        None => {
-            if let ExpressionKind::Template(template) = &expression.kind {
-                expression.reactive_template =
-                    reactive_template_metadata_from_current_store(template, context)?;
-            }
-        }
+        None => {}
     }
 
     Ok(())
 }
 enum NormalizedTemplateExpression {
     Folded(ConstStringValue, SyntheticInterfaceProvenance),
-    RuntimeTemplate(
-        OwnedRuntimeTemplateHandoff,
-        Option<ReactiveTemplateMetadata>,
-    ),
-    RuntimeSlotApplication(
-        OwnedRuntimeSlotApplicationHandoff,
-        Option<ReactiveTemplateMetadata>,
-    ),
-}
-
-fn reactive_template_metadata_from_current_store(
-    template: &Template,
-    context: &TemplateNormalizationContext<'_>,
-) -> Result<Option<ReactiveTemplateMetadata>, CompilerError> {
-    // Normalization has the module store, so it should refresh metadata from
-    // the same finalized TIR roots that HIR handoff materialization consumes.
-    // Use the final effective `TirView` so expression overlays are honored.
-    let store = context.template_ir_store.borrow();
-    reactive_template_metadata_from_store(template, &store)
-}
-
-fn reactive_template_metadata_from_store(
-    template: &Template,
-    store: &TemplateIrStore,
-) -> Result<Option<ReactiveTemplateMetadata>, CompilerError> {
-    let mut metadata = ReactiveTemplateMetadata::template_backed();
-    let view = finalized_tir_view_for_template(template, store)?;
-    reactive_template_metadata::merge_reactive_template_metadata(
-        &view,
-        &mut metadata,
-        &mut |expression| expression_reactive_template_metadata_from_store(expression, store),
-    )?;
-
-    Ok(Some(metadata))
-}
-
-fn expression_reactive_template_metadata_from_store(
-    expression: &Expression,
-    store: &TemplateIrStore,
-) -> Result<Option<ReactiveTemplateMetadata>, CompilerError> {
-    if let Some(metadata) = &expression.reactive_template {
-        return Ok(Some(metadata.clone()));
-    }
-
-    if let ExpressionKind::Template(template) = &expression.kind {
-        return reactive_template_metadata_from_store(template, store);
-    }
-
-    Ok(None)
+    RuntimeTemplate(OwnedRuntimeTemplateHandoff),
+    RuntimeSlotApplication(OwnedRuntimeSlotApplicationHandoff),
 }
 
 /// Normalizes a template for HIR consumption.
@@ -1772,7 +1711,6 @@ fn materialize_runtime_template_handoff_for_hir(
     template: &Template,
     context: &mut TemplateNormalizationContext<'_>,
     prepared: &TemplatePreparation,
-    reactive_template: Option<ReactiveTemplateMetadata>,
 ) -> Result<Option<NormalizedTemplateExpression>, TemplateNormalizationError> {
     let store_handle = Rc::clone(&context.template_ir_store);
     let store = store_handle.borrow();
@@ -1803,7 +1741,6 @@ fn materialize_runtime_template_handoff_for_hir(
         increment_ast_counter(AstCounter::RuntimeTemplateHandoffsMaterialized);
         return Ok(Some(NormalizedTemplateExpression::RuntimeSlotApplication(
             handoff,
-            reactive_template,
         )));
     }
 
@@ -1815,10 +1752,7 @@ fn materialize_runtime_template_handoff_for_hir(
     )?;
 
     increment_ast_counter(AstCounter::RuntimeTemplateHandoffsMaterialized);
-    Ok(Some(NormalizedTemplateExpression::RuntimeTemplate(
-        handoff,
-        reactive_template,
-    )))
+    Ok(Some(NormalizedTemplateExpression::RuntimeTemplate(handoff)))
 }
 
 fn normalize_runtime_slot_handoff_for_hir(

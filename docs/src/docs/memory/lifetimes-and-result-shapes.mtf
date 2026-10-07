@@ -129,9 +129,12 @@ that more precise per-result analysis could prove independent.
 
 Cross-region cycles are invalid. Every strongly connected allocation graph must belong to one lifetime region. A declared region is the only source mechanism for building a direct cycle: the compiler never invents a cyclic region on your behalf. `copy` preserves internal alias topology, but copying a cycle into an ordinary inferred region remains invalid. Direct source construction of cyclic graphs is deferred with the rest of declared-region implementation.
 
-### Reactive and builder-owned lifetimes
+### Builder-owned lifetimes
 
-Reactive subscriptions are read-only dependencies, not active borrow lifetimes. Builder-supplied page, mount, request, frame and arena roots are lifecycle inputs. They obey the same retained-edge rule as source regions. Builders supply lifecycle roots but cannot change source legality.
+Page, mount, request, frame and arena roots are accepted future inputs to lifetime topology. They
+obey the same retained-edge rule as source regions when a builder-owned consumer retains Moth
+values. Builders supply lifecycle roots but cannot change source legality. Future observation and
+event lifecycles need a separate accepted contract before they become memory-planning inputs.
 
 ### External boundaries
 

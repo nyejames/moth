@@ -454,7 +454,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let value_mode = match parameter.access {
                 PublicCallParameterAccess::Shared => ValueMode::ImmutableReference,
                 PublicCallParameterAccess::Mutable => ValueMode::MutableReference,
-                PublicCallParameterAccess::Reactive => ValueMode::ImmutableReference,
             };
             let mut value = Expression::new(
                 ExpressionKind::NoValue,
@@ -466,15 +465,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             if let Some(default) = &parameter.folded_default {
                 value = self.project_imported_folded_value(default, type_id, string_table)?;
                 value.value_mode = value_mode;
-            }
-            if parameter.access == PublicCallParameterAccess::Reactive {
-                value.reactive_source = Some(ReactiveSource {
-                    path: self
-                        .path_fork
-                        .try_intern_child(*function_path, name)
-                        .expect("imported callable parameter path table exhausted"),
-                    kind: ReactiveSourceKind::Parameter,
-                });
             }
             parameters.push(Declaration {
                 id: self
@@ -505,7 +495,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             returns.push(ReturnSlot {
                 value: diagnostic_type,
                 type_id: Some(type_id),
-                reactive_template: None,
                 channel: ReturnChannel::Error,
             });
             Some(type_id)

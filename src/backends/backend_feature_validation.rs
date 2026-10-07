@@ -35,8 +35,7 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::reachability::{
     HirBackendSelection, HirReachability, ReachableAssertionMessageUse,
     ReachableFloatStatementKind, ReachableFloatStatementUse, ReachableMapUse, ReachableMapUseKind,
-    ReachableNumericOpUse, ReachableRangeStepFailureUse, ReachableReactiveSinkKind,
-    ReachableReactiveSinkUse, ReachableReactiveTemplateUse, ReachableRuntimeCastForm,
+    ReachableNumericOpUse, ReachableRangeStepFailureUse, ReachableRuntimeCastForm,
     ReachableRuntimeCastUse,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
@@ -72,7 +71,7 @@ pub struct BackendFeatureValidationInput<'a> {
 
 /// Validates HIR runtime features that are target-specific after frontend semantics are complete.
 ///
-/// WHAT: hashmap construction/use, reactive runtime features, runtime casts, checked numeric
+/// WHAT: hashmap construction/use, runtime casts, checked numeric
 ///       operations, generic runtime values, Moth `Error` values and fallible control flow are
 ///       legal HIR, but this validator reports Wasm features that the target cannot lower. Its
 ///       bounded scalar step accepts direct integer/Byte and F16/F32/F64 values while retaining
@@ -116,17 +115,12 @@ pub fn validate_hir_backend_feature_support(
                 string_table,
             )?;
             validate_wasm_cross_module_calls(input.hir, reachability, input.target, string_table)?;
-            // Wasm still gates hashmaps, reactive runtime features, recoverable numeric
+            // Wasm still gates hashmaps, recoverable numeric
             // failure, statement casts, unsupported formatting, generic values and later
             // Error-value/fallible-control-flow checks. Trap-mode Float formatting and
             // finite validation run natively. Supported trap-mode arithmetic is not a
             // stand-in for recoverable failure delivery.
             validate_wasm_maps(&reachability.reachable_map_uses, input.target, string_table)?;
-            validate_wasm_reactive_features(
-                &reachability.reachable_reactive_templates,
-                input.target,
-                string_table,
-            )?;
             validate_wasm_runtime_casts(
                 &reachability.reachable_runtime_casts,
                 input.target,
@@ -178,16 +172,7 @@ pub fn validate_hir_backend_feature_support(
                 string_table,
             )?;
         }
-        BackendTarget::Js => {
-            // JS supports V1 top-level runtime fragment sinks, but not reactive template values
-            // flowing into external/host calls such as `io.line(...)`.
-            validate_js_reactive_sinks(
-                input.hir,
-                &reachability.reachable_reactive_sinks,
-                input.target,
-                string_table,
-            )?;
-        }
+        BackendTarget::Js => {}
     }
 
     Ok(())
@@ -411,31 +396,6 @@ fn validate_wasm_maps(
         string_table.intern(target.as_str()),
         reason,
         map_use.span,
-    );
-
-    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
-}
-
-/// Reports the first reachable reactive runtime feature for the Wasm target.
-///
-/// WHAT: reactive template values with runtime dependencies are valid HIR, but HTML-Wasm does
-///       not yet have a reactive runtime design.
-/// WHY: reject early with a structured diagnostic carrying the source span instead of a
-///      backend-internal lowering failure. Unreachable helper functions containing reactive
-///      templates remain valid typed HIR and do not block the build.
-fn validate_wasm_reactive_features(
-    reactive_templates: &[ReachableReactiveTemplateUse],
-    target: BackendTarget,
-    string_table: &mut StringTable,
-) -> Result<(), BackendFeatureValidationError> {
-    let Some(reactive_template) = reactive_templates.first() else {
-        return Ok(());
-    };
-
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
-        string_table.intern(target.as_str()),
-        UnsupportedBackendFeatureReason::ReactiveTemplateRuntime,
-        reactive_template.span,
     );
 
     Err(BackendFeatureValidationError::Diagnostic(diagnostic))
@@ -1525,50 +1485,4 @@ impl BackendTypeVisit {
         self.contains_number |= other.contains_number;
         self.open_cycle |= other.open_cycle;
     }
-}
-
-/// Reports the first reachable unsupported reactive sink for the JS target.
-///
-/// WHAT: JS supports V1 top-level runtime fragment sinks, but reactive template values with
-///       runtime subscriptions passed to external/host calls such as `io.line(...)` are deferred.
-///       Plain String parameters that merely *could* carry a reactive template are still allowed
-///       at unsupported sinks until an actual reactive value flows there.
-/// WHY: fail early with a structured diagnostic instead of silently snapshotting a reactive
-///      template at an unsupported sink, while avoiding false positives from ordinary String
-///      parameters.
-fn validate_js_reactive_sinks(
-    hir: &HirModule,
-    reactive_sinks: &[ReachableReactiveSinkUse],
-    target: BackendTarget,
-    string_table: &mut StringTable,
-) -> Result<(), BackendFeatureValidationError> {
-    let Some(rejected_sink) = reactive_sinks
-        .iter()
-        .filter(|sink| !matches!(sink.kind, ReachableReactiveSinkKind::RuntimeFragment))
-        .find(|sink| sink_template_has_runtime_subscription(hir, sink))
-    else {
-        return Ok(());
-    };
-
-    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
-        string_table.intern(target.as_str()),
-        UnsupportedBackendFeatureReason::ReactiveExternalCallSink,
-        rejected_sink.span,
-    );
-
-    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
-}
-
-/// Returns true when the template consumed by `sink` has at least one runtime subscription.
-///
-/// WHAT: a template with only template-value-parameter placeholders is not yet a live reactive
-///       value; it needs an actual `$(source)` subscription to trigger the unsupported-sink rule.
-fn sink_template_has_runtime_subscription(
-    hir: &HirModule,
-    sink: &ReachableReactiveSinkUse,
-) -> bool {
-    hir.side_table
-        .reactive_templates()
-        .find(|template| template.id == sink.template_id)
-        .is_some_and(|template| !template.dependencies.is_empty())
 }

@@ -29,8 +29,7 @@ use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
-    PublicCallParameterSummary, PublicCallReactiveEffect, PublicCallSummary,
-    PublicCallTransferEffect, PublicCallTransferEligibility,
+    PublicCallParameterSummary, PublicCallSummary, PublicCallTransferEffect,
 };
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModulePrivateExecutableCategory,
@@ -1200,9 +1199,7 @@ fn borrow_problem_hir_extractor_imports_call_access_and_result_alias_facts() {
             parameters: vec![PublicCallParameterSummary {
                 access: PublicCallParameterAccess::Mutable,
                 mutation: PublicCallMutationEffect::Writes,
-                transfer_eligibility: PublicCallTransferEligibility::Ineligible,
-                transfer_effect: PublicCallTransferEffect::NeverConsumes,
-                reactive_effect: PublicCallReactiveEffect::None,
+                transfer_effect: PublicCallTransferEffect::MayConsume,
             }],
             return_alias: FunctionReturnAliasSummary::AliasParams(vec![0]),
             escapes_builtin_failure: false,

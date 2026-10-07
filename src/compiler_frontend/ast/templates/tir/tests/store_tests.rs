@@ -14,13 +14,11 @@ use super::super::store::{ControlFlowBodyKind, TemplateIrStore};
 use super::super::summary::TemplateIrSummary;
 use super::super::view::TemplateTirPhase;
 use super::builder::TemplateIrBuilder;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, ReactiveSource, ReactiveSourceKind,
-};
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::templates::template::{
-    ReactiveSubscription, Style, TemplateSegmentOrigin, TemplateType,
+    Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::TemplateBranchSelector;
 use crate::compiler_frontend::ast::templates::template_slots::{
@@ -78,8 +76,6 @@ fn bool_selector() -> TemplateBranchSelector {
         function_receiver: None,
         value_mode: ValueMode::ImmutableOwned,
         span: None,
-        reactive_source: None,
-        reactive_template: None,
         const_record_state: ConstRecordState::RuntimeValue,
         contains_regular_division: false,
         synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
@@ -637,43 +633,6 @@ fn reserved_plan_is_invisible_to_preparation_lookup() {
     let reserved = store.reserve_slot_plan();
     assert!(store.get_slot_plan(reserved).is_none());
     assert!(store.get_slot_plan(TemplateSlotPlanId::new(99)).is_none());
-}
-
-#[test]
-fn reactive_subscription_rejects_non_text_node() {
-    let mut store = TemplateIrStore::new();
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let sequence = empty_sequence(&mut store);
-    let source = ReactiveSource {
-        path: path_fork
-            .try_intern_portable_path("main.moth/#reactive", &mut string_table)
-            .expect("test path fits"),
-        kind: ReactiveSourceKind::Declaration,
-    };
-    let error = store
-        .set_node_reactive_subscription(
-            sequence,
-            ReactiveSubscription {
-                source,
-                type_id: builtin_type_ids::STRING,
-                span: None,
-            },
-        )
-        .expect_err("only text nodes accept reactive subscriptions");
-    assert!(error.msg.contains("non-text"));
-}
-
-#[test]
-fn reactive_subscription_read_rejects_truncated_side_table() {
-    let mut store = TemplateIrStore::new();
-    let node = empty_sequence(&mut store);
-    MalformedTirStore::new(&mut store).truncate_reactive_side_table();
-
-    let error = store
-        .node_reactive_subscription(node)
-        .expect_err("a missing aligned side-table entry is malformed store state");
-    assert!(error.msg.contains("reactive side table is missing"));
 }
 
 #[test]

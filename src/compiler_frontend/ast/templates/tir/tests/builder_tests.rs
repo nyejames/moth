@@ -330,12 +330,7 @@ fn push_dynamic_expression_node_stores_expression_payload() {
 
     let node_id = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        builder.push_dynamic_expression_node(
-            expression.clone(),
-            TemplateSegmentOrigin::Head,
-            None,
-            None,
-        )
+        builder.push_dynamic_expression_node(expression.clone(), TemplateSegmentOrigin::Head, None)
     };
 
     let node = store
@@ -455,7 +450,6 @@ fn expression_site_ids_assigned_in_document_order() {
             ),
             TemplateSegmentOrigin::Body,
             None,
-            None,
         );
         let id_b = builder.push_dynamic_expression_node(
             Expression::string_slice(
@@ -465,7 +459,6 @@ fn expression_site_ids_assigned_in_document_order() {
             ),
             TemplateSegmentOrigin::Body,
             None,
-            None,
         );
         let id_c = builder.push_dynamic_expression_node(
             Expression::string_slice(
@@ -474,7 +467,6 @@ fn expression_site_ids_assigned_in_document_order() {
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
-            None,
             None,
         );
         (id_a, id_b, id_c)
@@ -547,7 +539,6 @@ fn derived_root_preserves_existing_occurrence_and_site_ids() {
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
-            None,
             None,
         );
 
@@ -665,7 +656,6 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
             ),
             TemplateSegmentOrigin::Body,
             None,
-            None,
         );
 
         let branch_body_a = builder.push_text_node(
@@ -731,7 +721,6 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
-            None,
             None,
         );
 
@@ -1101,7 +1090,6 @@ fn expression_sites_share_one_document_order_counter() {
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
-            None,
             None,
         );
 

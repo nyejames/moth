@@ -510,10 +510,8 @@ fn expression_with_inlined_kind(expression: &Expression, kind: ExpressionKind) -
     );
 
     // Constant-reference inlining replaces only the structural children. The surrounding value
-    // keeps its previously resolved const-record, reactive, and division-provenance metadata.
+    // keeps its previously resolved const-record and division-provenance metadata.
     rewritten.const_record_state = expression.const_record_state;
-    rewritten.reactive_source = expression.reactive_source.clone();
-    rewritten.reactive_template = expression.reactive_template.clone();
     rewritten.contains_regular_division = expression.contains_regular_division;
     rewritten.synthetic_interface_provenance = expression.synthetic_interface_provenance.clone();
     rewritten

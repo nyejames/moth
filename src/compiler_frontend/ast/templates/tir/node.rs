@@ -27,7 +27,7 @@
 
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::template::{
-    ReactiveSubscription, SlotKey, Style, TemplateSegmentOrigin, TemplateType,
+    SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateElseMarker, TemplateLoopControlKind, TemplateLoopHeader,
@@ -184,14 +184,6 @@ pub(crate) enum TemplateIrNodeKind {
     DynamicExpression {
         expression: Box<Expression>,
         origin: TemplateSegmentOrigin,
-        /// Direct `$(source)` reactive subscription carried by this splice, if any.
-        ///
-        /// WHAT: preserves the per-segment subscription marker that the AST
-        /// attaches to `$(source)` template chunks.
-        /// WHY: HIR lowering needs to distinguish direct subscriptions (lazy)
-        /// from ordinary dynamic reads (snapshots) without re-parsing template
-        /// directives or consulting another render-plan representation.
-        reactive_subscription: Option<ReactiveSubscription>,
         /// Document-order site ID assigned when this node is emitted.
         ///
         /// WHAT: a per-store counter assigns this ID in construction order so

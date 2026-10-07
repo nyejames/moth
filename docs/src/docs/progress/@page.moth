@@ -161,7 +161,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Partial]
             [: Broad parser, diagnostics, HIR lowering, backend artifact and integration coverage. Dynamic default-message failures execute on HTML and instantiated HTML-Wasm with distinct Error and trap observations.]
             [: Frontend / HIR / JS / HTML / HTML-Wasm]
-            [: [$html:<code>assert</code>] is a statement-only language intrinsic. It is always checked, unrecoverable and accepts named/default typed messages. JavaScript and HTML evaluate reachable runtime messages lazily on the failure edge; HTML-Wasm accepts default, fully folded and unreachable literal-true runtime messages but rejects reachable runtime construction. Literal-true messages are fully type/generic/evidence checked and normalized, then replaced with typed [$html:<code>none</code>] before HIR, so no TIR, runtime handoff, reactive metadata, generated request or executable fact is published. Message construction cannot escape its evaluation through [$html:<code>!</code>], [$html:<code>?</code>], return, break or continue. Authored propagation locations remain distinct from ordinary call mapping. [$html:<code>assert(false)</code>] is statically terminal.]
+            [: [$html:<code>assert</code>] is a statement-only language intrinsic. It is always checked, unrecoverable and accepts named/default typed messages. JavaScript and HTML evaluate reachable runtime messages lazily on the failure edge; HTML-Wasm accepts default, fully folded and unreachable literal-true runtime messages but rejects reachable runtime construction. Literal-true messages are fully type/generic/evidence checked and normalized, then replaced with typed [$html:<code>none</code>] before HIR, so no TIR, runtime handoff, generated request or executable fact is published. Message construction cannot escape its evaluation through [$html:<code>!</code>], [$html:<code>?</code>], return, break or continue. Authored propagation locations remain distinct from ordinary call mapping. [$html:<code>assert(false)</code>] is statically terminal.]
         ]
 
         [data:
@@ -185,7 +185,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Supported]
             [: Broad template parsing, directive, slot, const/runtime fragment, template control-flow, markdown inline-code and link-separator, heading section-link, diagnostics and JS/HTML integration coverage. Focused [$html:<code>$code</code>] formatter, escaping, lexical-role and HTML artifact coverage.]
             [: HTML / JS]
-            [: Main Alpha surface. Supported shapes include const and runtime templates, slots/inserts, [$html:<code>$children</code>] / [$html:<code>$fresh</code>] routing, markdown/code/raw/html/css/escape directives, template Bool and option branching, template loops, runtime slot applications, dependency namespace member access in template heads and const expansion guards. Static [$html:<code>$md</code>] headings and implicit [$html:<code>$md</code>] in [$html:<code>.mtf</code>] files render automatic fragment IDs from their visible labels, with opaque labels omitting IDs, and plain [$html:<code>.md</code>] files keep their separate renderer with no automatic IDs. Post-TIR performance follow-ups remain accepted deferred implementation tracked below and in the roadmap. [$html:<code>$code("moth")</code>] uses compiler-owned current word classification, lexical token roles and shared code presentation classes, and performs no semantic symbol resolution. Presentation-only roles cover final-design [$html:<code>into</code>] placement and canonical [$html:<code>Dec</code>] scale names without reserving them, and a shared error role marks Moth [$html:<code>!</code>] alongside JS/TS [$html:<code>throw</code>]/[$html:<code>catch</code>] and Python [$html:<code>raise</code>]/[$html:<code>except</code>]. Template bodies stay plain authored text around highlighted heads and interpolations.]
+            [: Main Alpha surface. Supported shapes include const and runtime templates, slots/inserts, [$html:<code>$children</code>] / [$html:<code>$fresh</code>] routing, markdown/code/raw/html/css/escape directives, template Bool and option branching, template loops, runtime slot applications, dependency namespace member access in template heads and const expansion guards. Static [$html:<code>$md</code>] headings and implicit [$html:<code>$md</code>] in [$html:<code>.mtf</code>] files render automatic fragment IDs from their visible labels, with opaque labels omitting IDs, and plain [$html:<code>.md</code>] files keep their separate renderer with no automatic IDs. Post-TIR performance follow-ups remain accepted deferred implementation tracked below and in the roadmap. [$html:<code>$code("moth")</code>] uses compiler-owned current word classification, lexical token roles and shared code presentation classes, and performs no semantic symbol resolution. Former dollar binding/parameter forms and [$html:<code>$(source)</code>] interpolation receive [$html:<code>MOTH-SYNTAX-0007</code>] at the dollar marker, with lexer and source-case coverage. Recognised template directives remain supported. Presentation-only roles cover final-design [$html:<code>into</code>] placement and canonical [$html:<code>Dec</code>] scale names without reserving them, and a shared error role marks Moth [$html:<code>!</code>] alongside JS/TS [$html:<code>throw</code>]/[$html:<code>catch</code>] and Python [$html:<code>raise</code>]/[$html:<code>except</code>]. Template bodies stay plain authored text around highlighted heads and interpolations.]
         ]
 
         [data:
@@ -297,13 +297,13 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Partial]
             [: Broad quoted-escape, string-content coercion and IO/template rejection coverage, plus targeted external [$html:<code>StringContent</code>] signature coverage.]
             [: Frontend / JS]
-            [: Quoted strings decode only [$html:<code>\\</code>], [$html:<code>\"</code>], [$html:<code>\n</code>], [$html:<code>\r</code>] and [$html:<code>\t</code>]. Invalid escapes are rejected by the tokenizer. Template heads and reusable external string-content signatures accept supported string values. Console helpers such as [$html:<code>io.line(...)</code>] use the same boundary, so complex values must be extracted or interpolated into templates before output. AST rejects source [$html:<code>String + String</code>] and no longer folds compile-time string addition. Runtime equality compares String content across construction origins; HTML-JS normalizes String-like map keys and HTML-Wasm compares finalized string bytes. Accepted design rejects source string concatenation with [$html:<code>+</code>]; templates remain the canonical concatenation form.]
+            [: Quoted strings decode only [$html:<code>\\</code>], [$html:<code>\"</code>], [$html:<code>\n</code>], [$html:<code>\r</code>] and [$html:<code>\t</code>]. Invalid escapes are rejected by the tokenizer. Template heads and reusable external string-content signatures accept supported string values. Console helpers such as [$html:<code>io.line(...)</code>] use the same boundary, so complex values must be extracted or interpolated into templates before output. AST rejects source [$html:<code>String + String</code>] and no longer folds compile-time string addition. Runtime equality compares String content across construction origins; HTML-JS compares primitive String map keys by content and HTML-Wasm compares finalized string bytes. Accepted design rejects source string concatenation with [$html:<code>+</code>]; templates remain the canonical concatenation form.]
         ]
 
         [data:
             [: Borrow validation and local last-use analysis]
             [: Partial]
-            [: Broad borrow, aliasing, mutable/exclusive access, branch merge, loop, short-circuit, future-use, optional-transfer, advisory drop-site, hashmap, aggregate-storage, reactivity and adversarial coverage. Phase 1 establishes the permanent `boracle` developer feature, shared `problem` and `last_use` seams and an opt-in `just boracle` validation lane. The reference facility now extracts validated HIR into immutable normalized problems, constructs typed `OriginRelations` as the only origin-overlap owner, answers pair-local `query_overlap` decisions with positive disjointness evidence and derives alias/provenance loans that retain structural place overlap separately. It connects parameter-aware origin flow to use-driven liveness, origin/loan last-use and exact after-event final-use candidate queries. Its compiler-owned source service covers calls, aggregates, maps, fallible flow, branch/loop paths and bounded generated copy/rebind metamorphic properties with deterministic reduced failure reports and classified comparisons against the deliberately shared Alpha subset. Composable experiment selection uses `boracle-reference-v1` with a sorted empty-by-default experiment set; the only current named experiment, `dead-exclusive-loan`, remains feature-gated developer research and is not production language support. A second executable semantics, the bounded operational oracle, now executes the same normalized problems with explicit dynamic generations and capability intervals, enumerates branches and bounded loops deterministically, always reports truncated exploration as inconclusive and classifies its result against the static solver so static acceptance plus an enumerated runtime conflict is a required failure. A seeded generator and a class-preserving reducer turn generated disagreements into minimal reproducible cases. The oracle is feature-gated developer reference infrastructure and never user-facing borrow support. The alpha checker remains the normal compiler authority; Boracle never changes default acceptance. Lifetime-region validation, retained-edge analysis, REC integration, memory-plan-driven cleanup and the optimized production checker remain deferred.]
+            [: Broad borrow, aliasing, mutable/exclusive access, branch merge, loop, short-circuit, future-use, optional-transfer, advisory drop-site, hashmap, aggregate-storage and adversarial coverage. Phase 1 establishes the permanent `boracle` developer feature, shared `problem` and `last_use` seams and an opt-in `just boracle` validation lane. The reference facility now extracts validated HIR into immutable normalized problems, constructs typed `OriginRelations` as the only origin-overlap owner, answers pair-local `query_overlap` decisions with positive disjointness evidence and derives alias/provenance loans that retain structural place overlap separately. It connects parameter-aware origin flow to use-driven liveness, origin/loan last-use and exact after-event final-use candidate queries. Its compiler-owned source service covers calls, aggregates, maps, fallible flow, branch/loop paths and bounded generated copy/rebind metamorphic properties with deterministic reduced failure reports and classified comparisons against the deliberately shared Alpha subset. Composable experiment selection uses `boracle-reference-v1` with a sorted empty-by-default experiment set; the only current named experiment, `dead-exclusive-loan`, remains feature-gated developer research and is not production language support. A second executable semantics, the bounded operational oracle, now executes the same normalized problems with explicit dynamic generations and capability intervals, enumerates branches and bounded loops deterministically, always reports truncated exploration as inconclusive and classifies its result against the static solver so static acceptance plus an enumerated runtime conflict is a required failure. A seeded generator and a class-preserving reducer turn generated disagreements into minimal reproducible cases. Infallible Boolean reassignment has complete real-source mutation replay coverage. Checked numeric reassignment currently reports `OracleInconclusive` with `UndecidableOverlap` on the existing result-carrier projection and zero completed executions, so it supplies no oracle safety proof. The oracle is feature-gated developer reference infrastructure and never user-facing borrow support. The alpha checker remains the normal compiler authority; Boracle never changes default acceptance. Lifetime-region validation, retained-edge analysis, REC integration, memory-plan-driven cleanup and the optimized production checker remain deferred.]
             [: HIR analysis / all backends]
             [: Shared and exclusive access enforcement is implemented and mandatory on every backend. Path-sensitive future-use facts drive optional transfer, and unproven or path-dependent transfer correctly falls back to borrowing. Per-block future use is a liveness fact, so an alias that every path redefines before its next read stops blocking mutation, including across a loop back-edge. Accepted incomplete work: loop final-iteration facts, detached stored-result transfer and the complete affine-transfer contract are not implemented, and drop facts remain advisory rather than memory-plan-driven. Complete when path-sensitive transfer and final-use facts are complete.]
         ]
@@ -417,7 +417,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Deferred]
             [: None]
             [: Project/link planning / full-control backends]
-            [: Accepted design only. Page, mount, request, frame and arena roots must participate in ordinary lifetime-topology validation for reactive and mounted storage. Complete when builder lifecycle roots instantiate validated topology and memory plans.]
+            [: Accepted design only. Page, mount, request, frame and arena roots must participate in ordinary lifetime-topology validation for retained builder-owned storage and future observation or event lifecycles. Complete when builder lifecycle roots instantiate validated topology and memory plans.]
         ]
 
         [data:
@@ -433,7 +433,15 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Deferred]
             [: None]
             [: Async / lifetime planning / full-control backends]
-            [: Accepted prerequisites are mandatory affine transfer on successful send, responsibility preservation on failed send, bounded channel or task lifetimes, independent graphs across task boundaries and non-atomic REC under the cooperative task model. Complete when the final memory prerequisites and a separate channel implementation plan are accepted.]
+            [: Accepted prerequisites are mandatory affine transfer on successful send, responsibility preservation on failed send, bounded channel or task lifetimes, independent graphs across task boundaries and non-atomic REC under the cooperative task model. The future form `reader, writer Channel of AppMessage = Channel()` has directional endpoints but no compiler or runtime implementation; omitted initialisation is unsupported. Complete when the final memory prerequisites and a separate channel implementation plan are accepted.]
+        ]
+
+        [data:
+            [: Wiring parameter contracts]
+            [: Deferred]
+            [: None]
+            [: JS / HTML after Phase 6]
+            [: Wire and Route are accepted parameter contracts, but the current Alpha compiler does not support their source syntax. Phase 6 owns implementation; this does not include route application or composition, subscriptions, event delivery, channels or async. See @../wiring (Wiring) for the canonical contract.]
         ]
 
         [data:
@@ -623,46 +631,6 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
 ]
 
 #[section, $md:
-    ## Reactivity V1
-
-    These rows describe the current Alpha implementation. The accepted Wiring
-    direction supersedes this model, but its removal has not landed. Existing
-    support and coverage remain recorded here until that implementation change.
-
-    [styled_table:
-        [header: [: Surface] [: Status] [: Coverage] [: Current surface] ]
-
-        [data:
-            [: Reactive declarations and parameters]
-            [: Partial]
-            [: Frontend syntax, AST/HIR metadata, borrow invalidation facts, JS lowering, HTML-JS mounting and unsupported sink/backend diagnostics.]
-            [: V1 supports [$html:<code>$Type</code>] / [$html:<code>$=</code>] local declarations and [$html:<code>$T</code>] parameters as source metadata, not wrapper [$html:<code>TypeId</code>]s. Reactive declarations are runtime-local and not dependency-bindable/exportable top-level declarations.]
-        ]
-
-        [data:
-            [: Reactive template subscriptions]
-            [: Partial]
-            [: Template-head parsing, source validation, subscription metadata, AST/HIR propagation, reachability, borrow invalidation, JS helper lowering, HTML-JS mounting and unsupported sink/backend diagnostics.]
-            [: V1 accepts one bare reactive source identifier in template head/capture positions through [$html:<code>$(source)</code>]. Snapshot reads remain ordinary captures. Field paths, calls, computed expressions, ordinary expression use and compile-time templates are rejected.]
-        ]
-
-        [data:
-            [: HTML-JS reactive runtime fragments]
-            [: Partial]
-            [: JS reactive source, scheduler, template-string runtime helper, slot mounting/rerender registration and unsupported sink coverage.]
-            [: V1 live sink support is top-level runtime HTML fragments in the HTML-JS builder. Fine-grained DOM updates, nested live regions, keyed diffing and other UI runtime strategies are deferred.]
-        ]
-
-        [data:
-            [: Wiring replacement]
-            [: Deferred]
-            [: No replacement implementation or coverage is claimed here.]
-            [: The accepted Wiring direction replaces Reactivity V1 rather than extending reactive bindings or subscriptions. Its implementation owns the eventual status cutover.]
-        ]
-    ]
-]
-
-#[section, $md:
     ## Experimental backend surfaces
 
     [styled_table:
@@ -671,7 +639,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: HTML-Wasm]
             [: Experimental]
-            [: Backend experiment and integration path for future Wasm output. Ordinary entry-selected `start` execution and non-reactive runtime page fragments use the shared HTML builder slot/hydration contract. Reactive mounting remains unsupported.]
+            [: Backend experiment and integration path for future Wasm output. Ordinary entry-selected `start` execution and runtime page fragments use the shared HTML builder slot/hydration contract.]
             [: Keep behind [$html:<code>--html-wasm</code>]. Tests may pin current behavior, but Alpha support is JS / HTML.]
         ]
 
@@ -685,7 +653,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Wasm payload/runtime parity]
             [: Experimental]
-            [: Covered paths validate or lower selected payload, assert, generic, map, collection, numeric, cast, reactive and external-call cases. The four-profile paired HTML-JS/HTML-Wasm [$html:<code>wasm_scalar_profile_comparison_runtime</code>] corpus covers scalar calls, exact fixed comparisons, unsigned Byte ordering and direct Int64-to-Float32 rounding. Paired [$html:<code>tests/cases/uint_wasm_scalar_*</code>] fixtures cover full-width Uint32/Uint64 boundary rendering, unsigned and Uint/Int-mixed comparisons, Uint-to-Float conversion including the Float32 rounding witness, and structured rejection of recoverable failure, statement casts, host calls and generic runtime values. Recoverable arithmetic, compound write-back and range failure now receive structured capability diagnostics before lowering. Paired checked-numeric fixtures assert HTML-JS entry Errors and HTML-Wasm capability rejection, not Wasm recovery support. Reachable mutable function parameters remain target-rejected with [$html:<code>unsupported_backend_feature.mutable_function_parameters</code>] diagnostics. Immutable parameters and mutable locals remain supported. Paired NumericToString expression-cast coverage targets profile Int and fixed signed/unsigned integer formatting in Int32/Float32, with generated-Wasm UTF-8 helper checks for signed and unsigned output. Float-format fixtures cover the default and Int32/Float32 profiles, not all four profiles. Formatting and finite boundary-validation guards remain fatal integrity checks. Scalar fixtures cover direct F16 values and comparisons, frontend-materialised literals, parameter/local/result paths and runtime I16-to-F16 conversion with ties to even. Portable Wasm helpers implement binary16 conversion, power and dividend-sign float remainder without host math imports. Emitter tests cover machine-boundary overflow, preserved power operands and compact scalar loads/stores with raw bytes and strides. The emitter-only compact-storage proof inspects 152 raw bytes, not source aggregate layout. F16 emitter cases cover two-byte raw-bit storage, signed zero and invalid-storage traps. The shared runtime harness distinguishes explicit Wasm traps from Moth Error outcomes. Other fallible casts, F32/F64 -> F16 narrowing and numeric-to-numeric casts from F16 other than widening to F32/F64, other defined builtin casts involving Bool, Char, Error or String, statement-form casts, source-level external Float imports, fixed-scalar aggregates and Dec remain target-gated. Reachable builtin [$html:<code>Error</code>] values and fallible control flow remain target-gated. Paired error cases and synthetic-start tests cover JS recovery and source-located Wasm rejection, not trap fallback.]
+            [: Covered paths validate or lower selected payload, assert, generic, map, collection, numeric, cast and external-call cases. The four-profile paired HTML-JS/HTML-Wasm [$html:<code>wasm_scalar_profile_comparison_runtime</code>] corpus covers scalar calls, exact fixed comparisons, unsigned Byte ordering and direct Int64-to-Float32 rounding. Paired [$html:<code>tests/cases/uint_wasm_scalar_*</code>] fixtures cover full-width Uint32/Uint64 boundary rendering, unsigned and Uint/Int-mixed comparisons, Uint-to-Float conversion including the Float32 rounding witness, and structured rejection of recoverable failure, statement casts, host calls and generic runtime values. Recoverable arithmetic, compound write-back and range failure now receive structured capability diagnostics before lowering. Paired checked-numeric fixtures assert HTML-JS entry Errors and HTML-Wasm capability rejection, not Wasm recovery support. Reachable mutable function parameters remain target-rejected with [$html:<code>unsupported_backend_feature.mutable_function_parameters</code>] diagnostics. Immutable parameters and mutable locals remain supported. Paired NumericToString expression-cast coverage targets profile Int and fixed signed/unsigned integer formatting in Int32/Float32, with generated-Wasm UTF-8 helper checks for signed and unsigned output. Float-format fixtures cover the default and Int32/Float32 profiles, not all four profiles. Formatting and finite boundary-validation guards remain fatal integrity checks. Scalar fixtures cover direct F16 values and comparisons, frontend-materialised literals, parameter/local/result paths and runtime I16-to-F16 conversion with ties to even. Portable Wasm helpers implement binary16 conversion, power and dividend-sign float remainder without host math imports. Emitter tests cover machine-boundary overflow, preserved power operands and compact scalar loads/stores with raw bytes and strides. The emitter-only compact-storage proof inspects 152 raw bytes, not source aggregate layout. F16 emitter cases cover two-byte raw-bit storage, signed zero and invalid-storage traps. The shared runtime harness distinguishes explicit Wasm traps from Moth Error outcomes. Other fallible casts, F32/F64 -> F16 narrowing and numeric-to-numeric casts from F16 other than widening to F32/F64, other defined builtin casts involving Bool, Char, Error or String, statement-form casts, source-level external Float imports, fixed-scalar aggregates and Dec remain target-gated. Reachable builtin [$html:<code>Error</code>] values and fallible control flow remain target-gated. Paired error cases and synthetic-start tests cover JS recovery and source-located Wasm rejection, not trap fallback.]
             [: Backend parity progress belongs here, not repeated in every feature row.]
         ]
     ]

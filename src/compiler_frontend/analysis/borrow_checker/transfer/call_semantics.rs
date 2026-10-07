@@ -10,7 +10,7 @@ use crate::compiler_frontend::external_packages::{
 };
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallParameterAccess, PublicCallParameterSummary,
-    PublicCallTransferEffect, PublicCallTransferEligibility,
+    PublicCallTransferEffect,
 };
 use crate::compiler_frontend::source::SourceSpan;
 
@@ -78,8 +78,8 @@ pub(super) fn resolve_call_semantics(
             )?;
 
             Ok(CallSemantics {
-                // Ordinary immutable and mutable parameters can both receive optional transfer
-                // responsibility at a proven final use. Reactive handles remain shared reads.
+                // Shared and mutable parameters can both receive optional transfer responsibility
+                // at a proven final use.
                 arg_effects: summary
                     .parameters
                     .iter()
@@ -297,26 +297,15 @@ fn validate_alias_indices(
 }
 
 fn parameter_arg_effect(parameter: &PublicCallParameterSummary) -> ArgEffect {
-    match parameter.access {
-        PublicCallParameterAccess::Reactive => ArgEffect::SharedBorrow,
-        PublicCallParameterAccess::Shared | PublicCallParameterAccess::Mutable => {
-            match (parameter.transfer_eligibility, parameter.transfer_effect) {
-                (
-                    PublicCallTransferEligibility::Eligible,
-                    PublicCallTransferEffect::MayConsume | PublicCallTransferEffect::AlwaysConsumes,
-                ) if parameter.access == PublicCallParameterAccess::Shared => {
-                    ArgEffect::MayConsumeShared
-                }
-                (
-                    PublicCallTransferEligibility::Eligible,
-                    PublicCallTransferEffect::MayConsume | PublicCallTransferEffect::AlwaysConsumes,
-                ) => ArgEffect::MayConsumeMutable,
-                (_, _) if parameter.access == PublicCallParameterAccess::Mutable => {
-                    ArgEffect::MutableBorrow
-                }
-                _ => ArgEffect::SharedBorrow,
-            }
-        }
+    match (parameter.access, parameter.transfer_effect) {
+        (
+            PublicCallParameterAccess::Shared,
+            PublicCallTransferEffect::MayConsume | PublicCallTransferEffect::AlwaysConsumes,
+        ) => ArgEffect::MayConsumeShared,
+        (
+            PublicCallParameterAccess::Mutable,
+            PublicCallTransferEffect::MayConsume | PublicCallTransferEffect::AlwaysConsumes,
+        ) => ArgEffect::MayConsumeMutable,
     }
 }
 

@@ -21,9 +21,7 @@ use super::test_support::{path, receiver_entry, register_struct};
 use crate::compiler_frontend::ast::AstPublicInterfaceProjectionInput;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ReactiveSource, ReactiveSourceKind,
-};
+use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, ReturnChannel, ReturnSlot,
 };
@@ -155,20 +153,6 @@ fn mutable_param_declaration(
     declaration
 }
 
-fn reactive_param_declaration(
-    name: &str,
-    type_id: TypeId,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> Declaration {
-    let mut declaration = param_declaration(name, type_id, string_table, path_fork);
-    declaration.value.reactive_source = Some(ReactiveSource {
-        path: declaration.id,
-        kind: ReactiveSourceKind::Parameter,
-    });
-    declaration
-}
-
 fn field_declaration(
     name: &str,
     type_id: TypeId,
@@ -205,7 +189,6 @@ fn return_slot(type_id: TypeId, channel: ReturnChannel) -> ReturnSlot {
     ReturnSlot {
         value: DataType::Inferred,
         type_id: Some(type_id),
-        reactive_template: None,
         channel,
     }
 }
@@ -214,7 +197,6 @@ fn unresolved_return_slot(channel: ReturnChannel) -> ReturnSlot {
     ReturnSlot {
         value: DataType::Inferred,
         type_id: None,
-        reactive_template: None,
         channel,
     }
 }
@@ -1313,31 +1295,6 @@ fn mutable_free_function_parameter_projects_mutable_access() {
         function.parameters[0].access,
         PublicCallParameterAccess::Mutable,
         "a mutable parameter projects declaration-owned mutable access"
-    );
-    assert!(
-        matches!(function.category, PublicFunctionCategory::ConcreteLocal),
-        "a non-generic free function remains a concrete-local declaration"
-    );
-}
-
-#[test]
-fn reactive_free_function_parameter_projects_reactive_access() {
-    let env = TypeEnvironment::new();
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let int_id = env.builtins().int;
-
-    let function = project_free_function_with_parameter(
-        reactive_param_declaration("source", int_id, &mut string_table, &mut path_fork),
-        &env,
-        &mut string_table,
-        &mut path_fork,
-    );
-
-    assert_eq!(
-        function.parameters[0].access,
-        PublicCallParameterAccess::Reactive,
-        "a reactive parameter projects declaration-owned reactive access"
     );
     assert!(
         matches!(function.category, PublicFunctionCategory::ConcreteLocal),

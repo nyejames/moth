@@ -95,30 +95,6 @@ pub(crate) fn runtime_slot_plan_roots(
     Ok((contribution_roots, site_render_roots))
 }
 
-pub(crate) fn runtime_slot_plan_site_render_root(
-    store: &TemplateIrStore,
-    slot_plan_id: TemplateSlotPlanId,
-    site_id: RuntimeSlotSiteId,
-) -> Result<TemplateIrNodeId, CompilerError> {
-    let slot_plan = store.get_slot_plan(slot_plan_id).ok_or_else(|| {
-        CompilerError::compiler_error(
-            "TIR runtime slot-plan site lookup referenced a missing slot plan.",
-        )
-    })?;
-
-    slot_plan
-        .slot_sites
-        .iter()
-        .find(|site| site.site == site_id)
-        .map(|site| site.render_root)
-        .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "TIR runtime slot-plan site lookup referenced missing site {:?} in plan {}.",
-                site_id, slot_plan_id
-            ))
-        })
-}
-
 pub(super) fn convert_runtime_slot_site(
     plan: TemplateSlotPlanId,
     site: RuntimeSlotSiteId,

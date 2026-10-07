@@ -1892,8 +1892,7 @@ fn rendered_output_captures_plain_errors_rejected_by_page_promises() {
 
 #[test]
 fn rendered_output_moth_error_ends_the_run_before_queued_page_work() {
-    // Reactive flushes are queued microtasks. They must not append output after the Moth Error,
-    // and a later throw from them must not replace the first error.
+    // Queued page work must not append output after the Moth Error or replace the first error.
     let (passed, kind, reason) = validate_html_script(
         concat!(
             "queueMicrotask(() => { console.log('after error'); throw new Error('second error'); }); ",

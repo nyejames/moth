@@ -1,13 +1,11 @@
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::ast::expressions::expression::{
-    ConstRecordState, Expression, ReactiveSource, ReactiveSourceKind,
-};
+use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::styles::markdown::markdown_formatter;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{
-    CommentDirectiveKind, ReactiveSubscription, SlotKey, Style, TemplateSegmentOrigin, TemplateType,
+    CommentDirectiveKind, SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::templates::template_control_flow::TemplateControlFlowValidationMode;
@@ -22,8 +20,6 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
-use crate::compiler_frontend::datatypes::builtin_type_ids;
-use crate::compiler_frontend::datatypes::datatype::DataType;
 use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -929,114 +925,10 @@ fn parser_tir_records_numeric_head_as_dynamic_expression_with_head_origin() {
             .kind,
         TemplateIrNodeKind::DynamicExpression {
             origin: TemplateSegmentOrigin::Head,
-            reactive_subscription: None,
             ..
         }
     ));
     assert_eq!(parser_tir_text(children[1], &store, &string_table), " body");
-}
-
-#[test]
-fn parser_tir_preserves_reactive_head_and_nested_child_metadata() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let scope = path_fork
-        .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
-        .expect("test path fits");
-    let source_name = string_table.intern("source");
-    let source_path = path_fork
-        .try_intern_child(scope, source_name)
-        .expect("test path fits");
-    let source_span = None;
-    let source = ReactiveSource {
-        path: source_path,
-        kind: ReactiveSourceKind::Declaration,
-    };
-    let source_expression = Expression::reference_with_type_id(
-        source_path,
-        DataType::StringSlice,
-        builtin_type_ids::STRING,
-        source_span,
-        ValueMode::ImmutableOwned,
-        ConstRecordState::ConstRecord,
-    )
-    .with_reactive_source(source);
-
-    let declaration = Declaration {
-        id: source_path,
-        value: source_expression,
-        binding_span: None,
-        config_qualifier: None,
-    };
-
-    let file_tokens = template_tokens_from_source(
-        "[$(source): body]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let template_source_path = file_tokens.source_path;
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
-    let canonical_range = canonical_owner
-        .full_range()
-        .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
-        .expect("test token stream must expose an AST cursor");
-    token_stream
-        .set_position(file_tokens.opener_index)
-        .expect("test token stream position must remain in canonical range");
-    let context = ScopeContext::new_for_tests(
-        ContextKind::Template,
-        template_source_path,
-        Rc::new(TopLevelDeclarationTable::new(vec![declaration], &path_fork)),
-        Arc::new(crate::compiler_frontend::external_packages::ExternalPackageRegistry::default()),
-        vec![],
-        0,
-    )
-    .with_source_file_scope(template_source_path);
-
-    let template = Template::new(
-        &mut token_stream,
-        template_source_path,
-        &context,
-        vec![],
-        &mut string_table,
-        &mut path_fork,
-    )
-    .expect("reactive head template should parse");
-    let store = context.template_ir_store();
-    let store = store.borrow();
-
-    let children = tir_root_child_ids(&template, &store);
-    assert_eq!(children.len(), 2);
-    let head_node = store
-        .get_node(children[0])
-        .expect("head child should exist");
-    let TemplateIrNodeKind::DynamicExpression {
-        origin,
-        reactive_subscription,
-        ..
-    } = &head_node.kind
-    else {
-        panic!("expected reactive head child to be a dynamic expression");
-    };
-    assert_eq!(*origin, TemplateSegmentOrigin::Head);
-    assert_eq!(
-        reactive_subscription
-            .as_ref()
-            .map(|subscription| &subscription.source.path),
-        Some(&source_path),
-        "parser TIR must preserve the explicit reactive subscription on the dynamic node"
-    );
-    assert_eq!(parser_tir_text(children[1], &store, &string_table), " body");
-
-    let parent_template = store
-        .get_template(template.tir_reference.root)
-        .expect("parent parser TIR template should exist");
-    assert!(parent_template.summary.has_reactivity);
 }
 
 // -------------------------
@@ -1335,9 +1227,8 @@ fn head_only_literal_text_records_formatted_tir_phase() {
 /// context's module store via `TemplateIrBuilder`, then attaches a `Parsed`
 /// phase module-local TIR reference.
 ///
-/// WHAT: lets formatter fixtures construct body-origin dynamic expressions and
-///       reactive side-table subscriptions that source parsing cannot express
-///       narrowly.
+/// WHAT: lets formatter fixtures construct body-origin dynamic expressions
+///       that source parsing cannot express narrowly.
 /// WHY: these tests protect TIR-owned payload facts directly.
 fn build_template_with_direct_tir_root(
     context: &ScopeContext,
@@ -1399,7 +1290,6 @@ fn pure_direct_dynamic_formatter_template_records_formatted_tir_phase() {
             let body_node = builder.push_dynamic_expression_node(
                 Expression::int(42, span, ValueMode::ImmutableOwned),
                 TemplateSegmentOrigin::Body,
-                None,
                 span,
             );
             let root = builder.push_sequence_node(vec![body_node], span);
@@ -1429,222 +1319,6 @@ fn pure_direct_dynamic_formatter_template_records_formatted_tir_phase() {
         &mut string_table,
     )
     .expect("formatted TIR reference installation should succeed");
-}
-
-#[test]
-fn reactive_body_segment_records_formatted_tir_phase() {
-    // A body segment carrying a reactive subscription whose expression is a safe
-    // formatter anchor preserves the formatted TIR root because the subscription
-    // metadata is preserved through the TIR formatter anchor and formatted
-    // root. Source parsing only emits reactive head expressions, so
-    // this body reactive dynamic-expression payload is constructed directly via
-    // `TemplateIrBuilder`.
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let context = new_constant_context(
-        path_fork
-            .try_intern_portable_path("main.moth", &mut string_table)
-            .expect("test path fits"),
-        &path_fork,
-    );
-    let span = None;
-
-    let source_path = path_fork
-        .try_intern_portable_path("main.moth/#reactive0", &mut string_table)
-        .expect("test path fits");
-    let expected_source_path = source_path;
-    let source = ReactiveSource {
-        path: source_path,
-        kind: ReactiveSourceKind::Declaration,
-    };
-    let subscription = ReactiveSubscription {
-        source: source.clone(),
-        type_id: builtin_type_ids::STRING,
-        span: None,
-    };
-    let expression = Expression::reference_with_type_id(
-        source_path,
-        DataType::StringSlice,
-        builtin_type_ids::STRING,
-        span,
-        ValueMode::ImmutableOwned,
-        ConstRecordState::ConstRecord,
-    )
-    .with_reactive_source(source);
-    let style = Style {
-        formatter: Some(markdown_formatter()),
-        ..Style::default()
-    };
-
-    let mut template = build_template_with_direct_tir_root(
-        &context,
-        TemplateType::String,
-        style.clone(),
-        span,
-        move |store, _string_table| {
-            let mut builder = TemplateIrBuilder::new(store);
-            let body_node = builder.push_dynamic_expression_node(
-                expression,
-                TemplateSegmentOrigin::Body,
-                Some(subscription),
-                span,
-            );
-            let root = builder.push_sequence_node(vec![body_node], span);
-            let summary = TemplateIrSummary {
-                dynamic_expression_count: 1,
-                max_depth: 1,
-                has_reactivity: true,
-                ..TemplateIrSummary::default()
-            };
-            (root, summary)
-        },
-        &mut string_table,
-    );
-
-    let has_control_flow = {
-        let store = context.template_ir_store.borrow();
-        store
-            .control_flow_node_id_for_template(template.tir_reference.root)
-            .expect("control-flow lookup")
-            .is_some()
-    };
-    let tir_reference = &mut template.tir_reference;
-    install_formatted_tir_reference_for_linear_template(
-        tir_reference,
-        has_control_flow,
-        &style,
-        &context,
-        &mut string_table,
-    )
-    .expect("formatted TIR reference installation should succeed");
-
-    let store = context.template_ir_store();
-    let store = store.borrow();
-    let children = tir_root_child_ids(&template, &store);
-    let reactive_subscription = children
-        .iter()
-        .find_map(|child_id| {
-            let node = store
-                .get_node(*child_id)
-                .expect("formatted root child should exist");
-            match &node.kind {
-                TemplateIrNodeKind::DynamicExpression {
-                    reactive_subscription,
-                    ..
-                } => Some(reactive_subscription),
-                _ => None,
-            }
-        })
-        .expect("formatted root should preserve the dynamic-expression anchor");
-    assert_eq!(
-        reactive_subscription
-            .as_ref()
-            .map(|subscription| &subscription.source.path),
-        Some(&expected_source_path),
-        "formatting must preserve the dynamic anchor's reactive subscription"
-    );
-}
-
-#[test]
-fn reactive_literal_text_segment_records_formatted_tir_phase() {
-    // A reactive subscription on literal body text is stored in the TIR store's
-    // node-level reactive-subscription side-table, so the formatted TIR root can
-    // be authoritative while preserving the dependency for reactive metadata.
-    // Source parsing only emits reactive head text, so this body reactive text
-    // payload is constructed directly via `TemplateIrBuilder`.
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let context = new_constant_context(
-        path_fork
-            .try_intern_portable_path("main.moth", &mut string_table)
-            .expect("test path fits"),
-        &path_fork,
-    );
-    let span = None;
-
-    let source_path = path_fork
-        .try_intern_portable_path("main.moth/#reactive0", &mut string_table)
-        .expect("test path fits");
-    let expected_source_path = source_path;
-    let subscription = ReactiveSubscription {
-        source: ReactiveSource {
-            path: source_path,
-            kind: ReactiveSourceKind::Declaration,
-        },
-        type_id: builtin_type_ids::STRING,
-        span: None,
-    };
-    let style = Style {
-        formatter: Some(markdown_formatter()),
-        ..Style::default()
-    };
-
-    let mut template = build_template_with_direct_tir_root(
-        &context,
-        TemplateType::String,
-        style.clone(),
-        span,
-        move |store, string_table| {
-            let text = string_table.intern("reactive body");
-            let byte_len = "reactive body".len();
-            let mut builder = TemplateIrBuilder::new(store);
-            let body_node = builder.push_text_node_with_subscription(
-                text,
-                byte_len,
-                TemplateSegmentOrigin::Body,
-                Some(subscription),
-                span,
-            );
-            let root = builder.push_sequence_node(vec![body_node], span);
-            let summary = TemplateIrSummary {
-                estimated_output_bytes: byte_len,
-                text_node_count: 1,
-                text_byte_count: byte_len,
-                max_depth: 1,
-                has_reactivity: true,
-                ..TemplateIrSummary::default()
-            };
-            (root, summary)
-        },
-        &mut string_table,
-    );
-
-    let has_control_flow = {
-        let store = context.template_ir_store.borrow();
-        store
-            .control_flow_node_id_for_template(template.tir_reference.root)
-            .expect("control-flow lookup")
-            .is_some()
-    };
-    let tir_reference = &mut template.tir_reference;
-    install_formatted_tir_reference_for_linear_template(
-        tir_reference,
-        has_control_flow,
-        &style,
-        &context,
-        &mut string_table,
-    )
-    .expect("formatted TIR reference installation should succeed");
-
-    let store = context.template_ir_store();
-    let store = store.borrow();
-    let children = tir_root_child_ids(&template, &store);
-    assert_eq!(children.len(), 1);
-    assert!(matches!(
-        store
-            .get_node(children[0])
-            .expect("formatted reactive text node should exist")
-            .kind,
-        TemplateIrNodeKind::Text { .. }
-    ));
-    assert_eq!(
-        store
-            .node_reactive_subscription(children[0])
-            .expect("reactive side-table lookup should succeed")
-            .map(|subscription| &subscription.source.path),
-        Some(&expected_source_path),
-        "formatting must preserve the text node's reactive side-table entry"
-    );
 }
 
 #[test]
@@ -2687,8 +2361,6 @@ fn parser_tir_records_finalized_child_template_as_child_template_node() {
     assert_eq!(parent_template.summary.dynamic_expression_count, 0);
     assert_eq!(parent_template.summary.slot_count, 0);
     assert!(!parent_template.summary.has_control_flow);
-    assert!(!parent_template.summary.has_reactivity);
-
     assert_eq!(parent_template.summary.max_depth, 1);
 }
 

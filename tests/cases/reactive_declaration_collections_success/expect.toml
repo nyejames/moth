@@ -1,4 +1,0 @@
-[backends.html]
-mode = "success"
-warnings = "forbid"
-rendered_output_contains = ["reactive_declaration_collections_success", "values=2", "fixed=2", "scores=1"]

@@ -753,7 +753,6 @@ impl ModuleMaterialisationPreparation {
                 Ok(StableFunctionParameter {
                     name: self.string_table.resolve(name).to_owned(),
                     value_mode: parameter.value.value_mode.clone(),
-                    reactive: parameter.value.reactive_source.is_some(),
                     folded_default: (!matches!(parameter.value.kind, ExpressionKind::NoValue))
                         .then(|| {
                             self.stable_folded_value_at_expression_path(

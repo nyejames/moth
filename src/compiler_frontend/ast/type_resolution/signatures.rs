@@ -122,7 +122,6 @@ pub(crate) fn resolve_function_signature(
         resolved_returns.push(ReturnSlot {
             value: resolved_value,
             type_id: Some(type_id),
-            reactive_template: return_slot.reactive_template.clone(),
             channel: return_slot.channel,
         });
     }

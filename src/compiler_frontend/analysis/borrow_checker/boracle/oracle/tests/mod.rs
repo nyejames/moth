@@ -3497,41 +3497,6 @@ fn boracle_oracle_install_definition_retires_overlapping_holder_on_unavailable_d
     }
 }
 
-#[test]
-fn boracle_oracle_reactive_observe_is_metadata_only_and_never_materialises() {
-    // The contract makes `ReactiveObserve` metadata-only: no capability, no access check and
-    // no conflict, and the place must be initialized. A materialising availability check
-    // would create a generation for a missing Field under a tight bound and turn a complete
-    // safe execution into GenerationBound, so the bound here is exactly the count the
-    // execution's real writer consumes.
-    let mut fixture = Fixture::new(1);
-    let place = fixture.place(0, []);
-    let observed = fixture.place(0, [ProjectionElem::Field(7)]);
-    fixture.fresh(place);
-    fixture.reactive_observe(observed);
-
-    match run_with_bounds(fixture.finish(), OracleBounds::new(256, 4096, 8, 1)) {
-        OracleOutcome::CompleteSafe { executions: 1, .. } => {}
-        outcome => panic!(
-            "a metadata-only observation must not materialise graph state or consume the \
-             generation bound: {outcome:?}"
-        ),
-    }
-}
-
-#[test]
-fn boracle_oracle_reactive_observe_of_uninitialized_place_is_compiler_error() {
-    let mut fixture = Fixture::new(1);
-    let place = fixture.place(0, []);
-    let observed = fixture.place(0, [ProjectionElem::Field(7)]);
-    fixture.reactive_observe(observed);
-    fixture.fresh(place);
-
-    let error = execute_bounded(&fixture.finish(), OracleBounds::default())
-        .expect_err("the observed place itself must stay initialized");
-    assert!(error.msg.contains("reactive observation"), "{error:?}");
-}
-
 fn safe_and_closed_cycle_problem() -> BorrowProblem {
     let mut fixture = Fixture::new(0);
     let safe = BlockId::new(1);
@@ -4703,10 +4668,6 @@ impl Fixture {
             destination,
             value: RebindValue::AliasFromPlace(source),
         })
-    }
-
-    fn reactive_observe(&mut self, place: PlaceId) {
-        self.event(EventKind::ReactiveObserve { place });
     }
 
     fn call_effect_result(

@@ -159,7 +159,6 @@ fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Ve
             name: Some(string_table.intern(name)),
             expected_type: ExpectedParameterType::UnknownExternal,
             access_mode: ExpectedAccessMode::Shared,
-            requires_reactive_source: false,
             default_value: None,
         })
         .collect::<Vec<_>>();
@@ -527,21 +526,18 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
             name: Some(string_table.intern("first")),
             expected_type: ExpectedParameterType::Known(int_type_id),
             access_mode: ExpectedAccessMode::Mutable,
-            requires_reactive_source: false,
             default_value: None,
         },
         ParameterExpectation {
             name: Some(string_table.intern("second")),
             expected_type: ExpectedParameterType::Known(int_type_id),
             access_mode: ExpectedAccessMode::Shared,
-            requires_reactive_source: false,
             default_value: Some(Expression::int(2, None, ValueMode::ImmutableOwned)),
         },
         ParameterExpectation {
             name: Some(string_table.intern("third")),
             expected_type: ExpectedParameterType::Known(int_type_id),
             access_mode: ExpectedAccessMode::Shared,
-            requires_reactive_source: false,
             default_value: None,
         },
     ];
@@ -607,7 +603,6 @@ fn whole_numeric_call_arguments_use_float_parameter_destinations() {
         name: None,
         expected_type: ExpectedParameterType::Known(builtin_type_ids::FLOAT),
         access_mode: ExpectedAccessMode::Shared,
-        requires_reactive_source: false,
         default_value: None,
     }];
     let arguments = parse_args_with_receiving_context(

@@ -1,0 +1,86 @@
+@wiring content as wiring
+
+@introduction-basic content as introduction_basic
+
+@wires-basic content as wires_basic
+
+@routes-basic content as routes_basic
+
+@scope-and-future-basic content as scope_and_future_basic
+
+@styles navbar,
+    section,
+    language_theme_head,
+    doc_level,
+    doc_pager
+
+page_title #= "Wiring"
+page_description #= "Accepted Wire and Route parameter contracts, with current implementation status."
+page_head #= language_theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Documentation) / Wiring
+
+    # Wiring
+
+    Wiring describes parameter contracts for binding identity and choice
+    constructors. It does not create callbacks, subscriptions or a UI runtime.
+
+    **Accepted design; not yet implemented.** Wire and Route source contracts
+    are unsupported by the current Alpha compiler until Phase 6 of the typed
+    semantic expressions plan. The examples teach the accepted direction and
+    do not claim to compile today. See @../progress (Progress) for current
+    support and the complete @#wiring-introduction (Wiring reference) for exact
+    rules.
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):wiring-introduction]
+        [$insert("title"):Introduction and detailed reference]
+        [$insert("advanced"):[wiring]]
+
+        [introduction_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):wiring-wires]
+        [$insert("title"):Wires]
+        [$insert("advanced"):See the Wires section of the detailed Wiring reference above.]
+
+        [wires_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):wiring-routes]
+        [$insert("title"):Routes]
+        [$insert("advanced"):See the Constructor routes section of the detailed Wiring reference above.]
+
+        [routes_basic]
+    ]
+]
+
+#[section:
+    [doc_level:
+        [$insert("key"):wiring-scope-and-future]
+        [$insert("title"):Scope and future channels]
+        [$insert("advanced"):See Capability positions and lifetimes and Future channel boundary in the detailed Wiring reference above.]
+
+        [scope_and_future_basic]
+    ]
+]
+
+#[section:
+    [doc_pager:
+        [$insert("previous_path"):../traits/]
+        [$insert("previous_title"):Traits]
+        [$insert("next_path"):../memory/]
+        [$insert("next_title"):Memory and lifetimes]
+    ]
+]

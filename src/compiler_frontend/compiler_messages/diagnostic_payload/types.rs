@@ -138,7 +138,6 @@ pub enum InvalidMutableAccessReason {
 pub enum UnsupportedBackendFeatureReason {
     HashmapConstruction,
     HashmapOperation,
-    ReactiveTemplateRuntime,
     RuntimeCasts,
     CheckedNumericOperations,
     RecoverableNumericFailure,
@@ -146,7 +145,6 @@ pub enum UnsupportedBackendFeatureReason {
     FloatBoundaryValidation,
     GenericRuntimeValues,
     FixedWidthScalarValues,
-    ReactiveExternalCallSink,
     CrossModuleCalls,
     RuntimeAssertionMessages,
     ErrorValues,
@@ -160,7 +158,6 @@ impl UnsupportedBackendFeatureReason {
         match self {
             Self::HashmapConstruction => "hashmap construction",
             Self::HashmapOperation => "hashmap operation",
-            Self::ReactiveTemplateRuntime => "reactive template runtime",
             Self::RuntimeCasts => "runtime casts",
             Self::CheckedNumericOperations => "checked numeric operations",
             Self::RecoverableNumericFailure => "recoverable numeric failure",
@@ -168,7 +165,6 @@ impl UnsupportedBackendFeatureReason {
             Self::FloatBoundaryValidation => "Float boundary validation",
             Self::GenericRuntimeValues => "generic runtime values",
             Self::FixedWidthScalarValues => "fixed-width numeric and Byte values",
-            Self::ReactiveExternalCallSink => "reactive external-call sink",
             Self::CrossModuleCalls => "cross-module calls",
             Self::RuntimeAssertionMessages => "runtime assertion messages",
             Self::ErrorValues => "Moth Error values",
@@ -701,7 +697,6 @@ pub enum InvalidTypeAnnotationReason {
     TraitThisMustBeDirect,
     AsNotValidHere,
     UnexpectedColon,
-    ReactiveAccessNotAllowed,
     InvalidTokenAfterName { token: DiagnosticToken },
     ExpectedTypeAnnotation { found: DiagnosticToken },
     DuplicateOptional,
@@ -898,12 +893,6 @@ pub enum InvalidTemplateStructureReason {
     UnsupportedTypeInTemplateHead { type_id: TypeId },
     RuntimeTemplateInConst,
     RuntimeValueInConstTemplateHead,
-    ReactiveSubscriptionEmpty,
-    ReactiveSubscriptionMultipleSources,
-    ReactiveSubscriptionComplexExpression,
-    ReactiveSubscriptionNonReactiveSource,
-    ReactiveSubscriptionInConstTemplate,
-    ReactiveSubscriptionOutsideTemplate,
     EmptyPathInTemplateHead,
     IncompatibleHeadItem,
     HelperOutsideWrapperSlot,
@@ -957,8 +946,6 @@ pub enum InvalidSignatureMemberReason {
     TraitMutableThisOnlyFirstParameter,
     TraitBareThisOnlyReceiver,
     TraitRequirementDefaultValue,
-    ReactiveAccessNotAllowed,
-    ReactiveParameterDefaultValue,
     /// An authored `=` introduced a parameter or struct-field default but no value
     /// followed it before a top-level comma, closing pipe, newline, block end or EOF.
     MissingDefaultValue,
@@ -1779,11 +1766,6 @@ pub enum InvalidCallShapeReason {
         parameter_index: usize,
         binding_name: Option<StringId>,
     },
-
-    ReactiveSourceRequired {
-        parameter_name: Option<StringId>,
-        parameter_index: usize,
-    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -2016,7 +1998,6 @@ pub enum CommonSyntaxMistakeReason {
     InvalidCompileTimeBindingSpacing,
     InvalidConfigQualifierSpacing,
     InvalidMutableBindingSpacing,
-    InvalidReactiveBindingSpacing,
     InvalidSymbolicSpacing { error: SymbolicSpacingError },
     InvalidChoiceVariantSpacing { gap: ChoiceVariantSeparatorGap },
     InvalidUnaryNegationSpacing,
@@ -2048,7 +2029,6 @@ impl CommonSyntaxMistakeReason {
             | CommonSyntaxMistakeReason::InvalidCompileTimeBindingSpacing
             | CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing
             | CommonSyntaxMistakeReason::InvalidMutableBindingSpacing
-            | CommonSyntaxMistakeReason::InvalidReactiveBindingSpacing
             | CommonSyntaxMistakeReason::InvalidChoiceVariantSpacing { .. }
             | CommonSyntaxMistakeReason::InvalidSymbolicSpacing { .. }
             | CommonSyntaxMistakeReason::InvalidUnaryNegationSpacing

@@ -217,10 +217,6 @@ pub fn parse_binding_target_syntax(
         )?;
         token_stream.advance();
         BindingMode::CompileTimeConstant
-    } else if token_stream.current_tag() == TokenTag::REACTIVE {
-        require_binding_marker_adjacent(token_stream, BindingMode::ReactiveRuntime, span_builder)?;
-        token_stream.advance();
-        BindingMode::ReactiveRuntime
     } else {
         BindingMode::ImmutableRuntime
     };
@@ -268,9 +264,6 @@ pub(crate) fn require_binding_marker_adjacent(
             BindingMode::MutableRuntime => CommonSyntaxMistakeReason::InvalidMutableBindingSpacing,
             BindingMode::CompileTimeConstant => {
                 CommonSyntaxMistakeReason::InvalidCompileTimeBindingSpacing
-            }
-            BindingMode::ReactiveRuntime => {
-                CommonSyntaxMistakeReason::InvalidReactiveBindingSpacing
             }
             BindingMode::ImmutableRuntime => return Ok(()),
         };

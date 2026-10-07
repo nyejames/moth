@@ -14,7 +14,7 @@ use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::source::line_index::{LineIndex, line_start_offsets};
 use crate::compiler_frontend::source::{
-    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId,
+    ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceDatabaseBuilder, SourceId, SourceSpan,
 };
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveHandlerSpec, StyleDirectiveRegistry, StyleDirectiveSpec,
@@ -101,6 +101,30 @@ fn tokenize_source_error(source: &str) -> (CompilerDiagnostic, StringTable) {
         panic!("tokenization should fail");
     };
     (expect_lexical_diagnostic(diagnostic), string_table)
+}
+
+fn assert_invalid_character_at_dollar(source: &str) {
+    let (diagnostic, _string_table) = tokenize_source_error(source);
+    let dollar_offset = source
+        .find('$')
+        .expect("the rejected syntax must contain a dollar marker");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let dollar_span = SourceSpan::new(
+        SourceId::COMPILATION_ROOT,
+        LocalSpan::exact(dollar_offset as u32, 1, &mut span_builder)
+            .expect("the short test span fits"),
+    );
+
+    assert_eq!(
+        diagnostic.kind,
+        DiagnosticKind::Syntax(SyntaxDiagnosticKind::InvalidCharacter)
+    );
+    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0007");
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(dollar_span),
+        "the removed marker should retain its exact authored location",
+    );
 }
 
 fn tokenize_source_with_registry(
@@ -1665,31 +1689,19 @@ fn rejects_legacy_style_child_template_prefix_syntax() {
 }
 
 #[test]
-fn tokenizes_reactive_marker_outside_template_heads() {
-    let (file_tokens, _string_table) = tokenize_source("$String\n");
-    let tokens = file_tokens.tokens.as_ref();
-
-    assert_eq!(token_at(tokens, 1).tag(), TokenTag::REACTIVE);
-    assert_eq!(token_at(tokens, 2).tag(), TokenTag::DATATYPE_STRING);
-    assert!(
-        !token_refs(tokens).any(|token| token.tag() == TokenTag::STYLE_DIRECTIVE),
-        "ordinary code should not produce style directive tokens"
-    );
+fn rejects_removed_reactive_binding_spellings_as_ordinary_syntax() {
+    for source in [
+        "value $String = \"name\"\n",
+        "value $= \"name\"\n",
+        "read_name |value $String| -> String:\n;\n",
+    ] {
+        assert_invalid_character_at_dollar(source);
+    }
 }
 
 #[test]
-fn tokenizes_template_reactive_subscription_marker() {
-    let (file_tokens, _string_table) = tokenize_source("[:[$(count)]]");
-    let tokens = file_tokens.tokens.as_ref();
-
-    assert!(
-        token_refs(tokens).any(|token| token.tag() == TokenTag::REACTIVE),
-        "`$(` in a template head should produce the reactive marker"
-    );
-    assert!(
-        !token_refs(tokens).any(|token| token.tag() == TokenTag::STYLE_DIRECTIVE),
-        "`$(` is subscription syntax, not a style directive"
-    );
+fn rejects_removed_template_subscription_spelling_as_ordinary_syntax() {
+    assert_invalid_character_at_dollar("[:[$(count)]]");
 }
 
 #[test]

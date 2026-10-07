@@ -12,7 +12,7 @@ use crate::compiler_frontend::ast::expressions::call_argument::{
 use crate::compiler_frontend::ast::expressions::expression::{
     ConstRecordState, Expression, ExpressionKind,
     FallibleCarrierVariant as AstFallibleCarrierVariant, FallibleExpressionHandling,
-    FallibleHandling, Operator, ReactiveSource, ReactiveSourceKind,
+    FallibleHandling, Operator,
 };
 use crate::compiler_frontend::ast::expressions::expression_kind::MapLiteralEntry;
 use crate::compiler_frontend::ast::expressions::failure_facts::FailureDisposition;
@@ -20,9 +20,7 @@ use crate::compiler_frontend::ast::statements::fallible_handling::wrap_catch_exp
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::ProducedValues;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
-use crate::compiler_frontend::ast::templates::template::{
-    ReactiveSubscription, SlotKey, TemplateType,
-};
+use crate::compiler_frontend::ast::templates::template::{SlotKey, TemplateType};
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopControlKind, TemplateLoopHeader,
 };
@@ -61,9 +59,6 @@ use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
 use crate::compiler_frontend::hir::patterns::HirPattern;
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::reactivity::{
-    HirReactiveSource, HirReactiveSourceKind, ReactiveSourceId,
-};
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
@@ -104,14 +99,10 @@ fn text_aggregate_wrapper_node(
         children: vec![
             OwnedRuntimeTemplateNode::Text {
                 text: OwnedFoldedString::Text(string_table.resolve(prefix).to_owned()),
-                reactive_subscription: None,
-                span: span.to_owned(),
             },
             OwnedRuntimeTemplateNode::AggregateOutput,
             OwnedRuntimeTemplateNode::Text {
                 text: OwnedFoldedString::Text(string_table.resolve(suffix).to_owned()),
-                reactive_subscription: None,
-                span: span.to_owned(),
             },
         ],
         span: span.to_owned(),
@@ -380,14 +371,10 @@ fn runtime_template_slot_placeholder_materializes_as_no_output_owned_node() {
             children: vec![
                 OwnedRuntimeTemplateNode::Text {
                     text: OwnedFoldedString::Text(string_table.resolve(before).to_owned()),
-                    reactive_subscription: None,
-                    span,
                 },
                 OwnedRuntimeTemplateNode::Slot { span },
                 OwnedRuntimeTemplateNode::Text {
                     text: OwnedFoldedString::Text(string_table.resolve(after).to_owned()),
-                    reactive_subscription: None,
-                    span,
                 },
             ],
             span,
@@ -1558,77 +1545,6 @@ fn runtime_template_inline_accumulator_coerces_non_string_segments() {
 }
 
 #[test]
-fn reactive_linear_template_keeps_subscription_chunks_lazy() {
-    let mut path_fork = super::PathInternerFork::empty();
-    let mut string_table = StringTable::new();
-    let span = None;
-    let count_path = super::symbol("count", &mut path_fork, &mut string_table);
-    let count_local = LocalId(24);
-    let count_source = ReactiveSource {
-        path: count_path,
-        kind: ReactiveSourceKind::Declaration,
-    };
-    let mut builder = setup_builder(&mut string_table, &mut path_fork);
-    register_local(
-        &mut builder,
-        count_path,
-        count_local,
-        builtin_type_ids::INT,
-        span,
-    );
-    builder.side_table.bind_reactive_source(HirReactiveSource {
-        id: ReactiveSourceId(0),
-        local_id: count_local,
-        path: count_path,
-        kind: HirReactiveSourceKind::Declaration,
-        type_id: builtin_type_ids::INT,
-        span,
-    });
-
-    let count_expression = reference_expr_with_type_id(
-        count_path,
-        builtin_type_ids::INT,
-        span,
-        ValueMode::ImmutableReference,
-    )
-    .with_reactive_source(count_source.clone());
-    let subscription = ReactiveSubscription {
-        source: count_source,
-        type_id: builtin_type_ids::INT,
-        span,
-    };
-    let handoff = OwnedRuntimeTemplateHandoff {
-        body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence {
-            children: vec![OwnedRuntimeTemplateNode::DynamicExpression {
-                expression: Box::new(count_expression),
-                reactive_subscription: Some(subscription),
-                span,
-            }],
-            span,
-        }),
-        span,
-    };
-    let expression = Expression::runtime_template_handoff(handoff, ValueMode::ImmutableOwned);
-
-    let lowered = builder
-        .lower_expression(&expression)
-        .expect("reactive runtime template should lower lazily");
-
-    assert!(
-        expression_contains_load_of_local(&lowered.value, count_local),
-        "reactive template snapshot body should reread the subscribed source"
-    );
-    let entry_block = declared_entry_block(&builder);
-    assert!(
-        entry_block
-            .statements
-            .iter()
-            .all(|statement| !matches!(&statement.kind, HirStatementKind::Assign { .. })),
-        "direct subscription chunks should not be materialized into eager snapshot assignments"
-    );
-}
-
-#[test]
 fn runtime_template_lowers_nested_templates_in_order() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
@@ -2468,23 +2384,6 @@ fn count_empty_string_initializers(block: &HirBlock) -> usize {
             )
         })
         .count()
-}
-
-fn expression_contains_load_of_local(
-    expression: &crate::compiler_frontend::hir::expressions::HirExpression,
-    expected: LocalId,
-) -> bool {
-    match &expression.kind {
-        HirExpressionKind::Load(HirPlace::Local(local))
-        | HirExpressionKind::Copy(HirPlace::Local(local)) => *local == expected,
-
-        HirExpressionKind::BinOp { left, right, .. } => {
-            expression_contains_load_of_local(left, expected)
-                || expression_contains_load_of_local(right, expected)
-        }
-
-        _ => false,
-    }
 }
 
 fn block_marks_loop_emitted(block: &HirBlock) -> bool {

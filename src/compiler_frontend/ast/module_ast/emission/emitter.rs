@@ -162,24 +162,9 @@ fn rebase_signature_parameters(
             continue;
         };
 
-        let old_parameter_id = parameter.id;
         parameter.id = path_fork
             .try_intern_child(function_path, parameter_name)
             .expect("path table exhausted while rebasing generic signature parameter");
-
-        if let Some(source) = &mut parameter.value.reactive_source
-            && source.path == old_parameter_id
-        {
-            source.path = parameter.id;
-        }
-
-        if let Some(metadata) = &mut parameter.value.reactive_template {
-            for dependency in &mut metadata.template_value_parameters {
-                if dependency.parameter == old_parameter_id {
-                    dependency.parameter = parameter.id;
-                }
-            }
-        }
     }
 }
 
@@ -1143,13 +1128,11 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 ReturnSlot {
                     value: start_return_type,
                     type_id: Some(start_return_type_id),
-                    reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
                     value: diagnostic_type_spelling(error_type, &self.environment.type_environment),
                     type_id: Some(error_type),
-                    reactive_template: None,
                     channel: ReturnChannel::Error,
                 },
             ],

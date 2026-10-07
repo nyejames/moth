@@ -48,7 +48,6 @@ use rustc_hash::FxHashMap;
 use std::{cell::RefCell, rc::Rc};
 
 mod metadata;
-mod reactivity;
 
 // -----------
 // Entry Point

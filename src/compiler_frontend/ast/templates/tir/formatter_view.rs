@@ -26,7 +26,7 @@ use crate::compiler_frontend::ast::templates::styles::whitespace::{
     TemplateBodyRunPosition, TemplateWhitespacePassProfile, apply_whitespace_passes_to_input,
 };
 use crate::compiler_frontend::ast::templates::template::{
-    BodyWhitespacePolicy, ReactiveSubscription, Style, TemplateSegmentOrigin,
+    BodyWhitespacePolicy, Style, TemplateSegmentOrigin,
 };
 use crate::compiler_frontend::ast::templates::tir::ids::{TemplateIrId, TemplateIrNodeId};
 use crate::compiler_frontend::ast::templates::tir::node::{TemplateIrNode, TemplateIrNodeKind};
@@ -114,27 +114,6 @@ impl FormatterStore<'_> {
                 TirView::new(&*self.store, reference.root, reference.phase, context)
             }
         }
-    }
-
-    fn node_reactive_subscription(
-        &self,
-        node_id: TemplateIrNodeId,
-    ) -> Result<Option<ReactiveSubscription>, CompilerError> {
-        Ok(self.store.node_reactive_subscription(node_id)?.cloned())
-    }
-
-    fn push_node(
-        &mut self,
-        node: TemplateIrNode,
-        reactive_subscription: Option<ReactiveSubscription>,
-    ) -> TemplateIrNodeId {
-        let node_id = self.store.push_node(node);
-        if let Some(subscription) = reactive_subscription {
-            self.store
-                .set_node_reactive_subscription(node_id, subscription)
-                .expect("a just-pushed node must accept a reactive subscription");
-        }
-        node_id
     }
 }
 
@@ -613,16 +592,12 @@ fn format_tir_node(
             let root = if replacement_nodes.len() == 1 && !content_changed {
                 replacement_nodes[0]
             } else {
-                push_formatter_node(
-                    formatter_store,
-                    TemplateIrNode::new(
-                        TemplateIrNodeKind::Sequence {
-                            children: replacement_nodes,
-                        },
-                        span,
-                    ),
-                    None,
-                )?
+                formatter_store.store.push_node(TemplateIrNode::new(
+                    TemplateIrNodeKind::Sequence {
+                        children: replacement_nodes,
+                    },
+                    span,
+                ))
             };
 
             Ok(TirFormatterResult { root, warnings })
@@ -733,16 +708,12 @@ fn format_tir_sequence(
         // Fast path: nothing changed, so the original node is still valid.
         original_node_ref
     } else {
-        push_formatter_node(
-            formatter_store,
-            TemplateIrNode::new(
-                TemplateIrNodeKind::Sequence {
-                    children: new_children,
-                },
-                span,
-            ),
-            None,
-        )?
+        formatter_store.store.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::Sequence {
+                children: new_children,
+            },
+            span,
+        ))
     };
 
     Ok(TirFormatterResult {
@@ -875,8 +846,6 @@ fn process_formatter_run(
 
     let mut input_pieces: Vec<FormatterInputPiece> = Vec::with_capacity(run.len());
     let mut anchor_side_table: Vec<TemplateIrNodeId> = Vec::with_capacity(run.len());
-    let mut run_reactive_subscription: Option<ReactiveSubscription> = None;
-
     for &node_id in run {
         let node_ref = node_id;
         let node = formatter_store
@@ -885,12 +854,6 @@ fn process_formatter_run(
 
         match &node.kind {
             TemplateIrNodeKind::Text { text, .. } => {
-                if run_reactive_subscription.is_none() {
-                    run_reactive_subscription = formatter_store
-                        .node_reactive_subscription(node_id)
-                        .map_err(|error| compiler_error_messages(error, string_table))?;
-                }
-
                 input_pieces.push(FormatterInputPiece::Text(FormatterTextPiece {
                     text: *text,
                     span: node.span,
@@ -947,7 +910,6 @@ fn process_formatter_run(
         output,
         &anchor_side_table,
         representative_span,
-        run_reactive_subscription,
         string_table,
     )?;
 
@@ -970,14 +932,12 @@ fn process_formatter_run(
 /// anchor becomes a structural expression node.
 /// WHY: preserving the representative span on transformed text keeps formatter
 /// output diagnosable without fabricating a new source range. Child-template
-/// opacity and dynamic-expression metadata remain attached to their original
-/// nodes.
+/// opacity and dynamic-expression payloads remain attached to their original nodes.
 fn output_to_tir_nodes(
     formatter_store: &mut FormatterStore<'_>,
     output: crate::compiler_frontend::ast::templates::formatter_contract::FormatterOutput,
     anchor_side_table: &[TemplateIrNodeId],
     representative_span: Option<SourceSpan>,
-    run_reactive_subscription: Option<ReactiveSubscription>,
     string_table: &mut StringTable,
 ) -> Result<(Vec<TemplateIrNodeId>, bool), CompilerMessages> {
     let mut nodes = Vec::with_capacity(output.pieces.len());
@@ -989,18 +949,14 @@ fn output_to_tir_nodes(
                 let text_id = string_table.intern(&text);
                 let byte_len = text.len();
 
-                nodes.push(push_formatter_node(
-                    formatter_store,
-                    TemplateIrNode::new(
-                        TemplateIrNodeKind::Text {
-                            text: text_id,
-                            byte_len,
-                            origin: TemplateSegmentOrigin::Body,
-                        },
-                        representative_span,
-                    ),
-                    run_reactive_subscription.clone(),
-                )?);
+                nodes.push(formatter_store.store.push_node(TemplateIrNode::new(
+                    TemplateIrNodeKind::Text {
+                        text: text_id,
+                        byte_len,
+                        origin: TemplateSegmentOrigin::Body,
+                    },
+                    representative_span,
+                )));
 
                 content_changed = true;
             }
@@ -1017,19 +973,14 @@ fn output_to_tir_nodes(
                         DataType::StringSlice,
                         ValueMode::ImmutableOwned,
                     );
-                    nodes.push(push_formatter_node(
-                        formatter_store,
-                        TemplateIrNode::new(
-                            TemplateIrNodeKind::DynamicExpression {
-                                expression: Box::new(expression),
-                                origin: TemplateSegmentOrigin::Body,
-                                reactive_subscription: None,
-                                site_id,
-                            },
-                            None,
-                        ),
+                    nodes.push(formatter_store.store.push_node(TemplateIrNode::new(
+                        TemplateIrNodeKind::DynamicExpression {
+                            expression: Box::new(expression),
+                            origin: TemplateSegmentOrigin::Body,
+                            site_id,
+                        },
                         None,
-                    )?);
+                    )));
                     content_changed = true;
                     continue;
                 }
@@ -1053,21 +1004,6 @@ fn output_to_tir_nodes(
     Ok((nodes, content_changed))
 }
 
-/// Appends a formatter-produced node to the store that owns the current view.
-///
-/// WHAT: obtains the mutable store borrow only after formatter input has been
-///       extracted into owned local data. WHY: `TirView` reads through the
-///       module store `RefCell`, so writeback must be a separate short phase
-///       rather than holding a mutable store borrow during view reads.
-fn push_formatter_node(
-    formatter_store: &mut FormatterStore<'_>,
-    node: TemplateIrNode,
-    reactive_subscription: Option<ReactiveSubscription>,
-) -> Result<TemplateIrNodeId, CompilerMessages> {
-    let node_id = formatter_store.push_node(node, reactive_subscription);
-
-    Ok(node_id)
-}
 // -------------------------
 //  Source spans
 // -------------------------

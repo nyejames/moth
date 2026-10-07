@@ -5,7 +5,6 @@
 //! entrypoint easier to inspect without changing the borrow-analysis model.
 
 use super::*;
-use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expressions::HirMapOp;
 use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
@@ -24,7 +23,6 @@ pub(crate) fn transfer_statement(
     // WHAT: transfer one statement at the block frontier.
     // WHY: the fixed-point driver merges only block states, so statement effects must be exact.
     let mut tracker = StatementAccessTracker::new(layout.local_count());
-    let mut reactive_invalidations = Vec::new();
     let conflicts_before = stats.conflicts_checked;
     let statement_order = layout.statement_order_or_unknown(statement.id);
 
@@ -32,16 +30,6 @@ pub(crate) fn transfer_statement(
         HirStatementKind::Assign { target, value } => {
             let location = context.diagnostics.statement_error_span(statement);
             let span = context.diagnostics.statement_error_span(statement);
-            let pending_invalidations = reactive_assignment_invalidations(
-                context,
-                layout,
-                state,
-                statement.id,
-                target,
-                location,
-                statement.span,
-            )?;
-
             {
                 let mut read_env = SharedReadEnv {
                     context,
@@ -97,7 +85,6 @@ pub(crate) fn transfer_statement(
                 target,
                 value,
             )?;
-            reactive_invalidations.extend(pending_invalidations);
         }
 
         HirStatementKind::Call {
@@ -112,16 +99,6 @@ pub(crate) fn transfer_statement(
                 .zip(semantics.arg_effects.iter().copied())
                 .map(|(argument, effect)| CallArgumentTransfer { argument, effect })
                 .collect::<Vec<_>>();
-            let pending_invalidations = reactive_mutable_call_invalidations(
-                context,
-                layout,
-                state,
-                statement.id,
-                target,
-                &call_args,
-                location,
-            )?;
-
             transfer_call_arguments_and_result(
                 &mut CallTransferContext {
                     context,
@@ -138,7 +115,6 @@ pub(crate) fn transfer_statement(
                 *result,
                 semantics.return_alias,
             )?;
-            reactive_invalidations.extend(pending_invalidations);
         }
 
         HirStatementKind::MapOp {
@@ -163,19 +139,6 @@ pub(crate) fn transfer_statement(
                     effect: map_argument_effect(*op, arg_index),
                 });
             }
-            let pending_invalidations = reactive_map_mutation_invalidations(
-                context,
-                layout,
-                state,
-                statement.id,
-                *op,
-                receiver,
-                ReactiveMapMutationSpans {
-                    location,
-                    span: statement.span,
-                },
-            )?;
-
             transfer_call_arguments_and_result(
                 &mut CallTransferContext {
                     context,
@@ -192,7 +155,6 @@ pub(crate) fn transfer_statement(
                 *result,
                 map_result_alias(*op),
             )?;
-            reactive_invalidations.extend(pending_invalidations);
         }
 
         HirStatementKind::CastOp { source, result, .. } => {
@@ -481,10 +443,6 @@ pub(crate) fn transfer_statement(
         conflicts_checked: stats.conflicts_checked - conflicts_before,
     };
     stats.statement_facts.push((statement.id, statement_fact));
-    stats
-        .reactive_invalidations
-        .push((statement.id, reactive_invalidations));
-
     Ok(())
 }
 
@@ -783,18 +741,6 @@ fn check_call_may_consume(
         return Ok(());
     }
 
-    // Reactive sources represent stable observable storage. Optional destruction responsibility
-    // must never consume that root, so use the call slot's ordinary access contract instead.
-    if mutable_roots.iter_ones().any(|root_index| {
-        input
-            .context
-            .diagnostics
-            .reactive_source_id_for_local(input.layout.local_ids[root_index])
-            .is_some()
-    }) {
-        return check_call_borrow_fallback(input, mutable_roots, location, span, fallback_effect);
-    }
-
     let move_decision = classify_move_decision(
         input.layout,
         input.block_id,
@@ -974,174 +920,4 @@ fn map_result_alias(op: HirMapOp) -> FunctionReturnAliasSummary {
     } else {
         FunctionReturnAliasSummary::Fresh
     }
-}
-
-fn reactive_assignment_invalidations(
-    context: &BorrowTransferContext<'_>,
-    layout: &FunctionLayout,
-    state: &BorrowState,
-    statement_id: HirNodeId,
-    target: &HirPlace,
-    location: Option<SourceSpan>,
-    span: Option<SourceSpan>,
-) -> Result<Vec<ReactiveInvalidationFact>, BorrowCheckError> {
-    match target {
-        HirPlace::Local(local_id) => {
-            let Some(source) = context.diagnostics.reactive_source_id_for_local(*local_id) else {
-                return Ok(Vec::new());
-            };
-
-            let Some(local_index) = layout.index_of(*local_id) else {
-                return Err(context.diagnostics.internal_error(
-                    format!(
-                        "Borrow checker could not resolve reactive assignment local '{local_id}' in the current function"
-                    ),
-                    location,
-                ));
-            };
-
-            // Declaration initialization also lowers as an assignment. It creates the stable
-            // source storage, but it does not invalidate an already-live source.
-            if state.local_state(local_index).mode.is_definitely_uninit() {
-                return Ok(Vec::new());
-            }
-
-            Ok(vec![ReactiveInvalidationFact {
-                statement_id,
-                source,
-                kind: ReactiveInvalidationKind::Assignment,
-                span,
-            }])
-        }
-
-        HirPlace::Field { .. } | HirPlace::Index { .. } => {
-            let roots =
-                roots_for_place(layout, state, target, location, span, &context.diagnostics)?;
-            let kind = match target {
-                HirPlace::Field { .. } => ReactivePlaceWriteKind::Field,
-                HirPlace::Index { .. } => ReactivePlaceWriteKind::Index,
-                HirPlace::Local(_) => return Ok(Vec::new()),
-            };
-            Ok(invalidations_for_roots(
-                context,
-                layout,
-                &roots,
-                statement_id,
-                ReactiveInvalidationKind::PlaceWrite(kind),
-                span,
-            ))
-        }
-    }
-}
-
-struct ReactiveMapMutationSpans {
-    location: Option<SourceSpan>,
-    span: Option<SourceSpan>,
-}
-
-fn reactive_map_mutation_invalidations(
-    context: &BorrowTransferContext<'_>,
-    layout: &FunctionLayout,
-    state: &BorrowState,
-    statement_id: HirNodeId,
-    op: HirMapOp,
-    receiver: &HirExpression,
-    spans: ReactiveMapMutationSpans,
-) -> Result<Vec<ReactiveInvalidationFact>, BorrowCheckError> {
-    if !op.requires_mutable_receiver() {
-        return Ok(Vec::new());
-    }
-
-    let roots = mutable_argument_roots(
-        layout,
-        state,
-        receiver,
-        spans.location,
-        receiver.span,
-        &context.diagnostics,
-    )?;
-    Ok(invalidations_for_roots(
-        context,
-        layout,
-        &roots,
-        statement_id,
-        ReactiveInvalidationKind::MapMutation(op),
-        spans.span,
-    ))
-}
-
-fn reactive_mutable_call_invalidations(
-    context: &BorrowTransferContext<'_>,
-    layout: &FunctionLayout,
-    state: &BorrowState,
-    statement_id: HirNodeId,
-    target: &CallTarget,
-    args: &[CallArgumentTransfer<'_>],
-    location: Option<SourceSpan>,
-) -> Result<Vec<ReactiveInvalidationFact>, BorrowCheckError> {
-    let mut invalidations = Vec::new();
-
-    for (argument_index, arg) in args.iter().enumerate() {
-        if !matches!(
-            arg.effect,
-            ArgEffect::MutableBorrow | ArgEffect::MayConsumeMutable
-        ) {
-            continue;
-        }
-
-        let argument_location = context
-            .diagnostics
-            .value_error_span(arg.argument.id, location);
-        let roots = mutable_argument_roots(
-            layout,
-            state,
-            arg.argument,
-            argument_location,
-            arg.argument.span,
-            &context.diagnostics,
-        )?;
-        invalidations.extend(invalidations_for_roots(
-            context,
-            layout,
-            &roots,
-            statement_id,
-            ReactiveInvalidationKind::MutableCallArgument {
-                target: Box::new(target.clone()),
-                argument_index,
-            },
-            arg.argument.span,
-        ));
-    }
-
-    Ok(invalidations)
-}
-
-fn invalidations_for_roots(
-    context: &BorrowTransferContext<'_>,
-    layout: &FunctionLayout,
-    roots: &RootSet,
-    statement_id: HirNodeId,
-    kind: ReactiveInvalidationKind,
-    span: Option<SourceSpan>,
-) -> Vec<ReactiveInvalidationFact> {
-    let mut sources = roots
-        .iter_ones()
-        .filter_map(|root_index| {
-            context
-                .diagnostics
-                .reactive_source_id_for_local(layout.local_ids[root_index])
-        })
-        .collect::<Vec<_>>();
-    sources.sort_by_key(|source| source.0);
-    sources.dedup();
-
-    sources
-        .into_iter()
-        .map(|source| ReactiveInvalidationFact {
-            statement_id,
-            source,
-            kind: kind.clone(),
-            span,
-        })
-        .collect()
 }

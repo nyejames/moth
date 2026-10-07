@@ -20,7 +20,6 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
 };
-use crate::compiler_frontend::hir::reactivity::ReactiveTemplateId;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::source::SourceSpan;
@@ -78,8 +77,6 @@ pub(crate) struct HirReachability {
     pub(crate) reachable_map_uses: Vec<ReachableMapUse>,
     pub(crate) reachable_resource_uses: Vec<ReachableResourceUse>,
     pub(crate) reachable_site_root_uses: Vec<ReachableSiteRootUse>,
-    pub(crate) reachable_reactive_templates: Vec<ReachableReactiveTemplateUse>,
-    pub(crate) reachable_reactive_sinks: Vec<ReachableReactiveSinkUse>,
     pub(crate) reachable_runtime_casts: Vec<ReachableRuntimeCastUse>,
     pub(crate) reachable_numeric_ops: Vec<ReachableNumericOpUse>,
     pub(crate) reachable_range_step_failures: Vec<ReachableRangeStepFailureUse>,
@@ -147,8 +144,6 @@ struct HirBlockRuntimeFacts {
     reachable_map_uses: Vec<ReachableMapUse>,
     reachable_resource_uses: Vec<ReachableResourceUse>,
     reachable_site_root_uses: Vec<ReachableSiteRootUse>,
-    reachable_reactive_templates: Vec<ReachableReactiveTemplateUse>,
-    reachable_reactive_sinks: Vec<ReachableReactiveSinkUse>,
     reachable_runtime_casts: Vec<ReachableRuntimeCastUse>,
     reachable_numeric_ops: Vec<ReachableNumericOpUse>,
     reachable_range_step_failures: Vec<ReachableRangeStepFailureUse>,
@@ -380,33 +375,6 @@ pub(crate) enum ReachableMapUseKind {
 pub(crate) struct ReachableExternalCall {
     pub(crate) function_id: ExternalFunctionId,
     pub(crate) span: Option<SourceSpan>,
-}
-
-/// A reachable reactive template-backed value.
-///
-/// WHY: unsupported-backend validation needs to reject reachable reactive runtime features even
-/// when they are produced inside helper functions rather than directly pushed into the page.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ReachableReactiveTemplateUse {
-    pub(crate) template_id: ReactiveTemplateId,
-    pub(crate) span: Option<SourceSpan>,
-}
-
-/// A reachable sink that consumes a reactive template-backed value.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ReachableReactiveSinkUse {
-    pub(crate) kind: ReachableReactiveSinkKind,
-    pub(crate) template_id: ReactiveTemplateId,
-    pub(crate) span: Option<SourceSpan>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum ReachableReactiveSinkKind {
-    RuntimeFragment,
-    ExternalCallArgument {
-        function_id: ExternalFunctionId,
-        argument_index: usize,
-    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -670,10 +638,6 @@ impl HirReachability {
             .extend(direct.reachable_resource_uses.iter().cloned());
         self.reachable_site_root_uses
             .extend(direct.reachable_site_root_uses.iter().cloned());
-        self.reachable_reactive_templates
-            .extend(direct.reachable_reactive_templates.iter().cloned());
-        self.reachable_reactive_sinks
-            .extend(direct.reachable_reactive_sinks.iter().cloned());
         self.reachable_runtime_casts
             .extend(direct.reachable_runtime_casts.iter().cloned());
         self.reachable_numeric_ops
@@ -819,28 +783,13 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 self.collect_runtime_feature_uses_from_expression(value, span);
             }
 
-            HirStatementKind::Call { target, args, .. } => {
-                for (argument_index, arg) in args.iter().enumerate() {
-                    if let CallTarget::External(function_id) = target {
-                        self.collect_reactive_sink_from_expression(
-                            ReachableReactiveSinkKind::ExternalCallArgument {
-                                function_id: *function_id,
-                                argument_index,
-                            },
-                            arg,
-                            span,
-                        );
-                    }
+            HirStatementKind::Call { args, .. } => {
+                for arg in args {
                     self.collect_runtime_feature_uses_from_expression(arg, span);
                 }
             }
 
             HirStatementKind::PushRuntimeFragment { value, .. } => {
-                self.collect_reactive_sink_from_expression(
-                    ReachableReactiveSinkKind::RuntimeFragment,
-                    value,
-                    span,
-                );
                 self.collect_runtime_feature_uses_from_expression(value, span);
             }
 
@@ -1020,24 +969,6 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
             .or(expression.span)
             .or(fallback_span);
 
-        // Only templates with actual runtime subscriptions are unsupported reactive runtime
-        // features. Plain runtime templates with variable interpolations are snapshots, not live
-        // reactive values, and are rejected by other backend-specific checks if needed.
-        if let Some(template) = self
-            .index
-            .hir
-            .side_table
-            .reactive_template_for_value(expression.id)
-            && !template.dependencies.is_empty()
-        {
-            self.direct_facts
-                .reachable_reactive_templates
-                .push(ReachableReactiveTemplateUse {
-                    template_id: template.id,
-                    span: expression_span,
-                });
-        }
-
         match &expression.kind {
             // Map literals.
             HirExpressionKind::MapLiteral(entries) => {
@@ -1150,39 +1081,6 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
             | HirExpressionKind::Load(_)
             | HirExpressionKind::Copy(_) => {}
         }
-    }
-
-    fn collect_reactive_sink_from_expression(
-        &mut self,
-        kind: ReachableReactiveSinkKind,
-        expression: &HirExpression,
-        fallback_span: Option<SourceSpan>,
-    ) {
-        let Some(template) = self
-            .index
-            .hir
-            .side_table
-            .reactive_template_for_value(expression.id)
-            .filter(|template| template.has_runtime_reactive_dependency())
-        else {
-            return;
-        };
-
-        let span = self
-            .index
-            .hir
-            .side_table
-            .value_source_span(expression.id)
-            .or(expression.span)
-            .or(fallback_span);
-
-        self.direct_facts
-            .reachable_reactive_sinks
-            .push(ReachableReactiveSinkUse {
-                kind,
-                template_id: template.id,
-                span,
-            });
     }
 
     fn enqueue_block(&mut self, block_id: BlockId) {

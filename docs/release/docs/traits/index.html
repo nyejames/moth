@@ -1282,11 +1282,11 @@ parsed_count <span class='moth-code-type'>Int</span> <span class='moth-code-oper
 
             <a
                 class="doc-pager__link doc-pager__link--next"
-                href="../reactivity/"
+                href="../wiring/"
                 rel="next"
             >
                 <span class="doc-pager__direction">Next →</span>
-                <span class="doc-pager__title">Reactivity</span>
+                <span class="doc-pager__title">Wiring</span>
             </a>
 
             
@@ -1572,34 +1572,6 @@ function __moth_collection_remove(collection, index) {
 function __moth_collection_length(collection) {
     const items = __moth_collection_items(collection);
     return items.length;
-}
-
-function __moth_string_like(value) {
-if (__moth_is_ref(value)) {
-return __moth_string_like(__moth_read(value));
-}
-return typeof value === "string" || (value !== null && typeof value === "object" && value.__moth_template === true && typeof value.snapshot === "function");
-}
-
-function __moth_string_value(value) {
-if (value === undefined || value === null) {
-return "";
-}
-if (__moth_is_ref(value)) {
-return __moth_string_value(__moth_read(value));
-}
-if (value.__moth_template === true && typeof value.snapshot === "function") {
-return value.snapshot();
-}
-return value;
-}
-
-function __moth_string_equal(left, right) {
-return __moth_string_value(left) === __moth_string_value(right);
-}
-
-function __moth_map_key(value) {
-return __moth_string_like(value) ? __moth_string_value(value) : value;
 }
 
 function __moth_value_to_string(value) {

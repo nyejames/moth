@@ -18,7 +18,6 @@
 - a copied acyclic graph may be allocated into an inferred or declared destination region
 - a copied cyclic graph must be allocated wholly into one declared region. Copying a cycle into an ordinary inferred region is invalid. Preserving internal alias topology does not override the rule that direct source-created cycles require one declared region
 - the copied graph shares no mutable allocation with the source graph
-- a reactive source is copied as its current value, not as the same reactive source identity
 - an external opaque handle or resource that doesn't define a genuine independent-copy operation produces a source diagnostic
 - a non-copyable graph member produces a source diagnostic, and the compiler won't silently retain an alias instead
 

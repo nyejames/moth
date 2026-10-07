@@ -1,0 +1,88 @@
+A Route parameter describes a known choice constructor and the payload it will
+receive later. Routes are parameter contracts, not callable values. The
+following Wire/Route forms teach accepted design and are unsupported by the
+current compiler until Phase 6.
+
+[codeblock, $code("moth"):
+    TodoMessage ::
+        Rename | id Int, text String |,
+        Delete | id Int |,
+    ;
+
+    offer_rename |on_rename Route of String -> TodoMessage| -> String:
+        return "Rename route received"
+    ;
+
+    offer_delete |on_delete Route of TodoMessage| -> String:
+        return "Delete route received"
+    ;
+
+    todo_id = 42
+    offer_rename(TodoMessage::Rename(todo_id))
+    offer_delete(TodoMessage::Delete(todo_id))
+]
+
+The first route has one future input, `String`; `todo_id` is captured now as the
+leading payload field. The second route has no future input and captures the
+complete `Delete` payload now. The receiving parameter is the immediate context
+that permits a constructor to leave fields for later input. An ordinary choice
+construction outside that context must provide every field.
+
+Rows can use the same zero-input shape to retain their own item identity:
+
+[codeblock, $code("moth"):
+    make_row_delete_offer |id Int| -> String:
+        return offer_delete(TodoMessage::Delete(id))
+    ;
+]
+
+Each call forms a route with that row's `id` already captured. A row loop can
+pass its current `id` to `make_row_delete_offer`; the example does not invoke
+the route, register an event or provide a UI callback. Those runtime
+operations are outside the accepted foundation.
+
+Choice values still describe application state changes in the ordinary way.
+This self-contained example uses currently executable Moth syntax; the update
+function receives an ordinary choice value and does not use Wire or Route:
+
+[codeblock, $code("moth"):
+    TodoMessage ::
+        Rename | id Int, text String |,
+        Delete | id Int |,
+    ;
+
+    update |state String, message TodoMessage| -> String:
+        return if message is:
+            Rename(id, text) => then text
+            Delete(id) => then state
+        ;
+    ;
+]
+
+A child message can be lifted into one parent choice constructor by capturing a
+leading field:
+
+[codeblock, $code("moth"):
+    EditorMessage ::
+        Changed | value String |,
+    ;
+
+    AppMessage ::
+        Editor | editor_id Int, message EditorMessage |,
+    ;
+
+    receive_editor_route |on_message Route of EditorMessage -> AppMessage| -> String:
+        return "Route received"
+    ;
+
+    forward_editor |on_message Route of EditorMessage -> AppMessage| -> String:
+        return receive_editor_route(on_message)
+    ;
+
+    forward_editor(AppMessage::Editor(7))
+]
+
+This uses one Route. It does not compose routes or call one from another. A
+compatible Route parameter can be forwarded unchanged; route invocation and
+composition remain unsupported. These examples teach accepted future contracts
+and are unsupported by the current compiler until Phase 6.

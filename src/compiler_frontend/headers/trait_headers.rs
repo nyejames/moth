@@ -13,7 +13,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::declaration_syntax::signature_members::parse_trait_requirement_signature_syntax;
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::is_uppercase_constant_name;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -81,7 +81,6 @@ pub(super) fn parse_trait_declaration(
     declaration_name: StringId,
     source_order: usize,
     context: &mut HeaderBuildContext<'_>,
-    span_builder: &mut ExtendedSpanBuilder,
 ) -> TraitHeaderResult<TraitDeclarationSyntax> {
     let mut requirements = Vec::new();
     let name_span = declaration_span;
@@ -117,8 +116,7 @@ pub(super) fn parse_trait_declaration(
             }
 
             _ => {
-                let requirement =
-                    parse_trait_requirement(cursor, trait_path, context, span_builder)?;
+                let requirement = parse_trait_requirement(cursor, trait_path, context)?;
                 requirements.push(requirement);
             }
         }
@@ -137,7 +135,6 @@ fn parse_trait_requirement(
     cursor: &mut TokenCursor<'_>,
     trait_path: PathId,
     context: &mut HeaderBuildContext<'_>,
-    span_builder: &mut ExtendedSpanBuilder,
 ) -> TraitHeaderResult<TraitRequirementSyntax> {
     let Some(first) = cursor.current() else {
         return Err(HeaderParseFailure::Diagnostic(
@@ -181,7 +178,6 @@ fn parse_trait_requirement(
         context.string_table,
         method_path,
         context.path_fork,
-        span_builder,
     )?;
     *cursor = declaration_cursor.canonical_cursor();
 

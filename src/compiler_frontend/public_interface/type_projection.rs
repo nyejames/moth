@@ -41,9 +41,7 @@ use super::model::{
 use crate::compiler_frontend::ast::ReceiverMethodEntry;
 use crate::compiler_frontend::ast::ResolvedTraitSourceFact;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, ReactiveSourceKind,
-};
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, ReturnChannel, ReturnSlot,
@@ -815,7 +813,7 @@ pub(super) fn project_free_function_semantics(
                 context,
             )?;
             let folded_default = project_folded_default(&declaration.value, folded_value_context)?;
-            let access = project_parameter_access(declaration)?;
+            let access = project_parameter_access(declaration);
             Ok(PublicParameterTypeSlot {
                 name,
                 type_identity,
@@ -1242,25 +1240,11 @@ pub(super) fn project_defaults_provenance(
 }
 
 /// Projects declaration-owned access without consulting HIR or borrow-analysis side tables.
-pub(super) fn project_parameter_access(
-    declaration: &Declaration,
-) -> Result<PublicCallParameterAccess, CompilerError> {
-    match declaration.value.reactive_source.as_ref() {
-        Some(source) if source.kind == ReactiveSourceKind::Declaration => {
-            Err(CompilerError::compiler_error(format!(
-                "defined public type-surface projection found reactive declaration metadata on function parameter {:?}",
-                declaration.id
-            )))
-        }
-        Some(_) if declaration.value.value_mode.is_mutable() => {
-            Err(CompilerError::compiler_error(format!(
-                "defined public type-surface projection found mutable reactive function parameter {:?}",
-                declaration.id
-            )))
-        }
-        Some(_) => Ok(PublicCallParameterAccess::Reactive),
-        None if declaration.value.value_mode.is_mutable() => Ok(PublicCallParameterAccess::Mutable),
-        None => Ok(PublicCallParameterAccess::Shared),
+pub(super) fn project_parameter_access(declaration: &Declaration) -> PublicCallParameterAccess {
+    if declaration.value.value_mode.is_mutable() {
+        PublicCallParameterAccess::Mutable
+    } else {
+        PublicCallParameterAccess::Shared
     }
 }
 

@@ -10,8 +10,8 @@ including a local string, runtime template snapshot or infallible string-produci
 It is still fully checked and normalized when the condition is the literal
 `true`. The message is normalized through the ordinary AST template path before
 it is discarded after final AST type/TIR validation, so its temporary AST-local
-TIR is removed with the message and no TIR reference, runtime handoff, reactive
-metadata, generated function or other runtime fact survives. Active messages
+TIR is removed with the message and no TIR reference, runtime handoff, generated
+function or other runtime fact survives. Active messages
 are evaluated only on the failure edge. See @../progress (Progress) for current
 compiler and backend support.
 

@@ -287,7 +287,6 @@ fn registered_runtime_template(
             reference_expression,
             TemplateSegmentOrigin::Body,
             None,
-            None,
         );
         let root = builder.push_sequence_node(vec![text_node, dynamic_node], None);
         builder.finish_template(
@@ -370,7 +369,6 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
                     unselected_member,
                 )),
             TemplateSegmentOrigin::Body,
-            None,
             location,
         );
         let selected_node = builder.push_dynamic_expression_node(
@@ -380,7 +378,6 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
                 ValueMode::ImmutableOwned,
             ),
             TemplateSegmentOrigin::Body,
-            None,
             location,
         );
         let branch = TemplateIrBranch::new(
@@ -539,13 +536,6 @@ fn runtime_template_expression_normalization_replaces_template_with_owned_handof
         expression.synthetic_interface_provenance.members(),
         &[provenance_member]
     );
-    assert!(
-        expression
-            .reactive_template
-            .as_ref()
-            .is_some_and(|metadata| metadata.template_backed),
-        "runtime handoff expressions must preserve template-backed metadata"
-    );
 }
 
 #[test]
@@ -576,7 +566,6 @@ fn runtime_template_expression_handoff_uses_finalized_expression_overlay_view() 
             nested_template_expression,
             TemplateSegmentOrigin::Body,
             None,
-            None,
         );
         let runtime_dynamic_node = builder.push_dynamic_expression_node(
             Expression::reference_with_type_id(
@@ -588,7 +577,6 @@ fn runtime_template_expression_handoff_uses_finalized_expression_overlay_view() 
                 ConstRecordState::RuntimeValue,
             ),
             TemplateSegmentOrigin::Body,
-            None,
             None,
         );
         let root =
@@ -633,10 +621,6 @@ fn runtime_template_expression_handoff_uses_finalized_expression_overlay_view() 
         string_slices.contains(&overlay_text),
         "runtime handoff must materialize normalized dynamic expressions from the final effective TirView"
     );
-    assert!(
-        expression.reactive_template.is_some(),
-        "runtime handoff replacement should preserve template metadata"
-    );
 }
 
 /// Proves that a nested runtime template inside a TIR dynamic expression node
@@ -667,7 +651,6 @@ fn nested_runtime_template_normalizes_through_final_view() {
         let dynamic_node = builder.push_dynamic_expression_node(
             Expression::template(nested_template, ValueMode::ImmutableOwned),
             TemplateSegmentOrigin::Body,
-            None,
             None,
         );
         let root = builder.push_sequence_node(vec![dynamic_node], None);
@@ -832,326 +815,6 @@ fn nested_const_template_folds_through_final_view() {
     assert_eq!(
         folded, child_text,
         "fold must produce the child template's text from the final TIR view"
-    );
-}
-
-/// Proves that reactive subscriptions stored on TIR dynamic expression nodes
-/// are collected into the expression's reactive metadata through the finalized
-/// effective view.
-#[test]
-fn reactive_metadata_derived_from_nested_final_view() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let reactive_path = path_fork
-        .try_intern_portable_path("reactive_source", &mut string_table)
-        .expect("test path fits");
-
-    let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
-    let context = TemplateViewContext::default();
-
-    // Build a TIR with a dynamic expression carrying a reactive subscription.
-    let template_id = {
-        let mut store = template_ir_store.borrow_mut();
-        let mut builder = TemplateIrBuilder::new(&mut store);
-
-        let subscription = ReactiveSubscription {
-            source: ReactiveSource {
-                path: reactive_path,
-                kind: ReactiveSourceKind::Declaration,
-            },
-            type_id: builtin_type_ids::STRING,
-            span: None,
-        };
-
-        let dynamic_node = builder.push_dynamic_expression_node(
-            Expression::reference_with_type_id(
-                reactive_path,
-                DataType::StringSlice,
-                builtin_type_ids::STRING,
-                None,
-                ValueMode::ImmutableReference,
-                ConstRecordState::RuntimeValue,
-            ),
-            TemplateSegmentOrigin::Body,
-            Some(subscription),
-            None,
-        );
-        let root = builder.push_sequence_node(vec![dynamic_node], None);
-        builder.finish_template(
-            root,
-            Style::default(),
-            TemplateType::StringFunction,
-            TemplateIrSummary::default(),
-            None,
-        )
-    };
-
-    let template = template_with_reference(
-        TemplateTirReference {
-            root: template_id,
-            phase: TemplateTirPhase::Composed,
-            context,
-        },
-        None,
-    );
-    let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
-
-    let mut context = TemplateNormalizationContext {
-        template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
-        string_table: &mut string_table,
-        template_ir_store: Rc::clone(&template_ir_store),
-        module_resources: None,
-    };
-
-    normalize_expression_templates(&mut expression, &mut context)
-        .expect("reactive template normalization should succeed");
-
-    let metadata = expression
-        .reactive_template
-        .as_ref()
-        .expect("runtime handoff replacement should preserve reactive template metadata");
-
-    assert!(
-        metadata.template_backed,
-        "reactive metadata should be template-backed"
-    );
-    assert!(
-        metadata.subscriptions.iter().any(|sub| {
-            sub.source.path == reactive_path
-                && matches!(sub.source.kind, ReactiveSourceKind::Declaration)
-        }),
-        "reactive metadata must contain the subscription from the final TIR view"
-    );
-}
-
-/// Pins the finalizer seam before durable reactive handoff annotation can repair it.
-#[test]
-fn selected_static_candidate_carries_annotated_context_into_runtime_handoff() {
-    use super::super::super::reactive_templates::propagate_reactive_template_metadata_in_ast;
-    use super::super::super::static_if_specialization::StaticIfCandidate;
-
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let function_path = path_fork
-        .try_intern_portable_path("render_count", &mut string_table)
-        .expect("test path fits");
-    let parameter_path = path_fork
-        .try_intern_portable_path("source", &mut string_table)
-        .expect("test path fits");
-    let active_source_path = path_fork
-        .try_intern_portable_path("count", &mut string_table)
-        .expect("test path fits");
-    let inactive_source_path = path_fork
-        .try_intern_portable_path("inactive", &mut string_table)
-        .expect("test path fits");
-    let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
-
-    let template_expression =
-        |store: &mut TemplateIrStore,
-         expression: Expression,
-         subscription: Option<ReactiveSubscription>| {
-            let location = None;
-            let mut builder = TemplateIrBuilder::new(store);
-            let dynamic = builder.push_dynamic_expression_node(
-                expression,
-                TemplateSegmentOrigin::Body,
-                subscription,
-                location,
-            );
-            let root = builder.push_sequence_node(vec![dynamic], location);
-            let template_id = builder.finish_template(
-                root,
-                Style::default(),
-                TemplateType::String,
-                TemplateIrSummary::empty(),
-                location,
-            );
-            Expression::template(
-                template_with_reference(
-                    TemplateTirReference {
-                        root: template_id,
-                        phase: TemplateTirPhase::Composed,
-                        context: TemplateViewContext::default(),
-                    },
-                    location,
-                ),
-                ValueMode::ImmutableOwned,
-            )
-        };
-
-    let mut parameter = Declaration {
-        id: parameter_path,
-        value: Expression::no_value_with_type_id(
-            None,
-            DataType::Int,
-            builtin_type_ids::INT,
-            ValueMode::ImmutableReference,
-        ),
-        binding_span: None,
-        config_qualifier: None,
-    };
-    parameter.value.reactive_source = Some(ReactiveSource {
-        path: parameter_path,
-        kind: ReactiveSourceKind::Parameter,
-    });
-
-    let parameter_reference = Expression::reference_with_type_id(
-        parameter_path,
-        DataType::Int,
-        builtin_type_ids::INT,
-        None,
-        ValueMode::ImmutableReference,
-        ConstRecordState::RuntimeValue,
-    )
-    .with_reactive_source(ReactiveSource {
-        path: parameter_path,
-        kind: ReactiveSourceKind::Parameter,
-    });
-    let function_template = template_expression(
-        &mut template_ir_store.borrow_mut(),
-        parameter_reference,
-        Some(ReactiveSubscription {
-            source: ReactiveSource {
-                path: parameter_path,
-                kind: ReactiveSourceKind::Parameter,
-            },
-            type_id: builtin_type_ids::INT,
-            span: None,
-        }),
-    );
-    let function = fixture_function_node(
-        function_path,
-        FunctionSignature {
-            parameters: vec![parameter],
-            returns: vec![ReturnSlot {
-                value: DataType::StringSlice,
-                type_id: Some(builtin_type_ids::STRING),
-                reactive_template: None,
-                channel: ReturnChannel::Success,
-            }],
-        },
-        vec![node(NodeKind::Return(vec![function_template]), None)],
-        None,
-    );
-
-    let active_argument = Expression::reference_with_type_id(
-        active_source_path,
-        DataType::Int,
-        builtin_type_ids::INT,
-        None,
-        ValueMode::ImmutableReference,
-        ConstRecordState::RuntimeValue,
-    )
-    .with_reactive_source(ReactiveSource {
-        path: active_source_path,
-        kind: ReactiveSourceKind::Declaration,
-    });
-    let mut type_environment = TypeEnvironment::new();
-    let active_call = Expression::function_call_with_typed_arguments(
-        function_path,
-        vec![CallArgument::positional(
-            active_argument,
-            CallAccessMode::Shared,
-            None,
-        )],
-        vec![builtin_type_ids::STRING],
-        &mut type_environment,
-        None,
-    );
-    let active_template =
-        template_expression(&mut template_ir_store.borrow_mut(), active_call, None);
-
-    let inactive_reference = Expression::reference_with_type_id(
-        inactive_source_path,
-        DataType::Int,
-        builtin_type_ids::INT,
-        None,
-        ValueMode::ImmutableReference,
-        ConstRecordState::RuntimeValue,
-    );
-    let inactive_template = template_expression(
-        &mut template_ir_store.borrow_mut(),
-        inactive_reference,
-        Some(ReactiveSubscription {
-            source: ReactiveSource {
-                path: inactive_source_path,
-                kind: ReactiveSourceKind::Declaration,
-            },
-            type_id: builtin_type_ids::INT,
-            span: None,
-        }),
-    );
-
-    let mut ast = vec![
-        function,
-        node(
-            NodeKind::If(
-                Expression::bool(true, None, ValueMode::ImmutableOwned),
-                vec![node(NodeKind::ExpressionStatement(active_template), None)],
-                Some(vec![node(
-                    NodeKind::ExpressionStatement(inactive_template),
-                    None,
-                )]),
-                test_if_branch_metadata(true),
-            ),
-            None,
-        ),
-    ];
-
-    let mut candidate = StaticIfCandidate::prepare(
-        &ast,
-        &ConstValueStore::default(),
-        Rc::clone(&template_ir_store),
-        &mut string_table,
-        NumericProfile::STANDARD,
-    )
-    .expect("static candidate specialization should succeed");
-    assert!(candidate.has_selections());
-
-    propagate_reactive_template_metadata_in_ast(
-        candidate.ast_mut(),
-        &mut template_ir_store.borrow_mut(),
-    )
-    .expect("candidate reactive propagation should succeed");
-
-    let mut normalization_context = TemplateNormalizationContext {
-        template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
-        string_table: &mut string_table,
-        template_ir_store,
-        module_resources: None,
-    };
-    for ast_node in candidate.ast_mut() {
-        normalize_ast_node_templates(ast_node, &mut normalization_context)
-            .expect("candidate normalization should succeed");
-    }
-
-    candidate.publish(&mut ast);
-
-    let NodeKind::LexicalScope { body } = &ast[1].kind else {
-        panic!("known Bool should publish one active lexical scope");
-    };
-    let NodeKind::ExpressionStatement(expression) = &body[0].kind else {
-        panic!("selected body should retain its template expression");
-    };
-    assert!(matches!(
-        expression.kind,
-        ExpressionKind::RuntimeTemplateHandoff(_)
-    ));
-    let metadata = expression
-        .reactive_template
-        .as_ref()
-        .expect("handoff must retain candidate metadata before durable publication");
-    assert!(metadata.subscriptions.iter().any(|subscription| {
-        subscription.source.path == active_source_path
-            && subscription.source.kind == ReactiveSourceKind::Declaration
-    }));
-    assert!(
-        metadata
-            .subscriptions
-            .iter()
-            .all(|subscription| subscription.source.path != inactive_source_path)
     );
 }
 
@@ -1333,7 +996,6 @@ fn static_true_assertion_discards_normalized_runtime_template_message_after_vali
         message.kind
     );
     assert_eq!(message.type_id, option_string_type_id);
-    assert!(message.reactive_template.is_none());
     assert!(message.synthetic_interface_provenance.is_empty());
 }
 

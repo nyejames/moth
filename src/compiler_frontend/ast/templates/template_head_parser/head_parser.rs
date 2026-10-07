@@ -20,7 +20,6 @@ use super::head_expressions::{
     TemplateHeadExpressionContext, handle_template_value_in_template_head,
     push_template_head_expression, push_template_head_path_expression,
 };
-use super::reactive_subscriptions::parse_reactive_subscription;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
@@ -413,24 +412,6 @@ pub fn parse_template_head(
                     ),
                 )
                 .into());
-            }
-
-            TokenTag::REACTIVE => {
-                enforce_head_compatibility(
-                    &head_state,
-                    &meaningful_item_compatibility,
-                    token_stream,
-                )?;
-                parse_reactive_subscription(
-                    token_stream,
-                    context,
-                    type_interner.environment(),
-                    construction_context,
-                    string_table,
-                    path_fork,
-                )?;
-                defer_comma_advance = true;
-                apply_head_compatibility(&mut head_state, &meaningful_item_compatibility);
             }
 
             // Variable, template and dependency-namespace references.

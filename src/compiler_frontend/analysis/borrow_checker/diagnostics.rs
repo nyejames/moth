@@ -11,7 +11,6 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocation};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::reactivity::ReactiveSourceId;
 use crate::compiler_frontend::hir::statements::HirStatement;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -60,15 +59,6 @@ impl<'a> BorrowDiagnostics<'a> {
         self.module
             .side_table
             .hir_source_span_for_hir(HirLocation::Local(local_id))
-    }
-
-    pub(super) fn reactive_source_id_for_local(
-        &self,
-        local_id: LocalId,
-    ) -> Option<ReactiveSourceId> {
-        self.module
-            .side_table
-            .reactive_source_id_for_local(local_id)
     }
 
     pub(super) fn function_name(&self, function_id: FunctionId) -> String {

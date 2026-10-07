@@ -92,7 +92,6 @@ impl<'a> HirValidator<'a> {
 
         // 4. Validate module-level metadata.
         self.validate_module_constants()?;
-        self.validate_reactive_metadata()?;
 
         // 5. Validate core HIR entities.
         self.validate_functions()?;

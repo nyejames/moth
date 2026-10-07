@@ -237,24 +237,6 @@ pub(crate) fn invalid_template_structure_message(
         crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::RuntimeValueInConstTemplateHead => {
             "Const templates can only capture compile-time values in the template head.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::ReactiveSubscriptionEmpty => {
-            "Reactive template subscriptions must name exactly one reactive source, for example `$(count)`.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::ReactiveSubscriptionMultipleSources => {
-            "Reactive template subscriptions accept exactly one source identifier.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::ReactiveSubscriptionComplexExpression => {
-            "Reactive template subscriptions accept one bare source identifier. Field paths, calls, operators, mutable access, and nested expressions are deferred.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::ReactiveSubscriptionNonReactiveSource => {
-            "`$(source)` requires a reactive declaration or reactive parameter.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::ReactiveSubscriptionInConstTemplate => {
-            "Reactive template subscriptions are only valid in runtime templates.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::ReactiveSubscriptionOutsideTemplate => {
-            "`$(source)` is valid only in template head or capture positions.".to_string()
-        }
         crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::EmptyPathInTemplateHead => {
             "Path token in template head cannot be empty.".to_string()
         }

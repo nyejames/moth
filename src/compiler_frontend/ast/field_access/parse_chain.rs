@@ -62,8 +62,8 @@ fn next_token_is_assignment_operator(next_token: Option<TokenTag>) -> bool {
 
 /// Builds the expression payload for a declaration reference without choosing an AST node shape.
 ///
-/// WHAT: preserves constant-context inlining, placeholder typing, value shape, and reactive
-/// metadata exactly as the field-access receiver path expects.
+/// WHAT: preserves constant-context inlining, placeholder typing and value shape for the
+/// field-access receiver path.
 /// WHY: expression parsing can push plain references as narrow operands while member/place
 /// parsing can still wrap the same payload as a temporary `AstNode` during migration.
 pub(crate) fn reference_expression_from_declaration(
@@ -110,22 +110,14 @@ pub(crate) fn reference_expression_from_declaration(
         inlined_expression.value_mode = ValueMode::ImmutableOwned;
         inlined_expression
     } else {
-        let mut ref_expr = Expression::reference_with_type_id(
+        Expression::reference_with_type_id(
             reference_arg.id.to_owned(),
             reference_arg.value.diagnostic_type.to_owned(),
             reference_arg.value.type_id,
             base_span,
             reference_arg.value.value_mode.to_owned(),
             reference_arg.value.const_record_state,
-        );
-        if let Some(source) = reference_arg.value.reactive_source.clone() {
-            ref_expr = ref_expr.with_reactive_source(source);
-        }
-        if let Some(template_metadata) = reference_arg.value.reactive_template.clone() {
-            ref_expr = ref_expr.with_reactive_template_metadata(template_metadata);
-        }
-
-        ref_expr
+        )
     }
 }
 

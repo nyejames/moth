@@ -42,7 +42,7 @@ The rule that direct source-created cycles require one declared region follows f
 - Declared-region identity must not enter `TypeId` or a source signature
 - Declared region closure occurs on every exit: fallthrough, `return`, `return!`, `break`, recovery exit and checked-operation failure path
 
-The declared region name is local to the current executable body scope. It cannot collide with a visible value, type, dependency binding, constant, reactive source or active declared region.
+The declared region name is local to the current executable body scope. It cannot collide with a visible value, type, dependency binding, constant or active declared region.
 
 Ordinary declarations written inside the declared region are not implicitly declared-region-owned. Only a declaration that uses `into region_name` places its result into that declared region.
 
@@ -165,7 +165,7 @@ Invalid escapes include:
 - returning a projection or alias rooted in declared-region-owned storage
 - storing a declared-region-owned value in a longer-lived local or aggregate
 - storing a value owned by a child declared region in a parent or sibling declared region
-- assigning a declared-region-owned value into longer-lived reactive storage
+- assigning a declared-region-owned value into longer-lived storage
 - passing a declared-region-owned value to an external call that may retain it
 - keeping a map lookup, collection element or field alias live after declared-region exit
 - creating a longer-lived retained edge into the declared region
@@ -181,14 +181,6 @@ V1 has no `into` placement on reassignment. A mutable binding already owned by a
 - a value already owned by the same declared region reused or rebound at a proven final use
 
 Reassignment does not let a declared-region-owned binding switch into a borrowed alias of ancestor, sibling or external storage. Reusing or rebinding a value already owned by the same declared region at final use does not transfer individual cleanup responsibility. The declared region remains responsible for cleanup. Use a separate ordinary alias binding for an ancestor or external value.
-
-### Reactive storage restrictions
-
-V1 rejects:
-
-- reactive declarations placed directly into a declared region
-- assigning declared-region-owned values into reactive storage that outlives the declared region
-- subscriptions or mounted state retaining declared-region-owned aliases past declared-region exit
 
 ### Calls and hidden result destinations
 

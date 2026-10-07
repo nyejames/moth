@@ -4444,3 +4444,148 @@ smokes on template stress, generic-160 and the split default/constructor fixture
 reproduce all 264 census metrics from the captured candidate, including 801
 generic snapshots and all eight size/alignment pairs. These smokes validate
 census behaviour rather than replacing the original memory or timing records.
+
+## Typed semantic expressions - Phase 1 retirement baseline (2026-10-07)
+
+This post-removal capture establishes the surviving-workload baseline for later
+representation and folding work. The before records use the dirty Phase 0
+candidate at `ab706091376373451afb32081c21476b56b5752a`. The after records use
+the dirty Phase 1 candidate worktree over `d78001bf216ea90386a7c7a8b8d1fc2ca682efc7`.
+Both captures retain before/after porcelain snapshots, and the Phase 1 source
+tree stayed unchanged during its native timing runs. Correctness-fixture
+retirements are not benchmark speedups. Preserve this baseline across the
+requested package-fix integration before Phase 2 and record integration movement
+separately so later representation comparisons cannot hide a loss.
+
+### Native comparison and identity
+
+Each side has five independent invocations of each suite, recorded as 15 raw
+run files: CLI, in-process frontend and data-layout. Every case used one
+preflight and ten measured iterations. The five before invocations ran as one
+sequential block, followed by five after invocations as another. The runs form
+unpaired blocks, leaving host and thermal drift confounded with the source
+change. The medians below show rough before/post movement. They do not prove
+repeatability, retirement causation or a storage improvement.
+
+Records use format 8, benchmark protocol 4 and timing schema 2. Both sides
+record the same manifest hash
+(`bf201ebb5d5531873b3fc701e43010869837ba5b06c688d3b4e49bca0b84a965`). Both
+also record Rust `1.99.0` (`b940084d7`), Cargo `1.99.0`, LLVM
+`23.1.1`, the pinned Node `v24.21.0`, the dev-mirror Cargo profile hash
+(`790934b010e6a8466e0a0322aaf755f172c792a583fb523c9e6dffe560cc05a1`), the
+Apple Silicon system identity (`6D851D`) and thread identity
+(`RAYON_NUM_THREADS` unset, record `thread_count=null`). The ambient `PATH`
+Node changed from `v24.21.0` before to `v26.10.0` after; the available pinned
+binary remained `v24.21.0`. The capture records that binary without selecting it.
+These suites launch Moth checks/builds or call the frontend in-process without
+executing emitted JavaScript, so the Node change does not affect their workload.
+
+CLI timings use the release `moth` binary with `timers`. Its SHA-256 was
+`4a29728112af4bbe53aca01eea7d9c76abd98b35b8bfa41105d8e8b85bf7b34a` before
+and `61bdae17c2dbbad91c6c8b37ca81fd5743ef74d68d922bb598a5010adef15353` after,
+constant across the five invocations on each side. Frontend and data-layout
+timings use the in-process dev-profile mirror with `timers`; its binary hashes
+are `952842e05795a75915d7504654af68dc83bc80741603392a22d964579aa5079c` before
+and `5864a1af21455ddb3752180acff018cb16b5fa18a290d128dd865870bfa6d7e5` after.
+The suites use distinct profiles and primary metrics. Keep CLI wall time
+separate from in-process frontend time. Counters stayed off for acceptance timing.
+
+Only cases with matching source workload and measurement fingerprints plus
+matching timing schema count. Of 84 case identities, 80 were comparable: 24
+crossed the native `faster` threshold, none crossed `slower`, and 56 stayed
+within the threshold. Workload changes exclude `docs` and `code_highlighter_stress` in both
+CLI and frontend. Classification uses
+`max(2.0 ms, 3% of before, 2 * sqrt(before_SD^2 + after_SD^2))`,
+where each SD is the median of five in-run standard deviations. No comparable
+after median rose by more than 5%, so the plan's slowdown follow-up did not
+trigger.
+
+Selected cases show the spread across the five run medians and the median
+within-run standard deviation, all in milliseconds. CLI and frontend rows use
+different primary metrics.
+
+| Suite | Case | Before median (range, SD) | After median (range, SD) | Native result |
+| --- | --- | ---: | ---: | --- |
+| CLI check | `generic_scaling_160_check` | 252.759 (249.657-264.557, 6.912) | 232.705 (228.347-234.421, 2.264) | faster |
+| CLI check | `collection_stress_check` | 60.058 (56.746-61.071, 1.313) | 54.547 (54.465-54.606, 0.224) | faster |
+| CLI check | `type_stress_check` | 10.720 (9.914-11.159, 0.534) | 9.443 (9.419-9.498, 0.055) | unchanged |
+| Frontend | `generic_scaling_160_frontend` | 1062.409 (1044.052-1105.753, 22.935) | 996.894 (993.949-1014.328, 8.397) | faster |
+| Frontend | `fold_stress_frontend` | 23.869 (23.262-24.585, 0.660) | 21.344 (21.288-21.819, 0.063) | faster |
+| Frontend | `constant_chain_512_frontend` | 25.819 (25.500-26.556, 0.583) | 24.711 (24.654-24.801, 0.060) | unchanged |
+| Data-layout | `data_layout_diagnosed_frontend` | 38.516 (37.550-40.024, 0.722) | 38.027 (37.915-38.279, 0.616) | unchanged |
+
+### Counter-on census and allocation proxies
+
+The separate counter-on census produced all 16 expected outcomes. It aggregates
+per-snapshot additive metrics by sum and `*_max` gauges by maximum, retaining
+duplicate metric rows until aggregation. In the accepted before-control versus
+post-removal comparison, the 15 unchanged non-doc workloads have no non-layout
+changes across 264 census metrics. The docs workload changed and is excluded.
+
+The original corrected Phase 0 census used counter binary
+`26dc2d3151ce96e7bc861bc4b59d89d21538960c422373474321fa396ddf78b4`. The
+accepted preserved before-control used
+`0bf5a221813bbbd0c06cf8a607f63dca414c08282363620d5aece7d3c31497e0`, which
+includes later census hardening. It reproduces all three original
+allocator-proxy values exactly on the 15 unchanged non-doc workloads. The
+current docs source changed, so it does not participate in that control. The
+post-removal counter probes used binary
+`cbc74da5f7e570e1792edc3f0e4bd30c2ab1fffd24fbe392fba3dd8d55e02396`.
+
+| Layout gauge (align 8) | Before | After |
+| --- | ---: | ---: |
+| `Expression` maximum size | 424 bytes | 360 bytes |
+| `RpnItem` maximum size | 424 bytes | 360 bytes |
+| `Declaration` maximum size | 504 bytes | 440 bytes |
+
+The `ExpressionKind` gauge stayed at 88 bytes, `HirExpression` at 64,
+`HirExpressionKind` at 40, `PlaceExpression` at 88 and `HirPlace` at 24. These
+inline-size reductions measure retirement. The typed-store redesign has not
+landed.
+
+The allocator probe's live-report and after-drop deltas stayed unchanged on all
+15 non-doc workloads. Peak allocation deltas fell on all 15; selected examples:
+
+| Workload | Before peak bytes | After peak bytes |
+| --- | ---: | ---: |
+| `generic_scaling_160` | 492,340,644 | 491,913,132 |
+| `constant_chain_512` | 4,785,655 | 4,291,455 |
+| `default_constructor_split` | 23,855,937 | 23,712,571 |
+
+These proxies include observer overhead. They do not measure an owner-complete
+IR heap or isolate pure allocation-byte attribution. No new sampling or scaling
+fit was run. Stack evidence remains the exact 1 MiB pass in default and
+counter-enabled lanes; headroom and high-water use remain unmeasured.
+
+### Validation and open evidence
+
+A recorded routine `just validate` pass reports root tests `5841`,
+xtask tests `849`, integration tests `2388/2388` and a docs check with no
+errors or warnings. `cargo test -p moth --lib --features timers,benchmark_counters`
+passes `5864` tests, and
+`cargo clippy -p moth --all-targets --features timers,benchmark_counters` passes.
+The counter lane includes the census and stack checks; the default 1 MiB stack
+check also passes. `just boracle` passes `250` feature tests plus `42` default
+problem and `5` last-use tests. `just boracle-campaign` passes one generated
+test in `38.86s`. Release docs produced 78 files, including 77 HTML pages; the
+generated check confirms the retired route and helpers are absent, navigation
+is clean and the Wiring sections and anchors resolve.
+
+Raw run files, logs, manifests, provenance and porcelain snapshots remain in
+`tmp/typed-semantic-expressions/raw-capture/raw/{before-phase1,after-phase1}/`.
+Find the thresholded case comparison in
+`tmp/typed-semantic-expressions/phase1-native-comparison.md`. Census summaries
+and outcomes live in `phase1-before-control-census-{summary,run-results}.json`
+and `phase1-census-{summary,run-results,comparison}.json` under
+`tmp/typed-semantic-expressions/`. Validation logs remain under that directory,
+and `phase1-generated-docs-verification.json` records the generated-page
+inspection.
+
+The numeric checked-result carrier remains `Inconclusive` with
+`UndecidableOverlap` and zero complete executions in both base and candidate.
+A separate Boolean mutation case remains a durable positive with one
+`CompleteSafe` execution. No production, oracle or bound changed. Independent
+source, correction and evidence reviews report clean outcomes. Saved broad gate
+logs lack an effective Node-version header, although their invocations selected
+the pinned runtime. The upcoming main-bound gate will record that header. Phase 1
+is accepted as a feature checkpoint; full main-bound validation remains pending.

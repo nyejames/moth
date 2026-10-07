@@ -358,7 +358,7 @@ The full-stack direction does not imply:
 - transparent RPC as ordinary function calls
 - remotely exposing exported functions by default
 - a virtual DOM
-- hidden reactive state inside strings or templates
+- implicit observation or event-registration state inside strings or templates
 - a second application type system or serialization schema language
 - direct ambient networking primitives in the Moth language
 - a particular Rust web framework

@@ -202,7 +202,6 @@ fn duplicate_function_parameters_rejected_by_shared_parser() {
         &mut string_table,
         function_path,
         &mut path_fork,
-        &mut span_builder,
     )
     .expect_err("duplicate function parameters must be rejected by the shared parser");
 
@@ -239,7 +238,6 @@ fn duplicate_struct_fields_rejected_by_shared_parser() {
         SignatureMemberContext::StructField,
         struct_path,
         &mut path_fork,
-        &mut span_builder,
     )
     .expect_err("duplicate struct fields must be rejected by the shared parser");
 
@@ -276,7 +274,6 @@ fn duplicate_choice_payload_fields_rejected_by_shared_parser() {
         SignatureMemberContext::ChoicePayloadField,
         choice_path,
         &mut path_fork,
-        &mut span_builder,
     )
     .expect_err("duplicate choice payload fields must be rejected by the shared parser");
 
@@ -312,7 +309,6 @@ fn duplicate_trait_requirement_parameters_rejected_by_shared_parser() {
         &mut string_table,
         method_path,
         &mut path_fork,
-        &mut span_builder,
     )
     .expect_err("duplicate trait-requirement parameters must be rejected by the shared parser");
 
@@ -347,7 +343,6 @@ fn distinct_members_parse_successfully_through_shared_parser() {
         SignatureMemberContext::StructField,
         struct_path,
         &mut path_fork,
-        &mut span_builder,
     )
     .expect("distinct member names must parse successfully");
 

@@ -706,7 +706,6 @@ impl<'a> HirBuilder<'a> {
         lowered.value.span = expr.span;
         self.side_table
             .map_value(expr.span, lowered.value.id, lowered.value.span);
-        self.bind_reactive_metadata_for_expression(expr, &lowered.value)?;
         self.log_expression_output(expr, &lowered.value);
         Ok(lowered)
     }

@@ -171,16 +171,12 @@ impl<'hir> JsEmitter<'hir> {
                 // WHAT: lower a fragment push into a JS vec push call against the unwrapped array.
                 // WHY: locals are stored as binding wrappers `{ value: ... }` so `.push` cannot be
                 //      called on the binding itself. __moth_read returns the underlying array.
-                //      Assignment value context preserves reactive template objects for Phase 7
-                //      mounting instead of snapshotting them to plain strings here.
                 let vec_name = self.local_name(*vec_local)?.to_owned();
                 let value_expr =
                     self.lower_expression_for_use(value, JsValueUse::AssignmentValue)?;
                 self.emit_line(&format!("__moth_read({vec_name}).push({value_expr});"));
             }
         }
-
-        self.emit_reactive_invalidations_for_statement(statement.id);
 
         Ok(())
     }
@@ -637,13 +633,7 @@ impl<'hir> JsEmitter<'hir> {
         match &value.kind {
             HirExpressionKind::Load(place) => {
                 let source = self.lower_place(place)?;
-                if self.local_is_reactive_source(local_id) {
-                    // Reactive declarations own stable source storage. Assignment updates that
-                    // storage with the source's current value rather than rebinding it as an alias.
-                    self.emit_line(&format!(
-                        "__moth_assign_value({local_name}, __moth_read({source}));",
-                    ));
-                } else if alias_only {
+                if alias_only {
                     self.emit_line(&format!(
                         "__moth_write({local_name}, __moth_read({source}));",
                     ));
@@ -662,30 +652,6 @@ impl<'hir> JsEmitter<'hir> {
         }
 
         Ok(())
-    }
-
-    fn emit_reactive_invalidations_for_statement(&mut self, statement_id: HirNodeId) {
-        let Some(invalidations) = self
-            .borrow_analysis
-            .analysis
-            .reactive_invalidations
-            .get(&statement_id)
-        else {
-            return;
-        };
-
-        let mut source_ids = invalidations
-            .iter()
-            .map(|fact| fact.source.0)
-            .collect::<Vec<_>>();
-        source_ids.sort_unstable();
-        source_ids.dedup();
-
-        // Borrow validation owns conservative invalidation detection. JS lowering only schedules
-        // the dirty sources after the statement's ordinary semantics have run.
-        for source_id in source_ids {
-            self.emit_line(&format!("__moth_reactive_schedule({source_id});"));
-        }
     }
 
     fn local_is_alias_only_before_statement(

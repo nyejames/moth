@@ -536,9 +536,6 @@ fn validate_evidence_method_shape(
             crate::compiler_frontend::public_call_summary::PublicCallParameterAccess::Mutable => {
                 required.value_mode.is_mutable()
             }
-            crate::compiler_frontend::public_call_summary::PublicCallParameterAccess::Reactive => {
-                false
-            }
         };
         if !access_matches
             || !trait_surface_type_matches(

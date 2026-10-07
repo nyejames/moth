@@ -111,6 +111,7 @@ pub(crate) use expression_sites::{
     walk_expression_payloads_with_nested_tir_views, walk_tir_view_expression_payloads,
 };
 
+#[cfg(test)]
 pub(crate) use node::TemplateLoopHeaderExpressionSites;
 pub(crate) use node::{
     TemplateIr, TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind, TirSlotPlaceholder,
@@ -182,7 +183,6 @@ pub(in crate::compiler_frontend::ast::templates) use render_unit::{
 pub(crate) use slot_plan::{
     TemplateSlotContributionSourcePlan, TemplateSlotPlan, TemplateSlotSitePlan,
     convert_tir_tree_to_active_slot_plan, push_runtime_slot_contribution_source,
-    runtime_slot_plan_roots, runtime_slot_plan_site_render_root,
 };
 
 pub(crate) use view::{TemplateTirPhase, finalized_tir_view_for_template};

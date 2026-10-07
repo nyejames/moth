@@ -12,15 +12,11 @@
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, ReactiveSource,
-};
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::file_value_resolution::resolve_file_value;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
-use crate::compiler_frontend::ast::templates::template::{
-    ReactiveSubscription, TemplateSegmentOrigin, TemplateType,
-};
+use crate::compiler_frontend::ast::templates::template::{TemplateSegmentOrigin, TemplateType};
 use crate::compiler_frontend::ast::templates::template_renderability::is_template_renderable_type;
 use crate::compiler_frontend::ast::templates::tir::TemplateConstructionContext;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
@@ -231,96 +227,34 @@ pub(super) fn push_template_head_expression(
         .into());
     }
 
-    // Ordinary `[source]` insertion is a snapshot read. Keep reactive source identity only for
-    // the explicit `$(source)` subscription path.
-    let mut snapshot_expression = expression;
-    snapshot_expression.clear_reactive_source();
-
     // Record head segments into parser TIR in source order before any body
     // nodes are appended.
     // Text nodes carry no provenance, so a constant reference that already folded to a
     // `StringSlice` must stay a dynamic expression when it bears provenance. The dynamic
     // fold path merges the selected payload's provenance into the template output, while
     // ordinary provenance-free literals keep the text fast path.
-    match &snapshot_expression.kind {
+    let plain_text = match &expression.kind {
         ExpressionKind::StringSlice(text)
-            if snapshot_expression
-                .synthetic_interface_provenance
-                .is_empty() =>
+            if expression.synthetic_interface_provenance.is_empty() =>
         {
-            let byte_len = string_table.resolve(*text).len();
-            target
-                .construction_context
-                .record_head_text(*text, byte_len, span);
+            Some(*text)
         }
-
-        _ => {
-            target.construction_context.record_head_dynamic_expression(
-                snapshot_expression.clone(),
-                None,
-                span,
-            );
-        }
-    }
-
-    Ok(())
-}
-
-/// Pushes an explicit `$(source)` subscription into parser TIR.
-///
-/// WHAT: reuses the ordinary reference expression for current rendering while attaching V1
-/// subscription metadata to the segment.
-/// WHY: the language type stays `String`/underlying scalar rendering; the reactive dependency is
-/// a template fact for later HIR/backend phases, not a value type or borrow.
-pub(super) fn push_template_head_reactive_subscription(
-    expression: Expression,
-    source: ReactiveSource,
-    target: TemplateHeadExpressionContext<'_>,
-    span: Option<SourceSpan>,
-    string_table: &StringTable,
-) -> HeadExpressionResult<()> {
-    if target.context.kind.is_constant_context() {
-        return Err(with_source_span(
-            CompilerDiagnostic::invalid_template_structure(
-                InvalidTemplateStructureReason::ReactiveSubscriptionInConstTemplate,
-                span,
-            ),
-            span,
-        )
-        .into());
-    }
-
-    validate_template_head_value_type(&expression, span, target.type_environment)?;
-
-    let subscription = ReactiveSubscription {
-        source,
-        type_id: expression.type_id,
-        span,
+        _ => None,
     };
-    // Reactive literal text in the head is recorded as a Text node carrying the
-    // subscription in the store side-table, not as a dynamic-expression anchor.
-    // The dependency remains available to reactive metadata and HIR invalidation.
-    match &expression.kind {
-        ExpressionKind::StringSlice(text) => {
-            let byte_len = string_table.resolve(*text).len();
-            target.construction_context.record_reactive_head_text(
-                *text,
-                byte_len,
-                Some(subscription.clone()),
-                span,
-            );
-        }
-        _ => {
-            target.construction_context.record_head_dynamic_expression(
-                expression.clone(),
-                Some(subscription.clone()),
-                span,
-            );
-        }
+    if let Some(text) = plain_text {
+        let byte_len = string_table.resolve(text).len();
+        target
+            .construction_context
+            .record_head_text(text, byte_len, span);
+    } else {
+        target
+            .construction_context
+            .record_head_dynamic_expression(expression, span);
     }
 
     Ok(())
 }
+
 /// Resolves a compile-time file value in template-head context and records its expression.
 ///
 /// Stage 0 owns physical resolution for every authored path occurrence. Reusing the ordinary

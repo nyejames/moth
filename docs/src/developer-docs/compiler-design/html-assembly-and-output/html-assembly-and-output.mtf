@@ -96,9 +96,7 @@ Development presentation stays local to the failing invocation. It does not fail
 
 The result is a document anatomy: HTML shell, paragraph text, script tags, runtime references and whatever the entry needs to boot.
 
-## Reactive and external work
-
-Reactive mount work is a **target-specific extension** of the page model, not a second compiler. Where the entry needs it, the builder wires backend-owned update strategy to the compiled source and sink metadata.
+## External work
 
 External JavaScript assets arrive **demand-driven**. Import maps and glue appear because link facts and bindings required them, not because a page collected script tags out of habit.
 

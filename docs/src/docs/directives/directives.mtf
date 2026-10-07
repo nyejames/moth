@@ -6,7 +6,7 @@ This page owns general grammar, ownership, context, arguments, attachment and di
 
 ### Marker and non-goals
 
-In the accepted directive design, `$` introduces a registered compiler or builder directive, not a binding mode, ordinary expression or source-defined callable. The queued Wiring replacement uses no `$` marker. Current reactive bindings remain an explicitly superseded Alpha surface until their removal. There is no accepted `with` attribute keyword.
+In the accepted directive design, `$` introduces a registered compiler or builder directive, not a binding mode, ordinary expression or source-defined callable. The former `$Type` and `$=` binding spellings are not part of the current binding grammar. Wiring uses parameter contracts and no `$` marker. There is no accepted `with` attribute keyword.
 
 Users and source packages cannot define, alias, import or override semantic directives. Frontend names are authoritative. Duplicate registrations and name conflicts are rejected rather than resolved by last registration.
 

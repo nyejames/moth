@@ -52,7 +52,7 @@ infrastructure, suite policy, broad fixture cleanup or audits.
     ]
 
     [td:
-        [: Runtime output or reactivity behaviour]
+        [: Runtime output]
         [:
             - `Runtime output assertions`
             - `Backend matrices and artifact assertions` when structure also matters

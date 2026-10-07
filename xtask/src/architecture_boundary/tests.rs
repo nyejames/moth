@@ -241,7 +241,6 @@ fn reports_every_new_static_solver_name_in_a_production_oracle_file() {
         "OriginTrace",
         "OriginTraceRule",
         "BoracleReport",
-        "ReactiveObservation",
     ];
 
     for name in names {
@@ -262,17 +261,6 @@ fn reports_every_new_static_solver_name_in_a_production_oracle_file() {
             findings[0].1
         );
     }
-}
-
-#[test]
-fn accepts_the_unrelated_reactive_observe_event_variant() {
-    assert!(
-        rules(
-            "src/compiler_frontend/analysis/borrow_checker/boracle/oracle/paths.rs",
-            "let _ = EventKind::ReactiveObserve { place };\n"
-        )
-        .is_empty()
-    );
 }
 
 #[test]

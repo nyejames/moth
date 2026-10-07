@@ -7,9 +7,7 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, ReactiveSource, ReactiveSourceKind, ReactiveTemplateMetadata,
-};
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_with_trailing_newline_policy;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources, ExpressionTrailingPolicy,
@@ -33,7 +31,7 @@ use crate::compiler_frontend::declaration_syntax::signature_members::{
     parse_function_signature_syntax,
 };
 use crate::compiler_frontend::declaration_syntax::type_syntax::parsed_ref_to_data_type;
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
@@ -59,13 +57,6 @@ pub struct ReturnSlot {
     /// Canonical `TypeId` for this return slot, populated during type resolution.
     /// `None` before resolution; `Some` afterwards.
     pub type_id: Option<TypeId>,
-    /// Value-level template metadata for this return slot.
-    ///
-    /// WHAT: set after AST body parsing for functions that directly return template-backed
-    /// strings or strings carrying template-value parameter placeholders.
-    /// WHY: callers need this metadata to preserve direct template-string flow without changing
-    /// the slot's ordinary semantic `TypeId`.
-    pub reactive_template: Option<ReactiveTemplateMetadata>,
     pub channel: ReturnChannel,
 }
 
@@ -74,7 +65,6 @@ impl ReturnSlot {
         Self {
             value,
             type_id: None,
-            reactive_template: None,
             channel: ReturnChannel::Success,
         }
     }
@@ -107,7 +97,6 @@ impl FunctionSignature {
         type_interner: &mut AstTypeInterner<'_>,
         path_fork: &mut PathInternerFork,
     ) -> SignatureResult<Self> {
-        let mut span_builder = ExtendedSpanBuilder::new();
         let signature_syntax = {
             let (syntax, next_index) = {
                 let mut declaration_cursor = token_stream.declaration_cursor()?;
@@ -117,7 +106,6 @@ impl FunctionSignature {
                     string_table,
                     *function_path,
                     path_fork,
-                    &mut span_builder,
                 )?;
                 (syntax, declaration_cursor.position())
             };
@@ -187,7 +175,7 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
 ) -> SignatureResult<FunctionSignature> {
     let mut parameters = Vec::with_capacity(syntax.parameters.len());
     for parameter in &syntax.parameters {
-        let mut declaration = signature_member_to_declaration(
+        let declaration = signature_member_to_declaration(
             parameter,
             source_owner,
             expression_context,
@@ -197,14 +185,6 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
             path_fork,
             TypeMismatchContext::Declaration,
         )?;
-        if declaration.value.type_id == builtin_type_ids::STRING {
-            declaration.value.reactive_template =
-                Some(ReactiveTemplateMetadata::from_template_value_parameter(
-                    declaration.id,
-                    parameter.span,
-                ));
-        }
-
         parameters.push(declaration);
     }
 
@@ -280,7 +260,7 @@ pub(crate) fn signature_member_to_declaration(
     };
 
     let member_span = member.span;
-    let mut value = if member.default_range.is_none() {
+    let value = if member.default_range.is_none() {
         Expression::new(
             ExpressionKind::NoValue,
             member_span,
@@ -319,12 +299,6 @@ pub(crate) fn signature_member_to_declaration(
         }
     };
 
-    if member.is_reactive {
-        value.reactive_source = Some(ReactiveSource {
-            path: member.id,
-            kind: ReactiveSourceKind::Parameter,
-        });
-    }
     Ok(Declaration {
         id: member.id,
         value,
@@ -557,7 +531,6 @@ fn return_slot_from_syntax(
     Ok(ReturnSlot {
         value: data_type,
         type_id: None,
-        reactive_template: None,
         channel,
     })
 }

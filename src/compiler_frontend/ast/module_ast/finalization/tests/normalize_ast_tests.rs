@@ -9,21 +9,18 @@ use super::super::template_helpers::{
 use super::*;
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::ast::const_values::store::{
-    ConstStringValue, ConstTemplateValue, ConstValueStore, ConstValueStoreError,
+    ConstStringValue, ConstTemplateValue, ConstValueStoreError,
 };
-use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, ReactiveSource, ReactiveSourceKind,
-};
+use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind;
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::values::{
     FoldedValueMaterialiser, materialize_public_const_template,
 };
-use crate::compiler_frontend::ast::statements::functions::{ReturnChannel, ReturnSlot};
 use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::templates::template::{
-    ReactiveSubscription, SlotKey, Style, TemplateSegmentOrigin, TemplateType,
+    SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
@@ -69,9 +66,6 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
-};
-use crate::compiler_frontend::tests::ast_fixture_support::{
-    function_node as fixture_function_node, node, test_if_branch_metadata,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::path::Path;
@@ -282,7 +276,6 @@ fn nested_wrapper_finalization_fixture(
             let outer_dynamic_node = builder.push_dynamic_expression_node(
                 Expression::string_slice(outer_dynamic_text, None, ValueMode::ImmutableOwned),
                 TemplateSegmentOrigin::Body,
-                None,
                 None,
             );
             let nested_child_node = builder.push_child_template_node_with_reference(

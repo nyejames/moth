@@ -262,20 +262,6 @@ impl<'a> AstCursor<'a> {
             .transpose()
     }
 
-    /// Project one token borrowed from this cursor's canonical owner while preserving donor
-    /// provenance for payloads that are interpreted by the requester.
-    pub(crate) fn diagnostic_token_from_ref(
-        &self,
-        token: TokenRef<'_>,
-        destination: &mut StringTable,
-    ) -> Result<DiagnosticToken, TokenViewError> {
-        DiagnosticToken::try_from_token_ref_in(
-            token,
-            self.payload_origin.map(|origin| origin.strings),
-            destination,
-        )
-    }
-
     /// Return the current numeric payload with text IDs translated only when consumed.
     pub(crate) fn current_numeric_literal_in(
         &self,

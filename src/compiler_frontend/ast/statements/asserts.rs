@@ -65,14 +65,12 @@ pub(crate) fn parse_assert_statement(
             name: Some(condition_name),
             expected_type: ExpectedParameterType::Known(bool_type_id),
             access_mode: ExpectedAccessMode::Shared,
-            requires_reactive_source: false,
             default_value: None,
         },
         ParameterExpectation {
             name: Some(message_name),
             expected_type: ExpectedParameterType::Known(message_type_id),
             access_mode: ExpectedAccessMode::Shared,
-            requires_reactive_source: false,
             default_value: Some(default_message),
         },
     ];

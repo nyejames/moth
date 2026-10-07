@@ -4,9 +4,9 @@
 
 ```text
 STATUS: active, design direction approved
-CURRENT_SLICE: Phase 0 complete - paused before Phase 1
+CURRENT_SLICE: Phase 1 complete - main and package-fix integration
 BLOCKERS: none
-NEXT_ACTION: await the user's instruction to start Phase 1; no Phase 1 work has started
+NEXT_ACTION: squash this branch into main, merge committed package fixes, update this branch from main, then start Phase 2
 ```
 
 ## Purpose and authority
@@ -208,7 +208,7 @@ Published-AST counts are occurrences, memory bytes are allocator proxies and
 stack pressure has a 1 MiB pass/fail observation only. Sampling records operation
 and stage ownership without claiming measured compatibility/substitution/default
 leaf costs. Phase 2 must resolve storage and lifetime choices under its evidence
-rules. Phase 1 remains unstarted at the user's requested pause.
+rules. Phase 1 has retired V1 and recorded the surviving-workload baseline.
 
 ### Starting owner map
 
@@ -332,40 +332,40 @@ Phase 2 decides representation under evidence rules through exactly these four e
 **Produces:** one supported compiler path without V1 reactivity, accurate public
 documentation and a second baseline for representation comparisons.
 
-- [ ] Remove reactive `$Type`, `$=` and `$T` parameter forms, `$(source)`
+- [x] Remove reactive `$Type`, `$=` and `$T` parameter forms, `$(source)`
   interpolation and obsolete call/header metadata through their current owners.
   Audit deferred `$bind` prose separately rather than assuming it was implemented.
   Preserve legitimate `$` directives and use ordinary structured syntax diagnostics
   for removed source. Do not add a migration-only diagnostic family, renumber
   existing codes or reuse a retired code for a new Wiring meaning.
-- [ ] Remove expression/TIR reactive metadata, String reactivity fixed points,
+- [x] Remove expression/TIR reactive metadata, String reactivity fixed points,
   subscription summaries, public/generated projection fields, HIR invalidation
   machinery, JS scheduling/snapshot paths and reactive HTML mounting glue.
-- [ ] Preserve ordinary template evaluation, structural/resource Strings,
+- [x] Preserve ordinary template evaluation, structural/resource Strings,
   fragments and insertion, value/alias/borrow contracts, assertions and existing
   builder lifecycle ownership. Do not turn normal retained values into a new
   subscription representation.
-- [ ] Classify every affected fixture. Delete tests whose only contract was
+- [x] Classify every affected fixture. Delete tests whose only contract was
   retired behaviour. Rewrite mixed-purpose tests around the surviving semantic
   contract and retain their original failure evidence. Remove test-only V1
   hooks and stale audit allowlists with the production owner they served.
-- [ ] Publish the Wiring teaching/reference structure described below, clearly
+- [x] Publish the Wiring teaching/reference structure described below, clearly
   separating accepted foundation contracts from executable support and future
   work. Remove obsolete public reactivity pages and navigation. Correct async
   channel examples without implementing channels.
-- [ ] Audit compiler/build/memory references, progress rows, source examples,
+- [x] Audit compiler/build/memory references, progress rows, source examples,
   grammar/highlighting/editor snippets, test instructions, diagrams, `AGENTS.md`
   routing and `index.md` for the retired model. Change each affected owner, not
   merely the page visible from the site menu.
-- [ ] Inspect indirect helper-demand, template-object preservation, String
+- [x] Inspect indirect helper-demand, template-object preservation, String
   coercion, map-key and numeric-formatting paths even when their names omit
   `reactive`. Give each remaining hit a remove/adapt/preserve/historical/external
   follow-up disposition. Preserve lazy assertion messages, imported-root
   suppression, normal entry activation and unrelated dependency invalidation.
-- [ ] Rebuild documentation and verify removed pages disappear from generated
+- [x] Rebuild documentation and verify removed pages disappear from generated
   navigation/output. Verify ordinary templates, fragments, resources, static
   branches and imports still pass their contractual coverage.
-- [ ] Record a post-removal baseline on the surviving workload cohort. Use this
+- [x] Record a post-removal baseline on the surviving workload cohort. Use this
   baseline to measure representation/folding work. Keep the pre-removal baseline
   to attribute retirement separately. Removed cases are not a storage speedup.
 

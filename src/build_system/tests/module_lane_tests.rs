@@ -12,9 +12,7 @@ use crate::build_system::create_project_modules::project_module_graph::ProjectMo
 use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
 use crate::builder_surface::PackageOrigin;
 use crate::builder_surface::external_import_providers::provider::RuntimeAssetIdentity;
-use crate::compiler_frontend::analysis::borrow_checker::{
-    BorrowCheckReport, ReactiveInvalidationFact, ReactiveInvalidationKind,
-};
+use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationContext;
 use crate::compiler_frontend::canonical_type_identity::{
@@ -40,7 +38,6 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::{
     collect_module_function_link_facts, collect_reachability_from_function_link_facts,
 };
-use crate::compiler_frontend::hir::reactivity::ReactiveSourceId;
 use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -209,23 +206,12 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
     };
 
     let entry_point = PathBuf::from("src/@page.moth");
-    let mut borrow_analysis = BorrowCheckReport::default();
-    borrow_analysis.analysis.reactive_invalidations.insert(
-        HirNodeId(1),
-        vec![ReactiveInvalidationFact {
-            statement_id: HirNodeId(1),
-            source: ReactiveSourceId(0),
-            kind: ReactiveInvalidationKind::Assignment,
-            span: None,
-        }],
-    );
-
     let mut module = Module {
         executable: ModuleExecutable {
             hir: hir_module,
             resource_table: ModuleResourceTable::new(),
             type_environment: TypeEnvironment::new(),
-            borrow_analysis,
+            borrow_analysis: BorrowCheckReport::default(),
             numeric_proofs: NumericProofs::default(),
             path_table: Arc::new(path_table),
         },

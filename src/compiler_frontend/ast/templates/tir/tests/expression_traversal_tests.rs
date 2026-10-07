@@ -60,7 +60,6 @@ fn dynamic_node(store: &mut TemplateIrStore, value: i64) -> TemplateIrNodeId {
         TemplateIrNodeKind::DynamicExpression {
             expression: Box::new(expression(value)),
             origin: TemplateSegmentOrigin::Body,
-            reactive_subscription: None,
             site_id,
         },
         None,
@@ -1424,7 +1423,6 @@ fn nested_walker_shares_visited_set_between_tir_child_and_expression_template() 
             TemplateIrNodeKind::DynamicExpression {
                 expression: Box::new(template_expression(child_template_for_expr)),
                 origin: TemplateSegmentOrigin::Body,
-                reactive_subscription: None,
                 site_id,
             },
             None,
