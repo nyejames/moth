@@ -14,6 +14,9 @@ use crate::compiler_frontend::ast::const_values::resolver::classify_template_fro
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
+use crate::compiler_frontend::compiler_messages::{
+    InvalidAssignmentTargetReason, InvalidThisUsageReason, NameNamespace,
+};
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -118,6 +121,52 @@ impl ScopeContext {
             .top_level_declarations
             .get_visible_non_receiver_by_name(*name, self.visible_declaration_ids.as_deref())
             .map(ScopeDeclarationRef::Shared)
+    }
+
+    /// Resolve the reserved receiver binding and report its shared availability rules.
+    pub(crate) fn resolve_this_reference(
+        &self,
+        this_id: StringId,
+        span: SourceSpan,
+    ) -> Result<ScopeDeclarationRef<'_>, CompilerDiagnostic> {
+        if self.is_assignment_target_unavailable(this_id) {
+            return Err(CompilerDiagnostic::invalid_assignment_target(
+                InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
+                Some(this_id),
+                None,
+                None,
+                None,
+                None,
+                Some(span),
+            ));
+        }
+
+        self.get_reference(&this_id).ok_or_else(|| {
+            CompilerDiagnostic::invalid_this_usage(
+                InvalidThisUsageReason::NotInReceiverMethod,
+                Some(span),
+            )
+        })
+    }
+
+    /// Resolve a source-visible value name for a place root, preserving namespace diagnostics.
+    pub(crate) fn resolve_value_reference(
+        &self,
+        name: StringId,
+        span: SourceSpan,
+    ) -> Result<ScopeDeclarationRef<'_>, CompilerDiagnostic> {
+        self.get_reference(&name).ok_or_else(|| {
+            if self.is_visible_type_alias_name(name) {
+                CompilerDiagnostic::namespace_misuse(
+                    name,
+                    NameNamespace::Value,
+                    NameNamespace::Type,
+                    Some(span),
+                )
+            } else {
+                CompilerDiagnostic::unknown_value_name(name, Some(span))
+            }
+        })
     }
 
     /// Return whether a name already resolves to a visible local declaration.

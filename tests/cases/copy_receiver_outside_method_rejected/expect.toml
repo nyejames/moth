@@ -10,4 +10,4 @@ code = "MOTH-RULE-0040"
 reason = "invalid_this_usage.not_in_receiver_method"
 path = "input/@page.moth"
 line = 2
-column = 12
+column = 17

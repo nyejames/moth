@@ -1,0 +1,7 @@
+Bucket = |
+    values {Int},
+|
+
+mutate |this Bucket| -> Error!:
+    ~this.values.set(0, 7)!
+;

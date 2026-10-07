@@ -1,0 +1,9 @@
+Bucket = | values {Int} |
+
+count |this Bucket| -> Int:
+    return this.values.length()
+;
+
+marked_count |this ~Bucket| -> Int:
+    return ~this.count()
+;

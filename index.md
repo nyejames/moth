@@ -114,6 +114,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [emission](src/compiler_frontend/ast/module_ast/emission/): function/start/body emission.
     - [finalization](src/compiler_frontend/ast/module_ast/finalization/): normalize constants/templates, const facts, type validation.
     - [scope_context](src/compiler_frontend/ast/module_ast/scope_context/): visibility/local declarations/diagnostic sinks.
+        - [lookup.rs](src/compiler_frontend/ast/module_ast/scope_context/lookup.rs): visible declaration lookup and shared reserved-receiver resolution for expressions, statements and place roots.
 - [type_resolution](src/compiler_frontend/ast/type_resolution/): parsed type syntax → TypeId.
     - [context.rs](src/compiler_frontend/ast/type_resolution/context.rs): state.
     - [resolve_type.rs](src/compiler_frontend/ast/type_resolution/resolve_type.rs): orchestration + diagnostic TypeId bridge.
@@ -125,6 +126,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [signatures.rs](src/compiler_frontend/ast/type_resolution/signatures.rs), [struct_fields.rs](src/compiler_frontend/ast/type_resolution/struct_fields.rs), [choice_variants.rs](src/compiler_frontend/ast/type_resolution/choice_variants.rs), [recursive_types.rs](src/compiler_frontend/ast/type_resolution/recursive_types.rs).
 - [expressions](src/compiler_frontend/ast/expressions/): parsing/type checking/calls/constructors/mutation/options/namespaces. Shared call syntax and retained parameter-slot routing live in [call_arguments.rs](src/compiler_frontend/ast/expressions/call_arguments.rs), call metadata in [call_argument.rs](src/compiler_frontend/ast/expressions/call_argument.rs) and final type/access policy in [call_validation.rs](src/compiler_frontend/ast/expressions/call_validation.rs). [failure_classification.rs](src/compiler_frontend/ast/expressions/failure_classification.rs) owns general failure classification across AST, TIR and runtime handoffs. [assertion_message_effects.rs](src/compiler_frontend/ast/expressions/assertion_message_effects.rs) owns assertion-message escape policy and diagnostics.
     - [failure_facts.rs](src/compiler_frontend/ast/expressions/failure_facts.rs): origin-owned failure witnesses and compact expression compatibility summaries.
+    - [parse_expression_places.rs](src/compiler_frontend/ast/expressions/parse_expression_places.rs): named and reserved receiver roots for mutable calls and explicit copies, with postfix and access rules delegated to field access.
 - [field_access](src/compiler_frontend/ast/field_access/): fields, receiver calls, collection/map builtins.
 - [statements](src/compiler_frontend/ast/statements/): bodies, declarations, returns, loops, matches, catch, value production.
     - [fallible_handling/catch_handler.rs](src/compiler_frontend/ast/statements/fallible_handling/catch_handler.rs): shared `catch:` and `catch |err|:` handler parsing with `then` value-production bodies.

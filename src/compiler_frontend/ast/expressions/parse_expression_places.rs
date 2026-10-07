@@ -1,7 +1,9 @@
 //! Place-sensitive expression parsing helpers.
 //!
-//! WHAT: parses place-sensitive expression forms such as `copy` and mutable receiver syntax.
-//! WHY: place rules differ from general expression parsing and benefit from one focused module.
+//! WHAT: parses place-sensitive forms with named or reserved receiver roots, including `copy`
+//! and mutable receiver syntax.
+//! WHY: place rules differ from general expression parsing, and each form keeps its own postfix
+//! access policy after shared root resolution.
 
 use super::error::ExpressionParseError;
 use super::expression_rpn::ExpressionRpnItem;
@@ -18,13 +20,15 @@ use crate::compiler_frontend::ast::field_access::{
     PostfixChainAccess, parse_field_access_expression_with_receiver_access,
     parse_postfix_chain_expression, reference_expression_from_declaration,
 };
+use crate::compiler_frontend::ast::module_ast::scope_context::ScopeDeclarationRef;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticToken, InvalidAssignmentTargetReason, InvalidCopyTargetReason,
-    InvalidReceiverCallReason, NameNamespace,
+    InvalidReceiverCallReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -39,7 +43,7 @@ pub(super) struct ParsedCopyPlace {
     pub(super) type_id: TypeId,
 }
 
-// WHAT: parses a `~name.<chain>` receiver expression.
+// WHAT: parses a mutable receiver expression rooted at a name or `this`.
 // WHY: mutable receiver syntax is a distinct place expression that must resolve to a field-access
 //      chain so the backend can pass the receiver by mutable reference.
 pub(super) fn parse_mutable_receiver_expression(
@@ -54,40 +58,26 @@ pub(super) fn parse_mutable_receiver_expression(
     let marker_span = Some(token_stream.current_postfix_operator_span());
     token_stream.advance();
 
-    if token_stream.current_tag() != TokenTag::SYMBOL {
+    if !matches!(
+        token_stream.current_tag(),
+        TokenTag::SYMBOL | TokenTag::THIS
+    ) {
         let found = token_stream
             .current_diagnostic_token(string_table)
             .map_err(|error| {
-                crate::compiler_frontend::compiler_messages::CompilerDiagnostic::token_view_invariant_error(
+                CompilerDiagnostic::token_view_invariant_error(
                     error,
                     "mutable-receiver symbol diagnostic",
                 )
             })?
             .unwrap_or_else(|| DiagnosticToken::from_static_tag(token_stream.current_tag()));
-        return Err(CompilerDiagnostic::unexpected_token_from_tag(found, marker_span).into());
+        return Err(CompilerDiagnostic::unexpected_token_from_tag(
+            found,
+            current_span(token_stream),
+        )
+        .into());
     }
-    let symbol_id = token_stream
-        .current_string_id_in(string_table)?
-        .ok_or_else(|| {
-            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                "mutable receiver symbol had no string payload",
-            )
-        })?;
-
-    let Some(receiver_declaration) = context.get_reference(&symbol_id) else {
-        if context.is_visible_type_alias_name(symbol_id) {
-            return Err(CompilerDiagnostic::namespace_misuse(
-                symbol_id,
-                NameNamespace::Value,
-                NameNamespace::Type,
-                current_span(token_stream),
-            )
-            .into());
-        }
-        return Err(
-            CompilerDiagnostic::unknown_value_name(symbol_id, current_span(token_stream)).into(),
-        );
-    };
+    let receiver_declaration = resolve_place_root(token_stream, context, string_table)?;
 
     // The mutable marker must be followed by a field-access chain; bare `~name` is not valid.
     // When the author wrote `~name = ...`, the intent was an assignment target, not a receiver
@@ -142,26 +132,11 @@ pub(super) fn parse_mutable_receiver_expression(
     )
 }
 
-// WHAT: parses the operand of a `copy` expression, which must resolve to a place.
+// WHAT: parses a named or `this`-rooted operand of a `copy` expression, which must resolve to a
+//      place.
 // WHY: `copy` clones the current stored value at a place; arbitrary expressions do not have
 //      stable storage, so the parser restricts this to names and parenthesized places.
 pub(super) fn parse_copy_place_expression(
-    token_stream: &mut AstCursor,
-    context: &ScopeContext,
-    type_interner: &mut AstTypeInterner<'_>,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> Result<ParsedCopyPlace, ExpressionParseError> {
-    parse_copy_place_payload(
-        token_stream,
-        context,
-        type_interner,
-        string_table,
-        path_fork,
-    )
-}
-
-fn parse_copy_place_payload(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -173,7 +148,7 @@ fn parse_copy_place_payload(
             let open_span = current_span(token_stream);
             token_stream.advance();
 
-            let mut parsed_place = parse_copy_place_payload(
+            let mut parsed_place = parse_copy_place_expression(
                 token_stream,
                 context,
                 type_interner,
@@ -203,31 +178,8 @@ fn parse_copy_place_payload(
             Ok(parsed_place)
         }
 
-        TokenTag::SYMBOL => {
-            let symbol_id = token_stream
-                .current_string_id_in(string_table)?
-                .ok_or_else(|| {
-                    crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                        "copy-place symbol had no string payload",
-                    )
-                })?;
-            let Some(place_declaration) = context.get_reference(&symbol_id) else {
-                if context.is_visible_type_alias_name(symbol_id) {
-                    return Err(CompilerDiagnostic::namespace_misuse(
-                        symbol_id,
-                        NameNamespace::Value,
-                        NameNamespace::Type,
-                        current_span(token_stream),
-                    )
-                    .into());
-                }
-                return Err(CompilerDiagnostic::unknown_value_name(
-                    symbol_id,
-                    current_span(token_stream),
-                )
-                .into());
-            };
-
+        TokenTag::SYMBOL | TokenTag::THIS => {
+            let place_declaration = resolve_place_root(token_stream, context, string_table)?;
             if context
                 .source_callable_signature(place_declaration.as_declaration())
                 .is_some()
@@ -299,7 +251,7 @@ fn parse_copy_place_payload(
             let marker_span = current_span(token_stream);
             token_stream.advance();
 
-            match parse_copy_place_payload(
+            match parse_copy_place_expression(
                 token_stream,
                 context,
                 type_interner,
@@ -318,6 +270,29 @@ fn parse_copy_place_payload(
         _ => Err(CompilerDiagnostic::invalid_copy_target(
             InvalidCopyTargetReason::NonPlace,
             current_span(token_stream),
+        )
+        .into()),
+    }
+}
+
+fn resolve_place_root<'a>(
+    token_stream: &mut AstCursor,
+    context: &'a ScopeContext,
+    string_table: &mut StringTable,
+) -> Result<ScopeDeclarationRef<'a>, ExpressionParseError> {
+    let span = token_stream.current_span();
+    match token_stream.current_tag() {
+        TokenTag::THIS => Ok(context.resolve_this_reference(string_table.intern("this"), span)?),
+        TokenTag::SYMBOL => {
+            let symbol_id = token_stream
+                .current_string_id_in(string_table)?
+                .ok_or_else(|| {
+                    CompilerError::compiler_error("place root symbol had no string payload")
+                })?;
+            Ok(context.resolve_value_reference(symbol_id, span)?)
+        }
+        _ => Err(CompilerError::compiler_error(
+            "place root resolution received a token other than a name or `this`",
         )
         .into()),
     }
