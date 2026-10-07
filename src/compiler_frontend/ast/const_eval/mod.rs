@@ -58,6 +58,8 @@ use crate::compiler_frontend::datatypes::numeric_operators::{
 use crate::compiler_frontend::datatypes::numeric_power;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
+#[cfg(feature = "benchmark_counters")]
+use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -204,6 +206,11 @@ pub fn constant_fold(
     numeric_profile: NumericProfile,
     scope_context: Option<&ScopeContext>,
 ) -> Result<ConstantFoldOutcome, ConstantFoldError> {
+    #[cfg(feature = "benchmark_counters")]
+    let input_item_count = {
+        increment_frontend_counter(FrontendCounter::CensusConstantFoldEntries);
+        output_stack.len()
+    };
     // Fold individual constant sub-expressions while leaving runtime-dependent operands and
     // operators in place. This keeps RPN ordering while still reporting statically known
     // numeric failures that happen to sit inside a larger runtime expression.
@@ -355,14 +362,29 @@ pub fn constant_fold(
         }
     }
 
+    // Reduction is moved/discarded RPN items, not retained bytes or clone traffic.
+    #[cfg(feature = "benchmark_counters")]
+    crate::compiler_frontend::instrumentation::add_frontend_counter(
+        FrontendCounter::CensusFoldReducedRpnItems,
+        input_item_count.saturating_sub(stack.len()),
+    );
+    // Unlike historical ConstantFoldSuccessCount, these distinguish every
+    // successful outcome at the folder owner, including speculative callers.
+
     if let Some(diagnostic) = text_unavailable {
+        #[cfg(feature = "benchmark_counters")]
+        increment_frontend_counter(FrontendCounter::CensusFoldOutcomeTextUnavailable);
         Ok(ConstantFoldOutcome::TextUnavailable {
             items: stack,
             diagnostic,
         })
     } else if stack.len() == 1 && matches!(&stack[0], ExpressionRpnItem::Operand(_)) {
+        #[cfg(feature = "benchmark_counters")]
+        increment_frontend_counter(FrontendCounter::CensusFoldOutcomeFolded);
         Ok(ConstantFoldOutcome::Folded(stack))
     } else {
+        #[cfg(feature = "benchmark_counters")]
+        increment_frontend_counter(FrontendCounter::CensusFoldOutcomeRuntime);
         Ok(ConstantFoldOutcome::NotConstant(stack))
     }
 }
@@ -525,6 +547,9 @@ pub fn fold_compile_time_expression(
     constant_context: bool,
     numeric_profile: NumericProfile,
 ) -> Result<Expression, ConstantFoldError> {
+    // Dedicated expression classifier includes the evaluator's single-value path.
+    #[cfg(feature = "benchmark_counters")]
+    increment_frontend_counter(FrontendCounter::CensusFoldCompileTimeExpressionEntries);
     match &expression.kind {
         ExpressionKind::Cast(cast) => {
             let folded_source = fold_compile_time_expression(
@@ -658,6 +683,8 @@ fn fold_resolved_cast(
     numeric_profile: NumericProfile,
     recovery_handler_body: Option<&[AstNode]>,
 ) -> Result<Expression, ConstantFoldError> {
+    #[cfg(feature = "benchmark_counters")]
+    increment_frontend_counter(FrontendCounter::CensusCastFoldAttempts);
     match &cast.evidence {
         ResolvedCastEvidence::Builtin { policy } => {
             if !policy.is_const_foldable() {

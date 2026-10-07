@@ -135,7 +135,6 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
         OwnedRuntimeSlotApplicationHandoff {
             wrapper: OwnedRuntimeTemplateNode::DynamicExpression {
                 expression: Box::new(orphan_bool_expression()),
-                reactive_subscription: None,
                 span: None,
             },
             contribution_sources: Vec::new(),
@@ -258,7 +257,6 @@ fn static_true_assertion_slot_handoff_is_validated_before_message_elision() {
     let slot_handoff = OwnedRuntimeSlotApplicationHandoff {
         wrapper: OwnedRuntimeTemplateNode::DynamicExpression {
             expression: Box::new(orphan_bool_expression()),
-            reactive_subscription: None,
             span: None,
         },
         contribution_sources: Vec::new(),
@@ -433,7 +431,6 @@ fn template_with_dynamic_overlay(
         crate::compiler_frontend::ast::templates::tir::TemplateIrNodeKind::DynamicExpression {
             expression: Box::new(structural),
             origin: TemplateSegmentOrigin::Body,
-            reactive_subscription: None,
             site_id,
         },
         None,

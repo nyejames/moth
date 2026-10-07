@@ -14,12 +14,8 @@ use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirMapEntry, HirVariantCarrier, HirVariantField, ValueKind,
 };
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalId, RegionId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::reactivity::{
-    HirReactiveSource, HirReactiveSourceKind, HirReactiveTemplate, HirReactiveTemplateDependency,
-    ReactiveSourceId, ReactiveTemplateId,
-};
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -345,94 +341,4 @@ fn assertion_message_map_metadata_emits_map_helpers() {
 
     assert!(source.contains("function __moth_map_new("));
     assert!(source.contains("__moth_map_new("));
-}
-
-#[test]
-fn reactive_assertion_message_emits_failure_snapshot_helpers() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let (mut type_environment, types) = build_type_environment();
-    let option_string = type_environment.intern_option(types.string);
-    let source_local = LocalId(0);
-    let region = RegionId(0);
-    let message_value = expression(
-        2,
-        HirExpressionKind::Load(HirPlace::Local(source_local)),
-        types.string,
-        region,
-        ValueKind::RValue,
-    );
-    let message = optional_message(3, option_string, message_value, 1, ValueKind::RValue);
-    let block = HirBlock {
-        id: BlockId(0),
-        region,
-        locals: vec![local(source_local.0, types.string, region)],
-        statements: vec![statement(
-            4,
-            HirStatementKind::Assign {
-                target: HirPlace::Local(source_local),
-                value: string_expression(5, "reactive message", types.string, region),
-            },
-        )],
-        terminator: HirTerminator::AssertFailure {
-            message,
-            message_evaluation: HirAssertionMessageEvaluation::Runtime,
-        },
-    };
-    let function = HirFunction {
-        id: FunctionId(0),
-        entry: BlockId(0),
-        params: vec![],
-        return_type: types.unit,
-    };
-    let mut module = build_module(
-        &mut path_fork,
-        &mut string_table,
-        "reactive_assertion",
-        vec![block],
-        function,
-        &[(source_local, "message")],
-    );
-    let source_path = path_fork
-        .try_intern_portable_path("message", &mut string_table)
-        .expect("test path fits");
-    module.side_table.bind_reactive_source(HirReactiveSource {
-        id: ReactiveSourceId(0),
-        local_id: source_local,
-        path: source_path,
-        kind: HirReactiveSourceKind::Declaration,
-        type_id: types.string,
-        span: None,
-    });
-    module
-        .side_table
-        .bind_reactive_template(HirReactiveTemplate {
-            id: ReactiveTemplateId(0),
-            value_id: HirValueId(2),
-            dependencies: vec![HirReactiveTemplateDependency {
-                source: ReactiveSourceId(0),
-                type_id: types.string,
-                span: None,
-            }],
-            template_value_parameters: vec![],
-            template_backed: false,
-            span: None,
-        });
-
-    let source = lower_hir_to_js(
-        &module,
-        &BorrowCheckReport::default(),
-        &NumericProofs::default(),
-        &string_table,
-        default_config(),
-        &type_environment,
-        &path_fork.snapshot_table(),
-    )
-    .expect("reactive assertion lowering should succeed")
-    .source;
-
-    assert!(source.contains("function __moth_template_string("));
-    assert!(source.contains("function __moth_template_snapshot("));
-    assert!(source.contains("__moth_template_snapshot(__moth_template_string("));
-    assert!(source.contains("let __assert_message_0"));
 }

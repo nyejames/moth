@@ -101,7 +101,6 @@ pub(super) struct StableFunctionSignature {
 pub(super) struct StableFunctionParameter {
     pub(super) name: String,
     pub(super) value_mode: ValueMode,
-    pub(super) reactive: bool,
     pub(super) folded_default: Option<PublicFoldedValue>,
     pub(super) parameter_type: MaterialisationTypeBlueprint,
     pub(super) span: Option<SourceSpan>,

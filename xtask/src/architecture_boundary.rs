@@ -126,7 +126,6 @@ const BORACLE_ORACLE_STATIC_SOLVER_NAMES: &[&str] = &[
     // `boracle/report.rs`
     "BoracleReport",
     "BoracleSolver",
-    "ReactiveObservation",
     // `boracle/service.rs`
     "BoracleDump",
     "BoracleExperiment",

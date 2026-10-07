@@ -154,13 +154,55 @@ fn boracle_source_differential_replays_plain_value() {
 }
 
 #[test]
-fn boracle_source_differential_replays_mutated_binding() {
+fn boracle_source_differential_replays_boolean_mutated_binding() {
+    let source = "value ~= false\nvalue = not value\nresult = value\n";
+    assert_mutable_reassignment_access_order(source);
+    let differential = assert_source_differential_replay(source, &["Agreement", "Agreement"]);
+    let oracle_outcomes = differential
+        .lines()
+        .filter_map(|line| line.strip_prefix("oracle-outcome = "))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        oracle_outcomes,
+        vec!["CompleteSafe { executions: 1 }"; 2],
+        "both differential comparisons should finish one conflict-free execution:\n{differential}"
+    );
+}
+
+#[test]
+fn boracle_source_differential_marks_checked_numeric_reassignment_inconclusive() {
     let source = "value ~= 1\nvalue = value + 1\nresult = value\n";
+    assert_mutable_reassignment_access_order(source);
+    let differential =
+        assert_source_differential_replay(source, &["OracleInconclusive", "OracleInconclusive"]);
+    let oracle_outcomes = differential
+        .lines()
+        .filter_map(|line| line.strip_prefix("oracle-outcome = "))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        oracle_outcomes.len(),
+        2,
+        "each differential comparison should report its bounded-oracle outcome:\n{differential}"
+    );
+    assert!(
+        oracle_outcomes.iter().all(|outcome| {
+            outcome.starts_with("Inconclusive {")
+                && outcome.contains("reason: UndecidableOverlap {")
+                && outcome.contains("path: [DynamicIndex]")
+                && outcome.contains("path: []")
+                && outcome.contains("completed_executions: 0")
+        }),
+        "computed numeric reassignment should preserve the oracle's undecidable-overlap refusal \
+         and zero complete executions:\n{differential}"
+    );
+}
+
+fn assert_mutable_reassignment_access_order(source: &str) {
     let report = solve_source(source);
     let function = report
         .functions()
         .first()
-        .expect("mutated-binding source should produce one function report");
+        .expect("mutable-reassignment source should produce one function report");
     let value_place = function
         .problem
         .places()
@@ -170,43 +212,47 @@ fn boracle_source_differential_replays_mutated_binding() {
                 binding.id == place.root && binding.mutable && !binding.compiler_temporary
             })
         })
-        .expect("mutated-binding source should retain its mutable binding place");
-    let redefinition_index =
-        function
-            .problem
-            .events()
-            .iter()
-            .enumerate()
-            .find_map(|(index, event)| {
-                matches!(
-                    &event.kind,
-                    EventKind::ExclusiveAliasFromPlace { destination, .. }
-                        if *destination == value_place.id
-                )
-                .then_some(index)
-            });
-    assert!(
-        redefinition_index.is_some(),
-        "mutated-binding source should retain its exclusive redefinition"
+        .expect("mutable-reassignment source should retain its mutable binding place");
+    let mut defining_write_points = function
+        .problem
+        .uses()
+        .iter()
+        .filter(|use_row| {
+            use_row.place == value_place.id
+                && use_row.definition
+                && use_row.kind.access_kind() == AccessKind::Exclusive
+        })
+        .map(|use_row| use_row.point)
+        .collect::<Vec<_>>();
+    defining_write_points.sort_unstable();
+    assert_eq!(
+        defining_write_points.len(),
+        2,
+        "mutable-reassignment source should retain an initial and reassignment defining write: {defining_write_points:?}"
     );
-    let redefinition_index = redefinition_index.expect("redefinition assertion should pass");
-    assert!(
-        function.problem.events()[..redefinition_index]
-            .iter()
-            .any(|event| {
-                let EventKind::Access { use_id } = &event.kind else {
-                    return false;
-                };
-                function.problem.uses().iter().any(|use_row| {
-                    use_row.id == *use_id
-                        && use_row.place == value_place.id
-                        && !use_row.definition
-                        && format!("{:?}", use_row.kind) == "Read"
-                })
-            }),
-        "mutated-binding source should read the previous value before redefining it"
+    let mut read_points = function
+        .problem
+        .uses()
+        .iter()
+        .filter(|use_row| {
+            use_row.place == value_place.id
+                && !use_row.definition
+                && use_row.kind.access_kind() == AccessKind::Shared
+        })
+        .map(|use_row| use_row.point)
+        .collect::<Vec<_>>();
+    read_points.sort_unstable();
+    assert_eq!(
+        read_points.len(),
+        2,
+        "mutable-reassignment source should retain the reassignment read and later value read: {read_points:?}"
     );
-    assert_source_differential_replay(source, &["Agreement", "Agreement"]);
+    assert!(
+        defining_write_points[0] < read_points[0]
+            && read_points[0] < defining_write_points[1]
+            && defining_write_points[1] < read_points[1],
+        "mutable-reassignment source should write, read before reassignment, write again, then read the assigned value: writes={defining_write_points:?} reads={read_points:?}"
+    );
 }
 
 #[test]
@@ -626,7 +672,7 @@ fn assert_source_differential_replay(source: &str, expected_classes: &[&str]) ->
     );
     assert!(
         !first.lines().any(|line| line == "required-failure = true"),
-        "accepted source should not produce a required differential failure:\n{first}"
+        "source should not produce a required differential failure:\n{first}"
     );
     first
 }

@@ -105,7 +105,7 @@ This compiles the project using the command-selected builder and writes output t
 
 </div>
 
-- First-class string templates powerful enough to act as a small compile-time markup engine. They support built-in Markdown, formatting, slots and reactive runtime output.
+- First-class string templates powerful enough to act as a small compile-time markup engine. They support built-in Markdown, formatting, slots and runtime fragment insertion.
 
 - Readable and consistent syntax. Unique but quick to learn.
 

@@ -6,32 +6,23 @@
 //! WHY: Float formatting is a Moth-owned contract shared by casts and templates; dedicated
 //!      tests guard against regressions back to native stringification.
 
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ReactiveSource, ReactiveSourceKind,
-};
+use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExpression;
 use crate::compiler_frontend::ast::expressions::expression_types::{
     CastHandling, ResolvedCastEvidence,
-};
-use crate::compiler_frontend::ast::templates::template::ReactiveSubscription;
-use crate::compiler_frontend::ast::templates::{
-    OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
+use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::hir_builder::{
     register_local, runtime_template_expression, setup_builder,
 };
 use crate::compiler_frontend::hir::ids::{FunctionId, LocalId};
 use crate::compiler_frontend::hir::numeric::NumericFailureMode;
-use crate::compiler_frontend::hir::reactivity::{
-    HirReactiveSource, HirReactiveSourceKind, ReactiveSourceId,
-};
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::tests::symbol;
@@ -117,22 +108,6 @@ fn has_plain_float_to_string_cast(builder: &HirBuilder<'_>) -> bool {
                     }
                 )
             })
-}
-
-fn expression_contains_float_to_string_cast(expression: &HirExpression) -> bool {
-    match &expression.kind {
-        HirExpressionKind::Cast { source, policy } => {
-            *policy == BuiltinCastPolicyId::NumericToString(NumericScalar::Float)
-                || expression_contains_float_to_string_cast(source)
-        }
-
-        HirExpressionKind::BinOp { left, right, .. } => {
-            expression_contains_float_to_string_cast(left)
-                || expression_contains_float_to_string_cast(right)
-        }
-
-        _ => false,
-    }
 }
 
 fn make_float_to_string_cast(
@@ -424,74 +399,6 @@ fn runtime_string_template_chunk_does_not_emit_format_float() {
     assert!(
         format_floats.is_empty(),
         "String template chunks must not emit FormatFloat statements"
-    );
-}
-
-#[test]
-fn reactive_float_template_subscription_keeps_lazy_formatter_expression() {
-    let mut path_fork = super::PathInternerFork::empty();
-    let mut string_table = StringTable::new();
-    let loc = None;
-    let value_path = symbol("value", &mut path_fork, &mut string_table);
-    let value_local = LocalId(20);
-    let source = ReactiveSource {
-        path: value_path,
-        kind: ReactiveSourceKind::Declaration,
-    };
-
-    let value_ref = reference_expr_with_type_id(
-        value_path,
-        builtin_type_ids::FLOAT,
-        loc,
-        ValueMode::ImmutableReference,
-    )
-    .with_reactive_source(source.clone());
-    let subscription = ReactiveSubscription {
-        source,
-        type_id: builtin_type_ids::FLOAT,
-        span: loc,
-    };
-    let handoff = OwnedRuntimeTemplateHandoff {
-        body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence {
-            children: vec![OwnedRuntimeTemplateNode::DynamicExpression {
-                expression: Box::new(value_ref),
-                reactive_subscription: Some(subscription),
-                span: loc,
-            }],
-            span: loc,
-        }),
-        span: loc,
-    };
-
-    let mut builder = setup_builder(&mut string_table, &mut path_fork);
-    register_local(
-        &mut builder,
-        value_path,
-        value_local,
-        builtin_type_ids::FLOAT,
-        loc,
-    );
-    builder.side_table.bind_reactive_source(HirReactiveSource {
-        id: ReactiveSourceId(0),
-        local_id: value_local,
-        path: value_path,
-        kind: HirReactiveSourceKind::Declaration,
-        type_id: builtin_type_ids::FLOAT,
-        span: loc,
-    });
-
-    let expr = Expression::runtime_template_handoff(handoff, ValueMode::ImmutableOwned);
-    let lowered = builder
-        .lower_expression(&expr)
-        .expect("reactive Float template subscription lowering should succeed");
-
-    assert!(
-        expression_contains_float_to_string_cast(&lowered.value),
-        "reactive Float subscriptions should format lazily inside the snapshot expression"
-    );
-    assert!(
-        builder.test_current_block_statements().is_empty(),
-        "direct reactive subscriptions must not be materialized into eager FormatFloat statements"
     );
 }
 

@@ -114,7 +114,6 @@ pub(crate) fn success_return_slot(type_id: TypeId) -> ReturnSlot {
     ReturnSlot {
         value: DataType::Inferred,
         type_id: Some(type_id),
-        reactive_template: None,
         channel: ReturnChannel::Success,
     }
 }

@@ -17,14 +17,11 @@ use super::super::store::{MalformedTirStore, TemplateIrStore, TemplateWrapperSet
 use super::super::summary::TemplateIrSummary;
 use super::super::{TemplateTirPhase, TemplateViewContext, TirView};
 use super::builder::TemplateIrBuilder;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, ReactiveSource, ReactiveSourceKind,
-};
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{
-    ReactiveSubscription, SlotKey, Style, Template, TemplateConstValueKind, TemplateSegmentOrigin,
-    TemplateType,
+    SlotKey, Style, Template, TemplateConstValueKind, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopControlKind, TemplateLoopHeader,
@@ -167,7 +164,6 @@ fn preparation_returns_runtime_with_exact_identity_for_runtime_expression() {
                 runtime_expression(table),
                 TemplateSegmentOrigin::Body,
                 None,
-                None,
             );
             builder.push_sequence_node(vec![expression], None)
         },
@@ -185,52 +181,6 @@ fn preparation_returns_runtime_with_exact_identity_for_runtime_expression() {
             assert_eq!(reason, RuntimeTemplateReason::RuntimeExpression);
         }
         other => panic!("runtime expression must be exclusively runtime: {other:?}"),
-    }
-}
-
-#[test]
-fn preparation_keeps_reactive_content_on_runtime_handoff() {
-    let mut path_fork = PathInternerFork::empty();
-    let (prepared, identity) = prepare_root(
-        TemplateType::String,
-        |builder, table| {
-            let source = ReactiveSource {
-                path: path_fork
-                    .try_intern_portable_path("main.moth/#reactive", table)
-                    .expect("test path fits"),
-                kind: ReactiveSourceKind::Declaration,
-            };
-            let text = table.intern("reactive text");
-            let text_node = builder.push_text_node_with_subscription(
-                text,
-                "reactive text".len(),
-                TemplateSegmentOrigin::Body,
-                Some(ReactiveSubscription {
-                    source,
-                    type_id: builtin_type_ids::STRING,
-                    span: None,
-                }),
-                None,
-            );
-            builder.push_sequence_node(vec![text_node], None)
-        },
-        TemplatePreparationMode::Value,
-    )
-    .expect("reactive preparation should succeed");
-
-    match prepared {
-        TemplatePreparation {
-            identity: prepared_identity,
-            outcome: TemplatePreparationOutcome::Runtime(reason),
-            facts,
-            ..
-        } => {
-            assert_eq!(prepared_identity, identity);
-            assert_eq!(reason, RuntimeTemplateReason::ReactiveContent);
-            assert!(facts.has_reactive_dependence);
-            assert!(!facts.is_const_evaluable_shape);
-        }
-        other => panic!("reactive content must remain runtime: {other:?}"),
     }
 }
 
@@ -391,7 +341,6 @@ fn preparation_continues_after_runtime_dependence_to_malformed_authority() {
                 runtime_expression(table),
                 TemplateSegmentOrigin::Body,
                 None,
-                None,
             );
             builder.push_sequence_node(vec![runtime, TemplateIrNodeId::new(999)], None)
         },
@@ -429,7 +378,6 @@ fn preparation_reenters_nested_template_payload_authority() {
         let dynamic = builder.push_dynamic_expression_node(
             Expression::template(nested_template, ValueMode::ImmutableOwned),
             TemplateSegmentOrigin::Body,
-            None,
             None,
         );
         let root = builder.push_sequence_node(vec![dynamic], None);
@@ -471,7 +419,6 @@ fn preparation_classifies_nested_value_cycle_as_runtime() {
             Expression::template(nested_value(), ValueMode::ImmutableOwned),
             TemplateSegmentOrigin::Body,
             None,
-            None,
         );
         let root = builder.push_sequence_node(vec![dynamic], None);
         assert_eq!(
@@ -489,7 +436,6 @@ fn preparation_classifies_nested_value_cycle_as_runtime() {
     let outer_dynamic = outer_builder.push_dynamic_expression_node(
         Expression::template(nested_value(), ValueMode::ImmutableOwned),
         TemplateSegmentOrigin::Body,
-        None,
         None,
     );
     let outer_root = outer_builder.push_sequence_node(vec![outer_dynamic], None);
@@ -772,70 +718,6 @@ fn preparation_rejects_mismatched_runtime_slot_site_identity() {
 }
 
 #[test]
-fn preparation_propagates_reactive_facts_from_runtime_slot_contribution_roots() {
-    let mut store = TemplateIrStore::new();
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let reactive_source = ReactiveSource {
-        path: path_fork
-            .try_intern_portable_path("main.moth/#reactive", &mut string_table)
-            .expect("test path fits"),
-        kind: ReactiveSourceKind::Declaration,
-    };
-    let contribution_root = {
-        let mut builder = TemplateIrBuilder::new(&mut store);
-        builder.push_text_node_with_subscription(
-            string_table.intern("reactive contribution"),
-            "reactive contribution".len(),
-            TemplateSegmentOrigin::Body,
-            Some(ReactiveSubscription {
-                source: reactive_source,
-                type_id: builtin_type_ids::STRING,
-                span: None,
-            }),
-            None,
-        )
-    };
-    let plan_id = store.push_slot_plan(TemplateSlotPlan {
-        contribution_sources: vec![empty_source_plan(
-            RuntimeSlotContributionSourceId(0),
-            contribution_root,
-        )],
-        slot_sites: Vec::new(),
-        span: None,
-    });
-    let wrapper_root = {
-        let mut builder = TemplateIrBuilder::new(&mut store);
-        builder.push_text_node(
-            string_table.intern("wrapper root"),
-            "wrapper root".len(),
-            TemplateSegmentOrigin::Body,
-            None,
-        )
-    };
-    let template_id = store.push_template(TemplateIr::new(
-        wrapper_root,
-        Style::default(),
-        TemplateType::StringFunction,
-        TemplateIrSummary::default(),
-        None,
-    ));
-    store
-        .attach_runtime_slot_plan(template_id, plan_id)
-        .expect("runtime slot plan should attach to the wrapper root");
-
-    let preparation = prepare_slot_plan_view(&store, template_id)
-        .expect("reactive contribution roots should be part of preparation facts");
-
-    assert!(preparation.facts.has_runtime_slot_plan);
-    assert!(preparation.facts.has_reactive_dependence);
-    assert!(matches!(
-        preparation.outcome,
-        TemplatePreparationOutcome::Runtime(_)
-    ));
-}
-
-#[test]
 fn preparation_reports_missing_wrapper_root_without_a_separate_slot_layout_walk() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
@@ -916,7 +798,6 @@ fn runtime_contribution_constness_propagates_option_capture_bindings() {
         let body_expression = builder.push_dynamic_expression_node(
             capture_expression,
             TemplateSegmentOrigin::Body,
-            None,
             None,
         );
         let body = builder.push_sequence_node(vec![body_expression], None);

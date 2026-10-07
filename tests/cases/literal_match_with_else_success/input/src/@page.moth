@@ -6,12 +6,16 @@ if value is:
     else => match_result = "other"
 ;
 
-reactive_text $= [:one]
-reactive_match_result ~= "unset"
-
-if reactive_text is:
-    "one" => reactive_match_result = "content"
-    else => reactive_match_result = "other"
+make_text |value String| -> String:
+    return [:[value]]
 ;
 
-[:literal_match_with_else_success result=[match_result] reactive=[reactive_match_result]]
+template_text = make_text("one")
+template_match_result ~= "unset"
+
+if template_text is:
+    "one" => template_match_result = "content"
+    else => template_match_result = "other"
+;
+
+[:literal_match_with_else_success result=[match_result] template=[template_match_result]]

@@ -1,31 +1,17 @@
 use super::super::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
-    PublicCallParameterSummary, PublicCallReactiveEffect, PublicCallSummary,
-    PublicCallSummaryTransition, PublicCallTransferEffect, PublicCallTransferEligibility,
-    validate_public_call_summary_transition,
+    PublicCallParameterSummary, PublicCallSummary, PublicCallSummaryTransition,
+    PublicCallTransferEffect, validate_public_call_summary_transition,
 };
 
 fn parameter(
     access: PublicCallParameterAccess,
     mutation: PublicCallMutationEffect,
-    reactive_effect: PublicCallReactiveEffect,
 ) -> PublicCallParameterSummary {
-    let (transfer_eligibility, transfer_effect) = match access {
-        PublicCallParameterAccess::Reactive => (
-            PublicCallTransferEligibility::Ineligible,
-            PublicCallTransferEffect::NeverConsumes,
-        ),
-        PublicCallParameterAccess::Shared | PublicCallParameterAccess::Mutable => (
-            PublicCallTransferEligibility::Eligible,
-            PublicCallTransferEffect::MayConsume,
-        ),
-    };
     PublicCallParameterSummary {
         access,
         mutation,
-        transfer_eligibility,
-        transfer_effect,
-        reactive_effect,
+        transfer_effect: PublicCallTransferEffect::MayConsume,
     }
 }
 
@@ -46,7 +32,6 @@ fn identical_summary_is_an_unchanged_transition() {
         vec![parameter(
             PublicCallParameterAccess::Mutable,
             PublicCallMutationEffect::NoWrite,
-            PublicCallReactiveEffect::None,
         )],
         FunctionReturnAliasSummary::Fresh,
     );
@@ -75,140 +60,41 @@ fn builtin_failure_bit_widens_but_never_narrows() {
 }
 
 #[test]
-fn mutation_and_reactive_bits_widen_but_do_not_narrow() {
+fn mutation_effect_widens_but_does_not_narrow() {
     let no_write = summary(
         vec![parameter(
             PublicCallParameterAccess::Mutable,
             PublicCallMutationEffect::NoWrite,
-            PublicCallReactiveEffect::None,
         )],
         FunctionReturnAliasSummary::Fresh,
     );
-    let writes_and_invalidates = summary(
+    let writes = summary(
         vec![parameter(
             PublicCallParameterAccess::Mutable,
             PublicCallMutationEffect::Writes,
-            PublicCallReactiveEffect::Invalidates,
         )],
         FunctionReturnAliasSummary::Fresh,
     );
 
     assert_eq!(
-        validate_public_call_summary_transition(&no_write, &writes_and_invalidates).unwrap(),
+        validate_public_call_summary_transition(&no_write, &writes).unwrap(),
         PublicCallSummaryTransition::Widened
     );
-    assert!(validate_public_call_summary_transition(&writes_and_invalidates, &no_write).is_err());
-}
-
-#[test]
-fn reactive_subscription_can_widen_to_both_effects() {
-    let subscribes = summary(
-        vec![parameter(
-            PublicCallParameterAccess::Reactive,
-            PublicCallMutationEffect::NoWrite,
-            PublicCallReactiveEffect::Subscribes,
-        )],
-        FunctionReturnAliasSummary::Fresh,
-    );
-    let both = summary(
-        vec![parameter(
-            PublicCallParameterAccess::Reactive,
-            PublicCallMutationEffect::NoWrite,
-            PublicCallReactiveEffect::SubscribesAndInvalidates,
-        )],
-        FunctionReturnAliasSummary::Fresh,
-    );
-
-    assert_eq!(
-        validate_public_call_summary_transition(&subscribes, &both).unwrap(),
-        PublicCallSummaryTransition::Widened
-    );
-    assert!(validate_public_call_summary_transition(&both, &subscribes).is_err());
-}
-
-#[test]
-fn every_reactive_effect_transition_follows_bitwise_inclusion() {
-    let effects = [
-        PublicCallReactiveEffect::None,
-        PublicCallReactiveEffect::Subscribes,
-        PublicCallReactiveEffect::Invalidates,
-        PublicCallReactiveEffect::SubscribesAndInvalidates,
-    ];
-
-    for previous_effect in effects {
-        for next_effect in effects {
-            let previous = summary(
-                vec![parameter(
-                    PublicCallParameterAccess::Reactive,
-                    PublicCallMutationEffect::NoWrite,
-                    previous_effect,
-                )],
-                FunctionReturnAliasSummary::Fresh,
-            );
-            let next = summary(
-                vec![parameter(
-                    PublicCallParameterAccess::Reactive,
-                    PublicCallMutationEffect::NoWrite,
-                    next_effect,
-                )],
-                FunctionReturnAliasSummary::Fresh,
-            );
-            let (previous_subscribes, previous_invalidates) = reactive_bits(previous_effect);
-            let (next_subscribes, next_invalidates) = reactive_bits(next_effect);
-            let allowed = (!previous_subscribes || next_subscribes)
-                && (!previous_invalidates || next_invalidates);
-
-            let transition = validate_public_call_summary_transition(&previous, &next);
-            assert_eq!(transition.is_ok(), allowed);
-            if allowed {
-                assert_eq!(
-                    transition.unwrap(),
-                    if previous_effect == next_effect {
-                        PublicCallSummaryTransition::Unchanged
-                    } else {
-                        PublicCallSummaryTransition::Widened
-                    }
-                );
-            }
-        }
-    }
-}
-
-fn reactive_bits(effect: PublicCallReactiveEffect) -> (bool, bool) {
-    match effect {
-        PublicCallReactiveEffect::None => (false, false),
-        PublicCallReactiveEffect::Subscribes => (true, false),
-        PublicCallReactiveEffect::Invalidates => (false, true),
-        PublicCallReactiveEffect::SubscribesAndInvalidates => (true, true),
-    }
+    assert!(validate_public_call_summary_transition(&writes, &no_write).is_err());
 }
 
 #[test]
 fn return_aliases_widen_from_fresh_to_supersets_or_unknown() {
-    let fresh = summary(
-        vec![parameter(
-            PublicCallParameterAccess::Mutable,
-            PublicCallMutationEffect::NoWrite,
-            PublicCallReactiveEffect::None,
-        )],
-        FunctionReturnAliasSummary::Fresh,
-    );
+    let parameters = vec![parameter(
+        PublicCallParameterAccess::Mutable,
+        PublicCallMutationEffect::NoWrite,
+    )];
+    let fresh = summary(parameters.clone(), FunctionReturnAliasSummary::Fresh);
     let aliases_parameter = summary(
-        vec![parameter(
-            PublicCallParameterAccess::Mutable,
-            PublicCallMutationEffect::NoWrite,
-            PublicCallReactiveEffect::None,
-        )],
+        parameters.clone(),
         FunctionReturnAliasSummary::AliasParams(vec![0]),
     );
-    let unknown = summary(
-        vec![parameter(
-            PublicCallParameterAccess::Mutable,
-            PublicCallMutationEffect::NoWrite,
-            PublicCallReactiveEffect::None,
-        )],
-        FunctionReturnAliasSummary::Unknown,
-    );
+    let unknown = summary(parameters, FunctionReturnAliasSummary::Unknown);
 
     assert_eq!(
         validate_public_call_summary_transition(&fresh, &aliases_parameter).unwrap(),
@@ -227,12 +113,10 @@ fn alias_parameter_sets_must_grow_by_subset() {
         parameter(
             PublicCallParameterAccess::Mutable,
             PublicCallMutationEffect::NoWrite,
-            PublicCallReactiveEffect::None,
         ),
         parameter(
             PublicCallParameterAccess::Mutable,
             PublicCallMutationEffect::NoWrite,
-            PublicCallReactiveEffect::None,
         ),
     ];
     let one = summary(
@@ -243,10 +127,7 @@ fn alias_parameter_sets_must_grow_by_subset() {
         parameters.clone(),
         FunctionReturnAliasSummary::AliasParams(vec![0, 1]),
     );
-    let incomparable = summary(
-        parameters.clone(),
-        FunctionReturnAliasSummary::AliasParams(vec![1]),
-    );
+    let incomparable = summary(parameters, FunctionReturnAliasSummary::AliasParams(vec![1]));
 
     assert_eq!(
         validate_public_call_summary_transition(&one, &superset).unwrap(),
@@ -262,7 +143,6 @@ fn invariant_parameter_access_cannot_change() {
         vec![parameter(
             PublicCallParameterAccess::Mutable,
             PublicCallMutationEffect::NoWrite,
-            PublicCallReactiveEffect::None,
         )],
         FunctionReturnAliasSummary::Fresh,
     );
@@ -270,7 +150,6 @@ fn invariant_parameter_access_cannot_change() {
         vec![parameter(
             PublicCallParameterAccess::Shared,
             PublicCallMutationEffect::NoWrite,
-            PublicCallReactiveEffect::None,
         )],
         FunctionReturnAliasSummary::Fresh,
     );
@@ -279,39 +158,21 @@ fn invariant_parameter_access_cannot_change() {
 }
 
 #[test]
-fn transfer_invariants_and_parameter_count_cannot_change() {
-    let current_parameter = parameter(
-        PublicCallParameterAccess::Mutable,
-        PublicCallMutationEffect::NoWrite,
-        PublicCallReactiveEffect::None,
-    );
+fn invalid_transfer_effect_and_parameter_count_are_rejected() {
     let current = summary(
-        vec![current_parameter.clone()],
+        vec![parameter(
+            PublicCallParameterAccess::Mutable,
+            PublicCallMutationEffect::NoWrite,
+        )],
         FunctionReturnAliasSummary::Fresh,
     );
 
-    let mut transfer_eligibility_changed = current_parameter.clone();
-    transfer_eligibility_changed.transfer_eligibility = PublicCallTransferEligibility::Ineligible;
+    let mut invalid_transfer = current.parameters[0].clone();
+    invalid_transfer.transfer_effect = PublicCallTransferEffect::AlwaysConsumes;
     assert!(
         validate_public_call_summary_transition(
             &current,
-            &summary(
-                vec![transfer_eligibility_changed],
-                FunctionReturnAliasSummary::Fresh,
-            )
-        )
-        .is_err()
-    );
-
-    let mut transfer_effect_changed = current_parameter;
-    transfer_effect_changed.transfer_effect = PublicCallTransferEffect::NeverConsumes;
-    assert!(
-        validate_public_call_summary_transition(
-            &current,
-            &summary(
-                vec![transfer_effect_changed],
-                FunctionReturnAliasSummary::Fresh
-            )
+            &summary(vec![invalid_transfer], FunctionReturnAliasSummary::Fresh)
         )
         .is_err()
     );
@@ -319,7 +180,6 @@ fn transfer_invariants_and_parameter_count_cannot_change() {
     let extra_parameter = parameter(
         PublicCallParameterAccess::Mutable,
         PublicCallMutationEffect::NoWrite,
-        PublicCallReactiveEffect::None,
     );
     assert!(
         validate_public_call_summary_transition(
@@ -340,12 +200,10 @@ fn invalid_alias_shape_is_rejected_before_transition() {
             parameter(
                 PublicCallParameterAccess::Mutable,
                 PublicCallMutationEffect::NoWrite,
-                PublicCallReactiveEffect::None,
             ),
             parameter(
                 PublicCallParameterAccess::Mutable,
                 PublicCallMutationEffect::NoWrite,
-                PublicCallReactiveEffect::None,
             ),
         ],
         FunctionReturnAliasSummary::AliasParams(vec![0]),
@@ -356,7 +214,6 @@ fn invalid_alias_shape_is_rejected_before_transition() {
     );
 
     assert!(validate_public_call_summary_transition(&current, &invalid).is_err());
-
     assert!(
         validate_public_call_summary_transition(
             &current,
@@ -375,7 +232,6 @@ fn empty_alias_params_summary_is_rejected() {
         vec![parameter(
             PublicCallParameterAccess::Mutable,
             PublicCallMutationEffect::NoWrite,
-            PublicCallReactiveEffect::None,
         )],
         FunctionReturnAliasSummary::Fresh,
     );
@@ -384,8 +240,5 @@ fn empty_alias_params_summary_is_rejected() {
         FunctionReturnAliasSummary::AliasParams(Vec::new()),
     );
 
-    assert!(
-        validate_public_call_summary_transition(&current, &empty).is_err(),
-        "public summaries reject empty AliasParams"
-    );
+    assert!(validate_public_call_summary_transition(&current, &empty).is_err());
 }

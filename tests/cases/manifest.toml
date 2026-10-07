@@ -11894,48 +11894,6 @@ contract = "backend.html_wasm.unreachable_cast_ignored"
 role = "backend"
 
 [[case]]
-id = "reactive_declaration_scalar_success"
-path = "reactive_declaration_scalar_success"
-tags = ["integration", "language", "reactivity"]
-contract = "language.reactivity.scalar_declaration_renders_current_value"
-role = "primary"
-
-[[case]]
-id = "reactive_declaration_inferred_success"
-path = "reactive_declaration_inferred_success"
-tags = ["integration", "language", "reactivity"]
-contract = "language.reactivity.inferred_type_declaration_renders_current_value"
-role = "primary"
-
-[[case]]
-id = "reactive_declaration_composite_success"
-path = "reactive_declaration_composite_success"
-tags = ["integration", "language", "reactivity", "structs", "choices"]
-contract = "language.reactivity.composite_declaration_renders_current_value"
-role = "primary"
-
-[[case]]
-id = "reactive_declaration_collections_success"
-path = "reactive_declaration_collections_success"
-tags = ["integration", "language", "reactivity", "collections", "hashmaps"]
-contract = "language.reactivity.collection_declaration_renders_current_value"
-role = "primary"
-
-[[case]]
-id = "reactive_parameter_success"
-path = "reactive_parameter_success"
-tags = ["integration", "language", "reactivity", "functions"]
-contract = "language.reactivity.reactive_parameter_renders_current_value"
-role = "primary"
-
-[[case]]
-id = "reactive_declaration_missing_initializer_rejected"
-path = "reactive_declaration_missing_initializer_rejected"
-tags = ["integration", "language", "reactivity", "diagnostics"]
-contract = "language.reactivity.declaration_missing_initializer_rejected"
-role = "primary"
-
-[[case]]
 id = "declaration_authored_assign_missing_initializer_rejected"
 path = "declaration_authored_assign_missing_initializer_rejected"
 tags = ["integration", "language", "diagnostics"]
@@ -11943,227 +11901,10 @@ contract = "language.syntax.authored_assign_missing_initializer_rejected"
 role = "primary"
 
 [[case]]
-id = "reactive_declaration_mixed_markers_rejected"
-path = "reactive_declaration_mixed_markers_rejected"
-tags = ["integration", "language", "reactivity", "diagnostics"]
-contract = "language.reactivity.declaration_mixed_markers_rejected"
-role = "primary"
-
-[[case]]
-id = "reactive_type_ordinary_position_rejected"
-path = "reactive_type_ordinary_position_rejected"
-tags = ["integration", "language", "reactivity", "diagnostics"]
-contract = "language.reactivity.type_in_ordinary_position_rejected"
-role = "primary"
-
-[[case]]
-id = "reactive_non_entry_top_level_rejected"
-path = "reactive_non_entry_top_level_rejected"
-tags = ["integration", "language", "reactivity", "diagnostics"]
-contract = "language.reactivity.non_entry_top_level_declaration_rejected"
-role = "primary"
-
-[[case]]
-id = "reactive_facade_export_rejected"
-path = "reactive_facade_export_rejected"
-tags = ["integration", "language", "reactivity", "diagnostics"]
-contract = "language.reactivity.facade_export_rejected"
-role = "primary"
-
-[[case]]
-id = "reactive_parameter_requires_source_rejected"
-path = "reactive_parameter_requires_source_rejected"
-tags = ["integration", "language", "reactivity", "diagnostics", "functions"]
-contract = "language.reactivity.parameter_requires_source_rejected"
-role = "primary"
-
-[[case]]
-id = "reactive_parameter_mutation_permission_rejected"
-path = "reactive_parameter_mutation_permission_rejected"
-tags = ["integration", "language", "reactivity", "diagnostics", "functions", "borrows"]
-contract = "language.reactivity.reactive_parameter_does_not_grant_mutation_permission"
-role = "primary"
-
-[[case]]
-id = "reactive_subscription_entry_runtime_success"
-path = "reactive_subscription_entry_runtime_success"
-tags = ["integration", "language", "reactivity", "templates"]
-contract = "language.reactivity.subscription_renders_current_source_value"
-role = "primary"
-
-[[case]]
-id = "reactive_subscription_head_argument_success"
-path = "reactive_subscription_head_argument_success"
-tags = ["integration", "language", "reactivity", "templates"]
-contract = "language.reactivity.subscription_renders_current_source_value"
-role = "boundary"
-
-[[case]]
-id = "reactive_subscription_helper_success"
-path = "reactive_subscription_helper_success"
-tags = ["integration", "language", "reactivity", "templates", "functions"]
-contract = "language.reactivity.reactive_parameter_subscription_acceptance"
-role = "primary"
-
-[[case]]
-id = "reactive_subscription_nested_runtime_success"
-path = "reactive_subscription_nested_runtime_success"
-tags = ["integration", "language", "reactivity", "templates"]
-contract = "language.reactivity.subscription_renders_current_source_value"
-role = "boundary"
-
-[[case]]
-id = "reactive_template_assign_insert_success"
-path = "reactive_template_assign_insert_success"
-tags = ["integration", "language", "reactivity", "templates"]
-contract = "language.reactivity.subscription_survives_template_assignment"
-role = "primary"
-
-[[case]]
-id = "reactive_template_return_helper_insert_success"
-path = "reactive_template_return_helper_insert_success"
-tags = ["integration", "language", "reactivity", "templates", "functions"]
-contract = "language.reactivity.subscription_survives_template_return"
-role = "primary"
-
-[[case]]
-id = "reactive_template_string_parameter_passthrough_success"
-path = "reactive_template_string_parameter_passthrough_success"
-tags = ["integration", "language", "reactivity", "templates", "functions"]
-contract = "language.reactivity.subscription_survives_string_parameter_passthrough"
-role = "primary"
-
-[[case]]
-id = "reactive_template_parameter_source_identity_success"
-path = "reactive_template_parameter_source_identity_success"
-tags = ["integration", "language", "reactivity", "templates", "functions"]
-contract = "language.reactivity.reactive_parameter_forwarding_preserves_source_identity"
-role = "primary"
-
-[[case]]
-id = "reactive_mount_multiple_sources_success"
-path = "reactive_mount_multiple_sources_success"
-tags = ["integration", "language", "reactivity", "templates"]
-contract = "language.reactivity.mount_multiple_sources_re_renders_on_mutation"
-role = "primary"
-
-[[case]]
-id = "reactive_mount_batched_mutations_success"
-path = "reactive_mount_batched_mutations_success"
-tags = ["integration", "language", "reactivity", "templates"]
-contract = "language.reactivity.mount_batched_mutations_re_render_once"
-role = "primary"
-
-[[case]]
-id = "reactive_subscription_non_reactive_source_rejected"
-path = "reactive_subscription_non_reactive_source_rejected"
-tags = ["integration", "language", "reactivity", "templates", "diagnostics"]
-contract = "language.reactivity.subscription_non_reactive_source_rejected"
-role = "primary"
-
-[[case]]
-id = "reactive_subscription_spaced_marker_rejected"
-path = "reactive_subscription_spaced_marker_rejected"
-tags = ["integration", "language", "reactivity", "templates", "diagnostics"]
-contract = "language.reactivity.subscription_spaced_marker_rejected"
-role = "primary"
-
-[[case]]
-id = "reactive_subscription_empty_rejected"
-path = "reactive_subscription_empty_rejected"
-tags = ["integration", "language", "reactivity", "templates", "diagnostics"]
-contract = "language.reactivity.subscription_empty_marker_rejected"
-role = "primary"
-
-[[case]]
-id = "reactive_subscription_multiple_sources_rejected"
-path = "reactive_subscription_multiple_sources_rejected"
-tags = ["integration", "language", "reactivity", "templates", "diagnostics"]
-contract = "language.reactivity.subscription_multiple_sources_rejected"
-role = "primary"
-
-[[case]]
-id = "reactive_subscription_field_path_rejected"
-path = "reactive_subscription_field_path_rejected"
-tags = ["integration", "language", "reactivity", "templates", "diagnostics"]
-contract = "language.reactivity.subscription_field_path_rejected"
-role = "primary"
-
-[[case]]
-id = "reactive_subscription_call_rejected"
-path = "reactive_subscription_call_rejected"
-tags = ["integration", "language", "reactivity", "templates", "diagnostics"]
-contract = "language.reactivity.subscription_call_rejected"
-role = "primary"
-
-[[case]]
-id = "reactive_subscription_operator_rejected"
-path = "reactive_subscription_operator_rejected"
-tags = ["integration", "language", "reactivity", "templates", "diagnostics"]
-contract = "language.reactivity.subscription_operator_rejected"
-role = "primary"
-
-[[case]]
-id = "reactive_subscription_mutable_access_rejected"
-path = "reactive_subscription_mutable_access_rejected"
-tags = ["integration", "language", "reactivity", "templates", "diagnostics"]
-contract = "language.reactivity.subscription_mutable_access_rejected"
-role = "primary"
-
-[[case]]
-id = "reactive_subscription_nested_template_rejected"
-path = "reactive_subscription_nested_template_rejected"
-tags = ["integration", "language", "reactivity", "templates", "diagnostics"]
-contract = "language.reactivity.subscription_nested_template_rejected"
-role = "primary"
-
-[[case]]
-id = "reactive_subscription_literal_rejected"
-path = "reactive_subscription_literal_rejected"
-tags = ["integration", "language", "reactivity", "templates", "diagnostics"]
-contract = "language.reactivity.subscription_literal_rejected"
-role = "primary"
-
-[[case]]
-id = "reactive_subscription_expression_position_rejected"
-path = "reactive_subscription_expression_position_rejected"
-tags = ["integration", "language", "reactivity", "templates", "diagnostics"]
-contract = "language.reactivity.subscription_expression_position_rejected"
-role = "primary"
-
-[[case]]
-id = "reactive_subscription_const_context_rejected"
-path = "reactive_subscription_const_context_rejected"
-tags = ["integration", "language", "reactivity", "templates", "diagnostics"]
-contract = "language.reactivity.subscription_const_context_rejected"
-role = "primary"
-
-[[case]]
-id = "assert_template_message_snapshot"
-path = "assert_template_message_snapshot"
+id = "assert_template_message_runtime"
+path = "assert_template_message_runtime"
 tags = ["integration", "language", "assert", "backend"]
-contract = "language.assert.template_message_snapshot"
-role = "backend"
-
-[[case]]
-id = "reactive_external_call_sink_rejected"
-path = "reactive_external_call_sink_rejected"
-tags = ["integration", "language", "reactivity", "templates", "diagnostics"]
-contract = "backend.html.reactive_external_call_sink_rejected"
-role = "backend"
-
-[[case]]
-id = "reactive_wasm_reachable_template_rejected"
-path = "reactive_wasm_reachable_template_rejected"
-tags = ["integration", "language", "reactivity", "templates", "diagnostics"]
-contract = "backend.html_wasm.reactive_template_runtime_rejected"
-role = "backend"
-
-[[case]]
-id = "reactive_wasm_unreachable_helper_ignored"
-path = "reactive_wasm_unreachable_helper_ignored"
-tags = ["integration", "language", "reactivity", "templates"]
-contract = "backend.html_wasm.unreachable_reactive_helper_ignored"
+contract = "language.assert.runtime_template_failure_message"
 role = "backend"
 
 [[case]]
@@ -13154,20 +12895,6 @@ path = "static_if_inactive_branch_type_error_rejected"
 tags = ["integration", "control-flow", "constants", "diagnostics"]
 contract = "language.control_flow.compile_time_bool_inactive_branch_validated"
 role = "boundary"
-
-[[case]]
-id = "static_if_inactive_reactive_metadata_ignored"
-path = "static_if_inactive_reactive_metadata_ignored"
-tags = ["integration", "control-flow", "constants", "reactivity", "wasm"]
-contract = "language.control_flow.compile_time_bool_inactive_reactive_metadata_absent"
-role = "primary"
-
-[[case]]
-id = "runtime_if_reactive_metadata_preserved"
-path = "runtime_if_reactive_metadata_preserved"
-tags = ["integration", "control-flow", "reactivity", "wasm", "diagnostics"]
-contract = "language.control_flow.runtime_bool_reactive_metadata_preserved"
-role = "primary"
 
 [[case]]
 id = "trait_requirement_unimported_type_rejected"
@@ -15013,4 +14740,39 @@ id = "uint_choice_payload_equality_int64_success"
 path = "uint_choice_payload_equality_int64_success"
 tags = ["integration", "language", "numeric", "runtime", "equality", "int64"]
 contract = "language.numbers.uint_choice_payload_equality_int64"
+role = "primary"
+
+[[case]]
+id = "dollar_binding_type_rejected"
+path = "dollar_binding_type_rejected"
+tags = ["integration", "language", "syntax", "diagnostics"]
+contract = "language.syntax.dollar_binding_type_rejected"
+role = "primary"
+
+[[case]]
+id = "dollar_binding_inference_rejected"
+path = "dollar_binding_inference_rejected"
+tags = ["integration", "language", "syntax", "diagnostics"]
+contract = "language.syntax.dollar_binding_inference_rejected"
+role = "primary"
+
+[[case]]
+id = "dollar_parameter_type_rejected"
+path = "dollar_parameter_type_rejected"
+tags = ["integration", "language", "syntax", "diagnostics"]
+contract = "language.syntax.dollar_parameter_type_rejected"
+role = "primary"
+
+[[case]]
+id = "dollar_template_interpolation_rejected"
+path = "dollar_template_interpolation_rejected"
+tags = ["integration", "language", "syntax", "diagnostics"]
+contract = "language.syntax.dollar_template_interpolation_rejected"
+role = "primary"
+
+[[case]]
+id = "function_parameter_reassignment_rejected"
+path = "function_parameter_reassignment_rejected"
+tags = ["integration", "language", "functions", "diagnostics"]
+contract = "language.functions.shared_parameter_reassignment_rejected"
 role = "primary"

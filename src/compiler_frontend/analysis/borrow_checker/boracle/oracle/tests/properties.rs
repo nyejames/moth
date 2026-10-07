@@ -901,7 +901,6 @@ fn event_references_place(problem: &BorrowProblem, event: &Event, candidate: Pla
             .iter()
             .find(|place| place.id == candidate)
             .is_some_and(|place| bindings.contains(&place.root)),
-        EventKind::ReactiveObserve { place } => *place == candidate,
         EventKind::CallArgument { argument, .. } => argument.place == candidate,
         EventKind::CallEffect(effect) => {
             effect

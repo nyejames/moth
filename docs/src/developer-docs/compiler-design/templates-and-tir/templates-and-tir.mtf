@@ -21,7 +21,6 @@ If the compiler treated the body as blind concatenation, it could still emit cha
 - type-check slot contents
 - fold pure pieces while keeping dynamic pieces honest
 - preserve source locations for diagnostics
-- attach constrained reactivity metadata
 - hand a neutral runtime plan to HIR without smuggling parser state
 
 Structure earns its keep.
@@ -122,25 +121,9 @@ Tooling that wants folded `.mtf` content asks the compiler's **direct Moth templ
 
 What comes back is folded content, not a finished artefact. It can still hold opaque resource and site-root anchors, because only a builder's link plan can resolve those. Output writing stays outside the service.
 
-## Reactivity boundary
-
-Reactivity in Moth is a constrained template and UI **source-and-sink** model. It is not a general closure system and not a second semantic IR.
-
-Durable ownership:
-
-- declaration parsing recognises reactive markers as syntax
-- AST resolves ordinary types, stable source identity and subscriptions
-- HIR carries backend-neutral source, sink and reachability metadata
-- borrow validation treats subscriptions as read-only dependencies rather than active borrow lifetimes
-- target validation rejects unsupported runtime forms before lowering
-- update strategy stays backend-owned artefact policy
-
-If you need arbitrary higher-order function values, this is the wrong language feature to stretch.
-
 ## What can fail here
 
 - invalid template structure, slot type or formatting operation
-- bad reactive subscription
 - internal missing TIR authority (a `CompilerError`, not a casual user typo)
 
 TIR ownership must stay distinct from AST finalisation and HIR validation. Post-TIR parser optimisation plans may discuss performance. They do not redefine the semantic handoff.
@@ -158,7 +141,7 @@ TIR ownership must stay distinct from AST finalisation and HIR validation. Post-
 ## Roadmap and current status
 
 - **Accepted design:** TIR remains AST-local and hands off folded strings or neutral runtime data.
-- **Current implementation:** template and reactivity progress rows.
+- **Current implementation:** template support is tracked in the progress matrix; Wire and Route implementation remains deferred until Phase 6.
 - **Queued work:** `post-tir-template-parser-optimization-plan.md` for performance discussion, labelled queued or deferred as appropriate.
 - **Deferred or outside scope:** a general macro system or public TIR.
 

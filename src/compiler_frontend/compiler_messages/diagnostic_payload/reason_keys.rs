@@ -498,8 +498,7 @@ macro_rules! define_reasoned_diagnostic_registry {
                         | InvalidCallShapeReason::DuplicateArgument { parameter_name, .. }
                         | InvalidCallShapeReason::MutableAccessRequired { parameter_name, .. }
                         | InvalidCallShapeReason::MutableAccessNotAllowed { parameter_name, .. }
-                        | InvalidCallShapeReason::MutableAccessOnNonPlace { parameter_name, .. }
-                        | InvalidCallShapeReason::ReactiveSourceRequired { parameter_name, .. } => {
+                        | InvalidCallShapeReason::MutableAccessOnNonPlace { parameter_name, .. } => {
                             if let Some(parameter_name) = parameter_name {
                                 *parameter_name = remap.get(*parameter_name);
                             }
@@ -846,7 +845,6 @@ define_stable_reason_keys! {
     UnsupportedBackendFeatureReason => {
     &UnsupportedBackendFeatureReason::HashmapConstruction => "unsupported_backend_feature.hashmap_construction",
     &UnsupportedBackendFeatureReason::HashmapOperation => "unsupported_backend_feature.hashmap_operation",
-    &UnsupportedBackendFeatureReason::ReactiveTemplateRuntime => "unsupported_backend_feature.reactive_template_runtime",
     &UnsupportedBackendFeatureReason::RuntimeCasts => "unsupported_backend_feature.runtime_casts",
     &UnsupportedBackendFeatureReason::CheckedNumericOperations => "unsupported_backend_feature.checked_numeric_operations",
     &UnsupportedBackendFeatureReason::RecoverableNumericFailure => "unsupported_backend_feature.recoverable_numeric_failure",
@@ -854,7 +852,6 @@ define_stable_reason_keys! {
     &UnsupportedBackendFeatureReason::FloatBoundaryValidation => "unsupported_backend_feature.float_boundary_validation",
     &UnsupportedBackendFeatureReason::GenericRuntimeValues => "unsupported_backend_feature.generic_runtime_values",
     &UnsupportedBackendFeatureReason::FixedWidthScalarValues => "unsupported_backend_feature.fixed_width_scalar_values",
-    &UnsupportedBackendFeatureReason::ReactiveExternalCallSink => "unsupported_backend_feature.reactive_external_call_sink",
     &UnsupportedBackendFeatureReason::CrossModuleCalls => "unsupported_backend_feature.cross_module_calls",
     &UnsupportedBackendFeatureReason::RuntimeAssertionMessages => "unsupported_backend_feature.runtime_assertion_messages",
     &UnsupportedBackendFeatureReason::ErrorValues => "unsupported_backend_feature.error_values",
@@ -953,7 +950,6 @@ define_stable_reason_keys! {
     &InvalidTypeAnnotationReason::TraitThisMustBeDirect => "invalid_type_annotation.trait_this_must_be_direct",
     &InvalidTypeAnnotationReason::AsNotValidHere => "invalid_type_annotation.as_not_valid_here",
     &InvalidTypeAnnotationReason::UnexpectedColon => "invalid_type_annotation.unexpected_colon",
-    &InvalidTypeAnnotationReason::ReactiveAccessNotAllowed => "invalid_type_annotation.reactive_access_not_allowed",
     &InvalidTypeAnnotationReason::InvalidTokenAfterName { .. } => "invalid_type_annotation.invalid_token_after_name",
     &InvalidTypeAnnotationReason::ExpectedTypeAnnotation { .. } => "invalid_type_annotation.expected_type_annotation",
     &InvalidTypeAnnotationReason::DuplicateOptional => "invalid_type_annotation.duplicate_optional",
@@ -1047,12 +1043,6 @@ define_stable_reason_keys! {
     &InvalidTemplateStructureReason::UnsupportedTypeInTemplateHead { .. } => "invalid_template_structure.unsupported_type_in_template_head",
     &InvalidTemplateStructureReason::RuntimeTemplateInConst => "invalid_template_structure.runtime_template_in_const",
     &InvalidTemplateStructureReason::RuntimeValueInConstTemplateHead => "invalid_template_structure.runtime_value_in_const_template_head",
-    &InvalidTemplateStructureReason::ReactiveSubscriptionEmpty => "invalid_template_structure.reactive_subscription_empty",
-    &InvalidTemplateStructureReason::ReactiveSubscriptionMultipleSources => "invalid_template_structure.reactive_subscription_multiple_sources",
-    &InvalidTemplateStructureReason::ReactiveSubscriptionComplexExpression => "invalid_template_structure.reactive_subscription_complex_expression",
-    &InvalidTemplateStructureReason::ReactiveSubscriptionNonReactiveSource => "invalid_template_structure.reactive_subscription_non_reactive_source",
-    &InvalidTemplateStructureReason::ReactiveSubscriptionInConstTemplate => "invalid_template_structure.reactive_subscription_in_const_template",
-    &InvalidTemplateStructureReason::ReactiveSubscriptionOutsideTemplate => "invalid_template_structure.reactive_subscription_outside_template",
     &InvalidTemplateStructureReason::EmptyPathInTemplateHead => "invalid_template_structure.empty_path_in_template_head",
     &InvalidTemplateStructureReason::IncompatibleHeadItem => "invalid_template_structure.incompatible_head_item",
     &InvalidTemplateStructureReason::HelperOutsideWrapperSlot => "invalid_template_structure.helper_outside_wrapper_slot",
@@ -1105,8 +1095,6 @@ define_stable_reason_keys! {
     &InvalidSignatureMemberReason::TraitMutableThisOnlyFirstParameter => "invalid_signature_member.trait_mutable_this_only_first_parameter",
     &InvalidSignatureMemberReason::TraitBareThisOnlyReceiver => "invalid_signature_member.trait_bare_this_only_receiver",
     &InvalidSignatureMemberReason::TraitRequirementDefaultValue => "invalid_signature_member.trait_requirement_default_value",
-    &InvalidSignatureMemberReason::ReactiveAccessNotAllowed => "invalid_signature_member.reactive_access_not_allowed",
-    &InvalidSignatureMemberReason::ReactiveParameterDefaultValue => "invalid_signature_member.reactive_parameter_default_value",
     &InvalidSignatureMemberReason::MissingDefaultValue => "invalid_signature_member.missing_default_value",
     },
 
@@ -1468,7 +1456,6 @@ define_stable_reason_keys! {
     &InvalidCallShapeReason::MutableAccessOnNonPlace { .. } => "invalid_call_shape.mutable_access_on_non_place",
     &InvalidCallShapeReason::MutableAccessOnImmutablePlace { .. } => "invalid_call_shape.mutable_access_on_immutable_place",
     &InvalidCallShapeReason::ImmutablePlaceMutableAccessRequired { .. } => "invalid_call_shape.immutable_place_mutable_access_required",
-    &InvalidCallShapeReason::ReactiveSourceRequired { .. } => "invalid_call_shape.reactive_source_required",
     },
 
     InvalidReturnShapeReason => {
@@ -1588,7 +1575,6 @@ define_stable_reason_keys! {
     &CommonSyntaxMistakeReason::InvalidCompileTimeBindingSpacing => "common_syntax_mistake.invalid_compile_time_binding_spacing",
     &CommonSyntaxMistakeReason::InvalidConfigQualifierSpacing => "common_syntax_mistake.invalid_config_qualifier_spacing",
     &CommonSyntaxMistakeReason::InvalidMutableBindingSpacing => "common_syntax_mistake.invalid_mutable_binding_spacing",
-    &CommonSyntaxMistakeReason::InvalidReactiveBindingSpacing => "common_syntax_mistake.invalid_reactive_binding_spacing",
     &CommonSyntaxMistakeReason::InvalidSymbolicSpacing { .. } => "common_syntax_mistake.invalid_symbolic_spacing",
     &CommonSyntaxMistakeReason::InvalidChoiceVariantSpacing { .. } => "common_syntax_mistake.invalid_choice_variant_spacing",
     &CommonSyntaxMistakeReason::InvalidUnaryNegationSpacing => "common_syntax_mistake.invalid_unary_negation_spacing",

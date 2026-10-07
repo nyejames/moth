@@ -7,7 +7,6 @@
 //!      durable `Template` value and the shared vocabulary used by parsing,
 //!      folding, slot routing, and runtime-handoff preparation.
 
-use crate::compiler_frontend::ast::expressions::expression::ReactiveSource;
 use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterInput, FormatterOutput,
 };
@@ -17,7 +16,6 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
@@ -158,21 +156,6 @@ pub enum TemplateSegmentOrigin {
     /// Body segments are literal body content, so they are eligible for style
     /// formatters such as markdown when they are compile-time-known strings.
     Body,
-}
-
-/// Metadata for a V1 `$(source)` template subscription.
-///
-/// WHAT: records the resolved reactive source identity and ordinary underlying
-/// value type without changing the segment expression's semantic `TypeId`.
-/// WHY: subscriptions are template metadata, not a wrapper type or borrow. Later
-/// HIR/backend stages can preserve this dependency while ordinary `[source]`
-/// head captures remain snapshots.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReactiveSubscription {
-    pub source: ReactiveSource,
-    pub type_id: TypeId,
-    /// Exact authored source range of the subscription expression, when known.
-    pub span: Option<SourceSpan>,
 }
 
 // -------------------------

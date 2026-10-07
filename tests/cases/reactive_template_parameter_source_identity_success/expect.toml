@@ -1,4 +1,0 @@
-[backends.html]
-mode = "success"
-warnings = "forbid"
-rendered_output_contains = ["reactive_template_parameter_source_identity_success outer=inner=11"]

@@ -34,7 +34,7 @@ page_head #= theme_head
     15. @./aliases (Aliases)
     16. @./generics (Generics)
     17. @./traits (Traits)
-    18. @./reactivity (Reactivity)
+    18. @./wiring (Wiring)
     19. @./memory (Memory and lifetimes)
 
     ## Projects and content

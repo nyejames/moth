@@ -129,11 +129,12 @@ fn transaction_summary_lookup_stays_inside_its_own_boundary() {
     let mut second_summary = summary();
     second_summary.parameters.push(
         crate::compiler_frontend::public_call_summary::PublicCallParameterSummary {
-            access: crate::compiler_frontend::public_call_summary::PublicCallParameterAccess::Shared,
-            mutation: crate::compiler_frontend::public_call_summary::PublicCallMutationEffect::NoWrite,
-            transfer_eligibility: crate::compiler_frontend::public_call_summary::PublicCallTransferEligibility::Ineligible,
-            transfer_effect: crate::compiler_frontend::public_call_summary::PublicCallTransferEffect::NeverConsumes,
-            reactive_effect: crate::compiler_frontend::public_call_summary::PublicCallReactiveEffect::None,
+            access:
+                crate::compiler_frontend::public_call_summary::PublicCallParameterAccess::Shared,
+            mutation:
+                crate::compiler_frontend::public_call_summary::PublicCallMutationEffect::NoWrite,
+            transfer_effect:
+                crate::compiler_frontend::public_call_summary::PublicCallTransferEffect::MayConsume,
         },
     );
     let first_boundary = PublishedBoundary::with(identity.clone(), first_summary.clone());

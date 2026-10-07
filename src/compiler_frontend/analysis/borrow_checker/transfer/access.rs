@@ -13,13 +13,13 @@ use crate::compiler_frontend::analysis::borrow_checker::state::{
     BorrowState, FunctionLayout, LocalState, RootSet,
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::{
-    LocalMode, OptionalTransferStatus, ReactiveInvalidationFact, ReactiveInvalidationKind,
-    ReactivePlaceWriteKind, StatementBorrowFact, TerminatorBorrowFact, ValueAccessClassification,
+    LocalMode, OptionalTransferStatus, StatementBorrowFact, TerminatorBorrowFact,
+    ValueAccessClassification,
 };
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
-use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId};
+use crate::compiler_frontend::hir::ids::BlockId;
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};

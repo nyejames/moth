@@ -40,7 +40,6 @@ pub(super) fn parse_builtin_method_args_typed(
             name: None,
             expected_type: ExpectedParameterType::Known(*expected_type_id),
             access_mode: ExpectedAccessMode::Shared,
-            requires_reactive_source: false,
             default_value: None,
         })
         .collect::<Vec<_>>();

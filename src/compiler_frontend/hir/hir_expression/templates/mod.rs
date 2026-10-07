@@ -52,10 +52,6 @@ impl<'a> HirBuilder<'a> {
             OwnedRuntimeTemplateBody::Render(node) => {
                 if is_owned_runtime_template_node_control_flow(node) {
                     self.lower_runtime_control_flow_template_expression(node, span_ref)
-                } else if self.owned_runtime_template_node_has_runtime_dependency(node) {
-                    self.lower_runtime_reactive_linear_template_expression_from_owned_node(
-                        node, span_ref,
-                    )
                 } else {
                     self.lower_runtime_linear_template_expression(node, span_ref)
                 }

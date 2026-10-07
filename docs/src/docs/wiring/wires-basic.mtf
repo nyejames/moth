@@ -1,0 +1,48 @@
+A Wire parameter asks the caller to preserve the identity of one named local
+binding. No special marker is written on the declaration or argument.
+
+[codeblock, $code("moth"):
+    read_name |value Wire of String| -> String:
+        return value
+    ;
+
+    forward_name |value Wire of String| -> String:
+        return read_name(value)
+    ;
+
+    replace_name |value ~String, replacement String|:
+        value = replacement
+    ;
+
+    current_name ~= "Priya"
+    label = read_name(current_name)
+    current_name = "Rob"
+    replace_name(~current_name, "Emmy")
+]
+
+The receiving parameter determines the use. Passing `current_name` to an
+ordinary `String` parameter reads its current value. Passing it to another
+compatible Wire parameter forwards the same binding identity. A Wire grants no
+mutation permission: `replace_name` has an ordinary exclusive parameter, so
+the call supplies `~current_name`. By contrast, `current_name ~= "Priya"`
+declares a mutable binding and later `current_name = "Rob"` reassigns it. The
+binding declaration and exclusive call argument have different jobs.
+
+The identity belongs to this binding instance, not its current text. Reassigning
+the mutable local keeps the same identity; a later function call or loop
+iteration has its own local instance. A temporary expression, literal, field or
+computed value cannot supply Wire identity directly.
+
+`#=` does not declare a Wire or another runtime binding. A fully folded record
+stored in a named constant is compile-time data, not a runtime type declaration:
+
+[codeblock, $code("moth"):
+    labels #= (
+        first = "Priya",
+        second = "Rob",
+    )
+]
+
+Read the ordinary value contract in @../constants/#const-records (Const records)
+and the full binding-identity rules in the detailed Wiring reference. The Wire
+examples describe accepted future design and are unsupported until Phase 6.

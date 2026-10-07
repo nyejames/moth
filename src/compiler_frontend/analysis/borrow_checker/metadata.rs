@@ -17,14 +17,12 @@ use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId}
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::patterns::HirPattern;
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::reactivity::HirReactiveSourceKind;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::utils::terminator_targets;
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
-    PublicCallParameterSummary, PublicCallReactiveEffect, PublicCallSummary,
-    PublicCallTransferEffect, PublicCallTransferEligibility,
+    PublicCallParameterSummary, PublicCallSummary, PublicCallTransferEffect,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -86,8 +84,8 @@ impl<'a> BorrowChecker<'a> {
             }
         }
 
-        let mut parameter_owner_by_local = FxHashMap::default();
         let mut function_ids = FxHashSet::default();
+        let mut parameter_owner_locals = FxHashSet::default();
 
         for function in &self.module.functions {
             if !function_ids.insert(function.id) {
@@ -115,6 +113,15 @@ impl<'a> BorrowChecker<'a> {
                         self.diagnostics.function_error_span(function.id),
                     ));
                 }
+                if !parameter_owner_locals.insert(*param) {
+                    return Err(self.diagnostics.internal_error(
+                        format!(
+                            "Borrow checker found parameter local '{}' owned by more than one function",
+                            self.diagnostics.local_name(*param)
+                        ),
+                        self.diagnostics.function_error_span(function.id),
+                    ));
+                }
 
                 let Some(is_mutable) = local_mutability_by_id.get(param).copied() else {
                     return Err(self.diagnostics.internal_error(
@@ -127,76 +134,16 @@ impl<'a> BorrowChecker<'a> {
                     ));
                 };
 
-                if parameter_owner_by_local
-                    .insert(*param, (function.id, position))
-                    .is_some()
-                {
-                    return Err(self.diagnostics.internal_error(
-                        format!(
-                            "Borrow checker found parameter local '{}' owned by more than one function",
-                            self.diagnostics.local_name(*param)
-                        ),
-                        self.diagnostics.function_error_span(function.id),
-                    ));
-                }
-
-                let access = match self.module.side_table.reactive_source_id_for_local(*param) {
-                    Some(source_id) => {
-                        let Some(source) = self.module.side_table.reactive_source(source_id) else {
-                            return Err(self.diagnostics.internal_error(
-                                format!(
-                                    "Borrow checker could not resolve reactive source metadata for parameter local '{}'",
-                                    self.diagnostics.local_name(*param)
-                                ),
-                                self.diagnostics.function_error_span(function.id),
-                            ));
-                        };
-
-                        match source.kind {
-                            HirReactiveSourceKind::Parameter if is_mutable => {
-                                return Err(self.diagnostics.internal_error(
-                                    format!(
-                                        "Reactive parameter '{}' in function '{}' is marked mutable",
-                                        self.diagnostics.local_name(*param),
-                                        self.diagnostics.function_name(function.id)
-                                    ),
-                                    source.span,
-                                ));
-                            }
-                            HirReactiveSourceKind::Parameter => PublicCallParameterAccess::Reactive,
-                            HirReactiveSourceKind::Declaration => {
-                                return Err(self.diagnostics.internal_error(
-                                    format!(
-                                        "Reactive declaration metadata is attached to parameter local '{}' in function '{}'",
-                                        self.diagnostics.local_name(*param),
-                                        self.diagnostics.function_name(function.id)
-                                    ),
-                                    source.span,
-                                ));
-                            }
-                        }
-                    }
-                    None if is_mutable => PublicCallParameterAccess::Mutable,
-                    None => PublicCallParameterAccess::Shared,
-                };
-
-                let (transfer_eligibility, transfer_effect) = match access {
-                    PublicCallParameterAccess::Reactive => (
-                        PublicCallTransferEligibility::Ineligible,
-                        PublicCallTransferEffect::NeverConsumes,
-                    ),
-                    PublicCallParameterAccess::Shared | PublicCallParameterAccess::Mutable => (
-                        PublicCallTransferEligibility::Eligible,
-                        PublicCallTransferEffect::MayConsume,
-                    ),
+                let access = if is_mutable {
+                    PublicCallParameterAccess::Mutable
+                } else {
+                    PublicCallParameterAccess::Shared
                 };
 
                 parameters.push(PublicCallParameterSummary {
                     access,
                     mutation: PublicCallMutationEffect::NoWrite,
-                    transfer_eligibility,
-                    transfer_effect,
-                    reactive_effect: PublicCallReactiveEffect::None,
+                    transfer_effect: PublicCallTransferEffect::MayConsume,
                 });
             }
 
@@ -209,26 +156,6 @@ impl<'a> BorrowChecker<'a> {
                 },
             );
         }
-
-        for source in self.module.side_table.reactive_sources() {
-            if source.kind != HirReactiveSourceKind::Parameter {
-                continue;
-            }
-
-            if parameter_owner_by_local.contains_key(&source.local_id) {
-                continue;
-            }
-
-            return Err(self.diagnostics.internal_error(
-                format!(
-                    "Reactive parameter source metadata points at local '{}' that is not a function parameter",
-                    self.diagnostics.local_name(source.local_id)
-                ),
-                source.span,
-            ));
-        }
-
-        self.retain_hir_reactive_parameter_effects(&parameter_owner_by_local)?;
 
         self.stabilize_return_alias_summaries()?;
 
@@ -351,76 +278,6 @@ impl<'a> BorrowChecker<'a> {
         Ok(recursive)
     }
 
-    fn retain_hir_reactive_parameter_effects(
-        &mut self,
-        parameter_owner_by_local: &FxHashMap<LocalId, (FunctionId, usize)>,
-    ) -> Result<(), BorrowCheckError> {
-        for template in self.module.side_table.reactive_templates() {
-            for dependency in &template.dependencies {
-                let Some(source) = self.module.side_table.reactive_source(dependency.source) else {
-                    return Err(self.diagnostics.internal_error(
-                        format!(
-                            "Reactive template metadata references unknown source {:?}",
-                            dependency.source
-                        ),
-                        dependency.span,
-                    ));
-                };
-
-                if source.kind != HirReactiveSourceKind::Parameter {
-                    continue;
-                }
-
-                self.mark_reactive_subscription(parameter_owner_by_local, source.local_id)?;
-            }
-
-            for dependency in &template.template_value_parameters {
-                self.mark_reactive_subscription(parameter_owner_by_local, dependency.parameter)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn mark_reactive_subscription(
-        &mut self,
-        parameter_owner_by_local: &FxHashMap<LocalId, (FunctionId, usize)>,
-        parameter_local: LocalId,
-    ) -> Result<(), BorrowCheckError> {
-        let Some((function_id, position)) = parameter_owner_by_local.get(&parameter_local) else {
-            return Err(self.diagnostics.internal_error(
-                format!(
-                    "Reactive template metadata references local '{}' that is not a function parameter",
-                    self.diagnostics.local_name(parameter_local)
-                ),
-                self.diagnostics.module_error_span(),
-            ));
-        };
-
-        let Some(summary) = self.public_call_summaries.get_mut(function_id) else {
-            return Err(self.diagnostics.internal_error(
-                format!(
-                    "Borrow checker is missing the public call summary for function '{}'",
-                    self.diagnostics.function_name(*function_id)
-                ),
-                self.diagnostics.function_error_span(*function_id),
-            ));
-        };
-
-        let Some(parameter) = summary.parameters.get_mut(*position) else {
-            return Err(self.diagnostics.internal_error(
-                format!(
-                    "Reactive template metadata references out-of-range parameter position {} in function '{}'",
-                    position,
-                    self.diagnostics.function_name(*function_id)
-                ),
-                self.diagnostics.function_error_span(*function_id),
-            ));
-        };
-        parameter.reactive_effect = parameter.reactive_effect.with_subscription();
-        Ok(())
-    }
-
     pub(super) fn finalize_public_call_summary_effects(
         &mut self,
         function: &HirFunction,
@@ -433,8 +290,6 @@ impl<'a> BorrowChecker<'a> {
         }
 
         let mut mutation_positions = FxHashSet::default();
-        let mut invalidated_positions = FxHashSet::default();
-
         for block_id in reachable_blocks {
             let block = self.block_by_id_or_error(*block_id, function.id)?;
             for statement in &block.statements {
@@ -503,28 +358,6 @@ impl<'a> BorrowChecker<'a> {
                     _ => {}
                 }
             }
-
-            for statement in &block.statements {
-                let Some(invalidations) = report.analysis.reactive_invalidations.get(&statement.id)
-                else {
-                    continue;
-                };
-                for invalidation in invalidations {
-                    let Some(source) = self.module.side_table.reactive_source(invalidation.source)
-                    else {
-                        return Err(self.diagnostics.internal_error(
-                            format!(
-                                "Borrow checker reactive invalidation references unknown source {:?}",
-                                invalidation.source
-                            ),
-                            invalidation.span,
-                        ));
-                    };
-                    if let Some(position) = parameter_positions.get(&source.local_id) {
-                        invalidated_positions.insert(*position);
-                    }
-                }
-            }
         }
 
         let Some(summary) = self.public_call_summaries.get_mut(&function.id) else {
@@ -544,9 +377,6 @@ impl<'a> BorrowChecker<'a> {
             {
                 parameter.mutation = PublicCallMutationEffect::Writes;
                 changed = true;
-            }
-            if invalidated_positions.contains(&position) {
-                parameter.reactive_effect = parameter.reactive_effect.with_invalidation();
             }
         }
 

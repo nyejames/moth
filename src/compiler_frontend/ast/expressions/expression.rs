@@ -24,9 +24,7 @@ use crate::compiler_frontend::ast::expressions::failure_facts::{
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
-use crate::compiler_frontend::ast::templates::template::{
-    ReactiveSubscription, TemplateConstValueKind,
-};
+use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateHandoff,
 };
@@ -89,20 +87,6 @@ pub struct Expression {
     pub value_mode: ValueMode,
     /// Exact authored source span, when the owning file has an identity.
     pub span: Option<SourceSpan>,
-    /// Reactive source identity carried independently of the expression type.
-    ///
-    /// WHAT: marks declarations and parameter references that are stable reactive sources.
-    /// WHY: `$T` is access syntax, not a wrapper type, so the underlying `TypeId` remains the
-    /// ordinary value type while call/template validation can still require a source identity.
-    pub reactive_source: Option<ReactiveSource>,
-    /// Reactive template-string metadata carried independently of the expression type.
-    ///
-    /// WHAT: marks `String` values that are backed by a runtime template or by a direct
-    /// template-value parameter passthrough.
-    /// WHY: reactive templates still have ordinary semantic type `String`; backend-facing
-    /// dependency information must therefore travel as value metadata rather than as a wrapper
-    /// type or an inferred expression dependency graph.
-    pub reactive_template: Option<ReactiveTemplateMetadata>,
     /// Explicit value-level const-record classification.
     ///
     /// WHAT: `ConstRecord` means this expression is a compile-time member group
@@ -130,165 +114,6 @@ pub struct Expression {
     /// survives AST value transformations and HIR lowering without leaking process-local IDs,
     /// source locations or interned names.
     pub synthetic_interface_provenance: SyntheticInterfaceProvenance,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ReactiveSourceKind {
-    Declaration,
-    Parameter,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReactiveSource {
-    pub path: PathId,
-    pub kind: ReactiveSourceKind,
-}
-
-/// A `String` parameter whose runtime value may itself be a template string.
-///
-/// WHAT: records the parameter identity used by a template body, for example `[content]` where
-/// `content String` can receive a reactive template value from a caller.
-/// WHY: V1 preserves only direct argument/return/template value flow. This placeholder lets call
-/// metadata substitute the concrete argument metadata without adding closures or whole-program
-/// dependency solving.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReactiveTemplateParameterDependency {
-    pub parameter: PathId,
-    pub span: Option<SourceSpan>,
-}
-
-impl ReactiveTemplateParameterDependency {
-    pub fn new(parameter: PathId, span: Option<SourceSpan>) -> Self {
-        Self { parameter, span }
-    }
-}
-
-/// Value-level metadata for template-backed strings.
-///
-/// Plain strings carry `None`. Template expressions and values that directly pass template
-/// strings through ordinary `String` parameters carry `Some`, with concrete subscriptions when
-/// known and parameter placeholders when the dependency is supplied by a caller.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ReactiveTemplateMetadata {
-    pub subscriptions: Vec<ReactiveSubscription>,
-    pub template_value_parameters: Vec<ReactiveTemplateParameterDependency>,
-    pub template_backed: bool,
-}
-
-impl ReactiveTemplateMetadata {
-    pub fn template_backed() -> Self {
-        Self {
-            subscriptions: Vec::new(),
-            template_value_parameters: Vec::new(),
-            template_backed: true,
-        }
-    }
-
-    pub fn from_template_value_parameter(parameter: PathId, span: Option<SourceSpan>) -> Self {
-        let mut metadata = Self::template_backed();
-        metadata.push_template_value_parameter(ReactiveTemplateParameterDependency::new(
-            parameter, span,
-        ));
-        metadata
-    }
-
-    pub fn push_subscription(&mut self, subscription: ReactiveSubscription) {
-        self.template_backed = true;
-        if !self.subscriptions.contains(&subscription) {
-            self.subscriptions.push(subscription);
-        }
-    }
-
-    pub fn push_template_value_parameter(
-        &mut self,
-        dependency: ReactiveTemplateParameterDependency,
-    ) {
-        self.template_backed = true;
-        if !self.template_value_parameters.contains(&dependency) {
-            self.template_value_parameters.push(dependency);
-        }
-    }
-
-    pub fn merge_from(&mut self, other: &ReactiveTemplateMetadata) {
-        self.template_backed |= other.template_backed;
-
-        for subscription in &other.subscriptions {
-            self.push_subscription(subscription.clone());
-        }
-
-        for dependency in &other.template_value_parameters {
-            self.push_template_value_parameter(dependency.clone());
-        }
-    }
-
-    /// Returns whether this template value needs live runtime dependency handling.
-    ///
-    /// Template-backed strings with no subscriptions are still templates, but only concrete
-    /// `$(source)` subscriptions or template-value parameter placeholders need reactive mounting
-    /// and lazy snapshot lowering.
-    pub fn has_runtime_dependency(&self) -> bool {
-        !self.subscriptions.is_empty() || !self.template_value_parameters.is_empty()
-    }
-
-    /// Substitute direct call arguments for parameter placeholders.
-    ///
-    /// WHAT:
-    /// - `$T` subscriptions captured inside a callee are rebound to the caller's reactive source.
-    /// - Ordinary `String` parameter placeholders merge the argument's template metadata.
-    ///
-    /// WHY: this is the V1 direct value-flow boundary. It deliberately does not inspect arbitrary
-    /// string operations or infer dependencies from expression structure.
-    pub fn instantiate_for_call(
-        &self,
-        parameters: &[Declaration],
-        arguments: &[CallArgument],
-    ) -> Option<Self> {
-        let mut instantiated = Self {
-            subscriptions: Vec::new(),
-            template_value_parameters: Vec::new(),
-            template_backed: self.template_backed,
-        };
-
-        for subscription in &self.subscriptions {
-            let mut resolved_subscription = subscription.clone();
-            if resolved_subscription.source.kind == ReactiveSourceKind::Parameter
-                && let Some(parameter_index) =
-                    parameter_index_by_path(parameters, &resolved_subscription.source.path)
-                && let Some(argument_source) = arguments
-                    .get(parameter_index)
-                    .and_then(|argument| argument.value.reactive_source.clone())
-            {
-                resolved_subscription.source = argument_source;
-            }
-            instantiated.push_subscription(resolved_subscription);
-        }
-
-        for dependency in &self.template_value_parameters {
-            let Some(parameter_index) = parameter_index_by_path(parameters, &dependency.parameter)
-            else {
-                instantiated.push_template_value_parameter(dependency.clone());
-                continue;
-            };
-
-            if let Some(argument_metadata) = arguments
-                .get(parameter_index)
-                .and_then(|argument| argument.value.reactive_template.as_ref())
-            {
-                instantiated.merge_from(argument_metadata);
-            }
-        }
-
-        (instantiated.template_backed
-            || !instantiated.subscriptions.is_empty()
-            || !instantiated.template_value_parameters.is_empty())
-        .then_some(instantiated)
-    }
-}
-
-fn parameter_index_by_path(parameters: &[Declaration], path: &PathId) -> Option<usize> {
-    parameters
-        .iter()
-        .position(|parameter| parameter.id == *path)
 }
 
 /// Canonical and diagnostic type data for a collection expression.
@@ -412,8 +237,6 @@ impl Expression {
             kind,
             span,
             value_mode,
-            reactive_source: None,
-            reactive_template: None,
             const_record_state: ConstRecordState::RuntimeValue,
             contains_regular_division: false,
             synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
@@ -472,8 +295,8 @@ impl Expression {
 
     /// Adopt the authored metadata of the expression a substitution replaces.
     ///
-    /// WHAT: copies the authored span, diagnostic type, receiver, value mode, reactive facts,
-    ///       const-record state and division provenance, and unions the synthetic-interface
+    /// WHAT: copies the authored span, diagnostic type, receiver, value mode, const-record state
+    ///       and division provenance, and unions the synthetic-interface
     ///       provenance of the authored operand into the replacement.
     /// WHY: substituted compile-time operands must stay indistinguishable from their authored
     ///      node for diagnostics and identity; one owner prevents repeated clones between a
@@ -483,8 +306,6 @@ impl Expression {
         self.diagnostic_type = authored.diagnostic_type.clone();
         self.function_receiver = authored.function_receiver.clone();
         self.value_mode = authored.value_mode.clone();
-        self.reactive_source = authored.reactive_source.clone();
-        self.reactive_template = authored.reactive_template.clone();
         self.const_record_state = authored.const_record_state;
         self.contains_regular_division |= authored.contains_regular_division;
         self.synthetic_interface_provenance = self
@@ -508,28 +329,6 @@ impl Expression {
         provenance: SyntheticInterfaceProvenance,
     ) -> Self {
         self.synthetic_interface_provenance = provenance;
-        self
-    }
-
-    /// Mark this expression as a reference to stable reactive storage.
-    pub fn with_reactive_source(mut self, source: ReactiveSource) -> Self {
-        self.reactive_source = Some(source);
-        self
-    }
-
-    /// Remove reactive identity at a snapshot boundary.
-    pub fn clear_reactive_source(&mut self) {
-        self.reactive_source = None;
-    }
-
-    /// Returns whether the expression can satisfy a `$T` parameter or subscription source.
-    pub fn is_reactive_source(&self) -> bool {
-        self.reactive_source.is_some()
-    }
-
-    /// Mark this `String` expression as a template-backed value.
-    pub fn with_reactive_template_metadata(mut self, metadata: ReactiveTemplateMetadata) -> Self {
-        self.reactive_template = Some(metadata);
         self
     }
 
@@ -982,8 +781,6 @@ impl Expression {
     pub fn coerced(value: Expression, to_type: TypeId) -> Self {
         let span = value.span;
         let value_mode = value.value_mode.to_owned();
-        let reactive_source = value.reactive_source.clone();
-        let reactive_template = value.reactive_template.clone();
         let contains_regular_division = value.contains_regular_division;
         let const_record_state = value.const_record_state;
         let synthetic_interface_provenance = value.synthetic_interface_provenance.clone();
@@ -1001,8 +798,6 @@ impl Expression {
         )
         .with_regular_division_provenance(contains_regular_division);
         expression.const_record_state = const_record_state;
-        expression.reactive_source = reactive_source;
-        expression.reactive_template = reactive_template;
         expression.synthetic_interface_provenance = synthetic_interface_provenance;
         expression
     }
@@ -1296,11 +1091,7 @@ impl Expression {
         expression
     }
 
-    /// Constructs a template expression without provisional reactive metadata.
-    ///
-    /// WHAT: records the template value while leaving `reactive_template` unset.
-    /// WHY: AST finalization owns the module store and recomputes authoritative
-    ///      metadata through TIR before normalization and HIR lowering.
+    /// Constructs a template expression owned by the module's TIR store.
     pub fn template(template: Template, value_mode: ValueMode) -> Self {
         let span = template.span;
         Self::new(
@@ -1322,15 +1113,13 @@ impl Expression {
         value_mode: ValueMode,
     ) -> Self {
         let span = handoff.span;
-        let mut expression = Self::new(
+        Self::new(
             ExpressionKind::RuntimeTemplateHandoff(Box::new(handoff)),
             span,
             builtin_type_ids::STRING,
             DataType::Template,
             value_mode,
-        );
-        expression.reactive_template = Some(ReactiveTemplateMetadata::template_backed());
-        expression
+        )
     }
 
     /// Constructs the final AST-owned payload for a runtime slot application.
@@ -1343,15 +1132,13 @@ impl Expression {
         value_mode: ValueMode,
     ) -> Self {
         let span = handoff.span;
-        let mut expression = Self::new(
+        Self::new(
             ExpressionKind::RuntimeSlotApplicationHandoff(Box::new(handoff)),
             span,
             builtin_type_ids::STRING,
             DataType::Template,
             value_mode,
-        );
-        expression.reactive_template = Some(ReactiveTemplateMetadata::template_backed());
-        expression
+        )
     }
 
     /// Constructs a copy expression from a frontend place expression.

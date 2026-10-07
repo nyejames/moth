@@ -1,7 +1,7 @@
 //! Shared call-argument normalization and validation.
 //!
 //! WHAT: consumes parser-retained argument slots, fills defaults and enforces the shared rules for
-//! type compatibility, reactive-source requirements and explicit access mode.
+//! type compatibility and explicit access mode.
 //! WHY: function calls, struct constructors, receiver methods and builtin members all need the
 //! same final argument policy even though they build different AST nodes afterward. Named and
 //! positional syntax is owned by `call_arguments` and is not reconstructed here.
@@ -28,6 +28,8 @@ use moth_lexical::numeric::profile::FloatPrecision;
 use crate::compiler_frontend::external_packages::{
     ExternalAccessKind, ExternalFunctionDef, ExternalParameter,
 };
+#[cfg(feature = "benchmark_counters")]
+use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::type_coercion::compatibility::{
@@ -148,7 +150,6 @@ pub(crate) struct ParameterExpectation {
     /// package does not expose a resolved frontend type.
     pub expected_type: ExpectedParameterType,
     pub access_mode: ExpectedAccessMode,
-    pub requires_reactive_source: bool,
     pub default_value: Option<Expression>,
 }
 
@@ -189,13 +190,12 @@ pub(crate) fn expectations_from_user_parameters(
             } else {
                 ExpectedAccessMode::Shared
             },
-            requires_reactive_source: parameter.value.reactive_source.is_some(),
             default_value: match parameter.value.kind {
                 ExpressionKind::NoValue => None,
                 _ => {
-                    let mut default_value = parameter.value.clone();
-                    default_value.reactive_template = None;
-                    Some(default_value)
+                    #[cfg(feature = "benchmark_counters")]
+                    increment_frontend_counter(FrontendCounter::CensusParameterDefaultViewClones);
+                    Some(parameter.value.clone())
                 }
             },
         })
@@ -227,7 +227,6 @@ fn parameter_expectation_from_external(
             ExternalAccessKind::Shared => ExpectedAccessMode::Shared,
             ExternalAccessKind::Mutable => ExpectedAccessMode::Mutable,
         },
-        requires_reactive_source: false,
         default_value: None,
     }
 }
@@ -256,8 +255,13 @@ pub(crate) fn expectations_from_constructor_fields(
                 ConstructorFieldAccessMode::Shared => ExpectedAccessMode::Shared,
                 ConstructorFieldAccessMode::Mutable => ExpectedAccessMode::Mutable,
             },
-            requires_reactive_source: false,
-            default_value: field.default_value.clone(),
+            default_value: {
+                #[cfg(feature = "benchmark_counters")]
+                if field.default_value.is_some() {
+                    increment_frontend_counter(FrontendCounter::CensusParameterDefaultViewClones);
+                }
+                field.default_value.clone()
+            },
         })
         .collect()
 }
@@ -341,6 +345,16 @@ fn resolve_call_arguments_with_type_policy(
     span: Option<SourceSpan>,
     context: CallArgumentPolicyContext<'_>,
 ) -> Result<Vec<CallArgument>, CallValidationError> {
+    #[cfg(feature = "benchmark_counters")]
+    increment_frontend_counter(match diagnostics.kind {
+        CallSurfaceKind::Function => FrontendCounter::CensusCallFunctionEntries,
+        CallSurfaceKind::StructConstructor => FrontendCounter::CensusCallStructConstructorEntries,
+        CallSurfaceKind::ChoiceConstructor => FrontendCounter::CensusCallChoiceConstructorEntries,
+        CallSurfaceKind::ReceiverMethod => FrontendCounter::CensusCallReceiverMethodEntries,
+        CallSurfaceKind::BuiltinMember => FrontendCounter::CensusCallBuiltinMemberEntries,
+        CallSurfaceKind::HostFunction => FrontendCounter::CensusCallHostFunctionEntries,
+        CallSurfaceKind::Assertion => FrontendCounter::CensusCallAssertionEntries,
+    });
     let CallArgumentPolicyContext {
         string_table,
         type_environment,
@@ -353,8 +367,7 @@ fn resolve_call_arguments_with_type_policy(
     // 1) consume parser-retained parameter slots,
     // 2) fill defaults and detect missing required parameters,
     // 3) classify access/passing mode, which feeds compatibility checks,
-    // 4) enforce reactive-source requirements,
-    // 5) validate and coerce known types while retaining opaque external values.
+    // 4) validate and coerce known types while retaining opaque external values.
     let mut resolved = order_call_arguments_by_retained_slot(args, expectations.len())?;
 
     // ------------------------
@@ -363,6 +376,8 @@ fn resolve_call_arguments_with_type_policy(
     for (slot, expectation) in expectations.iter().enumerate() {
         if resolved[slot].is_none() {
             if let Some(default_value) = &expectation.default_value {
+                #[cfg(feature = "benchmark_counters")]
+                increment_frontend_counter(FrontendCounter::CensusDefaultApplicationClones);
                 let defaulted = default_value.clone();
                 debug_assert!(
                     type_environment.get(defaulted.type_id).is_some(),
@@ -373,6 +388,26 @@ fn resolve_call_arguments_with_type_policy(
                     CallArgument::positional(defaulted, CallAccessMode::Shared, span)
                         .with_parameter_slot(ParameterSlot::new(slot)),
                 );
+                #[cfg(feature = "benchmark_counters")]
+                increment_frontend_counter(match diagnostics.kind {
+                    CallSurfaceKind::Function => FrontendCounter::CensusCallFunctionDefaultFills,
+                    CallSurfaceKind::StructConstructor => {
+                        FrontendCounter::CensusCallStructConstructorDefaultFills
+                    }
+                    CallSurfaceKind::ChoiceConstructor => {
+                        FrontendCounter::CensusCallChoiceConstructorDefaultFills
+                    }
+                    CallSurfaceKind::ReceiverMethod => {
+                        FrontendCounter::CensusCallReceiverMethodDefaultFills
+                    }
+                    CallSurfaceKind::BuiltinMember => {
+                        FrontendCounter::CensusCallBuiltinMemberDefaultFills
+                    }
+                    CallSurfaceKind::HostFunction => {
+                        FrontendCounter::CensusCallHostFunctionDefaultFills
+                    }
+                    CallSurfaceKind::Assertion => FrontendCounter::CensusCallAssertionDefaultFills,
+                });
             } else {
                 return Err(CompilerDiagnostic::invalid_call_shape(
                     InvalidCallShapeReason::MissingArgument {
@@ -411,22 +446,7 @@ fn resolve_call_arguments_with_type_policy(
             path_fork,
         )?;
 
-        if expectation.requires_reactive_source && !argument.value.is_reactive_source() {
-            return Err(CompilerDiagnostic::invalid_call_shape(
-                InvalidCallShapeReason::ReactiveSourceRequired {
-                    parameter_name: expectation.name,
-                    parameter_index: slot,
-                },
-                Some(string_table.intern(diagnostics.callee_name)),
-                argument.span,
-            )
-            .into());
-        }
-
         let mut normalized_argument = argument.with_passing_mode(passing_mode);
-        if !expectation.requires_reactive_source {
-            normalized_argument.value.clear_reactive_source();
-        }
 
         let expected_type_id = match expectation.expected_type {
             ExpectedParameterType::Known(type_id) => type_id,
@@ -592,6 +612,10 @@ fn is_call_argument_type_compatible(
             return true;
         }
     };
+    // Known-type cache-call attempts include exact identity. UnknownExternal
+    // returns above; this is deliberately not the cache lookup/miss metric.
+    #[cfg(feature = "benchmark_counters")]
+    increment_frontend_counter(FrontendCounter::CensusCallKnownTypeCompatibilityAttempts);
 
     let compatibility_mode = if passing_mode == CallPassingMode::FreshMutableValue {
         TypeCompatibilityMode::FreshMutableRvalue

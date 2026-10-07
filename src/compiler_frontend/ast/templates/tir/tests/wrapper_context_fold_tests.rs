@@ -176,7 +176,7 @@ fn build_expression_wrapper_template_with_expression(
 ) -> (TemplateIrId, ExpressionSiteId) {
     let mut builder = TemplateIrBuilder::new(store);
     let dynamic_node =
-        builder.push_dynamic_expression_node(expression, TemplateSegmentOrigin::Body, None, None);
+        builder.push_dynamic_expression_node(expression, TemplateSegmentOrigin::Body, None);
     let root = builder.push_sequence_node(vec![dynamic_node], None);
     let template_id = builder.finish_template(
         root,
@@ -546,7 +546,6 @@ fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> Wrapp
                 Expression::string_slice(outer_expression, None, ValueMode::ImmutableOwned),
                 TemplateSegmentOrigin::Body,
                 None,
-                None,
             )
         };
         let (outer_wrapper_template_id, nested_child_node) = {
@@ -789,7 +788,6 @@ fn handoff_fixture_result(
             wrapper_foldable: false,
             has_runtime_slot_plan: false,
             has_runtime_slot_sites: false,
-            has_reactive_dependence: false,
             final_value_kind: TemplateConstValueKind::NonConst,
         },
         outcome: TemplatePreparationOutcome::Runtime(RuntimeTemplateReason::RuntimeExpression),

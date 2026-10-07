@@ -25,7 +25,7 @@ use crate::compiler_frontend::declaration_syntax::signature_members::{
     SignatureMemberContext, SignatureMemberSyntax,
 };
 use crate::compiler_frontend::headers::HeaderParseFailure;
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
@@ -152,7 +152,6 @@ pub(crate) fn parse_choice_shell(
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
     warnings: &mut Vec<CompilerDiagnostic>,
-    span_builder: &mut ExtendedSpanBuilder,
 ) -> Result<Vec<ChoiceVariantSyntax>, HeaderParseFailure> {
     // Mutation: EOF diagnostic payloads intern delimiter symbols that are not present
     // in the source text.
@@ -226,7 +225,6 @@ pub(crate) fn parse_choice_shell(
                             SignatureMemberContext::ChoicePayloadField,
                             choice_path,
                             path_fork,
-                            span_builder,
                         )?;
                         if fields.is_empty() {
                             return Err(CompilerDiagnostic::invalid_choice_variant(

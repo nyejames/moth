@@ -214,17 +214,6 @@ impl<'a> BorrowChecker<'a> {
             for (value_id, fact) in block_stats.value_facts {
                 report.analysis.value_facts.insert(value_id, fact);
             }
-            for (statement_id, invalidations) in block_stats.reactive_invalidations {
-                if invalidations.is_empty() {
-                    report.analysis.reactive_invalidations.remove(&statement_id);
-                } else {
-                    report
-                        .analysis
-                        .reactive_invalidations
-                        .insert(statement_id, invalidations);
-                }
-            }
-
             let changed_out = match out_states.get(&block_id) {
                 Some(existing) => existing != &output_state,
                 None => true,

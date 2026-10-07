@@ -47,7 +47,7 @@ function. The rules below describe the accepted contract. See @../progress
 The message is type checked, generic-inferred, evidence-checked and fully
 normalized, including nested templates, even when the condition is compile-time
 `true`. The normalized inactive message is then replaced with typed `none` before
-the AST/HIR boundary, so it publishes no TIR, runtime handoff, reactive metadata,
+the AST/HIR boundary, so it publishes no TIR, runtime handoff,
 generated-function request or downstream executable fact. An active message is
 evaluated only on the failure edge. A template-backed message is read as one
 snapshot at failure and does not create an assertion sink or live subscription.

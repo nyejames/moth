@@ -11,7 +11,6 @@
 //! keeping the handoff walkers co-located with the data they traverse.
 
 use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::templates::template::ReactiveSubscription;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateElseMarker, TemplateLoopControlKind, TemplateLoopHeader,
 };
@@ -80,13 +79,10 @@ pub(crate) enum OwnedRuntimeTemplateNode {
     /// structural string identity without exposing TIR IDs or flattening URLs.
     Text {
         text: OwnedFoldedString,
-        reactive_subscription: Option<ReactiveSubscription>,
-        span: Option<SourceSpan>,
     },
 
     DynamicExpression {
         expression: Box<Expression>,
-        reactive_subscription: Option<ReactiveSubscription>,
         #[allow(dead_code)] // Retained for deferred source-aware handoff diagnostics.
         span: Option<SourceSpan>,
     },

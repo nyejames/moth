@@ -10,8 +10,8 @@
 //!   3. The compiled JS bundle is embedded in an inline `<script>` block.
 //!      The bundle content is escaped so it cannot contain a raw `</script>` sequence
 //!      that would prematurely close the script tag.
-//!   4. The generated caller invokes entry `start()` once and publishes runtime fragments
-//!      only after success, hydrating each slot in source order. Optional host hooks receive
+//!   4. The generated caller invokes entry `start()` once and inserts runtime fragments
+//!      only after success, filling each slot in source order. Optional host hooks receive
 //!      returned Error details or structurally classified startup faults. Release pages append
 //!      fixed failure text without publishing application error data or replacing static HTML.
 
@@ -20,7 +20,6 @@ use crate::build_system::build::{FileKind, OutputFile, ProjectLinkedModule};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::reachability::ReachableReactiveSinkKind;
 use crate::compiler_frontend::module_compilation::{
     Module, ModuleExternalImport, ResolvedConstFragment,
 };
@@ -78,9 +77,6 @@ pub(crate) struct HtmlDocumentRenderInput<'a> {
     pub start_is_fallible: bool,
     pub release_build: bool,
     pub entry_runtime_fragment_count: usize,
-    /// Whether the emitted JS bundle contains reactive runtime fragments that need the DOM mount
-    /// helper instead of plain-string slot insertion.
-    pub uses_reactive_runtime_fragments: bool,
     /// Optional import-map HTML to inject into `<head>` before module scripts.
     pub import_map_html: Option<String>,
     /// Whether the runtime bundle must be emitted as an ES module script.
@@ -270,9 +266,6 @@ pub(crate) fn compile_html_module_js(
         );
     }
 
-    let uses_reactive_runtime_fragments =
-        html_module_uses_reactive_runtime_fragments(input.hir_module, input.reachability);
-
     // Generate glue modules and import preamble only for external module exports referenced by
     // emitted JS. In HTML page bundles, JS lowering has already filtered unreachable wrappers.
     let glue_result = generate_module_glue(
@@ -307,7 +300,6 @@ pub(crate) fn compile_html_module_js(
         start_is_fallible: js_module.start_is_fallible,
         release_build: input.build_profile.is_release(),
         entry_runtime_fragment_count: input.root_activity.runtime_fragment_count,
-        uses_reactive_runtime_fragments,
         import_map_html: glue_result.import_map_html,
         use_module_script,
     })?;
@@ -367,58 +359,10 @@ fn assemble_isolated_module_sources(
     source
 }
 
-/// Returns true when the JS bootstrap must route runtime fragments through the reactive mount
-/// helper.
-///
-/// WHAT: HIR can carry placeholder template metadata for ordinary `String` parameters so helper
-/// functions can preserve reactive template objects when callers provide them. Those placeholders
-/// should not by themselves make a non-reactive page reference the mount helper. A runtime fragment
-/// needs mounting only when it has a direct source dependency, or when a placeholder dependency can
-/// be satisfied by a concrete reachable reactive source in this emitted page.
-/// WHY: this mirrors JS helper gating and keeps ordinary pages on the plain insertion path.
-fn html_module_uses_reactive_runtime_fragments(
-    hir_module: &HirModule,
-    reachability: &crate::compiler_frontend::hir::reachability::HirReachability,
-) -> bool {
-    let reachable_reactive_sources = hir_module
-        .blocks
-        .iter()
-        .filter(|block| {
-            reachability
-                .backend_selection()
-                .blocks()
-                .contains(&block.id)
-        })
-        .flat_map(|block| block.locals.iter())
-        .any(|local| {
-            hir_module
-                .side_table
-                .reactive_source_id_for_local(local.id)
-                .is_some()
-        });
-
-    reachability.reachable_reactive_sinks.iter().any(|sink| {
-        if !matches!(sink.kind, ReachableReactiveSinkKind::RuntimeFragment) {
-            return false;
-        }
-
-        let Some(template) = hir_module
-            .side_table
-            .reactive_templates()
-            .find(|template| template.id == sink.template_id)
-        else {
-            return false;
-        };
-
-        !template.dependencies.is_empty()
-            || (reachable_reactive_sources && !template.template_value_parameters.is_empty())
-    })
-}
-
 /// Renders entry-file start fragments into static HTML and an ordered list of slot IDs.
 ///
 /// WHAT: merges const fragments (with runtime insertion indices) and runtime slot placeholders
-/// into source-order HTML. Returns slot IDs so the bootstrap script can hydrate them in order.
+/// into source-order HTML. Returns slot IDs so the bootstrap script can fill them in order.
 /// WHY: source order requires interleaving const strings at their indexed positions
 ///      relative to runtime slots, resolving structural pieces against the consuming page
 ///      document's output context.
@@ -501,7 +445,6 @@ pub(crate) fn render_html_document(
         input.js_bundle,
         &slot_ids,
         input.use_module_script,
-        input.uses_reactive_runtime_fragments,
         input.start_is_fallible,
         input.release_build,
     );
@@ -523,7 +466,6 @@ fn render_runtime_bootstrap_script_html(
     js_bundle: &str,
     slot_ids: &[String],
     is_module_script: bool,
-    uses_reactive_runtime_fragments: bool,
     start_is_fallible: bool,
     release_build: bool,
 ) -> String {
@@ -544,7 +486,6 @@ fn render_runtime_bootstrap_script_html(
             start_function_name,
             slot_ids,
             "  ",
-            uses_reactive_runtime_fragments,
             start_is_fallible,
             release_build,
         );
@@ -564,7 +505,6 @@ fn render_runtime_bootstrap_script_html(
             start_function_name,
             slot_ids,
             "  ",
-            uses_reactive_runtime_fragments,
             start_is_fallible,
             release_build,
         );
@@ -579,7 +519,6 @@ fn append_runtime_bootstrap(
     start_function_name: &str,
     slot_ids: &[String],
     indent: &str,
-    uses_reactive_runtime_fragments: bool,
     start_is_fallible: bool,
     release_build: bool,
 ) {
@@ -589,7 +528,6 @@ fn append_runtime_bootstrap(
         start_function_name,
         slot_ids,
         &format!("{indent}  "),
-        uses_reactive_runtime_fragments,
         start_is_fallible,
         release_build,
     );
@@ -603,7 +541,6 @@ fn append_startup_lifecycle(
     start_function_name: &str,
     slot_ids: &[String],
     indent: &str,
-    uses_reactive_runtime_fragments: bool,
     start_is_fallible: bool,
     release_build: bool,
 ) {
@@ -666,19 +603,9 @@ fn append_startup_lifecycle(
         "{indent}  if (!el) throw new Error(\"Missing runtime mount slot: \" + moth_slots[i]);\n"
     ));
 
-    if uses_reactive_runtime_fragments {
-        // Reactive pages use the backend mount helper so template fragments can register for
-        // rerendering. The helper also handles plain-string fragments, preserving source order.
-        html.push_str(&format!(
-            "{indent}  __moth_mount_template_fragment(el, moth_frags[i]);\n"
-        ));
-    } else {
-        // Non-reactive pages keep the plain direct insertion path and avoid referencing the
-        // optional mount helper global.
-        html.push_str(&format!(
-            "{indent}  el.insertAdjacentHTML(\"beforeend\", moth_frags[i] || \"\");\n"
-        ));
-    }
+    html.push_str(&format!(
+        "{indent}  el.insertAdjacentHTML(\"beforeend\", moth_frags[i] || \"\");\n"
+    ));
 
     html.push_str(&format!("{indent}}}\n"));
 }

@@ -19,7 +19,6 @@ mod numeric_carrier;
 mod numeric_proofs;
 mod numeric_statements;
 mod prelude;
-mod reactivity;
 mod receiver_methods;
 mod results;
 mod runtime_helpers;

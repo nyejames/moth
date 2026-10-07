@@ -224,10 +224,6 @@ pub(crate) enum EventKind {
     ScopeExit {
         bindings: Box<[BindingId]>,
     },
-    /// A reactive template observes a stable source without creating an active borrow loan.
-    ReactiveObserve {
-        place: PlaceId,
-    },
     /// One ordered argument access belonging to a call effect.
     ///
     /// The complete [`CallEffect`] remains the result-provenance boundary. Keeping each

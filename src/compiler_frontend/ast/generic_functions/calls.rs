@@ -45,6 +45,8 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::generic_bindings::{BindingConflict, GenericTypeBindings};
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::datatypes::{diagnostic_type_spelling, environment::TypeEnvironment};
+#[cfg(feature = "benchmark_counters")]
+use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -795,6 +797,11 @@ pub(crate) fn substitute_function_signature(
     mapping: &FxHashMap<GenericParameterId, TypeId>,
     type_environment: &mut TypeEnvironment,
 ) -> FunctionSignature {
+    // Shared by generic call inference, concrete emission and generated requests.
+    #[cfg(feature = "benchmark_counters")]
+    increment_frontend_counter(
+        FrontendCounter::CensusGenericCallAndMaterialisationSignatureSubstitutions,
+    );
     FunctionSignature {
         parameters: signature
             .parameters
@@ -839,7 +846,6 @@ fn substitute_return_slot(
     ReturnSlot {
         value,
         type_id: Some(type_id),
-        reactive_template: slot.reactive_template.clone(),
         channel: slot.channel,
     }
 }

@@ -1065,7 +1065,7 @@ impl FrozenRenderRetentionMetrics {
         self.source_identity_slots += metrics.source_identity_slots;
     }
     /// Count distinct path-table owners reachable from the returned diagnostic report.
-
+    ///
     /// WHAT: walks the exact owner set the diagnostic renderer can still dereference after the
     ///       render tail: the frozen identity contexts behind range rows or donor-only handles,
     ///       the explicit `RenderPathContext` tables, and any transitional

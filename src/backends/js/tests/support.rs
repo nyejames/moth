@@ -546,8 +546,8 @@ pub(super) fn lower_minimal_module_with_int_to_float_cast(function_name: &str) -
 
 /// Builds and lowers a minimal module that performs a `Float -> String` expression cast.
 ///
-/// WHY: reactive Float template subscriptions use this lazy expression shape so their snapshot
-/// function can re-read and format the current source value on every rerender.
+/// WHY: prelude demand tests need a runtime expression cast that exercises Float-to-String
+/// formatting.
 pub(super) fn lower_minimal_module_with_float_string_cast(function_name: &str) -> String {
     lower_minimal_module_with_cast(
         function_name,

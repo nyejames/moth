@@ -1,7 +1,8 @@
 //! JavaScript backend for Moth.
 //!
-//! This backend lowers HIR into readable JavaScript using GC semantics.
-//! Borrowing and ownership are optimization concerns and therefore ignored here.
+//! This backend lowers validated HIR into readable JavaScript using host GC.
+//! Borrow and lifetime legality belong to the compiler before this boundary;
+//! lowering preserves the validated value and alias contracts.
 
 mod emitter;
 mod identifiers;

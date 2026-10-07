@@ -9,7 +9,6 @@ use crate::compiler_frontend::declaration_syntax::signature_members::{
     SignatureMemberContext, SignatureMemberSyntax, parse_signature_members_syntax,
 };
 use crate::compiler_frontend::headers::HeaderParseFailure;
-use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -27,7 +26,6 @@ pub fn parse_record_body(
     member_context: SignatureMemberContext,
     owner_path: PathId,
     path_fork: &mut PathInternerFork,
-    span_builder: &mut ExtendedSpanBuilder,
 ) -> RecordBodyParseResult {
     token_stream.advance();
     let fields = parse_signature_members_syntax(
@@ -37,7 +35,6 @@ pub fn parse_record_body(
         member_context,
         owner_path,
         path_fork,
-        span_builder,
     )?;
 
     token_stream.advance();

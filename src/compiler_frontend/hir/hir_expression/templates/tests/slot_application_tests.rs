@@ -33,16 +33,12 @@ fn fixture_resource_origin(relative_path: &str) -> StableResourceOriginId {
 fn piece_bearing_text_node(pieces: Vec<OwnedFoldedStringPiece>) -> OwnedRuntimeTemplateNode {
     OwnedRuntimeTemplateNode::Text {
         text: OwnedFoldedString::Pieces(pieces),
-        reactive_subscription: None,
-        span: None,
     }
 }
 
 fn plain_text_node(text: &str) -> OwnedRuntimeTemplateNode {
     OwnedRuntimeTemplateNode::Text {
         text: OwnedFoldedString::Text(text.to_owned()),
-        reactive_subscription: None,
-        span: None,
     }
 }
 

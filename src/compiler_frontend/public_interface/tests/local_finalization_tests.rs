@@ -26,8 +26,7 @@ use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
-    PublicCallParameterSummary, PublicCallReactiveEffect, PublicCallSummary,
-    PublicCallTransferEffect, PublicCallTransferEligibility,
+    PublicCallParameterSummary, PublicCallSummary, PublicCallTransferEffect,
 };
 use crate::compiler_frontend::semantic_identity::{
     OriginDeclarationId, OriginFunctionId, OriginTypeId,
@@ -42,34 +41,16 @@ fn empty_public_call_summary() -> PublicCallSummary {
 }
 
 fn public_call_summary_for_access(access: PublicCallParameterAccess) -> PublicCallSummary {
-    let (mutation, transfer_eligibility, transfer_effect, reactive_effect) = match access {
-        PublicCallParameterAccess::Shared => (
-            PublicCallMutationEffect::NoWrite,
-            PublicCallTransferEligibility::Eligible,
-            PublicCallTransferEffect::MayConsume,
-            PublicCallReactiveEffect::None,
-        ),
-        PublicCallParameterAccess::Mutable => (
-            PublicCallMutationEffect::Writes,
-            PublicCallTransferEligibility::Eligible,
-            PublicCallTransferEffect::MayConsume,
-            PublicCallReactiveEffect::None,
-        ),
-        PublicCallParameterAccess::Reactive => (
-            PublicCallMutationEffect::NoWrite,
-            PublicCallTransferEligibility::Ineligible,
-            PublicCallTransferEffect::NeverConsumes,
-            PublicCallReactiveEffect::Subscribes,
-        ),
+    let mutation = match access {
+        PublicCallParameterAccess::Shared => PublicCallMutationEffect::NoWrite,
+        PublicCallParameterAccess::Mutable => PublicCallMutationEffect::Writes,
     };
 
     PublicCallSummary {
         parameters: vec![PublicCallParameterSummary {
             access,
             mutation,
-            transfer_eligibility,
-            transfer_effect,
-            reactive_effect,
+            transfer_effect: PublicCallTransferEffect::MayConsume,
         }],
         return_alias: FunctionReturnAliasSummary::Fresh,
         escapes_builtin_failure: false,
@@ -402,7 +383,7 @@ fn finalization_rejects_signature_summary_shape_mismatch() {
 }
 
 #[test]
-fn finalization_rejects_declared_access_and_effect_drift() {
+fn finalization_rejects_declared_access_and_invalid_transfer_effect() {
     let function_origin = OriginFunctionId::new_free(module_origin(), "render".to_owned());
     let hir = public_hir_for_origins(&[(FunctionId(1), function_origin.clone())]);
 
@@ -423,9 +404,7 @@ fn finalization_rejects_declared_access_and_effect_drift() {
 
     let mut invalid_effect_summary =
         public_call_summary_for_access(PublicCallParameterAccess::Shared);
-    invalid_effect_summary.parameters[0].transfer_eligibility =
-        PublicCallTransferEligibility::Ineligible;
-    invalid_effect_summary.parameters[0].transfer_effect = PublicCallTransferEffect::NeverConsumes;
+    invalid_effect_summary.parameters[0].transfer_effect = PublicCallTransferEffect::AlwaysConsumes;
     let mut invalid_effect_analysis = BorrowAnalysis::default();
     invalid_effect_analysis
         .public_call_summaries

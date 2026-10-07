@@ -1308,19 +1308,16 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                 ReturnSlot {
                     value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
-                    reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
                     value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
-                    reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
                     value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
-                    reactive_template: None,
                     channel: ReturnChannel::Error,
                 },
             ],
@@ -1339,19 +1336,16 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                 ReturnSlot {
                     value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
-                    reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
                     value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
-                    reactive_template: None,
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
                     value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
-                    reactive_template: None,
                     channel: ReturnChannel::Error,
                 },
             ],

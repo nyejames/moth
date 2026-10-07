@@ -49,9 +49,9 @@ page_head #= theme_head
     - @../../docs/generics (Generics)
     - @../../docs/traits (Traits)
 
-    UI state:
+    Parameter capabilities and future channels:
 
-    - @../../docs/reactivity (Reactivity)
+    - @../../docs/wiring (Wiring)
 
     Projects and imported content:
 

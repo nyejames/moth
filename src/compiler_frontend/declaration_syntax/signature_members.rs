@@ -15,13 +15,11 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidSignatureMemberReason,
 };
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
-use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
-use crate::compiler_frontend::declaration_syntax::declaration_shell::require_binding_marker_adjacent;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
     TypeAnnotationContext, parse_type_annotation_cursor,
 };
 use crate::compiler_frontend::headers::HeaderParseFailure;
-use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
@@ -72,7 +70,6 @@ pub enum SignatureMemberContext {
 pub struct SignatureMemberSyntax {
     pub id: PathId,
     pub value_mode: ValueMode,
-    pub is_reactive: bool,
     pub type_annotation: ParsedTypeRef,
     /// Canonical source-owned default range. `None` means no authored default expression.
     pub default_range: Option<TokenRange>,
@@ -182,7 +179,6 @@ pub fn parse_function_signature_syntax(
     string_table: &mut StringTable,
     function_path: PathId,
     path_fork: &mut PathInternerFork,
-    span_builder: &mut ExtendedSpanBuilder,
 ) -> SignatureMemberParseResult<FunctionSignatureSyntax> {
     token_stream.advance();
 
@@ -193,7 +189,6 @@ pub fn parse_function_signature_syntax(
         SignatureMemberContext::FunctionParameter,
         function_path,
         path_fork,
-        span_builder,
     )?;
     token_stream.advance();
 
@@ -265,7 +260,6 @@ pub fn parse_signature_members_syntax(
     member_context: SignatureMemberContext,
     owner_path: PathId,
     path_fork: &mut PathInternerFork,
-    span_builder: &mut ExtendedSpanBuilder,
 ) -> SignatureMemberParseResult<Vec<SignatureMemberSyntax>> {
     let mut members = Vec::with_capacity(1);
     let mut expecting_member = true;
@@ -346,7 +340,6 @@ pub fn parse_signature_members_syntax(
                     false,
                     member_context,
                     path_fork,
-                    span_builder,
                 )?;
 
                 record_ordinary_member_name(&mut seen_member_names, &member, path_fork)?;
@@ -375,7 +368,6 @@ pub fn parse_signature_members_syntax(
                     true,
                     member_context,
                     path_fork,
-                    span_builder,
                 )?;
 
                 members.push(member);
@@ -415,7 +407,6 @@ pub fn parse_signature_members_syntax(
                     token_stream,
                     this_path,
                     ValueMode::ImmutableOwned,
-                    span_builder,
                 )?;
 
                 members.push(member);
@@ -457,7 +448,6 @@ pub fn parse_signature_members_syntax(
                     token_stream,
                     this_path,
                     ValueMode::MutableOwned,
-                    span_builder,
                 )?;
 
                 members.push(member);
@@ -563,10 +553,6 @@ fn record_ordinary_member_name(
     }
     Ok(())
 }
-#[allow(
-    clippy::too_many_arguments,
-    reason = "signature member parsing keeps the token stream, member path, mutable string/warning/span state, the reserved-this flag, member context, and path fork as separate borrows"
-)]
 fn parse_signature_member_syntax(
     token_stream: &mut DeclarationCursor<'_>,
     full_name: PathId,
@@ -575,7 +561,6 @@ fn parse_signature_member_syntax(
     allow_reserved_this: bool,
     member_context: SignatureMemberContext,
     path_fork: &PathInternerFork,
-    span_builder: &mut ExtendedSpanBuilder,
 ) -> SignatureMemberParseResult<SignatureMemberSyntax> {
     let member_span = current_source_span(token_stream);
     if !allow_reserved_this && let Some(name_id) = path_fork.component(full_name) {
@@ -596,32 +581,9 @@ fn parse_signature_member_syntax(
     token_stream.advance();
 
     let mut value_mode = ValueMode::ImmutableOwned;
-    let mut is_reactive = false;
-    match token_stream.current_tag() {
-        TokenTag::MUTABLE => {
-            token_stream.advance();
-            value_mode = ValueMode::MutableOwned;
-        }
-
-        TokenTag::REACTIVE => {
-            if member_context != SignatureMemberContext::FunctionParameter {
-                return Err(CompilerDiagnostic::invalid_signature_member(
-                    InvalidSignatureMemberReason::ReactiveAccessNotAllowed,
-                    current_source_span(token_stream),
-                )
-                .into());
-            }
-
-            require_binding_marker_adjacent(
-                token_stream,
-                BindingMode::ReactiveRuntime,
-                span_builder,
-            )?;
-            token_stream.advance();
-            is_reactive = true;
-        }
-
-        _ => {}
+    if token_stream.current_tag() == TokenTag::MUTABLE {
+        token_stream.advance();
+        value_mode = ValueMode::MutableOwned;
     }
 
     if token_stream.current_tag() == TokenTag::HASH {
@@ -654,13 +616,6 @@ fn parse_signature_member_syntax(
     let default_range = match token_stream.current_tag() {
         TokenTag::ASSIGN => {
             token_stream.advance();
-            if is_reactive {
-                return Err(CompilerDiagnostic::invalid_signature_member(
-                    InvalidSignatureMemberReason::ReactiveParameterDefaultValue,
-                    current_source_span(token_stream),
-                )
-                .into());
-            }
             if member_context == SignatureMemberContext::TraitRequirement {
                 return Err(CompilerDiagnostic::invalid_signature_member(
                     InvalidSignatureMemberReason::TraitRequirementDefaultValue,
@@ -710,7 +665,6 @@ fn parse_signature_member_syntax(
     Ok(SignatureMemberSyntax {
         id: full_name,
         value_mode,
-        is_reactive,
         type_annotation,
         default_range,
         span: member_span,
@@ -736,7 +690,6 @@ fn parse_trait_this_member_syntax(
     token_stream: &mut DeclarationCursor<'_>,
     full_name: PathId,
     value_mode: ValueMode,
-    _span_builder: &mut ExtendedSpanBuilder,
 ) -> SignatureMemberParseResult<SignatureMemberSyntax> {
     let member_span = current_source_span(token_stream);
 
@@ -749,7 +702,6 @@ fn parse_trait_this_member_syntax(
     Ok(SignatureMemberSyntax {
         id: full_name,
         value_mode,
-        is_reactive: false,
         type_annotation,
         default_range: None,
         span: member_span,
@@ -902,7 +854,6 @@ pub fn parse_trait_requirement_signature_syntax(
     string_table: &mut StringTable,
     method_path: PathId,
     path_fork: &mut PathInternerFork,
-    span_builder: &mut ExtendedSpanBuilder,
 ) -> SignatureMemberParseResult<FunctionSignatureSyntax> {
     token_stream.advance(); // past |
     let parameters = parse_signature_members_syntax(
@@ -912,7 +863,6 @@ pub fn parse_trait_requirement_signature_syntax(
         SignatureMemberContext::TraitRequirement,
         method_path,
         path_fork,
-        span_builder,
     )?;
     token_stream.advance(); // past |
 

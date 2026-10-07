@@ -19,9 +19,6 @@ use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{
     BlockId, ChoiceId, FieldId, FunctionId, HirNodeId, HirValueId, LocalId, StructId,
 };
-use crate::compiler_frontend::hir::reactivity::{
-    HirReactiveSource, HirReactiveTemplate, ReactiveSourceId, ReactiveTemplateId,
-};
 use crate::compiler_frontend::hir::statements::HirStatement;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
@@ -180,17 +177,6 @@ pub(crate) struct HirSideTable {
     field_names: FxHashMap<FieldId, PathId>,
     choice_names: FxHashMap<ChoiceId, PathId>,
     generic_choice_instances: FxHashMap<ChoiceId, GenericInstantiationKey>,
-
-    // -------------------------------------------------------------------------
-    //  Reactivity side-tables. Store source/template metadata outside the core IR.
-    // -------------------------------------------------------------------------
-    next_reactive_source_id: u32,
-    reactive_sources: FxHashMap<ReactiveSourceId, HirReactiveSource>,
-    reactive_source_by_local: FxHashMap<LocalId, ReactiveSourceId>,
-    reactive_source_by_path: FxHashMap<PathId, ReactiveSourceId>,
-    next_reactive_template_id: u32,
-    reactive_templates: FxHashMap<ReactiveTemplateId, HirReactiveTemplate>,
-    reactive_template_by_value: FxHashMap<HirValueId, ReactiveTemplateId>,
 }
 
 impl HirSideTable {
@@ -212,13 +198,6 @@ impl HirSideTable {
         self.field_names.clear();
         self.choice_names.clear();
         self.generic_choice_instances.clear();
-        self.next_reactive_source_id = 0;
-        self.reactive_sources.clear();
-        self.reactive_source_by_local.clear();
-        self.reactive_source_by_path.clear();
-        self.next_reactive_template_id = 0;
-        self.reactive_templates.clear();
-        self.reactive_template_by_value.clear();
     }
 
     /// Rewrites block locations after unused scaffolding blocks are removed.
@@ -285,15 +264,6 @@ impl HirSideTable {
         for key in self.generic_choice_instances.values_mut() {
             key.remap_path_ids(remap);
         }
-        for source in self.reactive_sources.values_mut() {
-            source.path = remap.get(source.path);
-        }
-
-        let mut reactive_source_by_path = FxHashMap::default();
-        for (source_id, source) in &self.reactive_sources {
-            reactive_source_by_path.insert(source.path, *source_id);
-        }
-        self.reactive_source_by_path = reactive_source_by_path;
     }
 
     /// Remaps string IDs retained by side-table metadata.
@@ -307,19 +277,6 @@ impl HirSideTable {
 
         for key in self.generic_choice_instances.values_mut() {
             remap_generic_instantiation_key(key, remap);
-        }
-
-        for source in self.reactive_sources.values_mut() {
-            source.remap_string_ids(remap);
-        }
-
-        self.reactive_source_by_path.clear();
-        for (source_id, source) in &self.reactive_sources {
-            self.reactive_source_by_path.insert(source.path, *source_id);
-        }
-
-        for template in self.reactive_templates.values_mut() {
-            template.remap_string_ids(remap);
         }
     }
 
@@ -485,62 +442,6 @@ impl HirSideTable {
         self.generic_choice_instances.insert(choice_id, key);
     }
 
-    /// Binds a local as a stable reactive source.
-    ///
-    /// WHAT: allocates a HIR `ReactiveSourceId` and indexes it by both local and AST path.
-    /// WHY: template dependencies name AST-resolved sources by path, while later HIR and backend
-    /// consumers need stable local/source IDs.
-    pub(crate) fn bind_reactive_source(
-        &mut self,
-        mut source: HirReactiveSource,
-    ) -> ReactiveSourceId {
-        if let Some(existing) = self.reactive_source_by_local.get(&source.local_id).copied() {
-            if let Some(previous_source) = self.reactive_sources.get(&existing) {
-                self.reactive_source_by_path.remove(&previous_source.path);
-            }
-
-            source.id = existing;
-            self.reactive_source_by_path.insert(source.path, existing);
-            self.reactive_sources.insert(existing, source);
-            return existing;
-        }
-
-        let id = ReactiveSourceId(self.next_reactive_source_id);
-        self.next_reactive_source_id += 1;
-        source.id = id;
-
-        self.reactive_source_by_local.insert(source.local_id, id);
-        self.reactive_source_by_path.insert(source.path, id);
-        self.reactive_sources.insert(id, source);
-        id
-    }
-
-    /// Binds reactive template metadata to one lowered HIR value.
-    pub(crate) fn bind_reactive_template(
-        &mut self,
-        mut template: HirReactiveTemplate,
-    ) -> ReactiveTemplateId {
-        if let Some(existing) = self
-            .reactive_template_by_value
-            .get(&template.value_id)
-            .copied()
-        {
-            template.id = existing;
-            self.reactive_templates.insert(existing, template);
-            return existing;
-        }
-
-        let id = ReactiveTemplateId(self.next_reactive_template_id);
-        self.next_reactive_template_id += 1;
-        template.id = id;
-
-        self.reactive_template_by_value
-            .insert(template.value_id, id);
-        self.reactive_templates.insert(id, template);
-
-        id
-    }
-
     // -------------------------
     //  Metadata Lookups
     // -------------------------
@@ -606,54 +507,6 @@ impl HirSideTable {
     #[inline]
     pub(crate) fn function_name_path(&self, function_id: FunctionId) -> Option<PathId> {
         self.function_names.get(&function_id).copied()
-    }
-
-    #[inline]
-    pub(crate) fn reactive_source_id_for_local(
-        &self,
-        local_id: LocalId,
-    ) -> Option<ReactiveSourceId> {
-        self.reactive_source_by_local.get(&local_id).copied()
-    }
-
-    #[inline]
-    pub(crate) fn reactive_source_id_for_path(&self, path: PathId) -> Option<ReactiveSourceId> {
-        self.reactive_source_by_path.get(&path).copied()
-    }
-
-    #[inline]
-    pub(crate) fn reactive_source(
-        &self,
-        source_id: ReactiveSourceId,
-    ) -> Option<&HirReactiveSource> {
-        self.reactive_sources.get(&source_id)
-    }
-
-    #[inline]
-    pub(crate) fn reactive_sources(&self) -> impl Iterator<Item = &HirReactiveSource> {
-        self.reactive_sources.values()
-    }
-
-    #[inline]
-    pub(crate) fn reactive_template_id_for_value(
-        &self,
-        value_id: HirValueId,
-    ) -> Option<ReactiveTemplateId> {
-        self.reactive_template_by_value.get(&value_id).copied()
-    }
-
-    #[inline]
-    pub(crate) fn reactive_template_for_value(
-        &self,
-        value_id: HirValueId,
-    ) -> Option<&HirReactiveTemplate> {
-        let template_id = self.reactive_template_id_for_value(value_id)?;
-        self.reactive_templates.get(&template_id)
-    }
-
-    #[inline]
-    pub(crate) fn reactive_templates(&self) -> impl Iterator<Item = &HirReactiveTemplate> {
-        self.reactive_templates.values()
     }
 
     #[inline]

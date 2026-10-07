@@ -788,9 +788,6 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                     )?;
                 }
             }
-            EventKind::ReactiveObserve { place } => {
-                validate_place(*place, places.len(), "reactive observation")?;
-            }
             EventKind::Terminator { kind } => match kind {
                 TerminatorEventKind::Jump { target }
                 | TerminatorEventKind::Break { target }

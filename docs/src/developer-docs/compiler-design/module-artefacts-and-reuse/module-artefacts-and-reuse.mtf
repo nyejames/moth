@@ -12,7 +12,7 @@ Think of four layers plus records of what changed:
 
 **Executable state.** Module-local `TypeEnvironment`, validated HIR, the resource table, borrow facts and optional profile-aware statement-keyed numeric-proof facts paired with the executable. Local lifetime-region and escape facts belong to this lane in the accepted design, and their validation is deferred.
 
-**Link facts.** Backend-neutral per-function edges, binding-backed call ids, helpers, capabilities, reactive features, numeric and cast operations, resource uses, provenance and generated-function requests. Resource *uses* are the compiler's business. Physical paths, URLs and asset placement stay with the builder.
+**Link facts.** Backend-neutral per-function edges, binding-backed call ids, helpers, capabilities, numeric and cast operations, resource uses, provenance and generated-function requests. Resource *uses* are the compiler's business. Physical paths, URLs and asset placement stay with the builder.
 
 **Compiler and builder metadata.** Dormant root activity, folded fragment values and insertion indexes, `$page` root metadata, documentation fragments, resource origins, non-executable fragment uses, materialisation context and structured warnings. Resolved `$page` metadata is accepted design and deferred.
 

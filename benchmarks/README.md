@@ -293,6 +293,23 @@ than `MOTH_TIMERS=off`. Do not turn counters on for normal before/after
 benchmark runs unless the active investigation specifically needs counter
 evidence.
 
+### Published-expression census
+
+The `benchmark_counters` investigation adds `ast_census_*` snapshots at each
+completed AST finalizer, including generated sidecars. Across raw probe rows,
+sum additive counts and take the maximum of `*_max` gauges; preserve duplicate
+metric rows rather than overwriting them. List lengths and capacities count
+elements, not bytes. Existing `ast_tir_overlay_lookups` excludes observer reads.
+The `frontend_census_*` owning-pass counters are command-global traffic, not
+the same denominator as published AST occurrences.
+
+The census covers retained emitted AST occurrences and diagnostic-owned
+signature defaults, not unique allocations or every transient/preparation owner.
+Inline layouts and the memory probe's whole-compiler allocation deltas do not
+measure exact retained AST bytes. Counter-enabled observations include observer
+overhead; keep normal timing comparisons counter-off. The activation evidence
+and its limits are recorded in `frontend-optimization-results.md`.
+
 ### Timer report model
 
 The human `MOTH_TIMERS=summary` report is a short developer scan, not a fourth

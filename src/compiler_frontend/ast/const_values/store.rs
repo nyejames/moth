@@ -11,9 +11,7 @@
 //! interface; public projection converts them to [`PublicFoldedValue`] before publication.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, ReactiveSource, ReactiveTemplateMetadata,
-};
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_types::{
     ConstRecordState, ConstValueKind,
 };
@@ -122,8 +120,6 @@ pub(crate) struct ConstValueMetadata {
     pub(crate) diagnostic_type: DataType,
     pub(crate) value_mode: ValueMode,
     pub(crate) span: Option<SourceSpan>,
-    pub(crate) reactive_source: Option<ReactiveSource>,
-    pub(crate) reactive_template: Option<ReactiveTemplateMetadata>,
     pub(crate) const_record_state: ConstRecordState,
     pub(crate) contains_regular_division: bool,
     pub(crate) synthetic_interface_provenance: SyntheticInterfaceProvenance,
@@ -658,8 +654,6 @@ impl ConstValueStore {
             diagnostic_type: expression.diagnostic_type.clone(),
             value_mode: expression.value_mode.clone(),
             span: expression.span,
-            reactive_source: expression.reactive_source.clone(),
-            reactive_template: expression.reactive_template.clone(),
             const_record_state: expression.const_record_state,
             contains_regular_division: expression.contains_regular_division,
             synthetic_interface_provenance: expression.synthetic_interface_provenance.clone(),
@@ -1011,8 +1005,6 @@ impl ConstValueStore {
             value.metadata.diagnostic_type.clone(),
             value.metadata.value_mode.clone(),
         );
-        expression.reactive_source = value.metadata.reactive_source.clone();
-        expression.reactive_template = value.metadata.reactive_template.clone();
         expression.const_record_state = value.metadata.const_record_state;
         expression.contains_regular_division = value.metadata.contains_regular_division;
         expression.synthetic_interface_provenance =

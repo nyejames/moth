@@ -1,7 +1,8 @@
-**Current support versus accepted design.** The Alpha compiler currently emits direct
-top-level templates from activity-selected HTML roots. The accepted queued design
-requires an explicit root purpose; `$page` is the first HTML purpose, but it is not
-implemented yet.
+**Root purposes and support.** The accepted HTML entry contract uses an explicit
+root purpose; `$page` supplies the initial page purpose. Exact metadata and
+placement rules live in Project Structure. This page describes the accepted
+template and value boundary; current compiler and builder support is tracked in
+@../progress (Progress) and @../progress/packages-and-builders (Packages and builders).
 
 Templates create owned `String` values.
 
@@ -81,10 +82,10 @@ Unevaluated template syntax is not a MON string literal. A folded compile-time t
 
 ### Page fragments
 
-A direct top-level template contributes output only when its root has an explicit
-purpose with an applicable consumer. `$page` is the initial HTML purpose in the
-accepted queued design. Until that cutover, the current compiler continues to use
-activity-based entry selection and the reserved `page_*` metadata path.
+Under the accepted root-purpose contract, a direct top-level template contributes
+output only when its root has an explicit purpose with an applicable consumer.
+`$page` is the initial HTML purpose. Its exact root and metadata rules live in
+@../project-structure/#entry-config (Entry metadata and page directives).
 
 - top-level runtime templates run through entry-selected `start()` in source order
 - direct top-level const templates fold into compile-time fragments

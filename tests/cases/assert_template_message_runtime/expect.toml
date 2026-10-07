@@ -1,0 +1,20 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = ""
+runtime_error_contains = ["message 1"]
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+message_contains = ["runtime assertion messages"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.runtime_assertion_messages"
+path = "input/@page.moth"
+line = 10
+column = 30

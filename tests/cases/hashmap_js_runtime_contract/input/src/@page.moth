@@ -26,7 +26,7 @@ render_hashmap_contract || -> String:
         then 99
     ;
 
-    map_key_source $String = "One"
+    map_key_source String = "One"
     duplicate {String = Int} = {runtime_duplicate_key(map_key_source) = 1, runtime_duplicate_key(map_key_source) = 2}
     duplicate_length = duplicate.length
     duplicate_value = duplicate.get("One") catch:
@@ -161,8 +161,8 @@ render_hashmap_contract || -> String:
     return [:hashmap_runtime has_ada=[has_ada_before] has_linus=[has_linus_before] insert_len=[len_after_insert] replace_len=[len_after_replace] removed=[removed] remove_len=[len_after_remove] clear_len=[len_after_clear] missing=[missing] duplicate=[duplicate_value] duplicate_len=[duplicate_length] template_contains=[template_key_contains] template_before_set=[template_key_before_set] template_after_set=[template_key_after_set] template_removed=[template_key_removed] template_length=[template_key_length_after_remove] fixed_i8_has_zero=[i8_has_zero_before],[i8_has_zero_after] fixed_i8_len=[i8_initial_length],[i8_length_after_insert],[i8_length_after_replace],[i8_length_after_remove] fixed_i64_has=[i64_before_max_found],[i64_min_after_remove] fixed_i64_len=[i64_initial_length],[i64_length_after_replace],[i64_length_after_remove] fixed_u64_has=[u64_neighbor_found],[u64_neighbor_after_remove] fixed_u64_len=[u64_initial_length],[u64_length_after_replace],[u64_length_after_remove] fixed_byte_has=[byte_max_found],[byte_zero_after_remove] fixed_byte_len=[byte_initial_length],[byte_length_after_replace],[byte_length_after_remove]]
 ;
 
-runtime_duplicate_key |key $String| -> String:
-    return [:[$(key)]]
+runtime_duplicate_key |key String| -> String:
+    return [:[key]]
 ;
 
 [:[render_hashmap_contract()]]

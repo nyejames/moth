@@ -104,7 +104,6 @@ fn owned_runtime_handoff_checks_dynamic_selectors_and_loop_headers() {
     let dynamic = handoff_expression(OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::DynamicExpression {
             expression: Box::new(propagated_expression(10)),
-            reactive_subscription: None,
             span: None,
         }),
         span: None,
@@ -157,7 +156,6 @@ fn raw_tir_dynamic_expression_is_checked_before_hir_handoff() {
         TemplateIrNodeKind::DynamicExpression {
             expression: Box::new(propagated_expression(20)),
             origin: TemplateSegmentOrigin::Body,
-            reactive_subscription: None,
             site_id,
         },
         span,

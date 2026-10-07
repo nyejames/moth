@@ -87,7 +87,7 @@ fn strings_comments_and_paths_shield_moth_error_markers() {
 #[test]
 fn final_moth_directives_wiring_and_numeric_families_keep_their_roles() {
     let highlighted = highlight_code_html(
-        "$fast_math $safe_math $infallible of Uint U64 F16 Byte",
+        "$fast_math $safe_math $infallible of Uint U64 F16 Byte Wire Route Channel",
         CodeLanguage::Moth,
     );
     for name in ["$fast_math", "$safe_math", "$infallible"] {
@@ -96,6 +96,9 @@ fn final_moth_directives_wiring_and_numeric_families_keep_their_roles() {
     assert!(highlighted.contains("<span class='moth-code-keyword'>of</span>"));
     for name in ["Uint", "U64", "F16", "Byte"] {
         assert!(highlighted.contains(&format!("<span class='moth-code-type'>{name}</span>")));
+    }
+    for name in ["Wire", "Route", "Channel"] {
+        assert!(highlighted.contains(&format!("<span class='moth-code-nominal'>{name}</span>")));
     }
 }
 

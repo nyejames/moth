@@ -558,7 +558,6 @@ fn fold_prepared_template_rejects_parsed_phase() {
             wrapper_foldable: true,
             has_runtime_slot_plan: false,
             has_runtime_slot_sites: false,
-            has_reactive_dependence: false,
             final_value_kind:
                 crate::compiler_frontend::ast::templates::template::TemplateConstValueKind::RenderableString,
         },
@@ -686,7 +685,6 @@ fn prepared_fold_preserves_root_expression_overlay_through_nested_children() {
         let leaf_expression = builder.push_dynamic_expression_node(
             Expression::string_slice(structural_text, None, ValueMode::ImmutableOwned),
             TemplateSegmentOrigin::Body,
-            None,
             None,
         );
         let leaf_root = builder.push_sequence_node(vec![leaf_expression], None);
@@ -823,7 +821,6 @@ fn repeated_prepared_fold_reuses_effective_expression_provenance() {
         let dynamic = builder.push_dynamic_expression_node(
             Expression::string_slice(text, None, ValueMode::ImmutableOwned),
             TemplateSegmentOrigin::Body,
-            None,
             None,
         );
         let root = builder.push_sequence_node(vec![dynamic], None);
@@ -1022,7 +1019,6 @@ fn fold_dynamic_ast_template_with_missing_root_authority() -> TemplateError {
         let dynamic_node = builder.push_dynamic_expression_node(
             Expression::template(nested_template, ValueMode::ImmutableOwned),
             TemplateSegmentOrigin::Body,
-            None,
             None,
         );
         let outer_root = builder.push_sequence_node(vec![dynamic_node], None);

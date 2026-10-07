@@ -36,7 +36,6 @@ pub(crate) mod patterns;
 pub(crate) mod places;
 pub(crate) mod private_failure_lane;
 pub(crate) mod reachability;
-pub(crate) mod reactivity;
 pub(crate) mod regions;
 pub(crate) mod statements;
 pub(crate) mod structs;

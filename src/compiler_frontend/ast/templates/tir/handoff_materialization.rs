@@ -313,14 +313,11 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 origin: _,
             } => Ok(OwnedRuntimeTemplateNode::Text {
                 text: OwnedFoldedString::Text(self.string_table.resolve(*text).to_owned()),
-                reactive_subscription: view.store().node_reactive_subscription(id)?.cloned(),
-                span: node.span,
             }),
 
             TemplateIrNodeKind::DynamicExpression {
                 expression,
                 origin: _,
-                reactive_subscription,
                 site_id,
             } => {
                 let effective_expression =
@@ -338,15 +335,10 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                         resources,
                         self.string_table,
                     )?;
-                    Ok(OwnedRuntimeTemplateNode::Text {
-                        text,
-                        reactive_subscription: reactive_subscription.clone(),
-                        span: node.span,
-                    })
+                    Ok(OwnedRuntimeTemplateNode::Text { text })
                 } else {
                     Ok(OwnedRuntimeTemplateNode::DynamicExpression {
                         expression: Box::new(effective_expression),
-                        reactive_subscription: reactive_subscription.clone(),
                         span: node.span,
                     })
                 }

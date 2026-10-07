@@ -144,7 +144,6 @@ fn const_template_projection_round_trips_structural_resource_and_site_root() {
         let dynamic_node = builder.push_dynamic_expression_node(
             structural_expression,
             TemplateSegmentOrigin::Body,
-            None,
             location,
         );
         let root = builder.push_sequence_node(vec![dynamic_node], location);

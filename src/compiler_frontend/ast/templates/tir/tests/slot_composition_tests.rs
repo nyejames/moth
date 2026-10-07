@@ -786,7 +786,7 @@ fn skipped_node_kinds_do_not_contribute_to_schema() {
     let text_node = builder.push_text_node(text_id, text_len, TemplateSegmentOrigin::Body, None);
     let expression = Expression::string_slice(text_id, None, ValueMode::ImmutableOwned);
     let dynamic_node =
-        builder.push_dynamic_expression_node(expression, TemplateSegmentOrigin::Body, None, None);
+        builder.push_dynamic_expression_node(expression, TemplateSegmentOrigin::Body, None);
     let loop_control_node = builder.push_loop_control_node(TemplateLoopControlKind::Break, None);
 
     let root = builder.push_sequence_node(
@@ -2155,7 +2155,6 @@ fn expand_preserves_non_slot_nodes() {
         TemplateIrNodeKind::DynamicExpression {
             expression: Box::new(expression),
             origin: TemplateSegmentOrigin::Body,
-            reactive_subscription: None,
             site_id,
         },
         None,

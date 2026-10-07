@@ -981,11 +981,6 @@ Ordinary reads, mutations and Route capture evaluation obey the same borrow rule
 Wire binding identity creates no observer, mutation authority or lifetime extension. Builder
 lifecycle roots and final retained-capture lifetime ownership belong to later analysis.
 
-Current extraction still has Reactivity V1 observation events. They are implementation debt
-retired with that source feature by the compiler foundation, not a required part of the stable
-borrow handoff or a model for future Wiring observation. Remove their obsolete fixtures with the
-event owner while preserving coverage of any ordinary access behaviour those fixtures also test.
-
 ## Structured witnesses
 
 Boracle should be able to answer "why" without re-running an unrelated inference.
@@ -1398,13 +1393,6 @@ The durable corpus should grow by semantic family rather than by implementation 
 - nested aggregate
 - collection/map insertion
 - detached remove result investigation
-
-### Reactivity vectors
-
-- subscription does not create an active loan
-- ordinary read still follows access rules
-- mutation creates invalidation facts
-- stable observable root does not transfer prematurely
 
 ## Generated problems
 

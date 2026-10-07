@@ -414,8 +414,7 @@ fn prepare_branch_chain_render_units(
 /// WHAT: reads the loop body node ID from the TIR `Loop` node, prepares the
 ///       body, then builds and installs the aggregate wrapper directly onto the
 ///       TIR `Loop` node. The aggregate wrapper root no longer needs to be
-///       cached on a durable carrier because the TIR node owns it and reactive
-///       metadata walks the TIR root directly.
+///       cached on a durable carrier because the TIR node owns it.
 fn prepare_loop_render_units(
     control_flow_node_id: TemplateIrNodeId,
     body: TemplateIrNodeId,

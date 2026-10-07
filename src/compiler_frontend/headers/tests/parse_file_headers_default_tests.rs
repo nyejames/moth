@@ -62,28 +62,6 @@ fn missing_default_value_after_assign_points_at_member_boundary() {
 
 #[test]
 fn special_member_default_reasons_win_over_missing_default_value() {
-    // Reactive parameters, trait requirements and choice payload fields keep their own
-    // more specific default-value reasons even when no expression follows the authored
-    // `=`, so they never fall through to `MissingDefaultValue`.
-    let reactive = parse_single_file_headers_with_entry(
-        "label |event $String =| -> String:\n;\n",
-        "src/@page.moth",
-        "src/@page.moth",
-    );
-    let reactive_errors =
-        expect_header_error(reactive, "reactive parameter defaults must be rejected");
-    assert!(
-        reactive_errors
-            .diagnostics
-            .iter()
-            .any(|diagnostic| matches!(
-                diagnostic.payload,
-                DiagnosticPayload::InvalidSignatureMember {
-                    reason: InvalidSignatureMemberReason::ReactiveParameterDefaultValue
-                }
-            ))
-    );
-
     let trait_requirement = parse_single_file_headers_with_entry(
         "BAD must:\n    wrong |This, value Int =|\n;\n",
         "src/@page.moth",

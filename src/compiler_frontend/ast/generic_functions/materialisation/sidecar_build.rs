@@ -36,8 +36,7 @@ use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
-    PublicCallParameterSummary, PublicCallReactiveEffect, PublicCallTransferEffect,
-    PublicCallTransferEligibility,
+    PublicCallParameterSummary, PublicCallTransferEffect,
 };
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModuleRootRole,
@@ -788,9 +787,7 @@ pub(crate) fn bootstrap_call_summary_from_signature(
         .parameters
         .iter()
         .map(|parameter| {
-            let access = if parameter.value.reactive_source.is_some() {
-                PublicCallParameterAccess::Reactive
-            } else if parameter.value.value_mode.is_mutable() {
+            let access = if parameter.value.value_mode.is_mutable() {
                 PublicCallParameterAccess::Mutable
             } else {
                 PublicCallParameterAccess::Shared
@@ -798,17 +795,7 @@ pub(crate) fn bootstrap_call_summary_from_signature(
             PublicCallParameterSummary {
                 access,
                 mutation: PublicCallMutationEffect::NoWrite,
-                transfer_eligibility: if access == PublicCallParameterAccess::Reactive {
-                    PublicCallTransferEligibility::Ineligible
-                } else {
-                    PublicCallTransferEligibility::Eligible
-                },
-                transfer_effect: if access == PublicCallParameterAccess::Reactive {
-                    PublicCallTransferEffect::NeverConsumes
-                } else {
-                    PublicCallTransferEffect::MayConsume
-                },
-                reactive_effect: PublicCallReactiveEffect::None,
+                transfer_effect: PublicCallTransferEffect::MayConsume,
             }
         })
         .collect();

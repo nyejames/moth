@@ -37,8 +37,7 @@ fn timestamp_from_iso_string_helper() -> String {
 
     format!(
         r#"function __moth_time_timestamp_from_iso_string(text) {{
-    const value = __moth_string_value(text);
-    const match = value.match(/^(\d{{4}})-(\d{{2}})-(\d{{2}})T(\d{{2}}):(\d{{2}}):(\d{{2}})(\.\d{{1,9}})?(Z|[+-]\d{{2}}:\d{{2}})$/);
+    const match = text.match(/^(\d{{4}})-(\d{{2}})-(\d{{2}})T(\d{{2}}):(\d{{2}}):(\d{{2}})(\.\d{{1,9}})?(Z|[+-]\d{{2}}:\d{{2}})$/);
     if (match === null) {{
         return {invalid_text};
     }}

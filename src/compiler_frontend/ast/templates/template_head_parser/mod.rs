@@ -19,7 +19,6 @@ pub(crate) mod directive_args;
 mod handler_directives;
 mod head_expressions;
 mod head_parser;
-mod reactive_subscriptions;
 
 // -------------------------
 //  Public API

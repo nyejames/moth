@@ -262,14 +262,6 @@ fn parse_type_atom(
 
         TokenTag::OPEN_CURLY => parse_collection_type(token_stream, context, string_table),
 
-        TokenTag::REACTIVE => Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_type_annotation(
-                context,
-                InvalidTypeAnnotationReason::ReactiveAccessNotAllowed,
-                current_source_span(token_stream),
-            ),
-        )),
-
         TokenTag::AS => Err(HeaderParseFailure::Diagnostic(
             CompilerDiagnostic::invalid_type_annotation(
                 context,
@@ -455,21 +447,6 @@ fn parse_collection_type(
             span,
             fixed_capacity: None,
         });
-    }
-
-    if let Some(reactive_span) = (0..inner.len()).find_map(|index| {
-        inner
-            .token_tag_at(index)
-            .filter(|tag| *tag == TokenTag::REACTIVE)
-            .and_then(|_| inner.token_span_at(index))
-    }) {
-        return Err(HeaderParseFailure::Diagnostic(
-            CompilerDiagnostic::invalid_type_annotation(
-                context,
-                InvalidTypeAnnotationReason::ReactiveAccessNotAllowed,
-                Some(reactive_span),
-            ),
-        ));
     }
 
     // Map type syntax `{K = V}` takes precedence over collection capacity splitting.

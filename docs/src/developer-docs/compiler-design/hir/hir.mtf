@@ -62,7 +62,7 @@ Source calls use explicit target classes:
 
 Generated concrete functions add another stable target class once materialised.
 
-HIR stores no dependency aliases as semantic authority and no backend runtime names as identity. Beside HIR, the compiler records **per-function link facts**: call edges, helper and capability needs, reactive features, numeric and cast operation presence, resource uses, project-context provenance and generated-function requests. Statement-level numeric safety belongs to the separate profile-aware `NumericProofs` side table paired with executable HIR.
+HIR stores no dependency aliases as semantic authority and no backend runtime names as identity. Beside HIR, the compiler records **per-function link facts**: call edges, helper and capability needs, numeric and cast operation presence, resource uses, project-context provenance and generated-function requests. Statement-level numeric safety belongs to the separate profile-aware `NumericProofs` side table paired with executable HIR.
 
 Those facts are the linking authority later stages consume.
 
@@ -104,7 +104,7 @@ Those facts are the linking authority later stages consume.
 
 ## Validation boundary
 
-**HIR validation** completes before borrow validation or target validation. It checks definition identities, type links, CFG shape, terminators, local and place references, start-function metadata, constants, reactive metadata and related invariants.
+**HIR validation** completes before borrow validation or target validation. It checks definition identities, type links, CFG shape, terminators, local and place references, start-function metadata, constants and related invariants.
 
 `NaN` and infinity in HIR are internal invariant failures, not casual user values.
 

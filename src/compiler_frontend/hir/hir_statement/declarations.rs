@@ -767,9 +767,6 @@ impl<'a> HirBuilder<'a> {
                 param.value.value_mode.is_mutable(),
                 param.binding_span,
             )?;
-            if let Some(source) = &param.value.reactive_source {
-                self.bind_reactive_source_for_local(local_id, source, param_type, &param_span)?;
-            }
 
             let function = self.function_mut_by_id_or_error(function_id, &param_span)?;
             function.params.push(local_id);
@@ -813,9 +810,6 @@ impl<'a> HirBuilder<'a> {
             variable.value.value_mode.is_mutable(),
             variable.binding_span,
         )?;
-        if let Some(source) = &variable.value.reactive_source {
-            self.bind_reactive_source_for_local(local_id, source, local_type, &source_location)?;
-        }
 
         let value = self.lower_expression_value_to_current_block(&variable.value)?;
 

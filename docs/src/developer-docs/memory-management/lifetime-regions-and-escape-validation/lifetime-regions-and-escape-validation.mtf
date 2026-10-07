@@ -432,7 +432,7 @@ contracts do not imply persistent observation or asynchronous delivery.
 A collector-free path may use explicit builder-owned lifecycle regions. A GC path may represent
 the same already-proven topology with ordinary reachability. Future Wiring observation and event
 lifecycles need their own accepted contract before they contribute retained edges or lifecycle
-roots. Reactivity V1 is not a required lifetime mechanism.
+roots.
 
 ## External lifetime boundaries
 

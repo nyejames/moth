@@ -43,7 +43,7 @@ page_head #= theme_head
     When you build something powerful directly into the semantics of a language rather than bolting it on, you can go so much further without excessive complexity, nasty trade-offs or weird DSLs within the same language.
     
     The source stays small, statically typed and opinionated, while the compiler and build system take on more of the work. 
-    Borrow validation, compile-time templates, reactive dependencies and project builders all feed through one toolchain.
+    Borrow validation, compile-time templates, accepted Wiring contracts and project builders all feed through one toolchain.
 
     Each piece of this is still modular, the language semantics stay agnostic to the platform its running on.
 
@@ -100,4 +100,3 @@ export:
         doc_pager_previous,
         doc_pager_next
 ;
-

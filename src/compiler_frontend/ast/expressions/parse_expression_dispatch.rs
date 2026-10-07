@@ -52,7 +52,7 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, DiagnosticToken, InvalidBuiltinCallReason,
     InvalidCastReason, InvalidControlFlowStatementReason, InvalidExpressionReason,
-    InvalidFallibleHandlingReason, InvalidTemplateStructureReason, TypeMismatchContext,
+    InvalidFallibleHandlingReason, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::declaration_syntax::type_syntax::builtin_scalar_type_name_for_tag;
@@ -795,14 +795,6 @@ pub(super) fn dispatch_expression_token(
 
             Ok(ExpressionTokenStep::Advance)
         }
-        TokenTag::REACTIVE if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS) => {
-            Err(CompilerDiagnostic::invalid_template_structure(
-                InvalidTemplateStructureReason::ReactiveSubscriptionOutsideTemplate,
-                Some(token_stream.current_span()),
-            )
-            .into())
-        }
-
         TokenTag::CAST | TokenTag::CAST_BANG => parse_cast_expression(
             token,
             token_stream,

@@ -246,9 +246,9 @@ Route captures evaluate when the route forms. Their reads, effects and aliases p
 ordinary access facts. Lifetime analysis owns any retained-edge and outlives constraints. Borrow
 validation does not turn a capture into an implicit copy or an independent allocation.
 
-Automatic observation, subscriptions and event delivery require their own later accepted
-contracts. Reactivity V1 invalidation facts are not part of this stable handoff. Builder-owned
-lifecycle roots remain distinct inputs to lifetime topology.
+Automatic observation, subscriptions and event delivery are not part of this handoff. Any future
+observation or event lifecycle needs a separate accepted contract. Builder-owned lifecycle roots
+remain distinct inputs to lifetime topology.
 
 ## Handoff to lifetime validation
 

@@ -104,19 +104,15 @@ fn copy_tir_node_with_active_slot_plan(
                 },
                 span,
             ));
-            if let Some(subscription) = store.node_reactive_subscription(source_node_id)?.cloned() {
-                store.set_node_reactive_subscription(node_id, subscription)?;
-            }
             Ok(node_id)
         }
 
         TemplateIrNodeKind::DynamicExpression {
             expression,
             origin,
-            reactive_subscription,
             site_id,
         } => {
-            copy_state.record_dynamic_expression(reactive_subscription.is_some());
+            copy_state.record_dynamic_expression();
 
             let copied_site_id = remap_expression_site_id(store);
             identity_remap
@@ -126,7 +122,6 @@ fn copy_tir_node_with_active_slot_plan(
                 TemplateIrNodeKind::DynamicExpression {
                     expression,
                     origin,
-                    reactive_subscription,
                     site_id: copied_site_id,
                 },
                 span,

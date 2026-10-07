@@ -45,7 +45,7 @@ The builder decides which packages exist. Unsupported packages are rejected with
 
 ### Binding-backed package constraints
 
-Binding-backed packages expose free functions, constants and opaque types. They don't expose source-style receiver methods. Use a source-backed wrapper type for method-style APIs. External calls are positional-only because named arguments, default parameters and reactive parameters are source-function features.
+Binding-backed packages expose free functions, constants and opaque types. They don't expose source-style receiver methods. Use a source-backed wrapper type for method-style APIs. External calls are positional-only because named arguments and default parameters are source-function features.
 
 The HTML-Wasm mode has a stricter backend surface. A reachable JS-backed package needs a Wasm lowering before that backend can use it.
 

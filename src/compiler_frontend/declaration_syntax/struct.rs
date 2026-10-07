@@ -22,7 +22,6 @@ use crate::compiler_frontend::declaration_syntax::signature_members::{
     SignatureMemberContext, SignatureMemberSyntax,
 };
 use crate::compiler_frontend::headers::HeaderParseFailure;
-use crate::compiler_frontend::source::ExtendedSpanBuilder;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 /// Two-lane result for struct shell parsing.
@@ -44,7 +43,6 @@ pub fn parse_struct_shell(
     warnings: &mut Vec<CompilerDiagnostic>,
     owner_path: PathId,
     path_fork: &mut PathInternerFork,
-    span_builder: &mut ExtendedSpanBuilder,
 ) -> StructShellResult {
     parse_record_body(
         token_stream,
@@ -53,7 +51,6 @@ pub fn parse_struct_shell(
         SignatureMemberContext::StructField,
         owner_path,
         path_fork,
-        span_builder,
     )
 }
 

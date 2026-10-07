@@ -766,7 +766,7 @@ version <span class='moth-code-operator'>#</span><span class='moth-code-type'>St
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p><strong>Accepted queued design.</strong> <code>$</code> is the general directive marker. Template directives are implemented. General non-template directives, shared directive-call integration, <code>$config</code>, <code>$project</code>, <code>$html_builder</code> and <code>$page</code> are accepted design queued for implementation and are not yet available in the Alpha compiler. Current projects still use grouped <code>project</code>/<code>html</code> records, <code>#Config of T</code> contracts and reserved <code>page_*</code> metadata. See <a href="../progress">Progress</a> for current support.</p><p><code>$</code> does not mean harmless metadata. Compiler-owned semantic directives may impose real language or structural contracts. Builder extensions remain constrained: they may supply template directives and consume metadata, configuration and root-purpose facts, but they cannot rewrite functions, change nominal identity, mutate HIR, alter visibility or weaken borrow and lifetime rules.</p><p>This page owns general grammar, ownership, context, arguments, attachment and diagnostic distinctions. Exact <code>$project</code>, <code>$config</code>, <code>$html_builder</code> and <code>$page</code> signatures live in the project-structure references linked below.</p><h3 id="marker-and-non-goals">Marker and non-goals</h3><p>In the accepted directive design, <code>$</code> introduces a registered compiler or builder directive, not a binding mode, ordinary expression or source-defined callable. The queued Wiring replacement uses no <code>$</code> marker. Current reactive bindings remain an explicitly superseded Alpha surface until their removal. There is no accepted <code>with</code> attribute keyword.</p><p>Users and source packages cannot define, alias, import or override semantic directives. Frontend names are authoritative. Duplicate registrations and name conflicts are rejected rather than resolved by last registration.</p><p>Directive names do not reserve the corresponding ordinary identifiers. <code>$project</code>, <code>$config</code> and <code>$html_builder</code> do not reserve <code>project</code>, <code>config</code>, <code>Config</code> or <code>html_builder</code> outside directive syntax. File semantics for <code>config.moth</code> and the <code>@project</code> dependency root remain separately reserved.</p><p>This is not a generic attribute or macro framework. It does not guarantee that every future directive can target every statement.</p><h3 id="ownership-and-context">Ownership and context</h3><p>Config-only is a placement and processing-phase restriction. It is not a second registry and is not synonymous with compiler ownership.</p><table style="">
+    <p><strong>Accepted queued design.</strong> <code>$</code> is the general directive marker. Template directives are implemented. General non-template directives, shared directive-call integration, <code>$config</code>, <code>$project</code>, <code>$html_builder</code> and <code>$page</code> are accepted design queued for implementation and are not yet available in the Alpha compiler. Current projects still use grouped <code>project</code>/<code>html</code> records, <code>#Config of T</code> contracts and reserved <code>page_*</code> metadata. See <a href="../progress">Progress</a> for current support.</p><p><code>$</code> does not mean harmless metadata. Compiler-owned semantic directives may impose real language or structural contracts. Builder extensions remain constrained: they may supply template directives and consume metadata, configuration and root-purpose facts, but they cannot rewrite functions, change nominal identity, mutate HIR, alter visibility or weaken borrow and lifetime rules.</p><p>This page owns general grammar, ownership, context, arguments, attachment and diagnostic distinctions. Exact <code>$project</code>, <code>$config</code>, <code>$html_builder</code> and <code>$page</code> signatures live in the project-structure references linked below.</p><h3 id="marker-and-non-goals">Marker and non-goals</h3><p>In the accepted directive design, <code>$</code> introduces a registered compiler or builder directive, not a binding mode, ordinary expression or source-defined callable. The former <code>$Type</code> and <code>$=</code> binding spellings are not part of the current binding grammar. Wiring uses parameter contracts and no <code>$</code> marker. There is no accepted <code>with</code> attribute keyword.</p><p>Users and source packages cannot define, alias, import or override semantic directives. Frontend names are authoritative. Duplicate registrations and name conflicts are rejected rather than resolved by last registration.</p><p>Directive names do not reserve the corresponding ordinary identifiers. <code>$project</code>, <code>$config</code> and <code>$html_builder</code> do not reserve <code>project</code>, <code>config</code>, <code>Config</code> or <code>html_builder</code> outside directive syntax. File semantics for <code>config.moth</code> and the <code>@project</code> dependency root remain separately reserved.</p><p>This is not a generic attribute or macro framework. It does not guarantee that every future directive can target every statement.</p><h3 id="ownership-and-context">Ownership and context</h3><p>Config-only is a placement and processing-phase restriction. It is not a second registry and is not synonymous with compiler ownership.</p><table style="">
             
             <tr style="">
                 
@@ -1110,34 +1110,6 @@ function __moth_collection_remove(collection, index) {
 function __moth_collection_length(collection) {
     const items = __moth_collection_items(collection);
     return items.length;
-}
-
-function __moth_string_like(value) {
-if (__moth_is_ref(value)) {
-return __moth_string_like(__moth_read(value));
-}
-return typeof value === "string" || (value !== null && typeof value === "object" && value.__moth_template === true && typeof value.snapshot === "function");
-}
-
-function __moth_string_value(value) {
-if (value === undefined || value === null) {
-return "";
-}
-if (__moth_is_ref(value)) {
-return __moth_string_value(__moth_read(value));
-}
-if (value.__moth_template === true && typeof value.snapshot === "function") {
-return value.snapshot();
-}
-return value;
-}
-
-function __moth_string_equal(left, right) {
-return __moth_string_value(left) === __moth_string_value(right);
-}
-
-function __moth_map_key(value) {
-return __moth_string_like(value) ? __moth_string_value(value) : value;
 }
 
 function __moth_value_to_string(value) {

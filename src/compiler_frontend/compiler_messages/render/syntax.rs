@@ -172,10 +172,6 @@ pub(crate) fn invalid_type_annotation_message(
         InvalidTypeAnnotationReason::UnexpectedColon => {
             "Unexpected ':' after declaration name. Declarations use `name Type = value`; immediate `name:` headers in executable bodies are reserved for declared regions.".to_string()
         }
-        InvalidTypeAnnotationReason::ReactiveAccessNotAllowed => {
-            "`$Type` is reactive access syntax, not a standalone type annotation. Use it only on reactive declarations such as `name $Type = value` or function parameters such as `param $Type`."
-                .to_string()
-        }
         InvalidTypeAnnotationReason::InvalidTokenAfterName { token } => {
             format!(
                 "Invalid token {} after declaration name. Expected a type or assignment operator.",
@@ -275,9 +271,6 @@ pub(crate) fn common_syntax_mistake_message(
         CommonSyntaxMistakeReason::InvalidMutableBindingSpacing => {
             "Invalid mutable binding syntax. Use `name ~= value` for inferred mutable bindings or `name ~Type = value` for explicit mutable types. For collection types, attach `~` to the first token of the type: `values ~{String} = ...`.".to_string()
         }
-        CommonSyntaxMistakeReason::InvalidReactiveBindingSpacing => {
-            "Invalid reactive binding syntax. Use `name $= value` for inferred reactive bindings or `name $Type = value` for explicit reactive types. For collection and option types, attach `$` to the first token of the type: `names ${String} = ...` or `value $String? = ...`.".to_string()
-        }
         CommonSyntaxMistakeReason::InvalidSymbolicSpacing { error } => {
             symbolic_spacing_message(*error)
         }
@@ -368,9 +361,6 @@ pub(crate) fn common_syntax_mistake_suggestion(reason: &CommonSyntaxMistakeReaso
         }
         CommonSyntaxMistakeReason::InvalidMutableBindingSpacing => {
             "Remove the space after `~` so it is immediately followed by `=` or the type annotation".to_owned()
-        }
-        CommonSyntaxMistakeReason::InvalidReactiveBindingSpacing => {
-            "Remove the space after `$` so it is immediately followed by `=` or the type annotation".to_owned()
         }
         CommonSyntaxMistakeReason::InvalidSymbolicSpacing { error } => {
             symbolic_spacing_suggestion(error.construct)

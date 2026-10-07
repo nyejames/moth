@@ -260,13 +260,15 @@ fn moth_highlighter_wraps_literals_and_keeps_non_keywords_plain() {
 }
 
 #[test]
-fn moth_compound_operators_use_one_span() {
+fn moth_multi_character_operators_and_binding_markers_use_one_span() {
     let highlighted = highlight_code_html(
-        "a //= b -> c :: d .. e => f << g >> h <= i >= j // k",
+        "a //= b += c -= d *= e /= f %= g ^= h #= i ~= j -> k :: l .. m => n << o >> p <= q >= r // s",
         CodeLanguage::Moth,
     );
 
-    for operator in ["//=", "::", "..", "//"] {
+    for operator in [
+        "//=", "+=", "-=", "*=", "/=", "%=", "^=", "#=", "~=", "::", "..", "//",
+    ] {
         assert!(
             highlighted.contains(&format!(
                 "<span class='moth-code-operator'>{operator}</span>"
@@ -295,8 +297,8 @@ fn moth_compound_operators_use_one_span() {
         highlighted
             .matches("<span class='moth-code-operator'>")
             .count(),
-        10,
-        "expected exactly one span per compound operator in: {highlighted}"
+        18,
+        "expected exactly one span per multi-character token in: {highlighted}"
     );
 }
 
@@ -676,7 +678,7 @@ fn moth_highlighter_keeps_expression_path_followers_plain() {
 }
 
 #[test]
-fn moth_highlighter_keeps_non_directive_dollar_forms_as_operators() {
+fn moth_highlighter_keeps_non_directive_dollar_prefix_as_operator() {
     let type_dollar = highlight_code_html("$Int", CodeLanguage::Moth);
     assert!(
         type_dollar.contains("<span class='moth-code-operator'>$</span>"),
@@ -685,12 +687,6 @@ fn moth_highlighter_keeps_non_directive_dollar_forms_as_operators() {
     assert!(
         type_dollar.contains("<span class='moth-code-type'>Int</span>"),
         "Int after $ must keep its type role, got: {type_dollar}"
-    );
-
-    let assign = highlight_code_html("$=", CodeLanguage::Moth);
-    assert!(
-        assign.contains("<span class='moth-code-operator'>$=</span>"),
-        "$= must stay one operator span, got: {assign}"
     );
 }
 
@@ -767,40 +763,6 @@ fn rust_types_no_longer_inherit_typescript_words() {
 
     let typescript = highlight_code_html("let value: string = name", CodeLanguage::TypeScript);
     assert!(typescript.contains("<span class='moth-code-type'>string</span>"));
-}
-
-#[test]
-fn moth_compound_assignment_forms_use_one_span() {
-    let highlighted = highlight_code_html(
-        "a += b -= c *= d /= e %= f ^= g #= h ~= i $= j",
-        CodeLanguage::Moth,
-    );
-
-    for operator in ["+=", "-=", "*=", "/=", "%=", "^=", "#=", "~=", "$="] {
-        assert!(
-            highlighted.contains(&format!(
-                "<span class='moth-code-operator'>{operator}</span>"
-            )),
-            "expected one operator span for {operator:?} in: {highlighted}"
-        );
-    }
-
-    assert_eq!(
-        highlighted
-            .matches("<span class='moth-code-operator'>")
-            .count(),
-        9,
-        "expected exactly one span per compound assignment in: {highlighted}"
-    );
-}
-
-#[test]
-fn moth_reactive_marker_is_not_a_directive() {
-    let highlighted = highlight_code_html("$(count)", CodeLanguage::Moth);
-
-    assert!(highlighted.contains("<span class='moth-code-operator'>$</span>"));
-    assert!(highlighted.contains("<span class='moth-code-delimiter'>(</span>"));
-    assert!(!highlighted.contains("moth-code-directive"));
 }
 
 #[test]

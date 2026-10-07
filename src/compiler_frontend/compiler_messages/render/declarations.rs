@@ -42,12 +42,6 @@ pub(crate) fn invalid_signature_member_message(reason: InvalidSignatureMemberRea
         InvalidSignatureMemberReason::TraitRequirementDefaultValue => {
             "Trait requirements cannot declare default parameter values.".to_string()
         }
-        InvalidSignatureMemberReason::ReactiveAccessNotAllowed => {
-            "`$Type` parameters are only valid in function signatures. Struct fields, choice payloads, and trait requirements use ordinary type annotations.".to_string()
-        }
-        InvalidSignatureMemberReason::ReactiveParameterDefaultValue => {
-            "Reactive parameters require an existing reactive source argument and cannot have default values.".to_string()
-        }
         InvalidSignatureMemberReason::MissingDefaultValue => {
             "Expected a default value after '='.".to_string()
         }

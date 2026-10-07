@@ -6,7 +6,7 @@
 
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::template::{
-    ReactiveSubscription, SlotKey, Style, TemplateSegmentOrigin, TemplateType,
+    SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateElseMarker, TemplateLoopControlKind, TemplateLoopHeader,
@@ -32,32 +32,6 @@ impl<'store> TemplateIrBuilder<'store> {
         Self { store }
     }
 
-    pub(crate) fn push_text_node_with_subscription(
-        &mut self,
-        text: StringId,
-        byte_len: usize,
-        origin: TemplateSegmentOrigin,
-        reactive_subscription: Option<ReactiveSubscription>,
-        span: Option<SourceSpan>,
-    ) -> TemplateIrNodeId {
-        let node_id = self.store.push_node(TemplateIrNode::new(
-            TemplateIrNodeKind::Text {
-                text,
-                byte_len,
-                origin,
-            },
-            span,
-        ));
-
-        if let Some(subscription) = reactive_subscription {
-            self.store
-                .set_node_reactive_subscription(node_id, subscription)
-                .expect("a just-pushed node must accept a reactive subscription");
-        }
-
-        node_id
-    }
-
     pub(crate) fn push_text_node(
         &mut self,
         text: StringId,
@@ -65,7 +39,14 @@ impl<'store> TemplateIrBuilder<'store> {
         origin: TemplateSegmentOrigin,
         span: Option<SourceSpan>,
     ) -> TemplateIrNodeId {
-        self.push_text_node_with_subscription(text, byte_len, origin, None, span)
+        self.store.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::Text {
+                text,
+                byte_len,
+                origin,
+            },
+            span,
+        ))
     }
 
     pub(crate) fn push_sequence_node(
@@ -111,7 +92,6 @@ impl<'store> TemplateIrBuilder<'store> {
         &mut self,
         expression: Expression,
         origin: TemplateSegmentOrigin,
-        reactive_subscription: Option<ReactiveSubscription>,
         span: Option<SourceSpan>,
     ) -> TemplateIrNodeId {
         let site_id = self.store.next_expression_site_id();
@@ -119,7 +99,6 @@ impl<'store> TemplateIrBuilder<'store> {
             TemplateIrNodeKind::DynamicExpression {
                 expression: Box::new(expression),
                 origin,
-                reactive_subscription,
                 site_id,
             },
             span,

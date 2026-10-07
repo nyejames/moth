@@ -171,8 +171,7 @@ impl<'a> HirValidator<'a> {
     }
 
     /// WHAT: recursively validates an expression tree, its side-table mappings,
-    ///       type/region invariants, reactive template constraints, and all
-    ///       expression-kind-specific invariants.
+    ///       type/region invariants and expression-kind-specific invariants.
     /// WHY: every backend and later analysis pass depends on well-formed HIR expressions.
     pub(super) fn validate_expression(
         &self,
@@ -214,34 +213,6 @@ impl<'a> HirValidator<'a> {
 
         self.require_type_id(expression.ty, anchor)?;
         self.require_region_id(expression.region, anchor)?;
-
-        if let Some(template) = self
-            .module
-            .side_table
-            .reactive_template_for_value(expression.id)
-        {
-            if expression.ty != self.type_environment.builtins().string {
-                return Err(self.error_with_hir(
-                    format!(
-                        "Reactive template metadata {:?} is attached to non-String value {:?}",
-                        template.id, expression.id
-                    ),
-                    anchor,
-                ));
-            }
-
-            if expression.value_kind == ValueKind::Const
-                && template.has_runtime_reactive_dependency()
-            {
-                return Err(self.error_with_hir(
-                    format!(
-                        "Reactive template metadata {:?} with runtime dependencies is attached to a const HIR value",
-                        template.id
-                    ),
-                    anchor,
-                ));
-            }
-        }
 
         match &expression.kind {
             HirExpressionKind::Number(value) => {

@@ -734,7 +734,6 @@ fn materialize_public_const_template_string<M: FoldedValueMaterialiser>(
         TemplateIrNodeKind::DynamicExpression {
             expression: Box::new(expression),
             origin: TemplateSegmentOrigin::Head,
-            reactive_subscription: None,
             site_id,
         },
         span,

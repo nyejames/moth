@@ -27,7 +27,6 @@ mod hir_local_lowering_tests;
 mod hir_loop_lowering_tests;
 mod hir_match_lowering_tests;
 mod hir_module_lowering_tests;
-mod hir_reactivity_tests;
 mod hir_result_lowering_tests;
 mod hir_validation_tests;
 mod loop_lowering_tests;

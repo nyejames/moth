@@ -33,3 +33,27 @@ Test case 1: [left, right] in .mtf prose (FAILS).
 Error should be more helpful and describe that undeclared variables are being used here.
 
 Currently reports a generic "Compile-time evaluation error --> test_brackets.mtf:1:1" error.
+
+## No diagnostic for using a keyword for a variable name
+
+```
+taxicab |left Cell, right Cell| -> Int:
+    ax, ay = to_coords(left)
+    bx, by = to_coords(right)
+    dx = if ax > bx then ax - bx else bx - ax
+    dy = if ay > by then ay - by else by - ay
+    return dx + dy
+;
+```
+
+Error given:
+Unary negation must be attached to its operand with no intervening whitespace.
+
+Hint: Suggestion: Write unary negation as `-value` or `-1`
+
+--> test.moth:247:42
+247 |     dy = if ay > by then ay - by else by - ay
+    |                                          ^
+
+but 
+

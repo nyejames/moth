@@ -42,8 +42,8 @@ pub(crate) struct PublicParameterTypeSlot {
     pub(crate) type_identity: CanonicalTypeIdentity,
     /// Source-level access selected by the resolved signature.
     ///
-    /// WHAT: retains shared, mutable or reactive parameter access before HIR and borrow
-    /// validation. This remains distinct from mutation, optional transfer and reactive effects.
+    /// WHAT: retains shared or mutable parameter access before HIR and borrow validation. This
+    /// remains distinct from mutation and optional transfer.
     /// WHY: generic declarations have no base concrete summary, while every consumer still needs
     /// the declaration-stable access contract.
     pub(crate) access: PublicCallParameterAccess,

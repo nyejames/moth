@@ -6,7 +6,7 @@
 //! [`ConcreteCallSummaryRecord`] in the completed [`LocalPublicInterface`].
 //!
 //! WHY: AST owns the public signature and declared parameter access while borrow validation
-//! owns mutation, transfer, reactive and return-alias effects. This is the sole production join
+//! owns mutation, transfer and return-alias effects. This is the sole production join
 //! point from the pre-HIR draft to the completed phase. Keeping finalization in its own module
 //! separates the post-borrow-validation step from the pre-HIR projection modules.
 
@@ -35,7 +35,7 @@ impl PublicInterfaceDraft {
     /// [`PublicCallSummary`] as one [`ConcreteCallSummaryRecord`] in the completed phase.
     /// Generic declarations never enter that table.
     /// WHY: AST owns the public signature and declared parameter access while borrow validation
-    /// owns mutation, transfer, reactive and return-alias effects. This is the sole production
+    /// owns mutation, transfer and return-alias effects. This is the sole production
     /// join point, so private functions and implicit start remain ordinary local summaries and
     /// never become consumer-visible public records. This consumes the pre-HIR draft and returns
     /// the completed [`LocalPublicInterface`]; the draft cannot be finalized twice.

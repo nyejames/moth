@@ -125,7 +125,7 @@ page_head #= language_theme_head
     [doc_pager:
         [$insert("previous_path"):../generics/]
         [$insert("previous_title"):Generics]
-        [$insert("next_path"):../reactivity/]
-        [$insert("next_title"):Reactivity]
+        [$insert("next_path"):../wiring/]
+        [$insert("next_title"):Wiring]
     ]
 ]

@@ -51,6 +51,8 @@ use crate::compiler_frontend::hir::ids::{LocalId, RegionId};
 use crate::compiler_frontend::hir::module::HirChoice;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+#[cfg(feature = "benchmark_counters")]
+use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::hir_log;
@@ -90,8 +92,25 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         expr: &Expression,
     ) -> Result<LoweredExpression, CompilerError> {
+        #[cfg(feature = "benchmark_counters")]
+        increment_frontend_counter(FrontendCounter::CensusHirLowerExpressionEntries);
         self.log_expression_input(expr);
         self.accumulate_function_provenance(expr);
+
+        // Only the six immediate scalar payload-copy arms below, not TypeId,
+        // span, remap, rewrite or constant-store copy traffic.
+        #[cfg(feature = "benchmark_counters")]
+        if matches!(
+            &expr.kind,
+            ExpressionKind::Uint(_)
+                | ExpressionKind::Int(_)
+                | ExpressionKind::Float(_)
+                | ExpressionKind::FixedScalar(_)
+                | ExpressionKind::Bool(_)
+                | ExpressionKind::Char(_)
+        ) {
+            increment_frontend_counter(FrontendCounter::CensusHirScalarPayloadCopiesSampled);
+        }
 
         let mut lowered = match &expr.kind {
             ExpressionKind::ChoiceConstruct {
@@ -166,11 +185,17 @@ impl<'a> HirBuilder<'a> {
                 expr.type_id,
                 HirExpressionKind::Int(*value),
             ),
-            ExpressionKind::Number(value) => self.lower_literal_expression(
-                &expr.span,
-                expr.type_id,
-                HirExpressionKind::Number(value.clone()),
-            ),
+            ExpressionKind::Number(value) => {
+                // Sampled NumberValue payload clone at this dispatcher, not a
+                // comprehensive ExpressionKind/constant-materialisation clone census.
+                #[cfg(feature = "benchmark_counters")]
+                increment_frontend_counter(FrontendCounter::CensusHirNumberPayloadClonesSampled);
+                self.lower_literal_expression(
+                    &expr.span,
+                    expr.type_id,
+                    HirExpressionKind::Number(value.clone()),
+                )
+            }
 
             ExpressionKind::Float(value) => self.lower_literal_expression(
                 &expr.span,
@@ -202,13 +227,17 @@ impl<'a> HirBuilder<'a> {
                 HirExpressionKind::StringLiteral(self.string_table.resolve(*value).to_owned()),
             ),
 
-            ExpressionKind::StructuralString { pieces } => self.lower_literal_expression(
-                &expr.span,
-                expr.type_id,
-                HirExpressionKind::StructuralString {
-                    pieces: pieces.clone(),
-                },
-            ),
+            ExpressionKind::StructuralString { pieces } => {
+                #[cfg(feature = "benchmark_counters")]
+                increment_frontend_counter(FrontendCounter::CensusHirStructuralPiecesClonesSampled);
+                self.lower_literal_expression(
+                    &expr.span,
+                    expr.type_id,
+                    HirExpressionKind::StructuralString {
+                        pieces: pieces.clone(),
+                    },
+                )
+            }
             ExpressionKind::Cast(cast) => {
                 self.lower_cast_expression(cast, expr.type_id, &expr.span)
             }
@@ -677,7 +706,6 @@ impl<'a> HirBuilder<'a> {
         lowered.value.span = expr.span;
         self.side_table
             .map_value(expr.span, lowered.value.id, lowered.value.span);
-        self.bind_reactive_metadata_for_expression(expr, &lowered.value)?;
         self.log_expression_output(expr, &lowered.value);
         Ok(lowered)
     }

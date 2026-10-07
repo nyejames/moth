@@ -496,7 +496,7 @@ return_compiler_error<span class='moth-code-operator'>!</span><span class='moth-
         </tr><tr style="">
              <td style=""><p> User-visible language or project behaviour</p></td> <td style=""><ul><li><code>Integration cases</code></li><li><code>Successful backend intent</code></li><li><code>Focused integration selection and inventory</code></li></ul></td>
         </tr><tr style="">
-             <td style=""><p> Runtime output or reactivity behaviour</p></td> <td style=""><ul><li><code>Runtime output assertions</code></li><li><code>Backend matrices and artifact assertions</code> when structure also matters</li></ul></td>
+             <td style=""><p> Runtime output</p></td> <td style=""><ul><li><code>Runtime output assertions</code></li><li><code>Backend matrices and artifact assertions</code> when structure also matters</li></ul></td>
         </tr><tr style="">
              <td style=""><p> Threads, shared state, timing or repeated execution</p></td> <td style=""><p> <code>Concurrency and repetition</code></p></td>
         </tr><tr style="">
@@ -1152,34 +1152,6 @@ function __moth_collection_remove(collection, index) {
 function __moth_collection_length(collection) {
     const items = __moth_collection_items(collection);
     return items.length;
-}
-
-function __moth_string_like(value) {
-if (__moth_is_ref(value)) {
-return __moth_string_like(__moth_read(value));
-}
-return typeof value === "string" || (value !== null && typeof value === "object" && value.__moth_template === true && typeof value.snapshot === "function");
-}
-
-function __moth_string_value(value) {
-if (value === undefined || value === null) {
-return "";
-}
-if (__moth_is_ref(value)) {
-return __moth_string_value(__moth_read(value));
-}
-if (value.__moth_template === true && typeof value.snapshot === "function") {
-return value.snapshot();
-}
-return value;
-}
-
-function __moth_string_equal(left, right) {
-return __moth_string_value(left) === __moth_string_value(right);
-}
-
-function __moth_map_key(value) {
-return __moth_string_like(value) ? __moth_string_value(value) : value;
 }
 
 function __moth_value_to_string(value) {

@@ -243,7 +243,6 @@ fn const_template_fold_keeps_resource_as_text_run_boundary() -> Result<(), Templ
             structural_expression,
             TemplateSegmentOrigin::Body,
             None,
-            None,
         );
         let after_node =
             builder.push_text_node(after, "after".len(), TemplateSegmentOrigin::Body, None);
@@ -958,7 +957,6 @@ fn final_view_fold_loop_binding_provenance_reaches_exact_result() {
             ),
             TemplateSegmentOrigin::Body,
             None,
-            None,
         );
         let range_provenance = SyntheticInterfaceProvenance::single(member.clone());
         let header = TemplateLoopHeader::Range {
@@ -1442,7 +1440,6 @@ fn final_view_fold_float_interpolation_uses_the_fold_context_precision() {
             float_expression(carrier),
             TemplateSegmentOrigin::Body,
             None,
-            None,
         );
         builder.finish_template(
             float_node,
@@ -1474,7 +1471,6 @@ fn final_view_fold_float_interpolation_uses_the_fold_context_precision() {
         let float_node = builder.push_dynamic_expression_node(
             float_expression(carrier),
             TemplateSegmentOrigin::Body,
-            None,
             None,
         );
         builder.finish_template(
@@ -1701,8 +1697,6 @@ fn final_view_runtime_slot_application_requires_handoff() {
         let handoff = OwnedRuntimeSlotApplicationHandoff {
             wrapper: OwnedRuntimeTemplateNode::Text {
                 text: OwnedFoldedString::Text("<shell>".to_owned()),
-                reactive_subscription: None,
-                span: None,
             },
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
@@ -1710,12 +1704,8 @@ fn final_view_runtime_slot_application_requires_handoff() {
         };
         let expression =
             Expression::runtime_slot_application_handoff(handoff, ValueMode::ImmutableOwned);
-        let dynamic_node = builder.push_dynamic_expression_node(
-            expression,
-            TemplateSegmentOrigin::Body,
-            None,
-            None,
-        );
+        let dynamic_node =
+            builder.push_dynamic_expression_node(expression, TemplateSegmentOrigin::Body, None);
 
         builder.finish_template(
             dynamic_node,

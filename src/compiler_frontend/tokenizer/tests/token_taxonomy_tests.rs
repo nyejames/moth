@@ -5,6 +5,7 @@ use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use moth_lexical::numeric::grammar::NumericLiteralKind;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 fn canonical_tokens_for_all_tags() -> Arc<SourceTokens> {
@@ -60,13 +61,29 @@ fn canonical_token_for_tag(tokens: &SourceTokens, tag: TokenTag) -> TokenRef<'_>
         .expect("canonical taxonomy token should resolve")
 }
 
+fn first_unknown_raw_tag() -> u16 {
+    TokenTag::all()
+        .iter()
+        .map(|tag| tag.raw())
+        .max()
+        .expect("token taxonomy should not be empty")
+        .checked_add(1)
+        .expect("token taxonomy should leave room for an unknown tag")
+}
+
 #[test]
 fn schema_has_all_explicit_tags_once() {
     let tags = TokenTag::all();
     let tokens = canonical_tokens_for_all_tags();
+    let mut raw_tags = HashSet::with_capacity(tags.len());
 
     for (index, tag) in tags.iter().enumerate() {
-        assert_eq!(tag.raw(), (index + 1) as u16);
+        assert_ne!(tag.raw(), 0, "explicit token tags must be nonzero");
+        assert!(
+            raw_tags.insert(tag.raw()),
+            "explicit token tag {} is assigned more than once",
+            tag.raw()
+        );
         let schema = tag.schema().expect("schema row");
         assert_eq!(schema.tag(), *tag);
         assert_eq!(schema.descriptor().text(), tag.descriptor().text());
@@ -110,6 +127,10 @@ fn schema_has_all_explicit_tags_once() {
             }
         }
     }
+    assert!(
+        !raw_tags.contains(&5),
+        "retired token tag code 5 must not be reused"
+    );
     assert_eq!(
         tags.iter()
             .filter(|tag| !matches!(**tag, TokenTag::NUMERIC_LITERAL | TokenTag::DOUBLE_COLON))
@@ -117,7 +138,7 @@ fn schema_has_all_explicit_tags_once() {
             .count(),
         0
     );
-    let first_unknown_raw = tags.len() as u16 + 1;
+    let first_unknown_raw = first_unknown_raw_tag();
     assert_eq!(
         TokenTag::from_raw_unchecked(first_unknown_raw)
             .descriptor()
@@ -129,7 +150,14 @@ fn schema_has_all_explicit_tags_once() {
 #[test]
 fn unknown_tags_and_reserved_flags_are_rejected() {
     assert_eq!(TokenTag::from_raw(0), None);
-    let first_unknown_raw = TokenTag::all().len() as u16 + 1;
+    assert_eq!(TokenTag::from_raw(5), None, "retired token tag code 5");
+    assert_eq!(
+        TokenShape::from_raw_parts(5, 0, 0),
+        None,
+        "retired token tag code 5 must not decode"
+    );
+
+    let first_unknown_raw = first_unknown_raw_tag();
     assert_eq!(TokenTag::from_raw(first_unknown_raw), None);
     assert_eq!(TokenShape::from_raw_parts(first_unknown_raw, 0, 0), None);
 

@@ -25,9 +25,7 @@ mod store_support;
 
 use crate::compiler_frontend::arena::capacity::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::template::{
-    ReactiveSubscription, SlotPlaceholder, TemplateType,
-};
+use crate::compiler_frontend::ast::templates::template::{SlotPlaceholder, TemplateType};
 use crate::compiler_frontend::ast::templates::template_control_flow::TemplateLoopHeader;
 use crate::compiler_frontend::ast::templates::tir::ids::{
     ChildTemplateOccurrenceId, ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId,
@@ -96,11 +94,6 @@ pub(crate) struct TemplateIrStore {
     expression_overlays: Vec<TirExpressionOverlay>,
     slot_resolution_overlays: Vec<TirSlotResolutionOverlay>,
     wrapper_context_overlays: Vec<TirWrapperContextOverlay>,
-
-    /// Reactive `$(source)` subscription metadata attached to text nodes.
-    /// Indexed by `TemplateIrNodeId`; `None` means the node carries no
-    /// reactive dependency.
-    node_reactive_subscriptions: Vec<Option<ReactiveSubscription>>,
 }
 
 impl TemplateIrStore {
@@ -116,7 +109,6 @@ impl TemplateIrStore {
             expression_overlays: Vec::new(),
             slot_resolution_overlays: Vec::new(),
             wrapper_context_overlays: Vec::new(),
-            node_reactive_subscriptions: Vec::new(),
         }
     }
 
@@ -139,7 +131,6 @@ impl TemplateIrStore {
             expression_overlays: Vec::with_capacity(side_capacity),
             slot_resolution_overlays: Vec::with_capacity(side_capacity),
             wrapper_context_overlays: Vec::with_capacity(side_capacity),
-            node_reactive_subscriptions: Vec::with_capacity(node_capacity),
         }
     }
 
@@ -363,57 +354,7 @@ impl TemplateIrStore {
     pub(crate) fn push_node(&mut self, node: TemplateIrNode) -> TemplateIrNodeId {
         let id = TemplateIrNodeId::new(self.nodes.len());
         self.nodes.push(node);
-        self.node_reactive_subscriptions.push(None);
         id
-    }
-
-    /// Reads aligned text-node subscription metadata without hiding store corruption.
-    pub(crate) fn node_reactive_subscription(
-        &self,
-        node_id: TemplateIrNodeId,
-    ) -> Result<Option<&ReactiveSubscription>, CompilerError> {
-        if self.get_node(node_id).is_none() {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR store reactive subscription lookup referenced missing node {node_id}."
-            )));
-        }
-
-        self.node_reactive_subscriptions
-            .get(node_id.index())
-            .map(|subscription| subscription.as_ref())
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "TIR store reactive side table is missing node {node_id}."
-                ))
-            })
-    }
-
-    /// Attaches a reactive subscription to an existing text node.
-    pub(crate) fn set_node_reactive_subscription(
-        &mut self,
-        node_id: TemplateIrNodeId,
-        subscription: ReactiveSubscription,
-    ) -> Result<(), CompilerError> {
-        let Some(node) = self.get_node(node_id) else {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR store cannot attach a reactive subscription to missing node {node_id}."
-            )));
-        };
-
-        if !matches!(node.kind, TemplateIrNodeKind::Text { .. }) {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR store cannot attach a reactive subscription to non-text node {node_id}."
-            )));
-        }
-
-        let Some(entry) = self.node_reactive_subscriptions.get_mut(node_id.index()) else {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR store reactive side table is missing node {node_id}."
-            )));
-        };
-
-        *entry = Some(subscription);
-        Ok(())
     }
 
     pub(crate) fn push_wrapper_set(

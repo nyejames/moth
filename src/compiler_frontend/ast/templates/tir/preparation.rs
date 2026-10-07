@@ -44,7 +44,6 @@ pub(crate) enum RuntimeTemplateReason {
     InheritedWrapperApplication,
     RuntimeSlotPlan,
     WrapperApplication,
-    ReactiveContent,
     SlotResolution,
     SlotWrapperApplication,
     SlotContribution,
@@ -74,7 +73,6 @@ pub(crate) struct TemplatePreparationFacts {
     pub(crate) wrapper_foldable: bool,
     pub(crate) has_runtime_slot_plan: bool,
     pub(crate) has_runtime_slot_sites: bool,
-    pub(crate) has_reactive_dependence: bool,
     pub(crate) final_value_kind: TemplateConstValueKind,
 }
 
@@ -130,7 +128,6 @@ struct PreparationFacts {
     wrapper_foldable: bool,
     has_runtime_slot_plan: bool,
     has_runtime_slot_sites: bool,
-    has_reactive_dependence: bool,
 }
 
 struct WrapperSetFacts {
@@ -148,7 +145,6 @@ impl Default for PreparationFacts {
             wrapper_foldable: true,
             has_runtime_slot_plan: false,
             has_runtime_slot_sites: false,
-            has_reactive_dependence: false,
         }
     }
 }
@@ -186,7 +182,6 @@ impl PreparationFacts {
         self.wrapper_foldable &= other.wrapper_foldable;
         self.has_runtime_slot_plan |= other.has_runtime_slot_plan;
         self.has_runtime_slot_sites |= other.has_runtime_slot_sites;
-        self.has_reactive_dependence |= other.has_reactive_dependence;
     }
 }
 
@@ -333,7 +328,6 @@ fn prepare_tir_view_in_scope(
             wrapper_foldable: facts.wrapper_foldable,
             has_runtime_slot_plan: facts.has_runtime_slot_plan,
             has_runtime_slot_sites: facts.has_runtime_slot_sites,
-            has_reactive_dependence: facts.has_reactive_dependence,
             final_value_kind: const_value_kind,
         },
         outcome,
@@ -459,7 +453,6 @@ impl PreparationWalk<'_> {
         loop_binding_paths: &[PathId],
         role: &PreparationTraversalRole,
     ) -> Result<PreparationFacts, TemplateError> {
-        let store = view.store();
         increment_ast_counter(AstCounter::TirPreparationNodesVisited);
         let traversal_key = (node_id, view.identity());
         if !self.visiting_nodes.insert(traversal_key) {
@@ -514,7 +507,8 @@ impl PreparationWalk<'_> {
                         role.clone(),
                     )?;
                     facts.merge(child_facts);
-                    if store
+                    if view
+                        .store()
                         .get_template(child_template_id)
                         .is_some_and(|template| {
                             matches!(template.kind, TemplateType::SlotInsert(_))
@@ -731,41 +725,15 @@ impl PreparationWalk<'_> {
                 TemplateIrNodeKind::DynamicExpression {
                     expression,
                     site_id,
-                    reactive_subscription,
                     ..
                 } => {
                     let effective_expression = view
                         .effective_expression_for_site(*site_id)?
                         .unwrap_or(expression.as_ref());
-                    let mut facts =
-                        self.walk_expression(view, effective_expression, loop_binding_paths, role)?;
-                    if reactive_subscription.is_some() {
-                        facts.has_reactive_dependence = true;
-                        self.record_role_runtime(
-                            &mut facts,
-                            role,
-                            RuntimeTemplateReason::ReactiveContent,
-                        );
-                    }
-                    Ok(facts)
+                    self.walk_expression(view, effective_expression, loop_binding_paths, role)
                 }
 
-                TemplateIrNodeKind::Text { .. } => {
-                    if store.node_reactive_subscription(node_id)?.is_some() {
-                        let mut facts = PreparationFacts {
-                            has_reactive_dependence: true,
-                            ..PreparationFacts::default()
-                        };
-                        self.record_role_runtime(
-                            &mut facts,
-                            role,
-                            RuntimeTemplateReason::ReactiveContent,
-                        );
-                        Ok(facts)
-                    } else {
-                        Ok(PreparationFacts::const_value())
-                    }
-                }
+                TemplateIrNodeKind::Text { .. } => Ok(PreparationFacts::const_value()),
                 TemplateIrNodeKind::AggregateOutput => {
                     if role.in_aggregate_wrapper {
                         Ok(PreparationFacts::const_value())

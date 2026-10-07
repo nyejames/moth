@@ -20,9 +20,7 @@ use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::AstBuildContext;
 use crate::compiler_frontend::ast::AstImportedFunctionContract;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, ReactiveSource, ReactiveSourceKind,
-};
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::values::materialize_public_folded_value;
 use crate::compiler_frontend::ast::module_ast::environment::{
@@ -1368,12 +1366,6 @@ impl StableFunctionSignature {
                 )
             };
             value.value_mode = parameter.value_mode.clone();
-            if parameter.reactive {
-                value.reactive_source = Some(ReactiveSource {
-                    path: parameter_path,
-                    kind: ReactiveSourceKind::Parameter,
-                });
-            }
             parameters.push(Declaration {
                 id: parameter_path,
                 value,
@@ -1399,7 +1391,6 @@ impl StableFunctionSignature {
             returns.push(ReturnSlot {
                 value: diagnostic_type,
                 type_id: Some(type_id),
-                reactive_template: None,
                 channel: returned.channel,
             });
             match returned.channel {

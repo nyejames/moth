@@ -412,9 +412,9 @@ reachability does not define the semantic owner or legalise an escape. Ordinary 
 insertion does not implicitly create an observer.
 
 Wire and Route parameter contracts add no automatic observation, template updates or event
-delivery. A backend consumes their validated reads, forwarding and captures without restoring a
-Reactivity V1 scheduler or subscription graph. Future observation and event lifecycles require a
-separate accepted contract before they become memory-planning inputs.
+delivery. A backend consumes their validated reads, forwarding and captures. Future observation
+and event lifecycles require a separate accepted contract before they become memory-planning
+inputs.
 
 ## Backend specialisation
 

@@ -1,0 +1,11 @@
+-- An ordinary shared parameter does not grant mutation permission.
+-- Assigning through the parameter is rejected because the binding stays immutable.
+
+render_count |count Int| -> String:
+    count = 2
+    return [:count=[count]]
+;
+
+count Int = 1
+
+[:function_parameter_reassignment_rejected [render_count(count)]]

@@ -3,12 +3,8 @@
 //! WHAT: defines the immutable analysis records produced while validating HIR borrows.
 //! WHY: transfer and diagnostics need a shared vocabulary for states, facts, and summaries.
 
-use crate::compiler_frontend::external_packages::CallTarget;
-use crate::compiler_frontend::hir::expressions::HirMapOp;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId, LocalId};
-use crate::compiler_frontend::hir::reactivity::ReactiveSourceId;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 use rustc_hash::FxHashMap;
 
@@ -33,8 +29,8 @@ impl BorrowCheckReport {
 pub(crate) struct BorrowAnalysis {
     /// Complete local function call contracts retained for semantic consumers.
     ///
-    /// WHAT: stores parameter access, mutation, optional transfer, reactive effects, and
-    /// return-alias facts in one local-function summary.
+    /// WHAT: stores parameter access, mutation, optional transfer and return-alias facts in one
+    /// local-function summary.
     /// WHY: call transfer and the public-interface draft consume the same frontend-owned semantic
     /// contract instead of reconstructing it from separate HIR metadata caches.
     pub public_call_summaries: FxHashMap<FunctionId, PublicCallSummary>,
@@ -45,11 +41,6 @@ pub(crate) struct BorrowAnalysis {
     pub statement_facts: FxHashMap<HirNodeId, StatementBorrowFact>,
     pub terminator_facts: FxHashMap<BlockId, TerminatorBorrowFact>,
     pub value_facts: FxHashMap<HirValueId, ValueBorrowFact>,
-    /// Conservative source-level invalidation facts for reactive sources.
-    ///
-    /// WHY: backend lowering needs to know which statements may dirty a stable reactive source,
-    /// while borrow validation must keep those subscriptions out of the active borrow state.
-    pub reactive_invalidations: FxHashMap<HirNodeId, Vec<ReactiveInvalidationFact>>,
     /// Advisory drop insertion points for later lowering stages.
     ///
     /// WHY: borrow checking must not mutate HIR, but lowering still needs
@@ -81,14 +72,6 @@ impl BorrowAnalysis {
     #[cfg(test)]
     pub(crate) fn value_fact(&self, id: HirValueId) -> Option<&ValueBorrowFact> {
         self.value_facts.get(&id)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn reactive_invalidations_for_statement(
-        &self,
-        id: HirNodeId,
-    ) -> Option<&[ReactiveInvalidationFact]> {
-        self.reactive_invalidations.get(&id).map(Vec::as_slice)
     }
 
     pub(crate) fn drop_sites_for_block(&self, block: BlockId) -> Option<&[BorrowDropSite]> {
@@ -159,31 +142,6 @@ impl OptionalTransferStatus {
             (Self::Borrow, Self::Transfer) | (Self::Transfer, Self::Borrow) => Self::Borrow,
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ReactiveInvalidationFact {
-    pub statement_id: HirNodeId,
-    pub source: ReactiveSourceId,
-    pub kind: ReactiveInvalidationKind,
-    pub span: Option<SourceSpan>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ReactiveInvalidationKind {
-    Assignment,
-    PlaceWrite(ReactivePlaceWriteKind),
-    MapMutation(HirMapOp),
-    MutableCallArgument {
-        target: Box<CallTarget>,
-        argument_index: usize,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ReactivePlaceWriteKind {
-    Field,
-    Index,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

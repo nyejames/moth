@@ -692,8 +692,8 @@ fn run_semantic_stages(
         metadata: lowering_metadata,
     } = hir_lowering;
 
-    // Link facts are the validated-HIR owner for direct call targets. The convergence
-    // observation model consumes these facts after HIR validation rather than scanning
+    // Link facts are the validated-HIR owner for direct call targets. Summary convergence
+    // consumes these facts after HIR validation rather than scanning
     // source or introducing a second HIR call graph. Convergence refreshes them only when the
     // private failure lane rewrites the CFG.
     let mut function_link_facts = collect_module_function_link_facts(&hir_module)?;

@@ -33,7 +33,6 @@ pub(crate) use types::{BorrowAnalysis, BorrowCheckReport, BorrowDropSiteKind, Lo
 #[cfg(test)]
 pub(crate) use types::{
     BorrowDropSite, BorrowStateSnapshot, LocalBorrowSnapshot, OptionalTransferStatus,
-    ReactiveInvalidationFact, ReactiveInvalidationKind,
 };
 pub(crate) type BorrowFacts = BorrowAnalysis;
 

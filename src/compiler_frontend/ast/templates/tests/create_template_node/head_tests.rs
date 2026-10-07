@@ -214,7 +214,6 @@ fn const_required_option_capture_template_with_direct_tir(
         let capture_node = builder.push_dynamic_expression_node(
             capture_reference,
             TemplateSegmentOrigin::Body,
-            None,
             span,
         );
         let branch_body = builder.push_sequence_node(vec![hello_node, capture_node], span);
@@ -1284,9 +1283,6 @@ fn tir_root_has_control_flow_child(template: &Template, store: &TemplateIrStore)
 
 #[path = "template_head_tests.rs"]
 mod template_head_tests;
-
-#[path = "reactive_tests.rs"]
-mod reactive_tests;
 
 #[path = "handler_runtime_tests.rs"]
 mod handler_runtime_tests;

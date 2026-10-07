@@ -19,7 +19,7 @@ Moth keeps shared aliases and exclusive mutation in the language model without a
 
 Access validation and lifetime validation work together, but they own different facts.
 
-**Borrow validation** checks shared and exclusive access, alias activity, last potential use, optional affine transfer and reactive invalidation. It reads validated HIR and writes side tables.
+**Borrow validation** checks shared and exclusive access, alias activity, last potential use and optional affine transfer. It reads validated HIR and writes side tables.
 
 **Lifetime and retained-edge analysis** checks one semantic lifetime owner, retained-edge outlives relationships, escapes, cycles, non-lexical intervals, cleanup frontiers, builder lifecycle roots and exported summaries.
 
@@ -300,11 +300,14 @@ An operation touching several direct edges at once still moves the count by what
 
 Backends consume a validated memory plan. They do not infer source meaning, reconstruct lifetime topology or choose a new strategy when lowering.
 
-## Reactive and builder-owned lifetimes
+## Builder-owned lifetimes
 
-Reactive subscriptions and mounted fragments can keep state observable after the function that created it returns. Builder lifecycle roots such as page, mount, request, frame and arena domains enter the same lifetime proof as source regions.
-
-A collector-free backend can use those lifecycle regions directly. A GC backend may represent the already-proven lifecycle with reachability, but reachability does not define which topology the compiler accepts.
+Page, mount, request, frame and arena roots are accepted future inputs to lifetime topology. When a
+builder-owned consumer retains Moth values, those roots enter the same proof as source regions. A
+collector-free backend can use validated lifecycle regions directly. A GC backend may represent
+the already-proven topology with reachability, but reachability does not define which topology the
+compiler accepts. Future observation and event lifecycles need their own accepted contract before
+they become memory-planning inputs.
 
 ## What can fail
 

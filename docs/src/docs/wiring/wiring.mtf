@@ -57,8 +57,36 @@ specialisation that the generic grammar rejects. A capability is not an ordinary
 type argument: `Box of Wire of T` does not create a wire container, and a route
 cannot become a collection element by applying `of`.
 
+## Parameter position and shared pipe shape
+
+Wire and Route are parameter contracts. A pipe-delimited list does not imply a
+shared meaning across declarations:
+
+[codeblock, $code("moth"):
+    show |value String| -> String:
+        return value
+    ;
+
+    Point = |
+        x Int,
+        y Int,
+    |
+
+    Status ::
+        Ready,
+        Failed | message String |,
+    ;
+]
+
+Function parameters receive call arguments. Struct fields describe named
+runtime storage. Choice payloads describe immutable variant data. Wire and
+Route contracts are valid only on function parameters; they do not change
+field, payload, local, collection, alias or return-slot types. See the function,
+struct and choice references for those ordinary position contracts.
+
 ## Wires
 
+**Accepted design; unsupported by the current Alpha compiler until Phase 6.**
 A source function parameter may require `Wire of T`:
 
 [codeblock, $code("moth"):
@@ -116,7 +144,8 @@ UI ownership and cross-task retention require separate contracts.
 
 ## Constructor routes
 
-V1 accepts zero or one future input:
+**Accepted design; unsupported by the current Alpha compiler until Phase 6.**
+The route contract allows zero or one future input:
 
 [codeblock, $code("text"):
     on_click Route of FormMessage
@@ -178,6 +207,27 @@ holes, named omissions or arbitrary reordering. A fully supplied zero-input
 constructor can use ordinary complete-constructor argument rules, including
 legal named arguments.
 
+The immediate receiving parameter is what permits a direct constructor to be
+partial. Outside that boundary, ordinary construction still requires every
+field:
+
+[codeblock, $code("moth"):
+    on_rename |route Route of String -> TodoMessage| -> String:
+        return "route received"
+    ;
+
+    on_delete |route Route of TodoMessage| -> String:
+        return "route received"
+    ;
+
+    todo_id = 42
+    on_rename(TodoMessage::Rename(todo_id))
+    on_delete(TodoMessage::Delete(todo_id))
+
+    -- INVALID outside a Route receiving parameter: String is still missing.
+    message = TodoMessage::Rename(todo_id)
+]
+
 The root argument is a direct choice variant path/application or an unchanged
 compatible route parameter. Captures are ordinary expressions evaluated once
 when the route forms, in normal argument order and with normal failure and
@@ -208,6 +258,48 @@ with leading `id Int` and trailing `message EditorMessage`,
 `Route of EditorMessage -> AppMessage`. This describes child-message lifting.
 Composing it with an input-to-child route is a separate design question, with no
 V1 application or composition syntax.
+
+Messages remain ordinary choice values consumed by ordinary update functions.
+This self-contained snippet uses currently executable Moth syntax; its update
+function receives an ordinary choice value and does not use Wire or Route:
+
+[codeblock, $code("moth"):
+    TodoMessage ::
+        Rename | id Int, text String |,
+        Delete | id Int |,
+    ;
+
+    update |state String, message TodoMessage| -> String:
+        return if message is:
+            Rename(id, text) => then text
+            Delete(id) => then state
+        ;
+    ;
+]
+
+One child-to-parent Route can be forwarded through another compatible Route
+parameter. The partial parent constructor captures its leading `editor_id`;
+the future `EditorMessage` fills the remaining field:
+
+[codeblock, $code("moth"):
+    EditorMessage ::
+        Changed | value String |,
+    ;
+
+    AppMessage ::
+        Editor | editor_id Int, message EditorMessage |,
+    ;
+
+    receive_editor |on_message Route of EditorMessage -> AppMessage| -> String:
+        return "route received"
+    ;
+
+    forward_editor |on_message Route of EditorMessage -> AppMessage| -> String:
+        return receive_editor(on_message)
+    ;
+
+    forward_editor(AppMessage::Editor(7))
+]
 
 ## Capability positions and lifetimes
 
@@ -248,8 +340,8 @@ UI behaviour.
 
 Automatic observation, derived-state graphs, change handlers, two-way binding,
 live templates, route invocation, event queues, schedulers, mount lifecycles,
-rendering policy and channel bridges lie outside this foundation. These are not
-inherited obligations from the removed reactivity model.
+rendering policy and channel bridges lie outside this foundation and require
+separate accepted contracts.
 
 ## Future channel boundary
 

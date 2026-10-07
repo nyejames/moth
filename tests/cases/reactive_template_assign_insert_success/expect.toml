@@ -1,4 +1,0 @@
-[backends.html]
-mode = "success"
-warnings = "forbid"
-rendered_output_contains = ["reactive_template_assign_insert_success assigned=8"]

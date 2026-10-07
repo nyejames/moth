@@ -734,7 +734,6 @@ impl<'a> FunctionProblemBuilder<'a> {
         event_ids: &mut Vec<EventId>,
     ) -> Result<ValueRef, CompilerError> {
         let source = self.value_source(expression, fallback_source);
-        self.emit_reactive_observations(expression, &source, event_ids)?;
         match &expression.kind {
             HirExpressionKind::Load(place) => {
                 let place = self.lower_place(place, &source, event_ids)?;
@@ -849,51 +848,6 @@ impl<'a> FunctionProblemBuilder<'a> {
                 })
             }
         }
-    }
-
-    fn emit_reactive_observations(
-        &mut self,
-        expression: &HirExpression,
-        source: &EventSource,
-        event_ids: &mut Vec<EventId>,
-    ) -> Result<(), CompilerError> {
-        let Some(template) = self
-            .module
-            .side_table
-            .reactive_template_for_value(expression.id)
-        else {
-            return Ok(());
-        };
-        if !template.has_runtime_reactive_dependency() {
-            return Ok(());
-        }
-
-        let mut locals = BTreeSet::new();
-        for dependency in &template.dependencies {
-            let reactive_source = self
-                .module
-                .side_table
-                .reactive_source(dependency.source)
-                .ok_or_else(|| {
-                    compiler_error(format!(
-                        "Boracle problem extraction cannot resolve reactive source {:?}",
-                        dependency.source
-                    ))
-                })?;
-            locals.insert(reactive_source.local_id.0);
-        }
-        locals.extend(
-            template
-                .template_value_parameters
-                .iter()
-                .map(|dependency| dependency.parameter.0),
-        );
-
-        for local in locals {
-            let place = self.local_place(LocalId(local), source)?;
-            self.emit_event(event_ids, *source, EventKind::ReactiveObserve { place });
-        }
-        Ok(())
     }
 
     fn expression_projection(

@@ -480,7 +480,7 @@ impl RenderedOutput {
 ///
 /// The harness stubs `document.getElementById` to capture `insertAdjacentHTML` calls, intercepts
 /// `console.log` and emits a summary after the page script's queued microtasks drain so runtime
-/// assertions can observe batched reactive flushes queued by the page bundle.
+/// assertions can observe queued page work before the run ends.
 fn execute_html_in_node(
     index: &BuiltArtifactIndex<'_>,
     resource_inputs: &mut ResourceInputRegistry,

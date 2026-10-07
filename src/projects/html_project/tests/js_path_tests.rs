@@ -23,15 +23,14 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[test]
-fn bootstrap_script_calls_start_once_and_hydrates_slots() {
-    // WHAT: with runtime slots, the bootstrap calls start() to get fragments and hydrates them.
+fn bootstrap_script_calls_start_once_and_inserts_slots() {
+    // WHAT: with runtime slots, the bootstrap calls start() to get fragments and inserts them.
     // WHY: start() is the sole fragment producer; no per-function wrapper calls needed.
     let slot_ids = vec![String::from("moth-slot-0")];
     let script = render_runtime_bootstrap_script_html(
         "start_entry",
         "function start_entry() { return []; }",
         &slot_ids,
-        false,
         false,
         false,
         false,
@@ -47,7 +46,7 @@ fn bootstrap_script_calls_start_once_and_hydrates_slots() {
     );
     assert!(
         script.contains("insertAdjacentHTML"),
-        "bootstrap must hydrate each slot"
+        "bootstrap must insert into each slot"
     );
     // Verify start() call comes before slot list setup in emission order.
     let start_frag_pos = script
@@ -258,7 +257,6 @@ fn no_runtime_fragments_still_emits_start_call() {
             start_is_fallible: false,
             release_build: false,
             entry_runtime_fragment_count: 0,
-            uses_reactive_runtime_fragments: false,
             import_map_html: None,
             use_module_script: false,
         },
@@ -319,7 +317,6 @@ fn inline_js_bundle_with_closing_script_tag_is_escaped_in_html() {
             start_is_fallible: false,
             release_build: false,
             entry_runtime_fragment_count: 0,
-            uses_reactive_runtime_fragments: false,
             import_map_html: None,
             use_module_script: false,
         },
@@ -337,39 +334,13 @@ fn inline_js_bundle_with_closing_script_tag_is_escaped_in_html() {
 }
 
 #[test]
-fn bootstrap_uses_mount_helper_for_reactive_runtime_fragments() {
-    // WHAT: when the module has reachable reactive runtime fragments, the bootstrap must call the
-    // backend mount helper so template objects register for rerendering instead of being snapshot.
+fn bootstrap_inserts_plain_runtime_fragments() {
+    // WHAT: each runtime fragment is inserted directly into its source-ordered slot.
     let slot_ids = vec![String::from("moth-slot-0")];
     let script = render_runtime_bootstrap_script_html(
         "start_entry",
         "function start_entry() { return []; }",
         &slot_ids,
-        false,
-        true,
-        false,
-        false,
-    );
-
-    assert!(
-        script.contains("__moth_mount_template_fragment(el, moth_frags[i])"),
-        "reactive bootstrap must hydrate slots through the mount helper"
-    );
-    assert!(
-        !script.contains("el.insertAdjacentHTML(\"beforeend\", moth_frags[i] || \"\")"),
-        "reactive bootstrap must not use the plain direct insertion path"
-    );
-}
-
-#[test]
-fn bootstrap_uses_plain_insertion_for_non_reactive_runtime_fragments() {
-    // WHAT: non-reactive pages must not reference the optional mount helper global.
-    let slot_ids = vec![String::from("moth-slot-0")];
-    let script = render_runtime_bootstrap_script_html(
-        "start_entry",
-        "function start_entry() { return []; }",
-        &slot_ids,
-        false,
         false,
         false,
         false,
@@ -377,11 +348,7 @@ fn bootstrap_uses_plain_insertion_for_non_reactive_runtime_fragments() {
 
     assert!(
         script.contains("el.insertAdjacentHTML(\"beforeend\", moth_frags[i] || \"\")"),
-        "non-reactive bootstrap must keep the plain direct insertion path"
-    );
-    assert!(
-        !script.contains("__moth_mount_template_fragment"),
-        "non-reactive bootstrap must not reference the mount helper"
+        "bootstrap must keep the plain direct insertion path"
     );
 }
 
@@ -399,7 +366,6 @@ function start_entry() { events.push("start"); return ["fragment"]; }
 const document = { getElementById() { return { insertAdjacentHTML(_, text) { events.push(text); } }; } };"#,
                 &slots,
                 is_module_script,
-                false,
                 false,
                 false,
             );
@@ -430,48 +396,45 @@ fn fallible_bootstrap_failure_records_details_once_without_publishing_applicatio
     use crate::backends::js::ENTRY_FAILURE_NOTICE;
 
     for is_module_script in [false, true] {
-        for reactive in [false, true] {
-            for slot_count in [0, 2] {
-                for release_build in [false, true] {
-                    let slots = (0..slot_count)
-                        .map(|index| format!("moth-slot-{index}"))
-                        .collect::<Vec<_>>();
-                    let caller = render_runtime_bootstrap_script_html(
-                        "start_entry",
-                        "",
-                        &slots,
-                        is_module_script,
-                        reactive,
-                        true,
-                        release_build,
-                    );
-                    assert!(caller.contains(
-                        "typeof globalThis.__moth_record_entry_failure === \"function\""
-                    ));
-                    assert!(caller.contains(
-                        "globalThis.__moth_record_entry_failure(__moth_error_code(moth_error), __moth_error_message(moth_error), moth_error.__moth_location ?? null);"
-                    ));
-                    assert!(!caller.contains(".message"));
-                    assert!(!caller.contains(".code"));
-                    assert!(
-                        caller.contains(&format!("process.stderr.write({ENTRY_FAILURE_NOTICE:?})"))
-                    );
-                    assert!(caller.contains("process.exitCode = 1"));
-                    assert!(!caller.contains("<application-error>"));
-                    if release_build {
-                        assert!(caller.contains(&format!(
-                            "document.createTextNode({RELEASE_ENTRY_FAILURE_NOTICE:?})"
-                        )));
-                    } else {
-                        assert!(!caller.contains(RELEASE_ENTRY_FAILURE_NOTICE));
-                        assert!(!caller.contains("createTextNode"));
-                    }
+        for slot_count in [0, 2] {
+            for release_build in [false, true] {
+                let slots = (0..slot_count)
+                    .map(|index| format!("moth-slot-{index}"))
+                    .collect::<Vec<_>>();
+                let caller = render_runtime_bootstrap_script_html(
+                    "start_entry",
+                    "",
+                    &slots,
+                    is_module_script,
+                    true,
+                    release_build,
+                );
+                assert!(
+                    caller
+                        .contains("typeof globalThis.__moth_record_entry_failure === \"function\"")
+                );
+                assert!(caller.contains(
+                    "globalThis.__moth_record_entry_failure(__moth_error_code(moth_error), __moth_error_message(moth_error), moth_error.__moth_location ?? null);"
+                ));
+                assert!(!caller.contains(".message"));
+                assert!(!caller.contains(".code"));
+                assert!(
+                    caller.contains(&format!("process.stderr.write({ENTRY_FAILURE_NOTICE:?})"))
+                );
+                assert!(caller.contains("process.exitCode = 1"));
+                assert!(!caller.contains("<application-error>"));
+                if release_build {
+                    assert!(caller.contains(&format!(
+                        "document.createTextNode({RELEASE_ENTRY_FAILURE_NOTICE:?})"
+                    )));
+                } else {
+                    assert!(!caller.contains(RELEASE_ENTRY_FAILURE_NOTICE));
+                    assert!(!caller.contains("createTextNode"));
+                }
 
-                    for missing_dom in
-                        [None, Some("document"), Some("body"), Some("createTextNode")]
-                    {
-                        let mut bundle = String::from(
-                            r#"
+                for missing_dom in [None, Some("document"), Some("body"), Some("createTextNode")] {
+                    let mut bundle = String::from(
+                        r#"
 const events = [];
 let payload_reads = 0;
 let error_message_reads = 0;
@@ -511,53 +474,49 @@ globalThis.document = {
         return { insertAdjacentHTML(_, text) { events.push(text); } };
     }
 };
-function __moth_mount_template_fragment(_, fragment) { events.push(fragment); }
 "#,
-                        );
-                        match missing_dom {
-                            None => {}
-                            Some("document") => bundle.push_str("delete globalThis.document;\n"),
-                            Some(property) => {
-                                bundle.push_str(&format!("delete document.{property};\n"));
-                            }
+                    );
+                    match missing_dom {
+                        None => {}
+                        Some("document") => bundle.push_str("delete globalThis.document;\n"),
+                        Some(property) => {
+                            bundle.push_str(&format!("delete document.{property};\n"));
                         }
-                        let html = render_runtime_bootstrap_script_html(
-                            "start_entry",
-                            &bundle,
-                            &slots,
-                            is_module_script,
-                            reactive,
-                            true,
-                            release_build,
-                        );
-                        let output = run_bootstrap_scripts(
-                            &html,
-                            "console.log(JSON.stringify([events, payload_reads, error_message_reads, error_code_reads, children[0] === static_content, children]));",
-                            is_module_script,
-                        );
+                    }
+                    let html = render_runtime_bootstrap_script_html(
+                        "start_entry",
+                        &bundle,
+                        &slots,
+                        is_module_script,
+                        true,
+                        release_build,
+                    );
+                    let output = run_bootstrap_scripts(
+                        &html,
+                        "console.log(JSON.stringify([events, payload_reads, error_message_reads, error_code_reads, children[0] === static_content, children]));",
+                        is_module_script,
+                    );
+                    assert_eq!(
+                        output.status.code(),
+                        Some(1),
+                        "Failure must exit 1 without a host exception: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    assert_eq!(output.stderr, ENTRY_FAILURE_NOTICE.as_bytes());
+                    let stdout = String::from_utf8(output.stdout).expect("Node.js output is UTF-8");
+                    assert!(!stdout.contains("<application-error>"));
+                    if release_build && missing_dom.is_none() {
                         assert_eq!(
-                            output.status.code(),
-                            Some(1),
-                            "Failure must exit 1 without a host exception: {}",
-                            String::from_utf8_lossy(&output.stderr)
+                            stdout.trim(),
+                            format!(
+                                r#"[["start","entry-failure:0","text-node"],1,1,1,true,[{{"nodeType":1,"outerHTML":"<main>static authored content</main>"}},{{"nodeType":3,"data":{RELEASE_ENTRY_FAILURE_NOTICE:?}}}]]"#
+                            )
                         );
-                        assert_eq!(output.stderr, ENTRY_FAILURE_NOTICE.as_bytes());
-                        let stdout =
-                            String::from_utf8(output.stdout).expect("Node.js output is UTF-8");
-                        assert!(!stdout.contains("<application-error>"));
-                        if release_build && missing_dom.is_none() {
-                            assert_eq!(
-                                stdout.trim(),
-                                format!(
-                                    r#"[["start","entry-failure:0","text-node"],1,1,1,true,[{{"nodeType":1,"outerHTML":"<main>static authored content</main>"}},{{"nodeType":3,"data":{RELEASE_ENTRY_FAILURE_NOTICE:?}}}]]"#
-                                )
-                            );
-                        } else {
-                            assert_eq!(
-                                stdout.trim(),
-                                r#"[["start","entry-failure:0"],1,1,1,true,[{"nodeType":1,"outerHTML":"<main>static authored content</main>"}]]"#
-                            );
-                        }
+                    } else {
+                        assert_eq!(
+                            stdout.trim(),
+                            r#"[["start","entry-failure:0"],1,1,1,true,[{"nodeType":1,"outerHTML":"<main>static authored content</main>"}]]"#
+                        );
                     }
                 }
             }
@@ -629,7 +588,6 @@ fn startup_faults_are_classified_and_rethrown_without_intercepting_later_scripts
                     &bundle,
                     &[String::from("moth-slot-0")],
                     is_module_script,
-                    false,
                     fallible,
                     false,
                 );
@@ -663,12 +621,11 @@ fn startup_faults_are_classified_and_rethrown_without_intercepting_later_scripts
 }
 
 #[test]
-fn fallible_bootstrap_success_unwraps_once_and_hydrates_in_source_order() {
+fn fallible_bootstrap_success_unwraps_once_and_inserts_in_source_order() {
     let slots = vec![String::from("moth-slot-0"), String::from("moth-slot-1")];
     for is_module_script in [false, true] {
-        for reactive in [false, true] {
-            for release_build in [false, true] {
-                let bundle = r#"
+        for release_build in [false, true] {
+            let bundle = r#"
 const events = [];
 globalThis.__moth_record_entry_failure = (code) => events.push("entry-failure:" + code);
 function __moth_error_code(_) { throw new Error("Success must not inspect an Error code"); }
@@ -684,40 +641,35 @@ const document = {
         return { id, insertAdjacentHTML(_, text) { events.push(id + ":" + text); } };
     }
 };
-function __moth_mount_template_fragment(element, fragment) {
-    events.push(element.id + ":" + fragment);
-}
 "#;
-                let html = render_runtime_bootstrap_script_html(
-                    "start_entry",
-                    bundle,
-                    &slots,
-                    is_module_script,
-                    reactive,
-                    true,
-                    release_build,
-                );
-                let output = run_bootstrap_scripts(
-                    &html,
-                    "console.log(JSON.stringify(events));",
-                    is_module_script,
-                );
-                assert!(
-                    output.status.success(),
-                    "Bootstrap runtime failed: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-                assert!(
-                    output.stderr.is_empty(),
-                    "Success must not report a terminal notice"
-                );
-                assert_eq!(
-                    String::from_utf8(output.stdout)
-                        .expect("Node.js output is UTF-8")
-                        .trim(),
-                    r#"["start","unwrap","moth-slot-0:first","moth-slot-1:second"]"#
-                );
-            }
+            let html = render_runtime_bootstrap_script_html(
+                "start_entry",
+                bundle,
+                &slots,
+                is_module_script,
+                true,
+                release_build,
+            );
+            let output = run_bootstrap_scripts(
+                &html,
+                "console.log(JSON.stringify(events));",
+                is_module_script,
+            );
+            assert!(
+                output.status.success(),
+                "Bootstrap runtime failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                output.stderr.is_empty(),
+                "Success must not report a terminal notice"
+            );
+            assert_eq!(
+                String::from_utf8(output.stdout)
+                    .expect("Node.js output is UTF-8")
+                    .trim(),
+                r#"["start","unwrap","moth-slot-0:first","moth-slot-1:second"]"#
+            );
         }
     }
 }

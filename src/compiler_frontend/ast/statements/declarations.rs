@@ -11,9 +11,7 @@ use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, ReactiveSource, ReactiveSourceKind,
-};
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
@@ -118,27 +116,6 @@ fn initializer_is_compile_time_constant(
             classify_template_from_effective_tir(template, &context.template_ir_store)
         })
         .map(|kind| kind.is_compile_time_value())
-}
-
-/// Apply binding-level reactive identity after the initializer has been fully typed.
-///
-/// WHAT: `$Type`/`$=` declarations become stable reactive sources; ordinary declarations store a
-/// snapshot even when their initializer read a reactive source.
-/// WHY: reactive identity is declaration metadata, not part of `TypeId` or the initializer's
-/// natural expression type.
-fn apply_reactive_declaration_metadata(
-    value: &mut Expression,
-    is_reactive_binding: bool,
-    qualified_name: &PathId,
-) {
-    if is_reactive_binding {
-        value.reactive_source = Some(ReactiveSource {
-            path: *qualified_name,
-            kind: ReactiveSourceKind::Declaration,
-        });
-    } else {
-        value.clear_reactive_source();
-    }
 }
 
 /// Body-local declaration plus syntax-origin facts that are not stored on `Declaration`.
@@ -389,7 +366,6 @@ pub fn resolve_declaration_syntax(
         string_table,
         path_fork,
     } = tables;
-    let mut span_builder = ExtendedSpanBuilder::new();
     let config_qualifier = declaration_syntax.config_qualifier.clone();
     let config_constant_context = matches!(context.kind, ContextKind::ConstantHeader);
     let has_config_resolution = context.shared.config_resolution.is_some();
@@ -435,7 +411,6 @@ pub fn resolve_declaration_syntax(
     // ----------------------------
     //  Validate constant-context constraints
     // ----------------------------
-    let is_reactive_binding = declaration_syntax.binding_mode.is_reactive();
     let value_mode = declaration_syntax.value_mode();
     if declaration_syntax.binding_mode.is_mutable() && context.kind.is_constant_context() {
         return Err(CompilerDiagnostic::invalid_declaration(
@@ -536,11 +511,6 @@ pub fn resolve_declaration_syntax(
         }
 
         parsed_initializer.value_mode = value_mode.to_owned();
-        apply_reactive_declaration_metadata(
-            &mut parsed_initializer,
-            is_reactive_binding,
-            &qualified_name,
-        );
         return Ok(Declaration {
             id: qualified_name,
             value: parsed_initializer,
@@ -671,7 +641,6 @@ pub fn resolve_declaration_syntax(
                         &mut field_warnings,
                         qualified_name,
                         path_fork,
-                        &mut span_builder,
                     )?;
                     (field_syntax, declaration_cursor.position())
                 };
@@ -873,11 +842,6 @@ pub fn resolve_declaration_syntax(
     // from type defaults; preserving that ownership would incorrectly allow writes through
     // immutable bindings and mutable receiver calls.
     parsed_initializer.value_mode = value_mode.to_owned();
-    apply_reactive_declaration_metadata(
-        &mut parsed_initializer,
-        is_reactive_binding,
-        &qualified_name,
-    );
 
     ast_log!("Created new ", Cyan #value_mode);
     Ok(Declaration {
