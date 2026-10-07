@@ -4676,8 +4676,156 @@ notes, titles and tables. This was not a complete link recrawl.
 
 Independent prerequisite source/correction reviews found no remaining required
 issue. These focused checks support an intermediate feature-branch checkpoint,
-not another main merge or a full-validation claim for this tree. Phase 2 remains
-incomplete while representation, reclamation, issuing domains, exact interfaces
-and migration boundaries are investigated. The standalone model measurements
+not another main merge or a full-validation claim for this tree. At this
+prerequisite checkpoint, Phase 2 remained incomplete while representation,
+reclamation, issuing domains, exact interfaces and migration boundaries were
+investigated. The standalone model measurements
 are separate evidence and do not establish compiler typing/folding or whole-IR
 memory improvements.
+
+### Phase 2 representation and lifetime decisions (2026-10-07)
+
+Phase 2 selected interfaces through four bounded evidence tracks. Independent
+review accepted the design and prototype obligations. This checkpoint selects
+the forms for implementation and does not deliver the production cutover.
+
+1. **Hot-row layout and payload capacity.** The reference is a safe Rust
+   operation enum in an array-of-structs store, with typed IDs and ranges and an
+   explicit `Zero` / `One(TypeId)` / `Multiple(TypeRange)` result shape. The
+   comparison models checked operation words (B) and a result-shape column (C).
+   Operation descriptors retain semantic meaning; the model does not make raw
+   tags into operations. The reference preserves `TypeId(0)`, full-width scalar
+   values and exact eight-byte `SourceSpan` storage.
+
+   | Capture | Rows | Candidate capacity bytes A/B/C | Construction median ns A/B/C |
+   | --- | ---: | ---: | ---: |
+   | `type_stress` main | 302 | 21,144 / 19,936 / 19,960 | 2,700.58 / 3,355.75 / 3,165.59 |
+   | `generic_scaling_160` main | 6,090 | 450,740 / 426,380 / 426,404 | 59,388.35 / 69,721.71 / 64,677.85 |
+
+   The corrected owner report covers 120 independent capture files: 21,787
+   projected expression nodes and 24,958 unique `Expression` headers, of which
+   18,858 fall inside observed allocation intervals and 6,100 fall outside.
+   It records 10,695,068 bytes of exact observed `Vec`, `Box` and `String`
+   payload capacity across those files. The isolated A model uses 1,556,056
+   bytes of candidate capacity, including reported shared model side stores.
+   The conditional 6,603,804-byte projection is
+   that A capacity plus a 5,047,748-byte remainder; it is an address-backed
+   header-replacement comparison, not a complete migrated graph or memory win.
+   All corpus sums are cumulative across captures, not resident memory.
+
+   Layout measurements used five invocations per fixture (600 process
+   observations) in fixed A/B/C order, which can bias timing comparisons.
+   `generic_scaling_160` includes only the first, last and largest of 802
+   domains. Its 6,537,216-byte median RSS includes parsing and simultaneous
+   correctness-validation candidates, not one candidate's memory. Exact raw
+   operation and payload descriptor bytes, diagnostic witnesses, declaration
+   maps, `TypeEnvironment`, `ConstValueStore`, string-table storage, unreachable
+   TIR capacity and allocator overhead remain unavailable or excluded.
+
+   The supplemental numeric capture adds 31 fixtures from eight existing
+   successful inputs. It preserves full-width integer boundaries, raw IEEE
+   negative zero and an exact 200-digit decimal coefficient with scales through
+   256. The original derived `BigInt` attribution was invalid and was corrected;
+   the raw exporter remained valid. Retained `Arc<BigInt>` limb capacity is
+   still unknown: a logical lower bound is not capacity. The model leaves exact
+   numeric owners opaque and does not test numeric semantics or numeric-profile
+   matrices. See `tmp/typed-semantic-expressions/phase2/layout/owner-byte-accounting.{md,json}`,
+   `tmp/typed-semantic-expressions/phase2/layout/owner-byte-accounting-numeric.json`
+   and `tmp/typed-semantic-expressions/phase2/layout/measurements-with-rss/`.
+
+2. **Issuing domains and TIR lifetime.** A nonzero four-byte expression ID is
+   local to its store, and each read view carries that store's borrow. The
+   corrected six-test domain probe covers the full `u32` ID bounds, same-number
+   IDs in distinct stores, child-view ownership and checked conversion from a
+   borrowed immutable prefix. It does not prove parser/TIR call sites or
+   scratch-ID identity; owner-qualified scratch checks belong to the
+   reclamation model. The corrected test log is
+   `tmp/typed-semantic-expressions/phase2/layout/expression-domain-test-results-corrected.log`.
+
+   The separate five-test TIR probe shows that dropping a view cannot reclaim
+   append-only TIR entries. Its 24,120 bytes of `Expression` headers and 9,356
+   bytes of TIR vector capacity exclude nested expression heaps. One actual
+   generic owner-drop test passes: a published sibling can materialise after
+   the declaring physical TIR owner drops. That test does not prove that all
+   retained signature, default and `ConstValueStore` expression clones have
+   been released. The stable-syntax and canonical-owned-input projection from
+   `ModuleMaterialisationPreparation` before expression-store release remains
+   a migration proof obligation. The physical owner-drop result is recorded in
+   `tmp/typed-semantic-expressions/phase2/generic-tir-release-test.log`.
+
+3. **Candidate isolation and last-reader freeze.** The selected contract
+   builds changed candidates in producer-local scratch, validates owner-bound
+   edges, promotes only reachable unique nodes and reuses unchanged roots. A
+   shared consuming freeze then runs after the last reader, remaps live roots
+   into exact-capacity frozen arrays and releases the old store. The frozen
+   model retains eight nodes and five roots for each policy; both arrays have
+   exact capacities of eight and five.
+
+   The freeze-enabled model passes ten tests. Five measured traces per policy
+   report append/rollback/promotion medians of 16,259.396 / 11,554.479 /
+   12,533.854 ns; conversion-only accounted freeze peaks of 73,200 / 27,216 /
+   2,016 bytes; and process RSS medians of 2,686,976 / 2,490,368 / 2,490,368
+   bytes, respectively. The conversion-only accounting includes old completed
+   comparison snapshots, old/new/remap/reachability/traversal conversion
+   buffers and inline headers. It excludes pre-freeze root-snapshot construction
+   maps and growing buffers, and post-freeze parity's simultaneous old/new
+   snapshots and traversal maps. Full trace time and RSS cover those phases;
+   allocator metadata and internal reallocation overlap remain excluded from
+   the accounted-capacity figure.
+
+   RSS also includes the runtime baseline and is not folding memory. The model
+   validates owner-qualified scratch IDs and promotion, but is not Moth folding,
+   TIR reclamation, production ID layout or real payload storage. The pre-freeze
+   source and measurements remain separately preserved under
+   `tmp/typed-semantic-expressions/phase2/reclamation/reclamation_model.pre-freeze.rs`
+   and `tmp/typed-semantic-expressions/phase2/reclamation/measurements/`; the
+   freeze tests and cohort are under
+   `tmp/typed-semantic-expressions/phase2/reclamation/test-results-with-freeze.log`
+   and `tmp/typed-semantic-expressions/phase2/reclamation/measurements-with-freeze/`.
+
+4. **Native call continuation.** The selected HIR interface is an
+   invoke-like terminator with ordered success destination locals and one error
+   destination. Validation requires unique destinations within each edge and
+   disjoint success/error sets. The standalone model passes 16 tests and reports
+   784 bytes for explicit successor locals versus 800 bytes for block arguments,
+   with construction/validation/drop medians across five invocations of
+   5,228.0021 versus 5,492.78335 ns. Its source evaluator does not execute either
+   candidate CFG;
+   native result transport, exactly-once execution, first-failure behaviour,
+   borrow validation, private failure installation and backend behaviour remain
+   unproved. These model sizes and timings are not compiler performance claims.
+   The durable model evidence is under
+   `tmp/typed-semantic-expressions/phase2/continuation/README.md`, `audit.md`
+   and `test-results-2.log`.
+
+The selected reference is the safe enum/AoS layout with explicit result shape.
+Its 64-byte projected row is the common-row decision ceiling, subject to actual
+operation and payload evidence rather than semantic weakening. Packed B saves
+four bytes per row but costs more construction work in both representative
+models. The column candidate adds a vector and its combined model costs more to
+construct than A without a demonstrated complete-pass benefit. These comparisons
+do not isolate the result codec or column from operation encoding. Reopen either
+only with a real compiler benefit that includes its invariants and full payload costs. Keep existing exact
+numeric/constant owners and sparse typed cold facts. No additional sharing cache,
+inline-list special case or packed failure vocabulary is selected.
+
+Scratch promotion bounds failed/discarded candidates while retaining unchanged
+roots. Append-only discarded graphs retain too much in the model. General
+suffix rollback cannot reclaim escaped roots and retains grown capacity.
+Common last-reader compaction releases committed dead nodes after TIR ends.
+Invoke-style successor-local definitions preserve the existing mutable-local CFG
+without adding block-argument storage/validator work. Production reader and
+execution proofs remain required before accepting these implementations.
+
+None of the models establishes whole-compiler retained bytes, stage or
+end-to-end speed, dev-stack headroom, full diagnostic/provenance ownership or
+every real reader's last-use boundary. The corpus accounting and model RSS must
+not be added or relabelled as a simultaneously resident graph. Actual payload
+remapping/release, generic-preparation detachment, diagnostic rendering, native
+CFG/installer/backend execution and compiler performance remain Phases 3/4
+acceptance gates. The architecture records the selected contracts.
+
+Independent design, domain and freeze reviews found no remaining required issue.
+The documentation release build passed with 78 outputs and no generated diff.
+These checks accept the research/design branch checkpoint and do not claim a
+new full-validation or production cutover result.

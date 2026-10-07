@@ -4,9 +4,9 @@
 
 ```text
 STATUS: active, design direction approved
-CURRENT_SLICE: Phase 2 - representation, packing and lifetimes
+CURRENT_SLICE: Phase 3 - dense HIR and capacity foundations
 BLOCKERS: none
-NEXT_ACTION: measure the integrated control and compare the four bounded representation and lifetime experiments
+NEXT_ACTION: migrate durable HIR expressions and places to the selected dense stores and typed ranges
 ```
 
 ## Purpose and authority
@@ -471,27 +471,36 @@ graph has not won the memory comparison.
 
 ### Lifetime decisions required before cutover
 
-- [ ] For each expression, payload, default, constant and TIR view store, record
+- [x] For each expression, payload, default, constant and TIR view store, record
   its owner and last reader. Prove that every surviving ID has a live matching
   store. Reusing an integer in a sibling store does not authorise cross-access.
-- [ ] Define how a fold that discards an operand releases or bounds its retained
+- [x] Define how a fold that discards an operand releases or bounds its retained
   storage. Dropping an ID does not reclaim append-only payloads. Test repeated
   replacement and mostly-folded large bodies, not only live runtime trees.
-- [ ] Preserve immutable overlay/root isolation between candidate instantiations.
+- [x] Preserve immutable overlay/root isolation between candidate instantiations.
   Structural TIR children inherit the accepted overlay, nested value expressions
   use their own context, and runtime dependence does not skip required validation.
-- [ ] Separate throwaway generic-body validation storage from retained canonical
+- [x] Separate throwaway generic-body validation storage from retained canonical
   tokens/declaration syntax and from concrete materialisation. Prove later
   instantiation after validation storage is dropped.
-- [ ] Define AST/TIR-to-HIR ownership transfer and required failure fact snapshots.
+- [x] Define AST/TIR-to-HIR ownership transfer and required failure fact snapshots.
   Base/generated recursive summary convergence cannot depend on a retained AST.
   Diagnostics retain exact locations/types/provenance after expression/TIR drop.
-- [ ] Preserve the current diagnostic TypeEnv dependency until its own display
+- [x] Preserve the current diagnostic TypeEnv dependency until its own display
   snapshot boundary replaces it. This plan does not claim that shrinking
   expressions implements diagnostic layout Phase 4 or frees every TypeEnv early.
-- [ ] Choose the native fallible-call HIR form: proposed new block arguments with
+- [x] Choose the native fallible-call HIR form: proposed new block arguments with
   edge-defined results or an explicit invoke-like terminator. Success and error definitions
   are mutually exclusive. Do not hide a semantic carrier behind an accessor.
+
+Phase 2 selected the safe enum/AoS reference, explicit result shape, typed
+owner-local IDs/ranges, scratch promotion with last-reader compaction and an
+invoke-like HIR continuation. The compiler architecture owns these contracts
+and the benchmark evidence report records the bounded comparisons and limits.
+The checked decisions above accept design and prototype proofs. Actual payload
+and service-root release, generic-preparation detachment, diagnostic rendering,
+native CFG/backend execution and compiler-wide performance remain required
+production proofs in Phases 3 and 4.
 
 ### Prior evidence to use, not blindly repeat
 
