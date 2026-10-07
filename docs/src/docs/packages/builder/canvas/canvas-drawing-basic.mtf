@@ -11,17 +11,15 @@ Bind the functions you need with a direct-selection clause.
 [codeblock, $code("moth"):
     @web/canvas get_canvas, context_2d, set_fill_style, fill_rect
 
-    canvas = get_canvas("my-canvas") catch:
-        assert(false, "canvas not found")
-    ;
-
-    ctx ~= context_2d(canvas) catch:
-        assert(false, "no 2D context")
-    ;
+    canvas = get_canvas("my-canvas")!
+    ctx ~= context_2d(canvas)!
 
     set_fill_style(~ctx, "red")
     fill_rect(~ctx, 10.0, 10.0, 50.0, 50.0)
 ]
+
+At the top level, `!` propagates failure through the implicit `start` function's
+`Error!` channel.
 
 ### Basic opaque types
 
