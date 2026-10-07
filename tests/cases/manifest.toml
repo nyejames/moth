@@ -4381,6 +4381,13 @@ contract = "language.loops.collection_iteration_acceptance"
 role = "primary"
 
 [[case]]
+id = "loop_body_bindings_rebind_each_iteration"
+path = "loop_body_bindings_rebind_each_iteration"
+tags = ["integration", "control-flow", "collections", "borrows"]
+contract = "language.loops.body_bindings_rebind_each_iteration"
+role = "primary"
+
+[[case]]
 id = "loop_collection_iteration_with_index"
 path = "loop_collection_iteration_with_index"
 tags = ["integration", "control-flow", "collections"]

@@ -10,7 +10,8 @@ use crate::backends::js::JsEmitter;
 impl<'hir> JsEmitter<'hir> {
     /// Emits the core binding and slot read/write helpers.
     ///
-    /// WHAT: `__moth_is_ref` identifies reference records; `__moth_binding` constructs slot bindings;
+    /// WHAT: `__moth_is_ref` identifies reference records; `__moth_binding` and
+    /// `__moth_alias_binding` construct fresh slot and alias bindings;
     /// `__moth_param_binding` normalises call arguments from plain JS values or alias refs;
     /// `__moth_resolve` walks alias chains; `__moth_read`/`__moth_write` perform guarded slot or
     /// computed-place reads and writes.
@@ -46,9 +47,16 @@ impl<'hir> JsEmitter<'hir> {
             emitter.with_indent(|em| em.emit_line("return value;"));
             emitter.emit_line("}");
             // Computed-place ref: wrap in an alias binding so callers get a uniform handle.
+            emitter.emit_line("return __moth_alias_binding(value);");
+        });
+        self.emit_line("}");
+        self.emit_line("");
+
+        self.emit_line("function __moth_alias_binding(ref) {");
+        self.with_indent(|emitter| {
             emitter.emit_line("const binding = __moth_binding(undefined);");
             emitter.emit_line("binding.__moth_mode = \"alias\";");
-            emitter.emit_line("binding.__moth_target = value;");
+            emitter.emit_line("binding.__moth_target = ref;");
             emitter.emit_line("return binding;");
         });
         self.emit_line("}");

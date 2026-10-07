@@ -382,6 +382,105 @@ fn alias_only_local_assignment_emits_write() {
     );
 }
 
+/// Verifies that writes to a local the borrow analysis proves unbound create a fresh wrapper. [binding]
+///
+/// WHY: function-entry wrappers outlive one execution of a re-entered block. Reusing an alias
+/// wrapper there would write through to the previous execution's referent.
+#[test]
+fn unbound_local_assignment_creates_fresh_binding() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (type_environment, types) = build_type_environment();
+
+    let assign_value = statement(
+        1,
+        HirStatementKind::Assign {
+            target: HirPlace::Local(LocalId(0)),
+            value: int_expression(1, 42, types.int, RegionId(0)),
+        },
+    );
+    let assign_alias = statement(
+        2,
+        HirStatementKind::Assign {
+            target: HirPlace::Local(LocalId(1)),
+            value: expression(
+                2,
+                HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
+                types.int,
+                RegionId(0),
+                ValueKind::RValue,
+            ),
+        },
+    );
+
+    let block = HirBlock {
+        id: BlockId(0),
+        region: RegionId(0),
+        locals: vec![
+            local(0, types.int, RegionId(0)),
+            local(1, types.int, RegionId(0)),
+        ],
+        statements: vec![assign_value, assign_alias],
+        terminator: HirTerminator::Return(unit_expression(3, types.unit, RegionId(0))),
+    };
+
+    let function = HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: vec![],
+        return_type: types.unit,
+    };
+
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        "main",
+        vec![block],
+        function,
+        &[(LocalId(0), "source"), (LocalId(1), "alias")],
+    );
+
+    let mut report = BorrowCheckReport::default();
+    for (statement_id, local_id) in [(1, 0), (2, 1)] {
+        report.analysis.statement_entry_states.insert(
+            HirNodeId(statement_id),
+            BorrowStateSnapshot {
+                locals: vec![LocalBorrowSnapshot {
+                    local: LocalId(local_id),
+                    mode: LocalMode::UNINIT,
+                    alias_roots: vec![],
+                }],
+            },
+        );
+    }
+
+    let output = lower_hir_to_js(
+        &module,
+        &report,
+        &NumericProofs::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("JS lowering should succeed");
+    let source_name = expected_dev_local_name("source", 0);
+    let alias_name = expected_dev_local_name("alias", 1);
+
+    assert!(
+        output
+            .source
+            .contains(&format!("{source_name} = __moth_binding(42);")),
+        "an unbound value local must receive a fresh slot binding"
+    );
+    assert!(
+        output.source.contains(&format!(
+            "{alias_name} = __moth_alias_binding({source_name});"
+        )),
+        "an unbound Load local must receive a fresh alias binding"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Computed-place tests [computed]
 // ---------------------------------------------------------------------------

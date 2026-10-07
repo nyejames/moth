@@ -8,6 +8,6 @@ kind = "html"
 must_contain = [
   "\" real=\"",
   "\", int=\"",
-  ", 2.5);",
-  ", 2);",
+  "= __moth_binding(2.5);",
+  "= __moth_binding(2);",
 ]

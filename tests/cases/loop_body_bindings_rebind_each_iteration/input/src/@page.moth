@@ -1,0 +1,63 @@
+-- Every loop iteration creates new body bindings. A binder or body-local alias must bind
+-- the current iteration's value, never write through an alias bound by an earlier one.
+
+Unit = | id Int, team Int |
+
+numbers = {1, 2, 3}
+number_sum ~= 0
+number_seen ~= [:]
+loop numbers |number|:
+    number_seen = [:[number_seen][number],]
+    number_sum += number
+;
+first_number = numbers.get(0)!
+last_number = numbers.get(2)!
+
+units = {Unit(10, 0), Unit(11, 1), Unit(12, 0)}
+unit_seen ~= [:]
+loop units |unit|:
+    same = unit
+    unit_seen = [:[unit_seen][same.id],]
+;
+first_unit = units.get(0)!
+last_unit = units.get(2)!
+
+-- An inner loop over the same collection must not move the outer binder.
+nested_seen ~= [:]
+loop units |outer|:
+    teammates ~= 0
+    loop units |inner|:
+        if inner.team is outer.team:
+            teammates += 1
+        ;
+    ;
+    nested_seen = [:[nested_seen][outer.id]:[teammates],]
+;
+
+range_seen ~= [:]
+loop 0 to 3 |index|:
+    picked = units.get(index)!
+    team = picked.team
+    range_seen = [:[range_seen][team],]
+;
+step ~= 0
+while_seen ~= [:]
+loop step < 3:
+    picked = units.get(step)!
+    held = picked
+    while_seen = [:[while_seen][held.id],]
+    step += 1
+;
+
+-- A mutable alias declared in the body still writes through to its referent.
+total ~= 0
+loop numbers |number|:
+    running ~= total
+    running = running + number
+;
+
+[:numbers seen=[number_seen] sum=[number_sum] first=[first_number] last=[last_number]]
+[:units seen=[unit_seen] first=[first_unit.id] last=[last_unit.id]]
+[:nested [nested_seen]]
+[:range [range_seen] while [while_seen]]
+[:total [total]]

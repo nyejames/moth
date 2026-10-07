@@ -621,6 +621,13 @@ impl<'hir> JsEmitter<'hir> {
         }
     }
 
+    /// Emits a write to a local, choosing how it treats the binding the local already holds.
+    ///
+    /// WHY: JS declares one binding wrapper per local at function entry, but a declaration
+    /// inside a re-entered block creates a new dynamic binding on every execution. Where the
+    /// borrow analysis proves the local is unbound, this assignment creates that binding with a
+    /// fresh wrapper. Reusing the old wrapper would write through an alias retained from an
+    /// earlier execution, mutating that execution's referent.
     fn emit_local_assignment(
         &mut self,
         statement: &HirStatement,
@@ -628,12 +635,16 @@ impl<'hir> JsEmitter<'hir> {
         value: &HirExpression,
     ) -> Result<(), CompilerError> {
         let local_name = self.local_name(local_id)?.to_owned();
-        let alias_only = self.local_is_alias_only_before_statement(statement, local_id);
+        let mode = self.local_mode_before_statement(statement, local_id);
+        let creates_binding = mode.is_some_and(LocalMode::is_definitely_uninit);
+        let alias_only = mode.is_some_and(Self::snapshot_local_is_alias_only);
 
         match &value.kind {
             HirExpressionKind::Load(place) => {
                 let source = self.lower_place(place)?;
-                if alias_only {
+                if creates_binding {
+                    self.emit_line(&format!("{local_name} = __moth_alias_binding({source});"));
+                } else if alias_only {
                     self.emit_line(&format!(
                         "__moth_write({local_name}, __moth_read({source}));",
                     ));
@@ -643,7 +654,9 @@ impl<'hir> JsEmitter<'hir> {
             }
             _ => {
                 let lowered = self.lower_expression_for_use(value, JsValueUse::AssignmentValue)?;
-                if alias_only {
+                if creates_binding {
+                    self.emit_line(&format!("{local_name} = __moth_binding({lowered});"));
+                } else if alias_only {
                     self.emit_line(&format!("__moth_write({local_name}, {lowered});"));
                 } else {
                     self.emit_line(&format!("__moth_assign_value({local_name}, {lowered});"));
@@ -654,26 +667,19 @@ impl<'hir> JsEmitter<'hir> {
         Ok(())
     }
 
-    fn local_is_alias_only_before_statement(
+    fn local_mode_before_statement(
         &self,
         statement: &HirStatement,
         local_id: LocalId,
-    ) -> bool {
-        let Some(snapshot) = self
-            .borrow_analysis
+    ) -> Option<LocalMode> {
+        self.borrow_analysis
             .analysis
             .statement_entry_states
-            .get(&statement.id)
-        else {
-            return false;
-        };
-
-        let Some(local_snapshot) = snapshot.locals.iter().find(|local| local.local == local_id)
-        else {
-            return false;
-        };
-
-        Self::snapshot_local_is_alias_only(local_snapshot.mode)
+            .get(&statement.id)?
+            .locals
+            .iter()
+            .find(|local| local.local == local_id)
+            .map(|local| local.mode)
     }
 
     pub(crate) fn local_is_alias_only_at_block_entry(
