@@ -46,6 +46,7 @@ fn synthetic_traversal_prepares_retained_clauses_without_a_token_rescan() {
 
     let collected = super::source_discovery::collect_reachable_input_files(
         &root.join("main.moth"),
+        &super::module_namespace::ModuleNamespaceSet::default(),
         &resolver,
         &style_directives,
         &mut external_imports,

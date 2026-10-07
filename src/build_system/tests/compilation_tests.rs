@@ -921,7 +921,7 @@ fn check_only_success_batches_render_local_paths_through_production_construction
         diagnosed: Vec::new(),
         blocked: Vec::new(),
     };
-    let frontend = ProjectFrontendCompilation::new_with_transient_messages(
+    let frontend = ProjectFrontendCompilation::new(
         project,
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),

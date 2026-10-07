@@ -567,18 +567,7 @@ impl SourceTreeIndex {
             }
             stats.dirs_visited += 1;
 
-            let mut entries = fs::read_dir(&directory)
-                .map_err(|error| Self::directory_read_error(&directory, error))?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| {
-                    CompilerError::file_error(
-                        &directory,
-                        format!(
-                            "Failed to read directory entry while indexing source tree: {error}"
-                        ),
-                    )
-                })?;
-            entries.sort_by_key(|entry| entry.path());
+            let entries = Self::sorted_directory_entries(&directory)?;
 
             let mut subdirectories = Vec::new();
             let mut source_files_by_stem: BTreeMap<String, String> = BTreeMap::new();
@@ -890,6 +879,41 @@ impl SourceTreeIndex {
         })
     }
 
+    /// Collect local namespace claims without loading sources or descending into directories.
+    /// Synthetic discovery needs these names even when their sources are not reachable: a
+    /// registered package must never take precedence over a local source or directory segment.
+    pub(super) fn single_file_dependency_keys(
+        source_root: &Path,
+    ) -> Result<BTreeSet<String>, PremergeFailure> {
+        let skip_policy = SourceTreeSkipPolicy::default();
+        let mut keys = BTreeSet::new();
+        for entry in Self::sorted_directory_entries(source_root)? {
+            let path = entry.path();
+            let is_directory = path.is_dir();
+            if is_directory && skip_policy.should_skip(&path) {
+                continue;
+            }
+            if !is_directory && !path.is_file() {
+                continue;
+            }
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| {
+                    non_utf8_filesystem_name_error(&path, "single-file namespace name")
+                })?;
+            if is_directory {
+                keys.insert(file_name.to_owned());
+            } else if !file_name.starts_with('@')
+                && !file_name.starts_with('+')
+                && let Some(stem) = source_stem_from_file_name(file_name)
+            {
+                keys.insert(stem.to_owned());
+            }
+        }
+        Ok(keys)
+    }
+
     /// Prepare bounded root data for a directly compiled special entry file.
     ///
     /// The source tree uses the same index owner as directory compilation. The caller consumes
@@ -1031,6 +1055,20 @@ impl SourceTreeIndex {
     #[cfg(test)]
     pub(crate) fn stats(&self) -> &SourceTreeDiscoveryStats {
         &self.stats
+    }
+
+    fn sorted_directory_entries(directory: &Path) -> Result<Vec<fs::DirEntry>, CompilerError> {
+        let mut entries = fs::read_dir(directory)
+            .map_err(|error| Self::directory_read_error(directory, error))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| {
+                CompilerError::file_error(
+                    directory,
+                    format!("Failed to read directory entry while indexing source tree: {error}"),
+                )
+            })?;
+        entries.sort_by_key(|entry| entry.path());
+        Ok(entries)
     }
 
     fn directory_read_error(directory: &Path, error: std::io::Error) -> CompilerError {

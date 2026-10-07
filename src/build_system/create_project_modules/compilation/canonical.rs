@@ -167,6 +167,11 @@ impl<'a> BoundaryCompilationContext<'a> {
         }
     }
 
+    #[cfg(feature = "boracle")]
+    pub(super) fn build_config_values(&self) -> Arc<ResolvedBuildConfigMap> {
+        Arc::clone(&self.build_config_values)
+    }
+
     pub(super) fn completed_packages(&self) -> &CompletedSourcePackageRegistry {
         self.completed_packages
     }
@@ -181,7 +186,7 @@ impl<'a> BoundaryCompilationContext<'a> {
     }
 }
 
-struct DirectoryModuleCompileContext<'boundary, 'services> {
+pub(super) struct DirectoryModuleCompileContext<'boundary, 'services> {
     boundary: &'boundary BoundaryCompilationContext<'services>,
     provider_store: &'boundary ModuleArtifactStore,
     /// Declaring-module generic templates already published in this boundary.
@@ -200,7 +205,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
         clippy::too_many_arguments,
         reason = "constructor borrows each directory-compile service separately: boundary context, provider store, materialisations, provider and source-package edges, and the build string table"
     )]
-    fn new(
+    pub(super) fn new(
         boundary: &'boundary BoundaryCompilationContext<'services>,
         provider_store: &'boundary ModuleArtifactStore,
         provider_materialisations: &'boundary ProviderMaterialisationRegistry,
@@ -275,7 +280,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
     /// their own resolved module/package records; an isolated job never falls back to canonical
     /// shell indexes, because a shell from another source must not accidentally bind merely due
     /// to sharing the owner's `ModuleId`.
-    fn build_source_provider_dependencies(
+    pub(super) fn build_source_provider_dependencies(
         &self,
         consumer_module_id: ModuleId,
         prepared: &PreparedModule,

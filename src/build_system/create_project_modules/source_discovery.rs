@@ -1,7 +1,8 @@
 //! Stage 0 source traversal, owned-input preparation and shared structural-provider resolution.
 //!
 //! Given an entry `.moth` file, the synthetic path walks its dependency clauses transitively to
-//! build the complete set of source files for one single-file module. Directory projects prepare
+//! build the consumer-owned source set and retained package-provider edges. Package source stays
+//! in its independent Stage 0 boundary. Directory projects prepare
 //! owned `SourceId`s through the direct-input helper in this module. Both paths assemble
 //! `PreparedSourceInput` values for downstream compilation stages.
 //! Stage 0 returns move-only typed failures in `SourceDiscoveryError`: a plain `CompilerDiagnostic`
@@ -60,6 +61,7 @@ use super::file_reference_resolution::{
 };
 use super::module_identity::ModuleId;
 use super::module_namespace::DirectoryDependencyResolution;
+use super::module_namespace::{ModuleNamespaceSet, ResolvedDependency};
 use super::prepared_source::{PreparedSourceInput, PreparedSourceKind};
 use super::resource_inputs::ResourceInputRegistry;
 use super::source_discovery_error::SourceDiscoveryError;
@@ -124,6 +126,7 @@ struct ReachableSourceInventory {
     local_source_cache: FxHashMap<PathBuf, PreparedDiscoverySource>,
     traversal_source_files: SourceDatabase,
     resolved_file_references: Vec<SingleFileResolvedReference>,
+    source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
 }
 
 struct DiscoveryWalkContext<'a> {
@@ -152,6 +155,7 @@ pub(super) struct CollectedReachableInputs {
     pub(super) source_files: SourceDatabaseBuilder,
     pub(super) input_files: Vec<PreparedSourceInput>,
     pub(super) resolved_file_references: Vec<SingleFileResolvedReference>,
+    pub(super) source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
 }
 /// Stage 0 boundary error preserving the finished source owner for the final tail.
 ///
@@ -248,6 +252,7 @@ fn missing_source_load_input_index(result: &MissingSourceLoadResult) -> usize {
 )]
 pub(super) fn collect_reachable_input_files(
     entry_path: &Path,
+    namespace_set: &ModuleNamespaceSet,
     project_path_resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
@@ -258,6 +263,7 @@ pub(super) fn collect_reachable_input_files(
 ) -> Result<CollectedReachableInputs, CollectReachableInputsError> {
     let discovery = match discover_reachable_source_files(
         entry_path,
+        namespace_set,
         project_path_resolver,
         style_directives,
         external_imports,
@@ -287,10 +293,12 @@ pub(super) fn collect_reachable_input_files(
         source_files,
         input_files,
         resolved_file_references,
+        source_package_dependencies,
     } = discovery;
     Ok(CollectedReachableInputs {
         source_files,
         input_files,
         resolved_file_references,
+        source_package_dependencies,
     })
 }

@@ -576,6 +576,7 @@ fn synthetic_nested_module_provider_resolves_from_owning_module_root() {
 
     super::source_discovery::collect_reachable_input_files(
         &nested_entry,
+        &super::module_namespace::ModuleNamespaceSet::default(),
         &resolver,
         &style_directives,
         &mut external_imports,
@@ -651,6 +652,7 @@ fn synthetic_nested_provider_keys_do_not_collide_with_entry_relative_spellings()
 
         super::source_discovery::collect_reachable_input_files(
             &nested_entry,
+            &super::module_namespace::ModuleNamespaceSet::default(),
             &resolver,
             &style_directives,
             &mut external_imports,

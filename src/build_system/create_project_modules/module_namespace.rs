@@ -27,9 +27,12 @@ use super::source_tree_index::{
 };
 
 use crate::builder_surface::SourceFileKind;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidImportPathReason};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, InvalidImportPathReason, PremergeFailure,
+};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::dependency_clause_syntax::RetainedDependencyPath;
+use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -154,6 +157,7 @@ pub(crate) enum ResolvedDependency {
 /// compile as separate graphs with their own source indexes. This owner is the single Stage 0
 /// home for the namespace lookup tables that replace filesystem probing and public-surface
 /// fallback on the migrated directory production path.
+#[derive(Default)]
 pub(crate) struct ModuleNamespaceSet {
     /// One namespace per project module, indexed by project `ModuleId`.
     project_namespaces: Vec<ModuleNamespace>,
@@ -162,8 +166,10 @@ pub(crate) struct ModuleNamespaceSet {
     package_namespaces: BTreeMap<String, Vec<ModuleNamespace>>,
     /// Registered Core, Builder and dependency package paths without their leading `@`.
     binding_package_paths: BTreeSet<String>,
-    /// Retained source-package boundary indexes for the lifetime of directory Stage 0.
+    /// Retained source-package boundary indexes shared by indexed and synthetic consumers.
     package_boundary_indexes: SourcePackageBoundaryIndexes,
+    /// Bounded local collision facts for each prepared synthetic owning root, without source IDs.
+    single_file_dependency_keys: BTreeMap<PathBuf, BTreeSet<String>>,
 }
 
 /// Borrowed directory-project namespace context used by canonical header-owned discovery.
@@ -314,8 +320,35 @@ impl ModuleNamespaceSet {
         package_boundary_indexes: SourcePackageBoundaryIndexes,
         binding_packages: &ExternalPackageRegistry,
     ) -> Self {
-        let project_namespaces = build_project_namespaces(source_tree_index, project_module_graph);
+        let mut namespaces = Self::for_source_packages(package_boundary_indexes, binding_packages);
+        namespaces.project_namespaces =
+            build_project_namespaces(source_tree_index, project_module_graph);
+        namespaces
+    }
 
+    /// Synthetic consumers keep local namespace claims separate from reachable source membership.
+    /// Only immediate names below prepared owning roots are read; unrelated source bodies and
+    /// arbitrary descendant directories never enter this inventory.
+    pub(crate) fn for_single_file(
+        package_boundary_indexes: SourcePackageBoundaryIndexes,
+        binding_packages: &ExternalPackageRegistry,
+        project_path_resolver: &ProjectPathResolver,
+    ) -> Result<Self, PremergeFailure> {
+        let mut namespaces = Self::for_source_packages(package_boundary_indexes, binding_packages);
+        let roots = std::iter::once(project_path_resolver.entry_root().to_path_buf())
+            .chain(project_path_resolver.module_roots().cloned())
+            .collect::<BTreeSet<_>>();
+        for root in roots {
+            let keys = SourceTreeIndex::single_file_dependency_keys(&root)?;
+            namespaces.single_file_dependency_keys.insert(root, keys);
+        }
+        Ok(namespaces)
+    }
+
+    fn for_source_packages(
+        package_boundary_indexes: SourcePackageBoundaryIndexes,
+        binding_packages: &ExternalPackageRegistry,
+    ) -> Self {
         let package_namespaces = build_package_namespaces(&package_boundary_indexes);
         let binding_package_paths = binding_packages
             .package_paths()
@@ -323,10 +356,11 @@ impl ModuleNamespaceSet {
             .collect();
 
         Self {
-            project_namespaces,
+            project_namespaces: Vec::new(),
             package_namespaces,
             binding_package_paths,
             package_boundary_indexes,
+            single_file_dependency_keys: BTreeMap::new(),
         }
     }
 
@@ -339,7 +373,6 @@ impl ModuleNamespaceSet {
     /// path as the IO handle and the boundary-local `ModuleId` for project graph edges.
     /// WHY: replaces the legacy filesystem source-surface fallback and candidate probing with
     /// indexed facts.
-    /// Resolve one compiler-semantic dependency through the boundary-aware namespace.
     #[allow(
         clippy::too_many_arguments,
         reason = "namespace resolution keeps the retained provider path, declaring file, source index, boundary, package prefix, and mutable string/path forks as separate borrows"
@@ -400,48 +433,13 @@ impl ModuleNamespaceSet {
             ));
         }
 
-        let source_package_surface = self.find_source_package_surface(&key);
-        let binding_package_prefix = self.binding_package_prefix_for_key(&key);
-
-        if source_package_surface.is_some() && binding_package_prefix.is_some() {
-            return Err(CompilerDiagnostic::ambiguous_import_target(
-                dependency_path,
-                dependency_span,
-            ));
-        }
-
-        if let Some(binding_prefix) = binding_package_prefix {
-            if namespace_conflicts_with_package_prefix(namespace, binding_prefix) {
-                return Err(CompilerDiagnostic::ambiguous_import_target(
-                    dependency_path,
-                    dependency_span,
-                ));
-            }
-
-            return Ok(ResolvedDependency::BindingPackage);
-        }
-
-        if let Some((dependency_prefix, _root_file)) = source_package_surface {
-            if namespace_conflicts_with_package_prefix(namespace, &key) {
-                return Err(CompilerDiagnostic::ambiguous_import_target(
-                    dependency_path,
-                    dependency_span,
-                ));
-            }
-
-            return Ok(ResolvedDependency::SourcePackageSurface {
-                consumer_module_id,
-                dependency_prefix: dependency_prefix.to_owned(),
-                #[cfg(test)]
-                root_file: _root_file.to_path_buf(),
-            });
-        }
-
-        if self.is_source_package_private_path(&key) {
-            return Err(CompilerDiagnostic::cross_module_import_not_exported(
-                dependency_path,
-                dependency_span,
-            ));
+        if let Some(package) = self.resolve_package_dependency(
+            provider,
+            consumer_module_id,
+            namespace.entries.keys().map(String::as_str),
+            &key,
+        )? {
+            return Ok(package);
         }
 
         if let Some(entry) = namespace.entries.get(&key) {
@@ -579,8 +577,93 @@ impl ModuleNamespaceSet {
         }
     }
 
-    /// Check whether the complete provider path matches a source-backed package prefix and return
-    /// the package's root file.
+    /// Resolve registered package surfaces through the same authority used by indexed modules.
+    /// Package implementation files never enter the synthetic consumer's reachable source set.
+    pub(crate) fn resolve_single_file_package_dependency(
+        &self,
+        provider: &RetainedDependencyPath,
+        declaring_canonical_path: &Path,
+        project_path_resolver: &ProjectPathResolver,
+        string_table: &mut StringTable,
+        path_fork: &PathInternerFork,
+    ) -> Result<Option<ResolvedDependency>, CompilerDiagnostic> {
+        let dependency_span = Some(provider.span);
+        reject_invalid_path_components(provider.path, dependency_span, string_table, path_fork)?;
+        reject_direct_special_file_dependency(provider, string_table, path_fork)?;
+        reject_explicit_source_extension(provider.path, dependency_span, string_table, path_fork)?;
+        let mut scratch = Vec::new();
+        let components = path_fork.resolve_components(provider.path, &mut scratch);
+        let key = portable_dependency_key(components, string_table);
+        let owning_root = project_path_resolver
+            .module_root_for_file(declaring_canonical_path)
+            .unwrap_or_else(|| project_path_resolver.entry_root().to_path_buf());
+        let local_keys = self
+            .single_file_dependency_keys
+            .get(&owning_root)
+            .into_iter()
+            .flatten()
+            .map(String::as_str);
+        // Synthetic traversal belongs to the sole consumer in its one-node graph.
+        self.resolve_package_dependency(provider, ModuleId::from_index(0), local_keys, &key)
+    }
+
+    fn resolve_package_dependency<'a>(
+        &self,
+        provider: &RetainedDependencyPath,
+        consumer_module_id: ModuleId,
+        local_dependency_keys: impl Iterator<Item = &'a str>,
+        key: &str,
+    ) -> Result<Option<ResolvedDependency>, CompilerDiagnostic> {
+        let dependency_path = provider.path;
+        let dependency_span = Some(provider.span);
+        let source_package_surface = self.find_source_package_surface(key);
+        let binding_package_prefix = self.binding_package_prefix_for_key(key);
+
+        if source_package_surface.is_some() && binding_package_prefix.is_some() {
+            return Err(CompilerDiagnostic::ambiguous_import_target(
+                dependency_path,
+                dependency_span,
+            ));
+        }
+
+        if let Some(binding_prefix) = binding_package_prefix {
+            if namespace_conflicts_with_package_prefix(local_dependency_keys, binding_prefix) {
+                return Err(CompilerDiagnostic::ambiguous_import_target(
+                    dependency_path,
+                    dependency_span,
+                ));
+            }
+
+            return Ok(Some(ResolvedDependency::BindingPackage));
+        }
+
+        if let Some((dependency_prefix, _root_file)) = source_package_surface {
+            if namespace_conflicts_with_package_prefix(local_dependency_keys, key) {
+                return Err(CompilerDiagnostic::ambiguous_import_target(
+                    dependency_path,
+                    dependency_span,
+                ));
+            }
+
+            return Ok(Some(ResolvedDependency::SourcePackageSurface {
+                consumer_module_id,
+                dependency_prefix: dependency_prefix.to_owned(),
+                #[cfg(test)]
+                root_file: _root_file.to_path_buf(),
+            }));
+        }
+
+        if self.is_source_package_private_path(key) {
+            return Err(CompilerDiagnostic::cross_module_import_not_exported(
+                dependency_path,
+                dependency_span,
+            ));
+        }
+
+        Ok(None)
+    }
+
+    /// Match the complete registered package prefix without traversing its private facade.
     fn find_source_package_surface(&self, provider_path: &str) -> Option<(&str, &Path)> {
         for (dependency_prefix, package_index) in self.package_boundary_indexes.iter() {
             if dependency_prefix == provider_path {
@@ -1062,12 +1145,12 @@ fn find_module_bypass_prefix<'a>(
     None
 }
 
-fn namespace_conflicts_with_package_prefix(
-    namespace: &ModuleNamespace,
+fn namespace_conflicts_with_package_prefix<'a>(
+    mut local_dependency_keys: impl Iterator<Item = &'a str>,
     package_prefix: &str,
 ) -> bool {
     let folded_package = package_prefix.to_ascii_lowercase();
-    namespace.entries.keys().any(|entry_key| {
+    local_dependency_keys.any(|entry_key| {
         let folded_entry = entry_key.to_ascii_lowercase();
         folded_entry == folded_package
             || folded_entry.starts_with(&format!("{folded_package}/"))

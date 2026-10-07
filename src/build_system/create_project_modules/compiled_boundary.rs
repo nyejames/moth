@@ -529,6 +529,13 @@ pub(crate) struct SourcePackagePublication {
 }
 
 impl CompletedSourcePackageRegistry {
+    /// Diagnosed package boundaries retain their reports instead of exposing partial interfaces.
+    pub(crate) fn has_diagnosed_or_blocked(&self) -> bool {
+        self.iter().any(|package| {
+            !package.boundary.diagnosed.is_empty() || !package.boundary.blocked.is_empty()
+        })
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             packages: Vec::new(),
@@ -1151,14 +1158,6 @@ impl ProjectFrontendCompilation {
         project: CompiledGraphBoundary,
         source_packages: CompletedSourcePackageRegistry,
         resource_inputs: ResourceInputRegistry,
-    ) -> Result<Self, CompilerError> {
-        Self::new_with_transient_messages(project, source_packages, resource_inputs, Vec::new())
-    }
-
-    pub(crate) fn new_with_transient_messages(
-        project: CompiledGraphBoundary,
-        source_packages: CompletedSourcePackageRegistry,
-        resource_inputs: ResourceInputRegistry,
         transient_batches: Vec<TransientPremergeBatch>,
     ) -> Result<Self, CompilerError> {
         project.validate_invariants()?;
@@ -1208,9 +1207,7 @@ impl ProjectFrontendCompilation {
                 .transient_batches
                 .iter()
                 .any(|transient| transient.batch.has_errors())
-            || self.source_packages.iter().any(|package| {
-                !package.boundary.diagnosed.is_empty() || !package.boundary.blocked.is_empty()
-            })
+            || self.source_packages.has_diagnosed_or_blocked()
     }
 
     /// Iterate every successful module view (base artefacts and generated sidecars) across all

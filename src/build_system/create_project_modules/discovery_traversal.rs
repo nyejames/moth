@@ -201,11 +201,13 @@ pub(crate) struct ReachableTraversalOutcome {
     pub(super) source_files: SourceDatabaseBuilder,
     pub(super) input_files: Vec<PreparedSourceInput>,
     pub(super) resolved_file_references: Vec<SingleFileResolvedReference>,
+    pub(super) source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
 }
 
 #[allow(clippy::too_many_arguments)]
 fn traverse_reachable_source_files(
     entry_paths: &[PathBuf],
+    namespace_set: &ModuleNamespaceSet,
     project_path_resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
     policy: &mut DependencyPolicy<'_, '_>,
@@ -248,11 +250,13 @@ fn traverse_reachable_source_files(
         local_source_cache: FxHashMap::default(),
         traversal_source_files: SourceDatabase::empty(),
         resolved_file_references: Vec::new(),
+        source_package_dependencies: Vec::new(),
     };
 
     // The walk only borrows source ownership, so every terminal path reaches this barrier.
     let outcome = walk_reachable_sources(
         &mut inventory,
+        namespace_set,
         &context,
         policy,
         &mut file_reference_resolver,
@@ -269,6 +273,7 @@ fn traverse_reachable_source_files(
         local_source_cache,
         traversal_source_files,
         mut resolved_file_references,
+        mut source_package_dependencies,
         ..
     } = inventory;
     reachable.extend(queue);
@@ -282,16 +287,19 @@ fn traverse_reachable_source_files(
         path_fork,
         failure,
         &mut resolved_file_references,
+        &mut source_package_dependencies,
     )?;
     Ok(ReachableTraversalOutcome {
         source_files,
         input_files,
         resolved_file_references,
+        source_package_dependencies,
     })
 }
 
 fn walk_reachable_sources(
     inventory: &mut ReachableSourceInventory,
+    namespace_set: &ModuleNamespaceSet,
     context: &DiscoveryWalkContext<'_>,
     policy: &mut DependencyPolicy<'_, '_>,
     file_reference_resolver: &mut SingleFileReferenceResolver<'_>,
@@ -304,6 +312,7 @@ fn walk_reachable_sources(
         local_source_cache,
         traversal_source_files,
         resolved_file_references,
+        source_package_dependencies,
     } = inventory;
     let DiscoveryWalkContext {
         canonical_entry_path,
@@ -416,11 +425,38 @@ fn walk_reachable_sources(
                 string_table,
             })?;
 
+            // Virtual binding packages also need local collision checks before their policy
+            // skips filesystem discovery. Explicit-extension providers retain their own owner.
+            if matches!(provider.target, DependencyTargetKind::Source)
+                && let Some(package) = namespace_set.resolve_single_file_package_dependency(
+                    provider,
+                    &canonical_file,
+                    project_path_resolver,
+                    string_table,
+                    path_fork,
+                )?
+            {
+                if let ResolvedDependency::SourcePackageSurface {
+                    consumer_module_id,
+                    dependency_prefix,
+                    ..
+                } = package
+                {
+                    source_package_dependencies.push(ResolvedSourcePackageDependency {
+                        consumer_module_id,
+                        dependency_prefix,
+                        dependency_shell_id: provider.dependency_shell_id,
+                    });
+                    add_frontend_counter(FrontendCounter::ResolvedSourcePackageClauseCount, 1);
+                }
+                continue;
+            }
+
             match action {
                 DependencyPolicyAction::Skip => continue,
                 DependencyPolicyAction::QueueLocal => {
                     let mut reachable_queue = ReachableQueue { reachable, queue };
-                    let result = resolve_and_queue_local_dependency(
+                    let result = resolve_and_queue_via_filesystem(
                         provider,
                         &canonical_file,
                         path_fork,
@@ -428,7 +464,9 @@ fn walk_reachable_sources(
                         string_table,
                         &mut reachable_queue,
                     );
-                    result?;
+                    result.map_err(|error| {
+                        with_provider_dependency_error(error, Some(provider.span))
+                    })?;
                 }
             }
         }
@@ -499,6 +537,7 @@ fn walk_reachable_sources(
 )]
 pub(crate) fn discover_reachable_source_files(
     entry_point: &Path,
+    namespace_set: &ModuleNamespaceSet,
     project_path_resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
     external_imports: &mut ExternalImportDiscoveryState<'_>,
@@ -511,6 +550,7 @@ pub(crate) fn discover_reachable_source_files(
 
     traverse_reachable_source_files(
         &[entry_point.to_path_buf()],
+        namespace_set,
         project_path_resolver,
         style_directives,
         &mut policy,
@@ -521,37 +561,9 @@ pub(crate) fn discover_reachable_source_files(
     )
 }
 
-/// Resolve a compiler-semantic Moth dependency and enqueue its indexed or synthetic-file target.
-///
-/// WHAT: handles cross-module root queuing, implementation-file discovery and direct dependency
-///       edge retention for a dependency that is not provider-backed or a virtual package dependency.
-/// WHY: one owner keeps indexed resolution, same-module queuing and graph-edge retention aligned.
-///      A graph edge is retained only when indexed resolution crosses project module roots.
-fn resolve_and_queue_local_dependency(
-    provider: &RetainedDependencyPath,
-    canonical_file: &Path,
-    path_fork: &mut PathInternerFork,
-    project_path_resolver: &ProjectPathResolver,
-    string_table: &mut StringTable,
-    reachable_queue: &mut ReachableQueue<'_>,
-) -> Result<(), SourceDiscoveryError> {
-    resolve_and_queue_via_filesystem(
-        provider,
-        canonical_file,
-        path_fork,
-        project_path_resolver,
-        string_table,
-        reachable_queue,
-    )
-}
-
-/// Resolve a compiler-semantic dependency through the filesystem-backed resolver for single-file
-/// synthetic compilation.
-///
-/// Single-file compilation has no directory source index or project module graph, so ordinary bare
-/// source clauses use the prepared owning-module-root table while relative and registered-package
-/// paths use the normal filesystem resolver. No dependency edges are collected because there is
-/// no project module graph to populate.
+/// Resolve an ordinary source clause within the bounded synthetic consumer.
+/// Registered package clauses have already produced separate provider edges, so this lane
+/// only queues consumer-owned source through its retained module roots and filesystem resolver.
 fn resolve_and_queue_via_filesystem(
     provider: &RetainedDependencyPath,
     canonical_file: &Path,
@@ -560,11 +572,7 @@ fn resolve_and_queue_via_filesystem(
     string_table: &mut StringTable,
     reachable_queue: &mut ReachableQueue<'_>,
 ) -> Result<(), SourceDiscoveryError> {
-    let resolved = if is_relative_dependency_path(provider.path, path_fork, string_table)
-        || project_path_resolver
-            .source_package_root_for_dependency(provider.path, path_fork, string_table)
-            .is_some()
-    {
+    let resolved = if is_relative_dependency_path(provider.path, path_fork, string_table) {
         project_path_resolver
             .resolve_dependency_to_source_file(
                 provider.path,

@@ -329,6 +329,7 @@ pub(super) fn finalize_reachable_files(
     path_fork: &mut PathInternerFork,
     failure: Option<TraversalFailure>,
     resolved_file_references: &mut [SingleFileResolvedReference],
+    source_package_dependencies: &mut [ResolvedSourcePackageDependency],
 ) -> Result<(SourceDatabaseBuilder, Vec<PreparedSourceInput>), SourceDiscoveryError> {
     let registration_index = SourceRegistrationIndex::from_rows(files.iter().map(|source_file| {
         (
@@ -413,6 +414,15 @@ pub(super) fn finalize_reachable_files(
         rebind_resolved_file_reference_diagnostics(resolved_file_references, &source_ids)
     {
         return Err(discovery_finalization_error(error, source_files));
+    }
+
+    for dependency in source_package_dependencies {
+        let shell = &mut dependency.dependency_shell_id;
+        shell.source =
+            match super::discovery_identity_rebind::final_source_id(shell.source, &source_ids) {
+                Ok(source) => source,
+                Err(error) => return Err(discovery_finalization_error(error, source_files)),
+            };
     }
 
     // All original tables are owned before the final source-kind/input assembly.

@@ -16,7 +16,99 @@ use crate::compiler_frontend::public_interface::{
 };
 use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::utilities::basic::portable_path_text;
 use moth_lexical::numeric::profile::NumericProfile;
+
+#[test]
+fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_single_file() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let default_line = "limit #Config of Int = 2147483648";
+    let package_source =
+        format!("{default_line}\nexport:\n    run || -> Int:\n        return 1\n    ;\n;\n");
+    let consumer_source = "@broken run\nvalue = run()\n";
+
+    for (entry_mode, direct_file) in [("ordinary direct file", true), ("directory", false)] {
+        let temporary_directory = tempfile::tempdir().expect("should create temporary project");
+        let project_root = temporary_directory.path().to_path_buf();
+        let source_root = project_root.join("src");
+        let package_root = project_root.join("packages/broken");
+        fs::create_dir_all(&source_root).expect("should create project source root");
+        fs::create_dir_all(&package_root).expect("should create source package root");
+        fs::write(
+            project_root.join("config.moth"),
+            "project #= (name = \"docs\", entry_root = \"src\")\nhtml #= ()\n",
+        )
+        .expect("should write project config");
+        fs::write(package_root.join("@mod.moth"), &package_source)
+            .expect("should write invalid source-package config default");
+
+        let entry = if direct_file {
+            let entry = source_root.join("page.moth");
+            fs::write(&entry, consumer_source).expect("should write ordinary selected page");
+            entry
+        } else {
+            fs::write(source_root.join("@page.moth"), consumer_source)
+                .expect("should write directory entry page");
+            project_root.clone()
+        };
+
+        let mut config = Config::new(entry);
+        config.project_name = "docs".to_owned();
+        config.entry_root = PathBuf::from("src");
+        let style_directives = StyleDirectiveRegistry::built_ins();
+        let mut string_table = StringTable::new();
+        let mut frontend_surface = BuilderSurface::with_mandatory_core();
+        frontend_surface.source_packages.register_filesystem_root(
+            "broken",
+            package_root,
+            PackageOrigin::Builder,
+        );
+
+        let messages = match compile_project_frontend(
+            &mut config,
+            BuildProfile::Dev,
+            None,
+            &style_directives,
+            &mut frontend_surface,
+            &mut string_table,
+        ) {
+            Err(messages) => messages,
+            Ok(_) => panic!("{entry_mode}: invalid package default unexpectedly compiled"),
+        };
+        assert!(
+            !messages.has_infrastructure_error(),
+            "{entry_mode}: {messages:?}"
+        );
+        let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
+        assert_eq!(diagnostics.len(), 1, "{entry_mode}: {messages:?}");
+        assert_eq!(
+            diagnostics[0].kind.code(),
+            "MOTH-SYNTAX-0008",
+            "{entry_mode}: {messages:?}"
+        );
+
+        let rendered = render_compiler_messages_html(&messages, &project_root);
+        assert!(
+            rendered.contains(default_line),
+            "{entry_mode}: the diagnostic must render its package-owned source excerpt: {rendered}"
+        );
+        let position = messages
+            .diagnostic_render_context(0)
+            .primary_position(diagnostics[0])
+            .expect("invalid package default should retain its authored source position");
+        assert_eq!(
+            portable_path_text(&position.path),
+            "@mod.moth",
+            "{entry_mode}: diagnostic paths are relative to their owning package boundary"
+        );
+        assert_eq!(position.line, default_line, "{entry_mode}");
+        assert_eq!(position.start.line, 0, "{entry_mode}");
+        assert_eq!(position.start.column, 23, "{entry_mode}");
+        assert_eq!(position.end.line, 0, "{entry_mode}");
+        assert_eq!(position.end.column, 33, "{entry_mode}");
+    }
+}
+
 #[test]
 fn source_package_config_inputs_are_isolated_from_project_inputs() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
@@ -256,61 +348,101 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
     )
     .expect("should write diagnosed source package");
 
-    let mut config = Config::new(dir.clone());
-    config.entry_root = PathBuf::from("src");
-    let style_directives = StyleDirectiveRegistry::built_ins();
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let mut frontend_surface = BuilderSurface::with_mandatory_core();
-    frontend_surface.source_packages.register_filesystem_root(
-        "broken",
-        package,
-        PackageOrigin::Builder,
-    );
+    for entry in [dir.clone(), src.join("@page.moth")] {
+        let mut config = Config::new(entry);
+        config.entry_root = PathBuf::from("src");
+        let style_directives = StyleDirectiveRegistry::built_ins();
+        let mut string_table = StringTable::new();
+        let _path_fork = PathInternerFork::empty();
+        let mut frontend_surface = BuilderSurface::with_mandatory_core();
+        frontend_surface.source_packages.register_filesystem_root(
+            "broken",
+            package.clone(),
+            PackageOrigin::Builder,
+        );
 
-    let mut frontend = compile_project_frontend(
-        &mut config,
-        BuildProfile::Dev,
-        None,
-        &style_directives,
-        &mut frontend_surface,
-        &mut string_table,
-    )
-    .expect("a diagnosed package with blocked project consumers is a retained outcome");
+        let mut frontend = compile_project_frontend(
+            &mut config,
+            BuildProfile::Dev,
+            None,
+            &style_directives,
+            &mut frontend_surface,
+            &mut string_table,
+        )
+        .expect("a diagnosed package with blocked project consumers is a retained outcome");
 
-    assert_eq!(
-        frontend
-            .source_packages
-            .get(0)
-            .expect("package boundary retained")
-            .boundary
-            .diagnosed
-            .len(),
-        1,
-        "package diagnostic should be retained in its own boundary"
-    );
-    assert_eq!(
-        frontend.project.blocked.len(),
-        1,
-        "project consumer should be blocked, not an infrastructure failure"
-    );
-    assert_eq!(
-        frontend.project.diagnosed.len(),
-        0,
-        "the project boundary itself should have no diagnostic"
-    );
+        assert_eq!(
+            frontend
+                .source_packages
+                .get(0)
+                .expect("package boundary retained")
+                .boundary
+                .diagnosed
+                .len(),
+            1,
+            "package diagnostic should be retained in its own boundary"
+        );
+        assert_eq!(
+            frontend.project.blocked.len(),
+            1,
+            "project consumer should be blocked, not an infrastructure failure"
+        );
+        assert_eq!(
+            frontend.project.diagnosed.len(),
+            0,
+            "the project boundary itself should have no diagnostic"
+        );
 
-    let project_source = frontend.project_source_database.take();
-    let messages = frontend
-        .into_render_messages_with_frozen_identity(&mut string_table, project_source, None)
-        .expect("package diagnostics should install frozen render identity");
-    assert_eq!(
-        messages.error_count(),
-        1,
-        "the package diagnostic should render once"
-    );
+        let project_source = frontend.project_source_database.take();
+        let messages = frontend
+            .into_render_messages_with_frozen_identity(&mut string_table, project_source, None)
+            .expect("package diagnostics should install frozen render identity");
+        assert_eq!(
+            messages.error_count(),
+            1,
+            "the package diagnostic should render once"
+        );
+        let rendered = render_compiler_messages_html(&messages, &dir);
+        assert!(
+            rendered.contains("return missing_package_value"),
+            "the diagnosed package must retain its own source snapshot: {rendered}"
+        );
+    }
+
+    #[cfg(feature = "boracle")]
+    {
+        let config = Config::new(src.join("@page.moth"));
+        let mut string_table = StringTable::new();
+        let mut frontend_surface = BuilderSurface::with_mandatory_core();
+        frontend_surface.source_packages.register_filesystem_root(
+            "broken",
+            package,
+            PackageOrigin::Builder,
+        );
+        let result = crate::build_system::create_project_modules::compile_single_file_boracle(
+            &config,
+            NumericProfile::STANDARD,
+            &StyleDirectiveRegistry::built_ins(),
+            &mut frontend_surface,
+            &mut string_table,
+        );
+        let messages = match result {
+            Err(messages) => messages,
+            Ok(_) => panic!("Boracle consumer of a diagnosed package unexpectedly compiled"),
+        };
+        assert!(!messages.has_infrastructure_error(), "{messages:?}");
+        let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
+        assert_eq!(diagnostics.len(), 1, "{messages:?}");
+        assert_eq!(diagnostics[0].kind.code(), "MOTH-RULE-0034");
+        let position = messages
+            .diagnostic_render_context(0)
+            .primary_position(diagnostics[0])
+            .expect("Boracle must retain the failed package's authored source span");
+        assert!(position.line.contains("return missing_package_value"));
+        let rendered = render_compiler_messages_html(&messages, &dir);
+        assert!(rendered.contains("return missing_package_value"));
+    }
 }
-
 #[test]
 fn same_module_generated_sidecars_rebuild_const_templates_in_their_fresh_store() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();

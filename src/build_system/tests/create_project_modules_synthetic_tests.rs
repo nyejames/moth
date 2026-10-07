@@ -419,6 +419,7 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
 
     let (failure, source_database) = match super::source_discovery::collect_reachable_input_files(
         &root.join("main.moth"),
+        &super::module_namespace::ModuleNamespaceSet::default(),
         &resolver,
         &style_directives,
         &mut external_imports,
