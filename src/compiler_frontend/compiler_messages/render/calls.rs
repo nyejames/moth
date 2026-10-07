@@ -167,17 +167,17 @@ pub(crate) fn invalid_return_shape_message(reason: InvalidReturnShapeReason) -> 
         InvalidReturnShapeReason::ReturnValuesWithBareSignature => {
             "This function has no return signature, so 'return' must be bare.".to_string()
         }
+        // Value arity is shared by returns and every `then` receiver (declarations,
+        // assignments, multi-binds and catch handlers), so the wording names no receiver.
         InvalidReturnShapeReason::TooManyReturnValues { expected_count } => {
-            format!(
-                "Return provides more values than the function signature expects ({expected_count})."
-            )
+            format!("Too many values provided. Expected {expected_count} value(s).")
         }
         InvalidReturnShapeReason::TooFewReturnValues {
             expected_count,
             provided_count,
         } => {
             format!(
-                "Return provides {provided_count} value(s), but the function expects {expected_count}."
+                "Too few values provided. Expected {expected_count} value(s), found {provided_count}."
             )
         }
         InvalidReturnShapeReason::MissingReturnBangValue => {

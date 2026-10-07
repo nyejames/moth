@@ -55,7 +55,6 @@ fn test_context(scope: PathId, path_fork: &PathInternerFork) -> ScopeContext {
         scope,
         Rc::new(TopLevelDeclarationTable::new(vec![], path_fork)),
         Arc::new(ExternalPackageRegistry::default()),
-        vec![],
         0,
     )
     .with_source_file_scope(scope)

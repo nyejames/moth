@@ -281,7 +281,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             input.scope,
             Rc::clone(input.top_level_declarations),
             Arc::clone(&self.context.external_package_registry),
-            Vec::<TypeId>::new(),
             input.scope_frame_capacity,
             self.context.template_ir_store.clone(),
             self.context.numeric_profile,

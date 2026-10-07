@@ -266,7 +266,6 @@ fn parse_numeric_token(
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     )
     .with_numeric_profile(profile);

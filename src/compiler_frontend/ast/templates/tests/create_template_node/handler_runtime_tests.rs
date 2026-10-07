@@ -322,7 +322,6 @@ fn runtime_template_loop_with_continue_as_slot_fill_parses() {
                 &path_fork,
             )),
             Arc::new(ExternalPackageRegistry::default()),
-            vec![],
             0,
         ),
         &scope,

@@ -35,7 +35,6 @@ impl ScopeContext {
         scope: PathId,
         top_level_declarations: Rc<TopLevelDeclarationTable>,
         external_package_registry: Arc<ExternalPackageRegistry>,
-        expected_result_type_ids: Vec<TypeId>,
         scope_frame_capacity: usize,
     ) -> ScopeContext {
         let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -44,7 +43,6 @@ impl ScopeContext {
             scope,
             top_level_declarations,
             external_package_registry,
-            expected_result_type_ids,
             scope_frame_capacity,
             template_ir_store,
             NumericProfile::STANDARD,

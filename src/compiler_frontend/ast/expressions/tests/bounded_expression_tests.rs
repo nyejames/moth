@@ -49,7 +49,6 @@ fn test_scope(
         scope,
         Rc::new(TopLevelDeclarationTable::new(vec![], path_fork)),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
     (scope, context)

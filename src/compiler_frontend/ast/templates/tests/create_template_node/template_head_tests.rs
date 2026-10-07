@@ -188,7 +188,6 @@ fn template_head_expression_preserves_infrastructure_failure() {
             scope,
             Rc::new(TopLevelDeclarationTable::new(vec![declaration], &path_fork)),
             Arc::new(ExternalPackageRegistry::default()),
-            vec![],
             0,
         ),
         &scope,
@@ -373,7 +372,6 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
             &path_fork,
         )),
         Arc::new(ExternalPackageRegistry::default()),
-        vec![],
         0,
     )
     .with_style_directives(&style_directives)
@@ -464,7 +462,6 @@ fn template_head_extensionless_path_retains_exact_span() {
         source_path,
         Rc::new(TopLevelDeclarationTable::new(vec![], &path_fork)),
         Arc::new(ExternalPackageRegistry::default()),
-        vec![],
         0,
     )
     .with_style_directives(&style_directives)
