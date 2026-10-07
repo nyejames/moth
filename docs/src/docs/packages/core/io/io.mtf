@@ -16,7 +16,7 @@ Every operation still has one observable Moth contract. A backend chooses how to
 
 ### Console helpers
 
-Console helpers write string content to the backend output surface. Each helper takes one `String` value and returns nothing.
+Console helpers write string content to the host's output surface. Each helper takes one `String` value and returns nothing.
 
 [table:
     [th:
@@ -26,12 +26,12 @@ Console helpers write string content to the backend output surface. Each helper 
 
     [td:
         [: `io.print(text)`]
-        [: plain output]
+        [: text without requesting line termination]
     ]
 
     [td:
         [: `io.line(text)`]
-        [: output with a trailing newline]
+        [: text as a completed line or output record]
     ]
 
     [td:
@@ -49,6 +49,8 @@ Console helpers write string content to the backend output surface. Each helper 
         [: error-level output]
     ]
 ]
+
+Hosts preserve the content and order of every call. A stream-oriented host such as a terminal can realise `print` and `line` as an ordinary write and a write followed by a newline. A record-oriented host such as a browser console shows each call as its own entry, so `print` and `line` look the same there. Moth doesn't buffer output to join `print` calls or render a newline the host doesn't show.
 
 The output boundary accepts `String` values only. Templates produce `String` values, so template interpolation provides the way to format non-string content for output.
 
@@ -74,7 +76,7 @@ Input polling lives under `io.input.*`. The handle type `io.input.Input` stays o
 
 The host owns the listeners that observe keyboard and pointer events and records their effect inside the handle. Moth never receives a host callback. A program observes recorded input only through explicit `update` and query calls, which run synchronously like any other call.
 
-`io.input.new()` returns `Input, Error!` because backend input support can be unavailable. `update` and `close` require mutable access through `~`. Polling reads use shared access.
+`io.input.new()` returns `Input, Error!` because input support can be unavailable. A host without the facilities input polling needs returns builtin error code 1, `Unsupported`, through `Error!`. `update` and `close` require mutable access through `~`. Polling reads use shared access.
 
 [codeblock, $code("moth"):
     input ~= io.input.new()!
@@ -101,6 +103,21 @@ The host owns the listeners that observe keyboard and pointer events and records
     io.input.close(~input)
 ]
 
+### Snapshots and transitions
+
+`io.input.update(~input)` publishes a snapshot and is the only point where observable input state changes. Every read observes the snapshot from the last completed `update`, including held keys, held buttons and pointer coordinates. Repeated reads without an `update` return the same answers. Before the first `update`, boolean reads return `false`, optional reads return `none` and pointer coordinates are `0.0`.
+
+- `key_down` and `pointer_down` report whether a key or button was held at the last `update`.
+- `key_pressed` and `pointer_pressed` report at least one up-to-down transition since the previous `update`.
+- `key_released` and `pointer_released` report at least one down-to-up transition since the previous `update`.
+- Pressed and released can both be true in one snapshot. A key pressed and released between two updates reports both and isn't down.
+- Holding a key produces one press, however many repeat events the host sends.
+- `last_key_pressed`, `last_key_released`, `last_pointer_pressed` and `last_pointer_released` return the most recent transition of their kind since the previous `update`, or `none`.
+
+Each `update` clears the transitions it published and keeps held state. The handle records whether each key or button changed, not how often, so its storage depends on the distinct keys and buttons involved rather than the number of host events. Polling doesn't provide an ordered history of events.
+
+When the host surface loses focus or becomes hidden, every held key and button is released. The releases appear at the next `update` like any other transition. Pointer coordinates keep their last value.
+
 ### Polling and execution
 
 Recording input doesn't schedule Moth execution. Input that arrives after Moth returns control to the host stays in the handle until something runs Moth code again, such as the next tick of a host-driven update loop, and that code calls `update`.
@@ -109,7 +126,7 @@ A loop that polls until input arrives never observes it. On HTML-JS the browser 
 
 ### Keyboard helpers
 
-Keyboard helpers track down, pressed, released and last-edge states.
+Keyboard helpers track down, pressed, released and last-transition states.
 
 [table:
     [th:
@@ -149,7 +166,9 @@ Keyboard helpers track down, pressed, released and last-edge states.
     ]
 ]
 
-Single alphabetic key strings normalise to lowercase. Space uses `"Space"`. Special keys use logical names such as `"ArrowLeft"`, `"Enter"`, `"Escape"`, `"Backspace"` and `"Shift"`.
+Keys use logical names. ASCII letters `A` to `Z` normalise to lowercase in recorded input and in queries. Other key names keep the host's spelling, including non-ASCII letters, with no Unicode case conversion. Space uses `"Space"`. Special keys use logical names such as `"ArrowLeft"`, `"Enter"`, `"Escape"`, `"Backspace"` and `"Shift"`.
+
+A key releases under the name it had when pressed. Pressing `1`, then Shift, then releasing both reports `"1"` and `"Shift"` as released, never `"!"`. Two keys that share a name, such as left and right Shift, keep that name down while either is held.
 
 ### Pointer helpers
 
@@ -205,11 +224,15 @@ Pointer helpers track button state and position.
     ]
 ]
 
-Pointer buttons use `"left"`, `"middle"` and `"right"`. Pointer coordinates use `Float` values.
+Pointer buttons use `"left"`, `"middle"` and `"right"`. Other buttons record no transitions.
+
+Pointer coordinates are `Float` logical host-client coordinates. The origin is the top-left corner of the host surface's client area, X increases rightward and Y increases downward. HTML-JS uses viewport-relative CSS pixels from the pointer event's `clientX` and `clientY`. A native host may use equivalent window-client logical coordinates. Canvas-local, physical-pixel and DPI-scaled coordinates belong to specialised APIs.
 
 ### Teardown
 
-`io.input.close(~input)` releases the input handle. Call it when the input handle no longer needs polling. The handle requires mutable access for close because teardown mutates the underlying host state.
+`io.input.close(~input)` stops observing input, clears every recorded and published state and leaves the handle permanently inert. Call it when the input handle no longer needs polling. The handle requires mutable access for close because teardown mutates the underlying host state.
+
+Calling `close` again or calling `update` after `close` does nothing. After `close`, boolean reads return `false`, optional reads return `none` and pointer coordinates return `0.0`. Input the host delivers after `close` can't change those answers.
 
 Teardown is explicit. Host garbage collection doesn't define when a handle stops observing input.
 
@@ -245,7 +268,7 @@ violates its host contract. Unsupported hosts never receive a silent no-op.
 
 ### Backend behaviour
 
-HTML-JS maps console helpers to the browser console and input helpers to global keyboard and pointer listeners on the browser window. HTML-Wasm rejects reachable Core IO calls before lowering until it gains equivalent support.
+HTML-JS maps console helpers to the browser console, one entry per call, and input helpers to global keyboard and pointer listeners on the browser window. HTML-Wasm rejects reachable Core IO calls before lowering until it gains equivalent support.
 
 ### Unsupported source forms
 
@@ -263,7 +286,7 @@ Browser-specific event control belongs to future `@web/*` packages. This covers 
 
 Complete filesystem, path and networking APIs belong to focused packages. `io` may later offer a few common high-level file operations.
 
-Further global input is deferred: physical key identities, typed key and button values, modifier state, wheel scrolling, pointer deltas, relative or DPI-scaled pointer coordinates, focus queries, touch gestures, gamepads, pressed and released collections and an ordered event queue. Non-JS lowerings are also deferred. See @../../../progress (progress matrix) for current target availability.
+Further global input is deferred: a physical key or scancode API, typed key and button values, modifier state, wheel scrolling, pointer deltas, focus queries, touch gestures, gamepads, pressed and released collections and an ordered event queue. Non-JS lowerings are also deferred. See @../../../progress (progress matrix) for current target availability.
 
 ### Related concepts
 

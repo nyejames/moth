@@ -823,7 +823,7 @@ for (const result of results) {
                 r#"["err","Map key not found","number","111","number","112",111]"#,
                 r#"["err","Map operation expects an ordered map","number","110","number","111",110]"#,
                 r#"["err","Map key not found","number","111","number","112",111]"#,
-                r#"["err","Browser input APIs unavailable","number","500","number","501",500]"#,
+                r#"["err","Unsupported operation","number","1","number","2",1]"#,
             ],
             "generated error records must retain U32-number codes under {profile}"
         );

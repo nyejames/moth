@@ -9,5 +9,4 @@ must_contain = [
   "function __moth_io_input_new(",
   "function __moth_io_input_update(",
   "function __moth_io_input_close(",
-  "heldKeys: new Set(),",
 ]

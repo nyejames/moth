@@ -34,6 +34,7 @@ mod results;
 mod strings;
 
 pub(crate) use collections::collection_javascript_helpers;
+pub(crate) use errors::error_result_source;
 
 use crate::backends::js::JsEmitter;
 

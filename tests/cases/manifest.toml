@@ -12518,11 +12518,11 @@ contract = "language.numeric.nonfinite_float_literal_rejected"
 role = "primary"
 
 [[case]]
-id = "core_io_console_print_success"
-path = "core_io_console_print_success"
+id = "core_io_console_print_line_records"
+path = "core_io_console_print_line_records"
 tags = ["integration", "core_io", "console"]
-contract = "backend.html.console_print_helper_emission"
-role = "backend"
+contract = "language.core_io.console_print_line_records"
+role = "primary"
 
 [[case]]
 id = "core_io_console_debug_success"
@@ -12595,18 +12595,11 @@ contract = "language.external.optional_type_identity_acceptance"
 role = "primary"
 
 [[case]]
-id = "core_io_input_new_success"
-path = "core_io_input_new_success"
-tags = ["integration", "core_io", "input"]
-contract = "backend.html.input_new_helper_emission"
-role = "backend"
-
-[[case]]
-id = "core_io_input_update_close_success"
-path = "core_io_input_update_close_success"
-tags = ["integration", "core_io", "input"]
-contract = "backend.html.input_update_close_helper_emission"
-role = "backend"
+id = "core_io_input_new_unsupported_host"
+path = "core_io_input_new_unsupported_host"
+tags = ["integration", "core_io", "input", "errors"]
+contract = "language.core_io.input_new_unsupported_host_error"
+role = "primary"
 
 [[case]]
 id = "core_io_input_reads_success"

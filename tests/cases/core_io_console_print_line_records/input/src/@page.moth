@@ -1,0 +1,6 @@
+-- Browser consoles are record-oriented, so print and line each produce one entry in call order
+count = 3
+io.print("loading")
+io.line("ready")
+io.print("partial ")
+io.line([:count=[count]])

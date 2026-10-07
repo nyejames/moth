@@ -1,6 +1,7 @@
 //! Runtime prelude presence and ordering tests for JavaScript output.
 
 use super::support::*;
+use crate::compiler_frontend::external_packages::ExternalFunctionId;
 
 // Prelude helper presence tests [binding] [alias] [computed] [clone]
 // ---------------------------------------------------------------------------
@@ -469,170 +470,41 @@ fn console_io_does_not_emit_input_helpers() {
     );
 }
 
-/// Verifies that `io.input.new()` reachability emits the new helper and its shared dependencies. [io-input-helper]
+/// Verifies that reaching any input function emits the shared input helper set, so each emitted
+/// read has the constructor and update helpers it depends on. Input semantics are executed in
+/// `io_input_runtime.rs`. [io-input-helper]
 #[test]
-fn io_input_new_helper_is_emitted_when_reachable() {
-    let source = lower_minimal_module_with_io_input_call(
-        "main",
-        crate::compiler_frontend::external_packages::ExternalFunctionId::IoInputNew,
-    );
+fn every_input_function_emits_the_shared_input_helpers() {
+    let input_functions = [
+        ExternalFunctionId::IoInputNew,
+        ExternalFunctionId::IoInputUpdate,
+        ExternalFunctionId::IoInputClose,
+        ExternalFunctionId::IoInputKeyDown,
+        ExternalFunctionId::IoInputKeyPressed,
+        ExternalFunctionId::IoInputKeyReleased,
+        ExternalFunctionId::IoInputPointerX,
+        ExternalFunctionId::IoInputPointerY,
+        ExternalFunctionId::IoInputPointerDown,
+        ExternalFunctionId::IoInputPointerPressed,
+        ExternalFunctionId::IoInputPointerReleased,
+        ExternalFunctionId::IoInputLastKeyPressed,
+        ExternalFunctionId::IoInputLastKeyReleased,
+        ExternalFunctionId::IoInputLastPointerPressed,
+        ExternalFunctionId::IoInputLastPointerReleased,
+    ];
 
-    assert!(
-        source.contains("function __moth_io_input_new("),
-        "io.input.new reachability should emit __moth_io_input_new"
-    );
-    assert!(
-        source.contains("function __moth_io_input_map_button("),
-        "input helpers should emit shared button mapper"
-    );
-    assert!(
-        source.contains("function __moth_io_input_normalize_key("),
-        "input helpers should emit shared key normalizer"
-    );
-    assert!(
-        source.contains("function __moth_io_input_release_all("),
-        "input helpers should emit shared release helper"
-    );
-
-    let new_helper = helper_source(&source, "__moth_io_input_new");
-    assert!(
-        new_helper.contains("typeof window.PointerEvent === \"undefined\""),
-        "io.input.new must feature-detect Pointer Events"
-    );
-    assert!(
-        new_helper.contains("const options = { passive: true, signal };"),
-        "io.input.new must register passive abortable listeners"
-    );
-}
-
-/// Verifies that `io.input.update(~input)` reachability emits a real update body. [io-input-helper]
-#[test]
-fn io_input_update_helper_is_emitted_when_reachable() {
-    let source = lower_minimal_module_with_io_input_call(
-        "main",
-        crate::compiler_frontend::external_packages::ExternalFunctionId::IoInputUpdate,
-    );
-
-    let helper = helper_source(&source, "__moth_io_input_update");
-    assert!(
-        helper.contains("handle.pending.length = 0"),
-        "__moth_io_input_update must drain pending events"
-    );
-    assert!(
-        helper.contains("handle.pressedKeys.clear()"),
-        "__moth_io_input_update must clear previous key press edges"
-    );
-}
-
-/// Verifies that `io.input.close(~input)` reachability emits a real close body. [io-input-helper]
-#[test]
-fn io_input_close_helper_is_emitted_when_reachable() {
-    let source = lower_minimal_module_with_io_input_call(
-        "main",
-        crate::compiler_frontend::external_packages::ExternalFunctionId::IoInputClose,
-    );
-
-    let helper = helper_source(&source, "__moth_io_input_close");
-    assert!(
-        helper.contains("handle.controller.abort()"),
-        "__moth_io_input_close must abort the AbortController"
-    );
-    assert!(
-        helper.contains("handle.pointerX = 0.0"),
-        "__moth_io_input_close must reset pointer coordinates"
-    );
-}
-
-/// Verifies that key polling helpers emit real bodies with neutral closed-handle behavior. [io-input-helper]
-#[test]
-fn io_input_key_helpers_are_emitted_when_reachable() {
-    let source = lower_minimal_module_with_io_input_call(
-        "main",
-        crate::compiler_frontend::external_packages::ExternalFunctionId::IoInputKeyDown,
-    );
-
-    assert!(
-        source.contains("function __moth_io_input_key_down("),
-        "io.input.key_down reachability should emit __moth_io_input_key_down"
-    );
-    assert!(
-        source.contains("function __moth_io_input_key_pressed("),
-        "input key helpers should be emitted together"
-    );
-    assert!(
-        source.contains("function __moth_io_input_key_released("),
-        "input key helpers should be emitted together"
-    );
-
-    let key_down = helper_source(&source, "__moth_io_input_key_down");
-    assert!(
-        key_down.contains("return handle.heldKeys.has(__moth_io_input_normalize_key(key))"),
-        "__moth_io_input_key_down must normalize query keys before checking held keys"
-    );
-}
-
-/// Verifies that pointer polling helpers emit real bodies. [io-input-helper]
-#[test]
-fn io_input_pointer_helpers_are_emitted_when_reachable() {
-    let source = lower_minimal_module_with_io_input_call(
-        "main",
-        crate::compiler_frontend::external_packages::ExternalFunctionId::IoInputPointerX,
-    );
-
-    assert!(
-        source.contains("function __moth_io_input_pointer_x("),
-        "io.input.pointer_x reachability should emit __moth_io_input_pointer_x"
-    );
-    assert!(
-        source.contains("function __moth_io_input_pointer_down("),
-        "input pointer helpers should be emitted together"
-    );
-}
-
-/// Verifies that `last_*` helpers return the canonical option carrier. [io-input-helper]
-#[test]
-fn io_input_last_helpers_return_canonical_option_carrier() {
-    let source = lower_minimal_module_with_io_input_call(
-        "main",
-        crate::compiler_frontend::external_packages::ExternalFunctionId::IoInputLastKeyPressed,
-    );
-
-    assert!(
-        source.contains("function __moth_io_input_last_key_pressed("),
-        "io.input.last_key_pressed reachability should emit __moth_io_input_last_key_pressed"
-    );
-
-    let helper = helper_source(&source, "__moth_io_input_last_key_pressed");
-    assert!(
-        helper.contains("return { tag: \"some\", value: handle.lastKeyPressed }"),
-        "last_key_pressed must return the some carrier"
-    );
-    assert!(
-        helper.contains("return { tag: \"none\" }"),
-        "last_key_pressed must return the none carrier"
-    );
-
-    let pointer_source = lower_minimal_module_with_io_input_call(
-        "main",
-        crate::compiler_frontend::external_packages::ExternalFunctionId::IoInputLastPointerPressed,
-    );
-    let pointer_helper = helper_source(&pointer_source, "__moth_io_input_last_pointer_pressed");
-    assert!(
-        pointer_helper.contains("handle.lastPointerPressed"),
-        "last_pointer_pressed must use the plan's pointer-edge field"
-    );
-}
-
-/// Verifies that emitted input helpers never call preventDefault. [io-input-helper]
-#[test]
-fn io_input_helpers_do_not_call_prevent_default() {
-    let source = lower_minimal_module_with_io_input_call(
-        "main",
-        crate::compiler_frontend::external_packages::ExternalFunctionId::IoInputNew,
-    );
-
-    assert!(
-        !source.contains("preventDefault"),
-        "input helpers must not call preventDefault by default"
-    );
+    for input_function in input_functions {
+        let source = lower_minimal_module_with_io_input_call("main", input_function);
+        for helper in [
+            "__moth_io_input_new",
+            "__moth_io_input_update",
+            "__moth_io_input_close",
+            input_function.name(),
+        ] {
+            assert!(
+                source.contains(&format!("function {helper}(")),
+                "{input_function:?} reachability should emit {helper}"
+            );
+        }
+    }
 }

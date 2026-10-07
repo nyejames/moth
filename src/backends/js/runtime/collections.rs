@@ -30,6 +30,7 @@
 
 use crate::backends::js::JsEmitter;
 use crate::backends::js::numeric_carrier::JsNumericCarrier;
+use crate::backends::js::runtime::error_result_source;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::profile::NumericProfile;
@@ -39,14 +40,6 @@ use moth_lexical::numeric::profile::NumericProfile;
 pub(crate) struct CollectionJsHelper {
     pub(crate) name: &'static str,
     pub(crate) source: String,
-}
-
-fn error_result_source(error: BuiltinErrorCode) -> String {
-    format!(
-        "__moth_error_result(\"{}\", {})",
-        error.default_message(),
-        error.as_u32()
-    )
 }
 
 /// Returns the complete `@core/collections` JavaScript source for the selected Int carrier.

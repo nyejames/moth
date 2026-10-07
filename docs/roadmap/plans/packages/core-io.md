@@ -16,13 +16,12 @@ accept public API or semantics.
 ### Current-state capsule
 
 ```text
-STATUS: activated; scope and prelude review accepted; current surface audited
-CURRENT_SLICE: Phase 1 - snapshot input contract and host-buffer hardening (not started)
-BLOCKERS: Phase 1 needs its listed contract decisions settled with the user before implementation;
-the ordered event queue needs a final Moth event value that crosses the binding boundary; io.set_title
-needs the config and HTML entry cutover; scheduling, timers and callbacks need structured async and a
-host-ingress contract
-NEXT_ACTION: settle the Phase 1 decisions, publish them in io.mtf, then implement and cover them
+STATUS: activated; scope and prelude review accepted; Phase 1 snapshot input hardening complete
+CURRENT_SLICE: Phase 2 - portable snapshot additions (candidate selection not started)
+BLOCKERS: Phase 2 needs its candidates chosen with the user; the ordered event queue needs a final
+Moth event value that crosses the binding boundary; io.set_title needs the config and HTML entry
+cutover; scheduling, timers and callbacks need structured async and a host-ingress contract
+NEXT_ACTION: choose the Phase 2 snapshot additions with the user, then publish and implement them
 ```
 
 ## Current surface
@@ -49,50 +48,55 @@ lowering, capability plumbing or tests.
 ### Console lowering
 
 `src/backends/js/package_bindings/core/io.rs` emits one shared `__moth_io_write` plus each
-referenced console helper. `print` and `line` both call `console.log` with identical bodies, so
-HTML-JS does not realise the documented trailing-newline distinction. `debug`, `warn` and `error`
-fall back to `console.log` when the specific console method is missing.
+referenced console helper. `print` and `line` both emit one `console.log` record because browser
+consoles are record-oriented. Appending `"\n"` would only render a blank line, and buffering `print`
+calls into one entry would delay output. `debug`, `warn` and `error` fall back to `console.log` when
+the specific console method is missing.
 
 ### Input host state
 
 `src/backends/js/package_bindings/core/io_input.js` is one helper blob, emitted whole when any input
-helper is reachable and never pulled in by console-only use. `__moth_io_input_new` fails unless
-`window`, `document`, `AbortController` and `window.PointerEvent` all exist. The handle holds held,
-pressed and released sets for keys and buttons, the pointer position, four `last_*` values and a
-`pending` array of edge records.
+helper is reachable and never pulled in by console-only use. `io.rs` interpolates the
+`BuiltinErrorCode::Unsupported` result into it through the shared `error_result_source` formatter in
+`src/backends/js/runtime/errors.rs`, which collections and Time also use. `__moth_io_input_new`
+returns that error unless `window`, `document`, `AbortController` and `window.PointerEvent` all exist.
+
+The handle has three lanes:
+
+- **Live state** written by listeners: a `liveKeys` map from key identity to the logical name
+  recorded at keydown, `liveButtons` and the live pointer position.
+- **Pending transitions** since the previous update: pressed and released sets for keys and buttons
+  plus the four `last_*` values. Repeats coalesce into the same set entry, so storage depends on
+  distinct keys and buttons rather than event count.
+- **Published snapshot**: held key and button sets, the pointer position and the transition record
+  published by the last update. Every read observes only this lane.
+
+`update` rebuilds the held sets from live state, copies the pointer position and swaps the pending
+and published transition records, so publication allocates nothing. `close` aborts the listeners,
+sets `closed` and clears all three lanes. `update` on a closed handle returns early, so a listener
+that still fires after close can't publish anything.
+
+Key identity is `code:` plus `event.code` when the host supplies a usable code, otherwise `key:` plus
+the normalised name. A keyup releases the identity recorded at keydown and therefore the name recorded
+then, so modifier changes can't strand a key. A keyup without a usable code releases every held key
+with the same name. A logical name is pressed when its first identity goes down and released when
+its last goes up, so both Shift keys share one `"Shift"` state. Keyup or pointerup without a recorded
+press is not a transition. Normalisation maps `" "` to `"Space"` and lowercases single ASCII `A`-`Z`
+on ingest and on every query. Button queries are not normalised.
 
 Host-owned listeners, all passive and all removed through one `AbortController` signal:
 
-- `window` `keydown` records a press only when the key is not already held, so key repeat produces no
-  new edge. `keyup` always records a release.
-- `window` `pointerdown`, `pointerup` and `pointermove` update `clientX`/`clientY`. Down and up
-  record button edges for buttons 0, 1 and 2 only. Other buttons update position but record nothing.
+- `window` `keydown` and `keyup` drive key transitions as above.
+- `window` `pointerdown`, `pointerup` and `pointermove` update the live `clientX`/`clientY`. Down and
+  up drive transitions for buttons 0, 1 and 2 only.
 - `window` `pointercancel` releases held buttons. `window` `blur` and a hidden `document`
-  `visibilitychange` release every held key and button, so input does not stick down across focus
-  loss and the synthetic releases surface as ordinary released edges.
-- `preventDefault` is never called. A unit test pins its absence.
+  `visibilitychange` release every held key and button. The releases publish at the next update and
+  the pointer position is kept.
+- `preventDefault` is never called.
 
-`update` clears the edge sets and `last_*` values, drains `pending` in arrival order into them and
-empties it. A press and release between two updates therefore reports both edges while `key_down`
-is false, and each `last_*` value is the final edge of its kind. `close` aborts the listeners, marks
-the handle closed and resets every field. A second `close` and any `update` after close are no-ops.
-Reads on a closed handle return `false`, `0.0` or `none`.
-
-Key normalisation maps `" "` to `"Space"` and lowercases single ASCII `A`-`Z`, both on ingest and on
-every query. Every other key string passes through unchanged. Button queries are not normalised.
-
-### Snapshot and live state are mixed
-
-Edges and `last_*` values change only at `update`. Held state and pointer position are written
-directly by the listeners, so `key_down`, `pointer_down`, `pointer_x` and `pointer_y` report the
-latest host state whether or not `update` ran. Within one synchronous Moth invocation nothing
-changes, because the browser cannot run listeners while Moth code runs. Across invocations without
-an `update`, edge and held queries can disagree.
-
-### Unbounded buffer
-
-`pending` grows by one record per edge until the next `update`, with no bound or coalescing. A
-program that keeps the handle open but stops calling `update` retains every edge the host delivers.
+The browser can't run listeners while Moth code runs. Chorded mouse buttons pressed while another is
+already down arrive as `pointermove` with a changed `buttons` mask rather than `pointerdown`, so they
+record no transition today.
 
 ### Wasm rejection
 
@@ -141,67 +145,41 @@ backstop. Unreachable IO calls create no requirement.
 
 ## Current work
 
-### Phase 1 - snapshot input contract and host-buffer hardening
+### Phase 2 - portable snapshot additions
 
-Publish the existing snapshot model as a precise contract, then make the implementation match it.
-Settle each decision with the user before implementation. The proposals follow the audit.
-
-| Decision | Proposal |
-|---|---|
-| Observation point | `update` is the only point where observable input state changes. Held state and pointer position join the snapshot instead of reading live host state. |
-| Edges between polls | A press and release between two updates reports both edges and not held. Each `last_*` value is the final edge of its kind since the previous update. |
-| Buffer bound | Coalesce at ingest into per-key and per-button pending edge flags plus the four pending `last_*` values. Storage is then bounded by distinct keys and buttons rather than event count, and no raw event record is kept. An ordered queue, if later accepted, owns its own explicit bound. |
-| Focus loss | Losing host focus or visibility releases every held key and button and reports those releases as ordinary edges. |
-| Teardown | `close` stops observation immediately. A second `close` and `update` after close do nothing. Reads after close return `false`, `0.0` and `none`. |
-| Pointer coordinates | Logical pixels from the top-left corner of the host surface's visible area. `0.0` until the first pointer event. HTML-JS keeps `clientX`/`clientY`. |
-| Key names | Decide the portable normalisation rule. The reference promises lowercase for single alphabetic keys, but only ASCII is lowercased. Logical key strings also stick when the produced character changes between down and up, such as `1` pressed and `!` released after Shift changes. The fix may need the physical-key distinction from Phase 2. |
-| Failure code | Replace the hand-built code 500 in `__moth_io_input_new` with a compiler-owned `BuiltinErrorCode` through the canonical error constructor, as Time did. |
-| `print` and `line` | Decide how HTML-JS realises the documented distinction or narrow the contract. Both currently emit one `console.log` entry and the runtime harness joins entries with newlines. |
-
-Coverage for this phase: the runtime harness has no `window`, so an integration case can execute the
-`new` failure path and observe its code. Edge, focus-loss, teardown and coordinate semantics need a
-driver that dispatches synthetic events, like the Node driver in
-`src/backends/js/tests/runtime_helpers.rs`, unless the harness gains a minimal window host.
+Choose the additions with the user before publishing or implementing any of them. Candidates:
+pointer movement deltas, wheel or scroll accumulation, modifier-key state, focus or active-state
+queries, a physical key or scancode API, typed key and button values and further pointer information
+that maps cleanly across hosts. Each needs a portable contract, stays global and application-oriented
+and joins the existing snapshot published by `update`.
 
 ## Known gaps and next extensions
 
-### Audit findings
+### Coverage limits
 
-| # | Finding | Evidence |
-|---|---|---|
-| 1 | `print` and `line` emit identical `console.log` bodies. | `src/backends/js/package_bindings/core/io.rs` |
-| 2 | `io.input.new` fails with the unowned code 500. | `io_input.js`, pinned by `runtime_helpers.rs` |
-| 3 | `pending` is unbounded and uncoalesced. | `io_input.js` |
-| 4 | Held state and pointer position are live while edges are snapshot. | `io_input.js` |
-| 5 | Only ASCII `A`-`Z` is lowercased, and logical keys can stick when the produced character changes. | `__moth_io_input_normalize_key` |
-| 6 | The reference omits pointer coordinate space, initial position, focus-loss release, ignored extra buttons and post-close reads. | `io.mtf` against `io_input.js` |
+The integration runtime harness has no `window`, so it executes only the `new` failure path. Input
+semantics are owned by the Node scenarios in `src/backends/js/tests/io_input_runtime.rs`, which
+install a fake `window`, `document`, `EventTarget` and `AbortController` and run the emitted helpers.
+A minimal window host in the harness would let a rich Moth input scenario own them end to end.
 
-### Canonical facts with no test owner
-
-No integration case executes input semantics. Edge reporting, held versus edge state, `last_*`
-ordering, focus-loss release, teardown, key normalisation, button mapping, coordinates and the `new`
-failure path through Moth recovery are unowned. Integration cases assert emitted helper text only.
-There is no `line` console case.
+Chorded mouse buttons that arrive only through `pointermove` record no transition.
 
 ### Next extensions, in order
 
 Candidates only. Nothing here is accepted API.
 
-1. **Portable snapshot additions.** Choose from pointer movement deltas, wheel or scroll accumulation,
-   modifier-key state, focus or active-state queries, improved pressed and released state, portable
-   physical or logical key distinctions and further pointer information that maps cleanly across
-   hosts. Each needs a portable contract and stays global and application-oriented.
-2. **Ordered event value investigation.** Define the final Moth event value first, likely a choice
+1. **Ordered event value investigation.** Define the final Moth event value first, likely a choice
    with typed key and button payloads. Registered binding signatures currently carry scalars,
    `String`, `Char`, `Bool`, options and opaque handles, with no choice, record or collection
    results. If the value cannot cross cleanly, keep the ordered queue deferred and continue snapshot
    polling.
-3. **Ordered pull queue.** Only after the value crosses cleanly: a bounded host queue drained by an
-   explicit poll into ordinary Moth values, with stated overflow and coalescing rules.
-4. **Queued `io.set_title`.** Its implementation is owned by the HTML page directives and runtime
+2. **Ordered pull queue.** Only after the value crosses cleanly: a host queue drained by an explicit
+   poll into ordinary Moth values, with its own representation, ordering and overflow contract. The
+   snapshot's coalesced transitions are not a queue and impose no size limit to inherit.
+3. **Queued `io.set_title`.** Its implementation is owned by the HTML page directives and runtime
    title work and needs the config and HTML entry cutover first. Its meaning is host-neutral and
    HTML-JS realises it as the live document title.
-5. **Small synchronous host conveniences.** Review each individually rather than adding a broad
+4. **Small synchronous host conveniences.** Review each individually rather than adding a broad
    speculative IO surface.
 
 ## Longer-term candidates
@@ -234,14 +212,17 @@ Primary owners:
 
 | Contract | Owner |
 |---|---|
-| Console helper emission per output lane | `tests/cases/core_io_console_print_success`, `_debug_success`, `_warn_success`, `_error_success` |
+| `print` and `line` content, order and one record per call | `tests/cases/core_io_console_print_line_records` |
+| Remaining console helper emission per output lane | `tests/cases/core_io_console_debug_success`, `_warn_success`, `_error_success` |
 | `line` emission and `@core/io as` alias binding | `tests/cases/core_io_dependency_alias_success` |
 | Bare prelude namespace, non-callable namespace, type-clause misuse | `tests/cases/core_io_namespace_binding_success`, `io_callable_rejected`, `core_io_type_dependency_rejected` |
 | String-only console boundary and template coercion | `tests/cases/io_coerce_to_string`, `io_rejects_struct_value`, `io_rejects_collection_value`, `io_rejects_option_value`, `io_rejects_multiple_return_value`, `io_rejects_result_value` |
-| Input helper emission, handle passing and optional reads | `tests/cases/core_io_input_new_success`, `core_io_input_update_close_success`, `core_io_input_reads_success`, `core_io_input_signature_success`, `core_io_input_last_key_optional_success` |
+| `io.input.new` returns `Unsupported` code 1 through Moth recovery | `tests/cases/core_io_input_new_unsupported_host` |
+| Input helper reachability, handle passing and optional reads | `tests/cases/core_io_input_signature_success`, `core_io_input_reads_success`, `core_io_input_last_key_optional_success`, `src/backends/js/tests/prelude.rs` |
+| Snapshot publication, transitions, repeat suppression, coalescing, `last_*` reads, key identity and naming, focus and visibility release, teardown, passive listeners and bounded storage | `src/backends/js/tests/io_input_runtime.rs` |
 | Mutable-access, argument-type and type-as-value rejection | `tests/cases/core_io_input_update_missing_mutable_rejected`, `core_io_input_non_string_key_rejected`, `core_io_input_type_as_value_rejected` |
 | Reachable HTML-Wasm rejection and unreachable acceptance | `tests/cases/core_io_input_wasm_rejected`, `core_io_unreachable_io_wrapper_wasm_ignored` |
-| Helper reachability, no `preventDefault`, failure carrier code | `src/backends/js/tests/prelude.rs`, `src/backends/js/tests/runtime_helpers.rs` |
+| Unsigned code record under both Int widths | `src/backends/js/tests/runtime_helpers.rs` |
 
 Every IO implementation phase closes with the programme's full phase gate plus console, input,
 lifecycle and recovery coverage appropriate to that phase. Runtime behaviour uses runtime-output
@@ -259,3 +240,15 @@ and pointer polling functions, JavaScript-only with pre-lowering HTML-Wasm rejec
 The dedicated scope and prelude review fixed `io` as the broad host-capability facade and the only
 preluded Core package, set the overlap rule with focused packages, kept event work pull-driven and
 moved scheduling, timers and callbacks behind async V1.
+
+### Phase 1 - snapshot input hardening
+
+The audit of the shipped helpers found live held state and pointer position mixed with snapshot
+edges, an unbounded raw event array, logical keys that stuck when a modifier changed the produced
+character, the unowned failure code 500 and an HTML-JS `print`/`line` distinction the reference
+promised but the browser console cannot show. Phase 1 made `update` the sole publication boundary,
+replaced the event array with coalesced transition sets, released keys by the identity recorded at
+keydown, released held input on focus or visibility loss, made `close` permanently inert, defined
+logical host-client pointer coordinates, switched the failure to `BuiltinErrorCode::Unsupported`
+and redefined `print` and `line` by line termination with record-oriented hosts allowed one entry per
+call. Executable fake-host scenarios replaced emitted-text assertions for input semantics.

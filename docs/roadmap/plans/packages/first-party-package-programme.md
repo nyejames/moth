@@ -480,7 +480,7 @@ materially safer to implement. Record the reason in the tracker rather than sile
 | 4 | `@core/time` | [core-time.md](./core-time.md) | v1 delivered: the semantic contract is published, the four defects it exposed are corrected and the accepted Duration and Timestamp arithmetic is registered and covered | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
 | 5 | `@web/canvas` | `web-canvas.md` | TODO: create when activated | Expand drawing, state, path, transform, text, image and pixel workflows deeply enough to support substantial visual stress-test programs |
 | 5a | `@html` | `html.md` | TODO: create only when needed | Add source-backed wrappers or broadly useful helpers required by canvas and HTML package work, without turning `@html` into a framework |
-| 6 | `@core/io` | [core-io.md](./core-io.md) | Scope and prelude review accepted and current surface audited; Phase 1 decisions await user settlement | Publish and harden the snapshot input contract, then add portable snapshot input and an ordered queue only where its final value shape crosses the binding boundary |
+| 6 | `@core/io` | [core-io.md](./core-io.md) | Scope review accepted and Phase 1 snapshot input hardening complete; Phase 2 candidates await user selection | Add portable snapshot input, then an ordered queue only where its final value shape crosses the binding boundary |
 | 7 | `@core/collections` | `core-collections.md` | TODO: create when activated | Audit common non-sorting gaps and integrate specialised collection work without duplicating its accepted contracts |
 | 7a | Collection sorting | [core-collections-sorting.md](./core-collections-sorting.md) | Accepted and queued behind mixed-backend prerequisites | Preserve stable-by-default sort and consume delivered fixed numeric/Byte ordering and compact layouts |
 | 8 | `@core/json` | `core-json.md` | Accepted package, TODO: design when activated | Design and implement a useful JSON v1 without reflection, generic derivation or a representation Moth cannot express correctly |
@@ -809,9 +809,9 @@ runtime asset reachability checks and failure coverage for unavailable handles o
 
 ### Phase 7 - `@core/io` scope and current v1 slice
 
-`core-io.md` exists and the scope and prelude review is accepted. Phase 1 publishes and hardens the
-existing snapshot input contract after its decisions are settled with the user. Portable snapshot
-additions and the ordered event investigation follow as separate phases.
+`core-io.md` exists and the scope and prelude review is accepted. Phase 1 published and hardened the
+snapshot input contract. Portable snapshot additions and the ordered event investigation follow as
+separate phases.
 
 Queued `io.set_title` is accepted Core IO design whose implementation belongs to the HTML page
 directive work. Config and HTML entry cutover remain prerequisites for that call's host-capability

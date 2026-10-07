@@ -29,6 +29,7 @@ pub(crate) fn core_javascript_helpers() -> Vec<CoreJsHelper> {
     helpers.extend_from_slice(text::CORE_TEXT_JS_HELPERS);
     helpers.extend_from_slice(random::CORE_RANDOM_JS_HELPERS);
     helpers.extend_from_slice(io::CORE_IO_JS_HELPERS);
+    helpers.push(io::core_io_input_js_helper());
     helpers.extend(
         time::core_time_js_helpers()
             .iter()
