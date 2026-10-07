@@ -434,7 +434,10 @@ use crate::compiler_frontend::compiler_messages::compiler_dev_logging::log_bench
 mod detailed {
     use super::AstCounter;
     use super::log_benchmark_counter;
+    use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
+    use crate::compiler_frontend::hir::places::HirPlace;
     use std::cell::RefCell;
+    use std::mem::{align_of, size_of};
 
     const COUNTER_COUNT: usize = AstCounter::TirOverlayLookups as usize + 1;
 
@@ -518,6 +521,7 @@ mod detailed {
             array[census_start..=census_end].fill(0);
         });
         collect();
+        record_hir_layout_census();
         for &counter in all_counters() {
             let index = counter.index();
             if !(census_start..=census_end).contains(&index) {
@@ -531,6 +535,33 @@ mod detailed {
             array[census_start..=census_end].fill(0);
             array[overlay_index] = saved_overlay;
         });
+    }
+
+    /// Constant downstream-layout gauges recorded with each census snapshot.
+    ///
+    /// WHAT: records the six HIR size/align gauges under the existing census
+    ///       `AstCounter` variants after the AST observer collect.
+    /// WHY: neutral instrumentation can measure both stages without an AST-to-HIR
+    ///      dependency. Every snapshot retains the same eight size/alignment pairs.
+    fn record_hir_layout_census() {
+        record_ast_counter_max(
+            AstCounter::CensusHirExpressionSizeMax,
+            size_of::<HirExpression>(),
+        );
+        record_ast_counter_max(
+            AstCounter::CensusHirExpressionAlignMax,
+            align_of::<HirExpression>(),
+        );
+        record_ast_counter_max(
+            AstCounter::CensusHirExpressionKindSizeMax,
+            size_of::<HirExpressionKind>(),
+        );
+        record_ast_counter_max(
+            AstCounter::CensusHirExpressionKindAlignMax,
+            align_of::<HirExpressionKind>(),
+        );
+        record_ast_counter_max(AstCounter::CensusHirPlaceSizeMax, size_of::<HirPlace>());
+        record_ast_counter_max(AstCounter::CensusHirPlaceAlignMax, align_of::<HirPlace>());
     }
 
     fn all_counters() -> &'static [AstCounter] {

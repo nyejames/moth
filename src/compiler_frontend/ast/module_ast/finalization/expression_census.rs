@@ -34,8 +34,6 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::folded_value::OwnedFoldedString;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
-use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, add_ast_counter, increment_ast_counter, record_ast_counter_max,
     with_expression_census_counters,
@@ -1117,22 +1115,6 @@ fn record_layouts() {
         align_of::<Declaration>(),
     );
     record_ast_counter_max(
-        AstCounter::CensusHirExpressionSizeMax,
-        size_of::<HirExpression>(),
-    );
-    record_ast_counter_max(
-        AstCounter::CensusHirExpressionAlignMax,
-        align_of::<HirExpression>(),
-    );
-    record_ast_counter_max(
-        AstCounter::CensusHirExpressionKindSizeMax,
-        size_of::<HirExpressionKind>(),
-    );
-    record_ast_counter_max(
-        AstCounter::CensusHirExpressionKindAlignMax,
-        align_of::<HirExpressionKind>(),
-    );
-    record_ast_counter_max(
         AstCounter::CensusPlaceExpressionSizeMax,
         size_of::<PlaceExpression>(),
     );
@@ -1140,6 +1122,4 @@ fn record_layouts() {
         AstCounter::CensusPlaceExpressionAlignMax,
         align_of::<PlaceExpression>(),
     );
-    record_ast_counter_max(AstCounter::CensusHirPlaceSizeMax, size_of::<HirPlace>());
-    record_ast_counter_max(AstCounter::CensusHirPlaceAlignMax, align_of::<HirPlace>());
 }

@@ -9,7 +9,8 @@
 use super::{
     AstCounter, FrontendCounter, add_ast_counter, add_frontend_counter,
     capture_frontend_counters_for_test, frontend_counter_test_values, log_ast_counters,
-    log_frontend_counters, reset_ast_counters, reset_frontend_counters,
+    log_frontend_counters, record_ast_counter_max, reset_ast_counters, reset_frontend_counters,
+    with_expression_census_counters,
 };
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
@@ -454,6 +455,81 @@ fn reset_and_log_ignore_threads_without_counter_capture() {
         vec![3.0],
         "unopted log must not prepend zero counter rows into the guarded session"
     );
+}
+
+#[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+#[test]
+fn expression_census_snapshots_preserve_main_and_sidecar_without_overlay_contamination() {
+    let _guard = super::lock_counter_test();
+
+    reset_ast_counters();
+    let timing_session = start_benchmark_collection(true).expect("timing session should start");
+
+    // Prior semantic overlay traffic; observer reads inside the census
+    // closures must not disturb it.
+    add_ast_counter(AstCounter::TirOverlayLookups, 11);
+
+    // Main-module snapshot.
+    with_expression_census_counters(|| {
+        add_ast_counter(AstCounter::CensusExpressions, 4);
+        record_ast_counter_max(AstCounter::CensusCallArgsLengthMax, 10);
+        // Observer read performed while collecting.
+        add_ast_counter(AstCounter::TirOverlayLookups, 100);
+    });
+
+    // Legitimate semantic traffic between the main and sidecar snapshots.
+    add_ast_counter(AstCounter::TirOverlayLookups, 5);
+
+    // Module-scope log must skip the census range, so it cannot duplicate
+    // either snapshot.
+    log_ast_counters();
+
+    // Late generated-sidecar snapshot with different counts and a smaller
+    // maximum (a stale gauge left over from the main snapshot would surface
+    // here as 10 instead of 6).
+    with_expression_census_counters(|| {
+        add_ast_counter(AstCounter::CensusExpressions, 9);
+        record_ast_counter_max(AstCounter::CensusCallArgsLengthMax, 6);
+        add_ast_counter(AstCounter::TirOverlayLookups, 50);
+    });
+
+    log_ast_counters();
+
+    let observations = timing_session.finish();
+
+    let values_for = |name: &str| -> Vec<f64> {
+        observations
+            .counters
+            .iter()
+            .filter(|counter| counter.name == name)
+            .map(|counter| counter.value)
+            .collect()
+    };
+
+    // Both snapshots are preserved as supplied: additive values emit exactly
+    // once each, and the gauge emits each snapshot's own maximum. A
+    // module-only logger would either lose the sidecar (single row) or
+    // duplicate rows from the between/after logs (four rows).
+    assert_eq!(
+        values_for("ast_census_expressions"),
+        vec![4.0, 9.0],
+        "main and sidecar expression snapshots must both publish"
+    );
+    assert_eq!(
+        values_for("ast_census_call_args_length_max"),
+        vec![10.0, 6.0],
+        "each snapshot must emit its own maximum without stale carryover"
+    );
+    // Only the two module-scope logs emit the semantic overlay metric: the
+    // seeded 11 plus the legitimate 5. Observer increments (100, 50) must
+    // never appear.
+    assert_eq!(
+        values_for("ast_tir_overlay_lookups"),
+        vec![16.0, 16.0],
+        "logged overlay must ignore observer reads yet keep legitimate traffic"
+    );
+
+    reset_ast_counters();
 }
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]

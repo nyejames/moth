@@ -4274,7 +4274,8 @@ porcelain snapshots. Source changes add feature-gated census and owning-pass
 counters plus two behaviour-preserving Clippy fixes.
 No optimisation was applied, Phase 1 has not started and no performance
 improvement is claimed. Independent phase audits accepted the corrected source,
-contracts and measurement evidence. Final integrated review remains pending.
+contracts and measurement evidence. A fresh `just validate` on the Phase 0
+checkpoint also passes with the same test counts and clean docs.
 
 ### Before-only cohort and provenance
 
@@ -4433,3 +4434,13 @@ counter lanes. Stack pressure has only this 1 MiB pass/fail observation,
 with headroom and high-water usage unmeasured. Earlier pre-correction census
 candidates remain explicitly historical. No optimisation landed and Phase 1
 remains unstarted.
+
+Final census hardening moves HIR layout constants to the neutral instrumentation
+owner and adds a native-output regression for main/late-sidecar snapshots,
+per-snapshot gauge reset and semantic overlay isolation. The
+`timers,benchmark_counters` library suite passes `5943/5943`, including that
+regression, and feature Clippy plus `just validate` pass again. Real compiler
+smokes on template stress, generic-160 and the split default/constructor fixture
+reproduce all 264 census metrics from the captured candidate, including 801
+generic snapshots and all eight size/alignment pairs. These smokes validate
+census behaviour rather than replacing the original memory or timing records.
