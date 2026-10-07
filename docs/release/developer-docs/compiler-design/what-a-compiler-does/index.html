@@ -908,6 +908,10 @@ function __moth_binding(value) {
 return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "slot", __moth_slot: { value }, __moth_target: null };
 }
 
+function __moth_alias_binding(ref) {
+return { __moth_ref: true, __moth_kind: "binding", __moth_mode: "alias", __moth_slot: null, __moth_target: ref };
+}
+
 function __moth_param_binding(value) {
 if (!__moth_is_ref(value)) {
 return __moth_binding(value);
@@ -916,13 +920,6 @@ if (value.__moth_kind === "binding") {
 return value;
 }
 return __moth_alias_binding(value);
-}
-
-function __moth_alias_binding(ref) {
-const binding = __moth_binding(undefined);
-binding.__moth_mode = "alias";
-binding.__moth_target = ref;
-return binding;
 }
 
 function __moth_resolve(ref) {
@@ -951,6 +948,7 @@ function __moth_assign_borrow(binding, ref) {
 if (binding.__moth_mode === "alias") {
 return __moth_write(binding, __moth_read(ref));
 }
+if (__moth_resolve(ref) === binding) { return binding; }
 binding.__moth_mode = "alias";
 binding.__moth_target = ref;
 return binding;
@@ -1191,7 +1189,7 @@ return String(value);
 }
 
 function b_fn0() {
-let b_l0 = __moth_binding(undefined);
+let b_l0;
 
 b_l0 = __moth_binding([]);
 return __moth_read(b_l0);
