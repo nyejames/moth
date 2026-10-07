@@ -484,16 +484,20 @@ pub struct ScopeContext {
 
     // Optional file-local visibility gate over declarations.
     pub visible_declaration_ids: Option<Arc<FxHashSet<PathId>>>,
+    /// Result types of the immediate receiving site, such as an annotated declaration
+    /// or a call argument. Empty when the receiver infers its own type.
+    ///
+    /// WHY: this is parse-time context for one receiver only. Function bodies leave it
+    /// empty so the function's result slots never leak into unrelated local receivers.
     pub expected_result_type_ids: Vec<TypeId>,
     pub expected_error_type: Option<TypeId>,
 
     /// Success return slots for the nearest enclosing function-like body.
     ///
-    /// WHAT: unlike `expected_result_type_ids`, this remains stable through
-    /// expression-local expected-type contexts such as call arguments.
-    /// WHY: postfix option propagation returns from the current function, so it
-    /// must validate against the function return contract rather than the
-    /// immediate expression receiver.
+    /// WHAT: the sole owner of the function success contract. It stays stable through
+    /// nested statement bodies, value blocks and expression-local receiver contexts.
+    /// WHY: `return` and postfix option propagation exit the current function, so they
+    /// validate against its contract rather than any immediate expression receiver.
     pub current_function_return_type_ids: Vec<TypeId>,
     /// Whether this scope is inside an authored function body.
     ///
@@ -869,7 +873,7 @@ impl ScopeContext {
             .alloc_root_frame_with_capacity(signature.parameters.len());
         record_scope_frame_depth(0);
 
-        let expected_result_type_ids = signature.success_return_type_ids();
+        let current_function_return_type_ids = signature.success_return_type_ids();
         let expected_error_type = signature.error_return_type_id();
         let function_scope = path_fork
             .try_intern_child(self.scope, function_name)
@@ -886,9 +890,9 @@ impl ScopeContext {
             unavailable_assignment_targets: self.unavailable_assignment_targets.clone(),
             pending_catch_assignment_targets: self.pending_catch_assignment_targets.clone(),
             visible_declaration_ids: self.visible_declaration_ids.clone(),
-            expected_result_type_ids: expected_result_type_ids.clone(),
+            expected_result_type_ids: Vec::new(),
             expected_error_type,
-            current_function_return_type_ids: expected_result_type_ids,
+            current_function_return_type_ids,
             inside_authored_function: true,
             active_value_target: None,
             active_generic_type_context: None,

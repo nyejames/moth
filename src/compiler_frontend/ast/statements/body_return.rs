@@ -122,12 +122,19 @@ pub(crate) fn parse_return_statement(
     //  Value-producing return if
     // --------------------------
 
-    if token_stream.current_tag() == TokenTag::IF && !context.expected_result_type_ids.is_empty() {
+    // A return receives values for the enclosing function contract, not for the local
+    // receiver it may be nested in, such as a value-producing declaration initializer.
+    // Keep the statement kind so return-site `catch` stays permitted.
+    let function_return_type_ids = &context.current_function_return_type_ids;
+    let mut return_context = context.new_child_expression(function_return_type_ids.clone());
+    return_context.kind = context.kind.clone();
+
+    if token_stream.current_tag() == TokenTag::IF && !function_return_type_ids.is_empty() {
         let value_block_expr = match try_parse_value_block_at_receiver(
             token_stream,
-            context,
+            &return_context,
             type_interner,
-            &context.expected_result_type_ids,
+            function_return_type_ids,
             ValueReceiverKind::Return,
             string_table,
             path_fork,
@@ -150,9 +157,7 @@ pub(crate) fn parse_return_statement(
         // For single-result returns, apply a final coercion guard to preserve
         // existing behavior (e.g. Int -> Float). For multi-result, the
         // value-block parser already validated and coerced each slot.
-        let return_expr = if context.expected_result_type_ids.len() == 1 {
-            let expected_type_id = context.expected_result_type_ids[0];
-
+        let return_expr = if let &[expected_type_id] = function_return_type_ids.as_slice() {
             coerce_expression_to_explicit_type_boundary(
                 value_block_expr,
                 expected_type_id,
@@ -177,7 +182,7 @@ pub(crate) fn parse_return_statement(
     //  Normal return values
     // --------------------------
 
-    let returned_values = if context.expected_result_type_ids.is_empty() {
+    let returned_values = if function_return_type_ids.is_empty() {
         if is_return_terminator(token_stream.current_tag()) {
             Vec::new()
         } else {
@@ -189,7 +194,7 @@ pub(crate) fn parse_return_statement(
         }
     } else {
         if is_return_terminator(token_stream.current_tag()) {
-            let expected_count = context.expected_result_type_ids.len();
+            let expected_count = function_return_type_ids.len();
             return Err(CompilerDiagnostic::invalid_return_shape(
                 InvalidReturnShapeReason::BareReturnWithExpectedValues { expected_count },
                 Some(token_stream.current_span()),
@@ -199,7 +204,7 @@ pub(crate) fn parse_return_statement(
 
         let parsed_return_values = create_multiple_expressions(
             token_stream,
-            context,
+            &return_context,
             type_interner,
             "return values",
             false,
@@ -208,7 +213,7 @@ pub(crate) fn parse_return_statement(
         )?;
 
         if token_stream.current_tag() == TokenTag::COMMA {
-            let expected_count = context.expected_result_type_ids.len();
+            let expected_count = function_return_type_ids.len();
             return Err(CompilerDiagnostic::invalid_return_shape(
                 InvalidReturnShapeReason::TooManyReturnValues { expected_count },
                 Some(token_stream.current_span()),
@@ -222,7 +227,7 @@ pub(crate) fn parse_return_statement(
         // applying explicit contextual coercion when a return boundary allows it.
         for (returned_value, expected_type_id) in parsed_return_values
             .into_iter()
-            .zip(context.expected_result_type_ids.iter())
+            .zip(function_return_type_ids.iter())
         {
             coerced_values.push(coerce_expression_to_explicit_type_boundary(
                 returned_value,

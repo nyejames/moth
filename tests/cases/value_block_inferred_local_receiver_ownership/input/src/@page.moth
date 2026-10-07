@@ -1,0 +1,186 @@
+-- Unannotated locals infer their type from their own produced values. The
+-- enclosing function's result slots belong only to real function exits.
+
+Role ::
+    Worker,
+    Sentinel,
+    Scout,
+;
+
+Summary = | label String, role Role, size Int |
+
+role_name |role Role| -> String:
+    return if role is:
+        Worker => then "worker"
+        Sentinel => then "sentinel"
+        Scout => then "scout"
+    ;
+;
+
+empty_labels type A || -> {A}:
+    return {}
+;
+
+-- Full match, inline Bool if and block Bool if, each with a local type that
+-- differs from the single function result.
+make_summary |slot Int| -> Summary:
+    role = if slot is:
+        < 4 => then Role::Worker
+        < 7 => then Role::Sentinel
+        else => then Role::Scout
+    ;
+    label = if slot < 4 then "small" else "large"
+    size = if slot < 4:
+        then slot
+    else
+        then slot * 10
+    ;
+    return Summary(label, role, size)
+;
+
+-- A branch can still return through the function contract while the other
+-- branches produce the local's own String value.
+checked_summary |slot Int| -> Summary:
+    label = if slot is:
+        < 0 => return Summary("negative", Role::Scout, 0)
+        < 4 => then "small"
+        else => then "large"
+    ;
+    return Summary(label, Role::Worker, slot)
+;
+
+-- An explicit local annotation constrains `then` values but not `return`.
+annotated_summary |slot Int| -> Summary:
+    label String = if slot < 0:
+        return Summary("annotated-negative", Role::Scout, 0)
+    else
+        then "annotated"
+    ;
+    return Summary(label, Role::Worker, slot)
+;
+
+-- Multiple success results: the local stays one value and returns keep both slots.
+describe |count Int| -> String, Int:
+    label = if count < 0:
+        return "negative", 0
+    else
+        then "counted"
+    ;
+    return label, count
+;
+
+-- No success results.
+add_bonus |total ~Int, count Int|:
+    bonus = if count > 2 then 10 else 1
+    total += bonus
+;
+
+count_large |limit Int| -> Summary:
+    total ~= 0
+    loop 0 to limit |value|:
+        step = if value > 2 then 1 else 0
+        total += step
+    ;
+    return Summary("loop", Role::Worker, total)
+;
+
+-- The inner declaration owns its Int target. The later `then` values still
+-- target the outer String receiver.
+nested_summary |count Int| -> Summary:
+    label String = if count > 0:
+        doubled = if count > 5 then count * 2 else count
+        if doubled > 10:
+            then "big"
+        else
+            then "small"
+        ;
+    else
+        then "none"
+    ;
+    return Summary(label, Role::Sentinel, count)
+;
+
+-- Typed locals keep context-dependent forms: typed `none` and generic evidence.
+typed_context_summary |count Int| -> Summary:
+    note String? = if count > 3 then "noted" else none
+    label = if note is |text| then text else "plain"
+    labels {String} = if count > 3 then empty_labels() else {"seeded"}
+    return Summary(label, Role::Scout, labels.length())
+;
+
+checked_label |count Int| -> String, Error!:
+    if count > 100:
+        return! Error("too large")
+    ;
+    return "valid"
+;
+
+-- `return!` and postfix `!` inside a local value block use the function's error slot.
+validated |count Int| -> Summary, Error!:
+    label = if count is:
+        < 0 => return! Error("negative count")
+        else => then checked_label(count)!
+    ;
+    return Summary(label, Role::Worker, count)
+;
+
+find_count |count Int| -> Int?:
+    if count is 0:
+        return none
+    ;
+    return count
+;
+
+-- Postfix `?` returns `none` from the function. The local itself stays `Int`.
+doubled_count |count Int| -> Int?:
+    found = if count > 5:
+        then find_count(count - 6)?
+    else
+        then count
+    ;
+    return found * 2
+;
+
+doubled_or_zero |count Int| -> Int:
+    return if doubled_count(count) is |value| then value else 0
+;
+
+low = make_summary(2)
+middle = make_summary(5)
+high = make_summary(8)
+negative = checked_summary(-1)
+small_checked = checked_summary(3)
+annotated_negative = annotated_summary(-1)
+annotated = annotated_summary(1)
+described_label, described_count = describe(3)
+bonus ~= 0
+add_bonus(~bonus, 3)
+add_bonus(~bonus, 1)
+looped = count_large(6)
+nested_big = nested_summary(6)
+nested_small = nested_summary(2)
+typed_plain = typed_context_summary(1)
+typed_noted = typed_context_summary(4)
+valid = validated(3) catch |err|:
+    then Summary(err.message, Role::Scout, 0)
+;
+negative_error = validated(-1) catch |negative_err|:
+    then Summary(negative_err.message, Role::Scout, 0)
+;
+too_large = validated(101) catch |size_err|:
+    then Summary(size_err.message, Role::Scout, 0)
+;
+
+[:low=[low.label]/[role_name(low.role)]/[low.size]
+middle=[middle.label]/[role_name(middle.role)]/[middle.size]
+high=[high.label]/[role_name(high.role)]/[high.size]
+checked=[negative.label]/[small_checked.label]
+annotated=[annotated_negative.label]/[annotated.label]
+described=[described_label]/[described_count]
+bonus=[bonus]
+looped=[looped.size]
+nested=[nested_big.label]/[nested_small.label]
+typed=[typed_plain.label]/[typed_plain.size]/[typed_noted.label]/[typed_noted.size]
+validated=[valid.label]/[negative_error.label]/[too_large.label]
+doubled=[doubled_or_zero(3)]/[doubled_or_zero(7)]/[doubled_or_zero(6)]
+]

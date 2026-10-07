@@ -1,0 +1,11 @@
+-- The function's String result is not the immediate receiver of this local,
+-- so it cannot supply the cast target.
+format_optional |value U8?| -> String:
+    text = if value is:
+        none => then "ABSENT"
+        |payload| => then cast payload
+    ;
+    return text
+;
+
+label = format_optional(7)

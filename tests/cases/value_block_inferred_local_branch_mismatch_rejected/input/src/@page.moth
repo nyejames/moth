@@ -1,0 +1,13 @@
+Summary = | label String |
+
+-- The inferred local takes its expected type from its first produced value,
+-- not from the function's Summary result.
+make_summary |count Int| -> Summary:
+    label = if count is:
+        < 4 => then "small"
+        else => then count
+    ;
+    return Summary(label)
+;
+
+summary = make_summary(2)

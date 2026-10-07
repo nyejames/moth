@@ -813,9 +813,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         if let Some(frozen_identity_handle) = frozen_identity_handle.as_ref() {
             context = context.with_frozen_identity_handle(frozen_identity_handle.clone());
         }
-        let expected_result_type_ids = signature.success_return_type_ids();
-        context.current_function_return_type_ids = expected_result_type_ids.clone();
-        context.expected_result_type_ids = expected_result_type_ids;
+        context.current_function_return_type_ids = signature.success_return_type_ids();
         context.expected_error_type = signature.error_return_type_id();
         context.set_local_declarations(signature.parameters.to_owned(), &*self.path_fork);
         // --------------------------
@@ -958,7 +956,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             string_table,
         )?;
         context = context.with_active_generic_type_context(generic_type_context);
-        context.expected_result_type_ids = resolved_signature.signature.success_return_type_ids();
+        context.current_function_return_type_ids =
+            resolved_signature.signature.success_return_type_ids();
         context.expected_error_type = resolved_signature.signature.error_return_type_id();
         context.set_local_declarations(
             resolved_signature.signature.parameters.clone(),
@@ -1035,11 +1034,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 scope_frame_capacity,
             })
             .with_visible_declarations(Arc::new(visible_declarations));
-        let expected_result_type_ids = resolved_signature.signature.success_return_type_ids();
-        let expected_error_type = resolved_signature.signature.error_return_type_id();
-        context.current_function_return_type_ids = expected_result_type_ids.clone();
-        context.expected_result_type_ids = expected_result_type_ids;
-        context.expected_error_type = expected_error_type;
+        context.current_function_return_type_ids =
+            resolved_signature.signature.success_return_type_ids();
+        context.expected_error_type = resolved_signature.signature.error_return_type_id();
         context.set_local_declarations(
             resolved_signature.signature.parameters.to_owned(),
             &*self.path_fork,

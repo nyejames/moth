@@ -11166,6 +11166,48 @@ contract = "language.expressions.value_if_mixed_produce_terminate_acceptance"
 role = "primary"
 
 [[case]]
+id = "value_block_inferred_local_receiver_ownership"
+path = "value_block_inferred_local_receiver_ownership"
+tags = ["integration", "language", "value-blocks", "declaration", "regression"]
+contract = "language.expressions.value_block_inferred_local_receiver_ownership"
+role = "primary"
+
+[[case]]
+id = "value_block_inferred_local_branch_mismatch_rejected"
+path = "value_block_inferred_local_branch_mismatch_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "declaration", "regression"]
+contract = "language.expressions.value_if_type_mismatch_rejected"
+role = "boundary"
+
+[[case]]
+id = "value_block_inferred_local_function_arity_rejected"
+path = "value_block_inferred_local_function_arity_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "declaration", "regression"]
+contract = "language.expressions.value_block_inferred_local_single_value_rejected"
+role = "primary"
+
+[[case]]
+id = "value_block_local_invalid_function_return_rejected"
+path = "value_block_local_invalid_function_return_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "return", "regression"]
+contract = "language.functions.return_value_type_mismatch_rejected"
+role = "boundary"
+
+[[case]]
+id = "value_block_inferred_local_cast_target_rejected"
+path = "value_block_inferred_local_cast_target_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "cast", "regression"]
+contract = "language.casts.missing_builtin_target_rejected"
+role = "boundary"
+
+[[case]]
+id = "value_block_inferred_local_generic_evidence_rejected"
+path = "value_block_inferred_local_generic_evidence_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "generics", "regression"]
+contract = "language.generics.ambiguous_inference_rejected"
+role = "boundary"
+
+[[case]]
 id = "value_if_return_inline"
 path = "value_if_return_inline"
 tags = ["integration", "language", "value-blocks", "if", "return"]
