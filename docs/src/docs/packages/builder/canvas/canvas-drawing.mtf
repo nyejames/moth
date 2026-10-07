@@ -1159,7 +1159,7 @@ The Wasm backend rejects reachable `@web/canvas` calls before lowering. Canvas s
 
 ### Deferred surfaces
 
-`@web/canvas` ships as a skeleton. Deferred surfaces include async image-loading helpers, `toBlob` and `captureStream`, raw typed-array and arbitrary line-dash array access, `Path2D`, `DOMMatrix`, `OffscreenCanvas`, `ImageBitmap`, video sources and WebGL. These will arrive as the language and external package ABI mature. See @../../../progress (progress matrix) for current status.
+`@web/canvas` ships as a skeleton. Deferred surfaces include async image-loading helpers, `toBlob` and `captureStream`, raw typed-array and arbitrary line-dash array access, `Path2D`, `DOMMatrix`, `OffscreenCanvas`, `ImageBitmap` and video sources. These will arrive as the language and external package ABI mature. WebGL belongs to @../graphics (@web/graphics), not this package. See @../../../progress (progress matrix) for current status.
 
 ### Related concepts
 

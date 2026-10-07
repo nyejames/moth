@@ -14,18 +14,7 @@ import { mothOk, mothErr } from "@moth/runtime";
 // Browser Canvas has overloads, union source types, callbacks, typed arrays, and
 // async image flows; the current JS external binding ABI is concrete, synchronous,
 // and scalar/opaque only, so overloaded APIs are exposed as explicitly named wrappers.
-
-// TODO(canvas-api): Add async image-loading helpers once external packages can model
-// callbacks, promises, or an event/listener API. `create_image` creates an element
-// immediately, but drawing remains fallible until the browser has loaded it.
-// TODO(canvas-api): Add toBlob/captureStream once callback/stream values have a
-// Moth ABI shape. `to_data_url*` is available now but can be expensive for
-// large canvases because it returns one in-memory string.
-// TODO(canvas-api): Add raw typed-array and arbitrary line-dash array access once
-// JS signatures can expose collections or typed-array handles safely.
-// TODO(canvas-api): Add Path2D, DOMMatrix, OffscreenCanvas, ImageBitmap, video
-// sources, and WebGL as separate opaque APIs rather than forcing them through the
-// scalar-only 2D wrapper surface.
+// Deferred surfaces and future package direction live in this directory's README.
 
 function okVoid() {
     return mothOk();
@@ -135,6 +124,8 @@ export function getImage(id) {
     return mothOk(image);
 }
 
+// Image creation returns the element immediately. Loading continues in the browser, so drawing
+// stays fallible through `assertLoadedImage` until the image has finished loading.
 /**
  * @moth.sig create_image |src String| -> CanvasImage
  */
@@ -216,6 +207,8 @@ export function setCanvasSize(canvas, width, height) {
     canvas.height = height;
 }
 
+// Data URLs return the whole encoded canvas as one in-memory string, which can be expensive for
+// large canvases.
 /**
  * @moth.sig to_data_url |canvas CanvasElement| -> String, Error!
  */

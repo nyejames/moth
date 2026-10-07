@@ -1,0 +1,60 @@
+`@web/graphics` is the HTML builder's WebGL2 package. It belongs to the Builder origin family with ExternalBinding backing. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
+
+### Current surface
+
+The HTML builder registers `@web/graphics` with no public functions, types or constants. A dependency clause naming the package resolves, and selecting any symbol from it is rejected as a missing symbol. No public API ships until its binding prerequisites are accepted and implemented. The package publishes no placeholder or temporary forms in the meantime.
+
+### Scope
+
+The package targets WebGL2 only. WebGL1 compatibility is outside current scope.
+
+It has two areas:
+
+[table:
+    [th:
+        [: Area]
+        [: Role]
+        [: Status]
+    ]
+
+    [td:
+        [: `graphics.gl`]
+        [: The WebGL2 graphics interface: contexts, shaders, programs, buffers, vertex arrays, uniforms, textures, samplers, framebuffers, renderbuffers, drawing and render state.]
+        [: Initial implementation area]
+    ]
+
+    [td:
+        [: `graphics.frame`]
+        [: Browser animation-frame scheduling that drives rendering at the browser's frame cadence.]
+        [: Accepted scope, waiting for an accepted host-to-Moth execution mechanism]
+    ]
+]
+
+The package stays close to WebGL2. Programs keep explicit control of GPU resource lifetime, shader compilation, program linking, buffer upload, render state, draw calls and framebuffer use. It isn't a scene graph or game engine. Higher-level graphics libraries build on it without requiring changes to it.
+
+### Relationship to `@web/canvas`
+
+`@web/canvas` owns canvas discovery, creation, sizing and Canvas 2D rendering. `@web/graphics` owns WebGL2 rendering, and WebGL isn't part of `@web/canvas`.
+
+Context creation will take the canvas handle owned by `@web/canvas` rather than a second canvas type. The package will also support projects that author their own canvas HTML without depending on `@web/canvas`.
+
+### Prerequisites for the first API
+
+The current annotated JavaScript binding profile can't yet express the final API. These capabilities come first:
+
+- a binding package signature naming an opaque type owned by another package, so context creation can take `@web/canvas`'s canvas handle
+- nested symbol paths for annotated JavaScript packages, so the API can live under `graphics.gl` and `graphics.frame`
+- a typed form for closed domains such as primitive modes and buffer usages, rather than raw numeric constants
+- bulk numeric and byte data crossing the binding boundary for buffer upload, texture upload, uniform arrays and readback, keeping numeric `U8` distinct from `Byte`
+
+Frame scheduling also waits for Moth to suspend and resume work or for another accepted host-reentry design. It won't be provided through a synchronous polling function.
+
+### Backend behaviour
+
+The package is supported only for the HTML builder's JavaScript target. See @../../../progress/packages-and-builders (packages and builders progress matrix) for current status.
+
+### Related concepts
+
+- For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
+- For the annotated JavaScript binding profile see @../../#external-binding-contracts (External binding contracts).
+- For Canvas 2D drawing see @../canvas (@web/canvas).

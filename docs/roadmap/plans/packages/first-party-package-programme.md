@@ -18,7 +18,7 @@ plans under this directory.
 
 ```text
 STATUS: active in parallel under the main roadmap
-CURRENT_SLICE: select the next eligible package slice from the tracker; delivered Math and Time work remains complete
+CURRENT_SLICE: `@web/graphics` is scaffolded with its README plan and its prerequisite binding designs await user review. Delivered Math and Time work remains complete
 BLOCKERS: result-slot/Core const-eval-dependent slices retain their capability gates; shared numeric/ABI/expression changes require coordination with their serial compiler owners
 NEXT_ACTION: refresh current main and the intended package's living plan, then run the complete package gate for an eligible isolated slice
 ```
@@ -50,7 +50,10 @@ Historical checkpoint and validation records below do not establish the current
 branch state or reinstate a programme-wide pause.
 
 The main roadmap links only this umbrella plan. Package-specific plans live in
-`docs/roadmap/plans/packages/` and are linked from the tracker in this file.
+`docs/roadmap/plans/packages/` and are linked from the tracker in this file. Built-in `@web/*`
+packages are the exception: each keeps its living implementation memory in a `README.md` beside
+its JavaScript asset under `src/projects/html_project/binding_packages/web/`, so package-local
+planning stays out of the global roadmap.
 
 Files in this directory are a deliberate exception to the normal short-lived plan lifecycle:
 
@@ -100,6 +103,7 @@ This programme owns:
 - a narrow audit and hardening pass over existing first-party package foundations
 - useful v1 completion work for existing Core packages
 - deeper expansion of `@web/canvas`
+- `@web/graphics` WebGL2 package design, binding prerequisites and implementation
 - secondary `@html` wrapper and helper work required by package additions
 - one newly accepted Core package, `@core/json`, after its own design checkpoint
 - JavaScript runtime implementations plus compiler-owned Rust semantic functions for Core constant
@@ -386,6 +390,9 @@ Each package plan uses this compact structure:
 The history records major completed versions or refactors only. It is not a phase-by-phase changelog.
 
 Create a package plan only when that package is activated. Do not add speculative placeholder files.
+Built-in `@web/*` packages use their package `README.md` with the same purpose. It may also hold
+clearly labelled tentative ideas and investigation questions, and it stays a concise handover
+document rather than a changelog.
 
 ## Mandatory phase gate
 
@@ -478,8 +485,9 @@ materially safer to implement. Record the reason in the tracker rather than sile
 | 2 | `@core/random` | `core-random.md` | TODO: create when activated | Complete common scalar random generation and specify portable observable rules while allowing unpromised generator identity to differ by backend |
 | 3 | `@core/math` | [core-math.md](./core-math.md) | Activated ahead of order 2 because its existing surface needs no new compiler capability; current-surface coverage, registration cleanup and the accepted scalar expansion with its published numerical contract are delivered | Audit the broad existing Float surface, fill common omissions and preserve finite-result boundaries |
 | 4 | `@core/time` | [core-time.md](./core-time.md) | v1 delivered: the semantic contract is published, the four defects it exposed are corrected and the accepted Duration and Timestamp arithmetic is registered and covered | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
-| 5 | `@web/canvas` | `web-canvas.md` | TODO: create when activated | Expand drawing, state, path, transform, text, image and pixel workflows deeply enough to support substantial visual stress-test programs |
+| 5 | `@web/canvas` | [canvas README](../../../../src/projects/html_project/binding_packages/web/canvas/README.md) | README seeded from accepted direction and the deferred notes formerly in `canvas.js`; expansion not started | Expand drawing, state, path, transform, text, image and pixel workflows deeply enough to support substantial visual stress-test programs |
 | 5a | `@html` | `html.md` | TODO: create only when needed | Add source-backed wrappers or broadly useful helpers required by canvas and HTML package work, without turning `@html` into a framework |
+| 5b | `@web/graphics` | [graphics README](../../../../src/projects/html_project/binding_packages/web/graphics/README.md) | Scaffolded: registered with no public symbols, canonical page and progress row added. Its binding prerequisites (cross-package opaque types, nested annotated paths, closed domains, bulk data, asset error codes) await user design review | A WebGL2 renderer written directly against `graphics.gl`, through textured, indexed and instanced drawing, without placeholder APIs |
 | 6 | `@core/io` | [core-io.md](./core-io.md) | Scope review accepted and Phase 1 snapshot input hardening complete; Phase 2 candidates await user selection | Add portable snapshot input, then an ordered queue only where its final value shape crosses the binding boundary |
 | 7 | `@core/collections` | `core-collections.md` | TODO: create when activated | Audit common non-sorting gaps and integrate specialised collection work without duplicating its accepted contracts |
 | 7a | Collection sorting | [core-collections-sorting.md](./core-collections-sorting.md) | Accepted and queued behind mixed-backend prerequisites | Preserve stable-by-default sort and consume delivered fixed numeric/Byte ordering and compact layouts |
@@ -534,16 +542,16 @@ not accept a nanosecond representation or silently alter the existing time ABI.
 
 #### `@web/canvas`
 
-A broad package slice is intentional. Prefer coherent workflows over a mechanical Web API mirror.
-Exercise mutable opaque handles, error recovery, runtime asset reachability, image and pixel data,
-templates and long-running visual programs.
+Follow the canvas README. A broad package slice is intentional. Exercise mutable opaque handles,
+error recovery, runtime asset reachability, image and pixel data, templates and long-running visual
+programs. WebGL belongs to `@web/graphics`.
 
-Pixel and binary-data designs distinguish numeric U8 channels from Byte octets.
-Their shared one-byte storage does not make them interchangeable. This is not
-permission to add bitwise syntax or settle a Core byte API here.
+#### `@web/graphics`
 
-Update `@html` wrappers only where source-owned methods or helper composition clearly improve Moth
-usage.
+Follow the graphics README. The package stays close to WebGL2 and below any scene or engine
+abstraction. Each binding prerequisite is a shared binding-boundary capability accepted in its
+canonical owner, not a graphics-local workaround. `graphics.frame` waits for structured async or an
+accepted host-reentry design and never ships as a polling handle.
 
 #### `@core/io`
 
@@ -598,7 +606,7 @@ Likely Web Builder candidates:
 - navigation, location and history
 - clipboard and file selection
 - browser-specific input and event surfaces
-- animation and frame scheduling
+- browser animation-frame scheduling beyond the accepted `@web/graphics` `graphics.frame` scope
 - fetch after the async and task model exists
 
 Cryptography is deliberately absent. Do not add it as a Core candidate, example or implied future
@@ -651,7 +659,7 @@ Canonical package docs:
 - own accepted public types, functions, semantics, fallibility and limitations
 - must be updated in the same phase that changes an accepted contract
 
-Living package plans:
+Living package plans and `@web/*` package READMEs:
 
 - preserve implementation rationale, quirks, prior blockers, rejected approaches and future work
 - never override canonical documentation
@@ -801,8 +809,8 @@ contract coverage. Keep wall-clock tests independent of the machine's current da
 
 ### Phase 6 - `@web/canvas` expansion and optional `@html` wrappers
 
-Create and accept `web-canvas.md`. Create `html.md` only when the wrapper work is substantial enough
-to need its own implementation memory.
+Refresh the canvas README and accept the slice scope with the user. Create `html.md` only when the
+wrapper work is substantial enough to need its own implementation memory.
 
 Mandatory closeout: full phase gate plus at least one substantial visual-program integration case,
 runtime asset reachability checks and failure coverage for unavailable handles or invalid operations.

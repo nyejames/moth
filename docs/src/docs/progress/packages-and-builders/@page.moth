@@ -370,6 +370,13 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         ]
 
         [data:
+            [: WebGL2 package [$html:<code>@web/graphics</code>]]
+            [: Deferred]
+            [: The HTML builder registers the package with no public symbols, so symbol selections are missing-symbol diagnostics. No placeholder or temporary API is published.]
+            [: Accepted Builder binding-backed WebGL2 package. WebGL1 is outside current scope. [$html:<code>graphics.gl</code>] is the initial implementation area. [$html:<code>graphics.frame</code>] is accepted scope that waits for an accepted host-to-Moth execution mechanism, never a polling stand-in. The first API waits for cross-package opaque type references for the [$html:<code>@web/canvas</code>] canvas handle, nested annotated symbol paths, typed closed domains and bulk numeric and byte data transfer, which is required for a useful v1.]
+        ]
+
+        [data:
             [: MON static project builder]
             [: Deferred]
             [: None]

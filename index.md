@@ -206,7 +206,9 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [code.rs](src/projects/html_project/styles/code.rs): the `$code` scanner shell, role vocabulary and span emission, with [moth_scanner.rs](src/projects/html_project/styles/moth_scanner.rs) owning the Moth contextual state machines and [language_profiles.rs](src/projects/html_project/styles/language_profiles.rs) the profile registry and non-Moth word tables.
 - [external_js](src/projects/html_project/external_js/): provider-backed JS imports, runtime modules/assets/glue.
 - [binding_packages](src/projects/html_project/binding_packages/): builder-owned binding packages for HTML projects.
-    - [@web/canvas binding package](src/projects/html_project/binding_packages/web/canvas/): built-in JS canvas asset (`canvas.js`) and `@web/canvas` registration. Used by the `@html` canvas helpers.
+    - [@web packages](src/projects/html_project/binding_packages/web/mod.rs): shared registration of every built-in `@web/*` JS asset. Each package directory holds its asset and a `README.md` with its living design and plan.
+        - [@web/canvas](src/projects/html_project/binding_packages/web/canvas/): Canvas 2D asset (`canvas.js`). Used by the `@html` canvas helpers.
+        - [@web/graphics](src/projects/html_project/binding_packages/web/graphics/): WebGL2 package, registered with no public symbols yet.
 - [moth_template](src/projects/html_project/moth_template/): direct .mtf request normalization, content-source discovery and output packaging around the compiler's [Moth template service](src/compiler_frontend/single_source_compilation/moth_template.rs), retaining per-document source contexts with warnings.
 - [new_html_project](src/projects/html_project/new_html_project/): scaffold command.
 

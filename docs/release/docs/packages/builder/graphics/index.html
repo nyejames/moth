@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>Builder packages | Moth</title>
-    <meta name="description" content="HTML builder helpers, canvas drawing and WebGL2 graphics packages provided by the HTML builder.">
+    <title>@web/graphics | Moth</title>
+    <meta name="description" content="WebGL2 rendering as a builder binding-backed runtime package.">
     <style>
 /*!
   MOTH CSS CORE (absolute basics CSS reset)
@@ -173,7 +173,7 @@ body {
     </style>
 <style>@font-face {
     font-family: "Computer Modern Sans";
-    src: url("../../../styles/fonts/cmunss.woff2") format("woff2");
+    src: url("../../../../styles/fonts/cmunss.woff2") format("woff2");
     font-style: normal;
     letter-spacing: 10em;
     font-weight: 400;
@@ -703,20 +703,92 @@ td {
         </a>
     </div>
 </nav>
-<section class="container"><p><a href="../../">Documentation</a> / <a href="../">Packages and dependencies</a> / Builder packages</p><h1 id="builder-packages">Builder packages</h1><p>The selected project builder supplies packages tied to its artefact model. This keeps browser and rendering APIs out of the core language.</p><p>The HTML builder provides source-backed compile-time helpers through <code>@html</code>, binding-backed runtime drawing through <code>@web/canvas</code> and WebGL2 rendering through <code>@web/graphics</code>. The <a href="../../progress/packages-and-builders">packages and builders progress matrix</a> records current support and accepted next gaps.</p><h2 id="package-pages">Package pages</h2><ul><li><a href="./html/">@html</a></li><li><a href="./canvas/">@web/canvas</a></li><li><a href="./graphics/">@web/graphics</a></li></ul></section>
+<section class="container"><p><a href="../../../">Documentation</a> / <a href="../">Builder packages</a> / @web/graphics</p><h1 id="webgraphics">@web/graphics</h1><p><code>@web/graphics</code> is the HTML builder&#39;s WebGL2 package. Its API will expose GPU resources, render state and draw calls through typed opaque handles while keeping WebGL&#39;s explicit graphics model.</p></section>
+<section class="container"><fieldset class="doc-level">
+    <legend class="visually-hidden">
+        Choose the explanation level: Graphics
+</legend>
+
+<input
+    class="doc-level__input doc-level__input--basic"
+    type="radio"
+    name="graphics-level"
+                id="graphics-basic"
+                value="basic"
+                checked
+            >
+
+            <input
+                class="doc-level__input doc-level__input--advanced"
+                type="radio"
+                name="graphics-level"
+                id="graphics-advanced"
+                value="advanced"
+            >
+
+            <header class="doc-level__header">
+                <h2 class="doc-level__title" id="graphics">
+                    Graphics
+</h2>
+
+<div class="doc-level__switch">
+    <label
+        class="doc-level__option doc-level__option--basic"
+        for="graphics-basic"
+                    >
+                        Basic
+                    </label>
+
+                    <label
+                        class="doc-level__option doc-level__option--advanced"
+                        for="graphics-advanced"
+                    >
+                        Advanced
+                    </label>
+                </div>
+            </header>
+
+            <div class="doc-level__panel doc-level__panel--basic">
+                
+
+
+
+        <p><code>@web/graphics</code> will give you WebGL2 rendering for games, simulations and 3D applications. It keeps WebGL&#39;s model of shaders, buffers, textures and draw calls, with Moth types in place of JavaScript overloads and numeric constants.</p><p>The package is registered but doesn&#39;t expose any functions yet. Its first API waits for binding features that let it accept a <code>@web/canvas</code> canvas and upload vertex and pixel data cleanly.</p><p>Use <a href="../canvas">@web/canvas</a> for 2D drawing today.</p><p>For the package scope, the planned areas and what the first API needs, see <a href="#graphics">@web/graphics advanced</a>.</p>
+</div>
+
+<div class="doc-level__panel doc-level__panel--advanced">
+    <p><code>@web/graphics</code> is the HTML builder&#39;s WebGL2 package. It belongs to the Builder origin family with ExternalBinding backing. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><h3 id="current-surface">Current surface</h3><p>The HTML builder registers <code>@web/graphics</code> with no public functions, types or constants. A dependency clause naming the package resolves, and selecting any symbol from it is rejected as a missing symbol. No public API ships until its binding prerequisites are accepted and implemented. The package publishes no placeholder or temporary forms in the meantime.</p><h3 id="scope">Scope</h3><p>The package targets WebGL2 only. WebGL1 compatibility is outside current scope.</p><p>It has two areas:</p><table style="">
+            
+            <tr style="">
+                
+            <th scope="col" style=""><p> Area</p></th><th scope="col" style=""><p> Role</p></th><th scope="col" style=""><p> Status</p></th>
+        
+</tr>
+
+
+
+                <tr style="">
+             <td style=""><p> <code>graphics.gl</code></p></td> <td style=""><p> The WebGL2 graphics interface: contexts, shaders, programs, buffers, vertex arrays, uniforms, textures, samplers, framebuffers, renderbuffers, drawing and render state.</p></td> <td style=""><p> Initial implementation area</p></td>
+        </tr><tr style="">
+             <td style=""><p> <code>graphics.frame</code></p></td> <td style=""><p> Browser animation-frame scheduling that drives rendering at the browser&#39;s frame cadence.</p></td> <td style=""><p> Accepted scope, waiting for an accepted host-to-Moth execution mechanism</p></td>
+        </tr>
+            
+</table><p>The package stays close to WebGL2. Programs keep explicit control of GPU resource lifetime, shader compilation, program linking, buffer upload, render state, draw calls and framebuffer use. It isn&#39;t a scene graph or game engine. Higher-level graphics libraries build on it without requiring changes to it.</p><h3 id="relationship-to-webcanvas">Relationship to <code>@web/canvas</code></h3><p><code>@web/canvas</code> owns canvas discovery, creation, sizing and Canvas 2D rendering. <code>@web/graphics</code> owns WebGL2 rendering, and WebGL isn&#39;t part of <code>@web/canvas</code>.</p><p>Context creation will take the canvas handle owned by <code>@web/canvas</code> rather than a second canvas type. The package will also support projects that author their own canvas HTML without depending on <code>@web/canvas</code>.</p><h3 id="prerequisites-for-the-first-api">Prerequisites for the first API</h3><p>The current annotated JavaScript binding profile can&#39;t yet express the final API. These capabilities come first:</p><ul><li>a binding package signature naming an opaque type owned by another package, so context creation can take <code>@web/canvas</code>&#39;s canvas handle</li><li>nested symbol paths for annotated JavaScript packages, so the API can live under <code>graphics.gl</code> and <code>graphics.frame</code></li><li>a typed form for closed domains such as primitive modes and buffer usages, rather than raw numeric constants</li><li>bulk numeric and byte data crossing the binding boundary for buffer upload, texture upload, uniform arrays and readback, keeping numeric <code>U8</code> distinct from <code>Byte</code></li></ul><p>Frame scheduling also waits for Moth to suspend and resume work or for another accepted host-reentry design. It won&#39;t be provided through a synchronous polling function.</p><h3 id="backend-behaviour">Backend behaviour</h3><p>The package is supported only for the HTML builder&#39;s JavaScript target. See <a href="../../../progress/packages-and-builders">packages and builders progress matrix</a> for current status.</p><h3 id="related-concepts">Related concepts</h3><ul><li>For package origin and backing see <a href="../../#package-origins-and-backing">Package origins and backing</a>.</li><li>For the annotated JavaScript binding profile see <a href="../../#external-binding-contracts">External binding contracts</a>.</li><li>For Canvas 2D drawing see <a href="../canvas">@web/canvas</a>.</li></ul>
+</div>
+</fieldset></section>
 <section class="container"><nav class="doc-pager" aria-label="Language documentation">
     <a
         class="doc-pager__link doc-pager__link--previous"
-        href="../core/"
+        href="../canvas/"
                 rel="prev"
             >
                 <span class="doc-pager__direction">← Previous</span>
-                <span class="doc-pager__title">Core packages</span>
+                <span class="doc-pager__title">@web/canvas</span>
             </a>
 
             <a
                 class="doc-pager__link doc-pager__link--next"
-                href="../../memory/"
+                href="../../../memory/"
                 rel="next"
             >
                 <span class="doc-pager__direction">Next →</span>

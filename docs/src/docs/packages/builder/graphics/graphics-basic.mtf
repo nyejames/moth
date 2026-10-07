@@ -1,0 +1,12 @@
+`@web/graphics` will give you WebGL2 rendering for games, simulations and 3D
+applications. It keeps WebGL's model of shaders, buffers, textures and draw
+calls, with Moth types in place of JavaScript overloads and numeric constants.
+
+The package is registered but doesn't expose any functions yet. Its first API
+waits for binding features that let it accept a `@web/canvas` canvas and upload
+vertex and pixel data cleanly.
+
+Use @../canvas (@web/canvas) for 2D drawing today.
+
+For the package scope, the planned areas and what the first API needs, see
+@#graphics (@web/graphics advanced).
