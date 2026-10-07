@@ -1,13 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-
-[[backends.html.artifact_assertions]]
-path = "index.html"
-kind = "html"
-must_contain = [
-  "\" real=\"",
-  "\", int=\"",
-  ", 2.5);",
-  ", 2);",
-]
+rendered_output_contains = ["real=2.5, int=2 "]

@@ -25,6 +25,12 @@ GC is a permitted runtime representation for a statically legal lifetime topolog
 - Invalid source access or topology is rejected before backend codegen.
 - Backend doesn't infer access or topology from source syntax.
 - Backend consumes HIR plus borrow facts and validated lifetime facts as validation context and assertion material only.
+- Binding definition, assignment and write-through semantics are explicit in
+  validated HIR. A re-entered definition establishes a new dynamic binding
+  occurrence. Lowerers consume its operation and place/rvalue classification,
+  including explicit operation and CFG destinations, without inspecting borrow
+  solver local modes or entry-state snapshots. A result binding can share an
+  allocation while remaining independent of the producing binding cell.
 - `ValidatedMemoryPlan` is the single final physical authority for ownership decisions and count transitions. Backend consumes it rather than rediscovering or selecting strategy.
 - Backend representation can't affect `copy`, alias or `~` semantics.
 - Imprecise planning results in conservative retention, never in rejecting legal source.
@@ -380,6 +386,11 @@ A future resource-capable profile requires a separate complete design for identi
 ## Fact consumption
 
 Borrow facts and validated lifetime topology are validation context and assertion material only. They do not supply final physical ownership, cleanup or count decisions.
+
+Borrow facts may prove legality or support a separately authorised narrow
+lowering optimisation. They do not select whether the source operation defines
+a local, assigns an existing place or writes through an alias. General solver
+state is not an optimisation handoff.
 
 Backends may consume:
 

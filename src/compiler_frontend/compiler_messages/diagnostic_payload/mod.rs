@@ -186,6 +186,9 @@ macro_rules! emit_diagnostic_payload_enum {
                 length: u32,
                 resource: SourceSpanCapacityResource,
             },
+            CompilerCapacityExceeded {
+                resource: HirCapacityResource,
+            },
             InvalidCharacter {
                 character: char,
             },

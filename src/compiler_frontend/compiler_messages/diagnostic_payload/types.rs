@@ -43,6 +43,18 @@ pub enum SourceSpanCapacityResource {
     Token,
 }
 
+/// Which compact HIR row or edge buffer could not represent another source-owned value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum HirCapacityResource {
+    ExpressionRows,
+    ValueEdges,
+    StructFields,
+    VariantFields,
+    MapEntries,
+    StringPieces,
+    PlaceProjections,
+}
+
 /// Why project-context-dependent semantic facts cannot cross a package facade boundary.
 ///
 /// The reason is intentionally independent of the rendered wording so build, check and tooling
@@ -150,6 +162,7 @@ pub enum UnsupportedBackendFeatureReason {
     ErrorValues,
     FallibleControlFlow,
     MutableFunctionParameters,
+    MutableLocalBindingAliases,
     NumberValues,
 }
 
@@ -170,6 +183,7 @@ impl UnsupportedBackendFeatureReason {
             Self::ErrorValues => "Moth Error values",
             Self::FallibleControlFlow => "fallible control flow",
             Self::MutableFunctionParameters => "mutable function parameters",
+            Self::MutableLocalBindingAliases => "mutable local binding aliases",
             Self::NumberValues => "Dec values",
         }
     }

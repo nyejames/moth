@@ -9,9 +9,9 @@
 //! HIR transformation or lowering invariant failure only.
 
 use crate::compiler_frontend::ast::expressions::expression::Operator;
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
 use crate::compiler_frontend::source::SourceSpan;
@@ -22,7 +22,7 @@ impl<'a> HirBuilder<'a> {
         &self,
         op: &Operator,
         span: &Option<SourceSpan>,
-    ) -> Result<HirBinOp, CompilerError> {
+    ) -> Result<HirBinOp, HirConstructionFailure> {
         match op {
             Operator::Add
             | Operator::Subtract
@@ -69,7 +69,7 @@ impl<'a> HirBuilder<'a> {
         &self,
         op: &Operator,
         span: &Option<SourceSpan>,
-    ) -> Result<HirUnaryOp, CompilerError> {
+    ) -> Result<HirUnaryOp, HirConstructionFailure> {
         match op {
             Operator::Not => Ok(HirUnaryOp::Not),
             Operator::Negate => Ok(HirUnaryOp::Neg),

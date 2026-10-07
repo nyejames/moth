@@ -35,6 +35,7 @@ use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
+use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirVariantFieldRange};
 use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
 };
@@ -44,7 +45,7 @@ use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::operators::HirBinOp;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -61,6 +62,7 @@ use std::process::{Command, Stdio};
 fn lowers_hir_to_wasm_module_bytes() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
@@ -71,7 +73,12 @@ fn lowers_hir_to_wasm_module_bytes() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(1, 7, types.int, RegionId(0))),
+        terminator: HirTerminator::Return(int_expression(
+            7,
+            types.int,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
@@ -83,6 +90,7 @@ fn lowers_hir_to_wasm_module_bytes() {
     let hir_module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
         vec![start_block],
         FunctionId(0),
@@ -124,6 +132,7 @@ process.stdout.write(JSON.stringify(assertions));
 fn emitted_assertions_deliver_static_messages_to_host_before_trapping_in_node() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (mut type_environment, types) = build_type_environment();
     let option_string = type_environment.intern_option(types.string);
     let cases = [
@@ -150,33 +159,37 @@ fn emitted_assertions_deliver_static_messages_to_host_before_trapping_in_node() 
             .try_intern_portable_path(name, &mut string_table)
             .expect("test path fits");
         let (variant_index, fields, message_evaluation) = match text {
-            None => (0, vec![], HirAssertionMessageEvaluation::Default),
-            Some(text) => (
-                1,
-                vec![HirVariantField {
-                    name: None,
-                    value: string_expression(index as u32 * 2 + 1, text, types.string, region),
-                }],
-                HirAssertionMessageEvaluation::Folded,
+            None => (
+                0,
+                HirVariantFieldRange::empty(),
+                HirAssertionMessageEvaluation::Default,
             ),
+            Some(text) => {
+                let value = string_expression(text, types.string, region, &mut expressions);
+                let fields = expressions
+                    .append_variant_fields(&[HirVariantField { name: None, value }], None)
+                    .expect("assertion message field should fit");
+                (1, fields, HirAssertionMessageEvaluation::Folded)
+            }
         };
+        let message = expression(
+            HirExpressionKind::VariantConstruct {
+                carrier: HirVariantCarrier::Option,
+                variant_index,
+                fields,
+            },
+            option_string,
+            region,
+            ValueKind::Const,
+            &mut expressions,
+        );
         blocks.push(HirBlock {
             id: block_id,
             region,
             locals: vec![],
             statements: vec![],
             terminator: HirTerminator::AssertFailure {
-                message: expression(
-                    index as u32 * 2,
-                    HirExpressionKind::VariantConstruct {
-                        carrier: HirVariantCarrier::Option,
-                        variant_index,
-                        fields,
-                    },
-                    option_string,
-                    region,
-                    ValueKind::Const,
-                ),
+                message,
                 message_evaluation,
             },
         });
@@ -204,6 +217,7 @@ fn emitted_assertions_deliver_static_messages_to_host_before_trapping_in_node() 
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         functions,
         blocks,
         FunctionId(0),
@@ -324,6 +338,7 @@ fn rejects_invalid_helper_export_policy() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
@@ -333,7 +348,12 @@ fn rejects_invalid_helper_export_policy() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(1, 0, types.int, RegionId(0))),
+        terminator: HirTerminator::Return(int_expression(
+            0,
+            types.int,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
@@ -344,6 +364,7 @@ fn rejects_invalid_helper_export_policy() {
     let hir_module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
         vec![start_block],
         FunctionId(0),
@@ -1893,6 +1914,7 @@ fn rejects_unsupported_wasm_feature_flags() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
@@ -1902,7 +1924,12 @@ fn rejects_unsupported_wasm_feature_flags() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(1, 0, types.int, RegionId(0))),
+        terminator: HirTerminator::Return(int_expression(
+            0,
+            types.int,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
@@ -1913,6 +1940,7 @@ fn rejects_unsupported_wasm_feature_flags() {
     let hir_module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
         vec![start_block],
         FunctionId(0),
@@ -1945,6 +1973,7 @@ fn rejects_unsupported_cfg_lowering_strategy() {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
@@ -1954,7 +1983,12 @@ fn rejects_unsupported_cfg_lowering_strategy() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(1, 0, types.int, RegionId(0))),
+        terminator: HirTerminator::Return(int_expression(
+            0,
+            types.int,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
@@ -1965,6 +1999,7 @@ fn rejects_unsupported_cfg_lowering_strategy() {
     let hir_module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
         vec![start_block],
         FunctionId(0),
@@ -3851,6 +3886,7 @@ fn build_uint_scalar_fixture(profile: NumericProfile) -> UintScalarFixture {
     let f32_type = builtin_type_ids::fixed_scalar(FixedScalar::F32);
     let region = RegionId(0);
 
+    let mut expressions = HirExpressionStore::default();
     let mut functions = Vec::new();
     let mut blocks = Vec::new();
     let mut names: Vec<(FunctionId, String)> = Vec::new();
@@ -3862,7 +3898,7 @@ fn build_uint_scalar_fixture(profile: NumericProfile) -> UintScalarFixture {
         region,
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(9000, 0, types.int, region)),
+        terminator: HirTerminator::Return(int_expression(0, types.int, region, &mut expressions)),
     });
     functions.push((
         HirFunction {
@@ -3894,6 +3930,9 @@ fn build_uint_scalar_fixture(profile: NumericProfile) -> UintScalarFixture {
         next_function_id += 1;
         let path = intern(name);
         let block_id = BlockId(1000 + id.0);
+        let left = hir_load_local(&mut expressions, LocalId(0), uint_type, region);
+        let right = hir_load_local(&mut expressions, LocalId(1), uint_type, region);
+        let result = hir_load_local(&mut expressions, LocalId(2), uint_type, region);
         blocks.push(HirBlock {
             id: block_id,
             region,
@@ -3910,15 +3949,12 @@ fn build_uint_scalar_fixture(profile: NumericProfile) -> UintScalarFixture {
                         domain: NumericScalar::Uint,
                     },
                     failure_mode: NumericFailureMode::Trap,
-                    operands: HirNumericOperands::Binary {
-                        left: hir_load_local(11, LocalId(0), uint_type, region),
-                        right: hir_load_local(12, LocalId(1), uint_type, region),
-                    },
-                    result: LocalId(2),
+                    operands: HirNumericOperands::Binary { left, right },
+                    result: HirLocalDestination::Define(LocalId(2)),
                 },
                 1,
             )],
-            terminator: HirTerminator::Return(hir_load_local(13, LocalId(2), uint_type, region)),
+            terminator: HirTerminator::Return(result),
         });
         functions.push((
             HirFunction {
@@ -3944,16 +3980,18 @@ fn build_uint_scalar_fixture(profile: NumericProfile) -> UintScalarFixture {
         next_function_id += 1;
         let path = intern(name);
         let block_id = BlockId(1000 + id.0);
+        let left = hir_load_local(&mut expressions, LocalId(0), uint_type, region);
+        let right = hir_load_local(&mut expressions, LocalId(1), uint_type, region);
         let body = expression(
-            id.0 * 100 + 33,
             HirExpressionKind::BinOp {
-                left: Box::new(hir_load_local(31, LocalId(0), uint_type, region)),
+                left,
                 op: operator,
-                right: Box::new(hir_load_local(32, LocalId(1), uint_type, region)),
+                right,
             },
             bool_type,
             region,
             ValueKind::RValue,
+            &mut expressions,
         );
         blocks.push(HirBlock {
             id: block_id,
@@ -3993,16 +4031,18 @@ fn build_uint_scalar_fixture(profile: NumericProfile) -> UintScalarFixture {
         } else {
             (int_type, uint_type)
         };
+        let left = hir_load_local(&mut expressions, LocalId(0), left_type, region);
+        let right = hir_load_local(&mut expressions, LocalId(1), right_type, region);
         let body = expression(
-            id.0 * 100 + 23,
             HirExpressionKind::BinOp {
-                left: Box::new(hir_load_local(21, LocalId(0), left_type, region)),
+                left,
                 op: operator,
-                right: Box::new(hir_load_local(22, LocalId(1), right_type, region)),
+                right,
             },
             bool_type,
             region,
             ValueKind::RValue,
+            &mut expressions,
         );
         blocks.push(HirBlock {
             id: block_id,
@@ -4049,25 +4089,19 @@ fn build_uint_scalar_fixture(profile: NumericProfile) -> UintScalarFixture {
         let path = intern(name);
         let block_id = BlockId(1000 + id.0);
         let source = expression(
-            id.0 * 100 + 41,
             HirExpressionKind::Uint(value),
             uint_type,
             region,
             ValueKind::Const,
+            &mut expressions,
         );
-        let body = expression(
-            id.0 * 100 + 42,
-            HirExpressionKind::Cast {
-                source: Box::new(source),
+        let body = expression(HirExpressionKind::Cast {
+                source,
                 policy: crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId::NumericConversion {
                     source: NumericScalar::Uint,
                     target,
                 },
-            },
-            return_type,
-            region,
-            ValueKind::RValue,
-        );
+            }, return_type, region, ValueKind::RValue, &mut expressions);
         blocks.push(HirBlock {
             id: block_id,
             region,
@@ -4091,6 +4125,7 @@ fn build_uint_scalar_fixture(profile: NumericProfile) -> UintScalarFixture {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         functions,
         blocks,
         FunctionId(0),

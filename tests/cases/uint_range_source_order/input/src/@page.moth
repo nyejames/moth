@@ -23,7 +23,7 @@ source_order_last_index ~= 0
 loop range_source_start() to & range_source_end() by range_source_step() |value, index|:
     source_order_total = source_order_total + value
     source_order_count = source_order_count + 1
-    source_order_last_index = index
+    source_order_last_index = copy index
 ;
 
 io.line([: uint_range_source_order count=[source_order_count]/index=[source_order_last_index]/total=[source_order_total]])

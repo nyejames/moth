@@ -39,11 +39,29 @@ impl<'a> HirValidator<'a> {
                         Some(HirLocation::Block(block.id)),
                     ));
                 }
+                self.local_block_by_id.insert(local.id, block.id);
+            }
+
+            for statement in &block.statements {
+                if self
+                    .statement_block_by_id
+                    .insert(statement.id, block.id)
+                    .is_some()
+                {
+                    return Err(self.error_with_hir(
+                        format!("Duplicate HIR statement id {:?}", statement.id),
+                        Some(HirLocation::Block(block.id)),
+                    ));
+                }
             }
         }
 
         for hir_struct in &self.module.structs {
-            if !self.struct_ids.insert(hir_struct.id) {
+            if self
+                .struct_types
+                .insert(hir_struct.id, hir_struct.frontend_type_id)
+                .is_some()
+            {
                 return Err(self.error_with_hir(
                     format!("Duplicate HIR struct id {:?}", hir_struct.id),
                     Some(HirLocation::Struct(hir_struct.id)),
@@ -70,6 +88,8 @@ impl<'a> HirValidator<'a> {
                     Some(HirLocation::Function(function.id)),
                 ));
             }
+            self.parameter_local_ids
+                .extend(function.params.iter().copied());
         }
 
         Ok(())

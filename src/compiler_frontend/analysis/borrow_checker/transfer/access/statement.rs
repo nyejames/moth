@@ -6,8 +6,9 @@
 
 use super::*;
 use crate::compiler_frontend::hir::expressions::HirMapOp;
-use crate::compiler_frontend::hir::ids::LocalId;
+use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
+use crate::compiler_frontend::hir::statements::HirWriteTarget;
 use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
 use crate::compiler_frontend::source::SourceSpan;
 
@@ -27,9 +28,13 @@ pub(crate) fn transfer_statement(
     let statement_order = layout.statement_order_or_unknown(statement.id);
 
     match &statement.kind {
-        HirStatementKind::Assign { target, value } => {
+        HirStatementKind::Write { target, value } => {
             let location = context.diagnostics.statement_error_span(statement);
             let span = context.diagnostics.statement_error_span(statement);
+            let (target_place, is_definition) = match target {
+                HirWriteTarget::DefineLocal(local) => (HirPlace::local(*local), true),
+                HirWriteTarget::AssignPlace(place) => (*place, false),
+            };
             {
                 let mut read_env = SharedReadEnv {
                     context,
@@ -44,7 +49,7 @@ pub(crate) fn transfer_statement(
                 };
                 record_shared_reads_in_place_indices(
                     &mut read_env,
-                    target,
+                    &target_place,
                     location,
                     &mut RootSet::empty(layout.local_count()),
                 )?;
@@ -63,7 +68,7 @@ pub(crate) fn transfer_statement(
                 };
                 record_shared_reads_in_expression(
                     &mut read_env,
-                    value,
+                    *value,
                     location,
                     &mut RootSet::empty(layout.local_count()),
                 )?;
@@ -82,8 +87,9 @@ pub(crate) fn transfer_statement(
                     span,
                     stats,
                 },
-                target,
-                value,
+                &target_place,
+                *value,
+                is_definition,
             )?;
         }
 
@@ -94,10 +100,15 @@ pub(crate) fn transfer_statement(
         } => {
             let location = context.diagnostics.statement_error_span(statement);
             let semantics = resolve_call_semantics(context, target, args.len(), location)?;
-            let call_args = args
+            let call_args = context
+                .expressions
+                .values(*args)
                 .iter()
                 .zip(semantics.arg_effects.iter().copied())
-                .map(|(argument, effect)| CallArgumentTransfer { argument, effect })
+                .map(|(argument, effect)| CallArgumentTransfer {
+                    argument: *argument,
+                    effect,
+                })
                 .collect::<Vec<_>>();
             transfer_call_arguments_and_result(
                 &mut CallTransferContext {
@@ -126,16 +137,16 @@ pub(crate) fn transfer_statement(
             let location = context.diagnostics.statement_error_span(statement);
             let mut call_args = Vec::with_capacity(args.len() + 1);
             call_args.push(CallArgumentTransfer {
-                argument: receiver,
+                argument: *receiver,
                 effect: if op.requires_mutable_receiver() {
                     ArgEffect::MutableBorrow
                 } else {
                     ArgEffect::SharedBorrow
                 },
             });
-            for (arg_index, arg) in args.iter().enumerate() {
+            for (arg_index, arg) in context.expressions.values(*args).iter().enumerate() {
                 call_args.push(CallArgumentTransfer {
-                    argument: arg,
+                    argument: *arg,
                     effect: map_argument_effect(*op, arg_index),
                 });
             }
@@ -172,7 +183,7 @@ pub(crate) fn transfer_statement(
                     value_fact_buffer,
                 },
                 &[CallArgumentTransfer {
-                    argument: source,
+                    argument: *source,
                     effect: ArgEffect::SharedBorrow,
                 }],
                 *result,
@@ -196,7 +207,7 @@ pub(crate) fn transfer_statement(
                     value_fact_buffer,
                 },
                 &[CallArgumentTransfer {
-                    argument: source,
+                    argument: *source,
                     effect: ArgEffect::SharedBorrow,
                 }],
                 Some(*result),
@@ -210,10 +221,10 @@ pub(crate) fn transfer_statement(
             let location = context.diagnostics.statement_error_span(statement);
             let arguments = numeric_op_arguments(operands);
             let call_args = arguments
-                .iter()
+                .into_iter()
                 .map(|argument| CallArgumentTransfer {
-                    argument,
                     effect: ArgEffect::SharedBorrow,
+                    argument,
                 })
                 .collect::<Vec<_>>();
 
@@ -280,7 +291,7 @@ pub(crate) fn transfer_statement(
                 for operand in [current, step, end, ascending] {
                     record_shared_reads_in_expression(
                         &mut read_env,
-                        operand,
+                        *operand,
                         location,
                         &mut RootSet::empty(layout.local_count()),
                     )?;
@@ -327,7 +338,7 @@ pub(crate) fn transfer_statement(
             };
             record_shared_reads_in_expression(
                 &mut read_env,
-                expression,
+                *expression,
                 location,
                 &mut RootSet::empty(layout.local_count()),
             )?;
@@ -352,7 +363,7 @@ pub(crate) fn transfer_statement(
             };
             record_shared_reads_in_expression(
                 &mut read_env,
-                value,
+                *value,
                 location,
                 &mut RootSet::empty(layout.local_count()),
             )?;
@@ -362,15 +373,16 @@ pub(crate) fn transfer_statement(
     // Aggregate literal children receive optional transfer analysis.
     let mut aggregate_context = AggregateTransferContext {
         diagnostics: &context.diagnostics,
+        expressions: context.expressions,
         value_fact_buffer,
     };
 
     match &statement.kind {
-        HirStatementKind::Assign { value, .. } => {
+        HirStatementKind::Write { value, .. } => {
             transfer_aggregate_expression_ownership(
                 layout,
                 state,
-                value,
+                *value,
                 block_id,
                 statement_order,
                 context.diagnostics.statement_error_span(statement),
@@ -381,11 +393,11 @@ pub(crate) fn transfer_statement(
             transfer_aggregate_expression_ownership(
                 layout,
                 state,
-                expression,
+                *expression,
                 block_id,
                 statement_order,
                 context.diagnostics.value_error_span(
-                    expression.id,
+                    *expression,
                     context.diagnostics.statement_error_span(statement),
                 ),
                 &mut aggregate_context,
@@ -395,13 +407,12 @@ pub(crate) fn transfer_statement(
             transfer_aggregate_expression_ownership(
                 layout,
                 state,
-                value,
+                *value,
                 block_id,
                 statement_order,
-                context.diagnostics.value_error_span(
-                    value.id,
-                    context.diagnostics.statement_error_span(statement),
-                ),
+                context
+                    .diagnostics
+                    .value_error_span(*value, context.diagnostics.statement_error_span(statement)),
                 &mut aggregate_context,
             )?;
         }
@@ -409,13 +420,12 @@ pub(crate) fn transfer_statement(
             transfer_aggregate_expression_ownership(
                 layout,
                 state,
-                source,
+                *source,
                 block_id,
                 statement_order,
-                context.diagnostics.value_error_span(
-                    source.id,
-                    context.diagnostics.statement_error_span(statement),
-                ),
+                context
+                    .diagnostics
+                    .value_error_span(*source, context.diagnostics.statement_error_span(statement)),
                 &mut aggregate_context,
             )?;
         }
@@ -424,13 +434,12 @@ pub(crate) fn transfer_statement(
             transfer_aggregate_expression_ownership(
                 layout,
                 state,
-                source,
+                *source,
                 block_id,
                 statement_order,
-                context.diagnostics.value_error_span(
-                    source.id,
-                    context.diagnostics.statement_error_span(statement),
-                ),
+                context
+                    .diagnostics
+                    .value_error_span(*source, context.diagnostics.statement_error_span(statement)),
                 &mut aggregate_context,
             )?;
         }
@@ -446,8 +455,8 @@ pub(crate) fn transfer_statement(
     Ok(())
 }
 
-struct CallArgumentTransfer<'a> {
-    argument: &'a HirExpression,
+struct CallArgumentTransfer {
+    argument: HirValueId,
     effect: ArgEffect,
 }
 
@@ -465,8 +474,8 @@ struct CallTransferContext<'a, 'module, 'state, 'tracker, 'stats, 'facts> {
 
 fn transfer_call_arguments_and_result(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
-    args: &[CallArgumentTransfer<'_>],
-    result: Option<LocalId>,
+    args: &[CallArgumentTransfer],
+    result: Option<HirLocalDestination>,
     return_alias: FunctionReturnAliasSummary,
 ) -> Result<(), BorrowCheckError> {
     if args.iter().any(|arg| {
@@ -485,7 +494,7 @@ fn transfer_call_arguments_and_result(
         let argument_location = input
             .context
             .diagnostics
-            .value_error_span(argument.id, input.location);
+            .value_error_span(argument, input.location);
 
         record_call_argument_reads(
             input,
@@ -500,7 +509,7 @@ fn transfer_call_arguments_and_result(
         let argument_location = input
             .context
             .diagnostics
-            .value_error_span(arg.argument.id, input.location);
+            .value_error_span(arg.argument, input.location);
         let effect = effective_call_argument_effect(
             arg.effect,
             arg_index,
@@ -537,7 +546,7 @@ fn transfer_call_arguments_and_result(
 
 fn record_call_argument_reads(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
-    argument: &HirExpression,
+    argument: HirValueId,
     effect: ArgEffect,
     argument_location: &Option<SourceSpan>,
     arg_roots: &mut RootSet,
@@ -545,7 +554,7 @@ fn record_call_argument_reads(
     if matches!(
         effect,
         ArgEffect::MutableBorrow | ArgEffect::MayConsumeShared | ArgEffect::MayConsumeMutable
-    ) && let Some(place) = transparent_place_from_expression(argument)
+    ) && let Some(place) = transparent_place_from_expression(input.context.expressions, argument)
     {
         let mut read_env = SharedReadEnv {
             context: input.context,
@@ -558,13 +567,13 @@ fn record_call_argument_reads(
             stats: input.stats,
             value_fact_buffer: input.value_fact_buffer,
         };
-        record_shared_reads_in_place_indices(&mut read_env, place, *argument_location, arg_roots)?;
+        record_shared_reads_in_place_indices(&mut read_env, &place, *argument_location, arg_roots)?;
         let place_roots = roots_for_place(
             input.layout,
             input.state,
-            place,
+            &place,
             *argument_location,
-            argument.span,
+            input.context.expressions.expression(argument).span,
             &input.context.diagnostics,
         )?;
         arg_roots.union_with(&place_roots);
@@ -587,24 +596,32 @@ fn record_call_argument_reads(
 
 fn transfer_call_argument_access(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
-    argument: &HirExpression,
+    argument: HirValueId,
     effect: ArgEffect,
     argument_location: Option<SourceSpan>,
 ) -> Result<(), BorrowCheckError> {
+    let argument_span = input.context.expressions.expression(argument).span;
     match effect {
         ArgEffect::SharedBorrow => Ok(()),
         ArgEffect::MutableBorrow => {
             let mutable_roots = mutable_argument_roots(
+                input.context,
                 input.layout,
                 input.state,
                 argument,
                 argument_location,
-                argument.span,
-                &input.context.diagnostics,
+                argument_span,
             )?;
-            check_call_mutable_borrow(input, &mutable_roots, argument_location, argument.span)?;
+            let actor_index_hint = call_argument_actor_index(input, argument);
+            check_call_mutable_borrow(
+                input,
+                &mutable_roots,
+                actor_index_hint,
+                argument_location,
+                argument_span,
+            )?;
             input.value_fact_buffer.record(
-                argument.id,
+                argument,
                 ValueAccessClassification::MutableArgument,
                 &mutable_roots,
             );
@@ -613,23 +630,25 @@ fn transfer_call_argument_access(
         ArgEffect::MayConsumeShared | ArgEffect::MayConsumeMutable => {
             let fallback_effect = fallback_call_argument_effect(effect);
             let mutable_roots = mutable_argument_roots(
+                input.context,
                 input.layout,
                 input.state,
                 argument,
                 argument_location,
-                argument.span,
-                &input.context.diagnostics,
+                argument_span,
             )?;
+            let actor_index_hint = call_argument_actor_index(input, argument);
             check_call_may_consume(
                 input,
                 argument,
                 &mutable_roots,
+                actor_index_hint,
                 argument_location,
-                argument.span,
+                argument_span,
                 fallback_effect,
             )?;
             input.value_fact_buffer.record(
-                argument.id,
+                argument,
                 if matches!(fallback_effect, ArgEffect::SharedBorrow) {
                     ValueAccessClassification::SharedRead
                 } else {
@@ -698,6 +717,7 @@ fn roots_overlap(left: &RootSet, right: &RootSet) -> bool {
 fn check_call_mutable_borrow(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     mutable_roots: &RootSet,
+    actor_index_hint: Option<usize>,
     location: Option<SourceSpan>,
     span: Option<SourceSpan>,
 ) -> Result<(), BorrowCheckError> {
@@ -714,7 +734,7 @@ fn check_call_mutable_borrow(
         location,
         span,
         stats: input.stats,
-        actor_index_hint: None,
+        actor_index_hint,
         current_order: input.current_order,
     };
     check_mutable_access(
@@ -731,8 +751,9 @@ fn check_call_mutable_borrow(
 
 fn check_call_may_consume(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
-    argument: &HirExpression,
+    argument: HirValueId,
     mutable_roots: &RootSet,
+    actor_index_hint: Option<usize>,
     location: Option<SourceSpan>,
     span: Option<SourceSpan>,
     fallback_effect: ArgEffect,
@@ -750,11 +771,18 @@ fn check_call_may_consume(
     match move_decision {
         MoveDecision::Borrow => {
             input.value_fact_buffer.record_optional_transfer(
-                argument.id,
+                argument,
                 OptionalTransferStatus::Borrow,
                 mutable_roots,
             );
-            check_call_borrow_fallback(input, mutable_roots, location, span, fallback_effect)
+            check_call_borrow_fallback(
+                input,
+                mutable_roots,
+                actor_index_hint,
+                location,
+                span,
+                fallback_effect,
+            )
         }
         MoveDecision::Move => {
             let mut check = AccessCheckContext {
@@ -766,7 +794,7 @@ fn check_call_may_consume(
                 location,
                 span,
                 stats: input.stats,
-                actor_index_hint: None,
+                actor_index_hint,
                 current_order: input.current_order,
             };
             let transfer_policy = MutableAccessPolicy {
@@ -777,13 +805,14 @@ fn check_call_may_consume(
             };
             if !probe_mutable_access(&check, mutable_roots, transfer_policy)? {
                 input.value_fact_buffer.record_optional_transfer(
-                    argument.id,
+                    argument,
                     OptionalTransferStatus::Borrow,
                     mutable_roots,
                 );
                 return check_call_borrow_fallback(
                     input,
                     mutable_roots,
+                    actor_index_hint,
                     location,
                     span,
                     fallback_effect,
@@ -791,7 +820,7 @@ fn check_call_may_consume(
             }
 
             input.value_fact_buffer.record_optional_transfer(
-                argument.id,
+                argument,
                 OptionalTransferStatus::Transfer,
                 mutable_roots,
             );
@@ -805,20 +834,31 @@ fn check_call_may_consume(
 fn check_call_borrow_fallback(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     roots: &RootSet,
+    actor_index_hint: Option<usize>,
     location: Option<SourceSpan>,
     span: Option<SourceSpan>,
     fallback_effect: ArgEffect,
 ) -> Result<(), BorrowCheckError> {
     if matches!(fallback_effect, ArgEffect::SharedBorrow) {
-        check_call_shared_borrow(input, roots, location, span)
+        check_call_shared_borrow(input, roots, actor_index_hint, location, span)
     } else {
-        check_call_mutable_borrow(input, roots, location, span)
+        check_call_mutable_borrow(input, roots, actor_index_hint, location, span)
     }
+}
+
+fn call_argument_actor_index(
+    input: &CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    argument: HirValueId,
+) -> Option<usize> {
+    // Allocation roots identify the reached value; the actor is the binding the argument reads.
+    transparent_place_from_expression(input.context.expressions, argument)
+        .and_then(|place| input.layout.index_of(place.root))
 }
 
 fn check_call_shared_borrow(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     roots: &RootSet,
+    actor_index_hint: Option<usize>,
     location: Option<SourceSpan>,
     span: Option<SourceSpan>,
 ) -> Result<(), BorrowCheckError> {
@@ -835,7 +875,7 @@ fn check_call_shared_borrow(
         location,
         span,
         stats: input.stats,
-        actor_index_hint: None,
+        actor_index_hint,
         current_order: input.current_order,
     };
     check_shared_access(&mut check, roots)
@@ -843,13 +883,14 @@ fn check_call_shared_borrow(
 
 fn transfer_call_result_alias(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
-    result: Option<LocalId>,
+    result: Option<HirLocalDestination>,
     return_alias: FunctionReturnAliasSummary,
     arg_roots: &[RootSet],
 ) -> Result<(), BorrowCheckError> {
-    let Some(result_local) = result else {
+    let Some(destination) = result else {
         return Ok(());
     };
+    let result_local = destination.local();
 
     let Some(local_index) = input.layout.index_of(result_local) else {
         return Err(input.context.diagnostics.internal_error(
@@ -893,15 +934,65 @@ fn transfer_call_result_alias(
         }
         _ => LocalState::slot(input.layout.local_count()),
     };
+
+    if matches!(destination, HirLocalDestination::Update(_)) {
+        let previous_state = input.state.local_state(local_index).clone();
+        if previous_state.mode.contains(LocalMode::ALIAS) {
+            // Only value roots are possible write-through targets. A mixed state also
+            // contains the destination's own slot root, which is replaced on its slot path.
+            if !previous_state.value_roots.is_empty() {
+                let mut check = AccessCheckContext {
+                    context: input.context,
+                    layout: input.layout,
+                    state: input.state,
+                    block_id: input.block_id,
+                    tracker: input.tracker,
+                    location: input.location,
+                    span: input.location,
+                    stats: input.stats,
+                    actor_index_hint: Some(local_index),
+                    current_order: input.current_order,
+                };
+                check_mutable_access(
+                    &mut check,
+                    &previous_state.value_roots,
+                    MutableAccessPolicy {
+                        allow_prior_shared: true,
+                        require_root_mutable: true,
+                        strict_move_exclusivity: false,
+                        check_alias_exclusivity: true,
+                    },
+                )?;
+            }
+            if previous_state.is_alias_only() {
+                return Ok(());
+            }
+
+            let mut value_roots = previous_state.value_roots;
+            value_roots.union_with(&new_local_state.value_roots);
+            let mut direct_alias_roots = previous_state.direct_alias_roots;
+            direct_alias_roots.union_with(&new_local_state.direct_alias_roots);
+            input.state.update_local_state(
+                local_index,
+                LocalState {
+                    mode: previous_state.mode,
+                    value_roots,
+                    direct_alias_roots,
+                },
+            );
+            return Ok(());
+        }
+    }
+
     input.state.update_local_state(local_index, new_local_state);
     Ok(())
 }
 
-fn numeric_op_arguments(operands: &HirNumericOperands) -> Vec<&HirExpression> {
+fn numeric_op_arguments(operands: &HirNumericOperands) -> Vec<HirValueId> {
     match operands {
-        HirNumericOperands::Unary { operand } => vec![operand],
+        HirNumericOperands::Unary { operand } => vec![*operand],
         HirNumericOperands::Binary { left, right } => {
-            vec![left, right]
+            vec![*left, *right]
         }
     }
 }

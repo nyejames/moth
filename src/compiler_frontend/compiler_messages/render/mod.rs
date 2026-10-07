@@ -37,7 +37,7 @@ pub(crate) use templates::*;
 
 use crate::compiler_frontend::compiler_messages::{
     BorrowAccessKind, CssTemplateWarning, DeferredFeatureReason, DiagnosticOperator,
-    DiagnosticPlace, GenericApplicationErrorReason, HtmlTemplateWarning,
+    DiagnosticPlace, GenericApplicationErrorReason, HirCapacityResource, HtmlTemplateWarning,
     IncompatibleChoiceComparisonReason, InvalidChoiceVariantReason, InvalidCollectionTypeReason,
     InvalidCompileTimePathReason, InvalidConfigReason, InvalidDependencyClauseReason,
     InvalidExpressionReason, InvalidExternalModuleReason, InvalidFallibleOperandReason,

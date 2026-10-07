@@ -5,7 +5,7 @@ use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapEntry, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use moth_lexical::numeric::profile::{FloatPrecision, IntWidth};
 use std::process::Command;
@@ -194,6 +194,7 @@ fn collection_length_is_infallible_runtime_helper() {
 /// Verifies that emitted `__moth_collection_remove` calls are not implicitly propagated. [collection]
 #[test]
 fn collection_remove_call_is_not_wrapped_with_result_propagate() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
@@ -205,17 +206,20 @@ fn collection_remove_call_is_not_wrapped_with_result_propagate() {
         1,
         HirStatementKind::Call {
             target: CallTarget::External(remove_id),
-            args: vec![
-                expression(
-                    1,
-                    HirExpressionKind::Collection(vec![]),
-                    types.collection_int,
-                    RegionId(0),
-                    ValueKind::RValue,
-                ),
-                int_expression(2, 0, types.int, RegionId(0)),
-            ],
-            result: Some(LocalId(0)),
+            args: append_values(
+                &[
+                    expression(
+                        HirExpressionKind::Collection(append_values(&[], &mut expressions)),
+                        types.collection_int,
+                        RegionId(0),
+                        ValueKind::RValue,
+                        &mut expressions,
+                    ),
+                    int_expression(0, types.int, RegionId(0), &mut expressions),
+                ],
+                &mut expressions,
+            ),
+            result: Some(HirLocalDestination::Define(LocalId(0))),
         },
     );
 
@@ -224,7 +228,11 @@ fn collection_remove_call_is_not_wrapped_with_result_propagate() {
         region: RegionId(0),
         locals: vec![local(0, types.int, RegionId(0))],
         statements: vec![call_statement],
-        terminator: HirTerminator::Return(unit_expression(3, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -235,6 +243,7 @@ fn collection_remove_call_is_not_wrapped_with_result_propagate() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -245,7 +254,6 @@ fn collection_remove_call_is_not_wrapped_with_result_propagate() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -258,7 +266,7 @@ fn collection_remove_call_is_not_wrapped_with_result_propagate() {
 
     assert!(
         output.source.contains(&format!(
-            "__moth_assign_value({removed_name}, __moth_collection_remove("
+            "{removed_name} = __moth_binding(__moth_collection_remove("
         )),
         "external fallible call result carriers must be assigned as fresh values"
     );
@@ -274,6 +282,7 @@ fn collection_remove_call_is_not_wrapped_with_result_propagate() {
 /// Verifies that emitted `__moth_collection_length` calls are plain value calls. [collection]
 #[test]
 fn collection_length_call_is_not_wrapped_with_result_propagate() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
@@ -285,14 +294,17 @@ fn collection_length_call_is_not_wrapped_with_result_propagate() {
         1,
         HirStatementKind::Call {
             target: CallTarget::External(length_id),
-            args: vec![expression(
-                1,
-                HirExpressionKind::Collection(vec![]),
-                types.collection_int,
-                RegionId(0),
-                ValueKind::RValue,
-            )],
-            result: Some(LocalId(0)),
+            args: append_values(
+                &[expression(
+                    HirExpressionKind::Collection(append_values(&[], &mut expressions)),
+                    types.collection_int,
+                    RegionId(0),
+                    ValueKind::RValue,
+                    &mut expressions,
+                )],
+                &mut expressions,
+            ),
+            result: Some(HirLocalDestination::Define(LocalId(0))),
         },
     );
 
@@ -301,7 +313,11 @@ fn collection_length_call_is_not_wrapped_with_result_propagate() {
         region: RegionId(0),
         locals: vec![local(0, types.int, RegionId(0))],
         statements: vec![call_statement],
-        terminator: HirTerminator::Return(unit_expression(2, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -312,6 +328,7 @@ fn collection_length_call_is_not_wrapped_with_result_propagate() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -322,7 +339,6 @@ fn collection_length_call_is_not_wrapped_with_result_propagate() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -356,17 +372,18 @@ fn cast_int_does_not_trim_string_input() {
 /// Verifies that Float -> Int casts use the standard profile's Int range helper. [cast]
 #[test]
 fn cast_float_to_int_uses_standard_profile_range_helper() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
     let source_expr = expression(
-        1,
         HirExpressionKind::Float((i32::MAX as f64) + 1.0),
         type_environment.builtins().float,
         region,
         ValueKind::Const,
+        &mut expressions,
     );
 
     let cast_statement = statement(
@@ -378,7 +395,7 @@ fn cast_float_to_int_uses_standard_profile_range_helper() {
                 target: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Int,
             },
             source: source_expr,
-            result: Some(LocalId(0)),
+            result: Some(HirLocalDestination::Define(LocalId(0))),
         },
     );
 
@@ -387,7 +404,7 @@ fn cast_float_to_int_uses_standard_profile_range_helper() {
         region,
         locals: vec![local(0, types.int, region)],
         statements: vec![cast_statement],
-        terminator: HirTerminator::Return(unit_expression(3, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
 
     let function = HirFunction {
@@ -398,6 +415,7 @@ fn cast_float_to_int_uses_standard_profile_range_helper() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -408,7 +426,6 @@ fn cast_float_to_int_uses_standard_profile_range_helper() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -678,20 +695,24 @@ fn clone_value_deep_copies_map_entries() {
 // ---------------------------------------------------------------------------
 
 fn lower_error_runtime_module(profile: NumericProfile) -> String {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
     let map_expression = expression(
-        1,
-        HirExpressionKind::MapLiteral(vec![HirMapEntry {
-            key: string_expression(2, "seed", types.string, region),
-            value: int_expression(3, 1, types.int, region),
-        }]),
+        HirExpressionKind::MapLiteral(append_map_entries(
+            &[HirMapEntry {
+                key: string_expression("seed", types.string, region, &mut expressions),
+                value: int_expression(1, types.int, region, &mut expressions),
+            }],
+            &mut expressions,
+        )),
         types.map_string_int,
         region,
         ValueKind::RValue,
+        &mut expressions,
     );
 
     let block = HirBlock {
@@ -704,12 +725,12 @@ fn lower_error_runtime_module(profile: NumericProfile) -> String {
                 4,
                 HirStatementKind::Call {
                     target: CallTarget::External(ExternalFunctionId::IoInputNew),
-                    args: vec![],
+                    args: append_values(&[], &mut expressions),
                     result: None,
                 },
             ),
         ],
-        terminator: HirTerminator::Return(unit_expression(5, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
     let function = HirFunction {
         id: FunctionId(0),
@@ -718,6 +739,7 @@ fn lower_error_runtime_module(profile: NumericProfile) -> String {
         return_type: types.unit,
     };
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -728,7 +750,6 @@ fn lower_error_runtime_module(profile: NumericProfile) -> String {
 
     lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         JsLoweringConfig::direct_js(false, profile),

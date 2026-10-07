@@ -11,15 +11,15 @@
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
-use crate::compiler_frontend::hir::expressions::{
-    HirExpression, HirExpressionKind, HirMapOp, ValueKind,
-};
+use crate::compiler_frontend::hir::expression_store::HirProjection;
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
-use crate::compiler_frontend::hir::ids::{BlockId as HirBlockId, FunctionId, LocalId};
+use crate::compiler_frontend::hir::ids::{BlockId as HirBlockId, FunctionId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
 use crate::compiler_frontend::hir::places::HirPlace;
+use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirWriteTarget};
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::utils::{collect_reachable_blocks, terminator_targets};
@@ -30,8 +30,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::bindings::Binding;
 use super::control_flow::{CfgBlock, CfgEdge, ProgramPoint};
 use super::events::{
-    AccessKind, AggregateField, Call, CallArgument, CallEffect, CallResult, Event, EventKind,
-    EventSource, TerminatorEventKind, Use, UseKind,
+    AccessKind, AggregateField, BindingDestination, Call, CallArgument, CallEffect, CallResult,
+    Event, EventKind, EventSource, JumpArgument, TerminatorEventKind, Use, UseKind,
 };
 use super::ids::{BindingId, BlockId, CallId, EventId, PlaceId, PointId, ValueOriginId};
 use super::origins::{CallResultProvenance, CallResultUnknownReason, OriginKind, ValueOrigin};
@@ -70,7 +70,7 @@ struct CallEffectSpec<'a> {
     argument_sources: Vec<EventSource>,
     accesses: Vec<AccessKind>,
     provenance: CallResultProvenance,
-    result: Option<LocalId>,
+    result: Option<HirLocalDestination>,
     source: &'a EventSource,
 }
 
@@ -98,6 +98,24 @@ struct FunctionProblemBuilder<'a> {
     exits: Vec<BlockId>,
     current_problem_block: Option<BlockId>,
     next_problem_block_id: u32,
+}
+
+#[derive(Clone, Copy)]
+enum ExpressionPlan {
+    Load(HirPlace),
+    Copy(HirPlace),
+    Literal,
+    TupleGet {
+        tuple: HirValueId,
+        index: usize,
+    },
+    VariantPayloadGet {
+        source: HirValueId,
+        field_index: usize,
+    },
+    FallibleUnwrap(HirValueId),
+    Aggregate,
+    Other,
 }
 
 impl<'a> FunctionProblemBuilder<'a> {
@@ -344,7 +362,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 event_ids,
                 source,
                 EventKind::Fresh {
-                    destination: place,
+                    destination: BindingDestination::Define(place),
                     origin,
                 },
             );
@@ -362,27 +380,40 @@ impl<'a> FunctionProblemBuilder<'a> {
             span: statement.span,
         };
         match &statement.kind {
-            HirStatementKind::Assign { target, value } => {
-                let target = self.lower_place(target, &source, event_ids)?;
-                self.lower_assignment(target, value, &source, event_ids)?;
+            HirStatementKind::Write { target, value } => {
+                let destination = match target {
+                    HirWriteTarget::DefineLocal(local) => {
+                        BindingDestination::Define(self.local_place(*local, &source)?)
+                    }
+                    HirWriteTarget::AssignPlace(place) => {
+                        BindingDestination::Update(self.lower_place(place, &source, event_ids)?)
+                    }
+                };
+                self.lower_assignment(destination, *value, &source, event_ids)?;
             }
             HirStatementKind::Call {
                 target,
                 args,
                 result,
-            } => self.lower_call(target, args, *result, &source, event_ids)?,
+            } => {
+                let args = self.module.expressions.values(*args).to_vec();
+                self.lower_call(target, &args, *result, &source, event_ids)?;
+            }
             HirStatementKind::Expr(expression)
             | HirStatementKind::PushRuntimeFragment {
                 value: expression, ..
             } => {
-                self.lower_expression(expression, &source, event_ids)?;
+                self.lower_expression(*expression, &source, event_ids)?;
             }
             HirStatementKind::MapOp {
                 op,
                 receiver,
                 args,
                 result,
-            } => self.lower_map_call(*op, receiver, args, *result, &source, event_ids)?,
+            } => {
+                let args = self.module.expressions.values(*args).to_vec();
+                self.lower_map_call(*op, *receiver, &args, *result, &source, event_ids)?;
+            }
             HirStatementKind::Drop(_) => {}
             HirStatementKind::CastOp {
                 source: value,
@@ -390,9 +421,12 @@ impl<'a> FunctionProblemBuilder<'a> {
                 ..
             } => {
                 let target = result
-                    .map(|local| self.local_place(local, &source))
+                    .map(|destination| {
+                        self.local_place(destination.local(), &source)
+                            .map(|place| binding_destination(destination, place))
+                    })
                     .transpose()?;
-                self.lower_fresh_value(target, value, &source, event_ids)?;
+                self.lower_fresh_value(target, *value, &source, event_ids)?;
             }
             HirStatementKind::FormatFloat {
                 source: value,
@@ -404,18 +438,23 @@ impl<'a> FunctionProblemBuilder<'a> {
                 result,
                 ..
             } => {
-                let target = Some(self.local_place(*result, &source)?);
-                self.lower_fresh_value(target, value, &source, event_ids)?;
+                let target = Some(binding_destination(
+                    *result,
+                    self.local_place(result.local(), &source)?,
+                ));
+                self.lower_fresh_value(target, *value, &source, event_ids)?;
             }
             HirStatementKind::NumericOp {
                 operands, result, ..
             } => {
                 self.lower_numeric_operands(operands, &source, event_ids)?;
-                let target = self.local_place(*result, &source)?;
+                let target =
+                    binding_destination(*result, self.local_place(result.local(), &source)?);
                 self.emit_fresh_write(target, &source, event_ids)?;
             }
             HirStatementKind::RangeStepFailure { result, .. } => {
-                let target = self.local_place(*result, &source)?;
+                let target =
+                    binding_destination(*result, self.local_place(result.local(), &source)?);
                 self.emit_fresh_write(target, &source, event_ids)?;
             }
             HirStatementKind::FloatRangeCandidate {
@@ -427,14 +466,20 @@ impl<'a> FunctionProblemBuilder<'a> {
                 in_range_result,
                 ..
             } => {
-                self.lower_expression(current, &source, event_ids)?;
-                self.lower_expression(step, &source, event_ids)?;
-                self.lower_expression(end, &source, event_ids)?;
-                self.lower_expression(ascending, &source, event_ids)?;
+                self.lower_expression(*current, &source, event_ids)?;
+                self.lower_expression(*step, &source, event_ids)?;
+                self.lower_expression(*end, &source, event_ids)?;
+                self.lower_expression(*ascending, &source, event_ids)?;
 
-                let candidate_target = self.local_place(*candidate_result, &source)?;
+                let candidate_target = binding_destination(
+                    *candidate_result,
+                    self.local_place(candidate_result.local(), &source)?,
+                );
                 self.emit_fresh_write(candidate_target, &source, event_ids)?;
-                let in_range_target = self.local_place(*in_range_result, &source)?;
+                let in_range_target = binding_destination(
+                    *in_range_result,
+                    self.local_place(in_range_result.local(), &source)?,
+                );
                 self.emit_fresh_write(in_range_target, &source, event_ids)?;
             }
         }
@@ -443,32 +488,62 @@ impl<'a> FunctionProblemBuilder<'a> {
 
     fn lower_load_assignment(
         &mut self,
-        target: PlaceId,
+        target: BindingDestination,
         place: &HirPlace,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
         let source_place = self.lower_place(place, source, event_ids)?;
         self.emit_read(source_place, source, event_ids)?;
-        self.emit_alias_write(target, source_place, source, event_ids)
+        let is_exact_root_self_update = matches!(
+            target,
+            BindingDestination::Update(destination) if destination == source_place
+        ) && self
+            .places
+            .get(source_place.index())
+            .is_some_and(|place| place.projections.is_empty());
+
+        if is_exact_root_self_update {
+            // Re-reading the same root preserves its current binding generation and capabilities.
+            self.emit_access_with_definition(source_place, UseKind::Write, source, event_ids, false)
+        } else {
+            self.emit_alias_write(target, source_place, source, event_ids)
+        }
     }
 
     fn lower_assignment(
         &mut self,
-        target: PlaceId,
-        value: &HirExpression,
+        target: BindingDestination,
+        expression_id: HirValueId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
-        match &value.kind {
-            HirExpressionKind::Load(place) => {
-                self.lower_load_assignment(target, place, source, event_ids)?;
+        match self.expression_plan(expression_id) {
+            ExpressionPlan::Load(place)
+                if self.module.expressions.expression(expression_id).value_kind
+                    == ValueKind::Place =>
+            {
+                self.lower_load_assignment(target, &place, source, event_ids)?;
             }
-            HirExpressionKind::Copy(place) => {
-                let source_place = self.lower_place(place, source, event_ids)?;
+            ExpressionPlan::Load(place)
+                if self.module.expressions.expression(expression_id).value_kind
+                    == ValueKind::RValue =>
+            {
+                let source_place = self.lower_place(&place, source, event_ids)?;
+                self.emit_read(source_place, source, event_ids)?;
+                self.emit_rebind_write(
+                    target,
+                    super::events::RebindValue::AliasFromPlace(source_place),
+                    source,
+                    event_ids,
+                )?;
+            }
+            ExpressionPlan::Load(_) => self.emit_fresh_write(target, source, event_ids)?,
+            ExpressionPlan::Copy(place) => {
+                let source_place = self.lower_place(&place, source, event_ids)?;
                 self.emit_read(source_place, source, event_ids)?;
                 let origin = self.new_copy_origin();
-                self.emit_write(target, source, event_ids)?;
+                self.emit_binding_write(target, source, event_ids)?;
                 self.emit_event(
                     event_ids,
                     *source,
@@ -479,32 +554,30 @@ impl<'a> FunctionProblemBuilder<'a> {
                     },
                 );
             }
-            HirExpressionKind::TupleGet { tuple, index } => {
+            ExpressionPlan::TupleGet { tuple, index } => {
                 let value_ref = self.lower_expression(tuple, source, event_ids)?;
                 self.emit_projection_write(
                     target,
                     value_ref,
-                    ProjectionElem::FixedIndex(*index as u32),
+                    ProjectionElem::FixedIndex(index as u32),
                     source,
                     event_ids,
                 )?;
             }
-            HirExpressionKind::VariantPayloadGet {
+            ExpressionPlan::VariantPayloadGet {
                 source: value,
                 field_index,
-                ..
             } => {
                 let value_ref = self.lower_expression(value, source, event_ids)?;
                 self.emit_projection_write(
                     target,
                     value_ref,
-                    ProjectionElem::FixedIndex(*field_index as u32),
+                    ProjectionElem::FixedIndex(field_index as u32),
                     source,
                     event_ids,
                 )?;
             }
-            HirExpressionKind::FallibleUnwrapSuccess { result }
-            | HirExpressionKind::FallibleUnwrapError { result } => {
+            ExpressionPlan::FallibleUnwrap(result) => {
                 let value_ref = self.lower_expression(result, source, event_ids)?;
                 self.emit_projection_write(
                     target,
@@ -514,43 +587,43 @@ impl<'a> FunctionProblemBuilder<'a> {
                     event_ids,
                 )?;
             }
-            HirExpressionKind::StructConstruct { .. }
-            | HirExpressionKind::Collection(_)
-            | HirExpressionKind::Range { .. }
-            | HirExpressionKind::TupleConstruct { .. }
-            | HirExpressionKind::VariantConstruct { .. }
-            | HirExpressionKind::MapLiteral(_) => {
-                self.lower_aggregate_into(target, value, source, event_ids)?;
+            ExpressionPlan::Aggregate => {
+                self.lower_aggregate_into(target, expression_id, source, event_ids)?;
             }
-            _ => self.lower_fresh_value(Some(target), value, source, event_ids)?,
+            ExpressionPlan::Literal | ExpressionPlan::Other => {
+                self.lower_fresh_value(Some(target), expression_id, source, event_ids)?;
+            }
         }
         Ok(())
     }
 
     fn lower_fresh_value(
         &mut self,
-        target: Option<PlaceId>,
-        expression: &HirExpression,
+        target: Option<BindingDestination>,
+        expression_id: HirValueId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
         let Some(target) = target else {
-            let _ = self.lower_expression(expression, source, event_ids)?;
+            let _ = self.lower_expression(expression_id, source, event_ids)?;
             return Ok(());
         };
-        if is_aggregate_expression(expression) {
-            return self.lower_aggregate_into(target, expression, source, event_ids);
+        if matches!(
+            self.expression_plan(expression_id),
+            ExpressionPlan::Aggregate
+        ) {
+            return self.lower_aggregate_into(target, expression_id, source, event_ids);
         }
-        match &expression.kind {
-            HirExpressionKind::Load(_) | HirExpressionKind::Copy(_) => {
-                let _ = self.lower_expression(expression, source, event_ids)?;
+        match self.expression_plan(expression_id) {
+            ExpressionPlan::Load(_) | ExpressionPlan::Copy(_) => {
+                let _ = self.lower_expression(expression_id, source, event_ids)?;
             }
             _ => {
-                let _ = self.lower_expression_children(expression, source, event_ids)?;
+                let _ = self.lower_expression_children(expression_id, source, event_ids)?;
             }
         }
         let origin = self.new_fresh_origin();
-        self.emit_write(target, source, event_ids)?;
+        self.emit_binding_write(target, source, event_ids)?;
         self.emit_event(
             event_ids,
             *source,
@@ -564,17 +637,17 @@ impl<'a> FunctionProblemBuilder<'a> {
 
     fn lower_aggregate_into(
         &mut self,
-        target: PlaceId,
-        expression: &HirExpression,
+        target: BindingDestination,
+        expression_id: HirValueId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
-        let fields = self.lower_aggregate_children(expression, source, event_ids)?;
+        let fields = self.lower_aggregate_children(expression_id, source, event_ids)?;
         for field in &fields {
-            self.project_place(target, field.projection)?;
+            self.project_place(target.place(), field.projection)?;
         }
         let origin = self.new_fresh_origin();
-        self.emit_write(target, source, event_ids)?;
+        self.emit_binding_write(target, source, event_ids)?;
         self.emit_event(
             event_ids,
             *source,
@@ -589,131 +662,60 @@ impl<'a> FunctionProblemBuilder<'a> {
 
     fn lower_aggregate_children(
         &mut self,
-        expression: &HirExpression,
+        expression_id: HirValueId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<Vec<AggregateField>, CompilerError> {
         let mut fields = Vec::new();
-        match &expression.kind {
-            HirExpressionKind::StructConstruct { fields: values, .. } => {
-                for (field, value) in values {
-                    let value_ref = self.lower_expression(value, source, event_ids)?;
-                    if let Some(source) = value_ref.place {
-                        fields.push(AggregateField {
-                            projection: ProjectionElem::Field(field.0),
-                            source,
-                        });
-                    }
-                }
+        for (projection, child_id) in self.aggregate_expression_children(expression_id) {
+            let value_ref = self.lower_expression(child_id, source, event_ids)?;
+            if let Some(source) = value_ref.place {
+                fields.push(AggregateField { projection, source });
             }
-            HirExpressionKind::Collection(values)
-            | HirExpressionKind::TupleConstruct { elements: values } => {
-                for (index, value) in values.iter().enumerate() {
-                    let value_ref = self.lower_expression(value, source, event_ids)?;
-                    if let Some(source) = value_ref.place {
-                        fields.push(AggregateField {
-                            projection: ProjectionElem::FixedIndex(index as u32),
-                            source,
-                        });
-                    }
-                }
-            }
-            HirExpressionKind::Range { start, end } => {
-                for (index, value) in [start.as_ref(), end.as_ref()].into_iter().enumerate() {
-                    let value_ref = self.lower_expression(value, source, event_ids)?;
-                    if let Some(source) = value_ref.place {
-                        fields.push(AggregateField {
-                            projection: ProjectionElem::FixedIndex(index as u32),
-                            source,
-                        });
-                    }
-                }
-            }
-            HirExpressionKind::VariantConstruct { fields: values, .. } => {
-                for (index, value) in values.iter().enumerate() {
-                    let value_ref = self.lower_expression(&value.value, source, event_ids)?;
-                    if let Some(source) = value_ref.place {
-                        fields.push(AggregateField {
-                            projection: ProjectionElem::FixedIndex(index as u32),
-                            source,
-                        });
-                    }
-                }
-            }
-            HirExpressionKind::MapLiteral(entries) => {
-                for entry in entries {
-                    let key = self.lower_expression(&entry.key, source, event_ids)?;
-                    if let Some(source) = key.place {
-                        fields.push(AggregateField {
-                            projection: ProjectionElem::MapEntry,
-                            source,
-                        });
-                    }
-                    let value = self.lower_expression(&entry.value, source, event_ids)?;
-                    if let Some(source) = value.place {
-                        fields.push(AggregateField {
-                            projection: ProjectionElem::MapEntry,
-                            source,
-                        });
-                    }
-                }
-            }
-            _ => {}
         }
         Ok(fields)
     }
 
     fn lower_expression_children(
         &mut self,
-        expression: &HirExpression,
+        expression_id: HirValueId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<Vec<ValueRef>, CompilerError> {
-        let mut values = Vec::new();
-        match &expression.kind {
-            HirExpressionKind::BinOp { left, right, .. } => {
-                values.push(self.lower_expression(left, source, event_ids)?);
-                values.push(self.lower_expression(right, source, event_ids)?);
+        let child_ids = self.expression_children(expression_id);
+        let mut values = Vec::with_capacity(child_ids.len());
+        for child_id in child_ids {
+            values.push(self.lower_expression(child_id, source, event_ids)?);
+        }
+        Ok(values)
+    }
+
+    fn expression_plan(&self, expression_id: HirValueId) -> ExpressionPlan {
+        match &self.module.expressions.expression(expression_id).kind {
+            HirExpressionKind::Load(place) => ExpressionPlan::Load(*place),
+            HirExpressionKind::Copy(place) => ExpressionPlan::Copy(*place),
+            HirExpressionKind::TupleGet { tuple, index } => ExpressionPlan::TupleGet {
+                tuple: *tuple,
+                index: *index,
+            },
+            HirExpressionKind::VariantPayloadGet {
+                source,
+                field_index,
+                ..
+            } => ExpressionPlan::VariantPayloadGet {
+                source: *source,
+                field_index: *field_index,
+            },
+            HirExpressionKind::FallibleUnwrapSuccess { result }
+            | HirExpressionKind::FallibleUnwrapError { result } => {
+                ExpressionPlan::FallibleUnwrap(*result)
             }
-            HirExpressionKind::UnaryOp { operand, .. }
-            | HirExpressionKind::Cast {
-                source: operand, ..
-            } => {
-                values.push(self.lower_expression(operand, source, event_ids)?);
-            }
-            HirExpressionKind::StructConstruct { fields, .. } => {
-                for (_, value) in fields {
-                    values.push(self.lower_expression(value, source, event_ids)?);
-                }
-            }
-            HirExpressionKind::Collection(elements)
-            | HirExpressionKind::TupleConstruct { elements } => {
-                for element in elements {
-                    values.push(self.lower_expression(element, source, event_ids)?);
-                }
-            }
-            HirExpressionKind::Range { start, end } => {
-                values.push(self.lower_expression(start, source, event_ids)?);
-                values.push(self.lower_expression(end, source, event_ids)?);
-            }
-            HirExpressionKind::TupleGet { tuple, .. }
-            | HirExpressionKind::FallibleUnwrapSuccess { result: tuple }
-            | HirExpressionKind::FallibleUnwrapError { result: tuple }
-            | HirExpressionKind::VariantPayloadGet { source: tuple, .. } => {
-                values.push(self.lower_expression(tuple, source, event_ids)?);
-            }
-            HirExpressionKind::VariantConstruct { fields, .. } => {
-                for field in fields {
-                    values.push(self.lower_expression(&field.value, source, event_ids)?);
-                }
-            }
-            HirExpressionKind::MapLiteral(entries) => {
-                for entry in entries {
-                    values.push(self.lower_expression(&entry.key, source, event_ids)?);
-                    values.push(self.lower_expression(&entry.value, source, event_ids)?);
-                }
-            }
-            HirExpressionKind::Load(_) | HirExpressionKind::Copy(_) => {}
+            HirExpressionKind::StructConstruct { .. }
+            | HirExpressionKind::Collection(_)
+            | HirExpressionKind::Range { .. }
+            | HirExpressionKind::TupleConstruct { .. }
+            | HirExpressionKind::VariantConstruct { .. }
+            | HirExpressionKind::MapLiteral(_) => ExpressionPlan::Aggregate,
             HirExpressionKind::Number(_)
             | HirExpressionKind::Uint(_)
             | HirExpressionKind::Int(_)
@@ -722,28 +724,161 @@ impl<'a> FunctionProblemBuilder<'a> {
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
             | HirExpressionKind::StringLiteral(_)
-            | HirExpressionKind::StructuralString { .. } => {}
+            | HirExpressionKind::StructuralString { .. } => ExpressionPlan::Literal,
+            _ => ExpressionPlan::Other,
         }
-        Ok(values)
+    }
+
+    fn expression_children(&self, expression_id: HirValueId) -> Vec<HirValueId> {
+        match &self.module.expressions.expression(expression_id).kind {
+            HirExpressionKind::BinOp { left, right, .. } => vec![*left, *right],
+            HirExpressionKind::UnaryOp { operand, .. }
+            | HirExpressionKind::Cast {
+                source: operand, ..
+            } => vec![*operand],
+            HirExpressionKind::StructConstruct { fields, .. } => self
+                .module
+                .expressions
+                .struct_fields(*fields)
+                .iter()
+                .map(|(_, value)| *value)
+                .collect(),
+            HirExpressionKind::Collection(elements)
+            | HirExpressionKind::TupleConstruct { elements } => {
+                self.module.expressions.values(*elements).to_vec()
+            }
+            HirExpressionKind::Range { start, end } => vec![*start, *end],
+            HirExpressionKind::TupleGet { tuple, .. }
+            | HirExpressionKind::FallibleUnwrapSuccess { result: tuple }
+            | HirExpressionKind::FallibleUnwrapError { result: tuple }
+            | HirExpressionKind::VariantPayloadGet { source: tuple, .. } => vec![*tuple],
+            HirExpressionKind::VariantConstruct { fields, .. } => self
+                .module
+                .expressions
+                .variant_fields(*fields)
+                .iter()
+                .map(|field| field.value)
+                .collect(),
+            HirExpressionKind::MapLiteral(entries) => self
+                .module
+                .expressions
+                .map_entries(*entries)
+                .iter()
+                .flat_map(|entry| [entry.key, entry.value])
+                .collect(),
+            HirExpressionKind::Load(_)
+            | HirExpressionKind::Copy(_)
+            | HirExpressionKind::Number(_)
+            | HirExpressionKind::Uint(_)
+            | HirExpressionKind::Int(_)
+            | HirExpressionKind::Float(_)
+            | HirExpressionKind::FixedScalar(_)
+            | HirExpressionKind::Bool(_)
+            | HirExpressionKind::Char(_)
+            | HirExpressionKind::StringLiteral(_)
+            | HirExpressionKind::StructuralString { .. } => Vec::new(),
+        }
+    }
+
+    fn aggregate_expression_children(
+        &self,
+        expression_id: HirValueId,
+    ) -> Vec<(ProjectionElem, HirValueId)> {
+        match &self.module.expressions.expression(expression_id).kind {
+            HirExpressionKind::StructConstruct { fields, .. } => self
+                .module
+                .expressions
+                .struct_fields(*fields)
+                .iter()
+                .map(|(field, value)| (ProjectionElem::Field(field.0), *value))
+                .collect(),
+            HirExpressionKind::Collection(elements)
+            | HirExpressionKind::TupleConstruct { elements } => self
+                .module
+                .expressions
+                .values(*elements)
+                .iter()
+                .enumerate()
+                .map(|(index, value)| (ProjectionElem::FixedIndex(index as u32), *value))
+                .collect(),
+            HirExpressionKind::Range { start, end } => vec![
+                (ProjectionElem::FixedIndex(0), *start),
+                (ProjectionElem::FixedIndex(1), *end),
+            ],
+            HirExpressionKind::VariantConstruct { fields, .. } => self
+                .module
+                .expressions
+                .variant_fields(*fields)
+                .iter()
+                .enumerate()
+                .map(|(index, field)| (ProjectionElem::FixedIndex(index as u32), field.value))
+                .collect(),
+            HirExpressionKind::MapLiteral(entries) => self
+                .module
+                .expressions
+                .map_entries(*entries)
+                .iter()
+                .flat_map(|entry| {
+                    [
+                        (ProjectionElem::MapEntry, entry.key),
+                        (ProjectionElem::MapEntry, entry.value),
+                    ]
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
     }
 
     fn lower_expression(
         &mut self,
-        expression: &HirExpression,
+        expression_id: HirValueId,
         fallback_source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<ValueRef, CompilerError> {
-        let source = self.value_source(expression, fallback_source);
-        match &expression.kind {
-            HirExpressionKind::Load(place) => {
-                let place = self.lower_place(place, &source, event_ids)?;
-                self.emit_read(place, &source, event_ids)?;
-                Ok(ValueRef { place: Some(place) })
+        let source = self.value_source(expression_id, fallback_source);
+        match self.expression_plan(expression_id) {
+            ExpressionPlan::Load(place) => {
+                let place = self.lower_place(&place, &source, event_ids)?;
+                let value_kind = self.module.expressions.expression(expression_id).value_kind;
+                if value_kind != ValueKind::Const {
+                    self.emit_read(place, &source, event_ids)?;
+                }
+                match value_kind {
+                    ValueKind::Place => Ok(ValueRef { place: Some(place) }),
+                    ValueKind::RValue => {
+                        let destination = self.synthetic_place(expression_id.0)?;
+                        self.emit_rebind_write(
+                            BindingDestination::Define(destination),
+                            super::events::RebindValue::AliasFromPlace(place),
+                            &source,
+                            event_ids,
+                        )?;
+                        Ok(ValueRef {
+                            place: Some(destination),
+                        })
+                    }
+                    ValueKind::Const => {
+                        let destination = self.synthetic_place(expression_id.0)?;
+                        let origin = self.new_fresh_origin();
+                        self.emit_write(destination, &source, event_ids)?;
+                        self.emit_event(
+                            event_ids,
+                            source,
+                            EventKind::Fresh {
+                                destination: BindingDestination::Define(destination),
+                                origin,
+                            },
+                        );
+                        Ok(ValueRef {
+                            place: Some(destination),
+                        })
+                    }
+                }
             }
-            HirExpressionKind::Copy(place) => {
-                let source_place = self.lower_place(place, &source, event_ids)?;
+            ExpressionPlan::Copy(place) => {
+                let source_place = self.lower_place(&place, &source, event_ids)?;
                 self.emit_read(source_place, &source, event_ids)?;
-                let destination = self.synthetic_place(expression.id.0)?;
+                let destination = self.synthetic_place(expression_id.0)?;
                 let origin = self.new_copy_origin();
                 self.emit_write(destination, &source, event_ids)?;
                 self.emit_event(
@@ -751,7 +886,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                     source,
                     EventKind::Copy {
                         source: source_place,
-                        destination,
+                        destination: BindingDestination::Define(destination),
                         origin,
                     },
                 );
@@ -759,26 +894,19 @@ impl<'a> FunctionProblemBuilder<'a> {
                     place: Some(destination),
                 })
             }
-            HirExpressionKind::Number(_)
-            | HirExpressionKind::Uint(_)
-            | HirExpressionKind::Int(_)
-            | HirExpressionKind::Float(_)
-            | HirExpressionKind::FixedScalar(_)
-            | HirExpressionKind::Bool(_)
-            | HirExpressionKind::Char(_)
-            | HirExpressionKind::StringLiteral(_)
-            | HirExpressionKind::StructuralString { .. } => {
-                if expression.value_kind == ValueKind::Const {
+            ExpressionPlan::Literal => {
+                if self.module.expressions.expression(expression_id).value_kind == ValueKind::Const
+                {
                     return Ok(ValueRef { place: None });
                 }
-                let destination = self.synthetic_place(expression.id.0)?;
+                let destination = self.synthetic_place(expression_id.0)?;
                 let origin = self.new_fresh_origin();
                 self.emit_write(destination, &source, event_ids)?;
                 self.emit_event(
                     event_ids,
                     source,
                     EventKind::Fresh {
-                        destination,
+                        destination: BindingDestination::Define(destination),
                         origin,
                     },
                 );
@@ -786,60 +914,61 @@ impl<'a> FunctionProblemBuilder<'a> {
                     place: Some(destination),
                 })
             }
-            HirExpressionKind::TupleGet { tuple, index } => {
+            ExpressionPlan::TupleGet { tuple, index } => {
                 let source_ref = self.lower_expression(tuple, &source, event_ids)?;
                 self.expression_projection(
+                    expression_id,
                     source_ref,
-                    ProjectionElem::FixedIndex(*index as u32),
+                    ProjectionElem::FixedIndex(index as u32),
                     &source,
                     event_ids,
                 )
             }
-            HirExpressionKind::VariantPayloadGet {
+            ExpressionPlan::VariantPayloadGet {
                 source: value,
                 field_index,
-                ..
             } => {
                 let source_ref = self.lower_expression(value, &source, event_ids)?;
                 self.expression_projection(
+                    expression_id,
                     source_ref,
-                    ProjectionElem::FixedIndex(*field_index as u32),
+                    ProjectionElem::FixedIndex(field_index as u32),
                     &source,
                     event_ids,
                 )
             }
-            HirExpressionKind::FallibleUnwrapSuccess { result }
-            | HirExpressionKind::FallibleUnwrapError { result } => {
+            ExpressionPlan::FallibleUnwrap(result) => {
                 let source_ref = self.lower_expression(result, &source, event_ids)?;
                 self.expression_projection(
+                    expression_id,
                     source_ref,
                     ProjectionElem::DynamicIndex,
                     &source,
                     event_ids,
                 )
             }
-            HirExpressionKind::StructConstruct { .. }
-            | HirExpressionKind::Collection(_)
-            | HirExpressionKind::Range { .. }
-            | HirExpressionKind::TupleConstruct { .. }
-            | HirExpressionKind::VariantConstruct { .. }
-            | HirExpressionKind::MapLiteral(_) => {
-                let destination = self.synthetic_place(expression.id.0)?;
-                self.lower_aggregate_into(destination, expression, &source, event_ids)?;
+            ExpressionPlan::Aggregate => {
+                let destination = self.synthetic_place(expression_id.0)?;
+                self.lower_aggregate_into(
+                    BindingDestination::Define(destination),
+                    expression_id,
+                    &source,
+                    event_ids,
+                )?;
                 Ok(ValueRef {
                     place: Some(destination),
                 })
             }
             _ => {
-                let _ = self.lower_expression_children(expression, &source, event_ids)?;
-                let destination = self.synthetic_place(expression.id.0)?;
+                let _ = self.lower_expression_children(expression_id, &source, event_ids)?;
+                let destination = self.synthetic_place(expression_id.0)?;
                 let origin = self.new_fresh_origin();
                 self.emit_write(destination, &source, event_ids)?;
                 self.emit_event(
                     event_ids,
                     source,
                     EventKind::Fresh {
-                        destination,
+                        destination: BindingDestination::Define(destination),
                         origin,
                     },
                 );
@@ -852,6 +981,7 @@ impl<'a> FunctionProblemBuilder<'a> {
 
     fn expression_projection(
         &mut self,
+        expression_id: HirValueId,
         source_ref: ValueRef,
         projection: ProjectionElem,
         source: &EventSource,
@@ -860,15 +990,17 @@ impl<'a> FunctionProblemBuilder<'a> {
         let Some(source_place) = source_ref.place else {
             return Ok(ValueRef { place: None });
         };
-        let destination = self.project_place(source_place, projection)?;
+        let projected_source = self.project_place(source_place, projection)?;
+        let destination = self.synthetic_place(expression_id.0)?;
         let origin = self.new_projection_origin(projection);
-        self.emit_write(destination, source, event_ids)?;
+        self.emit_read(projected_source, source, event_ids)?;
+        self.emit_binding_write(BindingDestination::Define(destination), source, event_ids)?;
         self.emit_event(
             event_ids,
             *source,
             EventKind::Projection {
                 source: source_place,
-                destination,
+                destination: BindingDestination::Define(destination),
                 origin,
             },
         );
@@ -879,7 +1011,7 @@ impl<'a> FunctionProblemBuilder<'a> {
 
     fn emit_projection_write(
         &mut self,
-        target: PlaceId,
+        target: BindingDestination,
         source_ref: ValueRef,
         projection: ProjectionElem,
         source: &EventSource,
@@ -889,7 +1021,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             return self.emit_fresh_write(target, source, event_ids);
         };
         let origin = self.new_projection_origin(projection);
-        self.emit_write(target, source, event_ids)?;
+        self.emit_binding_write(target, source, event_ids)?;
         self.emit_event(
             event_ids,
             *source,
@@ -910,11 +1042,11 @@ impl<'a> FunctionProblemBuilder<'a> {
     ) -> Result<(), CompilerError> {
         match operands {
             crate::compiler_frontend::hir::numeric::HirNumericOperands::Unary { operand } => {
-                self.lower_expression(operand, source, event_ids)?;
+                self.lower_expression(*operand, source, event_ids)?;
             }
             crate::compiler_frontend::hir::numeric::HirNumericOperands::Binary { left, right } => {
-                self.lower_expression(left, source, event_ids)?;
-                self.lower_expression(right, source, event_ids)?;
+                self.lower_expression(*left, source, event_ids)?;
+                self.lower_expression(*right, source, event_ids)?;
             }
         }
         Ok(())
@@ -923,15 +1055,15 @@ impl<'a> FunctionProblemBuilder<'a> {
     fn lower_call(
         &mut self,
         target: &CallTarget,
-        args: &[HirExpression],
-        result: Option<LocalId>,
+        args: &[HirValueId],
+        result: Option<HirLocalDestination>,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
         let arguments = self.lower_call_arguments(args, source, event_ids)?;
         let argument_sources = args
             .iter()
-            .map(|argument| self.value_source(argument, source))
+            .map(|argument| self.value_source(*argument, source))
             .collect();
         let (accesses, provenance) = self.call_effect(target, args.len())?;
         self.emit_call_effect_with_label(
@@ -951,19 +1083,19 @@ impl<'a> FunctionProblemBuilder<'a> {
     fn lower_map_call(
         &mut self,
         op: HirMapOp,
-        receiver: &HirExpression,
-        args: &[HirExpression],
-        result: Option<LocalId>,
+        receiver: HirValueId,
+        args: &[HirValueId],
+        result: Option<HirLocalDestination>,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
-        let mut expressions = Vec::with_capacity(args.len() + 1);
-        expressions.push(receiver.clone());
-        expressions.extend(args.iter().cloned());
-        let arguments = self.lower_call_arguments(&expressions, source, event_ids)?;
-        let argument_sources = expressions
+        let mut expression_ids = Vec::with_capacity(args.len() + 1);
+        expression_ids.push(receiver);
+        expression_ids.extend_from_slice(args);
+        let arguments = self.lower_call_arguments(&expression_ids, source, event_ids)?;
+        let argument_sources = expression_ids
             .iter()
-            .map(|argument| self.value_source(argument, source))
+            .map(|argument| self.value_source(*argument, source))
             .collect();
         let receiver_access = if op.requires_mutable_receiver() {
             AccessKind::Exclusive
@@ -998,20 +1130,25 @@ impl<'a> FunctionProblemBuilder<'a> {
 
     fn lower_call_arguments(
         &mut self,
-        args: &[HirExpression],
+        args: &[HirValueId],
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<Vec<PlaceId>, CompilerError> {
         args.iter()
-            .map(|argument| {
-                let argument_source = self.value_source(argument, source);
-                let value = match &argument.kind {
-                    HirExpressionKind::Load(place) => ValueRef {
-                        place: Some(self.lower_place(place, &argument_source, event_ids)?),
-                    },
-                    _ => self.lower_expression(argument, source, event_ids)?,
+            .map(|argument_id| {
+                let argument_source = self.value_source(*argument_id, source);
+                let value = match self.expression_plan(*argument_id) {
+                    ExpressionPlan::Load(place)
+                        if self.module.expressions.expression(*argument_id).value_kind
+                            == ValueKind::Place =>
+                    {
+                        ValueRef {
+                            place: Some(self.lower_place(&place, &argument_source, event_ids)?),
+                        }
+                    }
+                    _ => self.lower_expression(*argument_id, source, event_ids)?,
                 };
-                self.materialize_value_place(value, argument, &argument_source, event_ids)
+                self.materialize_value_place(value, *argument_id, &argument_source, event_ids)
             })
             .collect()
     }
@@ -1083,14 +1220,20 @@ impl<'a> FunctionProblemBuilder<'a> {
             event_ids.push(event_id);
         }
         let result = result_local
-            .map(|local| self.local_place(local, source))
+            .map(|destination| {
+                self.local_place(destination.local(), source)
+                    .map(|place| (binding_destination(destination, place), place))
+            })
             .transpose()?;
-        let call_result = result.map(|place| {
+        let call_result = result.map(|(destination, _place)| {
             let origin = self.new_origin(OriginKind::CallResult {
                 call: call_id,
                 provenance,
             });
-            CallResult { place, origin }
+            CallResult {
+                destination,
+                origin,
+            }
         });
         let event_id = self.next_event_id()?;
         let point = self.new_point(self.current_problem_block()?, *source);
@@ -1105,14 +1248,14 @@ impl<'a> FunctionProblemBuilder<'a> {
             *source,
         ));
         event_ids.push(event_id);
-        if let Some(result) = result {
+        if let Some((destination, result)) = result {
             let point = self.new_point(self.current_problem_block()?, *source);
             let use_id = self.next_use_id()?;
             self.uses.push(Use {
                 id: use_id,
                 point,
                 place: result,
-                kind: UseKind::Write,
+                kind: UseKind::BindingWrite(destination),
                 definition: true,
             });
             let event_id = self.next_event_id()?;
@@ -1139,48 +1282,35 @@ impl<'a> FunctionProblemBuilder<'a> {
     ) -> Result<TerminatorEventKind, CompilerError> {
         let kind = match terminator {
             HirTerminator::Jump { target, args } => {
-                let successor_local_count = self.hir_block(*target)?.locals.len();
-                if args.len() > successor_local_count {
-                    return Err(compiler_error(format!(
-                        "Boracle problem extraction found jump edge into block {:?} with {} argument(s), but the block declares only {} local(s)",
-                        target,
-                        args.len(),
-                        successor_local_count
-                    )));
-                }
-
-                let destination_locals = self
-                    .hir_block(*target)?
-                    .locals
-                    .iter()
-                    .take(args.len())
-                    .map(|local| local.id)
-                    .collect::<Vec<_>>();
-                for (destination_index, destination) in
-                    destination_locals.iter().copied().enumerate()
-                {
-                    for (argument_index, argument) in args.iter().copied().enumerate() {
-                        if destination_index != argument_index && destination == argument {
-                            return Err(compiler_error(format!(
-                                "Boracle problem extraction cannot model overlapping jump arguments into block {:?}: local {:?} is both destination of pair {} and argument of pair {}",
-                                target, destination, destination_index, argument_index
-                            )));
-                        }
+                let mut destinations = BTreeSet::new();
+                let mut captured_arguments = Vec::with_capacity(args.len());
+                for argument in args {
+                    if !destinations.insert(argument.destination.0) {
+                        return Err(compiler_error(format!(
+                            "Boracle problem extraction found duplicate jump destination {:?} into block {:?}",
+                            argument.destination, target
+                        )));
                     }
+                    let source_place = self.local_place(argument.source, source)?;
+                    let destination_place = self.local_place(argument.destination, source)?;
+                    self.emit_read(source_place, source, event_ids)?;
+                    captured_arguments.push((source_place, destination_place));
                 }
-
-                for (index, argument) in args.iter().enumerate() {
-                    let destination = self.local_place(destination_locals[index], source)?;
-                    let argument_place = HirPlace::Local(*argument);
-                    if destination == self.local_place(*argument, source)? {
-                        // Jump arguments are assigned in parallel by the production checker, so a
-                        // self-copy leaves the snapshotted slot unchanged.
-                        continue;
-                    }
-                    self.lower_load_assignment(destination, &argument_place, source, event_ids)?;
+                let mut jump_arguments = Vec::with_capacity(captured_arguments.len());
+                for (source_place, destination_place) in captured_arguments {
+                    self.emit_binding_write(
+                        BindingDestination::Define(destination_place),
+                        source,
+                        event_ids,
+                    )?;
+                    jump_arguments.push(JumpArgument {
+                        source: source_place,
+                        destination: BindingDestination::Define(destination_place),
+                    });
                 }
                 TerminatorEventKind::Jump {
                     target: self.problem_block(*target)?,
+                    arguments: jump_arguments.into_boxed_slice(),
                 }
             }
             HirTerminator::If {
@@ -1188,7 +1318,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 then_block,
                 else_block,
             } => {
-                self.lower_expression(condition, source, event_ids)?;
+                self.lower_expression(*condition, source, event_ids)?;
                 TerminatorEventKind::Branch {
                     targets: self.sorted_problem_targets([*then_block, *else_block].into_iter())?,
                 }
@@ -1198,14 +1328,14 @@ impl<'a> FunctionProblemBuilder<'a> {
                 success_block,
                 error_block,
             } => {
-                self.lower_expression(result, source, event_ids)?;
+                self.lower_expression(*result, source, event_ids)?;
                 TerminatorEventKind::Branch {
                     targets: self
                         .sorted_problem_targets([*success_block, *error_block].into_iter())?,
                 }
             }
             HirTerminator::Match { scrutinee, arms } => {
-                self.lower_expression(scrutinee, source, event_ids)?;
+                self.lower_expression(*scrutinee, source, event_ids)?;
                 for arm in arms {
                     self.lower_match_arm(arm, source, event_ids)?;
                 }
@@ -1220,20 +1350,20 @@ impl<'a> FunctionProblemBuilder<'a> {
                 target: self.problem_block(*target)?,
             },
             HirTerminator::Return(value) => {
-                self.lower_expression(value, source, event_ids)?;
+                self.lower_expression(*value, source, event_ids)?;
                 TerminatorEventKind::Return
             }
             HirTerminator::ReturnSuccess(value) => {
-                self.lower_expression(value, source, event_ids)?;
+                self.lower_expression(*value, source, event_ids)?;
                 TerminatorEventKind::ReturnSuccess
             }
             HirTerminator::ReturnError(value) => {
-                self.lower_expression(value, source, event_ids)?;
+                self.lower_expression(*value, source, event_ids)?;
                 TerminatorEventKind::ReturnError
             }
             HirTerminator::RuntimeFailure { .. } => TerminatorEventKind::RuntimeFailure,
             HirTerminator::AssertFailure { message, .. } => {
-                self.lower_expression(message, source, event_ids)?;
+                self.lower_expression(*message, source, event_ids)?;
                 TerminatorEventKind::AssertFailure
             }
             HirTerminator::Uninitialized => {
@@ -1257,14 +1387,14 @@ impl<'a> FunctionProblemBuilder<'a> {
             | HirPattern::OptionValue { value }
             | HirPattern::OptionRelational { value, .. }
             | HirPattern::Relational { value, .. } => {
-                self.lower_expression(value, source, event_ids)?;
+                self.lower_expression(*value, source, event_ids)?;
             }
             HirPattern::OptionNone
             | HirPattern::OptionPresent
             | HirPattern::Wildcard
             | HirPattern::ChoiceVariant { .. } => {}
         }
-        if let Some(guard) = &arm.guard {
+        if let Some(guard) = arm.guard {
             self.lower_expression(guard, source, event_ids)?;
         }
         Ok(())
@@ -1351,7 +1481,10 @@ impl<'a> FunctionProblemBuilder<'a> {
             jump_event_id,
             jump_point,
             EventKind::Terminator {
-                kind: TerminatorEventKind::Jump { target },
+                kind: TerminatorEventKind::Jump {
+                    target,
+                    arguments: Box::new([]),
+                },
             },
             source,
         ));
@@ -1392,7 +1525,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             }
         };
         match kind {
-            TerminatorEventKind::Jump { target }
+            TerminatorEventKind::Jump { target, .. }
             | TerminatorEventKind::Break { target }
             | TerminatorEventKind::Continue { target } => remap(target),
             TerminatorEventKind::Branch { targets } => {
@@ -1415,33 +1548,37 @@ impl<'a> FunctionProblemBuilder<'a> {
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<PlaceId, CompilerError> {
-        match place {
-            HirPlace::Local(local) => self.local_place(*local, source),
-            HirPlace::Field { base, field } => {
-                let base = self.lower_place(base, source, event_ids)?;
-                self.project_place(base, ProjectionElem::Field(field.0))
-            }
-            HirPlace::Index { base, index } => {
-                let base = self.lower_place(base, source, event_ids)?;
-                let projection = match index.kind {
-                    HirExpressionKind::Int(value) => {
+        let mut place_id = self.local_place(place.root, source)?;
+        let projections = self
+            .module
+            .expressions
+            .projections(place.projections)
+            .to_vec();
+        for projection in projections {
+            let projection = match projection {
+                HirProjection::Field(field) => ProjectionElem::Field(field.0),
+                HirProjection::Index(index_id) => {
+                    let fixed_index = match &self.module.expressions.expression(index_id).kind {
+                        HirExpressionKind::Int(value) => Some(*value),
+                        _ => None,
+                    };
+                    match fixed_index {
                         // Fixed projections need a 32-bit table id, so only values that
                         // fit `u32` stay fixed; negatives and oversized values use the
                         // dynamic path.
-                        match u32::try_from(value) {
-                            Ok(fixed) => ProjectionElem::FixedIndex(fixed),
-
-                            Err(_) => ProjectionElem::DynamicIndex,
+                        Some(value) => u32::try_from(value)
+                            .map(ProjectionElem::FixedIndex)
+                            .unwrap_or(ProjectionElem::DynamicIndex),
+                        None => {
+                            self.lower_expression(index_id, source, event_ids)?;
+                            ProjectionElem::DynamicIndex
                         }
                     }
-                    _ => {
-                        self.lower_expression(index, source, event_ids)?;
-                        ProjectionElem::DynamicIndex
-                    }
-                };
-                self.project_place(base, projection)
-            }
+                }
+            };
+            place_id = self.project_place(place_id, projection)?;
         }
+        Ok(place_id)
     }
 
     fn local_place(
@@ -1510,21 +1647,21 @@ impl<'a> FunctionProblemBuilder<'a> {
     fn materialize_value_place(
         &mut self,
         value: ValueRef,
-        expression: &HirExpression,
+        expression_id: HirValueId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<PlaceId, CompilerError> {
         if let Some(place) = value.place {
             return Ok(place);
         }
-        let place = self.synthetic_place(expression.id.0)?;
+        let place = self.synthetic_place(expression_id.0)?;
         let origin = self.new_fresh_origin();
         self.emit_write(place, source, event_ids)?;
         self.emit_event(
             event_ids,
             *source,
             EventKind::Fresh {
-                destination: place,
+                destination: BindingDestination::Define(place),
                 origin,
             },
         );
@@ -1533,16 +1670,19 @@ impl<'a> FunctionProblemBuilder<'a> {
 
     fn emit_alias_write(
         &mut self,
-        destination: PlaceId,
+        destination: BindingDestination,
         source_place: PlaceId,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
-        self.emit_write(destination, source, event_ids)?;
+        let destination_place = destination.place();
+        self.emit_binding_write(destination, source, event_ids)?;
         let destination_binding = self
             .places
-            .get(destination.index())
-            .ok_or_else(|| compiler_error(format!("unknown alias destination {destination:?}")))?
+            .get(destination_place.index())
+            .ok_or_else(|| {
+                compiler_error(format!("unknown alias destination {destination_place:?}"))
+            })?
             .root;
         let destination_access = self.alias_access_kind(destination_binding);
         let event = if destination_access == AccessKind::Exclusive {
@@ -1582,17 +1722,29 @@ impl<'a> FunctionProblemBuilder<'a> {
 
     fn emit_fresh_write(
         &mut self,
-        destination: PlaceId,
+        destination: BindingDestination,
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
         let origin = self.new_fresh_origin();
-        self.emit_write(destination, source, event_ids)?;
+        self.emit_binding_write(destination, source, event_ids)?;
         let event = EventKind::Fresh {
             destination,
             origin,
         };
         self.emit_event(event_ids, *source, event);
+        Ok(())
+    }
+
+    fn emit_rebind_write(
+        &mut self,
+        destination: BindingDestination,
+        value: super::events::RebindValue,
+        source: &EventSource,
+        event_ids: &mut Vec<EventId>,
+    ) -> Result<(), CompilerError> {
+        self.emit_binding_write(destination, source, event_ids)?;
+        self.emit_event(event_ids, *source, EventKind::Rebind { destination, value });
         Ok(())
     }
 
@@ -1603,6 +1755,20 @@ impl<'a> FunctionProblemBuilder<'a> {
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
         self.emit_access(place, UseKind::Write, source, event_ids)
+    }
+
+    fn emit_binding_write(
+        &mut self,
+        destination: BindingDestination,
+        source: &EventSource,
+        event_ids: &mut Vec<EventId>,
+    ) -> Result<(), CompilerError> {
+        self.emit_access(
+            destination.place(),
+            UseKind::BindingWrite(destination),
+            source,
+            event_ids,
+        )
     }
 
     fn emit_read(
@@ -1621,6 +1787,22 @@ impl<'a> FunctionProblemBuilder<'a> {
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
+        let definition = kind.is_write()
+            && self
+                .places
+                .get(place.index())
+                .is_some_and(|place| place.projections.is_empty());
+        self.emit_access_with_definition(place, kind, source, event_ids, definition)
+    }
+
+    fn emit_access_with_definition(
+        &mut self,
+        place: PlaceId,
+        kind: UseKind,
+        source: &EventSource,
+        event_ids: &mut Vec<EventId>,
+        definition: bool,
+    ) -> Result<(), CompilerError> {
         let point = self.new_point(self.current_problem_block()?, *source);
         let use_id = self.next_use_id()?;
         self.uses.push(Use {
@@ -1628,11 +1810,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             point,
             place,
             kind,
-            definition: kind == UseKind::Write
-                && self
-                    .places
-                    .get(place.index())
-                    .is_some_and(|place| place.projections.is_empty()),
+            definition,
         });
         let event_id = self.next_event_id()?;
         self.events.push(Event::new(
@@ -1828,13 +2006,14 @@ impl<'a> FunctionProblemBuilder<'a> {
         }
     }
 
-    fn value_source(&self, expression: &HirExpression, fallback: &EventSource) -> EventSource {
+    fn value_source(&self, expression_id: HirValueId, fallback: &EventSource) -> EventSource {
+        let expression = self.module.expressions.expression(expression_id);
         EventSource {
             hir_node: None,
             span: self
                 .module
                 .side_table
-                .value_source_span(expression.id)
+                .value_source_span(expression_id)
                 .or(expression.span)
                 .or(fallback.span),
         }
@@ -1877,6 +2056,13 @@ impl<'a> FunctionProblemBuilder<'a> {
     }
 }
 
+fn binding_destination(destination: HirLocalDestination, place: PlaceId) -> BindingDestination {
+    match destination {
+        HirLocalDestination::Define(_) => BindingDestination::Define(place),
+        HirLocalDestination::Update(_) => BindingDestination::Update(place),
+    }
+}
+
 fn dense_id(index: usize, owner: &str) -> Result<BlockId, CompilerError> {
     Ok(BlockId::new(dense_u32(index, owner)?))
 }
@@ -1884,18 +2070,6 @@ fn dense_id(index: usize, owner: &str) -> Result<BlockId, CompilerError> {
 fn dense_u32(index: usize, owner: &str) -> Result<u32, CompilerError> {
     u32::try_from(index)
         .map_err(|_| compiler_error(format!("{owner} table is larger than u32::MAX rows")))
-}
-
-fn is_aggregate_expression(expression: &HirExpression) -> bool {
-    matches!(
-        expression.kind,
-        HirExpressionKind::StructConstruct { .. }
-            | HirExpressionKind::Collection(_)
-            | HirExpressionKind::Range { .. }
-            | HirExpressionKind::TupleConstruct { .. }
-            | HirExpressionKind::VariantConstruct { .. }
-            | HirExpressionKind::MapLiteral(_)
-    )
 }
 
 fn compiler_error(message: impl Into<String>) -> CompilerError {

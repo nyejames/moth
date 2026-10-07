@@ -17,6 +17,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::const_facts::HirConstFacts;
 use crate::compiler_frontend::hir::constants::HirModuleConst;
+use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::failure_facts::HirFunctionFailureFacts;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::hir_builder::CatchProtectedCall;
@@ -80,6 +81,7 @@ pub struct HirChoiceField {
 
 #[derive(Debug, Clone)]
 pub struct HirModule {
+    pub expressions: HirExpressionStore,
     pub blocks: Vec<HirBlock>,
     pub functions: Vec<HirFunction>,
     pub structs: Vec<HirStruct>,
@@ -151,6 +153,7 @@ pub struct HirModule {
 impl HirModule {
     pub fn new() -> Self {
         Self {
+            expressions: HirExpressionStore::default(),
             blocks: vec![],
             functions: vec![],
             structs: vec![],
@@ -221,9 +224,7 @@ impl HirModule {
     }
 
     pub fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        for block in &mut self.blocks {
-            block.remap_string_ids(remap);
-        }
+        self.expressions.remap_string_ids(remap);
 
         for choice in &mut self.choices {
             for variant in &mut choice.variants {

@@ -29,11 +29,12 @@ use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalFunctionId, ExternalPackageId, ExternalPackageRegistry,
 };
 use crate::compiler_frontend::hir::blocks::HirBlock;
+use crate::compiler_frontend::hir::expression_store::HirValueRange;
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
 };
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId, RegionId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::{
     collect_module_function_link_facts, collect_reachability_from_function_link_facts,
@@ -92,20 +93,25 @@ fn fixture_lane_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAsset
 /// caller-supplied interned path in the caller-owned string table.
 fn minimal_hir_module(start_name_path: PathId) -> HirModule {
     let mut module = HirModule::new();
+    let return_value = module
+        .expressions
+        .append_expression(HirExpression {
+            kind: HirExpressionKind::TupleConstruct {
+                elements: HirValueRange::empty(),
+            },
+            ty: NONE,
+            value_kind: ValueKind::Const,
+            region: RegionId(0),
+            span: None,
+        })
+        .expect("fixture expression fits");
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.blocks = vec![HirBlock {
         id: BlockId(0),
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(HirExpression {
-            id: HirValueId(0),
-            kind: HirExpressionKind::TupleConstruct { elements: vec![] },
-            ty: NONE,
-            value_kind: ValueKind::Const,
-            region: RegionId(0),
-            span: None,
-        }),
+        terminator: HirTerminator::Return(return_value),
     }];
     module.functions = vec![HirFunction {
         id: FunctionId(0),
@@ -141,42 +147,62 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
 
     let option_value_name = local_string_table.intern("value");
     let mut hir_module = minimal_hir_module(start_name_path);
-    hir_module.blocks[0].statements.push(HirStatement {
-        id: HirNodeId(1),
-        kind: HirStatementKind::Expr(HirExpression {
-            id: HirValueId(1),
+    let payload = hir_module
+        .expressions
+        .append_expression(HirExpression {
+            kind: HirExpressionKind::Int(7),
+            ty: NONE,
+            value_kind: ValueKind::Const,
+            region: RegionId(0),
+            span: None,
+        })
+        .expect("fixture expression fits");
+    let fields = hir_module
+        .expressions
+        .append_variant_fields(
+            &[HirVariantField {
+                name: Some(option_value_name),
+                value: payload,
+            }],
+            None,
+        )
+        .expect("fixture fields fit");
+    let variant = hir_module
+        .expressions
+        .append_expression(HirExpression {
             kind: HirExpressionKind::VariantConstruct {
                 carrier: HirVariantCarrier::Option,
                 variant_index: 1,
-                fields: vec![HirVariantField {
-                    name: Some(option_value_name),
-                    value: HirExpression {
-                        id: HirValueId(2),
-                        kind: HirExpressionKind::Int(7),
-                        ty: NONE,
-                        value_kind: ValueKind::Const,
-                        region: RegionId(0),
-                        span: None,
-                    },
-                }],
+                fields,
             },
             ty: NONE,
             value_kind: ValueKind::RValue,
             region: RegionId(0),
             span: None,
-        }),
+        })
+        .expect("fixture expression fits");
+    hir_module.blocks[0].statements.push(HirStatement {
+        id: HirNodeId(1),
+        kind: HirStatementKind::Expr(variant),
         span: None,
     });
-    hir_module.blocks[0].statements.push(HirStatement {
-        id: HirNodeId(2),
-        kind: HirStatementKind::Expr(HirExpression {
-            id: HirValueId(3),
-            kind: HirExpressionKind::MapLiteral(vec![]),
+    let empty_map_entries = hir_module
+        .expressions
+        .append_map_entries(&[], None)
+        .unwrap();
+    let map = hir_module
+        .expressions
+        .append_expression(HirExpression {
+            kind: HirExpressionKind::MapLiteral(empty_map_entries),
             ty: NONE,
             value_kind: ValueKind::RValue,
             region: RegionId(0),
             span: None,
-        }),
+        })
+        .expect("fixture expression fits");
+    hir_module.blocks[0].statements.push(HirStatement {
+        id: HirNodeId(2),
+        kind: HirStatementKind::Expr(map),
         span: None,
     });
 
@@ -206,6 +232,7 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
     };
 
     let entry_point = PathBuf::from("src/@page.moth");
+    hir_module.expressions.freeze();
     let mut module = Module {
         executable: ModuleExecutable {
             hir: hir_module,
@@ -245,13 +272,26 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
         statement.span, None,
         "synthetic executable statements retain no authored source span",
     );
-    let HirStatementKind::Expr(HirExpression {
-        kind: HirExpressionKind::VariantConstruct { fields, .. },
+    let HirStatementKind::Expr(value) = &statement.kind else {
+        panic!("test statement should retain its option construction");
+    };
+    assert_eq!(*value, variant, "scalar remapping preserves expression IDs");
+    let HirExpressionKind::VariantConstruct {
+        fields: remapped_fields,
         ..
-    }) = &statement.kind
+    } = &module.executable.hir.expressions.expression(*value).kind
     else {
         panic!("test statement should retain its option construction");
     };
+    assert_eq!(
+        *remapped_fields, fields,
+        "scalar remapping preserves field ranges"
+    );
+    let fields = module
+        .executable
+        .hir
+        .expressions
+        .variant_fields(*remapped_fields);
     assert_eq!(
         fields[0].name.map(|name| merged_string_table.resolve(name)),
         Some("value"),
@@ -287,7 +327,7 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
         id: HirNodeId(99),
         kind: HirStatementKind::Call {
             target: CallTarget::External(ExternalFunctionId::Synthetic(99_999)),
-            args: vec![],
+            args: HirValueRange::empty(),
             result: None,
         },
         span: None,
@@ -1335,7 +1375,7 @@ fn lane_module_with_generated_and_cross_module_calls(
             id: HirNodeId(7),
             kind: HirStatementKind::Call {
                 target: CallTarget::Generated(identity),
-                args: vec![],
+                args: HirValueRange::empty(),
                 result: None,
             },
             span: None,
@@ -1346,7 +1386,7 @@ fn lane_module_with_generated_and_cross_module_calls(
             id: HirNodeId(8 + index as u32),
             kind: HirStatementKind::Call {
                 target: CallTarget::CrossModule(origin.clone()),
-                args: vec![],
+                args: HirValueRange::empty(),
                 result: None,
             },
             span: None,

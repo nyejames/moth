@@ -71,6 +71,10 @@ pub enum SourceRule {
     CompilerDependencyOnBuild,
     /// Production Boracle oracle code named a static-solver owner.
     OracleStaticSolverIndependence,
+    /// A durable HIR carrier reintroduced a known recursive owning expression or place shape.
+    RecursiveHirOwnership,
+    /// Production backend code named borrow-state snapshots as local-write semantic selectors.
+    BackendBorrowStateSemantics,
     /// A source file could not be read, so no rule could be applied to it.
     UnreadableSource,
 }
@@ -84,6 +88,8 @@ impl SourceRule {
             Self::ExternalStageOrchestration => "external-stage-orchestration",
             Self::CompilerDependencyOnBuild => "compiler-dependency-on-build",
             Self::OracleStaticSolverIndependence => "oracle-static-solver-independence",
+            Self::RecursiveHirOwnership => "recursive-hir-ownership",
+            Self::BackendBorrowStateSemantics => "backend-borrow-state-semantics",
             Self::UnreadableSource => "unreadable-source",
         }
     }
@@ -255,6 +261,10 @@ fn audit_source_fragment(relative: &str, content: &str) -> Vec<SourceFinding> {
                     }
                     BoundaryRule::OracleStaticSolverIndependence => {
                         SourceRule::OracleStaticSolverIndependence
+                    }
+                    BoundaryRule::RecursiveHirOwnership => SourceRule::RecursiveHirOwnership,
+                    BoundaryRule::BackendBorrowStateSemantics => {
+                        SourceRule::BackendBorrowStateSemantics
                     }
                 },
                 message,

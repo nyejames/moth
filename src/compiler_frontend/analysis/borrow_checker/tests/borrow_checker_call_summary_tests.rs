@@ -32,11 +32,13 @@ use crate::compiler_frontend::external_packages::{
     ExternalAbiType as RegistryAbiType, ExternalFunctionDef, ExternalFunctionId,
     ExternalFunctionLowerings, ExternalReturnSlot, ExternalSignatureType,
 };
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::lower_ast;
 use crate::compiler_frontend::hir::ids::LocalId;
-use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::private_failure_lane::install_private_failure_lanes;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatementKind, HirWriteTarget,
+};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::module_compilation::generated::infer_builtin_failure_summaries;
 use crate::compiler_frontend::source::SourceSpan;
@@ -667,19 +669,20 @@ sentinel = 0
     );
 
     let sentinel_statement = hir
-    .blocks
-    .iter()
-    .flat_map(|block| block.statements.iter())
-    .find(|statement| {
-        matches!(
-            &statement.kind,
-            HirStatementKind::Assign {
-                target: HirPlace::Local(local),
-                ..
-            } if hir.side_table.resolve_local_name(*local, &path_fork, &string_table) == Some("sentinel")
-        )
-    })
-    .expect("should locate the post-join sentinel assignment");
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find(|statement| {
+            matches!(
+                &statement.kind,
+                HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(local),
+                    ..
+                } if hir.side_table.resolve_local_name(*local, &path_fork, &string_table)
+                    == Some("sentinel")
+            )
+        })
+        .expect("should locate the post-join sentinel assignment");
     let op_name_snapshot = report
         .analysis
         .statement_entry_states
@@ -737,14 +740,15 @@ inspect(source)
             let HirStatementKind::Call { args, .. } = &statement.kind else {
                 return None;
             };
-            let argument = args.first()?;
+            let argument_id = *hir.expressions.values(*args).first()?;
+            let argument = hir.expressions.expression(argument_id);
             matches!(
                 &argument.kind,
-                crate::compiler_frontend::hir::expressions::HirExpressionKind::Load(
-                    HirPlace::Local(local)
-                ) if *local == source_local
+                crate::compiler_frontend::hir::expressions::HirExpressionKind::Load(place)
+                    if place.root == source_local
+                        && hir.expressions.projections(place.projections).is_empty()
             )
-            .then_some(argument.id)
+            .then_some(argument_id)
         })
         .expect("should locate the final shared call argument");
 
@@ -1661,6 +1665,48 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
 }
 
 #[test]
+fn mutable_call_uses_rvalue_backed_binding_as_its_access_actor() {
+    let source = r#"
+make_values || -> {Int}:
+return {1}
+;
+
+mutate |values ~{Int}|:
+~values.push(2)
+;
+
+items ~= make_values()
+mutate(~items)
+"#;
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+
+    run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("a mutable borrow through its own RValue-backed binding should pass");
+}
+
+#[test]
+fn checked_decimal_result_can_initialize_a_fresh_mutable_argument() {
+    let source = r#"
+produce |divisor Dec2| -> Dec2:
+return 1.00 / divisor
+;
+
+replace |value ~Dec2|:
+value = 4.00
+;
+
+replace(produce(2.00))
+"#;
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("a checked Decimal result is a value-backed fresh mutable argument");
+}
+
+#[test]
 fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argument() {
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
@@ -2237,8 +2283,8 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
         .iter()
         .flat_map(|block| block.statements.iter())
         .find_map(|statement| match &statement.kind {
-            HirStatementKind::Assign {
-                target: HirPlace::Local(local),
+            HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(local),
                 ..
             } if hir
                 .side_table
@@ -2255,8 +2301,8 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
         .iter()
         .flat_map(|block| block.statements.iter())
         .find_map(|statement| match &statement.kind {
-            HirStatementKind::Assign {
-                target: HirPlace::Local(local),
+            HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(local),
                 ..
             } if hir
                 .side_table
@@ -2268,6 +2314,52 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
             _ => None,
         })
         .expect("should locate the returned binding");
+    let returned_initializer = hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|statement| match &statement.kind {
+            HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(local),
+                value,
+            } if *local == returned_local => Some(*value),
+            _ => None,
+        })
+        .expect("the returned caller binding must have a definition");
+    let initializer = hir.expressions.expression(returned_initializer);
+    assert_eq!(
+        initializer.value_kind,
+        ValueKind::RValue,
+        "a call result load remains an rvalue at the caller binding boundary"
+    );
+    let HirExpressionKind::Load(call_result_place) = &initializer.kind else {
+        panic!("the external call result should be loaded into its caller binding");
+    };
+    assert!(
+        hir.expressions
+            .projections(call_result_place.projections)
+            .is_empty()
+    );
+    let call_result_local = call_result_place.root;
+    assert_ne!(
+        call_result_local, returned_local,
+        "the external call result scratch must be distinct from the caller binding"
+    );
+    assert!(
+        hir.blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .any(|statement| {
+                matches!(
+                    &statement.kind,
+                    HirStatementKind::Call {
+                        result: Some(HirLocalDestination::Define(result_local)),
+                        ..
+                    } if *result_local == call_result_local
+                )
+            }),
+        "the internal call result is a defined compiler temporary"
+    );
     let returned_rebinding = hir
         .blocks
         .iter()
@@ -2275,10 +2367,11 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
         .rfind(|statement| {
             matches!(
                 &statement.kind,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(local),
+                HirStatementKind::Write {
+                    target: HirWriteTarget::AssignPlace(place),
                     ..
-                } if *local == returned_local
+                } if place.root == returned_local
+                    && hir.expressions.projections(place.projections).is_empty()
             )
         })
         .expect("should locate the result rebinding statement");
@@ -2315,10 +2408,11 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
         .rfind(|statement| {
             matches!(
                 &statement.kind,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(local),
+                HirStatementKind::Write {
+                    target: HirWriteTarget::AssignPlace(place),
                     ..
-                } if *local == original_local
+                } if place.root == original_local
+                    && hir.expressions.projections(place.projections).is_empty()
             )
         })
         .expect("should locate the source rebinding statement");

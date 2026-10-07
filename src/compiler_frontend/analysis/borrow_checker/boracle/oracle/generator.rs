@@ -6,11 +6,11 @@
 //!      validated input rather than a second test-only generator.
 
 use crate::compiler_frontend::analysis::borrow_checker::problem::{
-    AccessKind, AggregateField, Binding, BindingId, BlockId, BorrowProblem, BorrowProblemParts,
-    Call, CallArgument, CallEffect, CallId, CallResult, CallResultProvenance, CfgBlock, CfgEdge,
-    Event, EventId, EventKind, EventSource, KillReason, Loan, LoanId, OriginKind, Place, PlaceId,
-    PointId, ProgramPoint, ProjectionElem, RebindValue, TerminatorEventKind, Use, UseId, UseKind,
-    ValueOrigin, ValueOriginId,
+    AccessKind, AggregateField, Binding, BindingDestination, BindingId, BlockId, BorrowProblem,
+    BorrowProblemParts, Call, CallArgument, CallEffect, CallId, CallResult, CallResultProvenance,
+    CfgBlock, CfgEdge, Event, EventId, EventKind, EventSource, KillReason, Loan, LoanId,
+    OriginKind, Place, PlaceId, PointId, ProgramPoint, ProjectionElem, RebindValue,
+    TerminatorEventKind, Use, UseId, UseKind, ValueOrigin, ValueOriginId,
 };
 
 const DIGIT_COUNT: u32 = 11;
@@ -103,7 +103,7 @@ pub(crate) fn generated_problem(seed: u32, cyclic: bool) -> GeneratedProblem {
         PlaceId::new(7)
     };
 
-    let bindings = (0..8)
+    let bindings = (0..9)
         .map(|id| Binding::synthetic(BindingId::new(id)))
         .collect();
     let places = vec![
@@ -115,6 +115,7 @@ pub(crate) fn generated_problem(seed: u32, cyclic: bool) -> GeneratedProblem {
         Place::new(PlaceId::new(5), BindingId::new(5), Vec::new()),
         Place::new(PlaceId::new(6), BindingId::new(6), Vec::new()),
         Place::new(PlaceId::new(7), BindingId::new(7), Vec::new()),
+        Place::new(PlaceId::new(8), BindingId::new(8), Vec::new()),
     ];
     let block_count = if cyclic || digits.block_shape == 1 {
         4
@@ -127,7 +128,7 @@ pub(crate) fn generated_problem(seed: u32, cyclic: bool) -> GeneratedProblem {
     builder.event(
         BlockId::new(0),
         EventKind::Fresh {
-            destination: PlaceId::new(0),
+            destination: BindingDestination::Define(PlaceId::new(0)),
             origin: source_origin,
         },
     );
@@ -137,7 +138,7 @@ pub(crate) fn generated_problem(seed: u32, cyclic: bool) -> GeneratedProblem {
         BlockId::new(0),
         EventKind::Copy {
             source: PlaceId::new(0),
-            destination: copied_place,
+            destination: BindingDestination::Define(copied_place),
             origin: copy_origin,
         },
     );
@@ -156,7 +157,7 @@ pub(crate) fn generated_problem(seed: u32, cyclic: bool) -> GeneratedProblem {
         BlockId::new(0),
         EventKind::Projection {
             source: PlaceId::new(0),
-            destination: PlaceId::new(2),
+            destination: BindingDestination::Define(PlaceId::new(8)),
             origin: projection_origin,
         },
     );
@@ -164,7 +165,7 @@ pub(crate) fn generated_problem(seed: u32, cyclic: bool) -> GeneratedProblem {
     builder.event(
         rebind_block,
         EventKind::Rebind {
-            destination: PlaceId::new(0),
+            destination: BindingDestination::Update(PlaceId::new(0)),
             value: RebindValue::Fresh(rebound_origin),
         },
     );
@@ -174,7 +175,7 @@ pub(crate) fn generated_problem(seed: u32, cyclic: bool) -> GeneratedProblem {
         builder.event(
             BlockId::new(0),
             EventKind::Fresh {
-                destination: PlaceId::new(6),
+                destination: BindingDestination::Define(PlaceId::new(6)),
                 origin: extra_origin,
             },
         );
@@ -201,7 +202,7 @@ pub(crate) fn generated_problem(seed: u32, cyclic: bool) -> GeneratedProblem {
     builder.event(
         BlockId::new(0),
         EventKind::Aggregate {
-            destination: PlaceId::new(3),
+            destination: BindingDestination::Define(PlaceId::new(3)),
             origin: aggregate_origin,
             fields: aggregate_fields.into_boxed_slice(),
         },
@@ -226,7 +227,7 @@ pub(crate) fn generated_problem(seed: u32, cyclic: bool) -> GeneratedProblem {
             call: CallId::new(0),
             arguments: vec![call_argument].into_boxed_slice(),
             result: Some(CallResult {
-                place: PlaceId::new(4),
+                destination: BindingDestination::Define(PlaceId::new(4)),
                 origin: call_result_origin,
             }),
         }),
@@ -237,12 +238,12 @@ pub(crate) fn generated_problem(seed: u32, cyclic: bool) -> GeneratedProblem {
     let alias_kind = if digits.alias_shape == 0 {
         EventKind::AliasFromPlace {
             source: PlaceId::new(0),
-            destination: PlaceId::new(5),
+            destination: BindingDestination::Define(PlaceId::new(5)),
         }
     } else {
         EventKind::ExclusiveAliasFromPlace {
             source: PlaceId::new(0),
-            destination: PlaceId::new(5),
+            destination: BindingDestination::Define(PlaceId::new(5)),
         }
     };
     builder.event(BlockId::new(0), alias_kind);
@@ -312,6 +313,7 @@ pub(crate) fn generated_problem(seed: u32, cyclic: bool) -> GeneratedProblem {
             } else {
                 BlockId::new(3)
             },
+            arguments: Box::new([]),
         }
     };
     builder.event(
@@ -337,6 +339,7 @@ pub(crate) fn generated_problem(seed: u32, cyclic: bool) -> GeneratedProblem {
         let block_three_terminator = if cyclic && digits.back_edge_shape == 1 {
             TerminatorEventKind::Jump {
                 target: BlockId::new(1),
+                arguments: Box::new([]),
             }
         } else {
             TerminatorEventKind::Return

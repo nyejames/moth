@@ -8,7 +8,7 @@ use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use std::sync::Arc;
 
@@ -18,6 +18,7 @@ use std::sync::Arc;
 /// Verifies that host io.line([: [...]]) reads the binding value before logging. [host]
 #[test]
 fn host_io_reads_the_underlying_value_before_logging() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
@@ -26,9 +27,9 @@ fn host_io_reads_the_underlying_value_before_logging() {
 
     let assign_message = statement(
         1,
-        HirStatementKind::Assign {
-            target: HirPlace::Local(LocalId(0)),
-            value: string_expression(1, "hello", types.string, RegionId(0)),
+        HirStatementKind::Write {
+            target: HirWriteTarget::DefineLocal(LocalId(0)),
+            value: string_expression("hello", types.string, RegionId(0), &mut expressions),
         },
     );
 
@@ -36,13 +37,16 @@ fn host_io_reads_the_underlying_value_before_logging() {
         2,
         HirStatementKind::Call {
             target: CallTarget::External(io_id),
-            args: vec![expression(
-                2,
-                HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
-                types.string,
-                RegionId(0),
-                ValueKind::RValue,
-            )],
+            args: append_values(
+                &[expression(
+                    HirExpressionKind::Load(HirPlace::local(LocalId(0))),
+                    types.string,
+                    RegionId(0),
+                    ValueKind::RValue,
+                    &mut expressions,
+                )],
+                &mut expressions,
+            ),
             result: None,
         },
     );
@@ -52,7 +56,11 @@ fn host_io_reads_the_underlying_value_before_logging() {
         region: RegionId(0),
         locals: vec![local(0, types.string, RegionId(0))],
         statements: vec![assign_message, call_statement],
-        terminator: HirTerminator::Return(unit_expression(3, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -63,6 +71,7 @@ fn host_io_reads_the_underlying_value_before_logging() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "entry_start",
@@ -73,7 +82,6 @@ fn host_io_reads_the_underlying_value_before_logging() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         JsLoweringConfig {
@@ -96,8 +104,8 @@ fn host_io_reads_the_underlying_value_before_logging() {
 
     let assign_index = output
         .source
-        .find(&format!("__moth_assign_value({message_name}, \"hello\");"))
-        .expect("expected local assignment to store the string value");
+        .find(&format!("{message_name} = __moth_binding(\"hello\");"))
+        .expect("expected local definition to create a string binding");
     let log_index = output
         .source
         .find(&format!("__moth_io_line(__moth_read({message_name}));"))
@@ -112,6 +120,7 @@ fn host_io_reads_the_underlying_value_before_logging() {
 /// Verifies that auto_invoke_start emits a call to the start function. [start]
 #[test]
 fn auto_invokes_start_function_when_enabled() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
@@ -121,7 +130,11 @@ fn auto_invokes_start_function_when_enabled() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(unit_expression(0, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -132,6 +145,7 @@ fn auto_invokes_start_function_when_enabled() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "start_main",
@@ -142,7 +156,6 @@ fn auto_invokes_start_function_when_enabled() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         JsLoweringConfig {
@@ -171,18 +184,19 @@ fn auto_invokes_start_function_when_enabled() {
 #[test]
 fn auto_invokes_fallible_start_once_and_branches_on_its_carrier_tag() {
     for succeeds in [false, true] {
+        let mut expressions = HirExpressionStore::default();
         let mut path_fork = PathInternerFork::empty();
         let mut string_table = StringTable::new();
         let (type_environment, types) = build_type_environment();
         let region = RegionId(0);
         let terminator = if succeeds {
-            HirTerminator::ReturnSuccess(int_expression(2, 42, types.int, region))
+            HirTerminator::ReturnSuccess(int_expression(42, types.int, region, &mut expressions))
         } else {
             HirTerminator::ReturnError(string_expression(
-                2,
                 "application-secret",
                 types.string,
                 region,
+                &mut expressions,
             ))
         };
         let block = HirBlock {
@@ -193,7 +207,15 @@ fn auto_invokes_fallible_start_once_and_branches_on_its_carrier_tag() {
                 1,
                 HirStatementKind::Call {
                     target: CallTarget::External(ExternalFunctionId::IoLine),
-                    args: vec![string_expression(1, "start", types.string, region)],
+                    args: append_values(
+                        &[string_expression(
+                            "start",
+                            types.string,
+                            region,
+                            &mut expressions,
+                        )],
+                        &mut expressions,
+                    ),
                     result: None,
                 },
             )],
@@ -206,6 +228,7 @@ fn auto_invokes_fallible_start_once_and_branches_on_its_carrier_tag() {
             return_type: types.fallible_int_string,
         };
         let module = build_module(
+            expressions,
             &mut path_fork,
             &mut string_table,
             "start_main",
@@ -217,7 +240,6 @@ fn auto_invokes_fallible_start_once_and_branches_on_its_carrier_tag() {
         config.auto_invoke_start = true;
         let output = lower_hir_to_js(
             &module,
-            &BorrowCheckReport::default(),
             &NumericProofs::default(),
             &string_table,
             config,

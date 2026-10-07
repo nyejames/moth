@@ -8,7 +8,9 @@ use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId}
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::regions::HirRegion;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatementKind, HirWriteTarget,
+};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
@@ -18,6 +20,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 /// Verifies that a receiver method call passes the receiver binding as the first argument. [receiver]
 #[test]
 fn receiver_method_call_emits_receiver_as_first_arg() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
@@ -29,7 +32,7 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
         region,
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(1, 42, types.int, region)),
+        terminator: HirTerminator::Return(int_expression(42, types.int, region, &mut expressions)),
     };
     let callee = HirFunction {
         id: FunctionId(1),
@@ -41,23 +44,26 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
     // Caller: let receiver = 7; let result = bump(receiver); return result
     let assign_receiver = statement(
         1,
-        HirStatementKind::Assign {
-            target: HirPlace::Local(LocalId(0)),
-            value: int_expression(1, 7, types.int, region),
+        HirStatementKind::Write {
+            target: HirWriteTarget::DefineLocal(LocalId(0)),
+            value: int_expression(7, types.int, region, &mut expressions),
         },
     );
     let call_bump = statement(
         2,
         HirStatementKind::Call {
             target: CallTarget::Local(FunctionId(1)),
-            args: vec![expression(
-                2,
-                HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
-                types.int,
-                region,
-                ValueKind::Place,
-            )],
-            result: Some(LocalId(1)),
+            args: append_values(
+                &[expression(
+                    HirExpressionKind::Load(HirPlace::local(LocalId(0))),
+                    types.int,
+                    region,
+                    ValueKind::Place,
+                    &mut expressions,
+                )],
+                &mut expressions,
+            ),
+            result: Some(HirLocalDestination::Define(LocalId(1))),
         },
     );
     let caller_block = HirBlock {
@@ -66,11 +72,11 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
         locals: vec![local(0, types.int, region), local(1, types.int, region)],
         statements: vec![assign_receiver, call_bump],
         terminator: HirTerminator::Return(expression(
-            3,
-            HirExpressionKind::Load(HirPlace::Local(LocalId(1))),
+            HirExpressionKind::Load(HirPlace::local(LocalId(1))),
             types.int,
             region,
             ValueKind::RValue,
+            &mut expressions,
         )),
     };
     let caller = HirFunction {
@@ -81,6 +87,8 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
     };
 
     let mut module = HirModule::new();
+    expressions.freeze();
+    module.expressions = expressions;
     module.blocks = vec![callee_block, caller_block];
     module.functions = vec![caller, callee];
     module.start_function = Some(FunctionId(0));
@@ -118,7 +126,6 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -138,9 +145,10 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
     );
 }
 
-/// Verifies that a receiver method return assigns through __moth_assign_value. [receiver] [alias]
+/// Verifies that a receiver method return creates a fresh value-backed result binding. [receiver] [alias]
 #[test]
 fn receiver_method_call_assigns_value_for_return() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
@@ -151,7 +159,7 @@ fn receiver_method_call_assigns_value_for_return() {
         region,
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(1, 42, types.int, region)),
+        terminator: HirTerminator::Return(int_expression(42, types.int, region, &mut expressions)),
     };
     let callee = HirFunction {
         id: FunctionId(1),
@@ -164,14 +172,17 @@ fn receiver_method_call_assigns_value_for_return() {
         1,
         HirStatementKind::Call {
             target: CallTarget::Local(FunctionId(1)),
-            args: vec![expression(
-                1,
-                HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
-                types.int,
-                region,
-                ValueKind::Place,
-            )],
-            result: Some(LocalId(1)),
+            args: append_values(
+                &[expression(
+                    HirExpressionKind::Load(HirPlace::local(LocalId(0))),
+                    types.int,
+                    region,
+                    ValueKind::Place,
+                    &mut expressions,
+                )],
+                &mut expressions,
+            ),
+            result: Some(HirLocalDestination::Define(LocalId(1))),
         },
     );
     let caller_block = HirBlock {
@@ -179,7 +190,7 @@ fn receiver_method_call_assigns_value_for_return() {
         region,
         locals: vec![local(0, types.int, region), local(1, types.int, region)],
         statements: vec![call_bump],
-        terminator: HirTerminator::Return(int_expression(2, 0, types.int, region)),
+        terminator: HirTerminator::Return(int_expression(0, types.int, region, &mut expressions)),
     };
     let caller = HirFunction {
         id: FunctionId(0),
@@ -189,6 +200,8 @@ fn receiver_method_call_assigns_value_for_return() {
     };
 
     let mut module = HirModule::new();
+    expressions.freeze();
+    module.expressions = expressions;
     module.blocks = vec![callee_block, caller_block];
     module.functions = vec![caller, callee];
     module.start_function = Some(FunctionId(0));
@@ -226,7 +239,6 @@ fn receiver_method_call_assigns_value_for_return() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -239,10 +251,10 @@ fn receiver_method_call_assigns_value_for_return() {
     let callee_name = expected_dev_function_name("bump", 1);
 
     assert!(
-        output.source.contains(&format!(
-            "__moth_assign_value({result_name}, {callee_name}("
-        )),
-        "moth-return receiver call must assign result with __moth_assign_value"
+        output
+            .source
+            .contains(&format!("{result_name} = __moth_binding({callee_name}(")),
+        "moth-return receiver call must install its fresh result binding"
     );
 }
 

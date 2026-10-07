@@ -49,9 +49,9 @@ less_f16 |left F16, right F16| -> Bool:
 rebind_f16 |value F16, replacement F16| -> F16:
     rebound ~F16 = copy value
     if rebound is value:
-        rebound = replacement
+        rebound = copy replacement
     else
-        rebound = value
+        rebound = copy value
     ;
     return rebound
 ;

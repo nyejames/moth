@@ -13,9 +13,11 @@ use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-use crate::compiler_frontend::hir::expressions::{
-    HirExpression, HirExpressionKind, HirMapEntry, HirVariantCarrier,
+use crate::compiler_frontend::hir::expression_store::{
+    HirMapEntryRange, HirProjection, HirVariantFieldRange,
 };
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirVariantCarrier};
+use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
 use crate::compiler_frontend::hir::places::HirPlace;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
@@ -29,7 +31,7 @@ enum OptionComparisonSide {
 impl<'hir> JsEmitter<'hir> {
     pub(crate) fn lower_fallible_success_condition(
         &mut self,
-        result: &HirExpression,
+        result: HirValueId,
     ) -> Result<String, CompilerError> {
         let lowered_result = self.lower_expr(result)?;
 
@@ -38,8 +40,10 @@ impl<'hir> JsEmitter<'hir> {
 
     pub(crate) fn lower_expr(
         &mut self,
-        expression: &HirExpression,
+        expression_id: HirValueId,
     ) -> Result<String, CompilerError> {
+        let hir = self.hir;
+        let expression = hir.expressions.expression(expression_id);
         // WHAT: dispatch lowering by the fully resolved HIR expression shape.
         // WHY: HIR has already linearized side effects, so expression lowering can stay a direct
         //      semantic mapping from each variant to the exact JS runtime helper sequence it needs.
@@ -76,7 +80,7 @@ impl<'hir> JsEmitter<'hir> {
                 carrier,
                 variant_index,
                 fields,
-            } => self.lower_variant_construct(carrier, *variant_index, fields),
+            } => self.lower_variant_construct(carrier, *variant_index, *fields),
             // HIR Float literals already contain the exact value rounded to the profile precision.
             // Non-finite values remain an internal invariant violation.
             HirExpressionKind::Float(value) => {
@@ -104,20 +108,23 @@ impl<'hir> JsEmitter<'hir> {
             HirExpressionKind::Bool(value) => Ok(value.to_string()),
             HirExpressionKind::Char(value) => Ok(escape_js_char(*value)),
             HirExpressionKind::StringLiteral(value) => Ok(escape_js_string(value)),
-            HirExpressionKind::StructuralString { pieces } => self.lower_structural_string(pieces),
-
-            HirExpressionKind::Load(_) | HirExpressionKind::Copy(_) => {
-                self.lower_expression_for_use(expression, JsValueUse::PlainExpression)
+            HirExpressionKind::StructuralString { pieces } => {
+                self.lower_structural_string(hir.expressions.string_pieces(*pieces))
             }
 
-            HirExpressionKind::BinOp { left, op, right } => self.lower_bin_op(left, *op, right),
-            HirExpressionKind::UnaryOp { op, operand } => self.lower_unary_op(*op, operand),
+            HirExpressionKind::Load(_) | HirExpressionKind::Copy(_) => {
+                self.lower_expression_for_use(expression_id, JsValueUse::PlainExpression)
+            }
+
+            HirExpressionKind::BinOp { left, op, right } => self.lower_bin_op(*left, *op, *right),
+            HirExpressionKind::UnaryOp { op, operand } => self.lower_unary_op(*op, *operand),
 
             HirExpressionKind::StructConstruct { fields, .. } => {
+                let fields = hir.expressions.struct_fields(*fields);
                 let mut pairs = Vec::with_capacity(fields.len());
                 for (field_id, value) in fields {
                     let field_name = self.field_name(*field_id)?.to_owned();
-                    let field_value = self.lower_expr(value)?;
+                    let field_value = self.lower_expr(*value)?;
                     pairs.push(format!("{field_name}: {field_value}"));
                 }
 
@@ -125,9 +132,11 @@ impl<'hir> JsEmitter<'hir> {
             }
 
             HirExpressionKind::Collection(elements) => {
-                let lowered = elements
+                let lowered = hir
+                    .expressions
+                    .values(*elements)
                     .iter()
-                    .map(|element| self.lower_expr(element))
+                    .map(|element| self.lower_expr(*element))
                     .collect::<Result<Vec<_>, _>>()?;
 
                 let items = format!("[{}]", lowered.join(", "));
@@ -162,44 +171,45 @@ impl<'hir> JsEmitter<'hir> {
             }
 
             HirExpressionKind::MapLiteral(entries) => {
-                self.lower_map_literal(expression.ty, entries)
+                self.lower_map_literal(expression.ty, *entries)
             }
 
             HirExpressionKind::Range { start, end } => {
-                let start = self.lower_expr(start)?;
-                let end = self.lower_expr(end)?;
+                let start = self.lower_expr(*start)?;
+                let end = self.lower_expr(*end)?;
                 Ok(format!("{{ start: {start}, end: {end} }}"))
             }
 
             HirExpressionKind::TupleConstruct { elements } => {
+                let elements = hir.expressions.values(*elements);
                 if elements.is_empty() {
                     Ok("undefined".to_owned())
                 } else {
                     let lowered = elements
                         .iter()
-                        .map(|element| self.lower_expr(element))
+                        .map(|element| self.lower_expr(*element))
                         .collect::<Result<Vec<_>, _>>()?;
                     Ok(format!("[{}]", lowered.join(", ")))
                 }
             }
 
             HirExpressionKind::TupleGet { tuple, index } => {
-                let tuple = self.lower_expr(tuple)?;
+                let tuple = self.lower_expr(*tuple)?;
                 Ok(format!("({tuple})[{index}]"))
             }
 
             HirExpressionKind::FallibleUnwrapSuccess { result } => {
-                let lowered_result = self.lower_expr(result)?;
+                let lowered_result = self.lower_expr(*result)?;
                 Ok(format!("(({lowered_result}).value)"))
             }
 
             HirExpressionKind::FallibleUnwrapError { result } => {
-                let lowered_result = self.lower_expr(result)?;
+                let lowered_result = self.lower_expr(*result)?;
                 Ok(format!("(({lowered_result}).value)"))
             }
 
             HirExpressionKind::Cast { source, policy } => {
-                let lowered_source = self.lower_expr(source)?;
+                let lowered_source = self.lower_expr(*source)?;
                 js_cast_expression_for_policy(*policy, &lowered_source, self.config.numeric_profile)
             }
 
@@ -208,7 +218,7 @@ impl<'hir> JsEmitter<'hir> {
                 source,
                 variant_index,
                 field_index,
-            } => self.lower_variant_payload_get(carrier, source, *variant_index, *field_index),
+            } => self.lower_variant_payload_get(carrier, *source, *variant_index, *field_index),
         }
     }
 
@@ -259,21 +269,21 @@ impl<'hir> JsEmitter<'hir> {
     /// WHY: the JS backend uses runtime helpers for field and index access to preserve its
     /// reference and aliasing semantics.
     pub(crate) fn lower_place(&mut self, place: &HirPlace) -> Result<String, CompilerError> {
-        match place {
-            HirPlace::Local(local_id) => Ok(self.local_name(*local_id)?.to_owned()),
-
-            HirPlace::Field { base, field } => {
-                let base = self.lower_place(base)?;
-                let field = escape_js_string(self.field_name(*field)?);
-                Ok(format!("__moth_field({base}, {field})"))
-            }
-
-            HirPlace::Index { base, index } => {
-                let base = self.lower_place(base)?;
-                let index = self.lower_expr(index)?;
-                Ok(format!("__moth_index({base}, {index})"))
+        let hir = self.hir;
+        let mut lowered = self.local_name(place.root)?.to_owned();
+        for projection in hir.expressions.projections(place.projections) {
+            match *projection {
+                HirProjection::Field(field_id) => {
+                    let field = escape_js_string(self.field_name(field_id)?);
+                    lowered = format!("__moth_field({lowered}, {field})");
+                }
+                HirProjection::Index(index_id) => {
+                    let index = self.lower_expr(index_id)?;
+                    lowered = format!("__moth_index({lowered}, {index})");
+                }
             }
         }
+        Ok(lowered)
     }
 
     // ------------------------
@@ -286,11 +296,12 @@ impl<'hir> JsEmitter<'hir> {
         &mut self,
         carrier: &HirVariantCarrier,
         variant_index: usize,
-        fields: &[crate::compiler_frontend::hir::expressions::HirVariantField],
+        fields: HirVariantFieldRange,
     ) -> Result<String, CompilerError> {
+        let hir = self.hir;
         let mut entries = vec![];
-        for field in fields {
-            let js_value = self.lower_expr(&field.value)?;
+        for field in hir.expressions.variant_fields(fields) {
+            let js_value = self.lower_expr(field.value)?;
             if let Some(name) = field.name {
                 let js_name = escape_js_string(self.string_table.resolve(name));
                 entries.push(format!("{js_name}: {js_value}"));
@@ -322,7 +333,7 @@ impl<'hir> JsEmitter<'hir> {
     fn lower_variant_payload_get(
         &mut self,
         carrier: &HirVariantCarrier,
-        source: &HirExpression,
+        source: HirValueId,
         variant_index: usize,
         field_index: usize,
     ) -> Result<String, CompilerError> {
@@ -353,10 +364,12 @@ impl<'hir> JsEmitter<'hir> {
         Ok(format!("({source_js})[{field_name_js}]"))
     }
 
-    pub(crate) fn is_unit_expression(&self, expression: &HirExpression) -> bool {
+    pub(crate) fn is_unit_expression(&self, expression_id: HirValueId) -> bool {
+        let expression = self.hir.expressions.expression(expression_id);
         if matches!(
-            expression.kind,
-            HirExpressionKind::TupleConstruct { ref elements } if elements.is_empty()
+            &expression.kind,
+            HirExpressionKind::TupleConstruct { elements }
+                if self.hir.expressions.values(*elements).is_empty()
         ) {
             return true;
         }
@@ -378,14 +391,15 @@ impl<'hir> JsEmitter<'hir> {
 
     fn lower_bin_op(
         &mut self,
-        left: &HirExpression,
+        left: HirValueId,
         operator: HirBinOp,
-        right: &HirExpression,
+        right: HirValueId,
     ) -> Result<String, CompilerError> {
-        let left_type = left.ty;
-        let right_type = right.ty;
+        let hir = self.hir;
+        let left_type = hir.expressions.expression(left).ty;
+        let right_type = hir.expressions.expression(right).ty;
         let option_equality = if matches!(operator, HirBinOp::Eq | HirBinOp::Ne) {
-            self.option_equality_sides(left, right)
+            self.option_equality_sides(left_type, right_type)
         } else {
             None
         };
@@ -427,11 +441,11 @@ impl<'hir> JsEmitter<'hir> {
 
     fn option_equality_sides(
         &self,
-        left: &HirExpression,
-        right: &HirExpression,
+        left_type: TypeId,
+        right_type: TypeId,
     ) -> Option<(OptionComparisonSide, OptionComparisonSide)> {
-        let left_side = self.classify_option_comparison_side(left.ty);
-        let right_side = self.classify_option_comparison_side(right.ty);
+        let left_side = self.classify_option_comparison_side(left_type);
+        let right_side = self.classify_option_comparison_side(right_type);
 
         if matches!(left_side, OptionComparisonSide::Option { .. })
             || matches!(right_side, OptionComparisonSide::Option { .. })
@@ -587,7 +601,7 @@ impl<'hir> JsEmitter<'hir> {
     fn lower_unary_op(
         &mut self,
         operator: HirUnaryOp,
-        operand: &HirExpression,
+        operand: HirValueId,
     ) -> Result<String, CompilerError> {
         let operand = self.lower_expr(operand)?;
         let js_operator = match operator {
@@ -611,7 +625,7 @@ impl<'hir> JsEmitter<'hir> {
     fn lower_map_literal(
         &mut self,
         type_id: TypeId,
-        entries: &[HirMapEntry],
+        entries: HirMapEntryRange,
     ) -> Result<String, CompilerError> {
         let Some(_map_shape) = self.type_environment.map_shape(type_id) else {
             return Err(CompilerError::compiler_error(
@@ -619,10 +633,12 @@ impl<'hir> JsEmitter<'hir> {
             ));
         };
 
+        let hir = self.hir;
+        let entries = hir.expressions.map_entries(entries);
         let mut lowered_entries = Vec::with_capacity(entries.len());
         for entry in entries {
-            let key = self.lower_expr(&entry.key)?;
-            let value = self.lower_expr(&entry.value)?;
+            let key = self.lower_expr(entry.key)?;
+            let value = self.lower_expr(entry.value)?;
             lowered_entries.push(format!("[{key}, {value}]"));
         }
 

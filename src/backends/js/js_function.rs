@@ -6,11 +6,11 @@
 use crate::backends::js::JsEmitter;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
+use crate::compiler_frontend::hir::ids::{BlockId, HirValueId};
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirJumpArgument, HirTerminator};
 use crate::compiler_frontend::hir::utils::terminator_targets;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ControlFlowStrategy {
@@ -44,7 +44,6 @@ impl<'hir> JsEmitter<'hir> {
         let reachable_blocks = self.collect_reachable_blocks(function.entry)?;
         self.emit_function_local_declarations(function, &reachable_blocks)?;
         self.emit_parameter_binding_setup(function)?;
-        self.validate_jump_argument_contract(&reachable_blocks)?;
 
         let strategy = self.choose_control_flow_strategy(function)?;
         self.current_function = Some(function.id);
@@ -113,7 +112,9 @@ impl<'hir> JsEmitter<'hir> {
 
         for local_id in local_ids {
             let local_name = self.local_name(local_id)?;
-            self.emit_line(&format!("let {local_name} = __moth_binding(undefined);"));
+            // Definitions and edge transfers establish wrappers when they execute. A function
+            // declaration reserves the JS name without creating an unused binding occurrence.
+            self.emit_line(&format!("let {local_name};"));
         }
 
         if !reachable_blocks.is_empty() || !function.params.is_empty() {
@@ -179,162 +180,17 @@ impl<'hir> JsEmitter<'hir> {
         }
     }
 
-    fn validate_jump_argument_contract(
-        &self,
-        reachable_blocks: &[BlockId],
-    ) -> Result<(), CompilerError> {
-        let mut incoming_arity_by_target = HashMap::new();
-
-        for source_block_id in reachable_blocks {
-            let block = self.block_by_id(*source_block_id)?;
-            match &block.terminator {
-                HirTerminator::Jump { target, args } => {
-                    self.record_incoming_jump_arity(
-                        *source_block_id,
-                        *target,
-                        args.len(),
-                        &mut incoming_arity_by_target,
-                    )?;
-                }
-
-                HirTerminator::If {
-                    then_block,
-                    else_block,
-                    ..
-                } => {
-                    self.record_incoming_jump_arity(
-                        *source_block_id,
-                        *then_block,
-                        0,
-                        &mut incoming_arity_by_target,
-                    )?;
-                    self.record_incoming_jump_arity(
-                        *source_block_id,
-                        *else_block,
-                        0,
-                        &mut incoming_arity_by_target,
-                    )?;
-                }
-
-                HirTerminator::FallibleBranch {
-                    success_block,
-                    error_block,
-                    ..
-                } => {
-                    self.record_incoming_jump_arity(
-                        *source_block_id,
-                        *success_block,
-                        0,
-                        &mut incoming_arity_by_target,
-                    )?;
-                    self.record_incoming_jump_arity(
-                        *source_block_id,
-                        *error_block,
-                        0,
-                        &mut incoming_arity_by_target,
-                    )?;
-                }
-
-                HirTerminator::Match { arms, .. } => {
-                    for arm in arms {
-                        self.record_incoming_jump_arity(
-                            *source_block_id,
-                            arm.body,
-                            0,
-                            &mut incoming_arity_by_target,
-                        )?;
-                    }
-                }
-
-                HirTerminator::Break { target } | HirTerminator::Continue { target } => {
-                    self.record_incoming_jump_arity(
-                        *source_block_id,
-                        *target,
-                        0,
-                        &mut incoming_arity_by_target,
-                    )?;
-                }
-
-                HirTerminator::Return(_)
-                | HirTerminator::ReturnSuccess(_)
-                | HirTerminator::ReturnError(_)
-                | HirTerminator::RuntimeFailure { .. }
-                | HirTerminator::Uninitialized
-                | HirTerminator::AssertFailure { .. } => {}
-            }
-        }
-
-        for (target, arity) in incoming_arity_by_target {
-            self.ensure_jump_target_parameter_arity(target, arity)?;
-        }
-
-        Ok(())
-    }
-
-    fn record_incoming_jump_arity(
-        &self,
-        source: BlockId,
-        target: BlockId,
-        arity: usize,
-        incoming_arity_by_target: &mut HashMap<BlockId, usize>,
-    ) -> Result<(), CompilerError> {
-        if let Some(existing_arity) = incoming_arity_by_target.get(&target)
-            && *existing_arity != arity
-        {
-            return Err(CompilerError::compiler_error(format!(
-                "JavaScript backend: block {} receives inconsistent incoming jump argument counts ({existing_arity} vs {arity}) at predecessor block {}",
-                target.0, source.0
-            )));
-        }
-
-        incoming_arity_by_target.insert(target, arity);
-        Ok(())
-    }
-
-    fn ensure_jump_target_parameter_arity(
-        &self,
-        target: BlockId,
-        arity: usize,
-    ) -> Result<(), CompilerError> {
-        let target_block = self.block_by_id(target)?;
-        if arity > target_block.locals.len() {
-            return Err(CompilerError::compiler_error(format!(
-                "JavaScript backend: block {} receives {arity} jump argument(s), but only {} target local(s) are available",
-                target.0,
-                target_block.locals.len()
-            )));
-        }
-        Ok(())
-    }
-
-    fn jump_target_parameter_locals(
-        &self,
-        target: BlockId,
-        arity: usize,
-    ) -> Result<Vec<LocalId>, CompilerError> {
-        self.ensure_jump_target_parameter_arity(target, arity)?;
-        let target_block = self.block_by_id(target)?;
-        Ok(target_block
-            .locals
-            .iter()
-            .take(arity)
-            .map(|local| local.id)
-            .collect())
-    }
-
     pub(crate) fn emit_jump_argument_transfer(
         &mut self,
-        target: BlockId,
-        args: &[LocalId],
+        args: &[HirJumpArgument],
     ) -> Result<(), CompilerError> {
         if args.is_empty() {
             return Ok(());
         }
 
-        let destination_locals = self.jump_target_parameter_locals(target, args.len())?;
         let mut captured_values = Vec::with_capacity(args.len());
-        for source_local in args {
-            let source_name = self.local_name(*source_local)?.to_owned();
+        for argument in args {
+            let source_name = self.local_name(argument.source)?.to_owned();
             let captured_name = self.next_temp_identifier("__jump_arg");
             self.emit_line(&format!(
                 "const {captured_name} = __moth_read({source_name});"
@@ -342,17 +198,11 @@ impl<'hir> JsEmitter<'hir> {
             captured_values.push(captured_name);
         }
 
-        for (destination_local, captured_name) in destination_locals.iter().zip(captured_values) {
-            let destination_name = self.local_name(*destination_local)?.to_owned();
-            if self.local_is_alias_only_at_block_entry(target, *destination_local) {
-                self.emit_line(&format!(
-                    "__moth_write({destination_name}, {captured_name});"
-                ));
-            } else {
-                self.emit_line(&format!(
-                    "__moth_assign_value({destination_name}, {captured_name});"
-                ));
-            }
+        for (argument, captured_name) in args.iter().zip(captured_values) {
+            let destination_name = self.local_name(argument.destination)?.to_owned();
+            self.emit_line(&format!(
+                "{destination_name} = __moth_binding({captured_name});"
+            ));
         }
 
         Ok(())
@@ -415,7 +265,7 @@ impl<'hir> JsEmitter<'hir> {
 
         match &block.terminator {
             HirTerminator::Jump { target, args } => {
-                self.emit_jump_argument_transfer(*target, args)?;
+                self.emit_jump_argument_transfer(args)?;
                 self.emit_structured_block(*target, emitted_blocks)
             }
 
@@ -423,28 +273,30 @@ impl<'hir> JsEmitter<'hir> {
                 condition,
                 then_block,
                 else_block,
-            } => self.emit_structured_if(condition, *then_block, *else_block, emitted_blocks),
+            } => self.emit_structured_if(*condition, *then_block, *else_block, emitted_blocks),
 
             HirTerminator::FallibleBranch {
                 result,
                 success_block,
                 error_block,
             } => self.emit_structured_fallible_branch(
-                result,
+                *result,
                 *success_block,
                 *error_block,
                 emitted_blocks,
             ),
 
             HirTerminator::Match { scrutinee, arms } => {
-                self.emit_structured_match(scrutinee, arms, emitted_blocks)
+                self.emit_structured_match(*scrutinee, arms, emitted_blocks)
             }
 
-            HirTerminator::Return(expression) => self.emit_return_terminator(expression),
+            HirTerminator::Return(expression) => self.emit_return_terminator(*expression),
             HirTerminator::ReturnSuccess(expression) => {
-                self.emit_success_return_terminator(expression)
+                self.emit_success_return_terminator(*expression)
             }
-            HirTerminator::ReturnError(expression) => self.emit_error_return_terminator(expression),
+            HirTerminator::ReturnError(expression) => {
+                self.emit_error_return_terminator(*expression)
+            }
             HirTerminator::Uninitialized => Err(CompilerError::compiler_error(
                 "JavaScript backend: structured lowering encountered Uninitialized terminator",
             )),
@@ -454,7 +306,7 @@ impl<'hir> JsEmitter<'hir> {
             HirTerminator::AssertFailure {
                 message,
                 message_evaluation,
-            } => self.emit_assert_failure_terminator(message, *message_evaluation),
+            } => self.emit_assert_failure_terminator(*message, *message_evaluation),
 
             HirTerminator::Break { .. } | HirTerminator::Continue { .. } => {
                 Err(CompilerError::compiler_error(
@@ -466,7 +318,7 @@ impl<'hir> JsEmitter<'hir> {
 
     fn emit_structured_if(
         &mut self,
-        condition: &crate::compiler_frontend::hir::expressions::HirExpression,
+        condition: HirValueId,
         then_block: BlockId,
         else_block: BlockId,
         emitted_blocks: &mut HashSet<BlockId>,
@@ -498,7 +350,7 @@ impl<'hir> JsEmitter<'hir> {
 
     fn emit_structured_fallible_branch(
         &mut self,
-        result: &crate::compiler_frontend::hir::expressions::HirExpression,
+        result: HirValueId,
         success_block: BlockId,
         error_block: BlockId,
         emitted_blocks: &mut HashSet<BlockId>,
@@ -532,12 +384,12 @@ impl<'hir> JsEmitter<'hir> {
 
     fn emit_structured_match(
         &mut self,
-        scrutinee: &crate::compiler_frontend::hir::expressions::HirExpression,
+        scrutinee: HirValueId,
         arms: &[HirMatchArm],
         emitted_blocks: &mut HashSet<BlockId>,
     ) -> Result<(), CompilerError> {
         let merge_target = self.resolve_match_merge_target(arms)?;
-        let scrutinee_type = scrutinee.ty;
+        let scrutinee_type = self.hir.expressions.expression(scrutinee).ty;
         let scrutinee = self.lower_expr(scrutinee)?;
         let scrutinee_temp = self.next_temp_identifier("__match_value");
         let synthetic_merge_wildcard = merge_target.and_then(|target| {
@@ -602,7 +454,7 @@ impl<'hir> JsEmitter<'hir> {
         match &block.terminator {
             HirTerminator::Jump { target, args } => {
                 if expected_merge_target == Some(*target) {
-                    self.emit_jump_argument_transfer(*target, args)?;
+                    self.emit_jump_argument_transfer(args)?;
                     Ok(BranchTermination::Jump(*target))
                 } else {
                     Err(CompilerError::compiler_error(
@@ -616,7 +468,7 @@ impl<'hir> JsEmitter<'hir> {
                 then_block,
                 else_block,
             } => {
-                let condition = self.lower_expr(condition)?;
+                let condition = self.lower_expr(*condition)?;
                 self.emit_nested_branch(
                     &condition,
                     *then_block,
@@ -631,7 +483,7 @@ impl<'hir> JsEmitter<'hir> {
                 success_block,
                 error_block,
             } => {
-                let condition = self.lower_fallible_success_condition(result)?;
+                let condition = self.lower_fallible_success_condition(*result)?;
                 self.emit_nested_branch(
                     &condition,
                     *success_block,
@@ -642,17 +494,17 @@ impl<'hir> JsEmitter<'hir> {
             }
 
             HirTerminator::Return(expression) => {
-                self.emit_return_terminator(expression)?;
+                self.emit_return_terminator(*expression)?;
                 Ok(BranchTermination::Terminated)
             }
 
             HirTerminator::ReturnSuccess(expression) => {
-                self.emit_success_return_terminator(expression)?;
+                self.emit_success_return_terminator(*expression)?;
                 Ok(BranchTermination::Terminated)
             }
 
             HirTerminator::ReturnError(expression) => {
-                self.emit_error_return_terminator(expression)?;
+                self.emit_error_return_terminator(*expression)?;
                 Ok(BranchTermination::Terminated)
             }
 
@@ -660,7 +512,7 @@ impl<'hir> JsEmitter<'hir> {
                 message,
                 message_evaluation,
             } => {
-                self.emit_assert_failure_terminator(message, *message_evaluation)?;
+                self.emit_assert_failure_terminator(*message, *message_evaluation)?;
                 Ok(BranchTermination::Terminated)
             }
 

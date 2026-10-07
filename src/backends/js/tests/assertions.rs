@@ -16,34 +16,38 @@ use crate::compiler_frontend::hir::expressions::{
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 fn optional_message(
-    id: u32,
     type_id: crate::compiler_frontend::datatypes::ids::TypeId,
-    inner: crate::compiler_frontend::hir::expressions::HirExpression,
+    inner: crate::compiler_frontend::hir::ids::HirValueId,
     variant_index: usize,
     value_kind: ValueKind,
-) -> crate::compiler_frontend::hir::expressions::HirExpression {
+    expressions: &mut HirExpressionStore,
+) -> crate::compiler_frontend::hir::ids::HirValueId {
+    let fields = if variant_index == 0 {
+        append_variant_fields(&[], expressions)
+    } else {
+        append_variant_fields(
+            &[HirVariantField {
+                name: None,
+                value: inner,
+            }],
+            expressions,
+        )
+    };
     expression(
-        id,
         HirExpressionKind::VariantConstruct {
             carrier: HirVariantCarrier::Option,
             variant_index,
-            fields: if variant_index == 0 {
-                vec![]
-            } else {
-                vec![HirVariantField {
-                    name: None,
-                    value: inner,
-                }]
-            },
+            fields,
         },
         type_id,
         RegionId(0),
         value_kind,
+        expressions,
     )
 }
 
@@ -52,17 +56,18 @@ fn function_with_assertion(
     blocks: Vec<HirBlock>,
     string_table: &mut StringTable,
     type_environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
-    types: &TypeIds,
     function_name: &str,
     local_names: &[(LocalId, &str)],
+    expressions: HirExpressionStore,
 ) -> String {
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        return_type: type_environment.builtins().none,
     };
     let module = build_module(
+        expressions,
         path_fork,
         string_table,
         function_name,
@@ -73,7 +78,6 @@ fn function_with_assertion(
 
     lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         string_table,
         default_config(),
@@ -86,27 +90,34 @@ fn function_with_assertion(
 
 #[test]
 fn structured_assertion_message_is_lowered_once_and_selected() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (mut type_environment, types) = build_type_environment();
     let option_string = type_environment.intern_option(types.string);
     let casted_message = expression(
-        2,
         HirExpressionKind::Cast {
-            source: Box::new(expression(
-                1,
-                HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
+            source: expression(
+                HirExpressionKind::Load(HirPlace::local(LocalId(0))),
                 types.int,
                 RegionId(0),
                 ValueKind::RValue,
-            )),
+                &mut expressions,
+            ),
             policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Int),
         },
         types.string,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
-    let message = optional_message(3, option_string, casted_message, 1, ValueKind::RValue);
+    let message = optional_message(
+        option_string,
+        casted_message,
+        1,
+        ValueKind::RValue,
+        &mut expressions,
+    );
     let source = function_with_assertion(
         &mut path_fork,
         vec![HirBlock {
@@ -115,9 +126,9 @@ fn structured_assertion_message_is_lowered_once_and_selected() {
             locals: vec![local(0, types.int, RegionId(0))],
             statements: vec![statement(
                 4,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(0)),
-                    value: int_expression(5, 42, types.int, RegionId(0)),
+                HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(LocalId(0)),
+                    value: int_expression(42, types.int, RegionId(0), &mut expressions),
                 },
             )],
             terminator: HirTerminator::AssertFailure {
@@ -127,9 +138,9 @@ fn structured_assertion_message_is_lowered_once_and_selected() {
         }],
         &mut string_table,
         &type_environment,
-        &types,
         "structured_assertion",
         &[(LocalId(0), "value")],
+        expressions,
     );
 
     assert_eq!(source.matches("let __assert_message_").count(), 1);
@@ -155,27 +166,34 @@ fn structured_assertion_message_is_lowered_once_and_selected() {
 
 #[test]
 fn dispatcher_assertion_message_is_lowered_once() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (mut type_environment, types) = build_type_environment();
     let option_string = type_environment.intern_option(types.string);
     let casted_message = expression(
-        5,
         HirExpressionKind::Cast {
-            source: Box::new(expression(
-                4,
-                HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
+            source: expression(
+                HirExpressionKind::Load(HirPlace::local(LocalId(0))),
                 types.boolean,
                 RegionId(0),
                 ValueKind::RValue,
-            )),
+                &mut expressions,
+            ),
             policy: BuiltinCastPolicyId::BoolToString,
         },
         types.string,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
-    let message = optional_message(6, option_string, casted_message, 1, ValueKind::RValue);
+    let message = optional_message(
+        option_string,
+        casted_message,
+        1,
+        ValueKind::RValue,
+        &mut expressions,
+    );
     let source = function_with_assertion(
         &mut path_fork,
         vec![
@@ -185,13 +203,13 @@ fn dispatcher_assertion_message_is_lowered_once() {
                 locals: vec![local(0, types.boolean, RegionId(0))],
                 statements: vec![statement(
                     7,
-                    HirStatementKind::Assign {
-                        target: HirPlace::Local(LocalId(0)),
-                        value: bool_expression(8, true, types.boolean, RegionId(0)),
+                    HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(LocalId(0)),
+                        value: bool_expression(true, types.boolean, RegionId(0), &mut expressions),
                     },
                 )],
                 terminator: HirTerminator::If {
-                    condition: bool_expression(1, true, types.boolean, RegionId(0)),
+                    condition: bool_expression(true, types.boolean, RegionId(0), &mut expressions),
                     then_block: BlockId(1),
                     else_block: BlockId(2),
                 },
@@ -219,9 +237,9 @@ fn dispatcher_assertion_message_is_lowered_once() {
         ],
         &mut string_table,
         &type_environment,
-        &types,
         "dispatcher_assertion",
         &[(LocalId(0), "flag")],
+        expressions,
     );
 
     assert!(source.contains("switch (__bb"));
@@ -248,16 +266,22 @@ fn dispatcher_assertion_message_is_lowered_once() {
 
 #[test]
 fn default_assertion_message_skips_optional_lowering() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (mut type_environment, types) = build_type_environment();
     let option_string = type_environment.intern_option(types.string);
     let message = optional_message(
-        2,
         option_string,
-        string_expression(1, "unused message", types.string, RegionId(0)),
+        string_expression(
+            "unused message",
+            types.string,
+            RegionId(0),
+            &mut expressions,
+        ),
         0,
         ValueKind::Const,
+        &mut expressions,
     );
     let source = function_with_assertion(
         &mut path_fork,
@@ -273,9 +297,9 @@ fn default_assertion_message_skips_optional_lowering() {
         }],
         &mut string_table,
         &type_environment,
-        &types,
         "default_assertion",
         &[],
+        expressions,
     );
 
     assert!(source.contains("throw __moth_assertion_error(\"assertion failed\");"));
@@ -303,6 +327,7 @@ fn default_assertion_message_skips_optional_lowering() {
 
 #[test]
 fn assertion_message_map_metadata_emits_map_helpers() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (mut type_environment, types) = build_type_environment();
@@ -310,16 +335,25 @@ fn assertion_message_map_metadata_emits_map_helpers() {
     // This synthetic nested shape exercises the backend metadata walk. Normal HIR validation
     // rejects a map where the language contract requires String, before backend lowering.
     let map_value = expression(
-        1,
-        HirExpressionKind::MapLiteral(vec![HirMapEntry {
-            key: string_expression(2, "key", types.string, RegionId(0)),
-            value: int_expression(3, 1, types.int, RegionId(0)),
-        }]),
+        HirExpressionKind::MapLiteral(append_map_entries(
+            &[HirMapEntry {
+                key: string_expression("key", types.string, RegionId(0), &mut expressions),
+                value: int_expression(1, types.int, RegionId(0), &mut expressions),
+            }],
+            &mut expressions,
+        )),
         types.map_string_int,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
-    let message = optional_message(4, option_string, map_value, 1, ValueKind::RValue);
+    let message = optional_message(
+        option_string,
+        map_value,
+        1,
+        ValueKind::RValue,
+        &mut expressions,
+    );
     let source = function_with_assertion(
         &mut path_fork,
         vec![HirBlock {
@@ -334,9 +368,9 @@ fn assertion_message_map_metadata_emits_map_helpers() {
         }],
         &mut string_table,
         &type_environment,
-        &types,
         "map_assertion",
         &[],
+        expressions,
     );
 
     assert!(source.contains("function __moth_map_new("));

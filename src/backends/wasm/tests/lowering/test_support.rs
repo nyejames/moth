@@ -5,9 +5,10 @@ use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::blocks::HirBlock;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::regions::HirRegion;
@@ -59,11 +60,13 @@ pub(crate) fn build_type_environment() -> (TypeEnvironment, TypeIds) {
 pub(crate) fn build_module(
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
+    expressions: HirExpressionStore,
     functions: Vec<(HirFunction, PathId, HirFunctionOrigin)>,
     blocks: Vec<HirBlock>,
     start_function: FunctionId,
 ) -> HirModule {
     let mut module = HirModule::new();
+    module.expressions = expressions;
     module.functions = functions
         .iter()
         .map(|(function, _, _)| function.clone())
@@ -102,6 +105,7 @@ pub(crate) fn build_module(
         }
     }
 
+    module.expressions.freeze();
     module
 }
 
@@ -130,16 +134,16 @@ pub(crate) fn borrow_facts_with_drop_site(
 }
 
 pub(crate) fn load_local(
-    id: u32,
+    expressions: &mut HirExpressionStore,
     local_id: LocalId,
     ty: TypeId,
     region: RegionId,
-) -> HirExpression {
+) -> HirValueId {
     expression(
-        id,
-        HirExpressionKind::Load(HirPlace::Local(local_id)),
+        HirExpressionKind::Load(HirPlace::local(local_id)),
         ty,
         region,
         ValueKind::Place,
+        expressions,
     )
 }

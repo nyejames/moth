@@ -1,9 +1,11 @@
 //! The compiler/build dependency-direction rules the source audit enforces.
 //!
-//! WHAT: three source-shaped bans that Rust visibility cannot express — production code outside
+//! WHAT: source-shaped bans that Rust visibility cannot express — production code outside
 //!       `src/compiler_frontend` naming a frontend semantic stage owner, `compiler_frontend` code
-//!       naming the build system or project tool's config container and `boracle/oracle` code
-//!       naming static-solver owners or reaching a static-solver module.
+//!       naming the build system or project tool's config container, `boracle/oracle` code naming
+//!       static-solver owners or reaching a static-solver module, durable HIR carriers owning
+//!       recursive expression/place shapes and backends naming borrow-state snapshots as semantic
+//!       selectors.
 //! WHY: `style-guide.mtf > Production layering and stage ownership` is a dependency rule. Every
 //!      owner named below is now `pub(in crate::compiler_frontend)` or narrower, so `rustc`
 //!      already rejects a build-side caller. What `rustc` cannot reject is the edit that widens
@@ -19,10 +21,10 @@
 //! of static solving. Source text is the only available tool, while the comparison-layer reducer
 //! lives at the `boracle` level.
 //!
-//! These are reintroduction tripwires, not behaviour tests. The behaviour each protects — that one
-//! module compilation, one config compilation and one template fold each run behind a named
-//! compiler service — is owned by those services' own tests. Text matching cannot prove it: a
-//! rename or an equivalent reimplementation would pass. Saying so is why the rules live here.
+//! These are reintroduction tripwires, not behaviour tests. The behaviour each protects — stage and
+//! oracle ownership, dense HIR carriers owning only IDs/ranges, and backends consuming explicit
+//! write semantics — is owned by those components' own tests. Text matching cannot prove it: a
+//! rename, alias or equivalent reimplementation would pass. Saying so is why the rules live here.
 
 /// The frontend semantic stage owners production code outside the compiler must not name.
 ///
@@ -182,15 +184,28 @@ const BORACLE_STATIC_SOLVER_MODULE_PREFIXES: &[&str] = &[
 /// reintroduction tripwire rather than a proof.
 const BUILD_AND_PROJECT_IMPORT_PREFIXES: &[&str] = &["settings::{Config"];
 
+/// Borrow solver snapshots that backend production code cannot use to choose local-write meaning.
+///
+/// The definition/update distinction is carried by HIR, while Wasm may still consume authorised
+/// borrow facts and JavaScript may still consume numeric proofs. Keep this list to the three
+/// snapshot names that select binding semantics; banning broader borrow vocabulary would reject
+/// legitimate validation and lowering inputs. The shared name matcher catches direct, qualified
+/// and braced spellings, but it does not parse Rust or resolve aliases, so renamed wrappers or an
+/// equivalent implementation can escape. This is a bounded regression tripwire, not proof.
+const BACKEND_BORROW_STATE_SEMANTIC_NAMES: &[&str] =
+    &["LocalMode", "statement_entry_states", "block_entry_states"];
+
 /// Which boundary rule one message belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoundaryRule {
     ExternalStageOrchestration,
     CompilerDependencyOnBuild,
     OracleStaticSolverIndependence,
+    RecursiveHirOwnership,
+    BackendBorrowStateSemantics,
 }
 
-/// Apply all three boundary rules to one file's text.
+/// Apply the boundary rules to one file's text.
 pub fn audit_architecture_boundary_fragment(
     relative: &str,
     content: &str,
@@ -218,6 +233,18 @@ pub fn audit_architecture_boundary_fragment(
                 )
             })
             .collect::<Vec<_>>();
+
+        if is_hir_carrier_source(relative) {
+            findings.extend(recursive_hir_ownership(content).into_iter().map(|shape| {
+                (
+                    BoundaryRule::RecursiveHirOwnership,
+                    format!(
+                        "owns recursive HIR shape '{shape}'; durable carriers use expression \
+                         IDs, typed side ranges and flat place projections"
+                    ),
+                )
+            }));
+        }
 
         if relative.starts_with("src/compiler_frontend/analysis/borrow_checker/boracle/oracle/") {
             findings.extend(
@@ -253,7 +280,7 @@ pub fn audit_architecture_boundary_fragment(
         return findings;
     }
 
-    banned_names_in_code(content, FRONTEND_SEMANTIC_STAGE_OWNERS)
+    let mut findings = banned_names_in_code(content, FRONTEND_SEMANTIC_STAGE_OWNERS)
         .into_iter()
         .map(|name| {
             (
@@ -264,7 +291,79 @@ pub fn audit_architecture_boundary_fragment(
                 ),
             )
         })
-        .collect()
+        .collect::<Vec<_>>();
+
+    if relative.starts_with("src/backends/") {
+        findings.extend(
+            banned_names_in_code(content, BACKEND_BORROW_STATE_SEMANTIC_NAMES)
+                .into_iter()
+                .map(|name| {
+                    (
+                        BoundaryRule::BackendBorrowStateSemantics,
+                        format!(
+                            "names borrow-state snapshot '{name}' to select backend local-write \
+                             semantics; validated HIR carries definition and update meaning"
+                        ),
+                    )
+                }),
+        );
+    }
+
+    findings
+}
+
+/// Catch the superseded owning shapes in the durable HIR carrier declarations.
+///
+/// Store buffers legitimately own expression rows, and readers legitimately borrow them.
+/// This tripwire targets the carrier files and known recursive spellings rather than
+/// attempting to parse Rust types or prove the absence of equivalent renamed shapes.
+fn is_hir_carrier_source(relative: &str) -> bool {
+    relative
+        .strip_prefix("src/compiler_frontend/hir/")
+        .is_some_and(|file| {
+            matches!(
+                file,
+                "expressions.rs"
+                    | "places.rs"
+                    | "statements.rs"
+                    | "terminators.rs"
+                    | "patterns.rs"
+                    | "numeric.rs"
+            )
+        })
+}
+
+fn recursive_hir_ownership(content: &str) -> Vec<String> {
+    let compact_code = content
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .flat_map(str::chars)
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
+    let mut findings = banned_prefixes_in_code(
+        &compact_code,
+        &[
+            "Box<HirExpression>",
+            "Vec<HirExpression>",
+            "Option<HirExpression>",
+            "Box<HirPlace>",
+            ",HirExpression)",
+        ],
+    );
+    if compact_code
+        .match_indices(":HirExpression")
+        .any(|(start, _)| {
+            let bytes = compact_code.as_bytes();
+            let after = start + ":HirExpression".len();
+            start
+                .checked_sub(1)
+                .is_none_or(|before| bytes[before] != b':')
+                && !bytes.get(after).copied().is_some_and(is_identifier_byte)
+        })
+    {
+        findings.push(": HirExpression".to_owned());
+    }
+    findings
 }
 
 /// Test sources, by the two layouts this repository uses for them.

@@ -1,7 +1,8 @@
 use super::{compile_boracle_input, run_boracle, solve_boracle};
 use crate::compiler_frontend::analysis::borrow_checker::{
-    AccessKind, BoracleDump, BoracleExperiment, BoracleModuleReport, BoracleRuleSelection,
-    CallResultProvenance, CallResultUnknownReason, EventKind, OriginKind, OriginOverlapDecision,
+    AccessKind, BindingDestination, BoracleDump, BoracleExperiment, BoracleModuleReport,
+    BoracleRuleSelection, CallResultProvenance, CallResultUnknownReason, EventKind, OriginKind,
+    OriginOverlapDecision, RebindValue, TerminatorEventKind, UseKind,
 };
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
@@ -53,18 +54,25 @@ fn boracle_source_service_accepts_stage0_resource_structural_strings() {
         .flat_map(|block| &block.statements)
         .find_map(|statement| {
             let value = match &statement.kind {
-                HirStatementKind::Assign { value, .. }
+                HirStatementKind::Write { value, .. }
                 | HirStatementKind::Expr(value)
                 | HirStatementKind::PushRuntimeFragment { value, .. } => value,
                 _ => return None,
             };
-            let HirExpressionKind::StructuralString { pieces } = &value.kind else {
+            let HirExpressionKind::StructuralString { pieces } =
+                &input.hir.expressions.expression(*value).kind
+            else {
                 return None;
             };
-            pieces.iter().find_map(|piece| match piece {
-                ConstStringPiece::Resource(resource_id) => Some(*resource_id),
-                _ => None,
-            })
+            input
+                .hir
+                .expressions
+                .string_pieces(*pieces)
+                .iter()
+                .find_map(|piece| match piece {
+                    ConstStringPiece::Resource(resource_id) => Some(*resource_id),
+                    _ => None,
+                })
         });
     assert!(
         resource_piece.is_some(),
@@ -94,7 +102,10 @@ fn boracle_source_service_accepts_stage0_resource_structural_strings() {
         problem.events().iter().any(|event| {
             matches!(
                 &event.kind,
-                EventKind::Fresh { destination, .. } if *destination == runtime_place
+                EventKind::Fresh {
+                    destination: BindingDestination::Define(place),
+                    ..
+                } if *place == runtime_place
             )
         }),
         "runtime structural strings should receive fresh value storage"
@@ -105,7 +116,7 @@ fn boracle_source_service_accepts_stage0_resource_structural_strings() {
             | EventKind::AliasFromPlace { destination, .. }
             | EventKind::ExclusiveAlias { destination, .. }
             | EventKind::ExclusiveAliasFromPlace { destination, .. } => {
-                *destination == runtime_place
+                destination.place() == runtime_place
             }
             _ => false,
         }),
@@ -137,10 +148,13 @@ fn boracle_source_differential_replays_plain_value() {
         function.problem.events().iter().any(|event| {
             matches!(
                 &event.kind,
-                EventKind::Fresh { destination, .. } if *destination == binding_place.id
+                EventKind::Fresh {
+                    destination: BindingDestination::Define(place),
+                    ..
+                } if *place == binding_place.id
             )
         }),
-        "plain-value source should emit a fresh value for its binding"
+        "plain-value source should define a fresh value for its binding"
     );
     assert!(
         function.problem.uses().iter().any(|use_row| {
@@ -230,6 +244,32 @@ fn assert_mutable_reassignment_access_order(source: &str) {
         2,
         "mutable-reassignment source should retain an initial and reassignment defining write: {defining_write_points:?}"
     );
+    let mut destinations = function
+        .problem
+        .uses()
+        .iter()
+        .filter_map(|use_row| {
+            if use_row.place != value_place.id {
+                return None;
+            }
+            use_row
+                .kind
+                .binding_destination()
+                .map(|destination| (use_row.point, destination))
+        })
+        .collect::<Vec<_>>();
+    destinations.sort_unstable_by_key(|(point, _)| point.raw());
+    assert_eq!(
+        destinations
+            .into_iter()
+            .map(|(_, destination)| destination)
+            .collect::<Vec<_>>(),
+        vec![
+            BindingDestination::Define(value_place.id),
+            BindingDestination::Update(value_place.id),
+        ],
+        "mutable-reassignment source should define its initial value and update that binding"
+    );
     let mut read_points = function
         .problem
         .uses()
@@ -275,17 +315,20 @@ result = shared
             let EventKind::Aggregate { destination, .. } = &event.kind else {
                 return None;
             };
+            if !matches!(destination, BindingDestination::Define(_)) {
+                return None;
+            }
             let place = function
                 .problem
                 .places()
                 .iter()
-                .find(|place| place.id == *destination)?;
+                .find(|place| place.id == destination.place())?;
             let binding = function
                 .problem
                 .bindings()
                 .iter()
                 .find(|binding| binding.id == place.root)?;
-            (!binding.compiler_temporary && binding.mutable).then_some(*destination)
+            (!binding.compiler_temporary && binding.mutable).then_some(destination.place())
         })
         .expect("shared-alias source should retain its mutable collection");
     let alias_destination = function.problem.events().iter().find_map(|event| {
@@ -304,10 +347,16 @@ result = shared
     );
     let alias_destination = alias_destination.expect("alias assertion should pass");
     assert!(
+        matches!(alias_destination, BindingDestination::Define(_)),
+        "a new shared binding should define its alias destination"
+    );
+    let alias_destination_place = alias_destination.place();
+    assert!(
         !function.problem.events().iter().any(|event| {
             matches!(
                 &event.kind,
-                EventKind::Fresh { destination, .. } if *destination == alias_destination
+                EventKind::Fresh { destination, .. }
+                    if destination.place() == alias_destination_place
             )
         }),
         "shared-alias source should not make its alias destination a fresh value"
@@ -360,7 +409,7 @@ measure |items ~{Int}| -> Int:
                     return false;
                 };
                 function.problem.uses().iter().any(|use_row| {
-                    use_row.place == result.place
+                    use_row.place == result.destination.place()
                         && !use_row.definition
                         && format!("{:?}", use_row.kind) == "Read"
                 })
@@ -411,7 +460,7 @@ choose |seed Bool| -> Int:
                     let EventKind::Fresh { destination, .. } = &event.kind else {
                         return false;
                     };
-                    *destination == place.id
+                    destination.place() == place.id
                         && function
                             .problem
                             .points()
@@ -426,7 +475,11 @@ choose |seed Bool| -> Int:
         .events()
         .iter()
         .filter_map(|event| {
-            let EventKind::Fresh { destination, .. } = &event.kind else {
+            let EventKind::Fresh {
+                destination: BindingDestination::Update(destination),
+                ..
+            } = &event.kind
+            else {
                 return None;
             };
             if *destination != value_place.id {
@@ -444,6 +497,18 @@ choose |seed Bool| -> Int:
         arm_blocks.len(),
         2,
         "if source should retain both arm assignments, arm blocks={arm_blocks:?}"
+    );
+    assert!(
+        function.problem.events().iter().any(|event| {
+            matches!(
+                &event.kind,
+                EventKind::Fresh {
+                    destination: BindingDestination::Define(place),
+                    ..
+                } if *place == value_place.id
+            )
+        }),
+        "if source should retain the value's initial definition separately from arm updates"
     );
     let merge_blocks = function
         .problem
@@ -507,55 +572,138 @@ choose |left Bool, right Bool| -> Bool:
         .functions()
         .iter()
         .find(|function| {
-            function
-                .problem
-                .events()
-                .iter()
-                .any(|event| matches!(&event.kind, EventKind::AliasFromPlace { .. }))
+            function.problem.events().iter().any(|event| {
+                matches!(&event.kind, EventKind::Terminator {
+                    kind: TerminatorEventKind::Jump { arguments, .. }
+                } if !arguments.is_empty())
+            })
         })
-        .expect("short-circuit source should produce jump-transfer aliases");
-    let transfers = function
+        .expect("short-circuit source should produce explicit jump transfers");
+    let jump_events = function
         .problem
         .events()
-        .windows(3)
-        .filter_map(|window| {
-            let EventKind::Access { use_id: read_id } = &window[0].kind else {
-                return None;
-            };
-            let EventKind::Access { use_id: write_id } = &window[1].kind else {
-                return None;
-            };
-            let EventKind::AliasFromPlace {
-                source,
-                destination,
-            } = &window[2].kind
-            else {
-                return None;
-            };
-            let read_use = function
-                .problem
-                .uses()
-                .iter()
-                .find(|use_row| use_row.id == *read_id)?;
-            let write_use = function
-                .problem
-                .uses()
-                .iter()
-                .find(|use_row| use_row.id == *write_id)?;
-            (read_use.place == *source
-                && !read_use.definition
-                && format!("{:?}", read_use.kind) == "Read"
-                && write_use.place == *destination
-                && write_use.definition
-                && write_use.kind.access_kind() == AccessKind::Exclusive)
-                .then_some((*source, *destination))
+        .iter()
+        .filter_map(|event| match &event.kind {
+            EventKind::Terminator {
+                kind: TerminatorEventKind::Jump { arguments, .. },
+            } if !arguments.is_empty() => Some((event, arguments)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let transfers = jump_events
+        .iter()
+        .flat_map(|(_, arguments)| arguments.iter())
+        .map(|argument| {
+            assert!(matches!(
+                argument.destination,
+                BindingDestination::Define(_)
+            ));
+            (argument.source, argument.destination.place())
         })
         .collect::<Vec<_>>();
     assert_eq!(
+        jump_events.len(),
+        2,
+        "short-circuit source should define the merge value on both predecessor jumps"
+    );
+    assert_eq!(
         transfers.len(),
         2,
-        "short-circuit source should transfer both jump arguments as read-then-defining-alias edges, transfers={transfers:?}"
+        "short-circuit source should retain both explicit edge definitions, transfers={transfers:?}"
     );
+    for (jump_event, arguments) in &jump_events {
+        let jump_block = function
+            .problem
+            .points()
+            .iter()
+            .find(|point| point.id == jump_event.point)
+            .expect("jump event should retain its point")
+            .block;
+        let argument_sources = arguments
+            .iter()
+            .map(|argument| argument.source)
+            .collect::<BTreeSet<_>>();
+        let argument_destinations = arguments
+            .iter()
+            .map(|argument| argument.destination)
+            .collect::<Vec<_>>();
+        let jump_ordinal = function
+            .problem
+            .points()
+            .iter()
+            .find(|point| point.id == jump_event.point)
+            .expect("jump event should retain its point")
+            .ordinal;
+        let mut read_points = function
+            .problem
+            .uses()
+            .iter()
+            .filter(|use_row| {
+                let Some(point) = function
+                    .problem
+                    .points()
+                    .iter()
+                    .find(|point| point.id == use_row.point)
+                else {
+                    return false;
+                };
+                argument_sources.contains(&use_row.place)
+                    && use_row.kind == UseKind::Read
+                    && point.block == jump_block
+                    && point.ordinal < jump_ordinal
+            })
+            .map(|use_row| {
+                function
+                    .problem
+                    .points()
+                    .iter()
+                    .find(|point| point.id == use_row.point)
+                    .expect("filtered read should retain its point")
+                    .ordinal
+            })
+            .collect::<Vec<_>>();
+        let mut write_points = function
+            .problem
+            .uses()
+            .iter()
+            .filter(|use_row| {
+                let Some(destination) = use_row.kind.binding_destination() else {
+                    return false;
+                };
+                let Some(point) = function
+                    .problem
+                    .points()
+                    .iter()
+                    .find(|point| point.id == use_row.point)
+                else {
+                    return false;
+                };
+                argument_destinations.contains(&destination)
+                    && destination.place() == use_row.place
+                    && point.block == jump_block
+                    && point.ordinal < jump_ordinal
+            })
+            .map(|use_row| {
+                function
+                    .problem
+                    .points()
+                    .iter()
+                    .find(|point| point.id == use_row.point)
+                    .expect("filtered write should retain its point")
+                    .ordinal
+            })
+            .collect::<Vec<_>>();
+        read_points.sort_unstable();
+        write_points.sort_unstable();
+        assert!(
+            !read_points.is_empty() && !write_points.is_empty(),
+            "each jump should retain source reads and destination definitions in its own block"
+        );
+        assert!(
+            read_points.last() < write_points.first(),
+            "a jump should capture its argument values before defining edge destinations: reads={read_points:?} writes={write_points:?}"
+        );
+    }
     let merge_destinations = transfers
         .iter()
         .map(|(_, destination)| *destination)
@@ -573,10 +721,24 @@ choose |left Bool, right Bool| -> Bool:
         !function.problem.events().iter().any(|event| {
             matches!(
                 &event.kind,
-                EventKind::Fresh { destination, .. } if *destination == merge_destination
+                EventKind::Fresh { destination, .. } if destination.place() == merge_destination
             )
         }),
-        "short-circuit source should define its merge local through alias transfers, not fresh values"
+        "short-circuit source should define its merge local through jump transfers"
+    );
+    assert!(
+        !function
+            .problem
+            .events()
+            .iter()
+            .any(|event| match &event.kind {
+                EventKind::AliasFromPlace { destination, .. }
+                | EventKind::ExclusiveAliasFromPlace { destination, .. } => {
+                    destination.place() == merge_destination
+                }
+                _ => false,
+            }),
+        "short-circuit merge locals should use explicit jump definitions, not alias events"
     );
     assert_source_differential_replay(source, &["Agreement"; 4]);
 }
@@ -818,6 +980,11 @@ result = shared
             _ => None,
         })
         .expect("copy event should be present in the typed source problem");
+    assert!(
+        matches!(destination, BindingDestination::Define(_)),
+        "a copy declaration should define an independent value binding"
+    );
+    let destination = destination.place();
     let source_origins =
         function
             .report
@@ -885,6 +1052,11 @@ writer = copy payload
             _ => None,
         })
         .expect("copy event should be present");
+    assert!(
+        matches!(destination, BindingDestination::Update(_)),
+        "copy assignment into an existing alias should update that binding"
+    );
+    let destination = destination.place();
     let source_origins =
         function
             .report
@@ -970,6 +1142,24 @@ result = shared
             _ => None,
         })
         .expect("rebind source should retain its alias event");
+    let alias_point = function
+        .problem
+        .events()
+        .iter()
+        .find(|event| event.id == alias_event)
+        .and_then(|event| {
+            function
+                .problem
+                .points()
+                .iter()
+                .find(|point| point.id == event.point)
+        })
+        .expect("alias event should retain its program point");
+    assert!(
+        matches!(alias_destination, BindingDestination::Define(_)),
+        "the shared declaration should define its alias binding"
+    );
+    let alias_destination = alias_destination.place();
     let old_origins = function
         .report
         .origin
@@ -981,13 +1171,25 @@ result = shared
         .iter()
         .find_map(|event| match &event.kind {
             EventKind::Aggregate { destination, .. } => {
-                let destination_place = &function.problem.places()[destination.index()];
-                (event.id > alias_event && destination_place.root == source_root)
+                let destination_place = &function.problem.places()[destination.place().index()];
+                let event_point = function
+                    .problem
+                    .points()
+                    .iter()
+                    .find(|point| point.id == event.point)?;
+                (event_point.block == alias_point.block
+                    && event_point.ordinal > alias_point.ordinal
+                    && destination_place.root == source_root)
                     .then_some((event.id, *destination))
             }
             _ => None,
         })
         .expect("fresh source rebind should retain its aggregate event");
+    assert!(
+        matches!(new_destination, BindingDestination::Update(_)),
+        "a fresh rvalue assigned to an existing slot should update that binding"
+    );
+    let new_destination = new_destination.place();
     let new_origins = function
         .report
         .origin
@@ -1003,7 +1205,143 @@ result = shared
 }
 
 #[test]
-fn boracle_source_slot_alias_rebind_then_fresh_rebind_separates_origins() {
+fn boracle_source_self_update_preserves_slot_before_a_different_place_update() {
+    let source = r#"
+source ~= {"source"}
+slot ~= {"slot"}
+slot = slot
+slot = source
+slot = {"replacement"}
+~slot.push("changed")
+result = source
+"#;
+    let report = solve_source(source);
+    let function = report
+        .functions()
+        .first()
+        .expect("self-update source should produce a function report");
+    let (slot_alias_event, slot_source, slot_destination) = function
+        .problem
+        .events()
+        .iter()
+        .find_map(|event| match &event.kind {
+            EventKind::ExclusiveAliasFromPlace {
+                source,
+                destination: BindingDestination::Update(destination),
+            } => Some((event.id, *source, *destination)),
+            _ => None,
+        })
+        .expect("a different-place update should install the mutable alias");
+    let slot_alias_point = function
+        .problem
+        .events()
+        .iter()
+        .find(|event| event.id == slot_alias_event)
+        .and_then(|event| {
+            function
+                .problem
+                .points()
+                .iter()
+                .find(|point| point.id == event.point)
+        })
+        .expect("the different-place update should retain its program point");
+    let slot_place = slot_destination;
+    let slot_root = function.problem.places()[slot_place.index()].root;
+    assert_ne!(
+        function.problem.places()[slot_source.index()].root,
+        slot_root
+    );
+
+    let self_update_use = function
+        .problem
+        .uses()
+        .iter()
+        .find(|use_row| {
+            use_row.place == slot_place
+                && use_row.kind == UseKind::Write
+                && !use_row.definition
+                && function
+                    .problem
+                    .points()
+                    .iter()
+                    .find(|point| point.id == use_row.point)
+                    .is_some_and(|point| point.ordinal < slot_alias_point.ordinal)
+        })
+        .expect("the exact self-update should be a non-defining write access");
+    let self_update_event = function
+        .problem
+        .events()
+        .iter()
+        .find(|event| {
+            matches!(
+                &event.kind,
+                EventKind::Access { use_id } if *use_id == self_update_use.id
+            )
+        })
+        .expect("the self-update write should retain its access event");
+    let initial_slot_event = function
+        .problem
+        .events()
+        .iter()
+        .find_map(|event| match &event.kind {
+            EventKind::Aggregate {
+                destination: BindingDestination::Define(destination),
+                ..
+            } if *destination == slot_place => Some(event.id),
+            _ => None,
+        })
+        .expect("the slot should begin with its own aggregate generation");
+    let initial_slot_origins = function
+        .report
+        .origin
+        .origins_after_event(initial_slot_event, slot_place)
+        .expect("the initial slot definition should publish its provenance");
+    let self_update_origins = function
+        .report
+        .origin
+        .origins_after_event(self_update_event.id, slot_place)
+        .expect("the self-update should preserve the slot provenance");
+    assert!(!initial_slot_origins.is_empty());
+    assert_eq!(self_update_origins, initial_slot_origins);
+
+    let (later_write_event, later_destination) = function
+        .problem
+        .events()
+        .iter()
+        .find_map(|event| match &event.kind {
+            EventKind::Aggregate {
+                destination: BindingDestination::Update(destination),
+                ..
+            } if function.problem.places()[destination.index()].root == slot_root => {
+                Some((event.id, *destination))
+            }
+            _ => None,
+        })
+        .expect("a later aggregate update should still target the alias-backed slot");
+    assert!(
+        function
+            .report
+            .origin
+            .is_write_through_event(later_write_event)
+    );
+    assert_eq!(later_destination, slot_place);
+
+    let differential = assert_source_differential_replay(source, &["Agreement", "Agreement"]);
+    let oracle_outcomes = differential
+        .lines()
+        .filter_map(|line| line.strip_prefix("oracle-outcome = "))
+        .collect::<Vec<_>>();
+    assert_eq!(oracle_outcomes.len(), 2);
+    assert!(
+        oracle_outcomes
+            .iter()
+            .all(|outcome| outcome.starts_with("CompleteSafe {")),
+        "both reference/oracle comparisons should complete safely:\n{differential}"
+    );
+}
+
+#[test]
+fn boracle_source_place_update_aliases_and_later_update_writes_through() {
     let report = solve_source(
         r#"
 source ~= {"source"}
@@ -1019,22 +1357,17 @@ result = survivor
         .functions()
         .iter()
         .find(|function| {
-            !function.report.has_conflicts()
-                && function
-                    .problem
-                    .events()
-                    .iter()
-                    .filter(|event| {
-                        matches!(
-                            event.kind,
-                            EventKind::AliasFromPlace { .. }
-                                | EventKind::ExclusiveAliasFromPlace { .. }
-                        )
-                    })
-                    .count()
-                    >= 2
+            function.problem.events().iter().any(|event| {
+                matches!(
+                    &event.kind,
+                    EventKind::ExclusiveAliasFromPlace {
+                        destination: BindingDestination::Update(_),
+                        ..
+                    }
+                )
+            })
         })
-        .expect("slot alias rebind source should produce a conflict-free typed report");
+        .expect("place-update source should produce a typed mutable alias report");
     let alias_events = function
         .problem
         .events()
@@ -1043,19 +1376,61 @@ result = survivor
             EventKind::AliasFromPlace {
                 source,
                 destination,
-            }
-            | EventKind::ExclusiveAliasFromPlace {
+            } => Some((event.id, *source, *destination)),
+            EventKind::ExclusiveAliasFromPlace {
                 source,
                 destination,
             } => Some((event.id, *source, *destination)),
             _ => None,
         })
         .collect::<Vec<_>>();
-    let (slot_alias_event, slot_source, slot_destination) = alias_events[0];
-    let (survivor_alias_event, survivor_source, survivor_destination) = alias_events[1];
-    let slot_root = function.problem.places()[slot_destination.index()].root;
+    let (slot_alias_event, slot_source, slot_destination) = alias_events
+        .iter()
+        .copied()
+        .find(|(_, _, destination)| matches!(destination, BindingDestination::Update(_)))
+        .expect("assignment from a place should update the existing slot");
+    let (survivor_alias_event, survivor_source, survivor_destination) = alias_events
+        .iter()
+        .copied()
+        .find(|(_, _, destination)| matches!(destination, BindingDestination::Define(_)))
+        .expect("alias declaration should define a separate holder");
+    let slot_destination_place = slot_destination.place();
+    let survivor_destination_place = survivor_destination.place();
+    let slot_root = function.problem.places()[slot_destination_place.index()].root;
+    let slot_alias_point = function
+        .problem
+        .events()
+        .iter()
+        .find(|event| event.id == slot_alias_event)
+        .and_then(|event| {
+            function
+                .problem
+                .points()
+                .iter()
+                .find(|point| point.id == event.point)
+        })
+        .expect("slot alias should retain its program point");
+    let survivor_alias_point = function
+        .problem
+        .events()
+        .iter()
+        .find(|event| event.id == survivor_alias_event)
+        .and_then(|event| {
+            function
+                .problem
+                .points()
+                .iter()
+                .find(|point| point.id == event.point)
+        })
+        .expect("survivor alias should retain its program point");
+    assert_eq!(slot_alias_point.block, survivor_alias_point.block);
+    assert!(slot_alias_point.ordinal < survivor_alias_point.ordinal);
     assert_eq!(
         function.problem.places()[survivor_source.index()].root,
+        slot_root
+    );
+    assert_ne!(
+        function.problem.places()[survivor_destination_place.index()].root,
         slot_root
     );
     assert_ne!(
@@ -1063,41 +1438,68 @@ result = survivor
         slot_root
     );
 
-    let intermediate_origins = function
+    let slot_alias_origins = function
         .report
         .origin
-        .origins_after_event(survivor_alias_event, survivor_destination)
-        .expect("surviving alias should publish intermediate origins");
-    let (fresh_rebind_event, fresh_rebind_destination) = function
+        .origins_after_event(slot_alias_event, slot_destination_place)
+        .expect("place update should publish the aliased source origins");
+    let survivor_origins = function
+        .report
+        .origin
+        .origins_after_event(survivor_alias_event, survivor_destination_place)
+        .expect("the declared survivor should publish the same referent origins");
+    assert!(!slot_alias_origins.is_empty());
+    assert_eq!(slot_alias_origins, survivor_origins);
+
+    let (write_through_event, write_through_destination) = function
         .problem
         .events()
         .iter()
         .find_map(|event| match &event.kind {
             EventKind::Aggregate { destination, .. }
-                if event.id > survivor_alias_event
-                    && function.problem.places()[destination.index()].root == slot_root =>
+                if function
+                    .problem
+                    .points()
+                    .iter()
+                    .find(|point| point.id == event.point)
+                    .is_some_and(|point| {
+                        point.block == slot_alias_point.block
+                            && point.ordinal > slot_alias_point.ordinal
+                    })
+                    && function.problem.places()[destination.place().index()].root == slot_root =>
             {
                 Some((event.id, *destination))
             }
             _ => None,
         })
-        .expect("slot should have a later fresh aggregate rebind");
-    let fresh_origins = function
+        .expect("slot should receive a later aggregate update");
+    assert!(
+        matches!(write_through_destination, BindingDestination::Update(_)),
+        "an aggregate assigned to an existing local should remain an update"
+    );
+    let write_through_destination = write_through_destination.place();
+    assert!(
+        function
+            .report
+            .origin
+            .is_write_through_event(write_through_event),
+        "a later assignment to the alias-backed slot should write through"
+    );
+    let slot_origins_after_write = function
         .report
         .origin
-        .origins_after_event(fresh_rebind_event, fresh_rebind_destination)
-        .expect("fresh slot rebind should publish new origins");
-    assert!(!intermediate_origins.is_empty());
-    assert!(!fresh_origins.is_empty());
+        .origins_after_event(write_through_event, write_through_destination)
+        .expect("write-through should preserve the slot's referent origins");
+    let survivor_origins_after_write = function
+        .report
+        .origin
+        .origins_after_event(write_through_event, survivor_destination_place)
+        .expect("write-through should preserve the survivor's referent origins");
     assert!(
-        intermediate_origins
-            .iter()
-            .all(|origin| !fresh_origins.contains(origin))
+        slot_alias_origins == slot_origins_after_write
+            && survivor_origins == survivor_origins_after_write,
+        "updating an alias-backed slot should preserve its referent identity"
     );
-    assert!(slot_alias_event < survivor_alias_event);
-    assert!(function.report.loans.loans().iter().all(|loan| {
-        loan.issue_event != Some(slot_alias_event) || loan.kind != AccessKind::Exclusive
-    }));
 }
 
 #[test]
@@ -1203,6 +1605,73 @@ result = writer
             use_row.definition && function.report.origin.is_write_through_use(use_row.id)
         })
         .expect("call-result destination write should be classified as write-through");
+    let (call_result_event, result_destination, argument_source) = function
+        .problem
+        .events()
+        .iter()
+        .find_map(|event| {
+            let EventKind::CallEffect(effect) = &event.kind else {
+                return None;
+            };
+            Some((
+                event.id,
+                effect.result?.destination,
+                effect.arguments.first()?.place,
+            ))
+        })
+        .expect("call-result effect should retain its destination and argument source");
+    assert!(
+        matches!(result_destination, BindingDestination::Define(_)),
+        "the internal call-result local should be defined by its call"
+    );
+    let result_binding = function
+        .problem
+        .places()
+        .get(result_destination.place().index())
+        .and_then(|place| function.problem.bindings().get(place.root.index()))
+        .expect("call-result destination should resolve to its internal binding");
+    assert!(
+        result_binding.compiler_temporary,
+        "the internal call-result binding should remain a compiler temporary"
+    );
+    let (rebind_event, writer_destination, source_place) = function
+        .problem
+        .events()
+        .iter()
+        .find_map(|event| match &event.kind {
+            EventKind::Rebind {
+                destination,
+                value: RebindValue::AliasFromPlace(source_place),
+            } if *source_place == result_destination.place() => {
+                Some((event.id, *destination, *source_place))
+            }
+            _ => None,
+        })
+        .expect("the caller assignment should rebind its destination from the call-result temp");
+    assert_eq!(
+        writer_destination,
+        BindingDestination::Update(write_through_use.place),
+        "the existing alias holder should remain the update destination"
+    );
+    assert_ne!(
+        function.problem.places()[result_destination.place().index()].root,
+        function.problem.places()[argument_source.index()].root,
+        "the call-result temporary should remain separate from the argument binding"
+    );
+    assert_ne!(
+        function.problem.places()[writer_destination.place().index()].root,
+        function.problem.places()[argument_source.index()].root,
+        "the caller's alias-holder binding should remain separate from the argument binding"
+    );
+    assert_eq!(
+        source_place,
+        result_destination.place(),
+        "the writer rebind should consume the internal call-result temporary"
+    );
+    assert!(
+        call_result_event < rebind_event,
+        "the call should define its result before the caller rebinds from it"
+    );
 
     assert!(
         function
@@ -1347,15 +1816,26 @@ result = shared
         .iter()
         .find(|function| function.report.has_conflicts())
         .expect("unknown result should retain a typed conflict");
-    let result = function
+    let (result, argument_source) = function
         .problem
         .events()
         .iter()
-        .find_map(|event| match &event.kind {
-            EventKind::CallEffect(effect) => effect.result,
-            _ => None,
+        .find_map(|event| {
+            let EventKind::CallEffect(effect) = &event.kind else {
+                return None;
+            };
+            Some((effect.result?, effect.arguments.first()?.place))
         })
         .expect("unknown call should retain its result row");
+    assert!(
+        matches!(result.destination, BindingDestination::Define(_)),
+        "a call result assigned to a new binding should define that binding"
+    );
+    assert_ne!(
+        function.problem.places()[result.destination.place().index()].root,
+        function.problem.places()[argument_source.index()].root,
+        "a call result binding should remain separate from its argument binding"
+    );
     assert!(matches!(
         &function.problem.origins()[result.origin.index()].kind,
         OriginKind::CallResult {
@@ -1483,10 +1963,14 @@ observed = loaded
                         .iter()
                         .all(|argument| argument.access == AccessKind::Shared) =>
             {
-                effect
-                    .result
-                    .as_ref()
-                    .map(|result| (event.id, effect.call, result.place, result.origin))
+                effect.result.as_ref().map(|result| {
+                    (
+                        event.id,
+                        effect.call,
+                        result.destination.place(),
+                        result.origin,
+                    )
+                })
             }
             _ => None,
         })
@@ -1608,7 +2092,7 @@ result = alias
                 destination,
                 fields,
                 ..
-            } if !fields.is_empty() => Some((event.id, *destination, fields[0].source)),
+            } if !fields.is_empty() => Some((event.id, destination.place(), fields[0].source)),
             _ => None,
         })
         .expect("aggregate event should retain its first child");
@@ -1639,7 +2123,7 @@ result = alias
                     && source_place
                         .projections
                         .starts_with(&aggregate_place.projections))
-                .then_some((event.id, *destination))
+                .then_some((event.id, destination.place()))
             }
             _ => None,
         })
@@ -1987,6 +2471,55 @@ loop counter < 2:
         })
         .expect("repeat loop source should produce a typed alias function report");
 
+    let items_root = first_function
+        .problem
+        .events()
+        .iter()
+        .find_map(|event| match &event.kind {
+            EventKind::Aggregate {
+                destination: BindingDestination::Define(destination),
+                ..
+            } => {
+                let root = first_function.problem.places()[destination.index()].root;
+                (!first_function.problem.bindings()[root.index()].compiler_temporary)
+                    .then_some(root)
+            }
+            _ => None,
+        })
+        .expect("loop source should define its initial collection slot");
+    assert!(
+        first_function
+            .problem
+            .events()
+            .iter()
+            .any(|event| match &event.kind {
+                EventKind::AliasFromPlace {
+                    source,
+                    destination: BindingDestination::Define(_),
+                }
+                | EventKind::ExclusiveAliasFromPlace {
+                    source,
+                    destination: BindingDestination::Define(_),
+                } => first_function.problem.places()[source.index()].root == items_root,
+                _ => false,
+            }),
+        "the loop-local alias should be a definition on each body execution"
+    );
+    assert!(
+        first_function
+            .problem
+            .events()
+            .iter()
+            .any(|event| match &event.kind {
+                EventKind::Aggregate {
+                    destination: BindingDestination::Update(destination),
+                    ..
+                } => first_function.problem.places()[destination.index()].root == items_root,
+                _ => false,
+            }),
+        "the collection assignment inside the loop should update its existing slot"
+    );
+
     assert!(
         first_function
             .problem
@@ -2219,7 +2752,7 @@ fn assert_mutable_parameter_is_write_through(source: &str) {
             EventKind::Fresh {
                 destination,
                 origin,
-            } if *origin == parameter_origin => Some(*destination),
+            } if *origin == parameter_origin => Some(destination.place()),
             _ => None,
         })
         .expect("parameter origin should have a defining destination");

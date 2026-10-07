@@ -35,11 +35,18 @@ pub(crate) struct BorrowAnalysis {
     /// contract instead of reconstructing it from separate HIR metadata caches.
     pub public_call_summaries: FxHashMap<FunctionId, PublicCallSummary>,
     pub function_summaries: FxHashMap<FunctionId, FunctionBorrowSummary>,
+    #[cfg(any(test, feature = "show_borrow_checker"))]
     pub block_entry_states: FxHashMap<BlockId, BorrowStateSnapshot>,
+    #[cfg(any(test, feature = "show_borrow_checker"))]
     pub block_exit_states: FxHashMap<BlockId, BorrowStateSnapshot>,
+    #[cfg(any(test, feature = "show_borrow_checker"))]
     pub statement_entry_states: FxHashMap<HirNodeId, BorrowStateSnapshot>,
     pub statement_facts: FxHashMap<HirNodeId, StatementBorrowFact>,
     pub terminator_facts: FxHashMap<BlockId, TerminatorBorrowFact>,
+    /// Per-value facts conservatively merged across every reachable final block context.
+    ///
+    /// A dense HIR value row can be shared by several CFG edges or functions, so its published
+    /// roots and access outcomes describe the union of those execution contexts.
     pub value_facts: FxHashMap<HirValueId, ValueBorrowFact>,
     /// Advisory drop insertion points for later lowering stages.
     ///
@@ -112,7 +119,7 @@ pub(crate) struct TerminatorBorrowFact {
     pub conflicts_checked: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ValueBorrowFact {
     pub classification: ValueAccessClassification,
     pub roots: Vec<LocalId>,
@@ -122,6 +129,17 @@ pub(crate) struct ValueBorrowFact {
     /// checker could not prove a transfer on every relevant path, while `Transfer` records a
     /// proven optional destruction-responsibility handoff for a later lowering stage.
     pub optional_transfer: OptionalTransferStatus,
+}
+
+impl ValueBorrowFact {
+    /// Merge facts from distinct final CFG contexts that share one immutable HIR value row.
+    pub(crate) fn merge(&mut self, other: Self) {
+        self.classification = self.classification.merge(other.classification);
+        self.roots.extend(other.roots);
+        self.roots.sort_unstable_by_key(|local| local.0);
+        self.roots.dedup_by_key(|local| local.0);
+        self.optional_transfer = self.optional_transfer.merge(other.optional_transfer);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -165,11 +183,13 @@ impl ValueAccessClassification {
     }
 }
 
+#[cfg(any(test, feature = "show_borrow_checker"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BorrowStateSnapshot {
     pub locals: Vec<LocalBorrowSnapshot>,
 }
 
+#[cfg(any(test, feature = "show_borrow_checker"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LocalBorrowSnapshot {
     pub local: LocalId,

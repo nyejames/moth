@@ -6,22 +6,25 @@
 //! liveness fact so a rebound alias stops blocking mutation once every path redefines it first.
 
 use crate::compiler_frontend::analysis::borrow_checker::OptionalTransferStatus;
+use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
 use crate::compiler_frontend::compiler_messages::BorrowDiagnosticKind;
 use crate::compiler_frontend::external_packages::CallTarget;
-use crate::compiler_frontend::hir::expressions::HirExpressionKind;
+use crate::compiler_frontend::hir::expression_store::HirValueRange;
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
+use crate::compiler_frontend::hir::validate_hir_module;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::borrow_fixture_support::{
     assert_borrow_error_kind, run_borrow_checker,
 };
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
-use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
+use crate::compiler_frontend::tests::hir_fixture_support::{expression, lower_hir};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
+use crate::compiler_frontend::tests::type_id_fixture_support::lower_ast;
 
 fn borrow_check_source(source: &str) {
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
@@ -186,17 +189,24 @@ return [: [output]</section>]
             else {
                 return None;
             };
-            if args.len() != 1 {
+            let argument_ids = hir.expressions.values(*args);
+            if argument_ids.len() != 1 {
                 return None;
             }
+            let argument_id = argument_ids[0];
+            let argument = hir.expressions.expression(argument_id);
 
-            let HirExpressionKind::Load(HirPlace::Local(local)) = &args[0].kind else {
+            let HirExpressionKind::Load(place) = &argument.kind else {
                 return None;
             };
+            if !hir.expressions.projections(place.projections).is_empty() {
+                return None;
+            }
+            let local = place.root;
             (hir.side_table
-                .resolve_local_name(*local, &path_fork, &string_table)
+                .resolve_local_name(local, &path_fork, &string_table)
                 == Some("card"))
-            .then_some(args[0].id)
+            .then_some(argument_id)
         })
         .expect("should locate the collection item passed to the user call");
 
@@ -249,17 +259,24 @@ return [: [output]</section>]
             else {
                 return None;
             };
-            if args.len() != 1 {
+            let argument_ids = hir.expressions.values(*args);
+            if argument_ids.len() != 1 {
                 return None;
             }
+            let argument_id = argument_ids[0];
+            let argument = hir.expressions.expression(argument_id);
 
-            let HirExpressionKind::Load(HirPlace::Local(local)) = &args[0].kind else {
+            let HirExpressionKind::Load(place) = &argument.kind else {
                 return None;
             };
+            if !hir.expressions.projections(place.projections).is_empty() {
+                return None;
+            }
+            let local = place.root;
             (hir.side_table
-                .resolve_local_name(*local, &path_fork, &string_table)
+                .resolve_local_name(local, &path_fork, &string_table)
                 == Some("card"))
-            .then_some(args[0].id)
+            .then_some(argument_id)
         })
         .expect("should locate the projected collection item passed to the user call");
 
@@ -303,6 +320,141 @@ loop keys |key|:
 return totals
 ;
 "#,
+    );
+}
+
+#[test]
+fn loop_definition_replaces_a_carried_alias_with_fresh_slot() {
+    let source = r#"probe || -> Int:
+left ~{Int} = {1}
+writer ~= left
+again ~= true
+loop again:
+writer = left
+sentinel ~= 0
+again = false
+;
+return 0
+;"#;
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let (mut hir, type_environment) =
+        lower_ast(ast, &mut string_table, &mut path_fork).expect("fixture source should lower");
+    let registry = default_external_package_registry(&mut string_table);
+    let local_named = |name| {
+        hir.blocks
+            .iter()
+            .flat_map(|block| &block.locals)
+            .find(|local| {
+                hir.side_table
+                    .resolve_local_name(local.id, &path_fork, &string_table)
+                    == Some(name)
+            })
+            .map(|local| local.id)
+            .unwrap_or_else(|| panic!("fixture local {name} should lower"))
+    };
+    let left = local_named("left");
+    let writer = local_named("writer");
+
+    // This fixture exercises a valid HIR re-entry that source scoping does not spell: retain an
+    // outer binding across the loop, then execute a typed Define on its back-edge. The source
+    // assignments identify the locals and CFG; changing the update tag makes the hidden
+    // definition-over-live-alias invariant explicit without introducing a test-only transfer.
+    let (body_block, definition_index, definition_id, sentinel_id) = hir
+        .blocks
+        .iter()
+        .find_map(|block| {
+            let definition = block.statements.iter().enumerate().find(|(_, statement)| {
+                matches!(
+                    &statement.kind,
+                    HirStatementKind::Write {
+                        target: HirWriteTarget::AssignPlace(place),
+                        ..
+                    } if place.root == writer && place.projections.is_empty()
+                )
+            });
+            let sentinel = block.statements.iter().find(|statement| {
+                matches!(
+                    &statement.kind,
+                    HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(local),
+                        ..
+                    } if hir.side_table.resolve_local_name(*local, &path_fork, &string_table)
+                        == Some("sentinel")
+                )
+            });
+            match (definition, sentinel) {
+                (Some((index, definition)), Some(sentinel)) => {
+                    Some((block.id, index, definition.id, sentinel.id))
+                }
+                _ => None,
+            }
+        })
+        .expect("loop body should contain the writer update and following sentinel");
+    let (left_type, body_region) = {
+        let left_local = hir
+            .blocks
+            .iter()
+            .flat_map(|block| &block.locals)
+            .find(|local| local.id == left)
+            .expect("left local should remain declared");
+        let body = &hir.blocks[body_block.0 as usize];
+        (left_local.ty, body.region)
+    };
+    // Keep the new value independent of the old referent: reading `left` here would be a real
+    // shared-alias conflict on later iterations, separate from the Define-over-alias invariant.
+    let rvalue = expression(
+        HirExpressionKind::Collection(HirValueRange::empty()),
+        left_type,
+        body_region,
+        ValueKind::RValue,
+        &mut hir.expressions,
+    );
+    let definition = &mut hir.blocks[body_block.0 as usize].statements[definition_index];
+    let HirStatementKind::Write { target, value } = &mut definition.kind else {
+        unreachable!("the selected loop statement is a write")
+    };
+    *target = HirWriteTarget::DefineLocal(writer);
+    *value = rvalue;
+
+    validate_hir_module(&hir, &type_environment)
+        .expect("loop re-entry definition should preserve HIR invariants");
+    let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+        .expect("re-entry should retire the stale alias before the new value is installed");
+
+    let definition_entry = report
+        .analysis
+        .statement_entry_states
+        .get(&definition_id)
+        .expect("the loop definition should have an entry snapshot");
+    let carried_writer = definition_entry
+        .locals
+        .iter()
+        .find(|state| state.local == writer)
+        .expect("the definition entry should include the carried writer");
+    assert!(
+        carried_writer.mode.contains(LocalMode::ALIAS),
+        "the fixed-point loop entry must carry the previous alias into the Define"
+    );
+    assert!(carried_writer.alias_roots.contains(&left));
+
+    let after_definition = report
+        .analysis
+        .statement_entry_states
+        .get(&sentinel_id)
+        .expect("the sentinel should snapshot state immediately after the Define");
+    let rebound_writer = after_definition
+        .locals
+        .iter()
+        .find(|state| state.local == writer)
+        .expect("the sentinel should include the newly defined writer");
+    assert_eq!(rebound_writer.mode, LocalMode::SLOT);
+    assert!(
+        rebound_writer.alias_roots.is_empty(),
+        "the fresh definition must discard the carried alias roots"
+    );
+    assert!(
+        !rebound_writer.alias_roots.contains(&left),
+        "the old alias root must not survive the new value-backed definition"
     );
 }
 

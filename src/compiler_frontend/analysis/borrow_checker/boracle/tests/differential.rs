@@ -5,9 +5,10 @@ use super::super::{
     compare_reference_and_experiments,
 };
 use crate::compiler_frontend::analysis::borrow_checker::problem::{
-    AccessKind, Binding, BindingId, BlockId, BorrowProblem, BorrowProblemParts, CfgBlock, Event,
-    EventId, EventKind, EventSource, Loan, LoanId, Place, PlaceId, PointId, ProgramPoint,
-    ProjectionElem, TerminatorEventKind, Use, UseId, UseKind, ValueOrigin, ValueOriginId,
+    AccessKind, Binding, BindingDestination, BindingId, BlockId, BorrowProblem, BorrowProblemParts,
+    CfgBlock, Event, EventId, EventKind, EventSource, Loan, LoanId, Place, PlaceId, PointId,
+    ProgramPoint, ProjectionElem, TerminatorEventKind, Use, UseId, UseKind, ValueOrigin,
+    ValueOriginId,
 };
 
 #[test]
@@ -302,7 +303,7 @@ fn safe_problem() -> BorrowProblem {
         vec![ValueOrigin::fresh(ValueOriginId::new(0))],
         Vec::new(),
         vec![EventKind::Fresh {
-            destination: PlaceId::new(0),
+            destination: BindingDestination::Define(PlaceId::new(0)),
             origin: ValueOriginId::new(0),
         }],
     )
@@ -328,12 +329,12 @@ fn shared_alias_definition_problem() -> BorrowProblem {
         }],
         vec![
             EventKind::Fresh {
-                destination: PlaceId::new(0),
+                destination: BindingDestination::Define(PlaceId::new(0)),
                 origin: ValueOriginId::new(0),
             },
             EventKind::Alias {
                 source: PlaceId::new(0),
-                destination: PlaceId::new(1),
+                destination: BindingDestination::Define(PlaceId::new(1)),
                 origins: vec![ValueOriginId::new(0)].into_boxed_slice(),
             },
             EventKind::Access {
@@ -383,7 +384,7 @@ fn dead_exclusive_runtime_conflict_problem() -> BorrowProblem {
         ],
         vec![
             EventKind::Fresh {
-                destination: PlaceId::new(0),
+                destination: BindingDestination::Define(PlaceId::new(0)),
                 origin: ValueOriginId::new(0),
             },
             EventKind::LoanIssue {
@@ -433,12 +434,12 @@ fn dead_exclusive_alias_problem() -> BorrowProblem {
         }],
         vec![
             EventKind::Fresh {
-                destination: PlaceId::new(0),
+                destination: BindingDestination::Define(PlaceId::new(0)),
                 origin: ValueOriginId::new(0),
             },
             EventKind::ExclusiveAliasFromPlace {
                 source: PlaceId::new(0),
-                destination: PlaceId::new(1),
+                destination: BindingDestination::Define(PlaceId::new(1)),
             },
             EventKind::Access {
                 use_id: UseId::new(0),

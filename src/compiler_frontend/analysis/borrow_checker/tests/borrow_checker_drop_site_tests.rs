@@ -8,6 +8,10 @@ use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
+use crate::compiler_frontend::hir::expression_store::HirProjection;
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatementKind, HirWriteTarget,
+};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, function_node, make_test_variable, node, symbol, test_if_branch_metadata,
@@ -210,9 +214,9 @@ fn catch_outward_handler_failure_drops_abandoned_argument_and_handler_local() {
         .find_map(|statement| match statement.kind {
             HirStatementKind::Call {
                 ref args,
-                result: Some(local),
+                result: Some(HirLocalDestination::Define(local)),
                 ..
-            } if args.is_empty() => Some(local),
+            } if args.len() == 0 => Some(local),
             _ => None,
         })
         .expect("the earlier argument must materialise a temporary");
@@ -261,8 +265,6 @@ fn catch_outward_handler_failure_drops_abandoned_argument_and_handler_local() {
 fn failed_field_compound_writeback_keeps_borrow_obligations_on_error_edge() {
     use crate::compiler_frontend::analysis::borrow_checker::LocalMode;
     use crate::compiler_frontend::hir::expressions::HirExpressionKind;
-    use crate::compiler_frontend::hir::places::HirPlace;
-    use crate::compiler_frontend::hir::statements::HirStatementKind;
     use crate::compiler_frontend::hir::terminators::HirTerminator;
     use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
     use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
@@ -286,12 +288,14 @@ fn failed_field_compound_writeback_keeps_borrow_obligations_on_error_edge() {
             .statements
             .iter()
             .find_map(|statement| match &statement.kind {
-                HirStatementKind::CastOp { source, result, .. } => {
-                    Some((statement.id, source, *result))
-                }
+                HirStatementKind::CastOp {
+                    source,
+                    result: Some(HirLocalDestination::Define(carrier)),
+                    ..
+                } => Some((statement.id, source, *carrier)),
                 _ => None,
             });
-        let Some((cast_id, cast_source, Some(carrier))) = cast else {
+        let Some((cast_id, cast_source, carrier)) = cast else {
             continue;
         };
         let HirTerminator::FallibleBranch {
@@ -307,13 +311,17 @@ fn failed_field_compound_writeback_keeps_borrow_obligations_on_error_edge() {
             .statements
             .iter()
             .find_map(|statement| match &statement.kind {
-                HirStatementKind::Assign {
-                    target: HirPlace::Field { base, .. },
+                HirStatementKind::Write {
+                    target: HirWriteTarget::AssignPlace(place),
                     ..
-                } => match base.as_ref() {
-                    HirPlace::Local(receiver) => Some(*receiver),
-                    _ => None,
-                },
+                } if hir.expressions.projections(place.projections).len() == 1
+                    && matches!(
+                        hir.expressions.projections(place.projections).first(),
+                        Some(HirProjection::Field(_))
+                    ) =>
+                {
+                    Some(place.root)
+                }
                 _ => None,
             });
         if let Some(receiver) = field_store {
@@ -341,17 +349,26 @@ fn failed_field_compound_writeback_keeps_borrow_obligations_on_error_edge() {
     assert!(
         !error.statements.iter().any(|statement| matches!(
             &statement.kind,
-            HirStatementKind::Assign {
-                target: HirPlace::Field { .. },
+            HirStatementKind::Write {
+                target: HirWriteTarget::AssignPlace(place),
                 ..
-            }
+            } if hir.expressions.projections(place.projections)
+                    .iter()
+                    .any(|projection| matches!(projection, HirProjection::Field(_)))
         )),
         "the failure edge must not write the field target"
     );
     // The promoted sum feeding the cast is abandoned on the failure edge.
-    let HirExpressionKind::Load(HirPlace::Local(promoted)) = &cast_source.kind else {
+    let HirExpressionKind::Load(promoted_place) = &hir.expressions.expression(*cast_source).kind
+    else {
         panic!("the write-back cast must read the promoted sum from a local");
     };
+    assert!(
+        hir.expressions
+            .projections(promoted_place.projections)
+            .is_empty()
+    );
+    let promoted = promoted_place.root;
     let sites = report
         .analysis
         .drop_sites_for_block(error_block)
@@ -361,7 +378,7 @@ fn failed_field_compound_writeback_keeps_borrow_obligations_on_error_edge() {
         .find(|site| site.kind == BorrowDropSiteKind::Return)
         .expect("the failed write-back must have a return drop site");
     assert!(
-        site.locals.contains(promoted),
+        site.locals.contains(&promoted),
         "the abandoned promoted sum cannot leak on the failure edge"
     );
     assert!(

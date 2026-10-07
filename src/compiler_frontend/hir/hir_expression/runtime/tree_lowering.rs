@@ -7,12 +7,13 @@
 
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpn;
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
+use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::statements::HirStatement;
 use crate::compiler_frontend::source::SourceSpan;
@@ -30,11 +31,12 @@ impl<'a> HirBuilder<'a> {
         rpn: &ExpressionRpn,
         source_span: &Option<SourceSpan>,
         expr_type_id: FrontendTypeId,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let tree = self.build_runtime_rpn_tree(rpn, source_span)?;
         let mut lowered = self.lower_runtime_tree_node(&tree, source_span)?;
         let expected_ty = self.lower_type_id(expr_type_id, source_span)?;
-        lowered.value.ty = expected_ty;
+        lowered.value =
+            self.replace_expression_metadata(lowered.value, source_span, Some(expected_ty), None)?;
         Ok(lowered)
     }
 
@@ -47,7 +49,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         node: &RuntimeRpnTree,
         source_span: &Option<SourceSpan>,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         let lowered = self.lower_runtime_tree_node(node, source_span)?;
         for prelude in lowered.prelude {
             self.emit_statement_to_current_block(prelude, source_span)?;
@@ -59,7 +61,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         node: &RuntimeRpnTree,
         _source_span: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         match node {
             RuntimeRpnTree::Leaf(expression) => {
                 if self.expression_needs_current_block_lowering(expression) {
@@ -82,7 +84,7 @@ impl<'a> HirBuilder<'a> {
 
                 if *op == Operator::Negate {
                     let Some((numeric_op, numeric_result_ty, discharged)) =
-                        self.classify_checked_numeric_negation(&lowered_operand)
+                        self.classify_checked_numeric_negation(lowered_operand)
                     else {
                         return_hir_transformation_error!(
                             "Numeric negation reached HIR lowering without a valid numeric domain",
@@ -115,12 +117,12 @@ impl<'a> HirBuilder<'a> {
                     span,
                     HirExpressionKind::UnaryOp {
                         op: hir_op,
-                        operand: Box::new(lowered_operand),
+                        operand: lowered_operand,
                     },
                     builtin_type_ids::BOOL,
                     ValueKind::RValue,
                     region,
-                );
+                )?;
                 Ok(LoweredExpression { prelude, value })
             }
             RuntimeRpnTree::Binary {
@@ -145,13 +147,13 @@ impl<'a> HirBuilder<'a> {
                     let value = self.make_expression(
                         span,
                         HirExpressionKind::Range {
-                            start: Box::new(lowered_left),
-                            end: Box::new(lowered_right),
+                            start: lowered_left,
+                            end: lowered_right,
                         },
                         range_ty,
                         ValueKind::RValue,
                         region,
-                    );
+                    )?;
                     return Ok(LoweredExpression { prelude, value });
                 }
 
@@ -159,7 +161,7 @@ impl<'a> HirBuilder<'a> {
                 // comparisons preserve their profile-precision promotion; Dec comparisons explicitly
                 // convert a mixed integer operand to the Dec scale before plain BinOp lowering.
                 if let Some((numeric_op, numeric_result_ty, discharged)) =
-                    self.classify_checked_numeric_binop(op, &lowered_left, &lowered_right)
+                    self.classify_checked_numeric_binop(op, lowered_left, lowered_right)
                 {
                     for prelude_statement in prelude.drain(..) {
                         self.emit_statement_to_current_block(prelude_statement, span)?;
@@ -203,13 +205,13 @@ impl<'a> HirBuilder<'a> {
                     span,
                     HirExpressionKind::BinOp {
                         op: hir_op,
-                        left: Box::new(lowered_left),
-                        right: Box::new(lowered_right),
+                        left: lowered_left,
+                        right: lowered_right,
                     },
                     result_ty,
                     ValueKind::RValue,
                     region,
-                );
+                )?;
                 Ok(LoweredExpression { prelude, value })
             }
         }
@@ -221,10 +223,10 @@ impl<'a> HirBuilder<'a> {
     fn lower_numeric_comparison_operands(
         &mut self,
         operator: &Operator,
-        left: HirExpression,
-        right: HirExpression,
+        left: HirValueId,
+        right: HirValueId,
         span: &Option<SourceSpan>,
-    ) -> Result<(HirExpression, HirExpression), CompilerError> {
+    ) -> Result<(HirValueId, HirValueId), HirConstructionFailure> {
         if !matches!(
             operator,
             Operator::Equality
@@ -237,8 +239,10 @@ impl<'a> HirBuilder<'a> {
             return Ok((left, right));
         }
 
-        let left_domain = NumericScalar::from_type_id(left.ty, &self.type_environment);
-        let right_domain = NumericScalar::from_type_id(right.ty, &self.type_environment);
+        let left_type = self.module.expressions.expression(left).ty;
+        let right_type = self.module.expressions.expression(right).ty;
+        let left_domain = NumericScalar::from_type_id(left_type, &self.type_environment);
+        let right_domain = NumericScalar::from_type_id(right_type, &self.type_environment);
         match (left_domain, right_domain) {
             (Some(NumericScalar::Int | NumericScalar::Uint), Some(NumericScalar::Float)) => {
                 let converted =
@@ -275,7 +279,7 @@ impl<'a> HirBuilder<'a> {
         pending_prelude: &mut Vec<HirStatement>,
         child: &RuntimeRpnTree,
         source_span: &Option<SourceSpan>,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         if self.runtime_tree_needs_current_block_lowering(child) {
             for prelude in pending_prelude.drain(..) {
                 self.emit_statement_to_current_block(prelude, source_span)?;

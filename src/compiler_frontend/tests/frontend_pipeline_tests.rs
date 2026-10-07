@@ -51,17 +51,16 @@ use crate::compiler_frontend::headers::parse_file_headers::{
     prepare_header_syntax,
 };
 use crate::compiler_frontend::hir::blocks::HirBlock;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
+use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureSource,
 };
 use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirFunctionOriginLookup};
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
-use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
+use crate::compiler_frontend::hir::ids::{BlockId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{HirNumericOperands, NumericFailureMode};
-use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::{HirTerminator, RuntimeFailureCause};
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
@@ -324,7 +323,12 @@ impl FrontendProject {
     fn lower_ast_result(&mut self, ast: Ast) -> Result<HirModule, CompilerMessages> {
         self.frontend
             .with_compiler(|compiler| {
-                compiler.generate_hir(ast, HirFunctionOriginLookup::default(), None)
+                compiler.generate_hir(
+                    ast,
+                    HirFunctionOriginLookup::default(),
+                    None,
+                    Default::default(),
+                )
             })
             .map(|result| result.hir_module)
     }
@@ -333,7 +337,12 @@ impl FrontendProject {
     fn failure_contract_result(&mut self) -> Result<HirModule, CompilerMessages> {
         let ast = self.ast_result()?;
         let lowered = self.frontend.with_compiler(|compiler| {
-            compiler.generate_hir(ast, HirFunctionOriginLookup::default(), None)
+            compiler.generate_hir(
+                ast,
+                HirFunctionOriginLookup::default(),
+                None,
+                Default::default(),
+            )
         })?;
         let hir = lowered.hir_module;
         let mut report = self
@@ -1021,11 +1030,15 @@ fn hir_block(hir: &HirModule, id: BlockId) -> &HirBlock {
         .expect("CFG block must exist")
 }
 
-fn loaded_local(expression: &HirExpression) -> LocalId {
-    let HirExpressionKind::Load(HirPlace::Local(local)) = &expression.kind else {
+fn loaded_local(hir: &HirModule, expression: &HirValueId) -> LocalId {
+    let HirExpressionKind::Load(place) = &hir.expressions.expression(*expression).kind else {
         panic!("carrier must be loaded from its producer local");
     };
-    *local
+    assert!(
+        place.projections.is_empty(),
+        "carrier must be a direct local load"
+    );
+    place.root
 }
 
 fn numeric_producer(hir: &HirModule, operator: NumericOperator) -> (&HirBlock, LocalId) {
@@ -1044,7 +1057,7 @@ fn numeric_producer(hir: &HirModule, operator: NumericOperator) -> (&HirBlock, L
                         ..
                     } if op.operator == operator => {
                         assert_eq!(*failure_mode, NumericFailureMode::ReturnError);
-                        Some((block, *result))
+                        Some((block, result.local()))
                     }
                     _ => None,
                 })
@@ -1058,7 +1071,7 @@ fn numeric_producer(hir: &HirModule, operator: NumericOperator) -> (&HirBlock, L
     producers[0]
 }
 
-fn fallible_edges(block: &HirBlock, carrier: LocalId) -> (BlockId, BlockId) {
+fn fallible_edges(hir: &HirModule, block: &HirBlock, carrier: LocalId) -> (BlockId, BlockId) {
     let HirTerminator::FallibleBranch {
         result,
         success_block,
@@ -1067,14 +1080,14 @@ fn fallible_edges(block: &HirBlock, carrier: LocalId) -> (BlockId, BlockId) {
     else {
         panic!("recoverable producer must branch before its payload is consumed");
     };
-    assert_eq!(loaded_local(result), carrier);
+    assert_eq!(loaded_local(hir, result), carrier);
     for statement in &block.statements {
-        if let HirStatementKind::Assign { value, .. } = &statement.kind {
-            match &value.kind {
+        if let HirStatementKind::Write { value, .. } = &statement.kind {
+            match &hir.expressions.expression(*value).kind {
                 HirExpressionKind::FallibleUnwrapSuccess { result }
                 | HirExpressionKind::FallibleUnwrapError { result } => {
                     assert_ne!(
-                        loaded_local(result),
+                        loaded_local(hir, result),
                         carrier,
                         "a producer must branch before either payload is assigned"
                     );
@@ -1093,17 +1106,19 @@ fn error_adapter(hir: &HirModule, error_block: BlockId, carrier: LocalId) -> (Bl
     let [statement] = adapter.statements.as_slice() else {
         panic!("error adapter must only initialise the handler's error slot");
     };
-    let HirStatementKind::Assign {
-        target: HirPlace::Local(error_local),
+    let HirStatementKind::Write {
+        target: HirWriteTarget::DefineLocal(error_local),
         value,
     } = &statement.kind
     else {
         panic!("error adapter must assign the shared error local");
     };
-    let HirExpressionKind::FallibleUnwrapError { result } = &value.kind else {
+    let HirExpressionKind::FallibleUnwrapError { result } =
+        &hir.expressions.expression(*value).kind
+    else {
         panic!("error adapter must unwrap the producer's failure payload");
     };
-    assert_eq!(loaded_local(result), carrier);
+    assert_eq!(loaded_local(hir, result), carrier);
     let HirTerminator::Jump { target, .. } = &adapter.terminator else {
         panic!("error adapter must enter the common handler");
     };
@@ -1136,7 +1151,12 @@ fn implicit_failure_private_chain_preserves_success_and_selects_error_materialis
     let lowered = project
         .frontend
         .with_compiler(|compiler| {
-            compiler.generate_hir(ast, HirFunctionOriginLookup::default(), None)
+            compiler.generate_hir(
+                ast,
+                HirFunctionOriginLookup::default(),
+                None,
+                Default::default(),
+            )
         })
         .expect("private failure chain must lower");
     let mut hir = lowered.hir_module;
@@ -1268,7 +1288,12 @@ fn implicit_failure_lanes_and_builtin_catch_preserve_float_integrity_guards() {
     let lowered = project
         .frontend
         .with_compiler(|compiler| {
-            compiler.generate_hir(ast, HirFunctionOriginLookup::default(), None)
+            compiler.generate_hir(
+                ast,
+                HirFunctionOriginLookup::default(),
+                None,
+                Default::default(),
+            )
         })
         .expect("float formatting and external validation must lower");
     let mut hir = lowered.hir_module;
@@ -1351,7 +1376,7 @@ fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
          walk |start Int, end Int| -> Int:\n\
              seen ~Int = 0\n\
              loop start to & end |value|:\n\
-                 seen = value\n\
+                 seen = copy value\n\
              ;\n\
              return seen\n;\n\
          safe_walk |start Int, end Int| -> Int, Error!:\n\
@@ -1361,7 +1386,12 @@ fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
     let lowered = project
         .frontend
         .with_compiler(|compiler| {
-            compiler.generate_hir(ast, HirFunctionOriginLookup::default(), None)
+            compiler.generate_hir(
+                ast,
+                HirFunctionOriginLookup::default(),
+                None,
+                Default::default(),
+            )
         })
         .expect("compound write-back and range updates must lower");
     let mut hir = lowered.hir_module;
@@ -1433,7 +1463,12 @@ fn private_failure_lane_marks_carriers_as_temps_without_weakening_fresh_mutable_
     let lowered = project
         .frontend
         .with_compiler(|compiler| {
-            compiler.generate_hir(ast, HirFunctionOriginLookup::default(), None)
+            compiler.generate_hir(
+                ast,
+                HirFunctionOriginLookup::default(),
+                None,
+                Default::default(),
+            )
         })
         .expect("fresh mutable arguments and private checked arithmetic must lower");
     let mut hir = lowered.hir_module;
@@ -1515,7 +1550,12 @@ fn private_failure_lane_preserves_unrelated_fatal_fallible_edge() {
     let lowered = project
         .frontend
         .with_compiler(|compiler| {
-            compiler.generate_hir(ast, HirFunctionOriginLookup::default(), None)
+            compiler.generate_hir(
+                ast,
+                HirFunctionOriginLookup::default(),
+                None,
+                Default::default(),
+            )
         })
         .expect("compound stores must lower");
     let mut hir = lowered.hir_module;
@@ -1576,6 +1616,7 @@ fn private_failure_lane_preserves_unrelated_fatal_fallible_edge() {
     else {
         panic!("the typed store conversion must return Error regardless of its rendered message");
     };
+    let error = hir.expressions.expression(*error);
     assert!(matches!(
         error.kind,
         HirExpressionKind::FallibleUnwrapError { .. }
@@ -1648,7 +1689,7 @@ fn store_conversion_returns_before_assign(hir: &HirModule, entry: BlockId) -> bo
         if hir.blocks[error_block.0 as usize]
             .statements
             .iter()
-            .any(|statement| matches!(statement.kind, HirStatementKind::Assign { .. }))
+            .any(|statement| matches!(statement.kind, HirStatementKind::Write { .. }))
         {
             return false;
         }
@@ -1659,11 +1700,11 @@ fn store_conversion_returns_before_assign(hir: &HirModule, entry: BlockId) -> bo
                 .any(|statement| {
                     matches!(
                         &statement.kind,
-                        HirStatementKind::Assign { value, .. }
+                        HirStatementKind::Write { value, .. }
                             if matches!(
-                                &value.kind,
+                                &hir.expressions.expression(*value).kind,
                                 HirExpressionKind::FallibleUnwrapSuccess { result }
-                                    if loaded_local(result) == carrier
+                                    if loaded_local(hir, result) == carrier.local()
                             )
                     )
                 });
@@ -1915,8 +1956,8 @@ fn implicit_failure_hir_two_numeric_operations_sequence_success_and_share_one_ha
     let (multiply, multiply_carrier) = numeric_producer(&hir, NumericOperator::Multiply);
     let (add, add_carrier) = numeric_producer(&hir, NumericOperator::Add);
     assert_ne!(multiply_carrier, add_carrier);
-    let (multiply_success, multiply_error) = fallible_edges(multiply, multiply_carrier);
-    let (add_success, add_error) = fallible_edges(add, add_carrier);
+    let (multiply_success, multiply_error) = fallible_edges(&hir, multiply, multiply_carrier);
+    let (add_success, add_error) = fallible_edges(&hir, add, add_carrier);
     assert_eq!(
         multiply_success, add.id,
         "addition must execute only after multiplication succeeds"
@@ -1967,10 +2008,11 @@ fn implicit_failure_hir_two_numeric_operations_sequence_success_and_share_one_ha
             _ => None,
         })
         .expect("addition must consume the multiplication success value");
+    let add_left = hir.expressions.expression(*add_left);
     let HirExpressionKind::FallibleUnwrapSuccess { result } = &add_left.kind else {
         panic!("the first success edge must unwrap multiplication before adding");
     };
-    assert_eq!(loaded_local(result), multiply_carrier);
+    assert_eq!(loaded_local(&hir, result), multiply_carrier);
     assert_eq!(add_left.ty, builtin_type_ids::INT);
 
     let success = hir_block(&hir, add_success);
@@ -1978,19 +2020,24 @@ fn implicit_failure_hir_two_numeric_operations_sequence_success_and_share_one_ha
         .statements
         .iter()
         .find_map(|statement| match &statement.kind {
-            HirStatementKind::Assign {
-                target: HirPlace::Local(local),
+            HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(local),
                 value,
-            } if matches!(value.kind, HirExpressionKind::FallibleUnwrapSuccess { .. }) => {
+            } if matches!(
+                hir.expressions.expression(*value).kind,
+                HirExpressionKind::FallibleUnwrapSuccess { .. }
+            ) =>
+            {
                 Some((*local, value))
             }
             _ => None,
         })
         .expect("the final success edge must initialise the catch success slot");
+    let success_value = hir.expressions.expression(*success_value);
     let HirExpressionKind::FallibleUnwrapSuccess { result } = &success_value.kind else {
         panic!("final success assignment must unwrap the addition carrier");
     };
-    assert_eq!(loaded_local(result), add_carrier);
+    assert_eq!(loaded_local(&hir, result), add_carrier);
     assert_eq!(success_value.ty, builtin_type_ids::INT);
     assert_ne!(success_local, error_local);
     assert_ne!(success_local, multiply_carrier);
@@ -2000,8 +2047,8 @@ fn implicit_failure_hir_two_numeric_operations_sequence_success_and_share_one_ha
     assert!(
         handler_block.statements.iter().any(|statement| matches!(
             &statement.kind,
-            HirStatementKind::Assign { target: HirPlace::Local(local), value }
-                if *local == success_local && matches!(value.kind, HirExpressionKind::Int(0))
+            HirStatementKind::Write { target: HirWriteTarget::DefineLocal(local), value }
+                if *local == success_local && matches!(hir.expressions.expression(*value).kind, HirExpressionKind::Int(0))
         )),
         "recovery must initialise the same success slot without reading a failed success payload"
     );
@@ -2045,17 +2092,17 @@ fn implicit_failure_hir_two_numeric_operations_sequence_success_and_share_one_ha
         let HirTerminator::FallibleBranch { result, .. } = &producer.terminator else {
             panic!("numeric carrier must be tested before any slot is defined");
         };
-        assert_eq!(result.ty, declaration.ty);
+        assert_eq!(hir.expressions.expression(*result).ty, declaration.ty);
     }
     for adapter_id in [multiply_error, add_error] {
         let adapter = hir_block(&hir, adapter_id);
         assert!(
             adapter.statements.iter().all(|statement| matches!(
                 &statement.kind,
-                HirStatementKind::Assign { target: HirPlace::Local(local), value }
+                HirStatementKind::Write { target: HirWriteTarget::DefineLocal(local), value }
                     if *local == error_local
-                        && value.ty == error_type
-                        && matches!(value.kind, HirExpressionKind::FallibleUnwrapError { .. })
+                        && hir.expressions.expression(*value).ty == error_type
+                        && matches!(hir.expressions.expression(*value).kind, HirExpressionKind::FallibleUnwrapError { .. })
             )),
             "error edges must define only the Error slot, never the success slot"
         );
@@ -2063,14 +2110,14 @@ fn implicit_failure_hir_two_numeric_operations_sequence_success_and_share_one_ha
     for success_block in [add, success] {
         assert!(success_block.statements.iter().all(|statement| !matches!(
             &statement.kind,
-            HirStatementKind::Assign { target: HirPlace::Local(local), .. } if *local == error_local
+            HirStatementKind::Write { target: HirWriteTarget::DefineLocal(local), .. } if *local == error_local
         )), "success edges must not initialise the Error slot");
     }
     assert!(
         handler_block.statements.iter().all(|statement| !matches!(
             &statement.kind,
-            HirStatementKind::Assign { value, .. }
-                if matches!(value.kind, HirExpressionKind::FallibleUnwrapSuccess { .. })
+            HirStatementKind::Write { value, .. }
+                if matches!(hir.expressions.expression(*value).kind, HirExpressionKind::FallibleUnwrapSuccess { .. })
         )),
         "the handler must never consume a failed producer's success payload"
     );
@@ -2086,11 +2133,11 @@ fn implicit_failure_nested_handler_catch_uses_its_own_error_continuation() {
     );
     let hir = project.hir();
     let (multiply, multiply_carrier) = numeric_producer(&hir, NumericOperator::Multiply);
-    let (_, multiply_error) = fallible_edges(multiply, multiply_carrier);
+    let (_, multiply_error) = fallible_edges(&hir, multiply, multiply_carrier);
     let (outer_handler, outer_error_slot) = error_adapter(&hir, multiply_error, multiply_carrier);
     let (divide, divide_carrier) = numeric_producer(&hir, NumericOperator::IntegerDivide);
     assert_eq!(divide.id, outer_handler);
-    let (_, divide_error) = fallible_edges(divide, divide_carrier);
+    let (_, divide_error) = fallible_edges(&hir, divide, divide_carrier);
     let (inner_handler, inner_error_slot) = error_adapter(&hir, divide_error, divide_carrier);
     assert_ne!(
         inner_handler, outer_handler,
@@ -2102,7 +2149,7 @@ fn implicit_failure_nested_handler_catch_uses_its_own_error_continuation() {
     );
     assert!(hir_block(&hir, inner_handler).statements.iter().any(|statement| matches!(
         &statement.kind,
-        HirStatementKind::Assign { value, .. } if matches!(value.kind, HirExpressionKind::Int(7))
+        HirStatementKind::Write { value, .. } if matches!(hir.expressions.expression(*value).kind, HirExpressionKind::Int(7))
     )));
 }
 
@@ -2528,7 +2575,7 @@ fn implicit_failure_cast_catch_retains_operand_and_conversion_contracts() {
         .lower_ast_result(ast)
         .expect("infallible cast must still recover operand failures");
     let (multiply, carrier) = numeric_producer(&hir, NumericOperator::Multiply);
-    let (_, error) = fallible_edges(multiply, carrier);
+    let (_, error) = fallible_edges(&hir, multiply, carrier);
     error_adapter(&hir, error, carrier);
 
     let mut project =
@@ -2840,21 +2887,21 @@ fn implicit_failure_in_handler_goes_outward_not_back_into_its_own_catch() {
     assert_eq!(contributor.span, handler_span);
     assert!(contributor.codes.contains(&BuiltinErrorCode::DivideByZero));
     let (multiply_block, multiply_carrier) = numeric_producer(&hir, NumericOperator::Multiply);
-    let (_, multiply_error) = fallible_edges(multiply_block, multiply_carrier);
+    let (_, multiply_error) = fallible_edges(&hir, multiply_block, multiply_carrier);
     let (handler, _) = error_adapter(&hir, multiply_error, multiply_carrier);
     let (divide_block, divide_carrier) = numeric_producer(&hir, NumericOperator::IntegerDivide);
     assert_eq!(
         divide_block.id, handler,
         "handler arithmetic must execute inside the handler"
     );
-    let (_, divide_error) = fallible_edges(divide_block, divide_carrier);
+    let (_, divide_error) = fallible_edges(&hir, divide_block, divide_carrier);
     let error_block = hir_block(&hir, divide_error);
     let HirTerminator::ReturnError(error) = &error_block.terminator else {
         panic!("handler failure must return outward, not re-enter its own handler");
     };
     assert!(matches!(
-        &error.kind,
-        HirExpressionKind::FallibleUnwrapError { result } if loaded_local(result) == divide_carrier
+        &hir.expressions.expression(*error).kind,
+        HirExpressionKind::FallibleUnwrapError { result } if loaded_local(&hir, result) == divide_carrier
     ));
 
     let mut project = failure_project(
@@ -3864,7 +3911,7 @@ fn implicit_failure_private_catch_routes_argument_failure_before_outer_call() {
     else {
         panic!("the private argument call must branch before the outer call consumes it");
     };
-    let (handler, _) = error_adapter(&hir, *error_block, loaded_local(result));
+    let (handler, _) = error_adapter(&hir, *error_block, loaded_local(&hir, result));
     assert!(
         reachable.contains(&handler),
         "the argument failure must enter the shared catch handler"
@@ -3876,7 +3923,12 @@ fn implicit_failure_private_catch_routes_argument_failure_before_outer_call() {
     let lowered = project
         .frontend
         .with_compiler(|compiler| {
-            compiler.generate_hir(ast, HirFunctionOriginLookup::default(), None)
+            compiler.generate_hir(
+                ast,
+                HirFunctionOriginLookup::default(),
+                None,
+                Default::default(),
+            )
         })
         .expect("failed private arguments must lower inside the outer catch");
     let mut hir = lowered.hir_module;
@@ -3934,7 +3986,7 @@ fn implicit_failure_private_catch_routes_argument_failure_before_outer_call() {
         else {
             panic!("every installed private call must branch before its success value is used");
         };
-        let (error_handler, _) = error_adapter(&hir, *error_block, loaded_local(result));
+        let (error_handler, _) = error_adapter(&hir, *error_block, loaded_local(&hir, result));
         assert!(
             reachable.contains(&error_handler),
             "the installed call failure must enter the shared catch handler"
@@ -3991,7 +4043,12 @@ fn implicit_failure_catch_abandons_later_temporaries_without_handler_reads() {
     let lowered = project
         .frontend
         .with_compiler(|compiler| {
-            compiler.generate_hir(ast, HirFunctionOriginLookup::default(), None)
+            compiler.generate_hir(
+                ast,
+                HirFunctionOriginLookup::default(),
+                None,
+                Default::default(),
+            )
         })
         .expect("abandoned temporaries must lower with one handler join");
     let mut hir = lowered.hir_module;
@@ -4050,7 +4107,7 @@ fn implicit_failure_catch_abandons_later_temporaries_without_handler_reads() {
         else {
             panic!("every installed private call must branch before its success value is used");
         };
-        let (error_handler, _) = error_adapter(&hir, *error_block, loaded_local(result));
+        let (error_handler, _) = error_adapter(&hir, *error_block, loaded_local(&hir, result));
         assert!(
             reachable.contains(&error_handler),
             "the installed call failure must enter the shared catch handler"
@@ -4314,7 +4371,12 @@ fn implicit_failure_failed_compound_writeback_keeps_target_after_rhs_catch() {
     let lowered = project
         .frontend
         .with_compiler(|compiler| {
-            compiler.generate_hir(ast, HirFunctionOriginLookup::default(), None)
+            compiler.generate_hir(
+                ast,
+                HirFunctionOriginLookup::default(),
+                None,
+                Default::default(),
+            )
         })
         .expect("RHS catch must lower while the write-back stays separate");
     let mut hir = lowered.hir_module;
@@ -4372,7 +4434,7 @@ fn implicit_failure_failed_compound_writeback_keeps_target_after_rhs_catch() {
     else {
         panic!("the typed RHS call must branch into the RHS catch handler");
     };
-    let (error_handler, _) = error_adapter(&hir, *error_block, loaded_local(result));
+    let (error_handler, _) = error_adapter(&hir, *error_block, loaded_local(&hir, result));
     assert!(
         reachable.contains(&error_handler),
         "the typed RHS call failure must enter the RHS catch handler"
@@ -4463,7 +4525,7 @@ fn implicit_failure_zero_success_host_catch_lowers_pending_numeric_argument() {
         .lower_ast_result(ast)
         .expect("numeric host arguments must support local recovery");
     let (multiply, carrier) = numeric_producer(&hir, NumericOperator::Multiply);
-    let (success, error) = fallible_edges(multiply, carrier);
+    let (success, error) = fallible_edges(&hir, multiply, carrier);
     let handler_slot = error_adapter(&hir, error, carrier);
     let host_block = hir_block(&hir, success);
     let host_carrier = host_block
@@ -4474,11 +4536,11 @@ fn implicit_failure_zero_success_host_catch_lowers_pending_numeric_argument() {
                 target: CallTarget::External(id),
                 result: Some(result),
                 ..
-            } if *id == host_id => Some(*result),
+            } if *id == host_id => Some(result.local()),
             _ => None,
         })
         .expect("the protected host call must execute only after its numeric argument succeeds");
-    let (_, host_error) = fallible_edges(host_block, host_carrier);
+    let (_, host_error) = fallible_edges(&hir, host_block, host_carrier);
     assert_eq!(
         error_adapter(&hir, host_error, host_carrier),
         handler_slot,
@@ -4600,7 +4662,7 @@ fn implicit_failure_builtin_catch_lowers_numeric_get_and_set_arguments() {
             .lower_ast_result(ast)
             .expect("builtin catch must sequence numeric arguments");
         let (multiply, carrier) = numeric_producer(&hir, NumericOperator::Multiply);
-        let (_, error) = fallible_edges(multiply, carrier);
+        let (_, error) = fallible_edges(&hir, multiply, carrier);
         error_adapter(&hir, error, carrier);
     }
 }

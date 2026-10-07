@@ -13,9 +13,9 @@ use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotContributionSource,
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::hir_expression::LoweredExpression;
@@ -41,7 +41,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         handoff: &OwnedRuntimeSlotApplicationHandoff,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let output_accumulator = self.initialize_runtime_template_accumulator(span_ref)?;
         let append_context = RuntimeTemplateAppendContext::new(output_accumulator);
         let emission =
@@ -60,11 +60,11 @@ impl<'a> HirBuilder<'a> {
         let region = self.current_region_or_error(span_ref)?;
         let value = self.make_expression(
             span_ref,
-            HirExpressionKind::Copy(HirPlace::Local(output_accumulator)),
+            HirExpressionKind::Copy(HirPlace::local(output_accumulator)),
             builtin_type_ids::STRING,
             ValueKind::RValue,
             region,
-        );
+        )?;
 
         Ok(LoweredExpression {
             prelude: vec![],
@@ -80,7 +80,7 @@ impl<'a> HirBuilder<'a> {
         handoff: &OwnedRuntimeSlotApplicationHandoff,
         append_context: RuntimeTemplateAppendContext<'_>,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
         let source_accumulators =
             self.initialize_runtime_slot_source_accumulators(handoff, span_ref)?;
 
@@ -119,7 +119,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         handoff: &OwnedRuntimeSlotApplicationHandoff,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<RuntimeSlotSourceAccumulatorContext, CompilerError> {
+    ) -> Result<RuntimeSlotSourceAccumulatorContext, HirConstructionFailure> {
         let mut context = RuntimeSlotSourceAccumulatorContext::new();
 
         for source in &handoff.contribution_sources {
@@ -136,7 +136,7 @@ impl<'a> HirBuilder<'a> {
         append_context: RuntimeTemplateAppendContext<'_>,
         source_accumulators: &RuntimeSlotSourceAccumulatorContext,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<RuntimeSlotContributionResult, CompilerError> {
+    ) -> Result<RuntimeSlotContributionResult, HirConstructionFailure> {
         let contribution_emitted_flag = self.initialize_runtime_template_emitted_flag(span_ref)?;
         let mut renders_wrapper_unconditionally = handoff.contribution_sources.is_empty();
         let loop_control_flush = RuntimeSlotLoopControlFlush {
@@ -208,7 +208,7 @@ impl<'a> HirBuilder<'a> {
         loop_control_flush: RuntimeSlotLoopControlFlush<'_>,
         contribution_emitted_flag: LocalId,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
         let append_context = RuntimeTemplateAppendContext::new(target_accumulator)
             .with_emitted_output(Some(contribution_emitted_flag))
             .with_loop_control_flush(loop_control_flush);
@@ -227,7 +227,7 @@ impl<'a> HirBuilder<'a> {
         append_context: RuntimeTemplateAppendContext<'_>,
         source_accumulators: &RuntimeSlotSourceAccumulatorContext,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
         let wrapper_context = append_context
             .with_runtime_slot_sites(source_accumulators, &handoff.slot_sites)
             .rejecting_unresolved_slots();
@@ -252,7 +252,7 @@ impl<'a> HirBuilder<'a> {
         source_accumulators: &RuntimeSlotSourceAccumulatorContext,
         emitted_any_contribution: LocalId,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
         let condition_block = self.current_block_id_or_error(span_ref)?;
         let parent_region = self.current_region_or_error(span_ref)?;
         let rendered_region = self.create_child_region(parent_region);
@@ -265,7 +265,7 @@ impl<'a> HirBuilder<'a> {
             builtin_type_ids::BOOL,
             span_ref,
             parent_region,
-        );
+        )?;
 
         self.emit_terminator(
             condition_block,

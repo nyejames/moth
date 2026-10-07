@@ -43,12 +43,10 @@ fn missing_field_name_metadata_is_an_internal_compiler_error() {
         }],
     });
 
-    let borrow_analysis = BorrowCheckReport::default();
     let numeric_proofs = NumericProofs::default();
     let path_table = path_fork.snapshot_table();
     let mut emitter = JsEmitter::new(
         &module,
-        &borrow_analysis,
         &numeric_proofs,
         &string_table,
         &path_table,
@@ -96,6 +94,7 @@ fn invalid_identifier_chars_are_replaced_with_underscore() {
 /// Verifies that function_name_by_id exposes stable JS names for runtime-fragment lookup. [names]
 #[test]
 fn exposes_function_name_map_for_runtime_fragments() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
@@ -105,7 +104,11 @@ fn exposes_function_name_map_for_runtime_fragments() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(unit_expression(0, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let block1 = HirBlock {
@@ -113,10 +116,16 @@ fn exposes_function_name_map_for_runtime_fragments() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(unit_expression(1, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let mut module = HirModule::new();
+    expressions.freeze();
+    module.expressions = expressions;
     module.blocks = vec![block0, block1];
     module.start_function = Some(FunctionId(0));
     module.functions = vec![
@@ -149,7 +158,6 @@ fn exposes_function_name_map_for_runtime_fragments() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),

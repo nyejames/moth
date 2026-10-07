@@ -5,11 +5,12 @@
 //! WHY: top-level runtime templates are source-order page fragments, but HIR
 //! represents them as ordinary runtime string pushes into this accumulator.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::hir::expression_store::{HirConstructionFailure, HirValueRange};
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
+use crate::compiler_frontend::hir::statements::HirWriteTarget;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
 
@@ -24,7 +25,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         function_id: FunctionId,
         span: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         if Some(function_id) != self.module.start_function {
             return Ok(());
         }
@@ -36,12 +37,16 @@ impl<'a> HirBuilder<'a> {
         let region = self.current_region_or_error(span)?;
         let empty_collection = self.make_expression(
             span,
-            HirExpressionKind::Collection(vec![]),
+            HirExpressionKind::Collection(HirValueRange::empty()),
             vec_ty,
             ValueKind::RValue,
             region,
-        );
-        self.emit_assign_local_statement(vec_local, empty_collection, span)?;
+        )?;
+        self.emit_write_statement(
+            HirWriteTarget::DefineLocal(vec_local),
+            empty_collection,
+            span,
+        )?;
         self.entry_fragment_vec_local = Some(vec_local);
 
         Ok(())
@@ -59,7 +64,7 @@ impl<'a> HirBuilder<'a> {
         function_id: FunctionId,
         current_block: BlockId,
         span: &Option<SourceSpan>,
-    ) -> Result<bool, CompilerError> {
+    ) -> Result<bool, HirConstructionFailure> {
         if Some(function_id) != self.module.start_function {
             return Ok(false);
         }
@@ -70,7 +75,7 @@ impl<'a> HirBuilder<'a> {
 
         let vec_type = self.local_type_id_or_error(vec_local, span)?;
         let region = self.current_region_or_error(span)?;
-        let load_expr = self.make_local_load_expression(vec_local, vec_type, span, region);
+        let load_expr = self.make_local_load_expression(vec_local, vec_type, span, region)?;
         let function = self.function_by_id_or_error(function_id, span)?;
         let terminator = if self
             .type_environment

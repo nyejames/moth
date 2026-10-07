@@ -14,7 +14,12 @@ use crate::compiler_frontend::ast::expressions::expression::{
     FallibleCarrierVariant as AstFallibleCarrierVariant, FallibleExpressionHandling,
     FallibleHandling, Operator,
 };
-use crate::compiler_frontend::ast::expressions::expression_kind::MapLiteralEntry;
+use crate::compiler_frontend::ast::expressions::expression_kind::{
+    MapLiteralEntry, ResolvedCastExpression,
+};
+use crate::compiler_frontend::ast::expressions::expression_types::{
+    CastHandling, ResolvedCastEvidence,
+};
 use crate::compiler_frontend::ast::expressions::failure_facts::FailureDisposition;
 use crate::compiler_frontend::ast::statements::fallible_handling::wrap_catch_expression;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
@@ -29,9 +34,9 @@ use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
-use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
-use crate::compiler_frontend::compiler_errors::ErrorType;
+use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::definitions::{
     BuiltinTypeDefinition, ChoiceTypeDefinition, ConstructedTypeDefinition, TypeDefinition,
 };
@@ -44,8 +49,12 @@ use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, Choice
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::compiler_frontend::hir::blocks::HirBlock;
+use crate::compiler_frontend::hir::expression_store::{
+    HirConstructionFailure, HirProjection, HirValueRange,
+};
 use crate::compiler_frontend::hir::expressions::{
-    HirExpressionKind, HirMapOp, HirVariantCarrier, OPTION_SOME_VARIANT_INDEX, ValueKind,
+    HirExpression, HirExpressionKind, HirMapOp, HirVariantCarrier, OPTION_SOME_VARIANT_INDEX,
+    ValueKind,
 };
 use crate::compiler_frontend::hir::hir_builder::{
     HirBuilder, expressions_to_owned_render_node, register_local, runtime_template_expression,
@@ -53,15 +62,17 @@ use crate::compiler_frontend::hir::hir_builder::{
 };
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::{
-    ChoiceId, FieldId, FunctionId, HirValueId, LocalId, StructId,
+    ChoiceId, FieldId, FunctionId, HirValueId, LocalId, RegionId, StructId,
 };
+use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
 use crate::compiler_frontend::hir::patterns::HirPattern;
-use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatementKind, HirWriteTarget,
+};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
-use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -72,6 +83,7 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
     option_none_expr, result_carrier_type_id, runtime_expr, runtime_operand_item,
     runtime_operator_item,
 };
+use crate::compiler_frontend::traits::ids::TraitEvidenceId;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn field_symbol(
@@ -306,6 +318,20 @@ fn declared_entry_block<'b>(builder: &'b HirBuilder<'_>) -> &'b HirBlock {
         .unwrap_or_else(|| panic!("declared HIR entry block {entry_id:?} should exist"))
 }
 
+fn expression_row<'a>(builder: &'a HirBuilder<'_>, value: HirValueId) -> &'a HirExpression {
+    let row: &'a HirExpression = builder.module.expressions.expression(value);
+    row
+}
+
+fn expect_infrastructure_error(failure: HirConstructionFailure) -> CompilerError {
+    match failure {
+        HirConstructionFailure::Infrastructure(error) => error,
+        HirConstructionFailure::Diagnosed(diagnostic) => {
+            panic!("expected infrastructure failure, got diagnosed failure: {diagnostic:?}")
+        }
+    }
+}
+
 fn assert_no_synthesized_helper_functions(builder: &HirBuilder<'_>) {
     let _path_fork = super::PathInternerFork::empty();
     assert_eq!(
@@ -340,15 +366,20 @@ fn expression_test_builder_produces_valid_hir_module_metadata() {
         .find(|block| block.id == entry_id)
         .expect("expression fixture should expose its declared entry block");
     let region = entry_block.region;
-    entry_block.terminator =
-        HirTerminator::Return(crate::compiler_frontend::hir::expressions::HirExpression {
-            id: HirValueId(0),
-            kind: HirExpressionKind::TupleConstruct { elements: vec![] },
+    let unit = builder
+        .module
+        .expressions
+        .append_expression(HirExpression {
+            kind: HirExpressionKind::TupleConstruct {
+                elements: HirValueRange::empty(),
+            },
             ty: builtin_type_ids::NONE,
             value_kind: ValueKind::Const,
             region,
             span: None,
-        });
+        })
+        .expect("unit expression should fit the fixture store");
+    entry_block.terminator = HirTerminator::Return(unit);
 
     validate_module_for_tests(
         &builder.module,
@@ -401,8 +432,16 @@ fn runtime_template_slot_placeholder_materializes_as_no_output_owned_node() {
     assert!(lowered.prelude.is_empty());
     assert_no_synthesized_helper_functions(&builder);
     let entry_block = declared_entry_block(&builder);
-    assert!(block_assigns_string_literal(entry_block, "before "));
-    assert!(block_assigns_string_literal(entry_block, "after"));
+    assert!(block_assigns_string_literal(
+        &builder.module,
+        entry_block,
+        "before "
+    ));
+    assert!(block_assigns_string_literal(
+        &builder.module,
+        entry_block,
+        "after"
+    ));
 }
 
 #[test]
@@ -419,9 +458,11 @@ fn escaped_slot_insert_helpers_fail_when_they_reach_hir_runtime_lowering() {
         ValueMode::ImmutableOwned,
     );
 
-    let err = builder
-        .lower_expression(&helper)
-        .expect_err("escaped helper templates should be rejected in HIR");
+    let err = expect_infrastructure_error(
+        builder
+            .lower_expression(&helper)
+            .expect_err("escaped helper templates should be rejected in HIR"),
+    );
 
     assert_eq!(err.error_type, ErrorType::HirTransformation);
     assert!(
@@ -444,9 +485,11 @@ fn escaped_slot_definition_helpers_fail_when_they_reach_hir_runtime_lowering() {
         ValueMode::ImmutableOwned,
     );
 
-    let err = builder
-        .lower_expression(&helper)
-        .expect_err("escaped slot definition helpers should be rejected in HIR");
+    let err = expect_infrastructure_error(
+        builder
+            .lower_expression(&helper)
+            .expect_err("escaped slot definition helpers should be rejected in HIR"),
+    );
 
     assert_eq!(err.error_type, ErrorType::HirTransformation);
     assert!(
@@ -467,9 +510,11 @@ fn runtime_template_without_handoff_reports_compiler_bug() {
         ValueMode::ImmutableOwned,
     );
 
-    let err = builder
-        .lower_expression(&template)
-        .expect_err("runtime templates without an owned handoff should fail");
+    let err = expect_infrastructure_error(
+        builder
+            .lower_expression(&template)
+            .expect_err("runtime templates without an owned handoff should fail"),
+    );
 
     assert_eq!(err.error_type, ErrorType::HirTransformation);
     assert!(
@@ -492,12 +537,14 @@ fn top_level_loop_control_handoff_reports_compiler_bug() {
         span,
     };
 
-    let err = builder
-        .lower_expression(&Expression::runtime_template_handoff(
-            handoff,
-            ValueMode::ImmutableOwned,
-        ))
-        .expect_err("top-level loop control handoffs should be rejected in HIR");
+    let err = expect_infrastructure_error(
+        builder
+            .lower_expression(&Expression::runtime_template_handoff(
+                handoff,
+                ValueMode::ImmutableOwned,
+            ))
+            .expect_err("top-level loop control handoffs should be rejected in HIR"),
+    );
 
     assert_eq!(err.error_type, ErrorType::HirTransformation);
     assert!(
@@ -518,16 +565,25 @@ fn lowers_primitive_literals() {
         .lower_expression(&Expression::int(42, span, ValueMode::ImmutableOwned))
         .expect("int lowering should succeed");
     assert!(int_lowered.prelude.is_empty());
-    assert_eq!(int_lowered.value.value_kind, ValueKind::Const);
-    assert!(matches!(int_lowered.value.kind, HirExpressionKind::Int(42)));
+    assert_eq!(
+        expression_row(&builder, int_lowered.value).value_kind,
+        ValueKind::Const
+    );
+    assert!(matches!(
+        &expression_row(&builder, int_lowered.value).kind,
+        HirExpressionKind::Int(42)
+    ));
 
     let float_lowered = builder
         .lower_expression(&Expression::float(3.25, span, ValueMode::ImmutableOwned))
         .expect("float lowering should succeed");
     assert!(float_lowered.prelude.is_empty());
-    assert_eq!(float_lowered.value.value_kind, ValueKind::Const);
+    assert_eq!(
+        expression_row(&builder, float_lowered.value).value_kind,
+        ValueKind::Const
+    );
     assert!(matches!(
-        float_lowered.value.kind,
+        &expression_row(&builder, float_lowered.value).kind,
         HirExpressionKind::Float(3.25)
     ));
 
@@ -535,9 +591,12 @@ fn lowers_primitive_literals() {
         .lower_expression(&Expression::bool(true, span, ValueMode::ImmutableOwned))
         .expect("bool lowering should succeed");
     assert!(bool_lowered.prelude.is_empty());
-    assert_eq!(bool_lowered.value.value_kind, ValueKind::Const);
+    assert_eq!(
+        expression_row(&builder, bool_lowered.value).value_kind,
+        ValueKind::Const
+    );
     assert!(matches!(
-        bool_lowered.value.kind,
+        &expression_row(&builder, bool_lowered.value).kind,
         HirExpressionKind::Bool(true)
     ));
 
@@ -545,9 +604,12 @@ fn lowers_primitive_literals() {
         .lower_expression(&Expression::char('x', span, ValueMode::ImmutableOwned))
         .expect("char lowering should succeed");
     assert!(char_lowered.prelude.is_empty());
-    assert_eq!(char_lowered.value.value_kind, ValueKind::Const);
+    assert_eq!(
+        expression_row(&builder, char_lowered.value).value_kind,
+        ValueKind::Const
+    );
     assert!(matches!(
-        char_lowered.value.kind,
+        &expression_row(&builder, char_lowered.value).kind,
         HirExpressionKind::Char('x')
     ));
 
@@ -556,10 +618,13 @@ fn lowers_primitive_literals() {
         .lower_expression(&string_expr)
         .expect("string literal lowering should succeed");
     assert!(string_lowered.prelude.is_empty());
-    assert_eq!(string_lowered.value.value_kind, ValueKind::Const);
+    assert_eq!(
+        expression_row(&builder, string_lowered.value).value_kind,
+        ValueKind::Const
+    );
     assert!(matches!(
-        string_lowered.value.kind,
-        HirExpressionKind::StringLiteral(ref s) if s == "hello"
+        &expression_row(&builder, string_lowered.value).kind,
+        HirExpressionKind::StringLiteral(s) if s == "hello"
     ));
 }
 
@@ -580,9 +645,12 @@ fn lowers_int_above_i32_range_without_truncation() {
         .expect("wide int lowering should succeed");
 
     assert!(lowered.prelude.is_empty());
-    assert_eq!(lowered.value.value_kind, ValueKind::Const);
+    assert_eq!(
+        expression_row(&builder, lowered.value).value_kind,
+        ValueKind::Const
+    );
     assert!(matches!(
-        lowered.value.kind,
+        &expression_row(&builder, lowered.value).kind,
         HirExpressionKind::Int(3_000_000_000)
     ));
 }
@@ -608,10 +676,14 @@ fn lowers_reference_to_registered_local() {
         .expect("reference lowering should succeed");
 
     assert!(lowered.prelude.is_empty());
-    assert_eq!(lowered.value.value_kind, ValueKind::Place);
+    assert_eq!(
+        expression_row(&builder, lowered.value).value_kind,
+        ValueKind::Place
+    );
     assert!(matches!(
-        lowered.value.kind,
-        HirExpressionKind::Load(HirPlace::Local(LocalId(10)))
+        &expression_row(&builder, lowered.value).kind,
+        HirExpressionKind::Load(place)
+            if place.root == LocalId(10) && super::is_local_place(place)
     ));
 }
 
@@ -639,8 +711,14 @@ fn lowers_reference_to_module_constant_when_local_is_missing() {
         .expect("module constant reference lowering should succeed");
 
     assert!(lowered.prelude.is_empty());
-    assert_eq!(lowered.value.value_kind, ValueKind::Const);
-    assert!(matches!(lowered.value.kind, HirExpressionKind::Int(3)));
+    assert_eq!(
+        expression_row(&builder, lowered.value).value_kind,
+        ValueKind::Const
+    );
+    assert!(matches!(
+        &expression_row(&builder, lowered.value).kind,
+        HirExpressionKind::Int(3)
+    ));
 }
 
 #[test]
@@ -679,11 +757,14 @@ fn lowers_runtime_rpn_arithmetic_stack_correctly() {
         .expect("runtime arithmetic lowering should succeed");
 
     assert!(lowered.prelude.is_empty());
-    assert_eq!(lowered.value.ty, builtin_type_ids::INT);
+    assert_eq!(
+        expression_row(&builder, lowered.value).ty,
+        builtin_type_ids::INT
+    );
     assert!(
         matches!(
-            lowered.value.kind,
-            HirExpressionKind::Load(HirPlace::Local(_))
+            &expression_row(&builder, lowered.value).kind,
+            HirExpressionKind::Load(place) if super::is_local_place(place)
         ),
         "checked integer addition should return a load of the NumericOp result local"
     );
@@ -715,11 +796,11 @@ fn runtime_division_subexpression_infers_float_type_in_hir() {
         .lower_expression(&expr)
         .expect("runtime division lowering should succeed");
 
-    assert_eq!(lowered.value.ty, expected_float);
+    assert_eq!(expression_row(&builder, lowered.value).ty, expected_float);
     assert!(
         matches!(
-            lowered.value.kind,
-            HirExpressionKind::Load(HirPlace::Local(_))
+            &expression_row(&builder, lowered.value).kind,
+            HirExpressionKind::Load(place) if super::is_local_place(place)
         ),
         "checked addition should return a load of the NumericOp result local"
     );
@@ -744,11 +825,11 @@ fn runtime_integer_division_lowers_to_hir_int_div_with_int_type() {
         .lower_expression(&expr)
         .expect("runtime integer division lowering should succeed");
 
-    assert_eq!(lowered.value.ty, expected_int);
+    assert_eq!(expression_row(&builder, lowered.value).ty, expected_int);
     assert!(
         matches!(
-            lowered.value.kind,
-            HirExpressionKind::Load(HirPlace::Local(_))
+            &expression_row(&builder, lowered.value).kind,
+            HirExpressionKind::Load(place) if super::is_local_place(place)
         ),
         "checked integer division should return a load of the NumericOp result local"
     );
@@ -772,7 +853,7 @@ fn lowers_unary_not_in_runtime_rpn() {
         .expect("unary not lowering should succeed");
 
     assert!(matches!(
-        lowered.value.kind,
+        &expression_row(&builder, lowered.value).kind,
         HirExpressionKind::UnaryOp {
             op: HirUnaryOp::Not,
             ..
@@ -804,7 +885,7 @@ fn lowers_range_operator_in_runtime_rpn() {
         .expect("range lowering should succeed");
 
     assert!(matches!(
-        lowered.value.kind,
+        &expression_row(&builder, lowered.value).kind,
         HirExpressionKind::Range { .. }
     ));
 }
@@ -839,17 +920,25 @@ fn lowers_function_call_to_call_statement_and_temp_load() {
         } => {
             assert_eq!(target, &CallTarget::Local(FunctionId(2)));
             assert_eq!(args.len(), 1);
-            result.expect("call with return should bind a temp local")
+            let HirLocalDestination::Define(local) =
+                result.expect("call with return should bind a temp local")
+            else {
+                panic!("call result must define a fresh caller-local binding");
+            };
+            local
         }
         _ => panic!("expected lowered call statement"),
     };
 
     assert!(matches!(
-        lowered.value.kind,
-        HirExpressionKind::Load(HirPlace::Local(local))
-        if local == result_local
+        &expression_row(&builder, lowered.value).kind,
+        HirExpressionKind::Load(place)
+            if place.root == result_local && super::is_local_place(place)
     ));
-    assert_eq!(lowered.value.value_kind, ValueKind::RValue);
+    assert_eq!(
+        expression_row(&builder, lowered.value).value_kind,
+        ValueKind::RValue
+    );
 }
 
 #[test]
@@ -885,7 +974,7 @@ fn expression_function_call_uses_variant_result_type_ids_for_single_return() {
         .lower_expression(&call_expr)
         .expect("function call lowering should use variant result TypeIds");
 
-    assert_eq!(lowered.value.ty, expected_int);
+    assert_eq!(expression_row(&builder, lowered.value).ty, expected_int);
 }
 
 #[test]
@@ -901,7 +990,9 @@ fn expression_function_call_uses_variant_result_type_ids_for_no_return() {
     let lowered = builder
         .lower_expression(&call_expr)
         .expect("no-return call lowering should use empty variant result TypeIds");
-    let lowered_type = builder.type_environment.get(lowered.value.ty);
+    let lowered_type = builder
+        .type_environment
+        .get(expression_row(&builder, lowered.value).ty);
 
     assert!(
         matches!(
@@ -948,7 +1039,9 @@ fn expression_function_call_uses_variant_result_type_ids_for_multi_return() {
     let bool_type = builder
         .lower_type_id(builtin_type_ids::BOOL, &span)
         .expect("builtin Bool TypeId should lower in test context");
-    let lowered_type = builder.type_environment.get(lowered.value.ty);
+    let lowered_type = builder
+        .type_environment
+        .get(expression_row(&builder, lowered.value).ty);
 
     assert!(
         matches!(
@@ -991,7 +1084,7 @@ fn expression_host_call_uses_variant_result_type_ids() {
         .lower_expression(&call_expr)
         .expect("host call lowering should use variant result TypeIds");
 
-    assert_eq!(lowered.value.ty, expected_int);
+    assert_eq!(expression_row(&builder, lowered.value).ty, expected_int);
 }
 
 #[test]
@@ -1053,7 +1146,104 @@ fn expression_handled_fallible_call_fallback_uses_variant_result_type_ids() {
         .lower_expression(&call_expr)
         .expect("handled fallible call lowering should use variant result TypeIds");
 
-    assert_eq!(lowered.value.ty, ok_type);
+    assert_eq!(expression_row(&builder, lowered.value).ty, ok_type);
+}
+
+#[test]
+fn optional_user_defined_cast_recovery_merges_the_inner_target_type() {
+    let mut path_fork = super::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let method_path = super::symbol("Label/try_to_string", &mut path_fork, &mut string_table);
+    let fallback_text = string_table.intern("fallback");
+    let span = None;
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let optional_string_type = builder
+        .type_environment
+        .intern_option(builtin_type_ids::STRING);
+    let error_type_id = builder.test_register_builtin_error_type();
+    let carrier_type = result_carrier_type_id(
+        &mut builder.type_environment,
+        builtin_type_ids::STRING,
+        error_type_id,
+    );
+    builder.test_register_function_with_return_type(method_path, FunctionId(101), carrier_type);
+
+    let mut cast = Expression::cast(
+        ResolvedCastExpression {
+            source: Box::new(Expression::int(1, span, ValueMode::ImmutableOwned)),
+            source_type_id: builtin_type_ids::INT,
+            target_type_id: builtin_type_ids::STRING,
+            target: BuiltinCastTarget::String,
+            requires_optional_wrap_after_cast: true,
+            evidence: ResolvedCastEvidence::UserDefined {
+                evidence_id: TraitEvidenceId(0),
+                method_path,
+            },
+            handling: CastHandling::Recover,
+            span,
+        },
+        optional_string_type,
+        &builder.type_environment,
+    );
+    cast.failure_facts.disposition = FailureDisposition::HandledByCatch { error_type_id };
+    let catch_expression = wrap_catch_expression(
+        cast,
+        FallibleHandling::Handler {
+            error: None,
+            body: vec![AstNode {
+                kind: NodeKind::ThenValue(ProducedValues {
+                    expressions: vec![Expression::string_slice(
+                        fallback_text,
+                        span,
+                        ValueMode::ImmutableOwned,
+                    )],
+                    span,
+                }),
+                span,
+                scope: method_path,
+            }],
+        },
+        vec![builtin_type_ids::STRING],
+    );
+
+    let lowered = builder
+        .lower_expression(&catch_expression)
+        .expect("optional user-defined cast recovery should lower");
+    assert_eq!(
+        builder.module.expressions.expression(lowered.value).ty,
+        optional_string_type
+    );
+
+    let mut found_inner_string_write = false;
+    for block in &builder.module.blocks {
+        for statement in &block.statements {
+            let HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(local_id),
+                value,
+            } = &statement.kind
+            else {
+                continue;
+            };
+            let destination = builder
+                .module
+                .blocks
+                .iter()
+                .flat_map(|block| &block.locals)
+                .find(|local| local.id == *local_id);
+            if destination.is_some_and(|local| local.ty == builtin_type_ids::STRING) {
+                found_inner_string_write = true;
+                assert_eq!(
+                    builder.module.expressions.expression(*value).ty,
+                    builtin_type_ids::STRING,
+                    "optional catch success and recovery must merge the cast's inner target type"
+                );
+            }
+        }
+    }
+    assert!(
+        found_inner_string_write,
+        "expected the catch join to write its inner String result"
+    );
 }
 
 #[test]
@@ -1117,7 +1307,7 @@ fn expression_handled_result_derives_success_slots_from_tuple_type_id() {
         .lower_expression(&handled_expr)
         .expect("handled Result expression should preserve multi-success tuple typing");
 
-    assert_eq!(lowered.value.ty, ok_type);
+    assert_eq!(expression_row(&builder, lowered.value).ty, ok_type);
 }
 
 #[test]
@@ -1146,27 +1336,32 @@ fn lowers_fresh_mutable_call_argument_via_hidden_local_with_origin_metadata() {
     assert_eq!(
         lowered.prelude.len(),
         2,
-        "fresh mutable args should materialize assignment before call"
+        "fresh mutable args should define their temporary before call"
     );
 
     let temp_local = match &lowered.prelude[0].kind {
-        HirStatementKind::Assign { target, value } => {
-            assert!(matches!(value.kind, HirExpressionKind::Int(7)));
-            match target {
-                HirPlace::Local(local) => *local,
-                other => panic!("expected local assignment target, got {other:?}"),
-            }
+        HirStatementKind::Write {
+            target: HirWriteTarget::DefineLocal(local),
+            value,
+        } => {
+            assert!(matches!(
+                &builder.module.expressions.expression(*value).kind,
+                HirExpressionKind::Int(7)
+            ));
+            *local
         }
-        other => panic!("expected first prelude statement to assign fresh arg temp, got {other:?}"),
+        other => panic!("expected first prelude statement to define fresh arg temp, got {other:?}"),
     };
 
     match &lowered.prelude[1].kind {
         HirStatementKind::Call { args, .. } => {
             assert_eq!(args.len(), 1);
+            let argument = builder.module.expressions.values(*args)[0];
             assert!(
                 matches!(
-                    args[0].kind,
-                    HirExpressionKind::Load(HirPlace::Local(local)) if local == temp_local
+                    &builder.module.expressions.expression(argument).kind,
+                    HirExpressionKind::Load(place)
+                        if place.root == temp_local && super::is_local_place(place)
                 ),
                 "call argument should load synthesized fresh-arg local"
             );
@@ -1243,11 +1438,16 @@ fn lowers_receiver_method_call_with_receiver_as_first_argument() {
         HirStatementKind::Call { target, args, .. } => {
             assert_eq!(target, &CallTarget::Local(FunctionId(22)));
             assert_eq!(args.len(), 2);
+            let args = builder.module.expressions.values(*args);
             assert!(matches!(
-                args[0].kind,
-                HirExpressionKind::Load(HirPlace::Local(LocalId(23)))
+                &builder.module.expressions.expression(args[0]).kind,
+                HirExpressionKind::Load(place)
+                    if place.root == LocalId(23) && super::is_local_place(place)
             ));
-            assert!(matches!(args[1].kind, HirExpressionKind::Int(7)));
+            assert!(matches!(
+                &builder.module.expressions.expression(args[1]).kind,
+                HirExpressionKind::Int(7)
+            ));
         }
         other => panic!("expected lowered receiver call statement, got {other:?}"),
     }
@@ -1296,8 +1496,13 @@ fn lowers_builtin_scalar_receiver_method_call_with_receiver_as_first_argument() 
             assert_eq!(target, &CallTarget::Local(FunctionId(41)));
             assert_eq!(args.len(), 1);
             assert!(matches!(
-                args[0].kind,
-                HirExpressionKind::Load(HirPlace::Local(LocalId(42)))
+                &builder
+                    .module
+                    .expressions
+                    .expression(builder.module.expressions.values(*args)[0])
+                    .kind,
+                HirExpressionKind::Load(place)
+                    if place.root == LocalId(42) && super::is_local_place(place)
             ));
         }
         other => panic!("expected lowered builtin scalar receiver call statement, got {other:?}"),
@@ -1401,9 +1606,11 @@ fn malformed_runtime_rpn_reports_hir_transformation_error() {
         ValueMode::MutableOwned,
     );
 
-    let err = builder
-        .lower_expression(&expr)
-        .expect_err("malformed rpn should fail");
+    let err = expect_infrastructure_error(
+        builder
+            .lower_expression(&expr)
+            .expect_err("malformed rpn should fail"),
+    );
     assert_eq!(err.error_type, ErrorType::HirTransformation);
     assert!(
         err.msg.contains("underflow"),
@@ -1437,11 +1644,15 @@ fn runtime_template_expression_lowers_inline_to_accumulator() {
     assert!(lowered.prelude.is_empty());
     assert_no_synthesized_helper_functions(&builder);
     assert!(matches!(
-        lowered.value.kind,
-        HirExpressionKind::Copy(HirPlace::Local(_))
+        &expression_row(&builder, lowered.value).kind,
+        HirExpressionKind::Copy(place) if super::is_local_place(place)
     ));
     let entry_block = declared_entry_block(&builder);
-    assert!(block_assigns_string_literal(entry_block, "hello"));
+    assert!(block_assigns_string_literal(
+        &builder.module,
+        entry_block,
+        "hello"
+    ));
 }
 
 #[test]
@@ -1469,11 +1680,15 @@ fn runtime_template_handoff_expression_lowers_inline_to_accumulator() {
     assert!(lowered.prelude.is_empty());
     assert_no_synthesized_helper_functions(&builder);
     assert!(matches!(
-        lowered.value.kind,
-        HirExpressionKind::Copy(HirPlace::Local(_))
+        &expression_row(&builder, lowered.value).kind,
+        HirExpressionKind::Copy(place) if super::is_local_place(place)
     ));
     let entry_block = declared_entry_block(&builder);
-    assert!(block_assigns_string_literal(entry_block, "hello"));
+    assert!(block_assigns_string_literal(
+        &builder.module,
+        entry_block,
+        "hello"
+    ));
 }
 
 #[test]
@@ -1512,13 +1727,25 @@ fn runtime_template_handoff_expression_flattens_nested_linear_handoff() {
     assert!(lowered.prelude.is_empty());
     let entry_block = declared_entry_block(&builder);
     assert_eq!(
-        count_empty_string_initializers(entry_block),
+        count_empty_string_initializers(&builder.module, entry_block),
         1,
         "nested owned linear handoffs should append into the parent accumulator without creating a child accumulator"
     );
-    assert!(block_assigns_string_literal(entry_block, "before "));
-    assert!(block_assigns_string_literal(entry_block, "inner"));
-    assert!(block_assigns_string_literal(entry_block, " after"));
+    assert!(block_assigns_string_literal(
+        &builder.module,
+        entry_block,
+        "before "
+    ));
+    assert!(block_assigns_string_literal(
+        &builder.module,
+        entry_block,
+        "inner"
+    ));
+    assert!(block_assigns_string_literal(
+        &builder.module,
+        entry_block,
+        " after"
+    ));
 }
 
 #[test]
@@ -1541,7 +1768,11 @@ fn runtime_template_inline_accumulator_coerces_non_string_segments() {
     assert!(lowered.prelude.is_empty());
     assert_no_synthesized_helper_functions(&builder);
     let entry_block = declared_entry_block(&builder);
-    assert!(block_assigns_coerced_int_chunk(entry_block, 5));
+    assert!(block_assigns_coerced_int_chunk(
+        &builder.module,
+        entry_block,
+        5
+    ));
 }
 
 #[test]
@@ -1577,9 +1808,21 @@ fn runtime_template_lowers_nested_templates_in_order() {
     assert!(lowered.prelude.is_empty());
     assert_no_synthesized_helper_functions(&builder);
     let entry_block = declared_entry_block(&builder);
-    assert!(block_assigns_string_literal(entry_block, "A"));
-    assert!(block_assigns_string_literal(entry_block, "B"));
-    assert!(block_assigns_string_literal(entry_block, "C"));
+    assert!(block_assigns_string_literal(
+        &builder.module,
+        entry_block,
+        "A"
+    ));
+    assert!(block_assigns_string_literal(
+        &builder.module,
+        entry_block,
+        "B"
+    ));
+    assert!(block_assigns_string_literal(
+        &builder.module,
+        entry_block,
+        "C"
+    ));
     // The owned runtime-template handoff flattens nested child templates into the
     // same accumulator, so all three literals are appended directly rather than
     // through an intermediate child-template local. }
@@ -1633,12 +1876,12 @@ fn runtime_template_control_flow_bool_if_lowers_inline_without_helper_call() {
     assert!(lowered.prelude.is_empty());
     assert_no_synthesized_helper_functions(&builder);
     assert!(matches!(
-        lowered.value.kind,
-        HirExpressionKind::Copy(HirPlace::Local(_))
+        &expression_row(&builder, lowered.value).kind,
+        HirExpressionKind::Copy(place) if super::is_local_place(place)
     ));
     let entry_block = declared_entry_block(&builder);
     assert_eq!(
-        count_empty_string_initializers(entry_block),
+        count_empty_string_initializers(&builder.module, entry_block),
         1,
         "inline template if should initialize exactly one runtime accumulator"
     );
@@ -1665,8 +1908,16 @@ fn runtime_template_control_flow_bool_if_lowers_inline_without_helper_call() {
         .find(|block| block.id == else_block)
         .expect("else block should exist");
 
-    assert!(block_assigns_string_literal(then_block, "shown"));
-    assert!(block_assigns_string_literal(else_block, "hidden"));
+    assert!(block_assigns_string_literal(
+        &builder.module,
+        then_block,
+        "shown"
+    ));
+    assert!(block_assigns_string_literal(
+        &builder.module,
+        else_block,
+        "hidden"
+    ));
 }
 
 #[test]
@@ -1834,13 +2085,17 @@ fn runtime_template_control_flow_bool_if_without_else_appends_nothing_on_false_p
         .find(|block| block.id == else_block)
         .expect("else block should exist");
 
-    assert!(block_assigns_string_literal(then_block, "shown"));
+    assert!(block_assigns_string_literal(
+        &builder.module,
+        then_block,
+        "shown"
+    ));
     assert!(
         else_block
             .statements
             .iter()
-            .all(|statement| !matches!(&statement.kind, HirStatementKind::Assign { .. })),
-        "false/no-else path should not append an assignment to the runtime template accumulator"
+            .all(|statement| !matches!(&statement.kind, HirStatementKind::Write { .. })),
+        "false/no-else path should not append a write to the runtime template accumulator"
     );
 }
 
@@ -1889,7 +2144,11 @@ fn runtime_template_control_flow_bool_if_coerces_dynamic_branch_chunks() {
         .find(|block| block.id == then_block)
         .expect("then block should exist");
 
-    assert!(block_assigns_coerced_int_chunk(then_block, 5));
+    assert!(block_assigns_coerced_int_chunk(
+        &builder.module,
+        then_block,
+        5
+    ));
 }
 
 #[test]
@@ -1939,7 +2198,7 @@ fn runtime_template_control_flow_option_capture_lowers_match_and_payload_binding
     assert_no_synthesized_helper_functions(&builder);
     let entry_block = declared_entry_block(&builder);
     assert_eq!(
-        count_empty_string_initializers(entry_block),
+        count_empty_string_initializers(&builder.module, entry_block),
         1,
         "option template should initialize exactly one runtime accumulator"
     );
@@ -1950,11 +2209,14 @@ fn runtime_template_control_flow_option_capture_lowers_match_and_payload_binding
             .filter(|statement| {
                 matches!(
                     &statement.kind,
-                    HirStatementKind::Assign { value, .. }
+                    HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(_),
+                        value,
+                    }
                         if matches!(
-                            &value.kind,
-                            HirExpressionKind::Load(HirPlace::Local(_))
-                                | HirExpressionKind::Copy(HirPlace::Local(_))
+                            &builder.module.expressions.expression(*value).kind,
+                            HirExpressionKind::Load(place) | HirExpressionKind::Copy(place)
+                                if super::is_local_place(place)
                         )
                 )
             })
@@ -1997,27 +2259,32 @@ fn runtime_template_control_flow_option_capture_lowers_match_and_payload_binding
         present_block.statements.iter().any(|statement| {
             matches!(
                 &statement.kind,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(_),
+                HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(_),
                     value,
-                } if matches!(
-                    &value.kind,
-                    HirExpressionKind::VariantPayloadGet {
-                        carrier: HirVariantCarrier::Option,
-                        variant_index: OPTION_SOME_VARIANT_INDEX,
-                        field_index: 0,
-                        ..
-                    }
-                )
+                }
+                if matches!(
+                        &builder.module.expressions.expression(*value).kind,
+                        HirExpressionKind::VariantPayloadGet {
+                            carrier: HirVariantCarrier::Option,
+                            variant_index: OPTION_SOME_VARIANT_INDEX,
+                            field_index: 0,
+                            ..
+                        }
+                    )
             )
         }),
-        "present branch should assign the option some payload into the capture local"
+        "present branch should define the option some payload in the capture local"
     );
     assert!(
         absent_block.locals.is_empty(),
         "absent branch must not bind the option capture local"
     );
-    assert!(block_assigns_string_literal(absent_block, "hidden"));
+    assert!(block_assigns_string_literal(
+        &builder.module,
+        absent_block,
+        "hidden"
+    ));
 }
 
 #[test]
@@ -2072,8 +2339,8 @@ fn runtime_template_control_flow_option_capture_without_else_appends_nothing_whe
         absent_block
             .statements
             .iter()
-            .all(|statement| !matches!(&statement.kind, HirStatementKind::Assign { .. })),
-        "absent/no-else branch should not append an assignment to the runtime template accumulator"
+            .all(|statement| !matches!(&statement.kind, HirStatementKind::Write { .. })),
+        "absent/no-else branch should not append a write to the runtime template accumulator"
     );
     assert!(
         absent_block.locals.is_empty(),
@@ -2140,7 +2407,11 @@ fn runtime_template_control_flow_loop_range_lowers_inline_and_wraps_aggregate_wh
 
     assert_no_synthesized_helper_functions(&builder);
     assert!(
-        builder.module.blocks.iter().any(block_marks_loop_emitted),
+        builder
+            .module
+            .blocks
+            .iter()
+            .any(|block| block_marks_loop_emitted(&builder.module, block)),
         "range template loop body should mark that at least one iteration emitted"
     );
     assert!(
@@ -2148,7 +2419,7 @@ fn runtime_template_control_flow_loop_range_lowers_inline_and_wraps_aggregate_wh
             .module
             .blocks
             .iter()
-            .any(|block| block_assigns_string_literal(block, "<card>")),
+            .any(|block| block_assigns_string_literal(&builder.module, block, "<card>")),
         "emitted aggregate should apply the owning head before the aggregate"
     );
     assert!(
@@ -2156,11 +2427,15 @@ fn runtime_template_control_flow_loop_range_lowers_inline_and_wraps_aggregate_wh
             .module
             .blocks
             .iter()
-            .any(|block| block_assigns_string_literal(block, "</card>")),
+            .any(|block| block_assigns_string_literal(&builder.module, block, "</card>")),
         "emitted aggregate should apply the owning head after the aggregate"
     );
     assert!(
-        builder.module.blocks.iter().any(block_appends_local_string),
+        builder
+            .module
+            .blocks
+            .iter()
+            .any(|block| block_appends_local_string(&builder.module, block)),
         "emitted aggregate should append the loop-local aggregate string"
     );
 }
@@ -2235,7 +2510,11 @@ fn runtime_template_control_flow_loop_collection_materializes_iterable_and_lengt
         "collection template loop should compute iterable length once before iteration"
     );
     assert!(
-        builder.module.blocks.iter().any(block_marks_loop_emitted),
+        builder
+            .module
+            .blocks
+            .iter()
+            .any(|block| block_marks_loop_emitted(&builder.module, block)),
         "collection template loop body should mark emitted iterations independently from string length"
     );
 }
@@ -2283,7 +2562,11 @@ fn runtime_template_control_flow_conditional_loop_rechecks_condition_and_wraps_w
 
     assert_no_synthesized_helper_functions(&builder);
     assert!(
-        builder.module.blocks.iter().any(block_marks_loop_emitted),
+        builder
+            .module
+            .blocks
+            .iter()
+            .any(|block| block_marks_loop_emitted(&builder.module, block)),
         "conditional template loop body should mark emitted output when its body has render pieces"
     );
     assert!(
@@ -2291,7 +2574,7 @@ fn runtime_template_control_flow_conditional_loop_rechecks_condition_and_wraps_w
             .module
             .blocks
             .iter()
-            .any(|block| block_assigns_string_literal(block, "<wrap>")),
+            .any(|block| block_assigns_string_literal(&builder.module, block, "<wrap>")),
         "emitted aggregate should apply the owning wrapper"
     );
 }
@@ -2342,17 +2625,26 @@ fn runtime_template_control_flow_loop_empty_body_does_not_mark_iteration_emitted
         .expect("runtime empty-body template loop should lower without marking output");
 
     assert!(
-        !builder.module.blocks.iter().any(block_marks_loop_emitted),
+        !builder
+            .module
+            .blocks
+            .iter()
+            .any(|block| block_marks_loop_emitted(&builder.module, block)),
         "empty loop bodies should not mark the aggregate as structurally emitted"
     );
 }
 
-fn block_assigns_string_literal(block: &HirBlock, expected: &str) -> bool {
+fn block_assigns_string_literal(module: &HirModule, block: &HirBlock, expected: &str) -> bool {
     block.statements.iter().any(|statement| {
-        let HirStatementKind::Assign { value, .. } = &statement.kind else {
+        let HirStatementKind::Write {
+            target: HirWriteTarget::AssignPlace(_),
+            value,
+        } = &statement.kind
+        else {
             return false;
         };
 
+        let value = module.expressions.expression(*value);
         let HirExpressionKind::BinOp {
             op: HirBinOp::StringAppend,
             right,
@@ -2363,57 +2655,59 @@ fn block_assigns_string_literal(block: &HirBlock, expected: &str) -> bool {
         };
 
         matches!(
-            right.kind,
-            HirExpressionKind::StringLiteral(ref value) if value == expected
+            &module.expressions.expression(*right).kind,
+            HirExpressionKind::StringLiteral(value) if value == expected
         )
     })
 }
 
-fn count_empty_string_initializers(block: &HirBlock) -> usize {
+fn count_empty_string_initializers(module: &HirModule, block: &HirBlock) -> usize {
     block
         .statements
         .iter()
         .filter(|statement| {
-            let HirStatementKind::Assign { value, .. } = &statement.kind else {
+            let HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(_),
+                value,
+            } = &statement.kind
+            else {
                 return false;
             };
 
+            let value = module.expressions.expression(*value);
             matches!(
-                value.kind,
-                HirExpressionKind::StringLiteral(ref value) if value.is_empty()
+                &value.kind,
+                HirExpressionKind::StringLiteral(value) if value.is_empty()
             )
         })
         .count()
 }
 
-fn block_marks_loop_emitted(block: &HirBlock) -> bool {
+fn block_marks_loop_emitted(module: &HirModule, block: &HirBlock) -> bool {
     block.statements.iter().any(|statement| {
-        matches!(
-            statement.kind,
-            HirStatementKind::Assign {
-                value: crate::compiler_frontend::hir::expressions::HirExpression {
-                    kind: HirExpressionKind::Bool(true),
-                    ..
-                },
-                ..
-            }
-        )
+        super::write_value(module, statement)
+            .is_some_and(|value| matches!(&value.kind, HirExpressionKind::Bool(true)))
     })
 }
 
-fn block_appends_local_string(block: &HirBlock) -> bool {
-    count_block_appends_local_string(block) > 0
+fn block_appends_local_string(module: &HirModule, block: &HirBlock) -> bool {
+    count_block_appends_local_string(module, block) > 0
 }
 
-fn count_block_appends_local_string(block: &HirBlock) -> usize {
+fn count_block_appends_local_string(module: &HirModule, block: &HirBlock) -> usize {
     block
         .statements
         .iter()
         .filter(|statement| {
-            let HirStatementKind::Assign { value, .. } = &statement.kind else {
+            let HirStatementKind::Write {
+                target: HirWriteTarget::AssignPlace(_),
+                value,
+            } = &statement.kind
+            else {
                 return false;
             };
 
+            let value = module.expressions.expression(*value);
             let HirExpressionKind::BinOp {
                 op: HirBinOp::StringAppend,
                 right,
@@ -2424,20 +2718,25 @@ fn count_block_appends_local_string(block: &HirBlock) -> usize {
             };
 
             matches!(
-                right.kind,
-                HirExpressionKind::Load(HirPlace::Local(_))
-                    | HirExpressionKind::Copy(HirPlace::Local(_))
+                &module.expressions.expression(*right).kind,
+                HirExpressionKind::Load(place) | HirExpressionKind::Copy(place)
+                    if super::is_local_place(place)
             )
         })
         .count()
 }
 
-fn block_assigns_coerced_int_chunk(block: &HirBlock, expected: i64) -> bool {
+fn block_assigns_coerced_int_chunk(module: &HirModule, block: &HirBlock, expected: i64) -> bool {
     block.statements.iter().any(|statement| {
-        let HirStatementKind::Assign { value, .. } = &statement.kind else {
+        let HirStatementKind::Write {
+            target: HirWriteTarget::AssignPlace(_),
+            value,
+        } = &statement.kind
+        else {
             return false;
         };
 
+        let value = module.expressions.expression(*value);
         let HirExpressionKind::BinOp {
             op: HirBinOp::StringAppend,
             right,
@@ -2447,6 +2746,7 @@ fn block_assigns_coerced_int_chunk(block: &HirBlock, expected: i64) -> bool {
             return false;
         };
 
+        let right = module.expressions.expression(*right);
         let HirExpressionKind::BinOp {
             op: HirBinOp::StringAppend,
             left,
@@ -2457,9 +2757,12 @@ fn block_assigns_coerced_int_chunk(block: &HirBlock, expected: i64) -> bool {
         };
 
         matches!(
-            left.kind,
-            HirExpressionKind::StringLiteral(ref value) if value.is_empty()
-        ) && matches!(right.kind, HirExpressionKind::Int(value) if value == expected)
+            &module.expressions.expression(*left).kind,
+            HirExpressionKind::StringLiteral(value) if value.is_empty()
+        ) && matches!(
+            &module.expressions.expression(*right).kind,
+            HirExpressionKind::Int(value) if *value == expected
+        )
     })
 }
 
@@ -2493,9 +2796,11 @@ fn local_resolution_uses_full_path_identity_not_leaf_name() {
         span,
         ValueMode::ImmutableReference,
     );
-    let err = builder
-        .lower_expression(&expr)
-        .expect_err("unregistered full-path symbol should not resolve by leaf name");
+    let err = expect_infrastructure_error(
+        builder
+            .lower_expression(&expr)
+            .expect_err("unregistered full-path symbol should not resolve by leaf name"),
+    );
 
     assert_eq!(err.error_type, ErrorType::HirTransformation);
     assert!(err.msg.contains("Unresolved local"));
@@ -2545,9 +2850,10 @@ fn nominal_struct_identity_uses_field_parent_path() {
         .lower_expression(&expression)
         .expect("struct instance lowering should succeed");
 
-    match lowered.value.kind {
+    match &expression_row(&builder, lowered.value).kind {
         HirExpressionKind::StructConstruct { struct_id, fields } => {
-            assert_eq!(struct_id, StructId(1));
+            assert_eq!(*struct_id, StructId(1));
+            let fields = builder.module.expressions.struct_fields(*fields);
             assert_eq!(fields.len(), 1);
             assert_eq!(fields[0].0, FieldId(3));
         }
@@ -2586,9 +2892,11 @@ fn rejects_const_record_struct_instance_runtime_lowering() {
         const_record_type_id,
     );
 
-    let error = builder
-        .lower_expression(&expression)
-        .expect_err("const record should not lower as a runtime struct construct");
+    let error = expect_infrastructure_error(
+        builder
+            .lower_expression(&expression)
+            .expect_err("const record should not lower as a runtime struct construct"),
+    );
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(
@@ -2630,9 +2938,11 @@ fn temp_locals_are_not_resolvable_as_user_symbols() {
         ValueMode::ImmutableReference,
     );
 
-    let error = builder
-        .lower_expression(&temp_reference)
-        .expect_err("compiler temp local should not resolve through locals_by_name");
+    let error = expect_infrastructure_error(
+        builder
+            .lower_expression(&temp_reference)
+            .expect_err("compiler temp local should not resolve through locals_by_name"),
+    );
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("Unresolved local"));
@@ -2699,10 +3009,11 @@ fn field_access_uses_base_struct_identity_not_global_leaf_lookup() {
         .lower_ast_node_to_place(&field_access)
         .expect("field access should lower via base struct identity");
 
-    match place {
-        HirPlace::Field { field, .. } => assert_eq!(field, FieldId(100)),
-        other => panic!("expected field place, got {other:?}"),
-    }
+    assert_eq!(place.root, LocalId(30));
+    assert_eq!(
+        builder.module.expressions.projections(place.projections),
+        &[HirProjection::Field(FieldId(100))]
+    );
 }
 
 #[test]
@@ -2774,14 +3085,24 @@ fn field_access_from_module_constant_base_materializes_temp_place() {
         lowered
             .prelude
             .iter()
-            .any(|statement| matches!(statement.kind, HirStatementKind::Assign { .. })),
+            .any(|statement| matches!(statement.kind, HirStatementKind::Write { .. })),
         "expected module constant base to be materialized into a temporary local"
     );
 
-    match lowered.value.kind {
-        HirExpressionKind::Load(HirPlace::Field { field, base }) => {
-            assert_eq!(field, FieldId(200));
-            assert!(matches!(*base, HirPlace::Local(_)));
+    match &expression_row(&builder, lowered.value).kind {
+        HirExpressionKind::Load(place) => {
+            assert_eq!(
+                builder.module.expressions.projections(place.projections),
+                &[HirProjection::Field(FieldId(200))]
+            );
+            assert!(
+                builder
+                    .module
+                    .blocks
+                    .iter()
+                    .flat_map(|block| block.locals.iter())
+                    .any(|local| local.id == place.root)
+            );
         }
         other => panic!("expected field load expression, got {other:?}"),
     }
@@ -2849,8 +3170,8 @@ fn const_record_module_constant_field_access_lowers_field_value_without_struct_c
         "const-record field access should not materialize the whole record"
     );
 
-    match lowered.value.kind {
-        HirExpressionKind::StringLiteral(ref value) if value == "red" => {}
+    match &expression_row(&builder, lowered.value).kind {
+        HirExpressionKind::StringLiteral(value) if value == "red" => {}
         other => panic!("expected direct string field value, got {other:?}"),
     }
 }
@@ -2994,12 +3315,12 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
             } => {
                 assert_eq!(target, &CallTarget::External(expected_id));
                 assert_eq!(
-                    result.is_some(),
+                    matches!(result, Some(HirLocalDestination::Define(_))),
                     expects_result,
-                    "{op:?} HIR call result should match its AST result type list"
+                    "{op:?} HIR call result should be a definition when its AST result type list is nonempty"
                 );
                 assert!(
-                    !args.is_empty(),
+                    args.len() > 0,
                     "collection host calls should include receiver as first argument"
                 );
             }
@@ -3042,18 +3363,29 @@ fn map_literal_lowering_preserves_entry_order() {
         .expect("map literal should lower to first-class HIR");
 
     assert!(lowered.prelude.is_empty());
-    assert_eq!(lowered.value.ty, map_type);
+    assert_eq!(expression_row(&builder, lowered.value).ty, map_type);
 
-    let HirExpressionKind::MapLiteral(entries) = &lowered.value.kind else {
-        panic!("expected HIR map literal, got {:?}", lowered.value.kind);
+    let HirExpressionKind::MapLiteral(entries) = &expression_row(&builder, lowered.value).kind
+    else {
+        panic!(
+            "expected HIR map literal, got {:?}",
+            expression_row(&builder, lowered.value).kind
+        );
     };
+    let entries = builder.module.expressions.map_entries(*entries);
     assert_eq!(entries.len(), 2);
     assert!(matches!(
-        (&entries[0].key.kind, &entries[0].value.kind),
+        (
+            &expression_row(&builder, entries[0].key).kind,
+            &expression_row(&builder, entries[0].value).kind
+        ),
         (HirExpressionKind::StringLiteral(key), HirExpressionKind::Int(10)) if key == "Priya"
     ));
     assert!(matches!(
-        (&entries[1].key.kind, &entries[1].value.kind),
+        (
+            &expression_row(&builder, entries[1].key).kind,
+            &expression_row(&builder, entries[1].value).kind
+        ),
         (HirExpressionKind::StringLiteral(key), HirExpressionKind::Int(12)) if key == "Grace"
     ));
 }
@@ -3150,18 +3482,26 @@ fn map_builtin_calls_lower_to_first_class_hir_ops() {
         };
         assert_eq!(*op, expected_op);
         assert_eq!(args.len(), expected_arg_count);
-        assert!(result.is_some());
         assert!(
             matches!(
-                receiver.kind,
-                HirExpressionKind::Load(HirPlace::Local(LocalId(80)))
+                &expression_row(&builder, *receiver).kind,
+                HirExpressionKind::Load(place)
+                    if place.root == LocalId(80) && super::is_local_place(place)
             ),
             "map receiver should lower as the original local place"
         );
 
-        let result_local = result.expect("map op should produce a result local");
+        let HirLocalDestination::Define(result_local) =
+            result.expect("map op should produce a result local")
+        else {
+            panic!("map result should define its result local");
+        };
         assert!(
-            matches!(lowered.value.kind, HirExpressionKind::Load(HirPlace::Local(local)) if local == result_local),
+            matches!(
+                &expression_row(&builder, lowered.value).kind,
+                HirExpressionKind::Load(place)
+                    if place.root == result_local && super::is_local_place(place)
+            ),
             "result-bearing map ops should return a load of the result local"
         );
         let local_ty = builder
@@ -3226,16 +3566,19 @@ fn lowers_choice_variant_expression_to_hir_variant_construct() {
         .expect("choice variant lowering should succeed");
 
     assert!(lowered.prelude.is_empty());
-    assert_eq!(lowered.value.value_kind, ValueKind::Const);
+    assert_eq!(
+        expression_row(&builder, lowered.value).value_kind,
+        ValueKind::Const
+    );
 
-    let (choice_id, variant_index) = match &lowered.value.kind {
+    let (choice_id, variant_index) = match &expression_row(&builder, lowered.value).kind {
         HirExpressionKind::VariantConstruct {
             carrier: HirVariantCarrier::Choice { choice_id },
             variant_index,
             fields,
         } => {
             assert!(
-                fields.is_empty(),
+                fields.len() == 0,
                 "unit variant should have no payload fields"
             );
             (*choice_id, *variant_index)
@@ -3250,7 +3593,9 @@ fn lowers_choice_variant_expression_to_hir_variant_construct() {
         "first choice should receive ChoiceId(0)"
     );
 
-    let hir_type = builder.type_environment.get(lowered.value.ty);
+    let hir_type = builder
+        .type_environment
+        .get(expression_row(&builder, lowered.value).ty);
     assert!(
         matches!(
             hir_type,
@@ -3291,20 +3636,22 @@ fn collection_expression_lowering_preserves_fixed_type_identity() {
         "literal collection elements should lower inline"
     );
     assert_eq!(
-        lowered.value.ty, fixed_collection,
+        expression_row(&builder, lowered.value).ty,
+        fixed_collection,
         "HIR collection expression should preserve the exact AST collection TypeId"
     );
 
     let shape = builder
         .type_environment
-        .collection_shape(lowered.value.ty)
+        .collection_shape(expression_row(&builder, lowered.value).ty)
         .expect("lowered expression type should remain a collection");
     assert_eq!(shape.fixed_capacity, Some(4));
 
-    match &lowered.value.kind {
+    match &expression_row(&builder, lowered.value).kind {
         HirExpressionKind::Collection(elements) => {
+            let elements = builder.module.expressions.values(*elements);
             assert_eq!(elements.len(), 1);
-            assert_eq!(elements[0].ty, int_type);
+            assert_eq!(expression_row(&builder, elements[0]).ty, int_type);
         }
         other => panic!("expected HIR collection expression, got {other:?}"),
     }
@@ -3331,13 +3678,13 @@ fn lowers_option_none_to_hir_variant_construct() {
 
     assert!(lowered.prelude.is_empty());
 
-    match &lowered.value.kind {
+    match &expression_row(&builder, lowered.value).kind {
         HirExpressionKind::VariantConstruct {
             carrier: HirVariantCarrier::Option,
             variant_index: 0,
             fields,
         } => {
-            assert!(fields.is_empty(), "Option none should have no fields");
+            assert!(fields.len() == 0, "Option none should have no fields");
         }
         other => panic!("expected VariantConstruct(Option, 0, []), got {other:?}"),
     }
@@ -3373,19 +3720,23 @@ fn lowers_fallible_success_to_hir_variant_construct() {
 
     assert!(lowered.prelude.is_empty());
 
-    match &lowered.value.kind {
+    match &expression_row(&builder, lowered.value).kind {
         HirExpressionKind::VariantConstruct {
             carrier: HirVariantCarrier::Fallible,
             variant_index: 0,
             fields,
         } => {
+            let fields = builder.module.expressions.variant_fields(*fields);
             assert_eq!(fields.len(), 1, "Result Ok should have one field");
             assert!(
                 fields[0].name.is_some(),
                 "Result Ok field should have a name"
             );
             assert!(
-                matches!(fields[0].value.kind, HirExpressionKind::Int(42)),
+                matches!(
+                    &expression_row(&builder, fields[0].value).kind,
+                    HirExpressionKind::Int(42)
+                ),
                 "Result Ok field value should be Int(42)"
             );
         }
@@ -3423,19 +3774,23 @@ fn lowers_fallible_error_to_hir_variant_construct() {
 
     assert!(lowered.prelude.is_empty());
 
-    match &lowered.value.kind {
+    match &expression_row(&builder, lowered.value).kind {
         HirExpressionKind::VariantConstruct {
             carrier: HirVariantCarrier::Fallible,
             variant_index: 1,
             fields,
         } => {
+            let fields = builder.module.expressions.variant_fields(*fields);
             assert_eq!(fields.len(), 1, "Result Err should have one field");
             assert!(
                 fields[0].name.is_some(),
                 "Result Err field should have a name"
             );
             assert!(
-                matches!(&fields[0].value.kind, HirExpressionKind::StringLiteral(s) if s == "oops"),
+                matches!(
+                    &expression_row(&builder, fields[0].value).kind,
+                    HirExpressionKind::StringLiteral(s) if s == "oops"
+                ),
                 "Result Err field value should be the lowered error string"
             );
         }
@@ -3465,7 +3820,7 @@ fn external_float_call_emits_validate_float_in_current_block() {
         .lower_expression_value_to_current_block(&call_expr)
         .expect("external Float call should lower");
 
-    assert_eq!(lowered.ty, float_type);
+    assert_eq!(expression_row(&builder, lowered).ty, float_type);
 
     let statements = builder.test_current_block_statements();
     assert!(
@@ -3517,7 +3872,7 @@ fn external_float_call_in_builtin_error_function_validates_with_return_error() {
         .lower_expression_value_to_current_block(&call_expr)
         .expect("external Float call should lower in builtin Error function");
 
-    assert_eq!(lowered.ty, float_type);
+    assert_eq!(expression_row(&builder, lowered).ty, float_type);
 
     let validate_modes: Vec<_> = builder
         .module
@@ -3556,7 +3911,10 @@ fn external_int_call_does_not_emit_validate_float() {
         .lower_expression(&call_expr)
         .expect("external Int call should lower");
 
-    assert_eq!(lowered.value.ty, builtin_type_ids::INT);
+    assert_eq!(
+        expression_row(&builder, lowered.value).ty,
+        builtin_type_ids::INT
+    );
 
     let prelude_has_validate = lowered
         .prelude
@@ -3602,7 +3960,7 @@ fn external_fallible_float_call_propagation_validates_success() {
         .lower_expression_value_to_current_block(&handled_call_expr)
         .expect("fallible external Float call should lower");
 
-    assert_eq!(lowered.ty, float_type);
+    assert_eq!(expression_row(&builder, lowered).ty, float_type);
 
     let all_statements: Vec<_> = builder
         .module
@@ -3682,7 +4040,7 @@ fn external_fallible_float_call_catch_validates_success() {
         .lower_expression(&catch_expr)
         .expect("fallible external Float catch should lower");
 
-    assert_eq!(lowered.value.ty, float_type);
+    assert_eq!(expression_row(&builder, lowered.value).ty, float_type);
 
     let all_statements: Vec<_> = builder
         .module
@@ -3743,32 +4101,127 @@ fn coerced_numeric_promotion_lowers_to_explicit_infallible_cast() {
             lowered.prelude.is_empty(),
             "{expected_source:?} promotion should convert inline without prelude statements"
         );
-        assert_eq!(lowered.value.ty, float_type);
-        let (policy_source, policy_target, converted) = match &lowered.value.kind {
-            HirExpressionKind::Cast { source, policy } => {
-                let BuiltinCastPolicyId::NumericConversion {
-                    source: domain_source,
-                    target: domain_target,
-                } = *policy
-                else {
-                    panic!("{expected_source:?} promotion should use a numeric conversion policy");
-                };
-                (domain_source, domain_target, &**source)
-            }
-            other => panic!("{expected_source:?} promotion should lower to Cast, got {other:?}"),
-        };
+        assert_eq!(expression_row(&builder, lowered.value).ty, float_type);
+        let (policy_source, policy_target, converted) =
+            match &expression_row(&builder, lowered.value).kind {
+                HirExpressionKind::Cast { source, policy } => {
+                    let BuiltinCastPolicyId::NumericConversion {
+                        source: domain_source,
+                        target: domain_target,
+                    } = *policy
+                    else {
+                        panic!(
+                            "{expected_source:?} promotion should use a numeric conversion policy"
+                        );
+                    };
+                    (domain_source, domain_target, *source)
+                }
+                other => {
+                    panic!("{expected_source:?} promotion should lower to Cast, got {other:?}")
+                }
+            };
         assert_eq!(policy_source, expected_source);
         assert_eq!(policy_target, NumericScalar::Float);
         match expected_source {
             NumericScalar::Uint => assert!(
-                matches!(converted.kind, HirExpressionKind::Uint(41)),
+                matches!(
+                    &builder.module.expressions.expression(converted).kind,
+                    HirExpressionKind::Uint(41)
+                ),
                 "Uint promotion should convert the original Uint literal value"
             ),
             NumericScalar::Int => assert!(
-                matches!(converted.kind, HirExpressionKind::Int(41)),
+                matches!(
+                    &builder.module.expressions.expression(converted).kind,
+                    HirExpressionKind::Int(41)
+                ),
                 "Int promotion should convert the original Int literal value"
             ),
             _ => unreachable!("promotion test only covers Uint and Int sources"),
         }
     }
+}
+
+#[test]
+fn metadata_replacement_preserves_distinct_occurrence_mappings() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let mut extended = ExtendedSpanBuilder::new();
+    let ast_span = SourceSpan::new(
+        SourceId::from_index(1),
+        LocalSpan::exact(3, 4, &mut extended).unwrap(),
+    );
+    let source_span = SourceSpan::new(
+        SourceId::from_index(2),
+        LocalSpan::exact(17, 4, &mut extended).unwrap(),
+    );
+    let original = builder
+        .make_expression(
+            &Some(source_span),
+            HirExpressionKind::Int(7),
+            builtin_type_ids::INT,
+            ValueKind::Const,
+            RegionId(0),
+        )
+        .unwrap();
+    builder
+        .side_table
+        .map_value(Some(ast_span), original, Some(source_span));
+    let before = builder.module.expressions.measurements();
+    let unchanged = builder
+        .replace_expression_metadata(original, &Some(source_span), None, None)
+        .unwrap();
+    assert_eq!(unchanged, original);
+    assert_eq!(builder.module.expressions.measurements(), before);
+
+    let replacement = builder
+        .replace_expression_metadata(original, &Some(source_span), None, Some(RegionId(1)))
+        .unwrap();
+    assert_ne!(replacement, original);
+    for value in [original, replacement] {
+        assert_eq!(builder.side_table.value_ast_span(value), Some(ast_span));
+        assert_eq!(
+            builder.side_table.value_source_span(value),
+            Some(source_span)
+        );
+        assert_eq!(
+            builder.module.expressions.expression(value).span,
+            Some(source_span)
+        );
+    }
+    assert_eq!(
+        builder.module.expressions.expression(original).region,
+        RegionId(0)
+    );
+    assert_eq!(
+        builder.module.expressions.expression(replacement).region,
+        RegionId(1)
+    );
+
+    let new_span = SourceSpan::new(
+        SourceId::from_index(1),
+        LocalSpan::exact(29, 4, &mut extended).unwrap(),
+    );
+    let retagged = builder
+        .replace_expression_metadata(replacement, &Some(new_span), None, None)
+        .unwrap();
+    assert_ne!(retagged, replacement);
+    assert_eq!(builder.side_table.value_ast_span(retagged), Some(new_span));
+    assert_eq!(
+        builder.side_table.value_source_span(retagged),
+        Some(new_span)
+    );
+    assert_eq!(
+        builder.module.expressions.expression(retagged).span,
+        Some(new_span)
+    );
+    assert_eq!(
+        builder.side_table.value_ast_span(replacement),
+        Some(ast_span)
+    );
+    assert_eq!(
+        builder.side_table.value_source_span(replacement),
+        Some(source_span)
+    );
 }

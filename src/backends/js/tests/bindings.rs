@@ -5,29 +5,34 @@ use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{
-    BlockId, FieldId, FunctionId, HirNodeId, LocalId, RegionId, StructId,
+    BlockId, FieldId, FunctionId, LocalId, RegionId, StructId,
 };
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_tests::integration_test_runner::assertions::{
+    run_node_script_within, with_harness_workspace,
+};
+use std::time::Duration;
 
 // Local binding and assignment tests [binding] [alias]
 // ---------------------------------------------------------------------------
 
-/// Verifies that assigning an integer value to a local emits __moth_assign_value. [binding]
+/// Verifies that defining a local with an integer creates a fresh value binding. [binding]
 #[test]
-fn local_slot_assignment_emits_assign_value() {
+fn value_definition_emits_fresh_binding() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
 
     let assign = statement(
         1,
-        HirStatementKind::Assign {
-            target: HirPlace::Local(LocalId(0)),
-            value: int_expression(1, 42, types.int, RegionId(0)),
+        HirStatementKind::Write {
+            target: HirWriteTarget::DefineLocal(LocalId(0)),
+            value: int_expression(42, types.int, RegionId(0), &mut expressions),
         },
     );
 
@@ -36,7 +41,11 @@ fn local_slot_assignment_emits_assign_value() {
         region: RegionId(0),
         locals: vec![local(0, types.int, RegionId(0))],
         statements: vec![assign],
-        terminator: HirTerminator::Return(unit_expression(2, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -47,6 +56,7 @@ fn local_slot_assignment_emits_assign_value() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -57,7 +67,6 @@ fn local_slot_assignment_emits_assign_value() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -68,10 +77,20 @@ fn local_slot_assignment_emits_assign_value() {
     let count_name = expected_dev_local_name("count", 0);
 
     assert!(
+        output.source.contains(&format!("let {count_name};")),
+        "function setup must reserve the name before its dynamic definition"
+    );
+    assert!(
+        !output
+            .source
+            .contains(&format!("let {count_name} = __moth_binding(undefined);")),
+        "function setup must not allocate a placeholder binding before the definition"
+    );
+    assert!(
         output
             .source
-            .contains(&format!("__moth_assign_value({count_name}, 42);")),
-        "assigning an integer to a local must emit __moth_assign_value"
+            .contains(&format!("{count_name} = __moth_binding(42);")),
+        "a local definition must wrap the produced value in a fresh binding"
     );
 }
 
@@ -81,6 +100,7 @@ fn local_slot_assignment_emits_assign_value() {
 /// Verifies that function parameters emit __moth_param_binding to normalize call arguments. [binding]
 #[test]
 fn function_parameters_emit_param_binding() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
@@ -90,7 +110,11 @@ fn function_parameters_emit_param_binding() {
         region: RegionId(0),
         locals: vec![local(0, types.int, RegionId(0))],
         statements: vec![],
-        terminator: HirTerminator::Return(unit_expression(0, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -101,6 +125,7 @@ fn function_parameters_emit_param_binding() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "takes_arg",
@@ -111,7 +136,6 @@ fn function_parameters_emit_param_binding() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -133,31 +157,32 @@ fn function_parameters_emit_param_binding() {
 // Borrow-assignment and alias behavior tests [alias]
 // ---------------------------------------------------------------------------
 
-/// Verifies that assigning a Load (borrow) to a local emits __moth_assign_borrow. [alias]
+/// Verifies that defining a local from a place creates a new alias binding. [alias]
 #[test]
-fn borrow_assignment_emits_assign_borrow() {
+fn place_definition_emits_fresh_alias_binding() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
 
     let assign_source = statement(
         1,
-        HirStatementKind::Assign {
-            target: HirPlace::Local(LocalId(0)),
-            value: int_expression(1, 42, types.int, RegionId(0)),
+        HirStatementKind::Write {
+            target: HirWriteTarget::DefineLocal(LocalId(0)),
+            value: int_expression(42, types.int, RegionId(0), &mut expressions),
         },
     );
 
     let assign_alias = statement(
         2,
-        HirStatementKind::Assign {
-            target: HirPlace::Local(LocalId(1)),
+        HirStatementKind::Write {
+            target: HirWriteTarget::DefineLocal(LocalId(1)),
             value: expression(
-                2,
-                HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
+                HirExpressionKind::Load(HirPlace::local(LocalId(0))),
                 types.int,
                 RegionId(0),
-                ValueKind::RValue,
+                ValueKind::Place,
+                &mut expressions,
             ),
         },
     );
@@ -170,7 +195,11 @@ fn borrow_assignment_emits_assign_borrow() {
             local(1, types.int, RegionId(0)),
         ],
         statements: vec![assign_source, assign_alias],
-        terminator: HirTerminator::Return(unit_expression(3, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -181,6 +210,7 @@ fn borrow_assignment_emits_assign_borrow() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -191,7 +221,6 @@ fn borrow_assignment_emits_assign_borrow() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -204,15 +233,174 @@ fn borrow_assignment_emits_assign_borrow() {
 
     assert!(
         output.source.contains(&format!(
-            "__moth_assign_borrow({alias_name}, {source_name})"
+            "{alias_name} = __moth_alias_binding({source_name});"
         )),
-        "Load assignment to a fresh local must emit __moth_assign_borrow"
+        "a place-valued definition must create a fresh alias wrapper"
     );
+}
+
+/// Verifies that updating an existing local from a place uses borrow-assignment semantics. [alias]
+#[test]
+fn place_update_emits_assign_borrow() {
+    let mut expressions = HirExpressionStore::default();
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (type_environment, types) = build_type_environment();
+
+    let update = statement(
+        1,
+        HirStatementKind::Write {
+            target: HirWriteTarget::AssignPlace(HirPlace::local(LocalId(1))),
+            value: expression(
+                HirExpressionKind::Load(HirPlace::local(LocalId(0))),
+                types.int,
+                RegionId(0),
+                ValueKind::Place,
+                &mut expressions,
+            ),
+        },
+    );
+    let block = HirBlock {
+        id: BlockId(0),
+        region: RegionId(0),
+        locals: vec![
+            local(0, types.int, RegionId(0)),
+            local(1, types.int, RegionId(0)),
+        ],
+        statements: vec![update],
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
+    };
+    let function = HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: vec![LocalId(0), LocalId(1)],
+        return_type: types.unit,
+    };
+    let module = build_module(
+        expressions,
+        &mut path_fork,
+        &mut string_table,
+        "main",
+        vec![block],
+        function,
+        &[(LocalId(0), "source"), (LocalId(1), "target")],
+    );
+
+    let output = lower_hir_to_js(
+        &module,
+        &NumericProofs::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("JS lowering should succeed");
+    let target_name = expected_dev_local_name("target", 1);
+    let source_name = expected_dev_local_name("source", 0);
+
+    assert!(
+        output.source.contains(&format!(
+            "__moth_assign_borrow({target_name}, {source_name});"
+        )),
+        "a place-valued update must use the runtime's borrow assignment helper"
+    );
+}
+
+/// Verifies that borrow-updating a slot from an alias resolving back to that slot is a no-op.
+#[test]
+fn place_update_from_alias_of_destination_does_not_create_cycle() {
+    let mut expressions = HirExpressionStore::default();
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (type_environment, types) = build_type_environment();
+    let define_alias = statement(
+        1,
+        HirStatementKind::Write {
+            target: HirWriteTarget::DefineLocal(LocalId(1)),
+            value: expression(
+                HirExpressionKind::Load(HirPlace::local(LocalId(0))),
+                types.int,
+                RegionId(0),
+                ValueKind::Place,
+                &mut expressions,
+            ),
+        },
+    );
+    let update_from_alias = statement(
+        2,
+        HirStatementKind::Write {
+            target: HirWriteTarget::AssignPlace(HirPlace::local(LocalId(0))),
+            value: expression(
+                HirExpressionKind::Load(HirPlace::local(LocalId(1))),
+                types.int,
+                RegionId(0),
+                ValueKind::Place,
+                &mut expressions,
+            ),
+        },
+    );
+    let block = HirBlock {
+        id: BlockId(0),
+        region: RegionId(0),
+        locals: vec![
+            local(0, types.int, RegionId(0)),
+            local(1, types.int, RegionId(0)),
+        ],
+        statements: vec![define_alias, update_from_alias],
+        terminator: HirTerminator::Return(expression(
+            HirExpressionKind::Load(HirPlace::local(LocalId(0))),
+            types.int,
+            RegionId(0),
+            ValueKind::RValue,
+            &mut expressions,
+        )),
+    };
+    let function = HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: vec![LocalId(0)],
+        return_type: types.int,
+    };
+    let module = build_module(
+        expressions,
+        &mut path_fork,
+        &mut string_table,
+        "main",
+        vec![block],
+        function,
+        &[(LocalId(0), "value"), (LocalId(1), "alias")],
+    );
+    let output = lower_hir_to_js(
+        &module,
+        &NumericProofs::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("same-binding place update should lower");
+    let function_name = expected_dev_function_name("main", 0);
+    let script = format!(
+        "{}\nconst value = __moth_binding(42);\nconsole.log({function_name}(value));",
+        output.source
+    );
+    let stdout = with_harness_workspace(|workspace| {
+        let script_path = workspace.write("program.js", &script)?;
+        let run = run_node_script_within(&script_path, workspace.path(), Duration::from_secs(2))?;
+        Ok(run.stdout)
+    })
+    .expect("a self-resolving alias update must finish under the bounded Node harness");
+    assert_eq!(stdout.trim(), "42");
 }
 
 /// Verifies that an alias local is read through __moth_read in a host io call. [binding]
 #[test]
 fn alias_local_read_emits_bs_read() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
@@ -221,22 +409,22 @@ fn alias_local_read_emits_bs_read() {
 
     let assign_source = statement(
         1,
-        HirStatementKind::Assign {
-            target: HirPlace::Local(LocalId(0)),
-            value: int_expression(1, 99, types.int, RegionId(0)),
+        HirStatementKind::Write {
+            target: HirWriteTarget::DefineLocal(LocalId(0)),
+            value: int_expression(99, types.int, RegionId(0), &mut expressions),
         },
     );
 
     let assign_alias = statement(
         2,
-        HirStatementKind::Assign {
-            target: HirPlace::Local(LocalId(1)),
+        HirStatementKind::Write {
+            target: HirWriteTarget::DefineLocal(LocalId(1)),
             value: expression(
-                2,
-                HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
+                HirExpressionKind::Load(HirPlace::local(LocalId(0))),
                 types.int,
                 RegionId(0),
-                ValueKind::RValue,
+                ValueKind::Place,
+                &mut expressions,
             ),
         },
     );
@@ -245,13 +433,16 @@ fn alias_local_read_emits_bs_read() {
         3,
         HirStatementKind::Call {
             target: CallTarget::External(io_id),
-            args: vec![expression(
-                3,
-                HirExpressionKind::Load(HirPlace::Local(LocalId(1))),
-                types.int,
-                RegionId(0),
-                ValueKind::RValue,
-            )],
+            args: append_values(
+                &[expression(
+                    HirExpressionKind::Load(HirPlace::local(LocalId(1))),
+                    types.int,
+                    RegionId(0),
+                    ValueKind::RValue,
+                    &mut expressions,
+                )],
+                &mut expressions,
+            ),
             result: None,
         },
     );
@@ -264,7 +455,11 @@ fn alias_local_read_emits_bs_read() {
             local(1, types.int, RegionId(0)),
         ],
         statements: vec![assign_source, assign_alias, log_alias],
-        terminator: HirTerminator::Return(unit_expression(4, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -275,6 +470,7 @@ fn alias_local_read_emits_bs_read() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -285,7 +481,6 @@ fn alias_local_read_emits_bs_read() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -303,18 +498,19 @@ fn alias_local_read_emits_bs_read() {
     );
 }
 
-/// Verifies that assigning to an alias-only local emits __moth_write instead of __moth_assign_value. [alias]
+/// Verifies that updating an existing local with a value uses value-assignment semantics. [binding]
 #[test]
-fn alias_only_local_assignment_emits_write() {
+fn value_update_emits_assign_value() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
 
     let assign = statement(
         1,
-        HirStatementKind::Assign {
-            target: HirPlace::Local(LocalId(0)),
-            value: int_expression(1, 42, types.int, RegionId(0)),
+        HirStatementKind::Write {
+            target: HirWriteTarget::AssignPlace(HirPlace::local(LocalId(0))),
+            value: int_expression(42, types.int, RegionId(0), &mut expressions),
         },
     );
 
@@ -323,17 +519,22 @@ fn alias_only_local_assignment_emits_write() {
         region: RegionId(0),
         locals: vec![local(0, types.int, RegionId(0))],
         statements: vec![assign],
-        terminator: HirTerminator::Return(unit_expression(2, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
-        params: vec![],
+        params: vec![LocalId(0)],
         return_type: types.unit,
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -342,23 +543,8 @@ fn alias_only_local_assignment_emits_write() {
         &[(LocalId(0), "target")],
     );
 
-    // Mark the local as alias-only at the assignment statement so the emitter takes the
-    // __moth_write path instead of __moth_assign_value.
-    let mut report = BorrowCheckReport::default();
-    report.analysis.statement_entry_states.insert(
-        HirNodeId(1),
-        BorrowStateSnapshot {
-            locals: vec![LocalBorrowSnapshot {
-                local: LocalId(0),
-                mode: LocalMode::ALIAS,
-                alias_roots: vec![],
-            }],
-        },
-    );
-
     let output = lower_hir_to_js(
         &module,
-        &report,
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -371,14 +557,8 @@ fn alias_only_local_assignment_emits_write() {
     assert!(
         output
             .source
-            .contains(&format!("__moth_write({target_name}, 42)")),
-        "alias-only local assignment must emit __moth_write, not __moth_assign_value"
-    );
-    assert!(
-        !output
-            .source
-            .contains(&format!("__moth_assign_value({target_name}")),
-        "alias-only local must not use __moth_assign_value"
+            .contains(&format!("__moth_assign_value({target_name}, 42);")),
+        "an explicit local update with an rvalue must use value-assignment semantics"
     );
 }
 
@@ -389,18 +569,20 @@ fn alias_only_local_assignment_emits_write() {
 /// Verifies that assigning to a struct field emits __moth_write(__moth_field(...)). [computed]
 #[test]
 fn field_place_emits_bs_field() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
 
     let assign_to_field = statement(
         1,
-        HirStatementKind::Assign {
-            target: HirPlace::Field {
-                base: Box::new(HirPlace::Local(LocalId(0))),
-                field: FieldId(0),
-            },
-            value: int_expression(1, 42, types.int, RegionId(0)),
+        HirStatementKind::Write {
+            target: HirWriteTarget::AssignPlace(
+                HirPlace::local(LocalId(0))
+                    .with_field(FieldId(0), &mut expressions, None)
+                    .expect("test field projection should fit"),
+            ),
+            value: int_expression(42, types.int, RegionId(0), &mut expressions),
         },
     );
 
@@ -409,7 +591,11 @@ fn field_place_emits_bs_field() {
         region: RegionId(0),
         locals: vec![local(0, types.int, RegionId(0))],
         statements: vec![assign_to_field],
-        terminator: HirTerminator::Return(unit_expression(2, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -420,6 +606,7 @@ fn field_place_emits_bs_field() {
     };
 
     let mut module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -446,7 +633,6 @@ fn field_place_emits_bs_field() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -468,18 +654,21 @@ fn field_place_emits_bs_field() {
 /// Verifies that assigning to a collection index emits __moth_write(__moth_index(...)). [computed]
 #[test]
 fn index_place_emits_bs_index() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
 
     let assign_to_index = statement(
         1,
-        HirStatementKind::Assign {
-            target: HirPlace::Index {
-                base: Box::new(HirPlace::Local(LocalId(0))),
-                index: Box::new(int_expression(10, 0, types.int, RegionId(0))),
-            },
-            value: int_expression(1, 42, types.int, RegionId(0)),
+        HirStatementKind::Write {
+            target: HirWriteTarget::AssignPlace({
+                let index = int_expression(0, types.int, RegionId(0), &mut expressions);
+                HirPlace::local(LocalId(0))
+                    .with_index(index, &mut expressions, None)
+                    .expect("test index projection should fit")
+            }),
+            value: int_expression(42, types.int, RegionId(0), &mut expressions),
         },
     );
 
@@ -488,7 +677,11 @@ fn index_place_emits_bs_index() {
         region: RegionId(0),
         locals: vec![local(0, types.int, RegionId(0))],
         statements: vec![assign_to_index],
-        terminator: HirTerminator::Return(unit_expression(2, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -499,6 +692,7 @@ fn index_place_emits_bs_index() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -509,7 +703,6 @@ fn index_place_emits_bs_index() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -530,6 +723,7 @@ fn index_place_emits_bs_index() {
 /// Verifies that reading a field place composes __moth_read with __moth_field. [computed]
 #[test]
 fn computed_place_read_composes_with_bs_read() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
@@ -540,16 +734,19 @@ fn computed_place_read_composes_with_bs_read() {
         1,
         HirStatementKind::Call {
             target: CallTarget::External(io_id),
-            args: vec![expression(
-                1,
-                HirExpressionKind::Load(HirPlace::Field {
-                    base: Box::new(HirPlace::Local(LocalId(0))),
-                    field: FieldId(0),
-                }),
-                types.int,
-                RegionId(0),
-                ValueKind::RValue,
-            )],
+            args: {
+                let field_place = HirPlace::local(LocalId(0))
+                    .with_field(FieldId(0), &mut expressions, None)
+                    .expect("test field projection should fit");
+                let field_value = expression(
+                    HirExpressionKind::Load(field_place),
+                    types.int,
+                    RegionId(0),
+                    ValueKind::RValue,
+                    &mut expressions,
+                );
+                append_values(&[field_value], &mut expressions)
+            },
             result: None,
         },
     );
@@ -559,7 +756,11 @@ fn computed_place_read_composes_with_bs_read() {
         region: RegionId(0),
         locals: vec![local(0, types.int, RegionId(0))],
         statements: vec![log_field],
-        terminator: HirTerminator::Return(unit_expression(2, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -570,6 +771,7 @@ fn computed_place_read_composes_with_bs_read() {
     };
 
     let mut module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -595,7 +797,6 @@ fn computed_place_read_composes_with_bs_read() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),

@@ -5,8 +5,8 @@
 //!      template features do not have to preserve separate call-based semantics.
 
 use crate::compiler_frontend::ast::templates::OwnedRuntimeTemplateNode;
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::hir_expression::LoweredExpression;
@@ -23,7 +23,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         node: &OwnedRuntimeTemplateNode,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let accumulator = self.initialize_runtime_template_accumulator(span_ref)?;
         self.append_owned_runtime_template_node_to_accumulator(
             node,
@@ -35,11 +35,11 @@ impl<'a> HirBuilder<'a> {
         let region = self.current_region_or_error(span_ref)?;
         let value = self.make_expression(
             span_ref,
-            HirExpressionKind::Copy(HirPlace::Local(accumulator)),
+            HirExpressionKind::Copy(HirPlace::local(accumulator)),
             builtin_type_ids::STRING,
             ValueKind::RValue,
             region,
-        );
+        )?;
 
         Ok(LoweredExpression {
             prelude: vec![],

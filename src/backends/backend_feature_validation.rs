@@ -25,9 +25,10 @@ use crate::compiler_frontend::datatypes::ids::{BuiltinTypeKey, TypeId};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirLocal;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
+use crate::compiler_frontend::hir::expression_store::HirProjection;
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
-use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
+use crate::compiler_frontend::hir::ids::{BlockId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{HirNumericOperands, NumericFailureMode};
 use crate::compiler_frontend::hir::patterns::HirPattern;
@@ -38,7 +39,7 @@ use crate::compiler_frontend::hir::reachability::{
     ReachableNumericOpUse, ReachableRangeStepFailureUse, ReachableRuntimeCastForm,
     ReachableRuntimeCastUse,
 };
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -166,6 +167,12 @@ pub fn validate_hir_backend_feature_support(
                 string_table,
             )?;
             validate_wasm_mutable_function_parameters(
+                input.hir,
+                reachability.backend_selection(),
+                input.target,
+                string_table,
+            )?;
+            validate_wasm_mutable_local_aliases(
                 input.hir,
                 reachability.backend_selection(),
                 input.target,
@@ -773,7 +780,7 @@ fn validate_wasm_fallible_control_flow(
 
 /// Reports a selected mutable parameter that Wasm cannot lower with write-through semantics.
 ///
-/// WHAT: examines only declared parameters of selected functions; mutable locals remain supported.
+/// WHAT: examines only declared parameters of selected functions.
 /// WHY: Wasm call lowering currently passes parameter values instead of writable locations, so
 ///      accepting `~` parameters would silently lose mutations when a callee returns.
 fn validate_wasm_mutable_function_parameters(
@@ -849,6 +856,97 @@ fn validate_wasm_mutable_function_parameters(
         let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
             string_table.intern(target.as_str()),
             UnsupportedBackendFeatureReason::MutableFunctionParameters,
+            None,
+        );
+        return Err(BackendFeatureValidationError::Diagnostic(diagnostic));
+    }
+
+    Ok(())
+}
+
+/// Reports mutable local writes whose place-backed value must remain a write-through alias.
+///
+/// WHAT: checks selected local definitions and whole-local updates using HIR's explicit write
+///       target and incoming `ValueKind`.
+/// WHY: Wasm assigns scalar locals by value, so it cannot preserve these source binding aliases.
+fn validate_wasm_mutable_local_aliases(
+    hir: &HirModule,
+    selection: &HirBackendSelection,
+    target: BackendTarget,
+    string_table: &mut StringTable,
+) -> Result<(), BackendFeatureValidationError> {
+    let mut spanless_alias = false;
+
+    for function in &hir.functions {
+        if !selection.contains_function(function.id) {
+            continue;
+        }
+
+        let Some(selected_block_ids) = selection.blocks_for_function(function.id) else {
+            return Err(BackendFeatureValidationError::Infrastructure(Box::new(
+                CompilerError::compiler_error(format!(
+                    "Backend feature validation has no selected blocks for function {:?}",
+                    function.id,
+                )),
+            )));
+        };
+        let selected_blocks = selected_block_ids.iter().copied().collect::<FxHashSet<_>>();
+        let mutable_locals = hir
+            .blocks
+            .iter()
+            .filter(|block| selected_blocks.contains(&block.id))
+            .flat_map(|block| &block.locals)
+            .filter(|local| local.mutable)
+            .map(|local| local.id)
+            .collect::<FxHashSet<_>>();
+
+        for block in &hir.blocks {
+            if !selected_blocks.contains(&block.id) {
+                continue;
+            }
+
+            for statement in &block.statements {
+                let HirStatementKind::Write {
+                    target: write_target,
+                    value,
+                } = &statement.kind
+                else {
+                    continue;
+                };
+                let local = match write_target {
+                    HirWriteTarget::DefineLocal(local) => Some(*local),
+                    HirWriteTarget::AssignPlace(place) if place.projections.is_empty() => {
+                        Some(place.root)
+                    }
+                    HirWriteTarget::AssignPlace(_) => None,
+                };
+                let Some(local) = local else {
+                    continue;
+                };
+
+                let expression = hir.expressions.expression(*value);
+                if !mutable_locals.contains(&local) || expression.value_kind != ValueKind::Place {
+                    continue;
+                }
+
+                if let Some(span) = statement.span.or(expression.span) {
+                    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+                        string_table.intern(target.as_str()),
+                        UnsupportedBackendFeatureReason::MutableLocalBindingAliases,
+                        Some(span),
+                    );
+                    return Err(BackendFeatureValidationError::Diagnostic(diagnostic));
+                }
+
+                spanless_alias = true;
+            }
+        }
+    }
+
+    if spanless_alias {
+        let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+            string_table.intern(target.as_str()),
+            UnsupportedBackendFeatureReason::MutableLocalBindingAliases,
             None,
         );
         return Err(BackendFeatureValidationError::Diagnostic(diagnostic));
@@ -966,16 +1064,19 @@ where
         }
 
         for statement in &block.statements {
-            if let Some(occurrence) =
-                first_unsupported_statement_occurrence(statement, &block.locals, &mut search)
-            {
+            if let Some(occurrence) = first_unsupported_statement_occurrence(
+                statement,
+                &block.locals,
+                module,
+                &mut search,
+            ) {
                 authored = Some(occurrence);
                 break 'blocks;
             }
         }
 
         if let Some(occurrence) =
-            first_unsupported_terminator_occurrence(&block.terminator, &mut search)
+            first_unsupported_terminator_occurrence(&block.terminator, module, &mut search)
         {
             authored = Some(occurrence);
             break 'blocks;
@@ -1024,60 +1125,75 @@ where
 fn first_unsupported_statement_occurrence<IsUnsupported>(
     statement: &HirStatement,
     locals: &[HirLocal],
+    module: &HirModule,
     search: &mut TypeOccurrenceSearch<'_, IsUnsupported>,
 ) -> Option<ReachableTypeOccurrence>
 where
     IsUnsupported: FnMut(TypeId) -> bool,
 {
     match &statement.kind {
-        HirStatementKind::Assign { target, value } => {
-            first_unsupported_place_occurrence(target, search)
-                .or_else(|| first_unsupported_expression_occurrence(value, search))
+        HirStatementKind::Write { target, value } => {
+            let target_occurrence = match target {
+                HirWriteTarget::DefineLocal(_) => None,
+                HirWriteTarget::AssignPlace(place) => {
+                    first_unsupported_place_occurrence(*place, module, search)
+                }
+            };
+            target_occurrence
+                .or_else(|| first_unsupported_expression_occurrence(*value, module, search))
         }
-        HirStatementKind::Call { args, .. } => args
+        HirStatementKind::Call { args, .. } => module
+            .expressions
+            .values(*args)
             .iter()
-            .find_map(|arg| first_unsupported_expression_occurrence(arg, search)),
+            .find_map(|arg| first_unsupported_expression_occurrence(*arg, module, search)),
         HirStatementKind::Expr(value) | HirStatementKind::PushRuntimeFragment { value, .. } => {
-            first_unsupported_expression_occurrence(value, search)
+            first_unsupported_expression_occurrence(*value, module, search)
         }
         HirStatementKind::CastOp { source, result, .. } => result
             .as_ref()
             .and_then(|result_local| {
                 first_unsupported_result_local_occurrence(
                     locals,
-                    *result_local,
+                    result_local.local(),
                     statement.span,
                     search,
                 )
             })
-            .or_else(|| first_unsupported_expression_occurrence(source, search)),
+            .or_else(|| first_unsupported_expression_occurrence(*source, module, search)),
         HirStatementKind::FormatFloat { source, .. }
         | HirStatementKind::ValidateFloat { source, .. } => {
-            first_unsupported_expression_occurrence(source, search)
+            first_unsupported_expression_occurrence(*source, module, search)
         }
         HirStatementKind::MapOp { receiver, args, .. } => {
-            first_unsupported_expression_occurrence(receiver, search).or_else(|| {
-                args.iter()
-                    .find_map(|arg| first_unsupported_expression_occurrence(arg, search))
+            first_unsupported_expression_occurrence(*receiver, module, search).or_else(|| {
+                module
+                    .expressions
+                    .values(*args)
+                    .iter()
+                    .find_map(|arg| first_unsupported_expression_occurrence(*arg, module, search))
             })
         }
         HirStatementKind::NumericOp {
             operands, result, ..
         } => {
-            if let Some(occurrence) =
-                first_unsupported_result_local_occurrence(locals, *result, statement.span, search)
-            {
+            if let Some(occurrence) = first_unsupported_result_local_occurrence(
+                locals,
+                result.local(),
+                statement.span,
+                search,
+            ) {
                 return Some(occurrence);
             }
 
             let unsupported_before = search.unsupported_count;
             let occurrence = match operands {
                 HirNumericOperands::Unary { operand } => {
-                    first_unsupported_expression_occurrence(operand, search)
+                    first_unsupported_expression_occurrence(*operand, module, search)
                 }
                 HirNumericOperands::Binary { left, right } => {
-                    first_unsupported_expression_occurrence(left, search)
-                        .or_else(|| first_unsupported_expression_occurrence(right, search))
+                    first_unsupported_expression_occurrence(*left, module, search)
+                        .or_else(|| first_unsupported_expression_occurrence(*right, module, search))
                 }
             };
 
@@ -1100,7 +1216,12 @@ where
             None
         }
         HirStatementKind::RangeStepFailure { result, .. } => {
-            first_unsupported_result_local_occurrence(locals, *result, statement.span, search)
+            first_unsupported_result_local_occurrence(
+                locals,
+                result.local(),
+                statement.span,
+                search,
+            )
         }
         HirStatementKind::FloatRangeCandidate {
             current,
@@ -1113,14 +1234,14 @@ where
         } => {
             if let Some(occurrence) = first_unsupported_result_local_occurrence(
                 locals,
-                *candidate_result,
+                candidate_result.local(),
                 statement.span,
                 search,
             )
             .or_else(|| {
                 first_unsupported_result_local_occurrence(
                     locals,
-                    *in_range_result,
+                    in_range_result.local(),
                     statement.span,
                     search,
                 )
@@ -1129,10 +1250,10 @@ where
             }
 
             let unsupported_before = search.unsupported_count;
-            let occurrence = first_unsupported_expression_occurrence(current, search)
-                .or_else(|| first_unsupported_expression_occurrence(step, search))
-                .or_else(|| first_unsupported_expression_occurrence(end, search))
-                .or_else(|| first_unsupported_expression_occurrence(ascending, search));
+            let occurrence = first_unsupported_expression_occurrence(*current, module, search)
+                .or_else(|| first_unsupported_expression_occurrence(*step, module, search))
+                .or_else(|| first_unsupported_expression_occurrence(*end, module, search))
+                .or_else(|| first_unsupported_expression_occurrence(*ascending, module, search));
             if let Some(occurrence) = occurrence {
                 return Some(ReachableTypeOccurrence {
                     span: statement.span.or(occurrence.span),
@@ -1171,6 +1292,7 @@ where
 
 fn first_unsupported_terminator_occurrence<IsUnsupported>(
     terminator: &HirTerminator,
+    module: &HirModule,
     search: &mut TypeOccurrenceSearch<'_, IsUnsupported>,
 ) -> Option<ReachableTypeOccurrence>
 where
@@ -1178,27 +1300,29 @@ where
 {
     match terminator {
         HirTerminator::If { condition, .. } => {
-            first_unsupported_expression_occurrence(condition, search)
+            first_unsupported_expression_occurrence(*condition, module, search)
         }
         HirTerminator::FallibleBranch { result, .. }
         | HirTerminator::Return(result)
         | HirTerminator::ReturnSuccess(result)
         | HirTerminator::ReturnError(result) => {
-            first_unsupported_expression_occurrence(result, search)
+            first_unsupported_expression_occurrence(*result, module, search)
         }
         HirTerminator::Match { scrutinee, arms } => {
-            first_unsupported_expression_occurrence(scrutinee, search).or_else(|| {
+            first_unsupported_expression_occurrence(*scrutinee, module, search).or_else(|| {
                 arms.iter().find_map(|arm| {
-                    first_unsupported_pattern_occurrence(&arm.pattern, search).or_else(|| {
-                        arm.guard.as_ref().and_then(|guard| {
-                            first_unsupported_expression_occurrence(guard, search)
-                        })
-                    })
+                    first_unsupported_pattern_occurrence(&arm.pattern, module, search).or_else(
+                        || {
+                            arm.guard.and_then(|guard| {
+                                first_unsupported_expression_occurrence(guard, module, search)
+                            })
+                        },
+                    )
                 })
             })
         }
         HirTerminator::AssertFailure { message, .. } => {
-            first_unsupported_expression_occurrence(message, search)
+            first_unsupported_expression_occurrence(*message, module, search)
         }
         HirTerminator::Jump { .. }
         | HirTerminator::Break { .. }
@@ -1214,6 +1338,7 @@ where
 ///      own semantic type, so it is scanned with the same predicate as an arm guard.
 fn first_unsupported_pattern_occurrence<IsUnsupported>(
     pattern: &HirPattern,
+    module: &HirModule,
     search: &mut TypeOccurrenceSearch<'_, IsUnsupported>,
 ) -> Option<ReachableTypeOccurrence>
 where
@@ -1224,7 +1349,7 @@ where
         | HirPattern::OptionValue { value }
         | HirPattern::OptionRelational { value, .. }
         | HirPattern::Relational { value, .. } => {
-            first_unsupported_expression_occurrence(value, search)
+            first_unsupported_expression_occurrence(*value, module, search)
         }
         HirPattern::OptionNone
         | HirPattern::OptionPresent
@@ -1238,35 +1363,40 @@ where
 /// WHY: a projected place is not a value, but its index operand has a semantic type and is scanned
 ///      like every other reachable expression.
 fn first_unsupported_place_occurrence<IsUnsupported>(
-    place: &HirPlace,
+    place: HirPlace,
+    module: &HirModule,
     search: &mut TypeOccurrenceSearch<'_, IsUnsupported>,
 ) -> Option<ReachableTypeOccurrence>
 where
     IsUnsupported: FnMut(TypeId) -> bool,
 {
-    match place {
-        HirPlace::Local(_) => None,
-        HirPlace::Field { base, .. } => first_unsupported_place_occurrence(base, search),
-        HirPlace::Index { base, index } => first_unsupported_place_occurrence(base, search)
-            .or_else(|| first_unsupported_expression_occurrence(index, search)),
+    for projection in module.expressions.projections(place.projections) {
+        if let HirProjection::Index(index) = *projection
+            && let Some(occurrence) = first_unsupported_expression_occurrence(index, module, search)
+        {
+            return Some(occurrence);
+        }
     }
+    None
 }
 
 fn first_unsupported_expression_occurrence<IsUnsupported>(
-    expression: &HirExpression,
+    expression_id: HirValueId,
+    module: &HirModule,
     search: &mut TypeOccurrenceSearch<'_, IsUnsupported>,
 ) -> Option<ReachableTypeOccurrence>
 where
     IsUnsupported: FnMut(TypeId) -> bool,
 {
+    let expression = module.expressions.expression(expression_id);
     if let Some(occurrence) = search.check(expression.ty, expression.span) {
         return Some(occurrence);
     }
 
     match &expression.kind {
         HirExpressionKind::BinOp { left, right, .. } => {
-            first_unsupported_expression_occurrence(left, search)
-                .or_else(|| first_unsupported_expression_occurrence(right, search))
+            first_unsupported_expression_occurrence(*left, module, search)
+                .or_else(|| first_unsupported_expression_occurrence(*right, module, search))
         }
         HirExpressionKind::UnaryOp { operand, .. }
         | HirExpressionKind::TupleGet { tuple: operand, .. }
@@ -1277,28 +1407,39 @@ where
         }
         | HirExpressionKind::VariantPayloadGet {
             source: operand, ..
-        } => first_unsupported_expression_occurrence(operand, search),
+        } => first_unsupported_expression_occurrence(*operand, module, search),
         HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
-            first_unsupported_place_occurrence(place, search)
+            first_unsupported_place_occurrence(*place, module, search)
         }
-        HirExpressionKind::StructConstruct { fields, .. } => fields
+        HirExpressionKind::StructConstruct { fields, .. } => module
+            .expressions
+            .struct_fields(*fields)
             .iter()
-            .find_map(|(_, value)| first_unsupported_expression_occurrence(value, search)),
+            .find_map(|(_, value)| first_unsupported_expression_occurrence(*value, module, search)),
         HirExpressionKind::Collection(items)
-        | HirExpressionKind::TupleConstruct { elements: items } => items
+        | HirExpressionKind::TupleConstruct { elements: items } => module
+            .expressions
+            .values(*items)
             .iter()
-            .find_map(|item| first_unsupported_expression_occurrence(item, search)),
-        HirExpressionKind::MapLiteral(entries) => entries.iter().find_map(|entry| {
-            first_unsupported_expression_occurrence(&entry.key, search)
-                .or_else(|| first_unsupported_expression_occurrence(&entry.value, search))
-        }),
+            .find_map(|item| first_unsupported_expression_occurrence(*item, module, search)),
+        HirExpressionKind::MapLiteral(entries) => module
+            .expressions
+            .map_entries(*entries)
+            .iter()
+            .find_map(|entry| {
+                first_unsupported_expression_occurrence(entry.key, module, search).or_else(|| {
+                    first_unsupported_expression_occurrence(entry.value, module, search)
+                })
+            }),
         HirExpressionKind::Range { start, end } => {
-            first_unsupported_expression_occurrence(start, search)
-                .or_else(|| first_unsupported_expression_occurrence(end, search))
+            first_unsupported_expression_occurrence(*start, module, search)
+                .or_else(|| first_unsupported_expression_occurrence(*end, module, search))
         }
-        HirExpressionKind::VariantConstruct { fields, .. } => fields
+        HirExpressionKind::VariantConstruct { fields, .. } => module
+            .expressions
+            .variant_fields(*fields)
             .iter()
-            .find_map(|field| first_unsupported_expression_occurrence(&field.value, search)),
+            .find_map(|field| first_unsupported_expression_occurrence(field.value, module, search)),
         HirExpressionKind::Number(_)
         | HirExpressionKind::Int(_)
         | HirExpressionKind::Uint(_)

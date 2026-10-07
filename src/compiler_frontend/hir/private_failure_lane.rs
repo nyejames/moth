@@ -24,6 +24,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::numeric_failure_codes;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::failure_facts::HirBuiltinFailureBoundary;
 use crate::compiler_frontend::hir::hir_builder::{CatchHandlerTarget, CatchProtectedCall};
@@ -32,11 +33,11 @@ use crate::compiler_frontend::hir::ids::{
     BlockId, FunctionId, HirNodeId, HirValueId, LocalId, RegionId,
 };
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::numeric::NumericFailureMode;
-use crate::compiler_frontend::hir::patterns::HirPattern;
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
+};
 use crate::compiler_frontend::hir::terminators::{HirTerminator, RuntimeFailureCause};
 use crate::compiler_frontend::hir::utils::terminator_targets;
 use crate::compiler_frontend::hir::validation::validate_hir_module;
@@ -59,7 +60,7 @@ pub(crate) fn install_private_failure_lanes(
     hir: &mut HirModule,
     report: &BorrowCheckReport,
     type_environment: &mut TypeEnvironment,
-) -> Result<PrivateFailureLaneInstallation, CompilerError> {
+) -> Result<PrivateFailureLaneInstallation, HirConstructionFailure> {
     let lane_functions = private_lane_functions(hir, report)?;
     let builtin_error = type_environment.type_id_for_canonical_identity(
         &CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error),
@@ -85,7 +86,6 @@ pub(crate) fn install_private_failure_lanes(
             local_types: FxHashMap::default(),
             next_local: 0,
             next_node: 0,
-            next_value: 0,
         };
         installer.assert_records_reference_live_calls(&records)?;
         installer.prepare_ids()?;
@@ -116,14 +116,12 @@ struct LaneInstaller<'a> {
     local_types: FxHashMap<LocalId, TypeId>,
     next_local: u32,
     next_node: u32,
-    next_value: u32,
 }
 
 impl LaneInstaller<'_> {
     fn prepare_ids(&mut self) -> Result<(), CompilerError> {
         let mut next_local = 0u32;
         let mut next_node = 0u32;
-        let mut next_value = 0u32;
         for (index, block) in self.hir.blocks.iter().enumerate() {
             if block.id != BlockId(index as u32) {
                 return Err(CompilerError::compiler_error(
@@ -136,13 +134,10 @@ impl LaneInstaller<'_> {
             }
             for statement in &block.statements {
                 next_node = next_node.max(statement.id.0.saturating_add(1));
-                note_statement_ids(&statement.kind, &mut next_value);
             }
-            note_terminator_ids(&block.terminator, &mut next_value);
         }
         self.next_local = next_local;
         self.next_node = next_node;
-        self.next_value = next_value;
         Ok(())
     }
 
@@ -189,7 +184,7 @@ impl LaneInstaller<'_> {
             for block_id in reachable_blocks_from_roots(self.hir, &roots) {
                 let terminator = &mut self.hir.blocks[block_id.0 as usize].terminator;
                 if let HirTerminator::Return(value) = terminator {
-                    *terminator = HirTerminator::ReturnSuccess(value.clone());
+                    *terminator = HirTerminator::ReturnSuccess(*value);
                 }
             }
         }
@@ -197,7 +192,7 @@ impl LaneInstaller<'_> {
     }
 
     /// Returns whether any producer was split.
-    fn rewrite_bodies(&mut self) -> Result<bool, CompilerError> {
+    fn rewrite_bodies(&mut self) -> Result<bool, HirConstructionFailure> {
         let function_ids = self
             .hir
             .functions
@@ -231,7 +226,7 @@ impl LaneInstaller<'_> {
         &mut self,
         function_id: FunctionId,
         block_id: BlockId,
-    ) -> Result<bool, CompilerError> {
+    ) -> Result<bool, HirConstructionFailure> {
         let statement_count = self.hir.blocks[block_id.0 as usize].statements.len();
         for index in 0..statement_count {
             let Some(producer) = self.producer_at(function_id, block_id, index)? else {
@@ -255,15 +250,15 @@ impl LaneInstaller<'_> {
                 if !self.target_uses_private_lane(target)? {
                     return Ok(None);
                 }
-                if let Some(local) = result
-                    && self.local_type(*local).is_some_and(|ty| {
+                if let Some(destination) = result
+                    && self.local_type(destination.local()).is_some_and(|ty| {
                         self.type_environment.fallible_carrier_slots(ty).is_some()
                     })
                 {
                     return Ok(None);
                 }
                 let success_type = match result {
-                    Some(local) => self.local_type(*local).ok_or_else(|| {
+                    Some(destination) => self.local_type(destination.local()).ok_or_else(|| {
                         CompilerError::compiler_error(
                             "private failure call result local has no type",
                         )
@@ -272,7 +267,7 @@ impl LaneInstaller<'_> {
                 };
                 Ok(Some(Producer {
                     statement: statement.id,
-                    scalar_local: *result,
+                    scalar_destination: *result,
                     success_type,
                 }))
             }
@@ -299,12 +294,12 @@ impl LaneInstaller<'_> {
                 && *failure_mode == NumericFailureMode::Trap
                 && statement_has_implicit_failure(&statement.kind) =>
             {
-                let success_type = self.local_type(*result).ok_or_else(|| {
+                let success_type = self.local_type(result.local()).ok_or_else(|| {
                     CompilerError::compiler_error("checked numeric result local has no type")
                 })?;
                 Ok(Some(Producer {
                     statement: statement.id,
-                    scalar_local: Some(*result),
+                    scalar_destination: Some(*result),
                     success_type,
                 }))
             }
@@ -318,7 +313,7 @@ impl LaneInstaller<'_> {
         block_id: BlockId,
         index: usize,
         producer: Producer,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let error_type = self.builtin_error_type()?;
         let carrier_type = self
             .type_environment
@@ -347,7 +342,7 @@ impl LaneInstaller<'_> {
         )?;
         self.finish_success_edge(
             success_block,
-            producer.scalar_local,
+            producer.scalar_destination,
             producer.success_type,
             carrier_local,
             carrier_type,
@@ -355,7 +350,7 @@ impl LaneInstaller<'_> {
             old_terminator,
         )?;
         let branch = HirTerminator::FallibleBranch {
-            result: self.load(carrier_local, carrier_type, region),
+            result: self.load(carrier_local, carrier_type, region)?,
             success_block,
             error_block,
         };
@@ -372,7 +367,9 @@ impl LaneInstaller<'_> {
         let statement = &mut self.hir.blocks[block_id.0 as usize].statements[index];
         let implicit_failure = statement_has_implicit_failure(&statement.kind);
         match &mut statement.kind {
-            HirStatementKind::Call { result, .. } => *result = Some(carrier_local),
+            HirStatementKind::Call { result, .. } => {
+                *result = Some(HirLocalDestination::Define(carrier_local));
+            }
             HirStatementKind::NumericOp {
                 failure_mode,
                 result,
@@ -394,7 +391,7 @@ impl LaneInstaller<'_> {
                 ..
             } if implicit_failure => {
                 *failure_mode = NumericFailureMode::ReturnError;
-                *result = carrier_local;
+                *result = HirLocalDestination::Define(carrier_local);
             }
             _ => {
                 return Err(CompilerError::compiler_error(
@@ -415,9 +412,9 @@ impl LaneInstaller<'_> {
         carrier_type: TypeId,
         error_type: TypeId,
         catch_handler: Option<CatchHandlerTarget>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let region = self.hir.blocks[error_block.0 as usize].region;
-        let payload = self.unwrap_error(carrier_local, carrier_type, error_type, region);
+        let payload = self.unwrap_error(carrier_local, carrier_type, error_type, region)?;
         if let Some(handler) = catch_handler {
             let slot_type = self.local_type(handler.error_local).ok_or_else(|| {
                 CompilerError::compiler_error("catch handler error local has no type")
@@ -425,18 +422,19 @@ impl LaneInstaller<'_> {
             if slot_type != error_type {
                 return Err(CompilerError::compiler_error(
                     "catch handler error local does not hold a builtin Error value",
-                ));
+                )
+                .into());
             }
-            let assign = HirStatement {
+            let write = HirStatement {
                 id: self.allocate_node(),
-                kind: HirStatementKind::Assign {
-                    target: HirPlace::Local(handler.error_local),
+                kind: HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(handler.error_local),
                     value: payload,
                 },
                 span: None,
             };
             let block = &mut self.hir.blocks[error_block.0 as usize];
-            block.statements.push(assign);
+            block.statements.push(write);
             block.terminator = HirTerminator::Jump {
                 target: handler.block,
                 args: vec![],
@@ -448,7 +446,8 @@ impl LaneInstaller<'_> {
         } else {
             return Err(CompilerError::compiler_error(
                 "private implicit failure reached a function with no Error! slot and no internal lane",
-            ));
+            )
+            .into());
         };
         self.hir.blocks[error_block.0 as usize].terminator = terminator;
         Ok(())
@@ -461,24 +460,27 @@ impl LaneInstaller<'_> {
     fn finish_success_edge(
         &mut self,
         success_block: BlockId,
-        scalar_local: Option<LocalId>,
+        scalar_destination: Option<HirLocalDestination>,
         success_type: TypeId,
         carrier_local: LocalId,
         carrier_type: TypeId,
         mut suffix: Vec<HirStatement>,
         terminator: HirTerminator,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let region = self.hir.blocks[success_block.0 as usize].region;
-        if let Some(scalar_local) = scalar_local {
-            let value = self.unwrap_success(carrier_local, carrier_type, success_type, region);
+        if let Some(scalar_destination) = scalar_destination {
+            let target = match scalar_destination {
+                HirLocalDestination::Define(local) => HirWriteTarget::DefineLocal(local),
+                HirLocalDestination::Update(local) => {
+                    HirWriteTarget::AssignPlace(HirPlace::local(local))
+                }
+            };
+            let value = self.unwrap_success(carrier_local, carrier_type, success_type, region)?;
             suffix.insert(
                 0,
                 HirStatement {
                     id: self.allocate_node(),
-                    kind: HirStatementKind::Assign {
-                        target: HirPlace::Local(scalar_local),
-                        value,
-                    },
+                    kind: HirStatementKind::Write { target, value },
                     span: None,
                 },
             );
@@ -567,7 +569,7 @@ impl LaneInstaller<'_> {
 
     /// A compound store conversion is lowered before the lane exists, so its error
     /// edge is still a trap. The target assign already sits on the success continuation.
-    fn retarget_store_conversions(&mut self) -> Result<(), CompilerError> {
+    fn retarget_store_conversions(&mut self) -> Result<(), HirConstructionFailure> {
         let lane_functions = self.lane_functions.iter().copied().collect::<Vec<_>>();
         for function_id in lane_functions {
             let entry = self.function_entry(function_id)?;
@@ -590,10 +592,11 @@ impl LaneInstaller<'_> {
                 {
                     return Err(CompilerError::compiler_error(
                         "compound write-back carrier must contain builtin Error",
-                    ));
+                    )
+                    .into());
                 }
                 let region = self.hir.blocks[block_id.0 as usize].region;
-                let payload = self.unwrap_error(carrier, carrier_type, error_type, region);
+                let payload = self.unwrap_error(carrier, carrier_type, error_type, region)?;
                 self.hir.blocks[block_id.0 as usize].terminator =
                     HirTerminator::ReturnError(payload);
             }
@@ -744,21 +747,28 @@ impl LaneInstaller<'_> {
         id
     }
 
-    fn allocate_value(&mut self) -> HirValueId {
-        let id = HirValueId(self.next_value);
-        self.next_value += 1;
-        id
-    }
-
-    fn load(&mut self, local: LocalId, ty: TypeId, region: RegionId) -> HirExpression {
-        HirExpression {
-            id: self.allocate_value(),
-            kind: HirExpressionKind::Load(HirPlace::Local(local)),
+    fn append_expression(
+        &mut self,
+        kind: HirExpressionKind,
+        ty: TypeId,
+        region: RegionId,
+    ) -> Result<HirValueId, HirConstructionFailure> {
+        self.hir.expressions.append_expression(HirExpression {
+            kind,
             ty,
             value_kind: ValueKind::RValue,
             region,
             span: None,
-        }
+        })
+    }
+
+    fn load(
+        &mut self,
+        local: LocalId,
+        ty: TypeId,
+        region: RegionId,
+    ) -> Result<HirValueId, HirConstructionFailure> {
+        self.append_expression(HirExpressionKind::Load(HirPlace::local(local)), ty, region)
     }
 
     fn unwrap_success(
@@ -767,17 +777,13 @@ impl LaneInstaller<'_> {
         carrier_type: TypeId,
         success_type: TypeId,
         region: RegionId,
-    ) -> HirExpression {
-        HirExpression {
-            id: self.allocate_value(),
-            kind: HirExpressionKind::FallibleUnwrapSuccess {
-                result: Box::new(self.load(carrier_local, carrier_type, region)),
-            },
-            ty: success_type,
-            value_kind: ValueKind::RValue,
+    ) -> Result<HirValueId, HirConstructionFailure> {
+        let carrier = self.load(carrier_local, carrier_type, region)?;
+        self.append_expression(
+            HirExpressionKind::FallibleUnwrapSuccess { result: carrier },
+            success_type,
             region,
-            span: None,
-        }
+        )
     }
 
     fn unwrap_error(
@@ -786,23 +792,19 @@ impl LaneInstaller<'_> {
         carrier_type: TypeId,
         error_type: TypeId,
         region: RegionId,
-    ) -> HirExpression {
-        HirExpression {
-            id: self.allocate_value(),
-            kind: HirExpressionKind::FallibleUnwrapError {
-                result: Box::new(self.load(carrier_local, carrier_type, region)),
-            },
-            ty: error_type,
-            value_kind: ValueKind::RValue,
+    ) -> Result<HirValueId, HirConstructionFailure> {
+        let carrier = self.load(carrier_local, carrier_type, region)?;
+        self.append_expression(
+            HirExpressionKind::FallibleUnwrapError { result: carrier },
+            error_type,
             region,
-            span: None,
-        }
+        )
     }
 }
 
 struct Producer {
     statement: HirNodeId,
-    scalar_local: Option<LocalId>,
+    scalar_destination: Option<HirLocalDestination>,
     success_type: TypeId,
 }
 
@@ -864,151 +866,6 @@ fn private_lane_functions(
         }
     }
     Ok(lane_functions)
-}
-
-fn note_statement_ids(kind: &HirStatementKind, next_value: &mut u32) {
-    match kind {
-        HirStatementKind::Assign { value, .. }
-        | HirStatementKind::Expr(value)
-        | HirStatementKind::PushRuntimeFragment { value, .. }
-        | HirStatementKind::CastOp { source: value, .. }
-        | HirStatementKind::FormatFloat { source: value, .. }
-        | HirStatementKind::ValidateFloat { source: value, .. } => {
-            note_expression_id(value, next_value)
-        }
-        HirStatementKind::Call { args, .. } => {
-            for argument in args {
-                note_expression_id(argument, next_value);
-            }
-        }
-        HirStatementKind::MapOp { receiver, args, .. } => {
-            note_expression_id(receiver, next_value);
-            for argument in args {
-                note_expression_id(argument, next_value);
-            }
-        }
-        HirStatementKind::NumericOp { operands, .. } => match operands {
-            HirNumericOperands::Unary { operand } => note_expression_id(operand, next_value),
-            HirNumericOperands::Binary { left, right } => {
-                note_expression_id(left, next_value);
-                note_expression_id(right, next_value);
-            }
-        },
-        HirStatementKind::FloatRangeCandidate {
-            current,
-            step,
-            end,
-            ascending,
-            ..
-        } => {
-            note_expression_id(current, next_value);
-            note_expression_id(step, next_value);
-            note_expression_id(end, next_value);
-            note_expression_id(ascending, next_value);
-        }
-        HirStatementKind::RangeStepFailure { .. } | HirStatementKind::Drop(_) => {}
-    }
-}
-
-fn note_terminator_ids(terminator: &HirTerminator, next_value: &mut u32) {
-    match terminator {
-        HirTerminator::Return(value)
-        | HirTerminator::ReturnSuccess(value)
-        | HirTerminator::ReturnError(value)
-        | HirTerminator::If {
-            condition: value, ..
-        }
-        | HirTerminator::FallibleBranch { result: value, .. }
-        | HirTerminator::AssertFailure { message: value, .. } => {
-            note_expression_id(value, next_value)
-        }
-        HirTerminator::Match { scrutinee, arms } => {
-            note_expression_id(scrutinee, next_value);
-            for arm in arms {
-                note_pattern_ids(&arm.pattern, next_value);
-                if let Some(guard) = &arm.guard {
-                    note_expression_id(guard, next_value);
-                }
-            }
-        }
-        HirTerminator::Jump { .. }
-        | HirTerminator::Break { .. }
-        | HirTerminator::Continue { .. }
-        | HirTerminator::Uninitialized
-        | HirTerminator::RuntimeFailure { .. } => {}
-    }
-}
-
-fn note_pattern_ids(pattern: &HirPattern, next_value: &mut u32) {
-    match pattern {
-        HirPattern::Literal(value)
-        | HirPattern::OptionValue { value }
-        | HirPattern::OptionRelational { value, .. }
-        | HirPattern::Relational { value, .. } => note_expression_id(value, next_value),
-        HirPattern::OptionNone
-        | HirPattern::OptionPresent
-        | HirPattern::Wildcard
-        | HirPattern::ChoiceVariant { .. } => {}
-    }
-}
-
-fn note_expression_id(expression: &HirExpression, next_value: &mut u32) {
-    *next_value = (*next_value).max(expression.id.0.saturating_add(1));
-    match &expression.kind {
-        HirExpressionKind::BinOp { left, right, .. } => {
-            note_expression_id(left, next_value);
-            note_expression_id(right, next_value);
-        }
-        HirExpressionKind::UnaryOp { operand, .. }
-        | HirExpressionKind::TupleGet { tuple: operand, .. }
-        | HirExpressionKind::FallibleUnwrapSuccess { result: operand }
-        | HirExpressionKind::FallibleUnwrapError { result: operand }
-        | HirExpressionKind::Cast {
-            source: operand, ..
-        }
-        | HirExpressionKind::VariantPayloadGet {
-            source: operand, ..
-        } => {
-            note_expression_id(operand, next_value);
-        }
-        HirExpressionKind::Range { start, end } => {
-            note_expression_id(start, next_value);
-            note_expression_id(end, next_value);
-        }
-        HirExpressionKind::StructConstruct { fields, .. } => {
-            for (_, field) in fields {
-                note_expression_id(field, next_value);
-            }
-        }
-        HirExpressionKind::Collection(items)
-        | HirExpressionKind::TupleConstruct { elements: items } => {
-            for item in items {
-                note_expression_id(item, next_value);
-            }
-        }
-        HirExpressionKind::VariantConstruct { fields, .. } => {
-            for field in fields {
-                note_expression_id(&field.value, next_value);
-            }
-        }
-        HirExpressionKind::MapLiteral(entries) => {
-            for entry in entries {
-                note_expression_id(&entry.key, next_value);
-                note_expression_id(&entry.value, next_value);
-            }
-        }
-        HirExpressionKind::Uint(_)
-        | HirExpressionKind::Int(_)
-        | HirExpressionKind::Float(_)
-        | HirExpressionKind::FixedScalar(_)
-        | HirExpressionKind::Number(_)
-        | HirExpressionKind::Bool(_)
-        | HirExpressionKind::Char(_)
-        | HirExpressionKind::StringLiteral(_)
-        | HirExpressionKind::StructuralString { .. }
-        | HirExpressionKind::Load(_)
-        | HirExpressionKind::Copy(_) => {}
-    }
 }
 
 fn reachable_blocks(hir: &HirModule, entry: BlockId) -> Vec<BlockId> {

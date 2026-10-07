@@ -21,7 +21,7 @@ use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::numeric::HirNumericOp;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -228,7 +228,7 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
     };
     assert!(
         matches!(
-            success_value.kind,
+            &module.expressions.expression(*success_value).kind,
             HirExpressionKind::FallibleUnwrapSuccess { .. }
         ),
         "success edge should unwrap the carrier success payload"
@@ -244,7 +244,7 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
     };
     assert!(
         matches!(
-            error_value.kind,
+            &module.expressions.expression(*error_value).kind,
             HirExpressionKind::FallibleUnwrapError { .. }
         ),
         "error edge should unwrap the carrier error payload"
@@ -376,7 +376,7 @@ fn direct_return_result_propagation_allows_alias_success_return() {
     };
     assert!(
         matches!(
-            success_value.kind,
+            &module.expressions.expression(*success_value).kind,
             HirExpressionKind::FallibleUnwrapSuccess { .. }
         ),
         "alias success edge should forward the unwrapped success payload"
@@ -504,16 +504,11 @@ fn declaration_result_propagation_assigns_unwrapped_success_on_success_edge() {
         .find(|block| block.id == success_block)
         .expect("declaration propagation should create a success block");
     assert!(
-        success_block.statements.iter().any(|statement| matches!(
-            statement.kind,
-            HirStatementKind::Assign {
-                value: crate::compiler_frontend::hir::expressions::HirExpression {
-                    kind: HirExpressionKind::FallibleUnwrapSuccess { .. },
-                    ..
-                },
-                ..
-            }
-        )),
+        success_block.statements.iter().any(|statement| {
+            super::write_value(&module, statement).is_some_and(|value| {
+                matches!(&value.kind, HirExpressionKind::FallibleUnwrapSuccess { .. })
+            })
+        }),
         "success edge should assign the unwrapped success payload to the declaration local"
     );
 
@@ -678,16 +673,11 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
         .find(|block| block.id == success_block)
         .expect("multi-bind propagation should create a success block");
     assert!(
-        success_block.statements.iter().any(|statement| matches!(
-            statement.kind,
-            HirStatementKind::Assign {
-                value: crate::compiler_frontend::hir::expressions::HirExpression {
-                    kind: HirExpressionKind::FallibleUnwrapSuccess { .. },
-                    ..
-                },
-                ..
-            }
-        )),
+        success_block.statements.iter().any(|statement| {
+            super::write_value(&module, statement).is_some_and(|value| {
+                matches!(&value.kind, HirExpressionKind::FallibleUnwrapSuccess { .. })
+            })
+        }),
         "success edge should materialize the unwrapped tuple payload before projection"
     );
 
@@ -695,16 +685,8 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
         .statements
         .iter()
         .filter(|statement| {
-            matches!(
-                statement.kind,
-                HirStatementKind::Assign {
-                    value: crate::compiler_frontend::hir::expressions::HirExpression {
-                        kind: HirExpressionKind::TupleGet { .. },
-                        ..
-                    },
-                    ..
-                }
-            )
+            super::write_value(&module, statement)
+                .is_some_and(|value| matches!(&value.kind, HirExpressionKind::TupleGet { .. }))
         })
         .count();
     assert_eq!(
@@ -1255,16 +1237,9 @@ fn statement_catch_handler_lowering_builds_explicit_result_branching() {
 
     let saw_err_unwrap_assign = module.blocks.iter().any(|block| {
         block.statements.iter().any(|statement| {
-            matches!(
-                statement.kind,
-                HirStatementKind::Assign {
-                    value: crate::compiler_frontend::hir::expressions::HirExpression {
-                        kind: HirExpressionKind::FallibleUnwrapError { .. },
-                        ..
-                    },
-                    ..
-                }
-            )
+            super::write_value(&module, statement).is_some_and(|value| {
+                matches!(&value.kind, HirExpressionKind::FallibleUnwrapError { .. })
+            })
         })
     });
     assert!(
@@ -1368,20 +1343,44 @@ fn multi_bind_lowering_projects_tuple_slots_from_single_rhs_call() {
         .iter()
         .flat_map(|block| block.statements.iter())
         .filter(|statement| {
-            matches!(
-                statement.kind,
-                HirStatementKind::Assign {
-                    value: crate::compiler_frontend::hir::expressions::HirExpression {
-                        kind: HirExpressionKind::TupleGet { .. },
-                        ..
-                    },
-                    ..
-                }
-            )
+            super::write_value(&module, statement)
+                .is_some_and(|value| matches!(&value.kind, HirExpressionKind::TupleGet { .. }))
         })
         .count();
     assert_eq!(
         tuple_get_assignments, 2,
-        "multi-bind lowering should assign both tuple slots in order"
+        "multi-bind lowering should stage both tuple slots before target writes"
     );
+
+    let start = &module.functions[module.start_function.expect("start function").0 as usize];
+    let entry = &module.blocks[start.entry.0 as usize];
+    for name in ["left", "right"] {
+        let local = entry
+            .locals
+            .iter()
+            .find(|local| {
+                module
+                    .side_table
+                    .resolve_local_name(local.id, &path_fork, &string_table)
+                    == Some(name)
+            })
+            .expect("multi-bind declaration should own its authored local");
+        let definitions = entry
+            .statements
+            .iter()
+            .filter(|statement| {
+                matches!(
+                    &statement.kind,
+                    HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(target),
+                        ..
+                    } if *target == local.id
+                )
+            })
+            .count();
+        assert_eq!(
+            definitions, 1,
+            "multi-bind declaration {name} should define once"
+        );
+    }
 }

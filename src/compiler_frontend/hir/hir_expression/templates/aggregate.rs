@@ -7,12 +7,13 @@
 //! child wrappers now consume a TIR-derived owned wrapper node; the shared emitted-guard
 //! infrastructure below is reused by both paths.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::places::HirPlace;
+use crate::compiler_frontend::hir::statements::HirWriteTarget;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
 
@@ -33,8 +34,8 @@ impl<'a> HirBuilder<'a> {
             &mut Self,
             RuntimeTemplateAggregateAppend,
             &Option<SourceSpan>,
-        ) -> Result<(), CompilerError>,
-    ) -> Result<(), CompilerError> {
+        ) -> Result<(), HirConstructionFailure>,
+    ) -> Result<(), HirConstructionFailure> {
         let condition_block = self.current_block_id_or_error(span_ref)?;
         let parent_region = self.current_region_or_error(span_ref)?;
         let then_region = self.create_child_region(parent_region);
@@ -46,7 +47,7 @@ impl<'a> HirBuilder<'a> {
             builtin_type_ids::BOOL,
             span_ref,
             parent_region,
-        );
+        )?;
 
         self.emit_terminator(
             condition_block,
@@ -70,7 +71,8 @@ impl<'a> HirBuilder<'a> {
         let else_tail_block = self.current_block_id_or_error(span_ref)?;
 
         if then_terminated {
-            return self.set_current_block(else_tail_block, span_ref);
+            self.set_current_block(else_tail_block, span_ref)?;
+            return Ok(());
         }
 
         let merge_block = self.create_block(parent_region, span_ref, "template-aggregate-merge")?;
@@ -87,13 +89,14 @@ impl<'a> HirBuilder<'a> {
             "template-aggregate.skipped.merge",
         )?;
 
-        self.set_current_block(merge_block, span_ref)
+        self.set_current_block(merge_block, span_ref)?;
+        Ok(())
     }
 
     pub(super) fn initialize_runtime_template_emitted_flag(
         &mut self,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<LocalId, CompilerError> {
+    ) -> Result<LocalId, HirConstructionFailure> {
         let flag = self.allocate_temp_local(builtin_type_ids::BOOL, None)?;
         let region = self.current_region_or_error(span_ref)?;
         let false_value = self.make_expression(
@@ -102,11 +105,11 @@ impl<'a> HirBuilder<'a> {
             builtin_type_ids::BOOL,
             ValueKind::Const,
             region,
-        );
+        )?;
 
         self.emit_statement_kind(
-            crate::compiler_frontend::hir::statements::HirStatementKind::Assign {
-                target: HirPlace::Local(flag),
+            crate::compiler_frontend::hir::statements::HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(flag),
                 value: false_value,
             },
             span_ref,
@@ -119,7 +122,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         emitted_output: LocalId,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let region = self.current_region_or_error(span_ref)?;
         let true_value = self.make_expression(
             span_ref,
@@ -127,11 +130,11 @@ impl<'a> HirBuilder<'a> {
             builtin_type_ids::BOOL,
             ValueKind::Const,
             region,
-        );
+        )?;
 
         self.emit_statement_kind(
-            crate::compiler_frontend::hir::statements::HirStatementKind::Assign {
-                target: HirPlace::Local(emitted_output),
+            crate::compiler_frontend::hir::statements::HirStatementKind::Write {
+                target: HirWriteTarget::AssignPlace(HirPlace::local(emitted_output)),
                 value: true_value,
             },
             span_ref,

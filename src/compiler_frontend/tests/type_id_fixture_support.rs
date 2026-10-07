@@ -660,6 +660,7 @@ pub(crate) fn lower_ast_with_metadata(
         path_fork,
         type_environment,
         crate::compiler_frontend::hir::functions::HirFunctionOriginLookup::default(),
+        Default::default(),
     )
     .build_hir_module(ast)
 }

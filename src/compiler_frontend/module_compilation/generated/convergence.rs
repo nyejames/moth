@@ -27,6 +27,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureContributor, HirBuiltinFailureSource,
     HirFunctionFailureFacts,
@@ -630,6 +631,9 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                     .map_err(PremergeFailure::Infrastructure)?;
             sidecar.module.executable.borrow_analysis = report;
         }
+        // The unchanged lane shares this barrier: every newly completed sidecar
+        // releases spare construction capacity before the transaction publishes it.
+        sidecar.module.executable.hir.expressions.freeze();
     }
     Ok(borrow_analysis)
 }
@@ -645,8 +649,27 @@ fn refresh_private_failure_lanes(
     warnings: &[CompilerDiagnostic],
     source_owner: Option<&FrozenIdentityHandle>,
 ) -> Result<Option<BorrowCheckReport>, PremergeFailure> {
-    let installation = install_private_failure_lanes(hir, report, type_environment)
-        .map_err(|error| CompilerMessages::from_error_ref(error, &compiler.string_table))?;
+    let installation =
+        install_private_failure_lanes(hir, report, type_environment).map_err(|failure| {
+            let messages = match failure {
+                HirConstructionFailure::Diagnosed(diagnostic) => {
+                    CompilerMessages::from_diagnostic_with_warnings(
+                        diagnostic,
+                        warnings.to_vec(),
+                        &compiler.string_table,
+                    )
+                    .with_type_context_for_all_diagnostics(type_environment.clone())
+                }
+                HirConstructionFailure::Infrastructure(error) => {
+                    CompilerMessages::from_error_ref(error, &compiler.string_table)
+                }
+            };
+            let mut failure = PremergeFailure::from(messages);
+            if let Some(owner) = source_owner {
+                failure.set_frozen_identity_handle_if_missing(owner.clone());
+            }
+            failure
+        })?;
     if installation == PrivateFailureLaneInstallation::Unchanged {
         return Ok(None);
     }

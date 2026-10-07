@@ -1,0 +1,8 @@
+-- Mutable slot updates from a Place require an exclusive mutable source.
+data = "test data"
+mutable_slot ~= "old"
+
+-- INVALID: an immutable Place cannot become a mutable alias.
+mutable_slot = data
+
+later_slot_use = mutable_slot

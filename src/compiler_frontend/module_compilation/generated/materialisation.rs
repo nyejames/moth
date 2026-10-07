@@ -380,6 +380,7 @@ fn materialise_generated_request_inner<'build>(
             HirFunctionOriginLookup::default(),
             Some(Rc::clone(&module_resources)),
             Some(&declaring_source_identity_handle),
+            Default::default(),
         )?;
         let HirLoweringResult {
             mut hir_module,

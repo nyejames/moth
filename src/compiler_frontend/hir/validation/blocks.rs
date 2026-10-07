@@ -19,16 +19,18 @@ use crate::compiler_frontend::datatypes::numeric_operators::{
     NumericOperator, binary_operation_domain, negation_domain,
 };
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-use crate::compiler_frontend::hir::expressions::HirExpression;
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
-use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
+use crate::compiler_frontend::hir::ids::{BlockId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::numeric::{HirNumericOperands, NumericFailureMode};
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
+};
 use crate::compiler_frontend::hir::terminators::{
     HirTerminator, classify_assertion_message_evaluation,
 };
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::profile::NumericProfile;
+use rustc_hash::FxHashSet;
 
 #[derive(Clone, Copy)]
 enum FallibleReturnSlot {
@@ -85,7 +87,7 @@ impl<'a> HirValidator<'a> {
 
             for statement in &block.statements {
                 self.validate_statement_mappings(statement)?;
-                self.validate_statement(statement)?;
+                self.validate_statement(statement, block.id)?;
             }
 
             self.validate_terminator_mapping(block.id)?;
@@ -178,26 +180,144 @@ impl<'a> HirValidator<'a> {
         Ok(())
     }
 
-    pub(super) fn validate_statement(&self, statement: &HirStatement) -> Result<(), CompilerError> {
+    fn statement_function_id(
+        &self,
+        block_id: BlockId,
+        anchor: Option<HirLocation>,
+    ) -> Result<crate::compiler_frontend::hir::ids::FunctionId, CompilerError> {
+        self.block_owner_by_id
+            .get(&block_id)
+            .copied()
+            .ok_or_else(|| {
+                self.error_with_hir(
+                    format!("Statement block {block_id} has no function owner"),
+                    anchor,
+                )
+            })
+    }
+
+    fn require_statement_local(
+        &self,
+        local_id: LocalId,
+        block_id: BlockId,
+        anchor: Option<HirLocation>,
+    ) -> Result<(), CompilerError> {
+        let function_id = self.statement_function_id(block_id, anchor)?;
+        self.require_local_in_function(local_id, function_id, anchor)
+    }
+
+    fn require_statement_destination(
+        &self,
+        destination: HirLocalDestination,
+        block_id: BlockId,
+        anchor: Option<HirLocation>,
+    ) -> Result<(), CompilerError> {
+        self.require_statement_local(destination.local(), block_id, anchor)?;
+        if let HirLocalDestination::Define(local_id) = destination {
+            self.require_local_not_parameter_definition(local_id, anchor)?;
+        }
+        Ok(())
+    }
+
+    fn validate_statement_local_destinations(
+        &self,
+        kind: &HirStatementKind,
+        block_id: BlockId,
+        anchor: Option<HirLocation>,
+    ) -> Result<(), CompilerError> {
+        match kind {
+            HirStatementKind::Write { target, .. } => match target {
+                HirWriteTarget::DefineLocal(local) => {
+                    self.require_statement_local(*local, block_id, anchor)?;
+                    self.require_local_not_parameter_definition(*local, anchor)?;
+                }
+                HirWriteTarget::AssignPlace(place) => {
+                    self.require_statement_local(place.root, block_id, anchor)?;
+                }
+            },
+            HirStatementKind::Call {
+                result: Some(destination),
+                ..
+            }
+            | HirStatementKind::CastOp {
+                result: Some(destination),
+                ..
+            }
+            | HirStatementKind::MapOp {
+                result: Some(destination),
+                ..
+            } => self.require_statement_destination(*destination, block_id, anchor)?,
+            HirStatementKind::NumericOp { result, .. }
+            | HirStatementKind::RangeStepFailure { result, .. }
+            | HirStatementKind::FormatFloat { result, .. }
+            | HirStatementKind::ValidateFloat { result, .. } => {
+                self.require_statement_destination(*result, block_id, anchor)?;
+            }
+            HirStatementKind::FloatRangeCandidate {
+                candidate_result,
+                in_range_result,
+                ..
+            } => {
+                self.require_statement_destination(*candidate_result, block_id, anchor)?;
+                self.require_statement_destination(*in_range_result, block_id, anchor)?;
+            }
+            HirStatementKind::Drop(local) => {
+                self.require_statement_local(*local, block_id, anchor)?;
+            }
+            HirStatementKind::PushRuntimeFragment { vec_local, .. } => {
+                self.require_statement_local(*vec_local, block_id, anchor)?;
+            }
+            HirStatementKind::Call { result: None, .. }
+            | HirStatementKind::CastOp { result: None, .. }
+            | HirStatementKind::MapOp { result: None, .. }
+            | HirStatementKind::Expr(_) => {}
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn validate_statement(
+        &self,
+        statement: &HirStatement,
+        block_id: BlockId,
+    ) -> Result<(), CompilerError> {
         let anchor = Some(HirLocation::Statement(statement.id));
+        self.validate_statement_local_destinations(&statement.kind, block_id, anchor)?;
         match &statement.kind {
-            HirStatementKind::Assign { target, value } => {
-                let _ = self.validate_place(target, anchor)?;
-                self.validate_expression(value, anchor)?;
+            HirStatementKind::Write { target, value } => {
+                let target_type = match target {
+                    HirWriteTarget::DefineLocal(local) => {
+                        self.require_statement_local(*local, block_id, anchor)?;
+                        self.local_types.get(local).copied().ok_or_else(|| {
+                            self.error_with_hir(
+                                "Write definition local has no registered type",
+                                anchor,
+                            )
+                        })?
+                    }
+                    HirWriteTarget::AssignPlace(place) => self.validate_place(place, anchor)?,
+                };
+                self.validate_expression(*value, anchor)?;
+                if self.expression_row(*value, anchor)?.ty != target_type {
+                    return Err(self.error_with_hir(
+                        "Write value type does not match its destination type",
+                        anchor,
+                    ));
+                }
             }
 
             HirStatementKind::Call { args, result, .. } => {
-                for arg in args {
-                    self.validate_expression(arg, anchor)?;
+                for arg in self.value_ids(*args, anchor)? {
+                    self.validate_expression(*arg, anchor)?;
                 }
 
-                if let Some(local_id) = result {
-                    self.require_local_id(*local_id, anchor)?;
+                if let Some(destination) = result {
+                    self.require_local_id(destination.local(), anchor)?;
                 }
             }
 
             HirStatementKind::Expr(expression) => {
-                self.validate_expression(expression, anchor)?;
+                self.validate_expression(*expression, anchor)?;
             }
 
             HirStatementKind::MapOp {
@@ -206,22 +326,22 @@ impl<'a> HirValidator<'a> {
                 result,
                 ..
             } => {
-                self.validate_expression(receiver, anchor)?;
-                for arg in args {
-                    self.validate_expression(arg, anchor)?;
+                self.validate_expression(*receiver, anchor)?;
+                for arg in self.value_ids(*args, anchor)? {
+                    self.validate_expression(*arg, anchor)?;
                 }
-                if let Some(local_id) = result {
-                    self.require_local_id(*local_id, anchor)?;
+                if let Some(destination) = result {
+                    self.require_local_id(destination.local(), anchor)?;
                 }
             }
 
             HirStatementKind::Drop(local) => {
-                self.require_local_id(*local, anchor)?;
+                self.require_statement_local(*local, block_id, anchor)?;
             }
 
             HirStatementKind::PushRuntimeFragment { vec_local, value } => {
-                self.require_local_id(*vec_local, anchor)?;
-                self.validate_expression(value, anchor)?;
+                self.require_statement_local(*vec_local, block_id, anchor)?;
+                self.validate_expression(*value, anchor)?;
             }
 
             HirStatementKind::CastOp {
@@ -229,16 +349,17 @@ impl<'a> HirValidator<'a> {
                 source,
                 result,
             } => {
-                self.validate_expression(source, anchor)?;
+                self.validate_expression(*source, anchor)?;
                 let expected_result_type =
-                    self.validate_numeric_cast_source_type(*policy, source, anchor)?;
+                    self.validate_numeric_cast_source_type(*policy, *source, anchor)?;
                 self.validate_number_cast_policy_fallibility_for_statement(*policy, anchor)?;
 
-                if let Some(local_id) = result {
-                    self.require_local_id(*local_id, anchor)?;
+                if let Some(destination) = result {
+                    let local_id = destination.local();
+                    self.require_local_id(local_id, anchor)?;
 
                     if let Some(expected_result_type) = expected_result_type {
-                        let Some(result_type) = self.local_types.get(local_id).copied() else {
+                        let Some(result_type) = self.local_types.get(&local_id).copied() else {
                             return Err(self.error_with_hir(
                                 "CastOp result local has no registered type",
                                 anchor,
@@ -275,7 +396,8 @@ impl<'a> HirValidator<'a> {
 
                 match operands {
                     HirNumericOperands::Unary { operand } => {
-                        self.validate_expression(operand, anchor)?;
+                        self.validate_expression(*operand, anchor)?;
+                        let operand = self.expression_row(*operand, anchor)?;
 
                         if operand.ty != domain_type {
                             return Err(self.error_with_hir(
@@ -287,8 +409,10 @@ impl<'a> HirValidator<'a> {
                         }
                     }
                     HirNumericOperands::Binary { left, right } => {
-                        self.validate_expression(left, anchor)?;
-                        self.validate_expression(right, anchor)?;
+                        self.validate_expression(*left, anchor)?;
+                        self.validate_expression(*right, anchor)?;
+                        let left = self.expression_row(*left, anchor)?;
+                        let right = self.expression_row(*right, anchor)?;
 
                         let right_type = if number_power {
                             self.type_environment.builtins().int
@@ -375,12 +499,16 @@ impl<'a> HirValidator<'a> {
                     ));
                 }
 
-                self.validate_expression(current, anchor)?;
-                self.validate_expression(step, anchor)?;
-                self.validate_expression(end, anchor)?;
-                self.validate_expression(ascending, anchor)?;
+                self.validate_expression(*current, anchor)?;
+                self.validate_expression(*step, anchor)?;
+                self.validate_expression(*end, anchor)?;
+                self.validate_expression(*ascending, anchor)?;
 
                 let domain_type = domain.type_id(self.type_environment);
+                let current = self.expression_row(*current, anchor)?;
+                let step = self.expression_row(*step, anchor)?;
+                let end = self.expression_row(*end, anchor)?;
+                let ascending = self.expression_row(*ascending, anchor)?;
                 if current.ty != domain_type || step.ty != domain_type || end.ty != domain_type {
                     return Err(self.error_with_hir(
                         "FloatRangeCandidate operands must match its numeric domain",
@@ -394,15 +522,17 @@ impl<'a> HirValidator<'a> {
                     ));
                 }
 
-                self.require_local_id(*candidate_result, anchor)?;
-                self.require_local_id(*in_range_result, anchor)?;
-                let Some(candidate_type) = self.local_types.get(candidate_result).copied() else {
+                let candidate_local = candidate_result.local();
+                let in_range_local = in_range_result.local();
+                self.require_local_id(candidate_local, anchor)?;
+                self.require_local_id(in_range_local, anchor)?;
+                let Some(candidate_type) = self.local_types.get(&candidate_local).copied() else {
                     return Err(self.error_with_hir(
                         "FloatRangeCandidate destination has no registered type",
                         anchor,
                     ));
                 };
-                let Some(in_range_type) = self.local_types.get(in_range_result).copied() else {
+                let Some(in_range_type) = self.local_types.get(&in_range_local).copied() else {
                     return Err(self.error_with_hir(
                         "FloatRangeCandidate Bool result has no registered type",
                         anchor,
@@ -431,7 +561,7 @@ impl<'a> HirValidator<'a> {
                 }
                 self.validate_float_effect_statement(
                     "FormatFloat",
-                    source,
+                    *source,
                     *failure_mode,
                     *result,
                     self.type_environment.builtins().string,
@@ -452,7 +582,7 @@ impl<'a> HirValidator<'a> {
                 }
                 self.validate_float_effect_statement(
                     "ValidateFloat",
-                    source,
+                    *source,
                     *failure_mode,
                     *result,
                     self.type_environment.builtins().float,
@@ -470,7 +600,7 @@ impl<'a> HirValidator<'a> {
     pub(super) fn validate_numeric_cast_source_type(
         &self,
         policy: BuiltinCastPolicyId,
-        source: &HirExpression,
+        source: HirValueId,
         anchor: Option<HirLocation>,
     ) -> Result<Option<TypeId>, CompilerError> {
         let builtins = self.type_environment.builtins();
@@ -490,7 +620,7 @@ impl<'a> HirValidator<'a> {
             _ => return Ok(None),
         };
 
-        if source.ty != policy_source_type {
+        if self.expression_row(source, anchor)?.ty != policy_source_type {
             return Err(self.error_with_hir(
                 format!("Cast policy {policy:?} source type does not match the policy source type"),
                 anchor,
@@ -658,13 +788,14 @@ impl<'a> HirValidator<'a> {
     fn validate_float_effect_statement(
         &self,
         statement_name: &'static str,
-        source: &HirExpression,
+        source: HirValueId,
         failure_mode: NumericFailureMode,
-        result: LocalId,
+        result: HirLocalDestination,
         success_type: TypeId,
         anchor: Option<HirLocation>,
     ) -> Result<(), CompilerError> {
         self.validate_expression(source, anchor)?;
+        let source = self.expression_row(source, anchor)?;
 
         if source.ty != self.type_environment.builtins().float {
             return Err(self.error_with_hir(
@@ -686,12 +817,13 @@ impl<'a> HirValidator<'a> {
         &self,
         statement_name: impl std::fmt::Display,
         failure_mode: NumericFailureMode,
-        result: LocalId,
+        result: HirLocalDestination,
         success_type: TypeId,
         anchor: Option<HirLocation>,
     ) -> Result<(), CompilerError> {
-        self.require_local_id(result, anchor)?;
-        let Some(result_type) = self.local_types.get(&result).copied() else {
+        let result_local = result.local();
+        self.require_local_id(result_local, anchor)?;
+        let Some(result_type) = self.local_types.get(&result_local).copied() else {
             return Err(self.error_with_hir(
                 format!("{statement_name} result local has no registered type"),
                 anchor,
@@ -762,8 +894,66 @@ impl<'a> HirValidator<'a> {
             HirTerminator::Jump { target, args } => {
                 self.require_block_id(*target, anchor)?;
                 self.require_same_function_cfg_owner(block_id, *target, anchor)?;
-                for local in args {
-                    self.require_local_id(*local, anchor)?;
+                let function_id =
+                    self.block_owner_by_id
+                        .get(&block_id)
+                        .copied()
+                        .ok_or_else(|| {
+                            self.error_with_hir(
+                                format!("Jump source block {block_id} has no function owner"),
+                                anchor,
+                            )
+                        })?;
+                let mut destinations = FxHashSet::default();
+                for argument in args {
+                    self.require_local_in_function(argument.source, function_id, anchor)?;
+                    self.require_local_in_function(argument.destination, function_id, anchor)?;
+                    self.require_local_in_block(argument.destination, *target, anchor)?;
+                    self.require_local_not_parameter_definition(argument.destination, anchor)?;
+                    if !destinations.insert(argument.destination) {
+                        return Err(self.error_with_hir(
+                            format!(
+                                "Jump to block {target} defines destination {:?} more than once",
+                                argument.destination
+                            ),
+                            anchor,
+                        ));
+                    }
+                    let source_type =
+                        self.local_types
+                            .get(&argument.source)
+                            .copied()
+                            .ok_or_else(|| {
+                                self.error_with_hir(
+                                    format!(
+                                        "Jump source local {:?} has no registered type",
+                                        argument.source
+                                    ),
+                                    anchor,
+                                )
+                            })?;
+                    let destination_type = self
+                        .local_types
+                        .get(&argument.destination)
+                        .copied()
+                        .ok_or_else(|| {
+                            self.error_with_hir(
+                                format!(
+                                    "Jump destination local {:?} has no registered type",
+                                    argument.destination
+                                ),
+                                anchor,
+                            )
+                        })?;
+                    if source_type != destination_type {
+                        return Err(self.error_with_hir(
+                            format!(
+                                "Jump argument source {:?} and destination {:?} have different types",
+                                argument.source, argument.destination
+                            ),
+                            anchor,
+                        ));
+                    }
                 }
             }
 
@@ -772,7 +962,7 @@ impl<'a> HirValidator<'a> {
                 then_block,
                 else_block,
             } => {
-                self.validate_expression(condition, anchor)?;
+                self.validate_expression(*condition, anchor)?;
                 self.require_block_id(*then_block, anchor)?;
                 self.require_same_function_cfg_owner(block_id, *then_block, anchor)?;
                 self.require_block_id(*else_block, anchor)?;
@@ -784,7 +974,8 @@ impl<'a> HirValidator<'a> {
                 success_block,
                 error_block,
             } => {
-                self.validate_expression(result, anchor)?;
+                self.validate_expression(*result, anchor)?;
+                let result = self.expression_row(*result, anchor)?;
                 if self
                     .type_environment
                     .fallible_carrier_slots(result.ty)
@@ -802,7 +993,8 @@ impl<'a> HirValidator<'a> {
             }
 
             HirTerminator::Match { scrutinee, arms } => {
-                self.validate_expression(scrutinee, anchor)?;
+                self.validate_expression(*scrutinee, anchor)?;
+                let scrutinee = self.expression_row(*scrutinee, anchor)?;
                 let pattern_subject_type_id = self
                     .type_environment
                     .option_inner_type(scrutinee.ty)
@@ -818,24 +1010,24 @@ impl<'a> HirValidator<'a> {
             }
 
             HirTerminator::Return(value) => {
-                self.validate_expression(value, anchor)?;
+                self.validate_expression(*value, anchor)?;
             }
 
             HirTerminator::ReturnSuccess(value) => {
-                self.validate_expression(value, anchor)?;
+                self.validate_expression(*value, anchor)?;
                 self.validate_fallible_return_terminator(
                     block_id,
-                    value,
+                    *value,
                     FallibleReturnSlot::Success,
                     anchor,
                 )?;
             }
 
             HirTerminator::ReturnError(value) => {
-                self.validate_expression(value, anchor)?;
+                self.validate_expression(*value, anchor)?;
                 self.validate_fallible_return_terminator(
                     block_id,
-                    value,
+                    *value,
                     FallibleReturnSlot::Error,
                     anchor,
                 )?;
@@ -859,7 +1051,9 @@ impl<'a> HirValidator<'a> {
             } => {
                 // Assertion failure is a valid terminal terminator.
                 // The message is an ordinary typed optional value evaluated on the failure edge.
-                self.validate_expression(message, anchor)?;
+                let message_id = *message;
+                self.validate_expression(message_id, anchor)?;
+                let message = self.expression_row(message_id, anchor)?;
                 let expected_message_type = self.type_environment.builtins().string;
                 if self.type_environment.option_inner_type(message.ty)
                     != Some(expected_message_type)
@@ -868,7 +1062,8 @@ impl<'a> HirValidator<'a> {
                         self.error_with_hir("AssertFailure message must have type String?", anchor)
                     );
                 }
-                let actual_evaluation = classify_assertion_message_evaluation(message);
+                let actual_evaluation =
+                    classify_assertion_message_evaluation(&self.module.expressions, message_id);
                 if *message_evaluation != actual_evaluation {
                     return Err(self.error_with_hir(
                         format!(
@@ -887,7 +1082,7 @@ impl<'a> HirValidator<'a> {
     fn validate_fallible_return_terminator(
         &self,
         block_id: BlockId,
-        value: &HirExpression,
+        value: HirValueId,
         slot: FallibleReturnSlot,
         anchor: Option<HirLocation>,
     ) -> Result<(), CompilerError> {
@@ -929,6 +1124,7 @@ impl<'a> HirValidator<'a> {
         };
 
         let expected_type = slot.select_type(success_type, error_type);
+        let value = self.expression_row(value, anchor)?;
         if value.ty != expected_type {
             return Err(self.error_with_hir(
                 format!(

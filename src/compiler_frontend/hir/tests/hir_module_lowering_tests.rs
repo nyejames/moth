@@ -17,8 +17,9 @@ use crate::compiler_frontend::ast::templates::{
 use crate::compiler_frontend::ast::{Ast, AstDocFragment, AstDocFragmentKind};
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::constants::{HirConstField, HirConstValue};
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
+use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::functions::{HirFunctionOrigin, HirFunctionOriginLookup};
+use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::module_metadata::ModuleDocFragmentKind;
 use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, ResourceId};
@@ -269,11 +270,16 @@ fn start_function_can_reference_module_constant() {
     let entry_block = &module.blocks[start_fn.entry.0 as usize];
 
     assert!(
-        entry_block.statements.iter().any(|statement| matches!(
-            statement.kind,
-            HirStatementKind::Expr(ref value)
-                if matches!(value.kind, HirExpressionKind::Int(3))
-        )),
+        entry_block.statements.iter().any(|statement| {
+            matches!(
+                &statement.kind,
+                HirStatementKind::Expr(value)
+                    if matches!(
+                        &module.expressions.expression(*value).kind,
+                        HirExpressionKind::Int(3)
+                    )
+            )
+        }),
         "expected constant reference to lower into a usable expression in start body"
     );
 }
@@ -830,18 +836,20 @@ fn structural_module_constant_reference_lowers_into_structural_expression() {
     let entry_block = &module.blocks[start_fn.entry.0 as usize];
 
     assert!(
-        entry_block.statements.iter().any(|statement| matches!(
-            &statement.kind,
-            HirStatementKind::Expr(value)
-                if matches!(
-                    &value.kind,
-                    HirExpressionKind::StructuralString { pieces }
-                        if pieces.as_slice() == [
-                            ConstStringPiece::Resource(logo),
-                            ConstStringPiece::Text(prefix),
-                        ]
-                )
-        )),
+        entry_block.statements.iter().any(|statement| {
+            matches!(
+                &statement.kind,
+                HirStatementKind::Expr(value)
+                    if matches!(
+                        &module.expressions.expression(*value).kind,
+                        HirExpressionKind::StructuralString { pieces }
+                            if module.expressions.string_pieces(*pieces) == [
+                                ConstStringPiece::Resource(logo),
+                                ConstStringPiece::Text(prefix),
+                            ]
+                    )
+            )
+        }),
         "expected the constant reference to lower into a structural string expression \
      with the authored pieces"
     );
@@ -1204,25 +1212,33 @@ fn remaps_structural_pieces_nested_two_container_levels_deep_after_table_merge()
 ///       handoff lane can assert on the structural chunk without pinning the accumulator
 ///       plumbing around it.
 /// WHY: the linear template path appends the owned piece payload as the chunk operand of the
-///       accumulator `Assign`, and handoff regressions (fusing, wrong table) must be reported
+///       accumulator update, and handoff regressions (fusing, wrong table) must be reported
 ///       against that piece list, not against the surrounding `StringAppend` shape.
-fn structural_pieces_in_statement(statement: &HirStatement) -> Option<&[ConstStringPiece]> {
+fn structural_pieces_in_statement<'a>(
+    module: &'a crate::compiler_frontend::hir::module::HirModule,
+    statement: &HirStatement,
+) -> Option<&'a [ConstStringPiece]> {
     let value = match &statement.kind {
-        HirStatementKind::Assign { value, .. } | HirStatementKind::Expr(value) => value,
+        HirStatementKind::Write { value, .. } | HirStatementKind::Expr(value) => *value,
         _ => return None,
     };
 
-    fn pieces_in(expression: &HirExpression) -> Option<&[ConstStringPiece]> {
-        match &expression.kind {
-            HirExpressionKind::StructuralString { pieces } => Some(pieces),
+    fn pieces_in(
+        module: &crate::compiler_frontend::hir::module::HirModule,
+        value: HirValueId,
+    ) -> Option<&[ConstStringPiece]> {
+        match &module.expressions.expression(value).kind {
+            HirExpressionKind::StructuralString { pieces } => {
+                Some(module.expressions.string_pieces(*pieces))
+            }
             HirExpressionKind::BinOp { left, right, .. } => {
-                pieces_in(left).or_else(|| pieces_in(right))
+                pieces_in(module, *left).or_else(|| pieces_in(module, *right))
             }
             _ => None,
         }
     }
 
-    pieces_in(value)
+    pieces_in(module, value)
 }
 
 #[test]
@@ -1285,6 +1301,7 @@ fn runtime_template_handoff_resource_piece_lowers_through_the_module_resource_ta
         &mut path_fork,
         HirFunctionOriginLookup::default(),
         Some(Rc::clone(&table)),
+        Default::default(),
     )
     .expect("piece-bearing template handoff should lower through the module resource table")
     .hir_module;
@@ -1298,7 +1315,7 @@ fn runtime_template_handoff_resource_piece_lowers_through_the_module_resource_ta
     let pieces = entry_block
         .statements
         .iter()
-        .find_map(structural_pieces_in_statement)
+        .find_map(|statement| structural_pieces_in_statement(&module, statement))
         .expect("template handoff should append one structural string chunk");
 
     match pieces {
@@ -1373,6 +1390,7 @@ fn runtime_template_handoff_site_root_piece_lowers_through_the_module_resource_t
         &mut path_fork,
         HirFunctionOriginLookup::default(),
         Some(Rc::clone(&table)),
+        Default::default(),
     )
     .expect("site-root template handoff should lower through the module resource table")
     .hir_module;
@@ -1386,7 +1404,7 @@ fn runtime_template_handoff_site_root_piece_lowers_through_the_module_resource_t
     let pieces = entry_block
         .statements
         .iter()
-        .find_map(structural_pieces_in_statement)
+        .find_map(|statement| structural_pieces_in_statement(&module, statement))
         .expect("template handoff should append one structural string chunk");
 
     match pieces {

@@ -11,9 +11,7 @@ use super::execute::{
     finish_definition_transition, is_place_available_without_materialising, oracle_error,
     require_call, require_origin, require_place, require_use,
 };
-use super::state::{
-    CapabilitySource, DefinitionEventKind, DefinitionRole, RuntimeAccessTarget, RuntimePlaceState,
-};
+use super::state::{CapabilitySource, DefinitionEventKind, DefinitionRole, RuntimeAccessTarget};
 use crate::compiler_frontend::analysis::borrow_checker::problem::{
     AccessKind, BorrowProblem, CallArgument, CallEffect, CallId, CallResultProvenance, Event,
     EventKind, OriginKind, PlaceId,
@@ -123,7 +121,9 @@ pub(super) fn execute_call_effect<'a>(
     let Some(result) = effect.result else {
         return Ok(EventExecutionResult::Continue);
     };
-    let place_row = require_place(problem, result.place, "call result place")?;
+    let destination = result.destination;
+    let result_place = destination.place();
+    let place_row = require_place(problem, result_place, "call result place")?;
     let origin = require_origin(problem, result.origin, "call result origin")?;
     let OriginKind::CallResult {
         call: origin_call,
@@ -148,12 +148,19 @@ pub(super) fn execute_call_effect<'a>(
         CallResultProvenance::Fresh => {
             // As with the value-producing events the write-through check precedes the
             // generation allocation, so an alias-backed result cannot consume the bound.
-            if let RuntimePlaceState::Alias { target, .. } = context.state.state(result.place)? {
+            if let Some(target) =
+                context
+                    .state
+                    .write_through_target(problem, context.place_index, destination)?
+            {
                 let transition = context.state.apply_definition_transition(
                     problem,
-                    result.place,
+                    context.place_index,
+                    destination,
                     DefinitionEventKind::Value,
-                    DefinitionRole::Slot { current: target },
+                    DefinitionRole::Slot {
+                        current: target.node,
+                    },
                     trace_index,
                 )?;
                 finish_definition_transition(context, &transition);
@@ -168,7 +175,8 @@ pub(super) fn execute_call_effect<'a>(
             };
             let transition = context.state.apply_definition_transition(
                 problem,
-                result.place,
+                context.place_index,
+                destination,
                 DefinitionEventKind::Value,
                 DefinitionRole::Slot {
                     current: generation,
@@ -181,7 +189,11 @@ pub(super) fn execute_call_effect<'a>(
         CallResultProvenance::AliasParams(parameter_indices) => {
             // A write-through result ignores its incoming value, but every argument remains a
             // validated input and its provenance relationship is still emitted by the reference.
-            if let RuntimePlaceState::Alias { target, .. } = context.state.state(result.place)? {
+            if let Some(target) =
+                context
+                    .state
+                    .write_through_target(problem, context.place_index, destination)?
+            {
                 for parameter_index in parameter_indices {
                     let argument = effect.arguments.get(*parameter_index).ok_or_else(|| {
                         oracle_error(format!(
@@ -203,9 +215,12 @@ pub(super) fn execute_call_effect<'a>(
                 }
                 let transition = context.state.apply_definition_transition(
                     problem,
-                    result.place,
+                    context.place_index,
+                    destination,
                     DefinitionEventKind::Value,
-                    DefinitionRole::Slot { current: target },
+                    DefinitionRole::Slot {
+                        current: target.node,
+                    },
                     trace_index,
                 )?;
                 finish_definition_transition(context, &transition);
@@ -214,7 +229,7 @@ pub(super) fn execute_call_effect<'a>(
                         Ok(source_targets) => source_targets,
                         Err(reason) => return Ok(EventExecutionResult::Inconclusive(reason)),
                     };
-                issue_call_result_provenance(context, event, result.place, &source_targets)?;
+                issue_call_result_provenance(context, event, result_place, &source_targets)?;
                 return Ok(EventExecutionResult::Continue);
             }
 
@@ -232,7 +247,8 @@ pub(super) fn execute_call_effect<'a>(
             };
             let transition = context.state.apply_definition_transition(
                 problem,
-                result.place,
+                context.place_index,
+                destination,
                 DefinitionEventKind::Value,
                 DefinitionRole::Slot {
                     current: generation,
@@ -240,7 +256,7 @@ pub(super) fn execute_call_effect<'a>(
                 trace_index,
             )?;
             finish_definition_transition(context, &transition);
-            issue_call_result_provenance(context, event, result.place, &source_targets)?;
+            issue_call_result_provenance(context, event, result_place, &source_targets)?;
             transition.target().clone()
         }
         CallResultProvenance::Alias(origins) => {
@@ -261,20 +277,18 @@ pub(super) fn execute_call_effect<'a>(
         }
     };
     // The pending entry is bound to the exact generation the transition above just installed:
-    // only a defining access to the result place consumes it, and the state layer rejects any
+    // only the confirming binding write to the result place consumes it, and the state layer rejects any
     // other event that retires or replaces that place first (`apply_definition_transition`,
     // `end_holders`). Keeping that binding is what keeps the confirming write's exemptions in
     // `execute_access` from suppressing detection through a stale entry.
     //
-    // The registration itself only happens where a confirmation can exist at all. The builder
-    // emits every call result into a local's root place, and validation rejects projected
-    // definitions, so a projected result place has no defining write that could confirm it and
-    // must not register a pending entry that would otherwise only dangle.
+    // The builder emits call results and their confirming writes into local root places.
+    // Projected operation fixtures have no such confirmation, so they register no pending entry.
     if place_row.projections.is_empty() {
         context
             .state
             .pending_call_results
-            .insert(result.place, target);
+            .insert(result_place, target);
     }
     Ok(EventExecutionResult::Continue)
 }

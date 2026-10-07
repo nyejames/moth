@@ -7,7 +7,7 @@
 
 use super::super::problem::{
     AccessKind, BlockId, BorrowProblem, Event, EventId, EventKind, Loan, LoanId, PlaceId,
-    PlaceOverlap, PointId, UseId, UseKind, ValueOriginId,
+    PlaceOverlap, PointId, RebindValue, Use, UseId, UseKind, ValueOriginId,
 };
 use super::{OriginOverlapDecision, OriginSolution};
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -220,7 +220,11 @@ fn event_accesses(
                 use_id: Some(*use_id),
                 place: use_row.place,
                 kind: use_row.kind.access_kind(),
-                definition: use_row.definition && !origins.is_write_through_use(*use_id),
+                definition: use_row
+                    .kind
+                    .binding_destination()
+                    .is_some_and(|destination| destination.defines())
+                    || use_row.definition && !origins.is_write_through_use(*use_id),
             }])
         }
         EventKind::CallArgument { argument, .. } => Ok(vec![AccessFact {
@@ -295,6 +299,38 @@ fn origins_for_access(
     origins.origins_for_place_after_event(problem, event, place)
 }
 
+fn jump_source_origins(
+    problem: &BorrowProblem,
+    origins: &OriginSolution,
+    terminator: &Event,
+    source: PlaceId,
+) -> Box<[ValueOriginId]> {
+    for block in &problem.control_flow().blocks {
+        let Some(terminator_index) = block
+            .events
+            .iter()
+            .position(|event| *event == terminator.id)
+        else {
+            continue;
+        };
+        for event_id in block.events[..terminator_index].iter().rev() {
+            let Some(event) = problem.events().get(event_id.index()) else {
+                continue;
+            };
+            let EventKind::Access { use_id } = &event.kind else {
+                continue;
+            };
+            let Some(use_row) = problem.uses().get(use_id.index()) else {
+                continue;
+            };
+            if use_row.kind == UseKind::Read && use_row.place == source {
+                return origins_for_access(problem, origins, event.id, source);
+            }
+        }
+    }
+    Box::new([])
+}
+
 fn derive_alias_loans(
     problem: &BorrowProblem,
     origins: &OriginSolution,
@@ -358,6 +394,30 @@ fn derive_provenance_loans(
     let mut result = Vec::new();
     for event in problem.events() {
         match &event.kind {
+            EventKind::Terminator {
+                kind: super::super::problem::TerminatorEventKind::Jump { arguments, .. },
+            } => {
+                for argument in arguments.iter() {
+                    let destination = argument.destination.place();
+                    let source_origins =
+                        jump_source_origins(problem, origins, event, argument.source);
+                    push_provenance_loan(
+                        problem,
+                        origins,
+                        graph,
+                        &mut result,
+                        first_id,
+                        ProvenanceLoanSpec {
+                            event,
+                            kind: AccessKind::Shared,
+                            source: argument.source,
+                            holder: destination,
+                            loan_origins: source_origins,
+                            fallback_origin: None,
+                        },
+                    )?;
+                }
+            }
             EventKind::AliasFromPlace {
                 source,
                 destination,
@@ -383,6 +443,7 @@ fn derive_provenance_loans(
                 // from the value being assigned. The destination may also retain an
                 // alias-backed alternative after a CFG join, so using its union here would
                 // incorrectly attach stale origins to the new loan.
+                let destination_place = destination.place();
                 let source_origins = provenance_source_origins(problem, origins, event, *source);
                 push_provenance_loan(
                     problem,
@@ -394,7 +455,7 @@ fn derive_provenance_loans(
                         event,
                         kind: AccessKind::Shared,
                         source: *source,
-                        holder: *destination,
+                        holder: destination_place,
                         loan_origins: source_origins,
                         fallback_origin: None,
                     },
@@ -406,8 +467,9 @@ fn derive_provenance_loans(
                 source,
                 ..
             } => {
+                let destination_place = destination.place();
                 let output_origins = origins
-                    .origins_after_event(event.id, *destination)
+                    .origins_after_event(event.id, destination_place)
                     .map(|origins| origins.to_vec())
                     .unwrap_or_else(|| {
                         origins_for_access(problem, origins, event.id, *source).to_vec()
@@ -422,7 +484,7 @@ fn derive_provenance_loans(
                         event,
                         kind: AccessKind::Shared,
                         source: *source,
-                        holder: *destination,
+                        holder: destination_place,
                         loan_origins: if output_origins.is_empty() {
                             origins_for_access(problem, origins, event.id, *source)
                         } else {
@@ -432,14 +494,39 @@ fn derive_provenance_loans(
                     },
                 )?;
             }
+            EventKind::Rebind {
+                destination,
+                value: RebindValue::AliasFromPlace(source),
+            } => {
+                // Produced values keep shared provenance independently of the destination's
+                // binding role, including a write through an existing alias.
+                let destination_place = destination.place();
+                let source_origins = provenance_source_origins(problem, origins, event, *source);
+                push_provenance_loan(
+                    problem,
+                    origins,
+                    graph,
+                    &mut result,
+                    first_id,
+                    ProvenanceLoanSpec {
+                        event,
+                        kind: AccessKind::Shared,
+                        source: *source,
+                        holder: destination_place,
+                        loan_origins: source_origins,
+                        fallback_origin: None,
+                    },
+                )?;
+            }
             EventKind::Aggregate {
                 destination,
                 fields,
                 ..
             } => {
+                let destination_place = destination.place();
                 for field in fields {
-                    let holder = projection_place(problem, *destination, field.projection)
-                        .unwrap_or(*destination);
+                    let holder = projection_place(problem, destination_place, field.projection)
+                        .unwrap_or(destination_place);
                     let field_origins =
                         origins_for_access(problem, origins, event.id, field.source);
                     push_provenance_loan(
@@ -491,7 +578,7 @@ fn derive_provenance_loans(
                                     event,
                                     kind: AccessKind::Shared,
                                     source: argument.place,
-                                    holder: result_row.place,
+                                    holder: result_row.destination.place(),
                                     loan_origins: origins_for_access(
                                         problem,
                                         origins,
@@ -505,8 +592,12 @@ fn derive_provenance_loans(
                     }
                     super::super::problem::CallResultProvenance::Alias(_)
                     | super::super::problem::CallResultProvenance::Unknown(_) => {
-                        let result_origins =
-                            origins_for_access(problem, origins, event.id, result_row.place);
+                        let result_origins = origins_for_access(
+                            problem,
+                            origins,
+                            event.id,
+                            result_row.destination.place(),
+                        );
                         let arguments = if effect.arguments.is_empty() {
                             vec![None]
                         } else {
@@ -538,8 +629,8 @@ fn derive_provenance_loans(
                                 ProvenanceLoanSpec {
                                     event,
                                     kind: AccessKind::Shared,
-                                    source: source.unwrap_or(result_row.place),
-                                    holder: result_row.place,
+                                    source: source.unwrap_or(result_row.destination.place()),
+                                    holder: result_row.destination.place(),
                                     loan_origins,
                                     fallback_origin: None,
                                 },
@@ -663,7 +754,7 @@ fn alias_event(event: &Event) -> Option<(AccessKind, PlaceId, PlaceId)> {
         | EventKind::AliasFromPlace {
             source,
             destination,
-        } => Some((AccessKind::Shared, source, destination)),
+        } => Some((AccessKind::Shared, source, destination.place())),
         EventKind::ExclusiveAlias {
             source,
             destination,
@@ -672,7 +763,7 @@ fn alias_event(event: &Event) -> Option<(AccessKind, PlaceId, PlaceId)> {
         | EventKind::ExclusiveAliasFromPlace {
             source,
             destination,
-        } => Some((AccessKind::Exclusive, source, destination)),
+        } => Some((AccessKind::Exclusive, source, destination.place())),
         _ => None,
     }
 }
@@ -750,7 +841,7 @@ fn holder_uses(
         if event_id == issue_event || !places_cover(problem, holder, use_row.place) {
             continue;
         }
-        if use_row.definition && !origins.is_write_through_use(use_row.id) {
+        if use_replaces_generation(use_row) && !origins.is_write_through_use(use_row.id) {
             continue;
         }
         if graph.reaches_without_kill(problem, issue_event, event_id, kills) {
@@ -783,8 +874,8 @@ fn holder_kills(
                 .is_some_and(|place| bindings.contains(&place.root)),
             EventKind::Access { use_id } => {
                 problem.uses().get(use_id.index()).is_some_and(|use_row| {
-                    use_row.kind == UseKind::Write
-                        && use_row.definition
+                    use_row.kind.is_write()
+                        && use_replaces_generation(use_row)
                         && !origins.is_write_through_use(*use_id)
                         && places_overlap(problem, holder, use_row.place) != PlaceOverlap::Disjoint
                 })
@@ -813,10 +904,18 @@ fn event_destination(event: &Event) -> Option<PlaceId> {
         | EventKind::Alias { destination, .. }
         | EventKind::AliasFromPlace { destination, .. }
         | EventKind::ExclusiveAlias { destination, .. }
-        | EventKind::ExclusiveAliasFromPlace { destination, .. } => Some(*destination),
-        EventKind::CallEffect(effect) => effect.result.map(|result| result.place),
+        | EventKind::ExclusiveAliasFromPlace { destination, .. } => Some(destination.place()),
+        EventKind::CallEffect(effect) => effect.result.map(|result| result.destination.place()),
         _ => None,
     }
+}
+
+fn use_replaces_generation(use_row: &Use) -> bool {
+    use_row.definition
+        || use_row
+            .kind
+            .binding_destination()
+            .is_some_and(super::super::problem::BindingDestination::defines)
 }
 
 fn places_cover(problem: &BorrowProblem, holder: PlaceId, observed: PlaceId) -> bool {

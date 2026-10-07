@@ -156,6 +156,7 @@ impl HirFunctionOriginLookup {
 pub struct HirFunction {
     pub id: FunctionId,
     pub entry: BlockId,
+    /// Locals defined by entering this function under its call ABI contract.
     pub params: Vec<LocalId>,
     pub return_type: TypeId,
 }

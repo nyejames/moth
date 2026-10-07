@@ -1,0 +1,10 @@
+-- A live shared alias blocks mutable alias acquisition by slot update.
+data ~= "test data"
+shared_alias = data
+mutable_slot ~= "old"
+mutable_slot = mutable_slot
+
+-- INVALID: the shared alias remains live when the slot update requests exclusivity.
+mutable_slot = data
+
+later_shared_alias_use = shared_alias

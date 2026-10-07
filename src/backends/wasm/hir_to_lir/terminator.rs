@@ -9,8 +9,11 @@ use crate::backends::wasm::lir::types::WasmAbiType;
 use crate::backends::wasm::runtime::imports::WasmHostFunction;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirVariantCarrier};
-use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
-use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
+use crate::compiler_frontend::hir::ids::BlockId;
+use crate::compiler_frontend::hir::terminators::{
+    HirAssertionMessageEvaluation, HirJumpArgument, HirTerminator,
+};
+use std::collections::HashSet;
 
 pub(crate) fn lower_terminator(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
@@ -32,7 +35,7 @@ pub(crate) fn lower_terminator(
             then_block,
             else_block,
         } => {
-            let lowered_condition = lower_expression(context, condition, statements)?;
+            let lowered_condition = lower_expression(context, *condition, statements)?;
             Ok(WasmLirTerminator::Branch {
                 condition: lowered_condition.value,
                 then_block: resolve_block_id(context, *then_block)?,
@@ -41,12 +44,20 @@ pub(crate) fn lower_terminator(
         }
         HirTerminator::Return(value) => {
             // Preserve unit-return as `Return(None)` to keep ABI shape explicit.
-            let return_abi = lower_type_to_abi(context.module_context, value.ty);
+            let return_abi = lower_type_to_abi(
+                context.module_context,
+                context
+                    .module_context
+                    .hir_module
+                    .expressions
+                    .expression(*value)
+                    .ty,
+            );
             if matches!(return_abi, WasmAbiType::Void) {
                 return Ok(WasmLirTerminator::Return { value: None });
             }
 
-            let lowered_value = lower_expression(context, value, statements)?;
+            let lowered_value = lower_expression(context, *value, statements)?;
             Ok(WasmLirTerminator::Return {
                 value: Some(lowered_value.value),
             })
@@ -82,18 +93,28 @@ pub(crate) fn lower_terminator(
                         carrier: HirVariantCarrier::Option,
                         variant_index: 1,
                         fields,
-                    } = &message.kind
+                    } = &context
+                        .module_context
+                        .hir_module
+                        .expressions
+                        .expression(*message)
+                        .kind
                     else {
                         return Err(CompilerError::compiler_error(
                             "Wasm lowering received a non-option folded assertion message",
                         ));
                     };
-                    let [field] = fields.as_slice() else {
+                    let [field] = context
+                        .module_context
+                        .hir_module
+                        .expressions
+                        .variant_fields(*fields)
+                    else {
                         return Err(CompilerError::compiler_error(
                             "Wasm lowering received a folded assertion message without one payload",
                         ));
                     };
-                    lower_expression(context, &field.value, statements)?
+                    lower_expression(context, field.value, statements)?
                 }
                 HirAssertionMessageEvaluation::Runtime => {
                     return Err(CompilerError::compiler_error(
@@ -121,7 +142,7 @@ pub(crate) fn lower_terminator(
 fn lower_jump_argument_transfer(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
     target: BlockId,
-    args: &[LocalId],
+    args: &[HirJumpArgument],
     statements: &mut Vec<WasmLirStmt>,
 ) -> Result<crate::backends::wasm::lir::types::WasmLirBlockId, CompilerError> {
     let target_block = context
@@ -141,41 +162,56 @@ fn lower_jump_argument_transfer(
         return Ok(lir_target);
     }
 
-    if args.len() > target_block.locals.len() {
-        return Err(lir_transformation_error(format!(
-            "Wasm lowering block {} receives {} jump argument(s), but only {} target local(s) are available",
-            target.0,
-            args.len(),
-            target_block.locals.len()
-        )));
-    }
-
     let mut transfers = Vec::with_capacity(args.len());
-    for (source_local, destination_local) in args.iter().zip(&target_block.locals) {
+    let mut destinations = HashSet::with_capacity(args.len());
+    for argument in args {
+        if !target_block
+            .locals
+            .iter()
+            .any(|local| local.id == argument.destination)
+        {
+            return Err(lir_transformation_error(format!(
+                "Wasm jump argument destination {:?} is not declared by target block {}",
+                argument.destination, target.0
+            )));
+        }
+        if !destinations.insert(argument.destination) {
+            return Err(lir_transformation_error(format!(
+                "Wasm jump to block {} defines destination {:?} more than once",
+                target.0, argument.destination
+            )));
+        }
+
         let source = context
             .local_map
-            .get(source_local)
+            .get(&argument.source)
             .copied()
             .ok_or_else(|| {
                 lir_transformation_error(format!(
-                    "Wasm lowering could not resolve jump source local {source_local:?}"
+                    "Wasm lowering could not resolve jump source local {:?}",
+                    argument.source
                 ))
             })?;
         let destination = context
             .local_map
-            .get(&destination_local.id)
+            .get(&argument.destination)
             .copied()
             .ok_or_else(|| {
                 lir_transformation_error(format!(
                     "Wasm lowering could not resolve jump target local {:?}",
-                    destination_local.id
+                    argument.destination
                 ))
             })?;
-        let source_abi = context.local_type_by_id.get(&source).copied().ok_or_else(|| {
-            lir_transformation_error(format!(
-                "Wasm lowering could not resolve carrier ABI for jump source local {source_local:?}"
-            ))
-        })?;
+        let source_abi = context
+            .local_type_by_id
+            .get(&source)
+            .copied()
+            .ok_or_else(|| {
+                lir_transformation_error(format!(
+                    "Wasm lowering could not resolve carrier ABI for jump source local {:?}",
+                    argument.source
+                ))
+            })?;
         let destination_abi = context
             .local_type_by_id
             .get(&destination)
@@ -183,14 +219,14 @@ fn lower_jump_argument_transfer(
             .ok_or_else(|| {
                 lir_transformation_error(format!(
                     "Wasm lowering could not resolve carrier ABI for jump target local {:?}",
-                    destination_local.id
+                    argument.destination
                 ))
             })?;
 
         if source_abi != destination_abi {
             return Err(lir_transformation_error(format!(
-                "Wasm lowering cannot transfer jump argument from {source_local:?} ({source_abi:?}) into target local {:?} ({destination_abi:?}) because their carrier ABI types differ",
-                destination_local.id
+                "Wasm lowering cannot transfer jump argument from {:?} ({source_abi:?}) into target local {:?} ({destination_abi:?}) because their carrier ABI types differ",
+                argument.source, argument.destination
             )));
         }
 

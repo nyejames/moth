@@ -7,21 +7,21 @@ use crate::backends::js::JsModule;
 use crate::backends::js::numeric_carrier::JsNumericCarrier;
 use crate::backends::js::runtime::NumericRuntimeHelperUsage;
 use crate::backends::js::{ENTRY_FAILURE_NOTICE, JsFunctionEmissionPolicy, JsLoweringConfig};
-use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::hir::blocks::HirBlock;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
+use crate::compiler_frontend::hir::expression_store::HirProjection;
+use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::ids::{BlockId, FieldId, FunctionId, LocalId};
+use crate::compiler_frontend::hir::ids::{BlockId, FieldId, FunctionId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::patterns::HirPattern;
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -30,7 +30,6 @@ use std::collections::{HashMap, HashSet};
 /// Lower one validated HIR module into JavaScript source.
 pub fn lower_hir_to_js(
     hir: &HirModule,
-    borrow_analysis: &BorrowCheckReport,
     numeric_proofs: &NumericProofs,
     string_table: &StringTable,
     config: JsLoweringConfig,
@@ -39,7 +38,6 @@ pub fn lower_hir_to_js(
 ) -> Result<JsModule, CompilerError> {
     let emitter = JsEmitter::new(
         hir,
-        borrow_analysis,
         numeric_proofs,
         string_table,
         path_table,
@@ -51,7 +49,6 @@ pub fn lower_hir_to_js(
 
 pub(crate) struct JsEmitter<'hir> {
     pub(crate) hir: &'hir HirModule,
-    pub(crate) borrow_analysis: &'hir BorrowCheckReport,
     /// Proven integer operation/narrowing facts paired with this immutable HIR. An empty table
     /// retains every checked numeric statement unchanged.
     pub(crate) numeric_proofs: &'hir NumericProofs,
@@ -84,7 +81,6 @@ pub(crate) struct JsEmitter<'hir> {
 impl<'hir> JsEmitter<'hir> {
     pub(crate) fn new(
         hir: &'hir HirModule,
-        borrow_analysis: &'hir BorrowCheckReport,
         numeric_proofs: &'hir NumericProofs,
         string_table: &'hir StringTable,
         path_table: &'hir PathTable,
@@ -100,7 +96,6 @@ impl<'hir> JsEmitter<'hir> {
         Self {
             out: String::new(),
             hir,
-            borrow_analysis,
             numeric_proofs,
             string_table,
             path_table,
@@ -363,20 +358,29 @@ impl<'hir> JsEmitter<'hir> {
 
     fn statement_uses_maps(&self, statement: &HirStatementKind) -> bool {
         match statement {
-            HirStatementKind::Assign { target: _, value }
-            | HirStatementKind::Expr(value)
-            | HirStatementKind::PushRuntimeFragment { value, .. } => {
-                self.expression_uses_maps(value)
+            HirStatementKind::Write { target, value } => {
+                let place_uses_maps = match target {
+                    HirWriteTarget::DefineLocal(_) => false,
+                    HirWriteTarget::AssignPlace(place) => self.place_uses_maps(*place),
+                };
+                place_uses_maps || self.expression_uses_maps(*value)
             }
 
-            HirStatementKind::Call { args, .. } => args
-                .iter()
-                .any(|argument| self.expression_uses_maps(argument)),
+            HirStatementKind::Expr(value) | HirStatementKind::PushRuntimeFragment { value, .. } => {
+                self.expression_uses_maps(*value)
+            }
 
-            HirStatementKind::CastOp { source, .. } => self.expression_uses_maps(source),
+            HirStatementKind::Call { args, .. } => self
+                .hir
+                .expressions
+                .values(*args)
+                .iter()
+                .any(|argument| self.expression_uses_maps(*argument)),
+
+            HirStatementKind::CastOp { source, .. } => self.expression_uses_maps(*source),
 
             HirStatementKind::FormatFloat { source, .. }
-            | HirStatementKind::ValidateFloat { source, .. } => self.expression_uses_maps(source),
+            | HirStatementKind::ValidateFloat { source, .. } => self.expression_uses_maps(*source),
 
             HirStatementKind::MapOp { .. } => true,
 
@@ -391,10 +395,10 @@ impl<'hir> JsEmitter<'hir> {
                 ascending,
                 ..
             } => {
-                self.expression_uses_maps(current)
-                    || self.expression_uses_maps(step)
-                    || self.expression_uses_maps(end)
-                    || self.expression_uses_maps(ascending)
+                self.expression_uses_maps(*current)
+                    || self.expression_uses_maps(*step)
+                    || self.expression_uses_maps(*end)
+                    || self.expression_uses_maps(*ascending)
             }
             HirStatementKind::RangeStepFailure { .. } | HirStatementKind::Drop(_) => false,
         }
@@ -402,9 +406,9 @@ impl<'hir> JsEmitter<'hir> {
 
     fn numeric_operands_use_maps(&self, operands: &HirNumericOperands) -> bool {
         match operands {
-            HirNumericOperands::Unary { operand } => self.expression_uses_maps(operand),
+            HirNumericOperands::Unary { operand } => self.expression_uses_maps(*operand),
             HirNumericOperands::Binary { left, right } => {
-                self.expression_uses_maps(left) || self.expression_uses_maps(right)
+                self.expression_uses_maps(*left) || self.expression_uses_maps(*right)
             }
         }
     }
@@ -436,15 +440,27 @@ impl<'hir> JsEmitter<'hir> {
                         HirStatementKind::CastOp { policy, source, .. }
                             if self.integer_narrowing_is_proven(statement.id, *policy) =>
                         {
-                            collect_expression_cast_policies(source, &mut self.used_cast_policies);
+                            collect_expression_cast_policies(
+                                self.hir,
+                                *source,
+                                &mut self.used_cast_policies,
+                            );
                         }
                         kind => {
-                            collect_statement_cast_policies(kind, &mut self.used_cast_policies);
+                            collect_statement_cast_policies(
+                                self.hir,
+                                kind,
+                                &mut self.used_cast_policies,
+                            );
                         }
                     }
                 }
 
-                collect_terminator_cast_policies(&block.terminator, &mut self.used_cast_policies);
+                collect_terminator_cast_policies(
+                    self.hir,
+                    &block.terminator,
+                    &mut self.used_cast_policies,
+                );
             }
         }
 
@@ -453,15 +469,14 @@ impl<'hir> JsEmitter<'hir> {
 
     fn terminator_uses_maps(&self, terminator: &HirTerminator) -> bool {
         match terminator {
-            HirTerminator::If { condition, .. } => self.expression_uses_maps(condition),
+            HirTerminator::If { condition, .. } => self.expression_uses_maps(*condition),
 
-            HirTerminator::FallibleBranch { result, .. } => self.expression_uses_maps(result),
+            HirTerminator::FallibleBranch { result, .. } => self.expression_uses_maps(*result),
 
             HirTerminator::Match { scrutinee, arms } => {
-                self.expression_uses_maps(scrutinee)
+                self.expression_uses_maps(*scrutinee)
                     || arms.iter().any(|arm| {
                         arm.guard
-                            .as_ref()
                             .is_some_and(|guard| self.expression_uses_maps(guard))
                             || self.pattern_uses_maps(&arm.pattern)
                     })
@@ -469,9 +484,9 @@ impl<'hir> JsEmitter<'hir> {
 
             HirTerminator::Return(value)
             | HirTerminator::ReturnSuccess(value)
-            | HirTerminator::ReturnError(value) => self.expression_uses_maps(value),
+            | HirTerminator::ReturnError(value) => self.expression_uses_maps(*value),
 
-            HirTerminator::AssertFailure { message, .. } => self.expression_uses_maps(message),
+            HirTerminator::AssertFailure { message, .. } => self.expression_uses_maps(*message),
 
             HirTerminator::Jump { .. }
             | HirTerminator::Break { .. }
@@ -486,7 +501,7 @@ impl<'hir> JsEmitter<'hir> {
             HirPattern::Literal(value)
             | HirPattern::OptionValue { value }
             | HirPattern::OptionRelational { value, .. }
-            | HirPattern::Relational { value, .. } => self.expression_uses_maps(value),
+            | HirPattern::Relational { value, .. } => self.expression_uses_maps(*value),
 
             HirPattern::OptionNone
             | HirPattern::OptionPresent
@@ -495,50 +510,60 @@ impl<'hir> JsEmitter<'hir> {
         }
     }
 
-    fn expression_uses_maps(&self, expression: &HirExpression) -> bool {
+    fn expression_uses_maps(&self, expression_id: HirValueId) -> bool {
+        let hir = self.hir;
+        let expression = hir.expressions.expression(expression_id);
         if self.type_environment.is_map_type(expression.ty) {
             return true;
         }
 
         match &expression.kind {
-            HirExpressionKind::Load(_) | HirExpressionKind::Copy(_) => false,
-
-            HirExpressionKind::BinOp { left, right, .. } => {
-                self.expression_uses_maps(left) || self.expression_uses_maps(right)
+            HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
+                self.place_uses_maps(*place)
             }
 
-            HirExpressionKind::UnaryOp { operand, .. } => self.expression_uses_maps(operand),
+            HirExpressionKind::BinOp { left, right, .. } => {
+                self.expression_uses_maps(*left) || self.expression_uses_maps(*right)
+            }
 
-            HirExpressionKind::StructConstruct { fields, .. } => fields
+            HirExpressionKind::UnaryOp { operand, .. } => self.expression_uses_maps(*operand),
+
+            HirExpressionKind::StructConstruct { fields, .. } => hir
+                .expressions
+                .struct_fields(*fields)
                 .iter()
-                .any(|(_, field_value)| self.expression_uses_maps(field_value)),
+                .any(|(_, field_value)| self.expression_uses_maps(*field_value)),
 
             HirExpressionKind::Collection(elements)
-            | HirExpressionKind::TupleConstruct { elements } => elements
+            | HirExpressionKind::TupleConstruct { elements } => hir
+                .expressions
+                .values(*elements)
                 .iter()
-                .any(|element| self.expression_uses_maps(element)),
+                .any(|element| self.expression_uses_maps(*element)),
 
             HirExpressionKind::MapLiteral(_) => true,
 
             HirExpressionKind::Range { start, end } => {
-                self.expression_uses_maps(start) || self.expression_uses_maps(end)
+                self.expression_uses_maps(*start) || self.expression_uses_maps(*end)
             }
 
-            HirExpressionKind::TupleGet { tuple, .. } => self.expression_uses_maps(tuple),
+            HirExpressionKind::TupleGet { tuple, .. } => self.expression_uses_maps(*tuple),
 
             HirExpressionKind::FallibleUnwrapSuccess { result }
             | HirExpressionKind::FallibleUnwrapError { result } => {
-                self.expression_uses_maps(result)
+                self.expression_uses_maps(*result)
             }
 
-            HirExpressionKind::Cast { source, .. } => self.expression_uses_maps(source),
+            HirExpressionKind::Cast { source, .. } => self.expression_uses_maps(*source),
 
-            HirExpressionKind::VariantConstruct { fields, .. } => fields
+            HirExpressionKind::VariantConstruct { fields, .. } => hir
+                .expressions
+                .variant_fields(*fields)
                 .iter()
-                .any(|field| self.expression_uses_maps(&field.value)),
+                .any(|field| self.expression_uses_maps(field.value)),
 
             HirExpressionKind::VariantPayloadGet { source, .. } => {
-                self.expression_uses_maps(source)
+                self.expression_uses_maps(*source)
             }
 
             HirExpressionKind::Int(_)
@@ -552,54 +577,62 @@ impl<'hir> JsEmitter<'hir> {
             | HirExpressionKind::StructuralString { .. } => false,
         }
     }
+
+    fn place_uses_maps(&self, place: HirPlace) -> bool {
+        self.hir
+            .expressions
+            .projections(place.projections)
+            .iter()
+            .any(|projection| match projection {
+                HirProjection::Field(_) => false,
+                HirProjection::Index(index) => self.expression_uses_maps(*index),
+            })
+    }
 }
 
 fn collect_statement_cast_policies(
+    hir: &HirModule,
     statement: &HirStatementKind,
     policies: &mut HashSet<BuiltinCastPolicyId>,
 ) {
     match statement {
-        HirStatementKind::Assign { target, value } => {
-            collect_place_cast_policies(target, policies);
-            collect_expression_cast_policies(value, policies);
+        HirStatementKind::Write { target, value } => {
+            if let HirWriteTarget::AssignPlace(place) = target {
+                collect_place_cast_policies(hir, *place, policies);
+            }
+            collect_expression_cast_policies(hir, *value, policies);
         }
         HirStatementKind::Expr(value) | HirStatementKind::PushRuntimeFragment { value, .. } => {
-            collect_expression_cast_policies(value, policies);
+            collect_expression_cast_policies(hir, *value, policies);
         }
-
         HirStatementKind::Call { args, .. } => {
-            for argument in args {
-                collect_expression_cast_policies(argument, policies);
+            for argument in hir.expressions.values(*args) {
+                collect_expression_cast_policies(hir, *argument, policies);
             }
         }
-
         HirStatementKind::CastOp { policy, source, .. } => {
             policies.insert(*policy);
-            collect_expression_cast_policies(source, policies);
+            collect_expression_cast_policies(hir, *source, policies);
         }
-
         HirStatementKind::FormatFloat { source, .. }
         | HirStatementKind::ValidateFloat { source, .. } => {
-            collect_expression_cast_policies(source, policies);
+            collect_expression_cast_policies(hir, *source, policies);
         }
-
         HirStatementKind::MapOp { receiver, args, .. } => {
-            collect_expression_cast_policies(receiver, policies);
-            for argument in args {
-                collect_expression_cast_policies(argument, policies);
+            collect_expression_cast_policies(hir, *receiver, policies);
+            for argument in hir.expressions.values(*args) {
+                collect_expression_cast_policies(hir, *argument, policies);
             }
         }
-
         HirStatementKind::NumericOp { operands, .. } => match operands {
             HirNumericOperands::Unary { operand } => {
-                collect_expression_cast_policies(operand, policies);
+                collect_expression_cast_policies(hir, *operand, policies);
             }
             HirNumericOperands::Binary { left, right } => {
-                collect_expression_cast_policies(left, policies);
-                collect_expression_cast_policies(right, policies);
+                collect_expression_cast_policies(hir, *left, policies);
+                collect_expression_cast_policies(hir, *right, policies);
             }
         },
-
         HirStatementKind::FloatRangeCandidate {
             current,
             step,
@@ -607,46 +640,44 @@ fn collect_statement_cast_policies(
             ascending,
             ..
         } => {
-            collect_expression_cast_policies(current, policies);
-            collect_expression_cast_policies(step, policies);
-            collect_expression_cast_policies(end, policies);
-            collect_expression_cast_policies(ascending, policies);
+            collect_expression_cast_policies(hir, *current, policies);
+            collect_expression_cast_policies(hir, *step, policies);
+            collect_expression_cast_policies(hir, *end, policies);
+            collect_expression_cast_policies(hir, *ascending, policies);
         }
         HirStatementKind::RangeStepFailure { .. } | HirStatementKind::Drop(_) => {}
     }
 }
 
 fn collect_terminator_cast_policies(
+    hir: &HirModule,
     terminator: &HirTerminator,
     policies: &mut HashSet<BuiltinCastPolicyId>,
 ) {
     match terminator {
         HirTerminator::If { condition, .. } => {
-            collect_expression_cast_policies(condition, policies)
+            collect_expression_cast_policies(hir, *condition, policies)
         }
-
         HirTerminator::FallibleBranch { result, .. } => {
-            collect_expression_cast_policies(result, policies);
+            collect_expression_cast_policies(hir, *result, policies);
         }
-
         HirTerminator::Match { scrutinee, arms } => {
-            collect_expression_cast_policies(scrutinee, policies);
+            collect_expression_cast_policies(hir, *scrutinee, policies);
             for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    collect_expression_cast_policies(guard, policies);
+                if let Some(guard) = arm.guard {
+                    collect_expression_cast_policies(hir, guard, policies);
                 }
-                collect_pattern_cast_policies(&arm.pattern, policies);
+                collect_pattern_cast_policies(hir, &arm.pattern, policies);
             }
         }
-
         HirTerminator::Return(value)
         | HirTerminator::ReturnSuccess(value)
-        | HirTerminator::ReturnError(value) => collect_expression_cast_policies(value, policies),
-
-        HirTerminator::AssertFailure { message, .. } => {
-            collect_expression_cast_policies(message, policies)
+        | HirTerminator::ReturnError(value) => {
+            collect_expression_cast_policies(hir, *value, policies)
         }
-
+        HirTerminator::AssertFailure { message, .. } => {
+            collect_expression_cast_policies(hir, *message, policies)
+        }
         HirTerminator::Jump { .. }
         | HirTerminator::Break { .. }
         | HirTerminator::Continue { .. }
@@ -656,6 +687,7 @@ fn collect_terminator_cast_policies(
 }
 
 fn collect_pattern_cast_policies(
+    hir: &HirModule,
     pattern: &HirPattern,
     policies: &mut HashSet<BuiltinCastPolicyId>,
 ) {
@@ -663,8 +695,9 @@ fn collect_pattern_cast_policies(
         HirPattern::Literal(value)
         | HirPattern::OptionValue { value }
         | HirPattern::OptionRelational { value, .. }
-        | HirPattern::Relational { value, .. } => collect_expression_cast_policies(value, policies),
-
+        | HirPattern::Relational { value, .. } => {
+            collect_expression_cast_policies(hir, *value, policies)
+        }
         HirPattern::OptionNone
         | HirPattern::OptionPresent
         | HirPattern::Wildcard
@@ -673,68 +706,59 @@ fn collect_pattern_cast_policies(
 }
 
 fn collect_expression_cast_policies(
-    expression: &HirExpression,
+    hir: &HirModule,
+    expression_id: HirValueId,
     policies: &mut HashSet<BuiltinCastPolicyId>,
 ) {
+    let expression = hir.expressions.expression(expression_id);
     match &expression.kind {
         HirExpressionKind::BinOp { left, right, .. } => {
-            collect_expression_cast_policies(left, policies);
-            collect_expression_cast_policies(right, policies);
+            collect_expression_cast_policies(hir, *left, policies);
+            collect_expression_cast_policies(hir, *right, policies);
         }
-
         HirExpressionKind::UnaryOp { operand, .. } => {
-            collect_expression_cast_policies(operand, policies)
+            collect_expression_cast_policies(hir, *operand, policies)
         }
-
         HirExpressionKind::StructConstruct { fields, .. } => {
-            for (_, value) in fields {
-                collect_expression_cast_policies(value, policies);
+            for (_, value) in hir.expressions.struct_fields(*fields) {
+                collect_expression_cast_policies(hir, *value, policies);
             }
         }
-
         HirExpressionKind::Collection(elements)
         | HirExpressionKind::TupleConstruct { elements } => {
-            for element in elements {
-                collect_expression_cast_policies(element, policies);
+            for element in hir.expressions.values(*elements) {
+                collect_expression_cast_policies(hir, *element, policies);
             }
         }
-
         HirExpressionKind::Range { start, end } => {
-            collect_expression_cast_policies(start, policies);
-            collect_expression_cast_policies(end, policies);
+            collect_expression_cast_policies(hir, *start, policies);
+            collect_expression_cast_policies(hir, *end, policies);
         }
-
         HirExpressionKind::TupleGet { tuple, .. } => {
-            collect_expression_cast_policies(tuple, policies);
+            collect_expression_cast_policies(hir, *tuple, policies);
         }
-
         HirExpressionKind::FallibleUnwrapSuccess { result }
         | HirExpressionKind::FallibleUnwrapError { result } => {
-            collect_expression_cast_policies(result, policies);
+            collect_expression_cast_policies(hir, *result, policies);
         }
-
         HirExpressionKind::Cast { source, policy } => {
             policies.insert(*policy);
-            collect_expression_cast_policies(source, policies);
+            collect_expression_cast_policies(hir, *source, policies);
         }
-
         HirExpressionKind::VariantConstruct { fields, .. } => {
-            for field in fields {
-                collect_expression_cast_policies(&field.value, policies);
+            for field in hir.expressions.variant_fields(*fields) {
+                collect_expression_cast_policies(hir, field.value, policies);
             }
         }
-
         HirExpressionKind::VariantPayloadGet { source, .. } => {
-            collect_expression_cast_policies(source, policies);
+            collect_expression_cast_policies(hir, *source, policies);
         }
-
         HirExpressionKind::MapLiteral(entries) => {
-            for entry in entries {
-                collect_expression_cast_policies(&entry.key, policies);
-                collect_expression_cast_policies(&entry.value, policies);
+            for entry in hir.expressions.map_entries(*entries) {
+                collect_expression_cast_policies(hir, entry.key, policies);
+                collect_expression_cast_policies(hir, entry.value, policies);
             }
         }
-
         HirExpressionKind::Int(_)
         | HirExpressionKind::Uint(_)
         | HirExpressionKind::Float(_)
@@ -745,18 +769,19 @@ fn collect_expression_cast_policies(
         | HirExpressionKind::StringLiteral(_)
         | HirExpressionKind::StructuralString { .. } => {}
         HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
-            collect_place_cast_policies(place, policies);
+            collect_place_cast_policies(hir, *place, policies);
         }
     }
 }
 
-fn collect_place_cast_policies(place: &HirPlace, policies: &mut HashSet<BuiltinCastPolicyId>) {
-    match place {
-        HirPlace::Local(_) => {}
-        HirPlace::Field { base, .. } => collect_place_cast_policies(base, policies),
-        HirPlace::Index { base, index } => {
-            collect_place_cast_policies(base, policies);
-            collect_expression_cast_policies(index, policies);
+fn collect_place_cast_policies(
+    hir: &HirModule,
+    place: HirPlace,
+    policies: &mut HashSet<BuiltinCastPolicyId>,
+) {
+    for projection in hir.expressions.projections(place.projections) {
+        if let HirProjection::Index(index) = projection {
+            collect_expression_cast_policies(hir, *index, policies);
         }
     }
 }

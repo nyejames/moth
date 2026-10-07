@@ -857,6 +857,7 @@ define_stable_reason_keys! {
     &UnsupportedBackendFeatureReason::ErrorValues => "unsupported_backend_feature.error_values",
     &UnsupportedBackendFeatureReason::FallibleControlFlow => "unsupported_backend_feature.fallible_control_flow",
     &UnsupportedBackendFeatureReason::MutableFunctionParameters => "unsupported_backend_feature.mutable_function_parameters",
+    &UnsupportedBackendFeatureReason::MutableLocalBindingAliases => "unsupported_backend_feature.mutable_local_binding_aliases",
     &UnsupportedBackendFeatureReason::NumberValues => "unsupported_backend_feature.number_values",
     },
 

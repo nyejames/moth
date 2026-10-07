@@ -4227,6 +4227,27 @@ contract = "language.bindings.live_shared_alias_blocks_mutable_rebinding"
 role = "primary"
 
 [[case]]
+id = "mutable_update_alias_live_shared_holder_rejected"
+path = "mutable_update_alias_live_shared_holder_rejected"
+tags = ["integration", "borrows", "diagnostics"]
+contract = "language.bindings.live_shared_alias_blocks_mutable_rebinding"
+role = "boundary"
+
+[[case]]
+id = "mutable_update_alias_immutable_referent_rejected"
+path = "mutable_update_alias_immutable_referent_rejected"
+tags = ["integration", "borrows", "diagnostics"]
+contract = "language.bindings.mutable_update_alias_immutable_referent_rejected"
+role = "primary"
+
+[[case]]
+id = "mutable_slot_self_assignment"
+path = "mutable_slot_self_assignment"
+tags = ["integration", "borrows"]
+contract = "language.bindings.mutable_slot_self_assignment"
+role = "primary"
+
+[[case]]
 id = "map_get_alias_blocks_set_when_used_after_mutation"
 path = "map_get_alias_blocks_set_when_used_after_mutation"
 tags = ["integration", "borrows", "diagnostics", "hashmaps"]
@@ -4378,6 +4399,13 @@ id = "loop_collection_iteration"
 path = "loop_collection_iteration"
 tags = ["integration", "control-flow", "collections"]
 contract = "language.loops.collection_iteration_acceptance"
+role = "primary"
+
+[[case]]
+id = "loop_body_bindings_rebind_each_iteration"
+path = "loop_body_bindings_rebind_each_iteration"
+tags = ["integration", "control-flow", "collections", "borrows"]
+contract = "language.loops.body_bindings_rebind_each_iteration"
 role = "primary"
 
 [[case]]
@@ -4708,6 +4736,13 @@ path = "multiple_print_statements"
 tags = ["integration", "language"]
 contract = "language.strings.io_line_basic_acceptance"
 role = "boundary"
+
+[[case]]
+id = "mutable_local_alias_wasm_rejected"
+path = "mutable_local_alias_wasm_rejected"
+tags = ["integration", "wasm-backend", "mutability"]
+contract = "backend.html_wasm.mutable_local_binding_aliases_rejected"
+role = "backend"
 
 [[case]]
 id = "mutable_marker_on_assignment_target_rejected"

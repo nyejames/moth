@@ -15,6 +15,7 @@ use crate::compiler_frontend::external_packages::{
     ExternalPackageRegistry,
 };
 use crate::compiler_frontend::hir::blocks::HirBlock;
+use crate::compiler_frontend::hir::expression_store::HirValueRange;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, RegionId};
@@ -46,6 +47,18 @@ use std::sync::Arc;
 pub(crate) fn create_test_hir_module() -> HirModule {
     let mut module = HirModule::new();
     let unit_type = crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE;
+    let return_value = module
+        .expressions
+        .append_expression(HirExpression {
+            kind: HirExpressionKind::TupleConstruct {
+                elements: HirValueRange::empty(),
+            },
+            ty: unit_type,
+            value_kind: ValueKind::Const,
+            region: RegionId(0),
+            span: None,
+        })
+        .expect("fixture expression fits");
 
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.blocks = vec![HirBlock {
@@ -53,14 +66,7 @@ pub(crate) fn create_test_hir_module() -> HirModule {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(HirExpression {
-            id: crate::compiler_frontend::hir::ids::HirValueId(0),
-            kind: HirExpressionKind::TupleConstruct { elements: vec![] },
-            ty: unit_type,
-            value_kind: ValueKind::Const,
-            region: RegionId(0),
-            span: None,
-        }),
+        terminator: HirTerminator::Return(return_value),
     }];
     module.functions = vec![HirFunction {
         id: FunctionId(0),
@@ -76,6 +82,7 @@ pub(crate) fn create_test_hir_module() -> HirModule {
         .function_origins
         .insert(FunctionId(0), HirFunctionOrigin::EntryStart);
 
+    module.expressions.freeze();
     module
 }
 
@@ -169,7 +176,7 @@ pub(crate) fn add_reachable_external_import(
         id: HirNodeId(10_000 + import_index as u32),
         kind: HirStatementKind::Call {
             target: CallTarget::External(function_id),
-            args: vec![],
+            args: HirValueRange::empty(),
             result: None,
         },
         span: None,

@@ -1,7 +1,6 @@
--- Test that copy() keyword emits __moth_clone_value in the JS backend.
--- Validates deep-copy semantics for collections.
+-- Test that explicit collection copies reach the JS backend.
 
 original ~= {1, 2, 3}
-cloned = copy(original)
+cloned ~= copy(original)
 original = cloned
 io.line([: [1]])

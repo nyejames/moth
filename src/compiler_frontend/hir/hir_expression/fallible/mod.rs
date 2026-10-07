@@ -24,10 +24,10 @@ use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, FallibleExpressionHandling, FallibleHandling,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
@@ -60,12 +60,10 @@ impl<'a> HirBuilder<'a> {
         value_span: &Option<SourceSpan>,
         propagation_span: &Option<SourceSpan>,
         expr_type_id: FrontendTypeId,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let lowered = self.lower_expression(value)?;
-        let ok_type = match self
-            .type_environment
-            .fallible_carrier_slots(lowered.value.ty)
-        {
+        let lowered_type = self.module.expressions.expression(lowered.value).ty;
+        let ok_type = match self.type_environment.fallible_carrier_slots(lowered_type) {
             Some((ok, _)) => ok,
             None => {
                 return_hir_transformation_error!(
@@ -92,11 +90,10 @@ impl<'a> HirBuilder<'a> {
         {
             let result_carrier =
                 self.emit_lowered_result_expression_to_current_block(lowered, value_span)?;
-            let mut success_value =
+            let success_value =
                 self.lower_fallible_carrier_to_success_value(result_carrier, propagation_span)?;
-            success_value.span = *value_span;
-            self.side_table
-                .map_value(*value_span, success_value.id, success_value.span);
+            let success_value =
+                self.replace_expression_metadata(success_value, value_span, None, None)?;
 
             return Ok(LoweredExpression {
                 prelude: vec![],
@@ -132,7 +129,7 @@ impl<'a> HirBuilder<'a> {
         handling: &FallibleExpressionHandling,
         call_span: &Option<SourceSpan>,
         propagation_span: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let (_, ok_type, _) = self.result_call_carrier_slots(&target, call_span)?;
 
         let requested_ok_type = self.lower_call_result_type(result_type_ids, call_span)?;
@@ -155,12 +152,11 @@ impl<'a> HirBuilder<'a> {
                 result_type_ids,
                 call_span,
             )?;
-            let mut success_value =
+            let success_value =
                 self.lower_fallible_carrier_to_success_value(result_carrier, propagation_span)?;
-            success_value.span = *call_span;
-            self.side_table
-                .map_value(*call_span, success_value.id, success_value.span);
-            self.log_call_result_binding(call_span, None, &success_value);
+            let success_value =
+                self.replace_expression_metadata(success_value, call_span, None, None)?;
+            self.log_call_result_binding(call_span, None, success_value);
 
             return Ok(LoweredExpression {
                 prelude: vec![],
@@ -196,7 +192,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn lower_handled_external_fallible_call_expression(
         &mut self,
         input: ExternalFallibleCallLoweringInput<'_>,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let ExternalFallibleCallLoweringInput {
             id,
             args,
@@ -220,12 +216,11 @@ impl<'a> HirBuilder<'a> {
                 error_type_id,
                 call_span,
             )?;
-            let mut success_value =
+            let success_value =
                 self.lower_fallible_carrier_to_success_value(result_carrier, propagation_span)?;
-            success_value.span = *call_span;
-            self.side_table
-                .map_value(*call_span, success_value.id, success_value.span);
-            self.log_call_result_binding(call_span, None, &success_value);
+            let success_value =
+                self.replace_expression_metadata(success_value, call_span, None, None)?;
+            self.log_call_result_binding(call_span, None, success_value);
 
             return Ok(LoweredExpression {
                 prelude: vec![],

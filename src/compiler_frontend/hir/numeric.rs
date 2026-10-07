@@ -14,7 +14,7 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-use crate::compiler_frontend::hir::expressions::HirExpression;
+use crate::compiler_frontend::hir::ids::HirValueId;
 
 /// How a checked numeric operation should behave on failure.
 ///
@@ -106,11 +106,6 @@ impl Display for HirNumericOp {
 ///      profile-`Int` exponent of a Dec power operation.
 #[derive(Debug, Clone)]
 pub enum HirNumericOperands {
-    Unary {
-        operand: HirExpression,
-    },
-    Binary {
-        left: HirExpression,
-        right: HirExpression,
-    },
+    Unary { operand: HirValueId },
+    Binary { left: HirValueId, right: HirValueId },
 }

@@ -9,13 +9,16 @@ use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{
-    HirExpression, HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
+    HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
 };
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
-use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
+use crate::compiler_frontend::hir::ids::{BlockId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::numeric::NumericFailureMode;
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatement, HirStatementKind,
+};
 use crate::compiler_frontend::hir::terminators::{HirTerminator, RuntimeFailureCause};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::type_coercion::compatibility::is_postfix_error_compatible;
@@ -60,7 +63,7 @@ impl<'a> HirBuilder<'a> {
         args: &[CallArgument],
         carrier_type: TypeId,
         call_span: &Option<SourceSpan>,
-    ) -> Result<LocalId, CompilerError> {
+    ) -> Result<LocalId, HirConstructionFailure> {
         let mut lowered_args = Vec::with_capacity(args.len());
 
         for (arg_index, argument) in args.iter().enumerate() {
@@ -71,13 +74,17 @@ impl<'a> HirBuilder<'a> {
             lowered_args.push(lowered.value);
         }
 
+        let args = self
+            .module
+            .expressions
+            .append_values(&lowered_args, *call_span)?;
         let result_local = self.allocate_temp_local(carrier_type, None)?;
         let call_statement = HirStatement {
             id: self.allocate_node_id(),
             kind: HirStatementKind::Call {
                 target,
-                args: lowered_args,
-                result: Some(result_local),
+                args,
+                result: Some(HirLocalDestination::Define(result_local)),
             },
             span: *call_span,
         };
@@ -93,7 +100,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         result_carrier: EmittedFallibleCarrier,
         span: &Option<SourceSpan>,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         let current_function_id = self.current_function_id_or_error(span)?;
         let current_return_type = self
             .function_by_id_or_error(current_function_id, span)?
@@ -142,16 +149,16 @@ impl<'a> HirBuilder<'a> {
             result_carrier.carrier_type,
             &None,
             success_region,
-        );
+        )?;
         let mut success_payload = self.make_expression(
             &None,
             HirExpressionKind::FallibleUnwrapSuccess {
-                result: Box::new(success_result),
+                result: success_result,
             },
             result_carrier.ok_type,
             ValueKind::RValue,
             success_region,
-        );
+        )?;
 
         if result_carrier.validate_float_success {
             success_payload = self.emit_validated_float_value(success_payload, span)?;
@@ -170,7 +177,7 @@ impl<'a> HirBuilder<'a> {
         result_carrier: EmittedFallibleCarrier,
         failure_mode: NumericFailureMode,
         span: &Option<SourceSpan>,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         if failure_mode == NumericFailureMode::ReturnError {
             return self.lower_fallible_carrier_to_success_value(result_carrier, span);
         }
@@ -202,16 +209,16 @@ impl<'a> HirBuilder<'a> {
             result_carrier.carrier_type,
             &None,
             success_region,
-        );
-        Ok(self.make_expression(
+        )?;
+        self.make_expression(
             &None,
             HirExpressionKind::FallibleUnwrapSuccess {
-                result: Box::new(success_result),
+                result: success_result,
             },
             result_carrier.ok_type,
             ValueKind::RValue,
             success_region,
-        ))
+        )
     }
 
     pub(super) fn emit_result_carrier_branch(
@@ -222,11 +229,11 @@ impl<'a> HirBuilder<'a> {
         authored_span: Option<SourceSpan>,
         success_label: &str,
         error_label: &str,
-    ) -> Result<FallibleCarrierBranch, CompilerError> {
+    ) -> Result<FallibleCarrierBranch, HirConstructionFailure> {
         let branch_block = self.current_block_id_or_error(span)?;
         let branch_region = self.current_region_or_error(span)?;
         let result_for_branch =
-            self.make_local_load_expression(result_local, carrier_type, &None, branch_region);
+            self.make_local_load_expression(result_local, carrier_type, &None, branch_region)?;
         let success_block = self.create_block(branch_region, span, success_label)?;
         let error_block = self.create_block(branch_region, span, error_label)?;
 
@@ -254,7 +261,7 @@ impl<'a> HirBuilder<'a> {
         expected_error_type: TypeId,
         span: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         self.set_current_block(error_block, span)?;
         let error_region = self.current_region_or_error(span)?;
         let error_result = self.make_local_load_expression(
@@ -262,16 +269,16 @@ impl<'a> HirBuilder<'a> {
             result_carrier.carrier_type,
             &None,
             error_region,
-        );
+        )?;
         let error_payload = self.make_expression(
             &None,
             HirExpressionKind::FallibleUnwrapError {
-                result: Box::new(error_result),
+                result: error_result,
             },
             result_carrier.err_type,
             ValueKind::RValue,
             error_region,
-        );
+        )?;
         let error_payload =
             self.coerce_postfix_error_payload(error_payload, expected_error_type, span)?;
 
@@ -284,31 +291,38 @@ impl<'a> HirBuilder<'a> {
     }
     pub(super) fn coerce_postfix_error_payload(
         &mut self,
-        error_payload: HirExpression,
+        error_payload: HirValueId,
         expected_error_type: TypeId,
         span: &Option<SourceSpan>,
-    ) -> Result<HirExpression, CompilerError> {
-        if error_payload.ty == expected_error_type {
+    ) -> Result<HirValueId, HirConstructionFailure> {
+        let (payload_type, payload_region) = {
+            let payload_row = self.module.expressions.expression(error_payload);
+            (payload_row.ty, payload_row.region)
+        };
+        if payload_type == expected_error_type {
             return Ok(error_payload);
         }
 
-        if self.type_environment.option_inner_type(expected_error_type) == Some(error_payload.ty) {
+        if self.type_environment.option_inner_type(expected_error_type) == Some(payload_type) {
             let value_name = self.string_table.intern("value");
-            let region = error_payload.region;
-            return Ok(self.make_expression(
+            let fields = self.module.expressions.append_variant_fields(
+                &[HirVariantField {
+                    name: Some(value_name),
+                    value: error_payload,
+                }],
+                *span,
+            )?;
+            return self.make_expression(
                 &None,
                 HirExpressionKind::VariantConstruct {
                     carrier: HirVariantCarrier::Option,
                     variant_index: 1,
-                    fields: vec![HirVariantField {
-                        name: Some(value_name),
-                        value: error_payload,
-                    }],
+                    fields,
                 },
                 expected_error_type,
                 ValueKind::RValue,
-                region,
-            ));
+                payload_region,
+            );
         }
 
         return_hir_transformation_error!(
@@ -321,7 +335,7 @@ impl<'a> HirBuilder<'a> {
         &self,
         target: &CallTarget,
         span: &Option<SourceSpan>,
-    ) -> Result<(TypeId, TypeId, TypeId), CompilerError> {
+    ) -> Result<(TypeId, TypeId, TypeId), HirConstructionFailure> {
         match target {
             CallTarget::Local(function_id) => {
                 let Some(function_index) = self.function_index_by_id.get(function_id).copied()

@@ -17,7 +17,7 @@ use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff,
     OwnedRuntimeTemplateNode,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
@@ -41,7 +41,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         handoff: &OwnedRuntimeTemplateHandoff,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         self.validate_runtime_template_handoff_lowering_input(handoff, span_ref)?;
 
         match &handoff.body {
@@ -68,7 +68,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         handoff: &OwnedRuntimeSlotApplicationHandoff,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         self.lower_runtime_slot_application_template_expression(handoff, span_ref)
     }
 
@@ -76,7 +76,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         handoff: &OwnedRuntimeTemplateHandoff,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         if runtime_template_handoff_has_top_level_loop_control(handoff) {
             return_hir_transformation_error!(
                 "Template loop-control signal reached HIR outside an owned template loop body.",

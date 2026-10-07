@@ -780,6 +780,28 @@ Effectful expression work is linearised into ordered statement preludes and temp
 
 HIR contains no unresolved generic/trait work, TIR, compile-time page fragments, config evaluation, target-selected source branches, absolute source paths, HTML URL routes, rendered URLs, content hashes, output paths or builder names. It does not choose lifetime topology, runtime ownership or physical layout.
 
+HIR explicitly distinguishes local definition from assignment to an existing
+place. Every execution of a definition establishes a new dynamic occurrence of
+that local, including re-entry through a loop. A static `LocalId` is not that
+dynamic source binding identity. Local-origin metadata keeps authored bindings
+separate from compiler temporaries, and a compiler definition does not itself
+make a local Wire-capable. Assignment through an existing mutable alias writes
+through to its referent rather than detaching it.
+
+An assignment from the same unprojected binding preserves its existing binding
+relationship and value provenance after the ordinary read and write checks. It
+does not establish an alias of that binding's own cell.
+
+The value's resolved place/rvalue classification determines the incoming binding
+relationship. An internal result-local load can be an rvalue. A result binding
+may share an allocation without aliasing another binding's cell, and materialising
+a produced value does not imply an independent copy. Parameter entry follows the
+function-call ABI. Dedicated operation destinations explicitly distinguish
+definition from update, including generated numeric state updates. CFG transfers
+name their source and destination locals, read all incoming values before writing
+and define the selected edge's destinations. Lowerers consume these facts directly
+without recovering them from borrow solver modes or entry-state snapshots.
+
 Structural String constants retain ordered Text/Resource/SiteRoot pieces. Folded fragments retain the same value shape plus insertion indexes in metadata. Per-function and metadata walks collect resource uses and a separate site-root-use fact, since SiteRoot has no `ResourceId`. The builder supplies a validated URL map for each physical variant. Lowering materialises final characters from that map without mutating canonical HIR. Inactive static branches contribute no executable uses.
 
 #### Result channels
@@ -855,6 +877,14 @@ Its solver-independent output contains:
 An affine responsibility is cleanup responsibility that may transfer at a proven final-use site. It neither proves uniqueness nor creates another lifetime owner. Optional inferred transfer is an optimisation, not an acceptance requirement. Transfer requires proof on every relevant path. Otherwise the operation remains a borrow. Both immutable and mutable parameters may receive cleanup responsibility at a proven final-use call.
 
 Borrow validation reads validated HIR and produces immutable side tables. It neither rewrites HIR nor decides final result provenance, retained-edge summaries, lifetime topology or physical ownership. The memory authority owns the detailed solver contract, not a particular abstract-state implementation.
+
+Borrow validation consumes HIR's definition/update and incoming-value contracts.
+A re-entered definition retires the prior dynamic binding state before establishing
+the new relationship. Assignment preserves existing slot/alias write semantics.
+Local modes are analysis state used to validate access and derive permitted
+optimisation facts. They cannot reclassify a definition as an assignment or become
+a backend's authority for the source operation. Binding identity remains separate
+from allocation provenance and lifetime ownership.
 
 Cross-module transfer consumes stable exported summaries without opening a callee's HIR as local control flow. Binding-backed calls use semantic package access/mutation/alias contracts, not source spelling or backend helper names. Missing trusted summaries are compiler bugs. Separate result slots preserve known alias relationships without inventing disjointness.
 

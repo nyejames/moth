@@ -9,6 +9,7 @@
 //! `CompilerError` / `return_hir_transformation_error!` in this module means an internal
 //! HIR transformation or lowering invariant failure only. Normal user-facing source failures
 //! must be emitted as `CompilerDiagnostic` from AST or earlier stages.
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::source::SourceSpan;
 
 use crate::compiler_frontend::ast::Ast;
@@ -24,16 +25,16 @@ use crate::compiler_frontend::datatypes::generic_identity_bridge::TypeIdentityKe
 use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::hir::blocks::HirLocal;
 use crate::compiler_frontend::hir::constants::{HirConstField, HirConstValue, HirModuleConst};
+use crate::compiler_frontend::hir::expression_store::HirVariantFieldRange;
 use crate::compiler_frontend::hir::expressions::{
-    HirExpression, HirExpressionKind, HirVariantCarrier, HirVariantField,
-    OPTION_SOME_VARIANT_INDEX, ValueKind,
+    HirExpressionKind, HirVariantCarrier, HirVariantField, OPTION_SOME_VARIANT_INDEX, ValueKind,
 };
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocation};
-use crate::compiler_frontend::hir::ids::LocalId;
-use crate::compiler_frontend::hir::places::HirPlace;
+use crate::compiler_frontend::hir::ids::{FieldId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::regions::HirRegion;
+use crate::compiler_frontend::hir::statements::HirWriteTarget;
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
@@ -45,7 +46,10 @@ use crate::return_hir_transformation_error;
 impl<'a> HirBuilder<'a> {
     // WHAT: pre-registers all structs and functions before any HIR body lowering starts.
     // WHY: later statement and expression lowering relies on complete symbol tables for stable ID lookups.
-    pub(crate) fn prepare_hir_declarations(&mut self, ast: &Ast) -> Result<(), CompilerError> {
+    pub(crate) fn prepare_hir_declarations(
+        &mut self,
+        ast: &Ast,
+    ) -> Result<(), HirConstructionFailure> {
         // Register choices FIRST so struct and function signature lowering can resolve them.
         // WHY: choices are nominal types discovered from AST declarations. Pre-registering
         //      them before expression lowering ensures `resolve_choice_id` is a pure
@@ -75,7 +79,7 @@ impl<'a> HirBuilder<'a> {
 
     // WHAT: lowers the AST module-constant pool into HIR's dedicated constant metadata arena.
     // WHY: module constants should remain compile-time data instead of turning into runtime statements.
-    pub(crate) fn lower_module_constants(&mut self) -> Result<(), CompilerError> {
+    pub(crate) fn lower_module_constants(&mut self) -> Result<(), HirConstructionFailure> {
         self.module.module_constants.clear();
         self.module_constants_by_name.clear();
 
@@ -93,7 +97,7 @@ impl<'a> HirBuilder<'a> {
     fn lower_module_constants_from(
         &mut self,
         store: &ConstValueStore,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         for (path, id) in store.path_value_bindings() {
             self.module_constants_by_name.insert(*path, id);
         }
@@ -128,7 +132,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         store: &ConstValueStore,
         value_id: ConstValueId,
-    ) -> Result<HirConstValue, CompilerError> {
+    ) -> Result<HirConstValue, HirConstructionFailure> {
         let mut path_scratch = Vec::new();
         store.fold_value(value_id, &mut |metadata, visit| {
             increment_frontend_counter(FrontendCounter::HirConstValueConversions);
@@ -206,7 +210,8 @@ impl<'a> HirBuilder<'a> {
                     }
                     None => Err(CompilerError::compiler_error(
                         "HIR invariant: Template constant reached HIR module-constant lowering before AST materialized it. Non-renderable template.",
-                    )),
+                    )
+                    .into()),
                 },
             }
         })
@@ -222,12 +227,12 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         value_id: ConstValueId,
         span: &Option<SourceSpan>,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         let store = std::mem::take(&mut self.module_const_values);
         let result = store.fold_value(value_id, &mut |metadata, visit| {
             let region = self.current_region_or_error(span)?;
             let ty = self.lower_type_id(metadata.type_id, span)?;
-            let expression = match visit {
+            match visit {
                 ConstValueVisit::Int(value) => {
                     self.make_expression(span, HirExpressionKind::Int(value), ty, ValueKind::Const, region)
                 }
@@ -278,26 +283,30 @@ impl<'a> HirBuilder<'a> {
                     // Pieces stay structural in constant expressions exactly like
                     // `HirExpressionKind::StructuralString` values from template lowering;
                     // physical variant planning owns final URL text.
-                    ConstStringValue::Pieces(pieces) => self.make_expression(
+                    ConstStringValue::Pieces(pieces) => {
+                        let pieces = self.module.expressions.append_string_pieces(pieces, *span)?;
+                        self.make_expression(
+                            span,
+                            HirExpressionKind::StructuralString { pieces },
+                            ty,
+                            ValueKind::Const,
+                            region,
+                        )
+                    }
+                },
+                ConstValueVisit::Collection(values) => {
+                    let values = self.module.expressions.append_values(&values, *span)?;
+                    self.make_expression(
                         span,
-                        HirExpressionKind::StructuralString {
-                            pieces: pieces.clone(),
-                        },
+                        HirExpressionKind::Collection(values),
                         ty,
                         ValueKind::Const,
                         region,
-                    ),
-                },
-                ConstValueVisit::Collection(values) => self.make_expression(
-                    span,
-                    HirExpressionKind::Collection(values),
-                    ty,
-                    ValueKind::Const,
-                    region,
-                ),
+                    )
+                }
                 ConstValueVisit::Record(fields) => {
                     let struct_id = self.resolve_const_struct_id(metadata.type_id, span)?;
-                    let fields = fields
+                    let fields: Vec<(FieldId, HirValueId)> = fields
                         .into_iter()
                         .map(|field| {
                             Ok((
@@ -305,7 +314,8 @@ impl<'a> HirBuilder<'a> {
                                 field.value,
                             ))
                         })
-                        .collect::<Result<Vec<_>, CompilerError>>()?;
+                        .collect::<Result<Vec<_>, HirConstructionFailure>>()?;
+                    let fields = self.module.expressions.append_struct_fields(&fields, *span)?;
                     self.make_expression(
                         span,
                         HirExpressionKind::StructConstruct { struct_id, fields },
@@ -324,13 +334,14 @@ impl<'a> HirBuilder<'a> {
                         metadata.type_id,
                         span,
                     )?;
-                    let fields = fields
+                    let fields: Vec<HirVariantField> = fields
                         .into_iter()
                         .map(|field| HirVariantField {
                             name: self.path_fork.component(*field.name),
                             value: field.value,
                         })
                         .collect();
+                    let fields = self.module.expressions.append_variant_fields(&fields, *span)?;
                     self.make_expression(
                         span,
                         HirExpressionKind::VariantConstruct {
@@ -346,27 +357,31 @@ impl<'a> HirBuilder<'a> {
                 ConstValueVisit::Range { start, end } => self.make_expression(
                     span,
                     HirExpressionKind::Range {
-                        start: Box::new(start),
-                        end: Box::new(end),
+                        start,
+                        end,
                     },
                     ty,
                     ValueKind::Const,
                     region,
                 ),
-                ConstValueVisit::Coerced(value) => value,
+                ConstValueVisit::Coerced(value) => Ok(value),
                 ConstValueVisit::OptionSome(value) => {
                     // Option payload fields are named `value`, matching runtime
                     // `VariantConstruct` producers and `VariantPayloadGet` readers.
                     let value_name = self.string_table.intern("value");
+                    let fields = self.module.expressions.append_variant_fields(
+                        &[HirVariantField {
+                            name: Some(value_name),
+                            value,
+                        }],
+                        *span,
+                    )?;
                     self.make_expression(
                         span,
                         HirExpressionKind::VariantConstruct {
                             carrier: HirVariantCarrier::Option,
                             variant_index: OPTION_SOME_VARIANT_INDEX,
-                            fields: vec![HirVariantField {
-                                name: Some(value_name),
-                                value,
-                            }],
+                            fields,
                         },
                         ty,
                         ValueKind::Const,
@@ -378,7 +393,7 @@ impl<'a> HirBuilder<'a> {
                     HirExpressionKind::VariantConstruct {
                         carrier: HirVariantCarrier::Option,
                         variant_index: 0,
-                        fields: Vec::new(),
+                        fields: HirVariantFieldRange::empty(),
                     },
                     ty,
                     ValueKind::Const,
@@ -398,22 +413,22 @@ impl<'a> HirBuilder<'a> {
                     // A piece-bearing template fold is the same structural string the
                     // `String` arm above keeps constant, so it lowers with the same
                     // expression vocabulary as `HirExpressionKind::StructuralString`.
-                    Some(ConstStringValue::Pieces(pieces)) => self.make_expression(
-                        span,
-                        HirExpressionKind::StructuralString {
-                            pieces: pieces.clone(),
-                        },
-                        ty,
-                        ValueKind::Const,
-                        region,
-                    ),
+                    Some(ConstStringValue::Pieces(pieces)) => {
+                        let pieces = self.module.expressions.append_string_pieces(pieces, *span)?;
+                        self.make_expression(
+                            span,
+                            HirExpressionKind::StructuralString { pieces },
+                            ty,
+                            ValueKind::Const,
+                            region,
+                        )
+                    }
                     None => return_hir_transformation_error!(
                         "HIR invariant: Template constant reached HIR module-constant lowering before AST materialized it. Non-renderable template.",
                         self.hir_error_location(span)
                     ),
                 },
-            };
-            Ok(expression)
+            }
         });
         self.module_const_values = store;
         result
@@ -424,7 +439,7 @@ impl<'a> HirBuilder<'a> {
         value: &NumberValue,
         type_id: TypeId,
         span: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         if self.type_environment.number_scale(type_id) != Some(value.scale()) {
             return_hir_transformation_error!(
                 format!(
@@ -442,7 +457,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         type_id: TypeId,
         span: &Option<SourceSpan>,
-    ) -> Result<crate::compiler_frontend::hir::ids::StructId, CompilerError> {
+    ) -> Result<crate::compiler_frontend::hir::ids::StructId, HirConstructionFailure> {
         if let Some(TypeIdentityKey::GenericInstance(key)) =
             self.type_environment.type_id_to_type_identity_key(type_id)
         {
@@ -476,7 +491,7 @@ impl<'a> HirBuilder<'a> {
         nominal_path: &PathId,
         type_id: TypeId,
         span: &Option<SourceSpan>,
-    ) -> Result<crate::compiler_frontend::hir::ids::ChoiceId, CompilerError> {
+    ) -> Result<crate::compiler_frontend::hir::ids::ChoiceId, HirConstructionFailure> {
         if let Some(TypeIdentityKey::GenericInstance(key)) =
             self.type_environment.type_id_to_type_identity_key(type_id)
         {
@@ -489,7 +504,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         name: &PathId,
         span: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         if self.structs_by_name.contains_key(name) {
             return_hir_transformation_error!(
                 format!(
@@ -609,7 +624,7 @@ impl<'a> HirBuilder<'a> {
         name: &PathId,
         signature: &FunctionSignature,
         span: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         if self.functions_by_name.contains_key(name) {
             return_hir_transformation_error!(
                 format!(
@@ -717,7 +732,7 @@ impl<'a> HirBuilder<'a> {
         Ok(())
     }
 
-    fn resolve_start_function(&mut self, ast: &Ast) -> Result<(), CompilerError> {
+    fn resolve_start_function(&mut self, ast: &Ast) -> Result<(), HirConstructionFailure> {
         if !ast.root_role.has_implicit_start() {
             self.module.start_function = None;
             return Ok(());
@@ -754,7 +769,7 @@ impl<'a> HirBuilder<'a> {
         function_id: crate::compiler_frontend::hir::ids::FunctionId,
         signature: &FunctionSignature,
         fallback_span: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         for param in &signature.parameters {
             let param_span = param.value.span.or(*fallback_span);
 
@@ -780,7 +795,7 @@ impl<'a> HirBuilder<'a> {
         variable: &Declaration,
         span: &Option<SourceSpan>,
         statement_span: Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         if variable.value.is_const_record_value() {
             if !self.module_constants_by_name.contains_key(&variable.id) {
                 return_hir_transformation_error!(
@@ -816,8 +831,8 @@ impl<'a> HirBuilder<'a> {
         // Authored initialization carries the statement span, falling back to the
         // initializer span when the statement is identity-free.
         self.emit_statement_kind_with_span(
-            crate::compiler_frontend::hir::statements::HirStatementKind::Assign {
-                target: HirPlace::Local(local_id),
+            crate::compiler_frontend::hir::statements::HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(local_id),
                 value,
             },
             span,
@@ -831,7 +846,7 @@ impl<'a> HirBuilder<'a> {
         ty: crate::compiler_frontend::datatypes::ids::TypeId,
         mutable: bool,
         span: Option<SourceSpan>,
-    ) -> Result<LocalId, CompilerError> {
+    ) -> Result<LocalId, HirConstructionFailure> {
         if self.locals_by_name.contains_key(&name) {
             return_hir_transformation_error!(
                 format!(

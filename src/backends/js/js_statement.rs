@@ -9,7 +9,6 @@ use crate::backends::js::numeric_carrier::{
     JsNumericCarrier, JsNumericConversion, binary_float_precision_bits, number_scale_factor_js,
 };
 use crate::backends::js::value_use::JsValueUse;
-use crate::compiler_frontend::analysis::borrow_checker::LocalMode;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
@@ -17,15 +16,18 @@ use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
 
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, HirMapOp};
+use crate::compiler_frontend::hir::expression_store::HirValueRange;
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, LocalId};
+use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern, HirRelationalPatternOp};
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
+};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 
 impl<'hir> JsEmitter<'hir> {
@@ -42,8 +44,8 @@ impl<'hir> JsEmitter<'hir> {
 
     pub(crate) fn emit_statement(&mut self, statement: &HirStatement) -> Result<(), CompilerError> {
         match &statement.kind {
-            HirStatementKind::Assign { target, value } => {
-                self.emit_assignment(statement, target, value)?;
+            HirStatementKind::Write { target, value } => {
+                self.emit_write(*target, *value)?;
             }
 
             HirStatementKind::Call {
@@ -51,7 +53,7 @@ impl<'hir> JsEmitter<'hir> {
                 args,
                 result,
             } => {
-                self.emit_call_statement(target, args, result)?;
+                self.emit_call_statement(target, *args, result)?;
             }
 
             HirStatementKind::CastOp {
@@ -59,14 +61,11 @@ impl<'hir> JsEmitter<'hir> {
                 source,
                 result,
             } => {
-                let source_expr = self.lower_expr(source)?;
+                let source_expr = self.lower_expr(*source)?;
                 let cast_expression =
                     self.lower_cast_op_expression(*policy, &source_expr, statement.id)?;
-                if let Some(result_local) = result {
-                    let result_name = self.local_name(*result_local)?;
-                    self.emit_line(&format!(
-                        "__moth_assign_value({result_name}, {cast_expression});"
-                    ));
+                if let Some(result) = result {
+                    self.emit_value_destination(*result, &cast_expression)?;
                 } else {
                     self.emit_line(&format!("{cast_expression};"));
                 }
@@ -82,7 +81,7 @@ impl<'hir> JsEmitter<'hir> {
                 // values.
                 // WHY: map ops are not ordinary calls; helper selection and arity validation stay
                 // local to `emit_map_op_statement`.
-                self.emit_map_op_statement(*op, receiver, args, result)?;
+                self.emit_map_op_statement(*op, *receiver, *args, result)?;
             }
 
             HirStatementKind::NumericOp {
@@ -127,7 +126,7 @@ impl<'hir> JsEmitter<'hir> {
                 in_range_result,
             } => {
                 self.emit_float_range_candidate_statement(
-                    [current, step, end, ascending],
+                    [*current, *step, *end, *ascending],
                     *inclusive,
                     *domain,
                     *candidate_result,
@@ -145,7 +144,7 @@ impl<'hir> JsEmitter<'hir> {
                 // WHY: Float formatting is a language builtin with an explicit failure mode; the
                 //      backend must map it to the helper that normalizes JS number text to the
                 //      Moth contract instead of using target-native stringification directly.
-                self.emit_format_float_statement(*failure_mode, source, *result)?;
+                self.emit_format_float_statement(*failure_mode, *source, *result)?;
             }
 
             HirStatementKind::ValidateFloat {
@@ -155,11 +154,11 @@ impl<'hir> JsEmitter<'hir> {
             } => {
                 // WHAT: validates a finite Float at its selected profile precision.
                 // WHY: external values enter the same finite, rounded carrier as every other Float.
-                self.emit_validate_float_statement(*failure_mode, source, *result)?;
+                self.emit_validate_float_statement(*failure_mode, *source, *result)?;
             }
 
             HirStatementKind::Expr(expression) => {
-                let expression = self.lower_expr(expression)?;
+                let expression = self.lower_expr(*expression)?;
                 self.emit_line(&format!("{expression};"));
             }
 
@@ -173,7 +172,7 @@ impl<'hir> JsEmitter<'hir> {
                 //      called on the binding itself. __moth_read returns the underlying array.
                 let vec_name = self.local_name(*vec_local)?.to_owned();
                 let value_expr =
-                    self.lower_expression_for_use(value, JsValueUse::AssignmentValue)?;
+                    self.lower_expression_for_use(*value, JsValueUse::AssignmentValue)?;
                 self.emit_line(&format!("__moth_read({vec_name}).push({value_expr});"));
             }
         }
@@ -191,10 +190,12 @@ impl<'hir> JsEmitter<'hir> {
     fn emit_map_op_statement(
         &mut self,
         op: HirMapOp,
-        receiver: &HirExpression,
-        args: &[HirExpression],
-        result: &Option<LocalId>,
+        receiver: HirValueId,
+        args: HirValueRange,
+        result: &Option<HirLocalDestination>,
     ) -> Result<(), CompilerError> {
+        let hir = self.hir;
+        let args = hir.expressions.values(args);
         // Lower the receiver map first so helper-call argument order mirrors HIR order.
         let receiver_expr = self.lower_expr(receiver)?;
 
@@ -220,7 +221,7 @@ impl<'hir> JsEmitter<'hir> {
         // Lower each HIR argument to a JS expression.
         let mut lowered_args = Vec::with_capacity(args.len());
         for arg in args {
-            lowered_args.push(self.lower_expr(arg)?);
+            lowered_args.push(self.lower_expr(*arg)?);
         }
 
         // Assemble the helper call, with or without extra arguments.
@@ -234,9 +235,8 @@ impl<'hir> JsEmitter<'hir> {
         };
 
         // Emit either an assignment to a destination local or a standalone call.
-        if let Some(result_local) = result {
-            let result_name = self.local_name(*result_local)?;
-            self.emit_line(&format!("__moth_assign_value({result_name}, {call});"));
+        if let Some(result) = result {
+            self.emit_value_destination(*result, &call)?;
         } else {
             self.emit_line(&format!("{call};"));
         }
@@ -255,7 +255,7 @@ impl<'hir> JsEmitter<'hir> {
         op: HirNumericOp,
         failure_mode: NumericFailureMode,
         operands: &HirNumericOperands,
-        result: LocalId,
+        result: HirLocalDestination,
         statement: HirNodeId,
     ) -> Result<(), CompilerError> {
         // Guard against arity mismatch between HIR and the backend.
@@ -269,9 +269,9 @@ impl<'hir> JsEmitter<'hir> {
 
         // Lower each HIR operand to a JS expression once, in source order.
         let mut lowered_args = match operands {
-            HirNumericOperands::Unary { operand } => vec![self.lower_expr(operand)?],
+            HirNumericOperands::Unary { operand } => vec![self.lower_expr(*operand)?],
             HirNumericOperands::Binary { left, right } => {
-                vec![self.lower_expr(left)?, self.lower_expr(right)?]
+                vec![self.lower_expr(*left)?, self.lower_expr(*right)?]
             }
         };
 
@@ -302,10 +302,7 @@ impl<'hir> JsEmitter<'hir> {
                     format!("{{ tag: \"ok\", value: {proven_expression} }}")
                 }
             };
-            let result_name = self.local_name(result)?;
-            self.emit_line(&format!(
-                "__moth_assign_value({result_name}, {assigned_value});"
-            ));
+            self.emit_value_destination(result, &assigned_value)?;
             return Ok(());
         }
 
@@ -483,11 +480,11 @@ impl<'hir> JsEmitter<'hir> {
     /// Emit the range candidate into JS-local scratch, then commit only a finite in-bound value.
     fn emit_float_range_candidate_statement(
         &mut self,
-        expressions: [&HirExpression; 4],
+        expressions: [HirValueId; 4],
         inclusive: bool,
         domain: NumericScalar,
-        candidate_result: LocalId,
-        in_range_result: LocalId,
+        candidate_result: HirLocalDestination,
+        in_range_result: HirLocalDestination,
     ) -> Result<(), CompilerError> {
         let [current, step, end, ascending] = expressions;
 
@@ -523,23 +520,20 @@ impl<'hir> JsEmitter<'hir> {
         let bound_check = format!(
             "({direction_name} ? ({candidate_name} {ascending_comparison} {end_expr}) : ({candidate_name} {descending_comparison} {end_expr}))"
         );
-        let candidate_local = self.local_name(candidate_result)?;
-        let in_range_local = self.local_name(in_range_result)?;
         let direction_assignment = format!("const {direction_name} = {ascending_expr};");
         let candidate_assignment = format!("const {candidate_name} = {candidate_expr};");
         let in_range_assignment =
             format!("const {in_range_name} = Number.isFinite({candidate_name}) && {bound_check};");
-        let in_range_result_assignment =
-            format!("__moth_assign_value({in_range_local}, {in_range_name});");
-        let candidate_result_assignment = format!(
-            "if ({in_range_name}) __moth_assign_value({candidate_local}, {candidate_name});"
-        );
 
         self.emit_line(&direction_assignment);
         self.emit_line(&candidate_assignment);
         self.emit_line(&in_range_assignment);
-        self.emit_line(&in_range_result_assignment);
-        self.emit_line(&candidate_result_assignment);
+        self.emit_value_destination(in_range_result, &in_range_name)?;
+        self.emit_line(&format!("if ({in_range_name}) {{"));
+        self.indent += 1;
+        self.emit_value_destination(candidate_result, &candidate_name)?;
+        self.indent -= 1;
+        self.emit_line("}");
 
         Ok(())
     }
@@ -552,8 +546,8 @@ impl<'hir> JsEmitter<'hir> {
     fn emit_format_float_statement(
         &mut self,
         failure_mode: NumericFailureMode,
-        source: &HirExpression,
-        result: LocalId,
+        source: HirValueId,
+        result: HirLocalDestination,
     ) -> Result<(), CompilerError> {
         let source_expr = self.lower_expr(source)?;
         let precision =
@@ -566,8 +560,8 @@ impl<'hir> JsEmitter<'hir> {
     fn emit_validate_float_statement(
         &mut self,
         failure_mode: NumericFailureMode,
-        source: &HirExpression,
-        result: LocalId,
+        source: HirValueId,
+        result: HirLocalDestination,
     ) -> Result<(), CompilerError> {
         let source_expr = self.lower_expr(source)?;
         let helper_call = format!("__moth_float_validate({source_expr})");
@@ -585,7 +579,7 @@ impl<'hir> JsEmitter<'hir> {
         &mut self,
         helper_call: String,
         failure_mode: NumericFailureMode,
-        result: LocalId,
+        result: HirLocalDestination,
     ) -> Result<(), CompilerError> {
         let assigned_value = match failure_mode {
             NumericFailureMode::Trap | NumericFailureMode::Infallible => {
@@ -594,117 +588,106 @@ impl<'hir> JsEmitter<'hir> {
             NumericFailureMode::ReturnError => helper_call,
         };
 
-        let result_name = self.local_name(result)?;
-        self.emit_line(&format!(
-            "__moth_assign_value({result_name}, {assigned_value});"
-        ));
+        self.emit_value_destination(result, &assigned_value)
+    }
+
+    pub(crate) fn emit_value_destination(
+        &mut self,
+        destination: HirLocalDestination,
+        value: &str,
+    ) -> Result<(), CompilerError> {
+        let local_name = self.local_name(destination.local())?.to_owned();
+        match destination {
+            HirLocalDestination::Define(_) => {
+                self.emit_line(&format!("{local_name} = __moth_binding({value});"));
+            }
+            HirLocalDestination::Update(_) => {
+                self.emit_line(&format!("__moth_assign_value({local_name}, {value});"));
+            }
+        }
 
         Ok(())
     }
 
-    fn emit_assignment(
+    fn emit_write(
         &mut self,
-        statement: &HirStatement,
-        target: &HirPlace,
-        value: &HirExpression,
+        target: HirWriteTarget,
+        value: HirValueId,
     ) -> Result<(), CompilerError> {
         match target {
-            HirPlace::Local(local_id) => self.emit_local_assignment(statement, *local_id, value),
-            _ => {
-                let target_ref = self.lower_place(target)?;
-                let emitted_value =
-                    self.lower_expression_for_use(value, JsValueUse::AssignmentValue)?;
-                self.emit_line(&format!("__moth_write({target_ref}, {emitted_value});"));
-
-                Ok(())
-            }
+            HirWriteTarget::DefineLocal(local) => self.emit_local_definition(local, value),
+            HirWriteTarget::AssignPlace(place) => self.emit_place_assignment(place, value),
         }
     }
 
-    fn emit_local_assignment(
+    fn emit_local_definition(
         &mut self,
-        statement: &HirStatement,
-        local_id: LocalId,
-        value: &HirExpression,
+        local: LocalId,
+        value: HirValueId,
     ) -> Result<(), CompilerError> {
-        let local_name = self.local_name(local_id)?.to_owned();
-        let alias_only = self.local_is_alias_only_before_statement(statement, local_id);
-
-        match &value.kind {
-            HirExpressionKind::Load(place) => {
-                let source = self.lower_place(place)?;
-                if alias_only {
-                    self.emit_line(&format!(
-                        "__moth_write({local_name}, __moth_read({source}));",
+        let local_name = self.local_name(local)?.to_owned();
+        let value_expression = self.hir.expressions.expression(value);
+        match value_expression.value_kind {
+            ValueKind::Place => {
+                let HirExpressionKind::Load(place) = &value_expression.kind else {
+                    return Err(CompilerError::compiler_error(
+                        "JavaScript backend received a place-valued definition without a direct place load",
                     ));
-                } else {
+                };
+                let source = self.lower_place(place)?;
+                self.emit_line(&format!("{local_name} = __moth_alias_binding({source});"));
+            }
+            ValueKind::RValue | ValueKind::Const => {
+                let lowered = self.lower_expression_for_use(value, JsValueUse::AssignmentValue)?;
+                self.emit_line(&format!("{local_name} = __moth_binding({lowered});"));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn emit_place_assignment(
+        &mut self,
+        target: HirPlace,
+        value: HirValueId,
+    ) -> Result<(), CompilerError> {
+        if self
+            .hir
+            .expressions
+            .projections(target.projections)
+            .is_empty()
+        {
+            let local_name = self.local_name(target.root)?.to_owned();
+            let value_expression = self.hir.expressions.expression(value);
+            match value_expression.value_kind {
+                ValueKind::Place => {
+                    let HirExpressionKind::Load(source_place) = &value_expression.kind else {
+                        return Err(CompilerError::compiler_error(
+                            "JavaScript backend received a place-valued update without a direct place load",
+                        ));
+                    };
+                    let source = self.lower_place(source_place)?;
                     self.emit_line(&format!("__moth_assign_borrow({local_name}, {source});"));
                 }
-            }
-            _ => {
-                let lowered = self.lower_expression_for_use(value, JsValueUse::AssignmentValue)?;
-                if alias_only {
-                    self.emit_line(&format!("__moth_write({local_name}, {lowered});"));
-                } else {
+                ValueKind::RValue | ValueKind::Const => {
+                    let lowered =
+                        self.lower_expression_for_use(value, JsValueUse::AssignmentValue)?;
                     self.emit_line(&format!("__moth_assign_value({local_name}, {lowered});"));
                 }
             }
+        } else {
+            let target_ref = self.lower_place(&target)?;
+            let emitted_value =
+                self.lower_expression_for_use(value, JsValueUse::AssignmentValue)?;
+            self.emit_line(&format!("__moth_write({target_ref}, {emitted_value});"));
         }
 
         Ok(())
-    }
-
-    fn local_is_alias_only_before_statement(
-        &self,
-        statement: &HirStatement,
-        local_id: LocalId,
-    ) -> bool {
-        let Some(snapshot) = self
-            .borrow_analysis
-            .analysis
-            .statement_entry_states
-            .get(&statement.id)
-        else {
-            return false;
-        };
-
-        let Some(local_snapshot) = snapshot.locals.iter().find(|local| local.local == local_id)
-        else {
-            return false;
-        };
-
-        Self::snapshot_local_is_alias_only(local_snapshot.mode)
-    }
-
-    pub(crate) fn local_is_alias_only_at_block_entry(
-        &self,
-        block_id: BlockId,
-        local_id: LocalId,
-    ) -> bool {
-        let Some(snapshot) = self
-            .borrow_analysis
-            .analysis
-            .block_entry_states
-            .get(&block_id)
-        else {
-            return false;
-        };
-
-        let Some(local_snapshot) = snapshot.locals.iter().find(|local| local.local == local_id)
-        else {
-            return false;
-        };
-
-        Self::snapshot_local_is_alias_only(local_snapshot.mode)
-    }
-
-    fn snapshot_local_is_alias_only(mode: LocalMode) -> bool {
-        mode.contains(LocalMode::ALIAS) && !mode.contains(LocalMode::SLOT)
     }
 
     pub(crate) fn emit_return_terminator(
         &mut self,
-        expression: &HirExpression,
+        expression: HirValueId,
     ) -> Result<(), CompilerError> {
         if self.is_unit_expression(expression) {
             self.emit_line("return;");
@@ -718,7 +701,7 @@ impl<'hir> JsEmitter<'hir> {
 
     pub(crate) fn emit_success_return_terminator(
         &mut self,
-        expression: &HirExpression,
+        expression: HirValueId,
     ) -> Result<(), CompilerError> {
         let Some(function_id) = self.current_function else {
             return Err(CompilerError::compiler_error(
@@ -743,7 +726,7 @@ impl<'hir> JsEmitter<'hir> {
                 "JavaScript backend: ReturnSuccess emitted in a non-fallible function",
             ));
         };
-        if expression.ty != success_type {
+        if self.hir.expressions.expression(expression).ty != success_type {
             return Err(CompilerError::compiler_error(
                 "JavaScript backend: ReturnSuccess value type does not match function success slot",
             ));
@@ -756,7 +739,7 @@ impl<'hir> JsEmitter<'hir> {
 
     pub(crate) fn emit_error_return_terminator(
         &mut self,
-        expression: &HirExpression,
+        expression: HirValueId,
     ) -> Result<(), CompilerError> {
         let Some(function_id) = self.current_function else {
             return Err(CompilerError::compiler_error(
@@ -781,7 +764,7 @@ impl<'hir> JsEmitter<'hir> {
                 "JavaScript backend: ReturnError emitted in a non-fallible function",
             ));
         };
-        if expression.ty != error_type {
+        if self.hir.expressions.expression(expression).ty != error_type {
             return Err(CompilerError::compiler_error(
                 "JavaScript backend: ReturnError value type does not match function error slot",
             ));
@@ -794,7 +777,7 @@ impl<'hir> JsEmitter<'hir> {
 
     pub(crate) fn emit_assert_failure_terminator(
         &mut self,
-        message: &HirExpression,
+        message: HirValueId,
         message_evaluation: HirAssertionMessageEvaluation,
     ) -> Result<(), CompilerError> {
         self.used_assertions = true;
@@ -886,7 +869,7 @@ impl<'hir> JsEmitter<'hir> {
     ) -> Result<(), CompilerError> {
         match terminator {
             HirTerminator::Jump { target, args } => {
-                self.emit_jump_argument_transfer(*target, args)?;
+                self.emit_jump_argument_transfer(args)?;
                 self.emit_line(&format!("{state_identifier} = {};", target.0));
                 self.emit_line("continue;");
             }
@@ -896,7 +879,7 @@ impl<'hir> JsEmitter<'hir> {
                 then_block,
                 else_block,
             } => {
-                let condition = self.lower_expr(condition)?;
+                let condition = self.lower_expr(*condition)?;
                 self.emit_line(&format!("if ({condition}) {{"));
                 self.with_indent(|emitter| {
                     emitter.emit_line(&format!("{state_identifier} = {};", then_block.0));
@@ -914,7 +897,7 @@ impl<'hir> JsEmitter<'hir> {
                 success_block,
                 error_block,
             } => {
-                let condition = self.lower_fallible_success_condition(result)?;
+                let condition = self.lower_fallible_success_condition(*result)?;
                 self.emit_line(&format!("if ({condition}) {{"));
                 self.with_indent(|emitter| {
                     emitter.emit_line(&format!("{state_identifier} = {};", success_block.0));
@@ -933,8 +916,8 @@ impl<'hir> JsEmitter<'hir> {
                         "JavaScript backend: Match terminator has no arms",
                     ));
                 }
-                let scrutinee_type = scrutinee.ty;
-                let scrutinee = self.lower_expr(scrutinee)?;
+                let scrutinee_type = self.hir.expressions.expression(*scrutinee).ty;
+                let scrutinee = self.lower_expr(*scrutinee)?;
                 let scrutinee_temp = self.next_temp_identifier("__match");
                 self.emit_line(&format!("const {scrutinee_temp} = {scrutinee};"));
 
@@ -995,15 +978,15 @@ impl<'hir> JsEmitter<'hir> {
             }
 
             HirTerminator::Return(value) => {
-                self.emit_return_terminator(value)?;
+                self.emit_return_terminator(*value)?;
             }
 
             HirTerminator::ReturnSuccess(value) => {
-                self.emit_success_return_terminator(value)?;
+                self.emit_success_return_terminator(*value)?;
             }
 
             HirTerminator::ReturnError(value) => {
-                self.emit_error_return_terminator(value)?;
+                self.emit_error_return_terminator(*value)?;
             }
 
             HirTerminator::Uninitialized => {
@@ -1020,7 +1003,7 @@ impl<'hir> JsEmitter<'hir> {
                 message,
                 message_evaluation,
             } => {
-                self.emit_assert_failure_terminator(message, *message_evaluation)?;
+                self.emit_assert_failure_terminator(*message, *message_evaluation)?;
             }
         }
 
@@ -1035,33 +1018,35 @@ impl<'hir> JsEmitter<'hir> {
     ) -> Result<String, CompilerError> {
         let pattern_condition = match &arm.pattern {
             HirPattern::Literal(value) => {
-                let literal = self.lower_expr(value)?;
+                let value_type = self.hir.expressions.expression(*value).ty;
+                let literal = self.lower_expr(*value)?;
                 self.lower_typed_equality(
                     scrutinee_expression.to_owned(),
                     scrutinee_type,
                     literal,
-                    value.ty,
+                    value_type,
                 )
             }
             HirPattern::OptionNone => {
                 format!("({scrutinee_expression}).tag === \"none\"")
             }
             HirPattern::OptionValue { value } => {
-                let literal = self.lower_expr(value)?;
+                let value_type = self.hir.expressions.expression(*value).ty;
+                let literal = self.lower_expr(*value)?;
                 let inner_type = self
                     .type_environment
                     .option_inner_type(scrutinee_type)
-                    .unwrap_or(value.ty);
+                    .unwrap_or(value_type);
                 let inner_equality = self.lower_typed_equality(
                     format!("({scrutinee_expression}).value"),
                     inner_type,
                     literal,
-                    value.ty,
+                    value_type,
                 );
                 format!("((({scrutinee_expression}).tag === \"some\") && {inner_equality})")
             }
             HirPattern::OptionRelational { op, value } => {
-                let rhs = self.lower_expr(value)?;
+                let rhs = self.lower_expr(*value)?;
                 let js_op = match op {
                     HirRelationalPatternOp::LessThan => "<",
                     HirRelationalPatternOp::LessThanOrEqual => "<=",
@@ -1077,7 +1062,7 @@ impl<'hir> JsEmitter<'hir> {
                 format!("({scrutinee_expression}).tag === \"some\"")
             }
             HirPattern::Relational { op, value } => {
-                let rhs = self.lower_expr(value)?;
+                let rhs = self.lower_expr(*value)?;
                 let js_op = match op {
                     HirRelationalPatternOp::LessThan => "<",
                     HirRelationalPatternOp::LessThanOrEqual => "<=",
@@ -1091,7 +1076,7 @@ impl<'hir> JsEmitter<'hir> {
             }
         };
 
-        if let Some(guard) = &arm.guard {
+        if let Some(guard) = arm.guard {
             let guard = self.lower_expr(guard)?;
             Ok(format!("({pattern_condition}) && ({guard})"))
         } else {

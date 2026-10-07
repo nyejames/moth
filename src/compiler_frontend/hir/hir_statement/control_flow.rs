@@ -14,18 +14,16 @@ use crate::compiler_frontend::ast::expressions::expression::{Expression, Express
 use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchArm, MatchPattern, RelationalPatternOp,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::blocks::HirBlock;
-use crate::compiler_frontend::hir::expressions::{
-    HirExpression, HirExpressionKind, HirVariantCarrier, ValueKind,
-};
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirVariantCarrier, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::{HirBuilder, LoopTargets};
 use crate::compiler_frontend::hir::hir_statement::match_captures::substitute_local_expressions;
-use crate::compiler_frontend::hir::ids::{BlockId, LocalId, RegionId};
+use crate::compiler_frontend::hir::ids::{BlockId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern, HirRelationalPatternOp};
 use crate::compiler_frontend::hir::regions::HirRegion;
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirJumpArgument, HirTerminator};
 use crate::compiler_frontend::hir::utils::terminator_targets;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
@@ -43,7 +41,7 @@ fn lower_relational_pattern_op(op: RelationalPatternOp) -> HirRelationalPatternO
 struct CfgMatchGuardLowering<'a> {
     arm: &'a MatchArm,
     capture_locals: &'a [LocalId],
-    scrutinee_hir: &'a HirExpression,
+    scrutinee_hir: HirValueId,
     scrutinee_ast: &'a Expression,
     guard_block: BlockId,
     arm_body_block: BlockId,
@@ -56,7 +54,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         body: &[AstNode],
         span: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let entry_block = self.current_block_id_or_error(span)?;
         let parent_region = self.current_region_or_error(span)?;
         let body_region = self.create_child_region(parent_region);
@@ -68,12 +66,12 @@ impl<'a> HirBuilder<'a> {
 
         let body_tail_block = self.current_block_id_or_error(span)?;
         if self.block_has_explicit_terminator(body_tail_block, span)? {
-            return self.set_current_block(body_tail_block, span);
+            return Ok(self.set_current_block(body_tail_block, span)?);
         }
 
         let after_block = self.create_block(parent_region, span, "lexical-scope.after")?;
         self.emit_jump_to(body_tail_block, after_block, span, "lexical-scope.exit")?;
-        self.set_current_block(after_block, span)
+        Ok(self.set_current_block(after_block, span)?)
     }
 
     pub(super) fn lower_if_statement(
@@ -83,7 +81,7 @@ impl<'a> HirBuilder<'a> {
         else_body: Option<&[AstNode]>,
         span: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         if matches!(condition.kind, ExpressionKind::Bool(_)) {
             increment_frontend_counter(FrontendCounter::HirStaticBoolIfNodes);
             return_hir_transformation_error!(
@@ -118,9 +116,9 @@ impl<'a> HirBuilder<'a> {
         condition: &Expression,
         span: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
-        emit_then: impl FnOnce(&mut HirBuilder<'_>) -> Result<(), CompilerError>,
-        emit_else: impl FnOnce(&mut HirBuilder<'_>) -> Result<(), CompilerError>,
-    ) -> Result<(), CompilerError> {
+        emit_then: impl FnOnce(&mut HirBuilder<'_>) -> Result<(), HirConstructionFailure>,
+        emit_else: impl FnOnce(&mut HirBuilder<'_>) -> Result<(), HirConstructionFailure>,
+    ) -> Result<(), HirConstructionFailure> {
         increment_frontend_counter(FrontendCounter::HirRuntimeIfNodes);
 
         let condition_value = self.lower_expression_value_to_current_block(condition)?;
@@ -173,7 +171,7 @@ impl<'a> HirBuilder<'a> {
                 then_block
             };
 
-            return self.set_current_block(anchor_block, span);
+            return Ok(self.set_current_block(anchor_block, span)?);
         }
 
         let merge_block = self.create_block(parent_region, span, "if-merge")?;
@@ -184,14 +182,14 @@ impl<'a> HirBuilder<'a> {
             self.emit_jump_to(else_tail_block, merge_block, span, "if.else.merge")?;
         }
 
-        self.set_current_block(merge_block, span)
+        Ok(self.set_current_block(merge_block, span)?)
     }
 
     pub(super) fn lower_break_statement(
         &mut self,
         span: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         self.emit_break_to_current_loop(span, authored_span)
     }
 
@@ -199,7 +197,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         span: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let current_block = self.current_block_id_or_error(span)?;
         let targets = self.current_loop_targets_or_error("break", span)?;
 
@@ -220,7 +218,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         span: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         self.emit_continue_to_current_loop(span, authored_span)
     }
 
@@ -228,7 +226,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         span: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let current_block = self.current_block_id_or_error(span)?;
         let targets = self.current_loop_targets_or_error("continue", span)?;
 
@@ -251,7 +249,7 @@ impl<'a> HirBuilder<'a> {
         body: &[AstNode],
         span: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         self.lower_while_statement_impl(condition, body, span, authored_span)
     }
 
@@ -271,7 +269,7 @@ impl<'a> HirBuilder<'a> {
         exhaustiveness: MatchExhaustiveness,
         span: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         self.validate_match_exhaustiveness_contract(exhaustiveness, default, span)?;
 
         if self.match_guards_need_current_block_lowering(arms) {
@@ -300,7 +298,7 @@ impl<'a> HirBuilder<'a> {
         exhaustiveness: MatchExhaustiveness,
         default: Option<&[AstNode]>,
         span: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         match exhaustiveness {
             MatchExhaustiveness::HasDefault if default.is_none() => {
                 return_hir_transformation_error!(
@@ -336,7 +334,7 @@ impl<'a> HirBuilder<'a> {
         exhaustiveness: MatchExhaustiveness,
         span: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let scrutinee_value = self.lower_expression_value_to_current_block(scrutinee)?;
         let current_block = self.current_block_id_or_error(span)?;
 
@@ -358,7 +356,7 @@ impl<'a> HirBuilder<'a> {
         let mut merge_block = None;
 
         // Register capture locals and lower each arm's pattern/guard together.
-        // WHY: guards are lowered into HirExpression here, but evaluated at runtime in the parent
+        // WHY: guards are lowered into dense HIR rows here, but evaluated at runtime in the parent
         // block context. Capture locals must be in `locals_by_name` during guard lowering so
         // variable references resolve. Registering per-arm prevents later arms from overwriting
         // earlier capture bindings before their guards are lowered.
@@ -375,7 +373,7 @@ impl<'a> HirBuilder<'a> {
                 arm,
                 &arm_capture_locals[index],
                 scrutinee,
-                &scrutinee_value,
+                scrutinee_value,
                 span,
             )?;
 
@@ -394,7 +392,7 @@ impl<'a> HirBuilder<'a> {
             });
         }
 
-        let scrutinee_for_captures = scrutinee_value.clone();
+        let scrutinee_for_captures = scrutinee_value;
 
         self.emit_terminator_with_span(
             current_block,
@@ -416,7 +414,7 @@ impl<'a> HirBuilder<'a> {
             self.lower_match_arm_body(
                 arm,
                 &arm_capture_locals[index],
-                &scrutinee_for_captures,
+                scrutinee_for_captures,
                 scrutinee,
                 span,
                 true,
@@ -464,7 +462,7 @@ impl<'a> HirBuilder<'a> {
         exhaustiveness: MatchExhaustiveness,
         span: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let scrutinee_value = self.lower_expression_value_to_current_block(scrutinee)?;
         let mut dispatch_block = self.current_block_id_or_error(span)?;
         let parent_region = self.current_region_or_error(span)?;
@@ -518,7 +516,7 @@ impl<'a> HirBuilder<'a> {
                     arm,
                     &capture_locals,
                     scrutinee,
-                    &scrutinee_value,
+                    scrutinee_value,
                     span,
                 )?
             };
@@ -526,7 +524,7 @@ impl<'a> HirBuilder<'a> {
             self.emit_terminator_with_span(
                 dispatch_block,
                 HirTerminator::Match {
-                    scrutinee: scrutinee_value.clone(),
+                    scrutinee: scrutinee_value,
                     arms: vec![
                         HirMatchArm {
                             pattern,
@@ -548,7 +546,7 @@ impl<'a> HirBuilder<'a> {
                 self.lower_cfg_match_guard(CfgMatchGuardLowering {
                     arm,
                     capture_locals: &capture_locals,
-                    scrutinee_hir: &scrutinee_value,
+                    scrutinee_hir: scrutinee_value,
                     scrutinee_ast: scrutinee,
                     guard_block: guard_block_id,
                     arm_body_block,
@@ -561,7 +559,7 @@ impl<'a> HirBuilder<'a> {
             self.lower_match_arm_body(
                 arm,
                 &capture_locals,
-                &scrutinee_value,
+                scrutinee_value,
                 scrutinee,
                 span,
                 !guard_needs_cfg,
@@ -614,7 +612,7 @@ impl<'a> HirBuilder<'a> {
         default_block: Option<BlockId>,
         no_match_block: Option<BlockId>,
         span: &Option<SourceSpan>,
-    ) -> Result<BlockId, CompilerError> {
+    ) -> Result<BlockId, HirConstructionFailure> {
         if index + 1 < arm_count {
             return self.create_block(parent_region, span, "match-next");
         }
@@ -641,7 +639,7 @@ impl<'a> HirBuilder<'a> {
         span: &Option<SourceSpan>,
         merge_block: &mut Option<BlockId>,
         terminated_anchor: &mut Option<BlockId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let (Some(default_block_id), Some(default_body)) = (default_block, default) else {
             return Ok(());
         };
@@ -674,13 +672,13 @@ impl<'a> HirBuilder<'a> {
         terminated_anchor: Option<BlockId>,
         span: &Option<SourceSpan>,
         context: &str,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         if let Some(merge_block_id) = merge_block {
-            return self.set_current_block(merge_block_id, span);
+            return Ok(self.set_current_block(merge_block_id, span)?);
         }
 
         if let Some(anchor_block) = terminated_anchor {
-            return self.set_current_block(anchor_block, span);
+            return Ok(self.set_current_block(anchor_block, span)?);
         }
 
         return_hir_transformation_error!(
@@ -692,7 +690,7 @@ impl<'a> HirBuilder<'a> {
     fn lower_cfg_match_guard(
         &mut self,
         context: CfgMatchGuardLowering<'_>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let CfgMatchGuardLowering {
             arm,
             capture_locals,
@@ -744,11 +742,11 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         arm: &MatchArm,
         capture_locals: &[LocalId],
-        scrutinee_hir: &HirExpression,
+        scrutinee_hir: HirValueId,
         scrutinee_ast: &Expression,
         span: &Option<SourceSpan>,
         emit_capture_assignments: bool,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         self.with_arm_capture_bindings(arm, capture_locals, |builder| {
             if emit_capture_assignments {
                 builder.emit_match_arm_capture_assignments(
@@ -769,9 +767,9 @@ impl<'a> HirBuilder<'a> {
         arm: &MatchArm,
         capture_locals: &[LocalId],
         scrutinee_ast: &Expression,
-        scrutinee_hir: &HirExpression,
+        scrutinee_hir: HirValueId,
         span: &Option<SourceSpan>,
-    ) -> Result<Option<HirExpression>, CompilerError> {
+    ) -> Result<Option<HirValueId>, HirConstructionFailure> {
         let Some(guard) = &arm.guard else {
             return Ok(None);
         };
@@ -780,7 +778,7 @@ impl<'a> HirBuilder<'a> {
         if let MatchPattern::ChoiceVariant { captures, .. } = &arm.pattern {
             if !captures.is_empty() && !capture_locals.is_empty() {
                 return Ok(Some(self.substitute_match_guard_captures(
-                    &guard_expr,
+                    guard_expr,
                     arm,
                     capture_locals,
                     scrutinee_ast,
@@ -807,7 +805,7 @@ impl<'a> HirBuilder<'a> {
                 &binding_span,
                 HirExpressionKind::VariantPayloadGet {
                     carrier: HirVariantCarrier::Option,
-                    source: Box::new(scrutinee_hir.clone()),
+                    source: scrutinee_hir,
                     variant_index:
                         crate::compiler_frontend::hir::expressions::OPTION_SOME_VARIANT_INDEX,
                     field_index: 0,
@@ -815,13 +813,15 @@ impl<'a> HirBuilder<'a> {
                 field_ty,
                 ValueKind::RValue,
                 region,
-            );
+            )?;
             let mut substitutions = rustc_hash::FxHashMap::default();
             substitutions.insert(capture_local, payload_get);
             return Ok(Some(substitute_local_expressions(
-                &guard_expr,
+                &mut self.module.expressions,
+                &mut self.side_table,
+                guard_expr,
                 &substitutions,
-            )));
+            )?));
         }
 
         Ok(Some(guard_expr))
@@ -837,7 +837,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         condition: &Expression,
         scrutinee_type_id: TypeId,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         let lowered_pattern = self.lower_expression(condition)?;
         if !lowered_pattern.prelude.is_empty() {
             return_hir_transformation_error!(
@@ -846,7 +846,8 @@ impl<'a> HirBuilder<'a> {
             );
         }
 
-        if lowered_pattern.value.value_kind != ValueKind::Const {
+        let lowered_pattern_row = self.module.expressions.expression(lowered_pattern.value);
+        if lowered_pattern_row.value_kind != ValueKind::Const {
             return_hir_transformation_error!(
                 "Match arm patterns must be compile-time literals",
                 self.hir_error_location(&condition.span)
@@ -854,7 +855,7 @@ impl<'a> HirBuilder<'a> {
         }
 
         if !matches!(
-            lowered_pattern.value.kind,
+            &lowered_pattern_row.kind,
             HirExpressionKind::Uint(_)
                 | HirExpressionKind::Int(_)
                 | HirExpressionKind::Float(_)
@@ -878,7 +879,7 @@ impl<'a> HirBuilder<'a> {
                 self.hir_error_location(&condition.span)
             );
         }
-        if let HirExpressionKind::Number(value) = &lowered_pattern.value.kind
+        if let HirExpressionKind::Number(value) = &lowered_pattern_row.kind
             && self.type_environment.number_scale(scrutinee_type_id) != Some(value.scale())
         {
             return_hir_transformation_error!(
@@ -895,7 +896,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         pattern: &MatchPattern,
         scrutinee_type_id: TypeId,
-    ) -> Result<HirPattern, CompilerError> {
+    ) -> Result<HirPattern, HirConstructionFailure> {
         let pattern_value_type_id = self
             .type_environment
             .option_inner_type(scrutinee_type_id)
@@ -957,7 +958,7 @@ impl<'a> HirBuilder<'a> {
     fn lower_match_guard_expression(
         &mut self,
         guard: &Expression,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         let lowered_guard = self.lower_expression(guard)?;
         if !lowered_guard.prelude.is_empty() {
             return_hir_transformation_error!(
@@ -966,7 +967,9 @@ impl<'a> HirBuilder<'a> {
             );
         }
 
-        if lowered_guard.value.ty != self.type_environment.builtins().bool {
+        if self.module.expressions.expression(lowered_guard.value).ty
+            != self.type_environment.builtins().bool
+        {
             return_hir_transformation_error!(
                 "Match arm guards must lower to Bool expressions",
                 self.hir_error_location(&guard.span)
@@ -985,9 +988,11 @@ impl<'a> HirBuilder<'a> {
     fn lower_match_guard_value_to_current_block(
         &mut self,
         guard: &Expression,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         let guard_value = self.lower_expression_value_to_current_block(guard)?;
-        if guard_value.ty != self.type_environment.builtins().bool {
+        if self.module.expressions.expression(guard_value).ty
+            != self.type_environment.builtins().bool
+        {
             return_hir_transformation_error!(
                 "Match arm guards must lower to Bool expressions",
                 self.hir_error_location(&guard.span)
@@ -1003,7 +1008,7 @@ impl<'a> HirBuilder<'a> {
         region: crate::compiler_frontend::hir::ids::RegionId,
         span: &Option<SourceSpan>,
         merge_block: &mut Option<BlockId>,
-    ) -> Result<BlockId, CompilerError> {
+    ) -> Result<BlockId, HirConstructionFailure> {
         if let Some(existing) = *merge_block {
             return Ok(existing);
         }
@@ -1027,7 +1032,7 @@ impl<'a> HirBuilder<'a> {
         region: crate::compiler_frontend::hir::ids::RegionId,
         source_span: &Option<SourceSpan>,
         label: &str,
-    ) -> Result<BlockId, CompilerError> {
+    ) -> Result<BlockId, HirConstructionFailure> {
         let block = HirBlock {
             id: self.allocate_block_id(),
             region,
@@ -1058,7 +1063,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         block_id: BlockId,
         span: &Option<SourceSpan>,
-    ) -> Result<bool, CompilerError> {
+    ) -> Result<bool, HirConstructionFailure> {
         if self.block_has_incoming_terminator_edge(block_id) {
             return Ok(false);
         }
@@ -1097,27 +1102,29 @@ impl<'a> HirBuilder<'a> {
 
     pub(super) fn expression_from_return_values(
         &mut self,
-        values: &[HirExpression],
+        values: &[HirValueId],
         span: &Option<SourceSpan>,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         let region = self.current_region_or_error(span)?;
 
         match values {
-            [] => Ok(self.unit_expression(span, region)),
-            [single] => Ok(single.to_owned()),
+            [] => self.unit_expression(span, region),
+            [single] => Ok(*single),
             many => {
-                let field_types = many.iter().map(|value| value.ty).collect::<Vec<_>>();
+                let field_types = many
+                    .iter()
+                    .map(|value| self.module.expressions.expression(*value).ty)
+                    .collect::<Vec<_>>();
                 let tuple_type = self.type_environment.intern_tuple(field_types);
+                let elements = self.module.expressions.append_values(many, *span)?;
 
-                Ok(self.make_expression(
+                self.make_expression(
                     span,
-                    HirExpressionKind::TupleConstruct {
-                        elements: many.to_vec(),
-                    },
+                    HirExpressionKind::TupleConstruct { elements },
                     tuple_type,
                     ValueKind::RValue,
                     region,
-                ))
+                )
             }
         }
     }
@@ -1128,7 +1135,7 @@ impl<'a> HirBuilder<'a> {
         target: BlockId,
         span: &Option<SourceSpan>,
         edge_label: &str,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         self.emit_jump_with_args(from_block, target, vec![], span, edge_label)
     }
 
@@ -1144,7 +1151,7 @@ impl<'a> HirBuilder<'a> {
         target: BlockId,
         span: &Option<SourceSpan>,
         edge_label: &str,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let continuation_block = self.current_block_id_or_error(span)?;
         self.emit_jump_to(continuation_block, target, span, edge_label)
     }
@@ -1153,10 +1160,10 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         from_block: BlockId,
         target: BlockId,
-        args: Vec<crate::compiler_frontend::hir::ids::LocalId>,
+        args: Vec<HirJumpArgument>,
         span: &Option<SourceSpan>,
         edge_label: &str,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         self.emit_terminator(from_block, HirTerminator::Jump { target, args }, span)?;
 
         self.log_control_flow_edge(from_block, target, edge_label);
@@ -1168,7 +1175,7 @@ impl<'a> HirBuilder<'a> {
         block_id: BlockId,
         terminator: HirTerminator,
         span: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         self.emit_terminator_with_span(block_id, terminator, span, None)
     }
 
@@ -1178,7 +1185,7 @@ impl<'a> HirBuilder<'a> {
         terminator: HirTerminator,
         span: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         self.log_terminator_emitted(block_id, &terminator, span);
         self.set_block_terminator(block_id, terminator, span)?;
         if let Some(authored_span) = authored_span {
@@ -1202,7 +1209,7 @@ impl<'a> HirBuilder<'a> {
         &self,
         keyword: &str,
         span: &Option<SourceSpan>,
-    ) -> Result<LoopTargets, CompilerError> {
+    ) -> Result<LoopTargets, HirConstructionFailure> {
         let Some(targets) = self.loop_targets.last().copied() else {
             return_hir_transformation_error!(
                 format!(

@@ -337,7 +337,8 @@ fn active_mutable_alias_for_root(
         }
 
         let candidate_state = activity.state.local_state(candidate_index);
-        if !candidate_state.has_value_aliases() {
+        if !candidate_state.mode.contains(LocalMode::ALIAS) || !candidate_state.has_value_aliases()
+        {
             continue;
         }
 
@@ -402,10 +403,22 @@ fn is_local_active_for_alias_conflict(
     local_index: usize,
     strict_move_exclusivity: bool,
 ) -> bool {
+    let local_state = activity.state.local_state(local_index);
+
+    // Slot-backed holders, including a root-only transport slot with no value_roots, do not
+    // write through their own binding cell. Their linear last-use can include a mutually
+    // exclusive handler, so decide activity from this CFG point even when a compiler-temp actor
+    // uses linear expiry for source-binding aliases.
+    if !strict_move_exclusivity && !local_state.mode.contains(LocalMode::ALIAS) {
+        return activity.layout.future_use_kind(
+            activity.block_id,
+            local_index,
+            activity.current_order - 1,
+        ) != FutureUseKind::None;
+    }
+
     let last_use = activity.layout.local_last_use_order[local_index];
     if last_use >= 0 {
-        let local_state = activity.state.local_state(local_index);
-
         // Traversal ordinals are ordered within a block, not across CFG paths. A handler
         // visited after its merge cannot prolong a dead alias. Include the current statement:
         // a holder read there still excludes a simultaneous shared read through its source.
@@ -471,7 +484,6 @@ fn is_local_active_for_alias_conflict(
         return false;
     }
 
-    let local_state = activity.state.local_state(local_index);
     if !local_state.has_value_aliases() {
         return false;
     }

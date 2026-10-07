@@ -4829,3 +4829,192 @@ Independent design, domain and freeze reviews found no remaining required issue.
 The documentation release build passed with 78 outputs and no generated diff.
 These checks accept the research/design branch checkpoint and do not claim a
 new full-validation or production cutover result.
+
+## Typed semantic expressions - Phase 3 dense HIR and capacity foundations (2026-10-07; draft)
+
+This evidence describes the **pre-hardening dense-HIR candidate**. After these
+captures, the user requested additional local-definition/update architecture
+hardening. That implementation work has reopened Phase 3, so the results below
+are historical evidence for the measured candidate, not final gates for the
+current tree. The captures remain unchanged; repeat the affected checks and
+measurements after hardening before evaluating acceptance.
+
+The candidate replaces durable recursive HIR expressions and places with
+module-owned dense expression rows, `HirValueId` edges and typed side ranges.
+Places retain a root local and an ordered flat projection range; indexed
+projections refer to expression IDs. Seven dense vectors hold rows and payloads
+for values, struct fields, variant fields, map entries, String pieces and
+projections. The measured row stride is 56 bytes. Completed stores freeze after
+summary-dependent rewrites, pruning and final link-fact refresh.
+
+### Pre-hardening correctness evidence
+
+- The focused library run passed **6,011/6,011** tests
+  (`phase3/performance-corrections-library-tests.log`), including the dense
+  active-cell validator flags and direct borrow-fact insertion.
+- `just validate-full` completed successfully with exit code 0
+  (`phase3/final-corrected-full-validation.log`).
+- The final `just boracle` lane completed with exit code 0
+  (`phase3/final-corrected-boracle.log`): formatting and Clippy passed, along
+  with 42 borrow-problem tests, 5 last-use tests and 250 Boracle tests.
+
+These results all predate the requested hardening. The current correctness
+checkpoint is recorded below; refreshed performance acceptance remains pending.
+
+### Paired frontend timing: performance remains unaccepted
+
+The corrected quiet native capture matched **42/42** frontend cases with no
+input-identity exclusions, using five alternating invocations per side. The
+median paired delta of summed case medians was **+120.892 ms** in the initial
+quiet comparison and **+38.687 ms** after two corrections. In the corrected
+capture, the median paired case percentage changes were **+1.977%** for `docs`,
+**+1.955%** for `generic_scaling_40`, and **+3.595%** for
+`generic_scaling_80`; all three were slower in all five pairs. The latter two
+had median paired deltas of **+2.786 ms** and **+12.458 ms**. Pattern stress
+was mixed. The corrected aggregate remains positive, so this evidence does not
+accept a frontend performance improvement. Earlier contaminated and
+pre-correction captures remain diagnostic only.
+
+The final pre-hardening CLI capture matched **40/40** cases with zero
+input-identity exclusions and passed its independent timing audit. The median
+paired delta of summed case medians was **-4.782 ms**, with a five-pair range
+of **-62.410 ms to +6.150 ms**. No CLI case was slower in all five pairs;
+`generic_scaling_80` had a median paired change of **-3.910%**. This CLI result
+does not override the positive frontend result or establish a whole-compiler
+gain. The CLI and frontend comparisons must be refreshed after hardening.
+
+A separate historical 40-case CLI capture predates the frontend corrections;
+its **+5.879 ms** median paired delta is superseded for current comparison and
+kept only as diagnostic history. The relevant reports are
+`phase3/paired-frontends-corrected-quiet-comparison.json` and
+`phase3/paired-cli-final-quiet-comparison.json`.
+
+A reversible canonical-empty projection lookup experiment was rejected and
+reverted. Its five paired percentage deltas were **+0.525%, +1.120%, +1.568%,
+-0.039% and +0.230%**, which show no repeatable win. No full frame-offset table
+is reproduced here; sampled profiles are attribution evidence and do not
+isolate whole-suite changes to an individual case.
+
+### Pre-hardening native frame observations
+
+The final pre-hardening native prologue snapshot
+(`phase3/candidate-native-frames-final.json`) contains **3,403** function
+records and has no unresolved stack adjustments. The largest static prologue
+remains **19,744 bytes** in `parse_identifier_or_call`, the same as
+`phase3/baseline-native-frames.json`. `HirValidator::validate_expression` is
+**912 bytes**, compared with **17,024** in the baseline;
+`validate_expression_contents` is **5,872 bytes** separately. These are static
+per-function prologue sizes, not dynamic stack high-water measurements or
+headroom, and must not be summed. Refresh frame evidence after hardening.
+
+### Pre-hardening allocator and representation-shape observations
+
+The final pre-hardening 16-workload memory capture represents the candidate
+with `Cell`-backed validator flags and direct borrow-fact insertion. The table
+shows its five-pair reported medians in bytes; `delta` is candidate minus
+control.
+
+| Workload | Peak allocator proxy (control / candidate / delta B) | Live at report (control / candidate / delta B) | After report drop (control / candidate / delta B) |
+|---|---:|---:|---:|
+| `docs` | 38,539,520 / 38,536,970 / -2,550 | 1,790,358 / 1,791,256 / +898 | 1,542 / 1,542 / 0 |
+| `generic_scaling_160` | 491,924,775 / 485,616,751 / -6,308,024 | 13,775,522 / 13,776,420 / +898 | 1,469 / 1,469 / 0 |
+| `collection_stress` | 13,037,734 / 13,138,318 / +100,584 | 36,230 / 37,128 / +898 | 1,487 / 1,487 / 0 |
+| `pattern_stress` | 2,630,060 / 2,669,004 / +38,944 | 36,233 / 37,131 / +898 | 1,490 / 1,490 / 0 |
+| `default_constructor_split` | 23,728,679 / 24,173,444 / +444,765 | 53,478 / 54,376 / +898 | 1,451 / 1,451 / 0 |
+
+The mixed peak deltas do not establish an integrated memory win. The logical
+counting-allocator proxy excludes allocator metadata and internal reallocation
+overlap. RSS includes process mappings and observers and remains a whole-process
+measure. These memory captures also need refreshing after hardening.
+
+The quiet shape census covered **19 workloads x 5 captures**: 16 matched
+whole-compiler workloads and three supplemental shape inputs. For
+`generic_scaling_160`, the reported workload-level store-family medians span
+801 successful modules; all 801 were censused and validator-checked. The
+estimates are 7,614 HIR expressions and 22,842 value items. The table gives
+each store family's initial, builder and frozen capacities, growth events, row counts,
+useful/dead bytes and per-store sequential logical freeze bound. The byte bound
+describes builder-plus-frozen capacity for that store; it is not an allocator
+peak or a whole-compiler total.
+
+| Store | Initial / builder / frozen capacity (items) | Growth events | Length / useful / dead (items) | Builder / frozen capacity (B) | Useful / dead payload (B) | Sequential logical freeze bound (B) |
+|---|---:|---:|---:|---:|---:|---:|
+| Rows | 7,614 / 18,428 / 15,550 | 801 | 15,550 / 12,342 / 3,208 | 1,031,968 / 870,800 | 691,152 / 179,648 | 1,902,768 |
+| Values | 22,842 / 24,122 / 1,123 | 320 | 1,123 / 1,123 / 0 | 96,488 / 4,492 | 4,492 / 0 | 100,980 |
+| Struct fields | 0 / 1,024 / 800 | 9 | 800 / 800 / 0 | 8,192 / 6,400 | 6,400 / 0 | 14,592 |
+| Variant fields | 0 / 0 / 0 | 0 | 0 / 0 / 0 | 0 / 0 | 0 / 0 | 0 |
+| Map entries | 0 / 0 / 0 | 0 | 0 / 0 / 0 | 0 / 0 | 0 / 0 | 0 |
+| String pieces | 0 / 0 / 0 | 0 | 0 / 0 / 0 | 0 / 0 | 0 / 0 | 0 |
+| Projections | 0 / 2,432 / 960 | 488 | 960 / 960 / 0 | 19,456 / 7,680 | 7,680 / 0 | 27,136 |
+
+These are workload-level store-family totals summarized over five captures,
+not measurements matched by `module_N`. Per-module rows retain atomic
+completion-order IDs, so per-module costs are available only per run and have
+no owner-matched cross-run median. Do not sum the per-store freeze bounds into
+a whole-program peak. The census also records **6 String-literal rows** with
+**53 bytes** of length and capacity; Decimal coefficient and Arc payload counts
+are zero for this workload. It measured 15 map entries in
+`shape_hashmap_scalar_key_types_success`, three structural String pieces in
+`shape_generic_body_file_value_success` and expression-rewrite activity in
+`pattern_stress`. Dead nested String and Decimal payload fields were measured
+zero across all natural workloads; no synthetic case manufactured dead data.
+The number-transport supplement records 12 unique Decimal coefficients, 160
+bytes of BigInt magnitude capacity and 576 bytes of requested Arc-layout size.
+The Arc estimate excludes allocator rounding and metadata.
+
+The census describes retained-carrier reachability in the HIR store, not
+runtime liveness or backend reachability. The 18,433-byte census observer and
+39,936-byte replacement-event observer buffers are probe overhead. Drop timing
+separates store storage from observer buffers. That destruction capture
+predates the `Cell` flags and direct fact insertion, although the seven-store
+shape is unchanged; no current destruction comparison with its predecessor is
+available, so no drop-improvement claim is made. Probe time and RSS include
+instrumentation and are not clean compiler performance evidence.
+
+The cost-corpus provenance records HEAD
+`42f035a0743495ce2bef453660e9f3c0afb3db64`, root fingerprint
+`991c1d3aabb3edbb3b44625c6a6d6681eea30ccc7a0f5e1bc83507d2738c2027`, and a
+1,551,879-byte tracked diff plus three untracked implementation files. It has
+no timestamp in that provenance file. The corpus manifest records the capture
+window as 2026-10-07 14:59:58–15:00:30 UTC. Treat the census as evidence for that
+pre-hardening snapshot, not the current tree. The source summary and coverage details are in
+`phase3/dense-hir-cost-corpus-quiet/summary.json` and
+`phase3/dense-hir-cost-corpus-quiet/root-provenance.json`.
+
+### Current correctness and integration checkpoint
+
+- The focused feature-library run passed 6,060/6,060 tests in 16.64 seconds
+  (local-write-library-tests-12.log).
+- Routine4 passed formatting, Clippy, the feature-lane mapping check, the source audit
+  (1,484 files, zero findings), the first-party audit (21 files, 81 JavaScript
+  sources, zero findings), workspace tests and 2,404/2,404 integration tests in
+  15.21 seconds. The documentation check reported no errors or warnings in
+  1.51 seconds. The workspace Moth and xtask runs passed 5,913 and 854 tests
+  (local-write-routine-validation-4.log).
+- The current Boracle lane passed 257 selected tests in 9.67 seconds, with
+  normalization and last-use smoke checks passing (local-write-boracle.log).
+- The all-target campaign passed Clippy in 30.64 seconds. Its generated
+  differential campaign passed 1/1 in 42.78 seconds
+  (local-write-boracle-campaign.log).
+- Fresh dense-HIR, default, normalized/oracle, backend and documentation/status/deletion audits found no unresolved required correctness finding.
+
+### Current status
+
+The dense-HIR and explicit local definition/update implementation has a
+reviewable current-tree correctness and integration checkpoint. The checks
+above do not close 3M or Phase 3: refreshed five-pair performance acceptance
+and package-fix synchronization remain open. The campaign evidence is
+correctness evidence, not a performance result. All compiler performance,
+memory and frame measurements above describe the pre-hardening candidate and
+remain historical; no post-hardening performance claim is made.
+
+The next steps are to synchronize the committed package fixes in both
+directions, collect fresh measurements on the synchronized tree and record the
+accepted benchmark history, then squash onto main and pause before Phase 4.
+Phase 4 remains paused until the user resumes it after the separate
+template-control-flow removal. No Phase 3 completion or native benchmark-history
+recording is claimed here.
+
+Raw evidence remains under `tmp/typed-semantic-expressions/phase3/`, including
+the paired frontend, CLI and memory comparison JSON, quiet cost-corpus summary,
+native frame snapshots and scoped validation logs cited above.

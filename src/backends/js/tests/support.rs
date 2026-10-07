@@ -9,9 +9,6 @@ pub(super) use crate::backends::js::test_symbol_helpers::{
     expected_dev_field_name, expected_dev_function_name, expected_dev_local_name,
 };
 pub(super) use crate::backends::js::{JsLoweringConfig, lower_hir_to_js};
-pub(super) use crate::compiler_frontend::analysis::borrow_checker::{
-    BorrowCheckReport, BorrowStateSnapshot, LocalBorrowSnapshot, LocalMode,
-};
 pub(super) use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::datatypes::definitions::ChoiceTypeDefinition;
@@ -24,9 +21,8 @@ pub(super) use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalFunctionId, IO_INPUT_EXTERNAL_TYPE_ID,
 };
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
-use crate::compiler_frontend::hir::expressions::{
-    HirExpression, HirExpressionKind, HirMapEntry, ValueKind,
-};
+pub(super) use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapEntry, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{
     BlockId, ChoiceId, FunctionId, HirNodeId, LocalId, RegionId,
@@ -34,7 +30,9 @@ use crate::compiler_frontend::hir::ids::{
 use crate::compiler_frontend::hir::module::{HirChoice, HirModule};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::regions::HirRegion;
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatement, HirStatementKind,
+};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 pub(super) use crate::compiler_frontend::tests::hir_fixture_support::{
     bool_expression, expression, int_expression, string_expression, unit_expression,
@@ -186,14 +184,55 @@ pub(super) fn build_type_environment() -> (TypeEnvironment, TypeIds) {
     )
 }
 
-pub(super) fn float_expression(id: u32, value: f64, ty: TypeId, region: RegionId) -> HirExpression {
+pub(super) fn float_expression(
+    value: f64,
+    ty: TypeId,
+    region: RegionId,
+    expressions: &mut HirExpressionStore,
+) -> crate::compiler_frontend::hir::ids::HirValueId {
     expression(
-        id,
         HirExpressionKind::Float(value),
         ty,
         region,
         ValueKind::Const,
+        expressions,
     )
+}
+
+pub(super) fn append_values(
+    values: &[crate::compiler_frontend::hir::ids::HirValueId],
+    expressions: &mut HirExpressionStore,
+) -> crate::compiler_frontend::hir::expression_store::HirValueRange {
+    expressions
+        .append_values(values, None)
+        .expect("test HIR value range should fit")
+}
+
+pub(super) fn append_map_entries(
+    entries: &[HirMapEntry],
+    expressions: &mut HirExpressionStore,
+) -> crate::compiler_frontend::hir::expression_store::HirMapEntryRange {
+    expressions
+        .append_map_entries(entries, None)
+        .expect("test HIR map-entry range should fit")
+}
+
+pub(super) fn append_variant_fields(
+    fields: &[crate::compiler_frontend::hir::expressions::HirVariantField],
+    expressions: &mut HirExpressionStore,
+) -> crate::compiler_frontend::hir::expression_store::HirVariantFieldRange {
+    expressions
+        .append_variant_fields(fields, None)
+        .expect("test HIR variant-field range should fit")
+}
+
+pub(super) fn append_string_pieces(
+    pieces: &[crate::compiler_frontend::ast::const_values::store::ConstStringPiece],
+    expressions: &mut HirExpressionStore,
+) -> crate::compiler_frontend::hir::expression_store::HirStringPieceRange {
+    expressions
+        .append_string_pieces(pieces, None)
+        .expect("test HIR string-piece range should fit")
 }
 
 /// Assembles a module from this backend's fixture shape.
@@ -202,6 +241,7 @@ pub(super) fn float_expression(id: u32, value: f64, ty: TypeId, region: RegionId
 /// seeding differ, so this is not the same operation under one name. Only the HIR node
 /// constructors are shared, from `compiler_frontend::tests::hir_fixture_support`.
 pub(super) fn build_module(
+    mut expressions: HirExpressionStore,
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
     function_name: &str,
@@ -209,7 +249,9 @@ pub(super) fn build_module(
     function: HirFunction,
     local_names: &[(LocalId, &str)],
 ) -> HirModule {
+    expressions.freeze();
     let mut module = HirModule::new();
+    module.expressions = expressions;
     let function_id = function.id;
     module.blocks = blocks;
     module.start_function = Some(function_id);
@@ -249,13 +291,18 @@ pub(super) fn lower_minimal_module(function_name: &str) -> String {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
+    let mut expressions = HirExpressionStore::default();
 
     let block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(unit_expression(0, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -266,6 +313,7 @@ pub(super) fn lower_minimal_module(function_name: &str) -> String {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         function_name,
@@ -276,7 +324,6 @@ pub(super) fn lower_minimal_module(function_name: &str) -> String {
 
     lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -296,16 +343,23 @@ pub(super) fn lower_minimal_map_module(function_name: &str) -> String {
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
+    let mut expressions = HirExpressionStore::default();
 
+    let map_key = string_expression("Priya", types.string, region, &mut expressions);
+    let map_value = int_expression(10, types.int, region, &mut expressions);
+    let map_entries = append_map_entries(
+        &[HirMapEntry {
+            key: map_key,
+            value: map_value,
+        }],
+        &mut expressions,
+    );
     let map_expression = expression(
-        1,
-        HirExpressionKind::MapLiteral(vec![HirMapEntry {
-            key: string_expression(2, "Priya", types.string, region),
-            value: int_expression(3, 10, types.int, region),
-        }]),
+        HirExpressionKind::MapLiteral(map_entries),
         types.map_string_int,
         region,
         ValueKind::RValue,
+        &mut expressions,
     );
 
     let block = HirBlock {
@@ -313,7 +367,7 @@ pub(super) fn lower_minimal_map_module(function_name: &str) -> String {
         region,
         locals: vec![],
         statements: vec![statement(1, HirStatementKind::Expr(map_expression))],
-        terminator: HirTerminator::Return(unit_expression(4, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
 
     let function = HirFunction {
@@ -324,6 +378,7 @@ pub(super) fn lower_minimal_map_module(function_name: &str) -> String {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         function_name,
@@ -334,7 +389,6 @@ pub(super) fn lower_minimal_map_module(function_name: &str) -> String {
 
     lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -360,6 +414,7 @@ pub(super) fn lower_minimal_module_with_numeric_op_for_profile(
     operands: crate::compiler_frontend::hir::numeric::HirNumericOperands,
     result_type: TypeId,
     numeric_profile: NumericProfile,
+    mut expressions: HirExpressionStore,
 ) -> String {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -372,7 +427,7 @@ pub(super) fn lower_minimal_module_with_numeric_op_for_profile(
             op,
             failure_mode,
             operands,
-            result: LocalId(0),
+            result: HirLocalDestination::Define(LocalId(0)),
         },
     );
 
@@ -381,7 +436,7 @@ pub(super) fn lower_minimal_module_with_numeric_op_for_profile(
         region,
         locals: vec![local(0, result_type, region)],
         statements: vec![numeric_statement],
-        terminator: HirTerminator::Return(unit_expression(2, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
 
     let function = HirFunction {
@@ -392,6 +447,7 @@ pub(super) fn lower_minimal_module_with_numeric_op_for_profile(
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -402,7 +458,6 @@ pub(super) fn lower_minimal_module_with_numeric_op_for_profile(
 
     lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         JsLoweringConfig::direct_js(false, numeric_profile),
@@ -427,11 +482,9 @@ pub(super) fn emit_cast_helpers_for_profile(
     let path_table = path_fork.snapshot_table();
     let (type_environment, _) = build_type_environment();
     let hir = HirModule::new();
-    let borrow_analysis = BorrowCheckReport::default();
     let numeric_proofs = NumericProofs::default();
     let mut emitter = crate::backends::js::JsEmitter::new(
         &hir,
-        &borrow_analysis,
         &numeric_proofs,
         &string_table,
         &path_table,
@@ -455,25 +508,27 @@ pub(super) fn emit_cast_helpers_for_profile(
 fn lower_minimal_module_with_cast(
     function_name: &str,
     policy: BuiltinCastPolicyId,
-    source_expression: impl FnOnce(&TypeIds, RegionId) -> HirExpression,
+    source_expression: impl FnOnce(
+        &TypeIds,
+        RegionId,
+        &mut HirExpressionStore,
+    ) -> crate::compiler_frontend::hir::ids::HirValueId,
     result_type: impl FnOnce(&TypeIds) -> TypeId,
 ) -> String {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
+    let mut expressions = HirExpressionStore::default();
 
-    let source = source_expression(&types, region);
+    let source = source_expression(&types, region, &mut expressions);
     let cast_type = result_type(&types);
     let cast_call = expression(
-        2,
-        HirExpressionKind::Cast {
-            source: Box::new(source),
-            policy,
-        },
+        HirExpressionKind::Cast { source, policy },
         cast_type,
         region,
         ValueKind::RValue,
+        &mut expressions,
     );
 
     let block = HirBlock {
@@ -481,7 +536,7 @@ fn lower_minimal_module_with_cast(
         region,
         locals: vec![],
         statements: vec![statement(1, HirStatementKind::Expr(cast_call))],
-        terminator: HirTerminator::Return(unit_expression(3, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
 
     let function = HirFunction {
@@ -492,6 +547,7 @@ fn lower_minimal_module_with_cast(
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         function_name,
@@ -502,7 +558,6 @@ fn lower_minimal_module_with_cast(
 
     lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -523,7 +578,7 @@ pub(super) fn lower_minimal_module_with_string_int_cast(function_name: &str) -> 
         BuiltinCastPolicyId::StringToNumeric(
             crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Int,
         ),
-        |types, region| string_expression(1, "0", types.string, region),
+        |types, region, expressions| string_expression("0", types.string, region, expressions),
         |types| types.int,
     )
 }
@@ -539,7 +594,7 @@ pub(super) fn lower_minimal_module_with_int_to_float_cast(function_name: &str) -
             source: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Int,
             target: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Float,
         },
-        |types, region| int_expression(1, 0, types.int, region),
+        |types, region, expressions| int_expression(0, types.int, region, expressions),
         |types| types.float,
     )
 }
@@ -554,7 +609,7 @@ pub(super) fn lower_minimal_module_with_float_string_cast(function_name: &str) -
         BuiltinCastPolicyId::NumericToString(
             crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Float,
         ),
-        |types, region| float_expression(1, 1.5, types.float, region),
+        |types, region, expressions| float_expression(1.5, types.float, region, expressions),
         |types| types.string,
     )
 }
@@ -573,12 +628,21 @@ pub(super) fn lower_minimal_module_with_io_call(
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
+    let mut expressions = HirExpressionStore::default();
 
     let call_statement = statement(
         1,
         HirStatementKind::Call {
             target: CallTarget::External(io_function_id),
-            args: vec![string_expression(2, "hello", types.string, region)],
+            args: append_values(
+                &[string_expression(
+                    "hello",
+                    types.string,
+                    region,
+                    &mut expressions,
+                )],
+                &mut expressions,
+            ),
             result: None,
         },
     );
@@ -588,7 +652,7 @@ pub(super) fn lower_minimal_module_with_io_call(
         region,
         locals: vec![],
         statements: vec![call_statement],
-        terminator: HirTerminator::Return(unit_expression(3, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
 
     let function = HirFunction {
@@ -599,6 +663,7 @@ pub(super) fn lower_minimal_module_with_io_call(
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         function_name,
@@ -609,7 +674,6 @@ pub(super) fn lower_minimal_module_with_io_call(
 
     lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -632,33 +696,34 @@ pub(super) fn lower_minimal_module_with_io_input_call(
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
+    let mut expressions = HirExpressionStore::default();
 
     let input_local = local(0, types.input_handle, region);
-    let input_load = || {
-        expression(
-            2,
-            HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
-            types.input_handle,
-            region,
-            ValueKind::RValue,
-        )
-    };
+    let input_value = expression(
+        HirExpressionKind::Load(HirPlace::local(LocalId(0))),
+        types.input_handle,
+        region,
+        ValueKind::RValue,
+        &mut expressions,
+    );
 
     let args = match io_function_id {
         ExternalFunctionId::IoInputNew => vec![],
-        ExternalFunctionId::IoInputUpdate | ExternalFunctionId::IoInputClose => vec![input_load()],
+        ExternalFunctionId::IoInputUpdate | ExternalFunctionId::IoInputClose => vec![input_value],
         ExternalFunctionId::IoInputPointerX | ExternalFunctionId::IoInputPointerY => {
-            vec![input_load()]
+            vec![input_value]
         }
         ExternalFunctionId::IoInputLastKeyPressed
         | ExternalFunctionId::IoInputLastKeyReleased
         | ExternalFunctionId::IoInputLastPointerPressed
-        | ExternalFunctionId::IoInputLastPointerReleased => vec![input_load()],
+        | ExternalFunctionId::IoInputLastPointerReleased => vec![input_value],
         _ => vec![
-            input_load(),
-            string_expression(3, "d", types.string, region),
+            input_value,
+            string_expression("d", types.string, region, &mut expressions),
         ],
     };
+
+    let args = append_values(&args, &mut expressions);
 
     let call_statement = statement(
         1,
@@ -674,7 +739,7 @@ pub(super) fn lower_minimal_module_with_io_input_call(
         region,
         locals: vec![input_local],
         statements: vec![call_statement],
-        terminator: HirTerminator::Return(unit_expression(4, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
 
     let function = HirFunction {
@@ -685,6 +750,7 @@ pub(super) fn lower_minimal_module_with_io_input_call(
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         function_name,
@@ -695,7 +761,6 @@ pub(super) fn lower_minimal_module_with_io_input_call(
 
     lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),

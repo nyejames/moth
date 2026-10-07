@@ -21,17 +21,19 @@ use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::expression_store::{
+    HirConstructionFailure, HirStringPieceRange,
+};
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
-use crate::compiler_frontend::hir::ids::{LocalId, RegionId};
+use crate::compiler_frontend::hir::ids::{HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
@@ -54,7 +56,7 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn initialize_runtime_template_accumulator(
         &mut self,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<LocalId, CompilerError> {
+    ) -> Result<LocalId, HirConstructionFailure> {
         let string_ty = builtin_type_ids::STRING;
         let accumulator = self.allocate_temp_local(string_ty, None)?;
         let region = self.current_region_or_error(span_ref)?;
@@ -64,11 +66,11 @@ impl<'a> HirBuilder<'a> {
             string_ty,
             ValueKind::Const,
             region,
-        );
+        )?;
 
         self.emit_statement_kind(
-            HirStatementKind::Assign {
-                target: HirPlace::Local(accumulator),
+            HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(accumulator),
                 value: empty_string,
             },
             span_ref,
@@ -82,15 +84,15 @@ impl<'a> HirBuilder<'a> {
         aggregate: LocalId,
         accumulator: LocalId,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let region = self.current_region_or_error(span_ref)?;
         let aggregate_value = self.make_expression(
             span_ref,
-            HirExpressionKind::Load(HirPlace::Local(aggregate)),
+            HirExpressionKind::Load(HirPlace::local(aggregate)),
             builtin_type_ids::STRING,
             ValueKind::Place,
             region,
-        );
+        )?;
 
         self.append_template_chunk_to_accumulator(aggregate_value, accumulator, span_ref)
     }
@@ -100,7 +102,7 @@ impl<'a> HirBuilder<'a> {
         text: String,
         accumulator: LocalId,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let region = self.current_region_or_error(span_ref)?;
         let chunk = self.make_expression(
             span_ref,
@@ -108,7 +110,7 @@ impl<'a> HirBuilder<'a> {
             builtin_type_ids::STRING,
             ValueKind::Const,
             region,
-        );
+        )?;
 
         self.append_template_chunk_to_accumulator(chunk, accumulator, span_ref)
     }
@@ -126,7 +128,7 @@ impl<'a> HirBuilder<'a> {
         text: &OwnedFoldedString,
         append_context: RuntimeTemplateAppendContext<'_>,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
         let OwnedFoldedString::Pieces(pieces) = text else {
             return_hir_transformation_error!(
                 "Piece-bearing runtime-template text node carried neither plain text nor pieces.",
@@ -144,7 +146,7 @@ impl<'a> HirBuilder<'a> {
             builtin_type_ids::STRING,
             ValueKind::Const,
             region,
-        );
+        )?;
 
         self.append_template_chunk_to_accumulator(
             chunk,
@@ -166,7 +168,7 @@ impl<'a> HirBuilder<'a> {
         expression: &Expression,
         append_context: RuntimeTemplateAppendContext<'_>,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
         if let ExpressionKind::StringSlice(text) = &expression.kind
             && self.string_table.resolve(*text).is_empty()
         {
@@ -193,7 +195,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         append_context: RuntimeTemplateAppendContext<'_>,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
         if append_context.rejects_unresolved_slots() {
             return_hir_transformation_error!(
                 "Runtime template slot application reached HIR with an unresolved slot placeholder. AST slot routing should have converted it to a runtime slot site before HIR lowering.",
@@ -213,7 +215,7 @@ impl<'a> HirBuilder<'a> {
         append_context: RuntimeTemplateAppendContext<'_>,
         aggregate_local: Option<LocalId>,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
         match node {
             OwnedRuntimeTemplateNode::Sequence { children, .. } => {
                 let mut emitted_output = false;
@@ -434,7 +436,7 @@ impl<'a> HirBuilder<'a> {
         emission: TemplateBodyEmission,
         append_context: RuntimeTemplateAppendContext<'_>,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         if emission == TemplateBodyEmission::Output
             && let Some(flag) = append_context.emitted_output
         {
@@ -450,7 +452,7 @@ impl<'a> HirBuilder<'a> {
         append_context: RuntimeTemplateAppendContext<'_>,
         aggregate_local: Option<LocalId>,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
         match &template.body {
             OwnedRuntimeTemplateBody::Render(node) => self
                 .append_owned_runtime_template_node_to_accumulator(
@@ -473,7 +475,7 @@ impl<'a> HirBuilder<'a> {
         append_context: RuntimeTemplateAppendContext<'_>,
         aggregate_local: Option<LocalId>,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
         self.append_owned_runtime_template_branch_chain_from_index(
             branches,
             fallback,
@@ -492,7 +494,7 @@ impl<'a> HirBuilder<'a> {
         append_context: RuntimeTemplateAppendContext<'_>,
         aggregate_local: Option<LocalId>,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
         let Some(branch) = branches.get(branch_index) else {
             return self.append_owned_runtime_template_fallback_branch(
                 fallback,
@@ -555,7 +557,7 @@ impl<'a> HirBuilder<'a> {
         scrutinee: &Expression,
         pattern: &MatchPattern,
         append: OwnedRuntimeBranchChainAppend<'_, '_>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
         self.append_runtime_option_present_template_branch(
             scrutinee,
             pattern,
@@ -590,7 +592,7 @@ impl<'a> HirBuilder<'a> {
         append_context: RuntimeTemplateAppendContext<'_>,
         aggregate_local: Option<LocalId>,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
         let Some(fallback) = fallback else {
             return Ok(TemplateBodyEmission::NoOutput);
         };
@@ -611,7 +613,7 @@ impl<'a> HirBuilder<'a> {
         append_context: RuntimeTemplateAppendContext<'_>,
         aggregate_local: Option<LocalId>,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
         let aggregate = self.initialize_runtime_template_accumulator(span_ref)?;
         let emitted_any_iteration = self.initialize_runtime_template_emitted_flag(span_ref)?;
 
@@ -709,7 +711,7 @@ impl<'a> HirBuilder<'a> {
         append_context: RuntimeTemplateAppendContext<'_>,
         _aggregate_local: Option<LocalId>,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let Some(aggregate_wrapper) = aggregate_wrapper else {
             return Ok(());
         };
@@ -737,7 +739,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         expression: &Expression,
         append_context: RuntimeTemplateAppendContext<'_>,
-    ) -> Result<Option<TemplateBodyEmission>, CompilerError> {
+    ) -> Result<Option<TemplateBodyEmission>, HirConstructionFailure> {
         let Some(candidate) = runtime_template_append_candidate_for_expression(expression) else {
             return Ok(None);
         };
@@ -826,7 +828,7 @@ impl<'a> HirBuilder<'a> {
         flush: RuntimeSlotLoopControlFlush<'_>,
         control_kind: TemplateLoopControlKind,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let condition_block = self.current_block_id_or_error(span_ref)?;
         let parent_region = self.current_region_or_error(span_ref)?;
         let flush_region = self.create_child_region(parent_region);
@@ -838,7 +840,7 @@ impl<'a> HirBuilder<'a> {
             builtin_type_ids::BOOL,
             span_ref,
             parent_region,
-        );
+        )?;
 
         self.emit_terminator(
             condition_block,
@@ -880,7 +882,7 @@ impl<'a> HirBuilder<'a> {
         site_id: RuntimeSlotSiteId,
         append_context: RuntimeTemplateAppendContext<'_>,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
         let Some(slot_sites) = append_context.slot_sites else {
             return_hir_transformation_error!(
                 "Runtime slot site appeared outside an active runtime slot application.",
@@ -910,7 +912,7 @@ impl<'a> HirBuilder<'a> {
         source_id: RuntimeSlotContributionSourceId,
         append_context: RuntimeTemplateAppendContext<'_>,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
         let Some(source_accumulators) = append_context.source_accumulators else {
             return_hir_transformation_error!(
                 "Runtime slot source appeared outside an active runtime slot application.",
@@ -927,11 +929,11 @@ impl<'a> HirBuilder<'a> {
         let region = self.current_region_or_error(span_ref)?;
         let source_value = self.make_expression(
             span_ref,
-            HirExpressionKind::Load(HirPlace::Local(source_accumulator)),
+            HirExpressionKind::Load(HirPlace::local(source_accumulator)),
             builtin_type_ids::STRING,
             ValueKind::Place,
             region,
-        );
+        )?;
         self.append_template_chunk_to_accumulator(
             source_value,
             append_context.target_accumulator,
@@ -945,7 +947,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         control_kind: TemplateLoopControlKind,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         match control_kind {
             TemplateLoopControlKind::Break => self.emit_break_to_current_loop(span_ref, None),
             TemplateLoopControlKind::Continue => self.emit_continue_to_current_loop(span_ref, None),
@@ -957,7 +959,7 @@ impl<'a> HirBuilder<'a> {
         node: &OwnedRuntimeTemplateNode,
         append_context: RuntimeTemplateAppendContext<'_>,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
         match node {
             OwnedRuntimeTemplateNode::LoopControl {
                 kind,
@@ -1008,7 +1010,7 @@ impl<'a> HirBuilder<'a> {
         wrapper_node: &OwnedRuntimeTemplateNode,
         append_context: RuntimeTemplateAppendContext<'_>,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
         let child_accumulator = self.initialize_runtime_template_accumulator(span_ref)?;
         let child_emitted = self.initialize_runtime_template_emitted_flag(span_ref)?;
         let child_context = append_context
@@ -1060,36 +1062,36 @@ impl<'a> HirBuilder<'a> {
 
     fn append_template_chunk_to_accumulator(
         &mut self,
-        chunk: HirExpression,
+        chunk: HirValueId,
         accumulator: LocalId,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let string_ty = builtin_type_ids::STRING;
         let region = self.current_region_or_error(span_ref)?;
         let accumulated = self.make_expression(
             span_ref,
-            HirExpressionKind::Load(HirPlace::Local(accumulator)),
+            HirExpressionKind::Load(HirPlace::local(accumulator)),
             string_ty,
             ValueKind::Place,
             region,
-        );
+        )?;
         let chunk_as_string =
             self.coerce_expression_to_string(chunk, span_ref, string_ty, region)?;
         let next_value = self.make_expression(
             span_ref,
             HirExpressionKind::BinOp {
-                left: Box::new(accumulated),
+                left: accumulated,
                 op: HirBinOp::StringAppend,
-                right: Box::new(chunk_as_string),
+                right: chunk_as_string,
             },
             string_ty,
             ValueKind::RValue,
             region,
-        );
+        )?;
 
         self.emit_statement_kind(
-            HirStatementKind::Assign {
-                target: HirPlace::Local(accumulator),
+            HirStatementKind::Write {
+                target: HirWriteTarget::AssignPlace(HirPlace::local(accumulator)),
                 value: next_value,
             },
             span_ref,
@@ -1098,67 +1100,68 @@ impl<'a> HirBuilder<'a> {
 
     pub(super) fn coerce_expression_to_string(
         &mut self,
-        expression: HirExpression,
+        expression: HirValueId,
         span_ref: &Option<SourceSpan>,
         string_ty: TypeId,
         region: RegionId,
-    ) -> Result<HirExpression, CompilerError> {
-        if expression.ty == builtin_type_ids::STRING {
+    ) -> Result<HirValueId, HirConstructionFailure> {
+        let expression_type = self.module.expressions.expression(expression).ty;
+        if expression_type == builtin_type_ids::STRING {
             return Ok(expression);
         }
 
-        if expression.ty == self.type_environment.builtins().none {
-            return Ok(self.make_expression(
+        if expression_type == self.type_environment.builtins().none {
+            return self.make_expression(
                 span_ref,
                 HirExpressionKind::StringLiteral(String::new()),
                 string_ty,
                 ValueKind::Const,
                 region,
-            ));
+            );
         }
 
         // `Float` template chunks must use the Moth-owned formatter instead of target-native
         // stringification so casts and templates share one formatting contract.
         // Template chunk formatting is generated scaffolding: the `FormatFloat` stays spanless.
-        if expression.ty == self.type_environment.builtins().float {
+        if expression_type == self.type_environment.builtins().float {
             return self.emit_formatted_float_value(expression, span_ref);
         }
-        if let Some(scale) = self.type_environment.number_scale(expression.ty) {
-            return Ok(self.make_expression(
+        if let Some(scale) = self.type_environment.number_scale(expression_type) {
+            return self.make_expression(
                 span_ref,
                 HirExpressionKind::Cast {
-                    source: Box::new(expression),
+                    source: expression,
                     policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Number(scale)),
                 },
                 string_ty,
                 ValueKind::RValue,
                 region,
-            ));
+            );
         }
 
         // Profile-sized `Uint` chunks render through the same numeric text policy as
         // explicit casts, so a chunk never reaches `StringAppend` as a raw number.
         // Fixed numeric chunks share this rule; `Byte` is not numeric and keeps the
         // append path; template validation rejects it before lowering.
-        if expression.ty == self.type_environment.builtins().uint
+        if expression_type == self.type_environment.builtins().uint
             || self
                 .type_environment
-                .fixed_scalar(expression.ty)
+                .fixed_scalar(expression_type)
                 .and_then(|scalar| BuiltinCastTarget::Fixed(scalar).numeric_scalar())
                 .is_some()
         {
-            let numeric = NumericScalar::from_type_id(expression.ty, &self.type_environment)
+            let numeric = NumericScalar::from_type_id(expression_type, &self.type_environment)
                 .unwrap_or(NumericScalar::Uint);
-            return Ok(self.make_expression(
+            return self.make_expression(
                 span_ref,
                 HirExpressionKind::Cast {
-                    source: Box::new(expression),
+                    source: expression,
                     policy: BuiltinCastPolicyId::NumericToString(numeric),
                 },
                 string_ty,
                 ValueKind::RValue,
                 region,
-            ));
+            );
         }
 
         let empty = self.make_expression(
@@ -1167,19 +1170,19 @@ impl<'a> HirBuilder<'a> {
             string_ty,
             ValueKind::Const,
             region,
-        );
+        )?;
 
-        Ok(self.make_expression(
+        self.make_expression(
             span_ref,
             HirExpressionKind::BinOp {
-                left: Box::new(empty),
+                left: empty,
                 op: crate::compiler_frontend::hir::operators::HirBinOp::StringAppend,
-                right: Box::new(expression),
+                right: expression,
             },
             string_ty,
             ValueKind::RValue,
             region,
-        ))
+        )
     }
 
     // ------------------------
@@ -1191,7 +1194,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         pieces: &[OwnedFoldedStringPiece],
         span_ref: &Option<SourceSpan>,
-    ) -> Result<Vec<ConstStringPiece>, CompilerError> {
+    ) -> Result<HirStringPieceRange, HirConstructionFailure> {
         let mut hir_pieces = Vec::with_capacity(pieces.len());
 
         for piece in pieces {
@@ -1210,7 +1213,9 @@ impl<'a> HirBuilder<'a> {
             hir_pieces.push(hir_piece);
         }
 
-        Ok(hir_pieces)
+        self.module
+            .expressions
+            .append_string_pieces(&hir_pieces, *span_ref)
     }
 }
 

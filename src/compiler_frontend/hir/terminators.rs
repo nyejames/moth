@@ -3,22 +3,20 @@
 //! WHAT: explicit control-flow exits for each block.
 //! WHY: control flow must be structured enough for borrow validation and backend lowering.
 
-use crate::compiler_frontend::hir::expressions::{
-    HirExpression, HirExpressionKind, HirVariantCarrier, ValueKind,
-};
-use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
+use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirVariantCarrier, ValueKind};
+use crate::compiler_frontend::hir::ids::{BlockId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::patterns::HirMatchArm;
-use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 
 #[derive(Debug, Clone)]
 pub enum HirTerminator {
     Jump {
         target: BlockId,
-        args: Vec<LocalId>, // Not SSA - just passing current local values
+        args: Vec<HirJumpArgument>,
     },
 
     If {
-        condition: HirExpression,
+        condition: HirValueId,
         then_block: BlockId,
         else_block: BlockId, // Required, must jump or return somewhere (Could just be continuation)
     },
@@ -30,13 +28,13 @@ pub enum HirTerminator {
     /// WHY: fallible control flow is part of the HIR CFG contract. Keeping the branch as a
     /// terminator avoids hiding an error edge inside an ordinary boolean expression.
     FallibleBranch {
-        result: HirExpression,
+        result: HirValueId,
         success_block: BlockId,
         error_block: BlockId,
     },
 
     Match {
-        scrutinee: HirExpression,
+        scrutinee: HirValueId,
         arms: Vec<HirMatchArm>, // Each arm's body block must end with Jump or Return
     },
 
@@ -48,7 +46,7 @@ pub enum HirTerminator {
         target: BlockId,
     },
 
-    Return(HirExpression),
+    Return(HirValueId),
 
     /// Return through the function's fallible success slot.
     ///
@@ -56,14 +54,14 @@ pub enum HirTerminator {
     /// fallible carrier in HIR.
     /// WHY: explicit success/error terminators keep the HIR control-flow contract aligned with
     /// Moth's fallible signature model.
-    ReturnSuccess(HirExpression),
+    ReturnSuccess(HirValueId),
 
     /// Return through the function's fallible error slot.
     ///
     /// WHAT: represents `return! value` without constructing a runtime fallible carrier in HIR.
     /// WHY: Phase 8 moves fallible control flow toward explicit success/error edges so borrow
     /// validation and backend lowering do not need to infer error paths from variant values.
-    ReturnError(HirExpression),
+    ReturnError(HirValueId),
 
     /// Internal placeholder for blocks that have not yet received a real terminator.
     ///
@@ -90,9 +88,16 @@ pub enum HirTerminator {
     /// The message is an optional String value; its evaluation fact tells target validation
     /// whether construction is the default, fully folded, or runtime work.
     AssertFailure {
-        message: HirExpression,
+        message: HirValueId,
         message_evaluation: HirAssertionMessageEvaluation,
     },
+}
+
+/// One local value transferred across a CFG edge into a newly defined destination.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HirJumpArgument {
+    pub source: LocalId,
+    pub destination: LocalId,
 }
 
 /// Semantic origin retained until private failure lanes have been installed.
@@ -123,48 +128,28 @@ pub enum HirAssertionMessageEvaluation {
 /// WHY: lowering, HIR validation, reachability and backend feature checks must share one
 ///      classifier rather than independently interpreting variant or constant details.
 pub(crate) fn classify_assertion_message_evaluation(
-    message: &HirExpression,
+    expressions: &HirExpressionStore,
+    message: HirValueId,
 ) -> HirAssertionMessageEvaluation {
-    match &message.kind {
+    match &expressions.expression(message).kind {
         HirExpressionKind::VariantConstruct {
             carrier: HirVariantCarrier::Option,
             variant_index: 0,
             fields,
-        } if fields.is_empty() => HirAssertionMessageEvaluation::Default,
+        } if expressions.variant_fields(*fields).is_empty() => {
+            HirAssertionMessageEvaluation::Default
+        }
         HirExpressionKind::VariantConstruct {
             carrier: HirVariantCarrier::Option,
             variant_index: 1,
             fields,
-        } if fields
+        } if expressions
+            .variant_fields(*fields)
             .iter()
-            .all(|field| field.value.value_kind == ValueKind::Const) =>
+            .all(|field| expressions.expression(field.value).value_kind == ValueKind::Const) =>
         {
             HirAssertionMessageEvaluation::Folded
         }
         _ => HirAssertionMessageEvaluation::Runtime,
-    }
-}
-
-impl HirTerminator {
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        match self {
-            Self::If { condition, .. } => condition.remap_string_ids(remap),
-            Self::FallibleBranch { result, .. }
-            | Self::Return(result)
-            | Self::ReturnSuccess(result)
-            | Self::ReturnError(result) => result.remap_string_ids(remap),
-            Self::Match { scrutinee, arms } => {
-                scrutinee.remap_string_ids(remap);
-                for arm in arms {
-                    arm.remap_string_ids(remap);
-                }
-            }
-            Self::Jump { .. }
-            | Self::Break { .. }
-            | Self::Continue { .. }
-            | Self::Uninitialized
-            | Self::RuntimeFailure { .. } => {}
-            Self::AssertFailure { message, .. } => message.remap_string_ids(remap),
-        }
     }
 }

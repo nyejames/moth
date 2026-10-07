@@ -6,7 +6,9 @@
 
 use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::Ast;
+use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PremergeFailure};
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::module::HirModule;
@@ -14,6 +16,10 @@ use crate::compiler_frontend::module_metadata::HirLoweringResult;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use std::{cell::RefCell, rc::Rc};
+
+#[cfg(test)]
+#[path = "tests/stages_tests.rs"]
+mod tests;
 
 fn attach_owner_to_diagnostic(
     mut diagnostic: CompilerDiagnostic,
@@ -32,21 +38,34 @@ pub(in crate::compiler_frontend::module_compilation) fn lower_hir(
     function_origin_lookup: HirFunctionOriginLookup,
     module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
     frozen_identity_handle: Option<&FrozenIdentityHandle>,
+    capacity_estimate: FrontendArenaCapacityEstimate,
 ) -> Result<HirLoweringResult, PremergeFailure> {
     compiler
-        .generate_hir(module_ast, function_origin_lookup, module_resources)
-        .map_err(|messages| {
-            let mut failure = PremergeFailure::from(messages);
-            if let Some(handle) = frozen_identity_handle {
-                failure.set_frozen_identity_handle_if_missing(handle.clone());
-            }
-            failure.prepend_diagnostics(
-                warnings.iter().cloned().map(|diagnostic| {
-                    attach_owner_to_diagnostic(diagnostic, frozen_identity_handle)
-                }),
-            );
-            failure
-        })
+        .generate_hir(
+            module_ast,
+            function_origin_lookup,
+            module_resources,
+            capacity_estimate,
+        )
+        .map_err(|messages| premerge_hir_failure(messages, warnings, frozen_identity_handle))
+}
+
+fn premerge_hir_failure(
+    messages: CompilerMessages,
+    warnings: &[CompilerDiagnostic],
+    frozen_identity_handle: Option<&FrozenIdentityHandle>,
+) -> PremergeFailure {
+    let mut failure = PremergeFailure::from(messages);
+    if let Some(handle) = frozen_identity_handle {
+        failure.set_frozen_identity_handle_if_missing(handle.clone());
+    }
+    failure.prepend_diagnostics(
+        warnings
+            .iter()
+            .cloned()
+            .map(|diagnostic| attach_owner_to_diagnostic(diagnostic, frozen_identity_handle)),
+    );
+    failure
 }
 
 pub(in crate::compiler_frontend::module_compilation) fn check_borrows(

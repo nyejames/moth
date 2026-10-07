@@ -13,6 +13,58 @@ fn rules(relative: &str, content: &str) -> Vec<BoundaryRule> {
 }
 
 #[test]
+fn recursive_hir_carriers_reject_owned_expressions_and_place_bases() {
+    for shape in [
+        "pub value: HirExpression,",
+        "left: Box<HirExpression>,",
+        "values: Vec<\n HirExpression\n>,",
+        "guard: Option<HirExpression>,",
+        "fields: Vec<(FieldId, HirExpression)>,",
+        "base: Box<HirPlace>,",
+    ] {
+        let findings = rules("src/compiler_frontend/hir/expressions.rs", shape);
+        assert_eq!(
+            findings,
+            vec![BoundaryRule::RecursiveHirOwnership],
+            "{shape}"
+        );
+    }
+}
+
+#[test]
+fn dense_hir_storage_and_borrowed_readers_are_permitted() {
+    assert!(
+        rules(
+            "src/compiler_frontend/hir/expression_store.rs",
+            "rows: Vec<HirExpression>,"
+        )
+        .is_empty()
+    );
+    assert!(
+        rules(
+            "src/compiler_frontend/hir/expressions.rs",
+            "use super::HirExpression;\n// left: Box<HirExpression>\n\
+         pub left: HirValueId,\nfn inspect(value: &HirExpression) {}"
+        )
+        .is_empty()
+    );
+    assert!(
+        rules(
+            "src/compiler_frontend/hir/places.rs",
+            "pub struct HirPlace { pub root: LocalId, pub projections: HirProjectionRange }"
+        )
+        .is_empty()
+    );
+    assert!(
+        rules(
+            "src/compiler_frontend/hir/tests/fixture.rs",
+            "values: Vec<HirExpression>,"
+        )
+        .is_empty()
+    );
+}
+
+#[test]
 fn reports_a_build_file_that_binds_module_headers_itself() {
     let findings = audit_architecture_boundary_fragment(
         "src/build_system/create_project_modules/compilation.rs",
@@ -400,6 +452,89 @@ fn accepts_the_comparison_layer_importing_the_static_solver_modules() {
         rules(
             "src/compiler_frontend/analysis/borrow_checker/boracle/differential.rs",
             "use super::{loans, origins, relations};\n"
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn reports_backend_borrow_state_names_in_qualified_braced_and_bare_forms() {
+    let examples = [
+        (
+            "use crate::compiler_frontend::analysis::borrow_checker::LocalMode;\n",
+            "LocalMode",
+        ),
+        (
+            "use crate::compiler_frontend::analysis::borrow_checker::{statement_entry_states};\n",
+            "statement_entry_states",
+        ),
+        (
+            "if analysis.block_entry_states.contains_key(&block) {}\n",
+            "block_entry_states",
+        ),
+        ("let mode: LocalMode = snapshot.mode;\n", "LocalMode"),
+    ];
+
+    for (source, name) in examples {
+        let findings = audit_architecture_boundary_fragment("src/backends/js/emitter.rs", source);
+        assert_eq!(
+            findings.len(),
+            1,
+            "unexpected findings for {source}: {findings:?}"
+        );
+        assert_eq!(findings[0].0, BoundaryRule::BackendBorrowStateSemantics);
+        assert!(
+            findings[0].1.contains(name),
+            "the finding should name what it found: {}",
+            findings[0].1
+        );
+    }
+
+    let findings = audit_architecture_boundary_fragment(
+        "src/backends/js/emitter.rs",
+        "use crate::compiler_frontend::analysis::borrow_checker::{statement_entry_states, block_entry_states};\n",
+    );
+    assert_eq!(
+        findings.len(),
+        2,
+        "both braced snapshot names should be reported: {findings:?}"
+    );
+    assert!(
+        findings
+            .iter()
+            .all(|(rule, _)| *rule == BoundaryRule::BackendBorrowStateSemantics)
+    );
+}
+
+#[test]
+fn backend_borrow_state_rule_ignores_comments_tests_and_longer_identifiers() {
+    let comment = "// LocalMode statement_entry_states block_entry_states\n\
+                   /// LocalMode is historical context only\n";
+    assert!(rules("src/backends/js/emitter.rs", comment).is_empty());
+    assert!(rules("src/backends/js/tests/emitter.rs", "LocalMode\n").is_empty());
+    assert!(rules("src/backends/js/emitter_tests.rs", "LocalMode\n").is_empty());
+
+    let longer_identifiers =
+        "LocalModeSnapshot statement_entry_states_cache block_entry_states_by_block\n";
+    assert!(rules("src/backends/js/emitter.rs", longer_identifiers).is_empty());
+}
+
+#[test]
+fn backend_borrow_state_rule_preserves_authorised_facts_and_other_scopes() {
+    let authorised_backend_facts = "fn lower(\
+        borrow_facts: &BorrowFacts,\
+        borrow_report: &BorrowCheckReport,\
+        numeric_proofs: &NumericProofs\
+    ) {}\n";
+    assert!(rules("src/backends/wasm/backend.rs", authorised_backend_facts).is_empty());
+
+    let analysis_state = "let mode: LocalMode = snapshot.mode;\n\
+                         statement_entry_states.get(&statement);\n\
+                         block_entry_states.get(&block);\n";
+    assert!(
+        rules(
+            "src/compiler_frontend/analysis/borrow_checker/metadata.rs",
+            analysis_state
         )
         .is_empty()
     );

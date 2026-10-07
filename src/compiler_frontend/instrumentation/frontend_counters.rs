@@ -97,6 +97,37 @@ pub(crate) enum FrontendCounter {
     HirBlockCount,
     HirStatementCount,
     HirFunctionCount,
+    // Dense store allocation observations, recorded at the final structural freeze.
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    EstimatedHirExpressions,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    EstimatedHirValueItems,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    HirExpressionCount,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    HirExpressionInitialCapacity,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    HirExpressionGrowthEvents,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    HirExpressionConstructionCapacity,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    HirExpressionFrozenCapacity,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    HirValueItemCount,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    HirValueItemInitialCapacity,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    HirValueItemGrowthEvents,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    HirValueItemConstructionCapacity,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    HirValueItemFrozenCapacity,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    HirSideStoreGrowthEvents,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    HirStoreConstructionBytes,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    HirStoreFrozenBytes,
     BorrowFunctionCount,
     BorrowBlockCount,
     BorrowConflictCheckCount,
@@ -365,6 +396,21 @@ mod detailed {
     static HIR_BLOCK_COUNT: AtomicUsize = AtomicUsize::new(0);
     static HIR_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
     static HIR_FUNCTION_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static ESTIMATED_HIR_EXPRESSIONS: AtomicUsize = AtomicUsize::new(0);
+    static ESTIMATED_HIR_VALUE_ITEMS: AtomicUsize = AtomicUsize::new(0);
+    static HIR_EXPRESSION_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static HIR_EXPRESSION_INITIAL_CAPACITY: AtomicUsize = AtomicUsize::new(0);
+    static HIR_EXPRESSION_GROWTH_EVENTS: AtomicUsize = AtomicUsize::new(0);
+    static HIR_EXPRESSION_CONSTRUCTION_CAPACITY: AtomicUsize = AtomicUsize::new(0);
+    static HIR_EXPRESSION_FROZEN_CAPACITY: AtomicUsize = AtomicUsize::new(0);
+    static HIR_VALUE_ITEM_COUNT: AtomicUsize = AtomicUsize::new(0);
+    static HIR_VALUE_ITEM_INITIAL_CAPACITY: AtomicUsize = AtomicUsize::new(0);
+    static HIR_VALUE_ITEM_GROWTH_EVENTS: AtomicUsize = AtomicUsize::new(0);
+    static HIR_VALUE_ITEM_CONSTRUCTION_CAPACITY: AtomicUsize = AtomicUsize::new(0);
+    static HIR_VALUE_ITEM_FROZEN_CAPACITY: AtomicUsize = AtomicUsize::new(0);
+    static HIR_SIDE_STORE_GROWTH_EVENTS: AtomicUsize = AtomicUsize::new(0);
+    static HIR_STORE_CONSTRUCTION_BYTES: AtomicUsize = AtomicUsize::new(0);
+    static HIR_STORE_FROZEN_BYTES: AtomicUsize = AtomicUsize::new(0);
     static BORROW_FUNCTION_COUNT: AtomicUsize = AtomicUsize::new(0);
     static BORROW_BLOCK_COUNT: AtomicUsize = AtomicUsize::new(0);
     static BORROW_CONFLICT_CHECK_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -612,6 +658,21 @@ mod detailed {
             FrontendCounter::HirBlockCount,
             FrontendCounter::HirStatementCount,
             FrontendCounter::HirFunctionCount,
+            FrontendCounter::EstimatedHirExpressions,
+            FrontendCounter::EstimatedHirValueItems,
+            FrontendCounter::HirExpressionCount,
+            FrontendCounter::HirExpressionInitialCapacity,
+            FrontendCounter::HirExpressionGrowthEvents,
+            FrontendCounter::HirExpressionConstructionCapacity,
+            FrontendCounter::HirExpressionFrozenCapacity,
+            FrontendCounter::HirValueItemCount,
+            FrontendCounter::HirValueItemInitialCapacity,
+            FrontendCounter::HirValueItemGrowthEvents,
+            FrontendCounter::HirValueItemConstructionCapacity,
+            FrontendCounter::HirValueItemFrozenCapacity,
+            FrontendCounter::HirSideStoreGrowthEvents,
+            FrontendCounter::HirStoreConstructionBytes,
+            FrontendCounter::HirStoreFrozenBytes,
             FrontendCounter::BorrowFunctionCount,
             FrontendCounter::BorrowBlockCount,
             FrontendCounter::BorrowConflictCheckCount,
@@ -875,6 +936,25 @@ mod detailed {
             FrontendCounter::HirStatementCount => &HIR_STATEMENT_COUNT,
 
             FrontendCounter::HirFunctionCount => &HIR_FUNCTION_COUNT,
+            FrontendCounter::EstimatedHirExpressions => &ESTIMATED_HIR_EXPRESSIONS,
+            FrontendCounter::EstimatedHirValueItems => &ESTIMATED_HIR_VALUE_ITEMS,
+            FrontendCounter::HirExpressionCount => &HIR_EXPRESSION_COUNT,
+            FrontendCounter::HirExpressionInitialCapacity => &HIR_EXPRESSION_INITIAL_CAPACITY,
+            FrontendCounter::HirExpressionGrowthEvents => &HIR_EXPRESSION_GROWTH_EVENTS,
+            FrontendCounter::HirExpressionConstructionCapacity => {
+                &HIR_EXPRESSION_CONSTRUCTION_CAPACITY
+            }
+            FrontendCounter::HirExpressionFrozenCapacity => &HIR_EXPRESSION_FROZEN_CAPACITY,
+            FrontendCounter::HirValueItemCount => &HIR_VALUE_ITEM_COUNT,
+            FrontendCounter::HirValueItemInitialCapacity => &HIR_VALUE_ITEM_INITIAL_CAPACITY,
+            FrontendCounter::HirValueItemGrowthEvents => &HIR_VALUE_ITEM_GROWTH_EVENTS,
+            FrontendCounter::HirValueItemConstructionCapacity => {
+                &HIR_VALUE_ITEM_CONSTRUCTION_CAPACITY
+            }
+            FrontendCounter::HirValueItemFrozenCapacity => &HIR_VALUE_ITEM_FROZEN_CAPACITY,
+            FrontendCounter::HirSideStoreGrowthEvents => &HIR_SIDE_STORE_GROWTH_EVENTS,
+            FrontendCounter::HirStoreConstructionBytes => &HIR_STORE_CONSTRUCTION_BYTES,
+            FrontendCounter::HirStoreFrozenBytes => &HIR_STORE_FROZEN_BYTES,
 
             FrontendCounter::BorrowFunctionCount => &BORROW_FUNCTION_COUNT,
 
@@ -1277,6 +1357,25 @@ mod detailed {
             FrontendCounter::HirStatementCount => "hir_statement_count",
 
             FrontendCounter::HirFunctionCount => "hir_function_count",
+            FrontendCounter::EstimatedHirExpressions => "estimated_hir_expressions",
+            FrontendCounter::EstimatedHirValueItems => "estimated_hir_value_items",
+            FrontendCounter::HirExpressionCount => "hir_expression_count",
+            FrontendCounter::HirExpressionInitialCapacity => "hir_expression_initial_capacity",
+            FrontendCounter::HirExpressionGrowthEvents => "hir_expression_growth_events",
+            FrontendCounter::HirExpressionConstructionCapacity => {
+                "hir_expression_construction_capacity"
+            }
+            FrontendCounter::HirExpressionFrozenCapacity => "hir_expression_frozen_capacity",
+            FrontendCounter::HirValueItemCount => "hir_value_item_count",
+            FrontendCounter::HirValueItemInitialCapacity => "hir_value_item_initial_capacity",
+            FrontendCounter::HirValueItemGrowthEvents => "hir_value_item_growth_events",
+            FrontendCounter::HirValueItemConstructionCapacity => {
+                "hir_value_item_construction_capacity"
+            }
+            FrontendCounter::HirValueItemFrozenCapacity => "hir_value_item_frozen_capacity",
+            FrontendCounter::HirSideStoreGrowthEvents => "hir_side_store_growth_events",
+            FrontendCounter::HirStoreConstructionBytes => "hir_store_construction_bytes",
+            FrontendCounter::HirStoreFrozenBytes => "hir_store_frozen_bytes",
 
             FrontendCounter::BorrowFunctionCount => "borrow_function_count",
 

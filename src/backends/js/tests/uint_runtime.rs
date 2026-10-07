@@ -44,6 +44,7 @@ fn profile(int_width: IntWidth) -> NumericProfile {
 /// Lowers one `Uint` addition so the prelude carries the profile-selected
 /// integer helper family with `Uint` bounds.
 fn lower_uint_operation_source(numeric_profile: NumericProfile) -> String {
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, _) = build_type_environment();
     let uint_type: TypeId = type_environment.builtins().uint;
     let region = RegionId(0);
@@ -55,22 +56,23 @@ fn lower_uint_operation_source(numeric_profile: NumericProfile) -> String {
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
             left: expression(
-                1,
                 HirExpressionKind::Uint(1),
                 uint_type,
                 region,
                 ValueKind::Const,
+                &mut expressions,
             ),
             right: expression(
-                2,
                 HirExpressionKind::Uint(2),
                 uint_type,
                 region,
                 ValueKind::Const,
+                &mut expressions,
             ),
         },
         uint_type,
         numeric_profile,
+        expressions,
     )
 }
 

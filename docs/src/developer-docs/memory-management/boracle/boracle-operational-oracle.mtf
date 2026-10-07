@@ -91,25 +91,49 @@ On a concrete execution a place is exactly one of `Unavailable`, `Slot` or `Alia
 
 There is no join step, so nothing has to be chosen at a join. A block's entry state is exactly the state its executed predecessor produced. An execution never selects between predecessor states and never widens them. Enumeration replaces the choice: distinct predecessors are distinct executions, each carrying its own independent runtime state.
 
-Write semantics follow from the concrete state:
+Write semantics consume the normalized writer's `BindingDestination` and incoming value
+meaning. Concrete state does not recover the source operation.
 
-- A definition write to a `Slot` place replaces the slot generation with the one its event defines, and retires the capabilities held by places that structurally overlap it. A direct alias, a projection and `RebindValue::AliasFromPlace` adopt a node they resolved from their source. Every other value-producing writer allocates a new `DynamicOriginId`, including a call `AliasParams` result, which takes its own fresh generation and carries its relationship to the arguments as provenance capabilities instead. The reference agrees: its result arm replaces the generation with `one_origin(result.origin)` rather than the argument origins.
-- A definition write to an `Alias` place is a write through the alias, whether its access is `Exclusive` or `Shared`. It mutates the aliased storage, creates no new generation and retires nothing.
-- A non-defining write is a mutation. It performs the access check and changes no generation.
+- `Define` captures the incoming value before retiring the previous dynamic binding and
+  overlapping holder capabilities. A direct place source installs an `Alias`. A produced
+  value installs a `Slot`, even when its allocation provenance is shared. Re-entering the
+  same static definition applies this rule again rather than writing through its old alias.
+- `Update` to an alias writes through to its referent, preserves the alias and creates no
+  replacement generation. This applies to shared and exclusive aliases under the existing
+  reference transition rule. Access legality remains a separate check.
+- `Update` to a slot replaces its represented value and retires overlapping holders. A
+  direct place source can install an alias. A produced value remains slot-backed.
+- A non-defining access without a value-producing writer is a mutation. It performs the
+  access check and changes no generation.
 
-Generations identify storage for aliasing purposes, not values. Mutation through an exclusive alias therefore keeps the generation identity, which is what makes the owner and the alias agree that they touch the same storage.
+The normalized builder uses that non-defining access for an exact unprojected
+place self-update, after reading the source. It preserves the current Slot or
+Alias state and holder capabilities without installing a new relationship.
+
+Generations identify storage for aliasing purposes, not binding instances or lifetime owners.
+Mutation through an exclusive alias keeps the generation identity so the owner and alias
+agree that they touch the same storage. Distinct binding cells can retain shared allocation
+provenance without being aliases of one another's cells.
 
 ## Provenance events set state, access events check legality
 
-For every destination except a call result the builder emits the definition write before the
-provenance event that gives that destination its meaning. The definition access checks the target
-and the provenance event applies the destination-role transition below. No provenance writer may
-install a role without consulting this owner.
+For ordinary HIR writers the builder emits a paired binding-write access before the
+provenance event that gives the destination its meaning. Its `UseKind::BindingWrite`
+carries the same `BindingDestination::Define` or `Update` as that writer. Normalized
+input validation checks that relationship. The access checks legality and the provenance
+event applies the destination-role transition below. No provenance writer may install
+a role without consulting this owner.
+
+Jump arguments are one atomic transfer owned by the terminator. All source-read
+accesses precede all paired destination-write accesses, and the terminator captures
+every source before installing any destination. Input validation checks the access
+sequence against the explicit argument pairs.
 
 A call result is the one reversed case. The builder emits the granular argument events, then the
-`CallEffect`, and only then the confirming definition write for the result place. A definition write
+`CallEffect`, and only then the confirming binding write for the result place. A paired binding write
 that targets the result place of a `CallEffect` already executed at this call confirms the generation
-that effect defined and never replaces it. Without that rule the trailing write would allocate a
+that effect installed and never replaces it. Its Define/Update tag and generation-evidence bit
+remain independent. Without that rule the trailing write would allocate a
 second generation and discard the one every provenance capability was issued against.
 
 That confirmation is bound to the generation the effect installed. Any other event that retires or
@@ -124,110 +148,78 @@ malformed input rejected during problem validation.
 
 ### Destination role transitions
 
-The installed concrete role is a function of the destination's current concrete state and the
-event kind:
+The installed concrete role consumes both the explicit destination operation and the
+event's incoming-value meaning:
 
 [table:
     [th:
-        [: **Current state**]
-        [: **Event**]
+        [: **Destination**]
+        [: **Incoming value**]
         [: **Result**]
     ]
 
     [td:
-        [: `Unavailable`]
-        [: direct alias declaration: `Alias`, `AliasFromPlace`, `ExclusiveAlias` or
-        `ExclusiveAliasFromPlace`, or the entry `Fresh` that seeds a mutable parameter]
-        [: direct aliases become `Alias` with the event's access, while the entry `Fresh`
-        installs an exclusive alias, because a `Fresh` event carries no access kind]
+        [: `Define`, with any prior state]
+        [: direct alias: `Alias`, `AliasFromPlace`, `ExclusiveAlias` or
+        `ExclusiveAliasFromPlace`]
+        [: retire the old binding relationship and install an `Alias` with the event's access]
     ]
 
     [td:
-        [: `Unavailable`]
-        [: any value-producing event: `Fresh`, `Copy`, `Aggregate`, `Projection`,
-        `RebindValue::Fresh`, `RebindValue::AliasFromPlace`, call `Fresh` or call `AliasParams`]
-        [: the event-defined `Slot`]
+        [: `Define`, with any prior state]
+        [: produced value: `Fresh`, `Copy`, `Aggregate`, `Projection`, `Rebind` or call result]
+        [: retire the old binding relationship and install the event-defined `Slot`]
     ]
 
     [td:
-        [: `Slot`]
-        [: any definition]
-        [: replace the slot's represented generation, remain `Slot`, and retire the capabilities
-        held by every place that structurally overlaps the destination, covered projections
-        included]
+        [: `Update` to a `Slot`]
+        [: direct alias]
+        [: replace the represented value, retire overlapping holders and install an `Alias`]
     ]
 
     [td:
-        [: `Alias`, shared and exclusive alike]
-        [: any definition]
-        [: write through to the referent, preserve the `Alias`, create no generation and retire
-        nothing]
+        [: `Update` to a `Slot`]
+        [: produced value]
+        [: replace the represented generation, retire overlapping holders and remain `Slot`]
+    ]
+
+    [td:
+        [: `Update` to an `Alias`, shared or exclusive]
+        [: any incoming value]
+        [: write through to the referent, preserve the `Alias`, create no replacement
+        generation and retire no destination holder]
     ]
 ]
 
-Every row that installs or replaces a generation retires the capabilities held by places that structurally overlap the destination, covered projections included. That applies to both `Unavailable` rows as well as the `Slot` row, because a projection of a place can hold a capability before the place itself holds any state. Only the alias write-through row retires nothing, and that row is the reason retirement is keyed on write-through rather than on alias production. Matching only the destination's exact place would leave a capability held by a covered projection live after its storage had been replaced, and a later use of that stale capability reports a conflict that cannot happen.
+Mutable parameter entry is the separate ABI case described below. A direct alias can carry
+an undecidable residual path in its alias state. A slot can carry only a resolved node, so
+value-producing writers retain the typed residual-path refusal described under evaluation
+order. Binding freshness never implies an independent value graph.
 
-The table has no conflict row, because the role transition itself never diagnoses. A defining
-access cannot conflict with a loan in the reference, since `access_conflict_overlap` returns no
-overlap whenever `access.definition` holds (`loans.rs:266-269`), so a definition landing on an
-aliased destination is a write-through rather than a diagnosis.
+Every installing or replacing transition retires capabilities held by structurally
+overlapping places, including covered projections. RHS capture precedes that retirement.
+An update through an alias retires none of those destination holders and remains
+conflict-checked. The paired access consumes the explicit destination tag so an old alias
+cannot make a re-entered definition exercise or mutate its old referent.
 
-That statement is about the transition, not about the paired access. The reference computes an
-access row's `definition` flag as `use_row.definition && !origins.is_write_through_use(use_id)`
-(`loans.rs:227-234`), so the paired access of a write-through is deliberately reclassified as an
-ordinary mutation and stays conflict-checked. The oracle mirrors that rule, which is why a
-write-through through a mutable parameter can still report its defining write as the witness. Role
-selection and access legality are separate decisions, and only the first has no conflict outcome.
+Role selection and access legality remain separate. `Use.definition` describes a
+value-generation write for access reasoning. It is not the definition/update operation
+owned by `BindingDestination`. Ordinary updates through aliases are checked as mutation.
+The existing terminal unpaired shared-alias disagreement remains the separately recorded
+reference gap. This destination contract does not settle that gap.
 
-The alias row draws no distinction between a shared and an exclusive alias, because the reference
-draws none. `is_alias_only` tests a single `BindingMode::Alias` (`origins.rs:1414-1416`) and the
-alias arms return a write-through for any alias-backed destination (`origins.rs:1064-1069` and
-`1106-1111`).
+A direct alias installation issues its access capability. An alias update ignores the
+incoming binding relationship and issues no replacement alias capability. Value-producing
+relationships retain their provenance capabilities independently of binding role: a
+projection, aggregate field, rvalue rebind or `AliasParams` result may share storage while
+remaining slot-backed. These capabilities are shared and additive, with one per named call
+parameter or aggregate field. `CallResultProvenance::Alias` and `Unknown` remain unsupported
+by the oracle and retain their typed refusals.
 
-Retirement is keyed on write-through rather than on alias production. `holder_kills` returns false
-for a write-through event and otherwise ends any holder its destination overlaps
-(`loans.rs:790-805`), and its `Access` arm ends a holder for a defining write only when that write
-is not a write-through. So a slot replacement ends the destination's prior holders, a write-through
-leaves them live to be exercised by a later covered use, and a defining write with no paired
-provenance event still ends a covered holder.
-
-Capability issuance follows the selected row for the same reason. A write-through ignores the
-incoming source, so issuing a capability against that source would name a target the destination is
-not aliased to, and a later read of the destination would extend it into a conflict that cannot
-happen. The reference issues nothing there either, because `derive_alias_loans` accepts only
-initial aliases and `derive_provenance_loans` accepts only slot rebinds. So an installed alias
-issues the event's capability and a write-through issues none.
-
-A slot rebind is the one alias case that still carries a relationship. The reference emits a shared
-provenance capability when an alias-valued event replaces a slot, even where the syntax is exclusive,
-because the destination stays slot-backed and only its represented value has changed. The oracle
-emits the same shared capability, and takes its target from the assigned source rather than the
-destination's current union, because a CFG join can leave the destination an alias-backed
-alternative whose origins have nothing to do with this assignment.
-
-Projection and `AliasParams` destinations take the value-producing row like any other, matching
-`replace_generation(.., BindingMode::Slot, ..)` in the reference's projection arm
-(`origins.rs:1206-1213`) and result arm (`origins.rs:1367-1370`).
-
-Taking that row costs nothing now, because the relationship those destinations used to carry in
-their role is carried by a capability instead. Every arm of `derive_provenance_loans` that the
-oracle executes has an executing counterpart: a slot rebind, a projection, one capability per
-aggregate field and one per `AliasParams` index. All are shared, whatever the syntax says, and all
-are additive, which is why a result with several named arguments needs no alternatives and no
-inconclusive outcome. The reference also derives provenance loans for a
-`CallResultProvenance::Alias` and for an `Unknown` result (`loans.rs:516-553`). The oracle reaches
-neither, because it refuses both shapes first and reports a typed reason, per the unsupported
-shapes section. Those two arms are the exact provenance gap between the two sides.
-
-An aggregate field is held by the projected child place, falling back to the destination when the
-problem declares no such child, matching the reference's `projection_place` lookup and its
-`unwrap_or`. Holding the child rather than the root is what keeps a later write to one field from
-retiring the capabilities of its siblings.
-
-These capabilities fire on a write-through as well. Only the alias arms are gated on the selected
-role, because only they name the incoming source. Aggregating or calling into an established alias
-writes through to the referent, and the referent's fields genuinely do alias the field sources, so
-suppressing the capability there would report safety over a real conflict.
+An aggregate field's capability is held by its projected child place, falling back to the
+destination when the problem declares no such child. This keeps a write to one field from
+retiring its siblings' capabilities. Aggregate and call updates through an alias preserve
+independently valid incoming provenance relationships while retaining write-through.
 
 ### Mutable parameter entry
 
@@ -240,8 +232,13 @@ checks the parameter origin kind and the destination binding's `mutable` flag.
 
 An uninitialised destination has two rules:
 
-- A definition access (`Use.definition == true`) to an `Unavailable` place is initialization. It is legal, and it installs no state, so the paired provenance event still observes an `Unavailable` destination and owns the role decision. Were the access to install a slot first, every initial alias and projection would reach its writer already slot-backed and the `Unavailable` rows could never fire.
-- Any non-defining access to an `Unavailable` place is malformed normalized input and returns `CompilerError`.
+- A paired `BindingWrite(Define)` access, or an unpaired internal access with
+  `Use.definition == true`, may initialise an `Unavailable` place. It installs
+  no state, so the provenance writer still observes an unavailable destination
+  and owns the role decision. The paired definition's validity does not depend
+  on the separate generation-evidence bit.
+- Other accesses to an `Unavailable` place are malformed normalized input and
+  return `CompilerError`.
 
 Every normalized event holds one or more roles. An event that both changes state and issues a
 capability appears under both roles:
@@ -254,7 +251,7 @@ capability appears under both roles:
 
     [td:
         [: state mutation]
-        [: `Fresh`, `Alias`, `AliasFromPlace`, `ExclusiveAlias`, `ExclusiveAliasFromPlace`, `Copy`, `Projection`, `Rebind`, `Aggregate`, `ScopeExit`, `CallEffect`, `Access` in its definition arm]
+        [: `Fresh`, `Alias`, `AliasFromPlace`, `ExclusiveAlias`, `ExclusiveAliasFromPlace`, `Copy`, `Projection`, `Rebind`, `Aggregate`, `ScopeExit`, `CallEffect`, definition `Access` holder retirement and jump-argument destination installation]
     ]
 
     [td:
@@ -264,7 +261,7 @@ capability appears under both roles:
 
     [td:
         [: capability issue]
-        [: `Alias`, `AliasFromPlace`, `ExclusiveAlias`, `ExclusiveAliasFromPlace`, `Projection`, `Aggregate`, `CallArgument`, `CallEffect`, `LoanIssue`]
+        [: `Alias`, `AliasFromPlace`, `ExclusiveAlias`, `ExclusiveAliasFromPlace`, `Projection`, place-sourced `Rebind`, `Aggregate`, `CallArgument`, `CallEffect`, `LoanIssue`]
     ]
 
     [td:
@@ -302,10 +299,10 @@ Per-event runtime meaning, complete for all 16 `EventKind` variants:
         [: `Alias { source, destination, origins }`]
         [: a direct alias declaration. `destination` follows the transition table, using
         `resolve(source)` and the event's `Shared` access. It issues a shared capability held by
-        `destination`. The static `origins` set is ignored. Replacing a slot-backed destination
-        needs the source's resolved node alone, so a source that keeps a residual undecidable path
-        returns typed `UndecidableOverlap`. Installing onto an `Unavailable` destination keeps the
-        residual path in the `Alias` state and needs no refusal.]
+        `destination` when the operation installs an alias. The static `origins` set is ignored.
+        Alias state retains the resolved target's residual path, including when a definition
+        replaces an old slot or alias. An update through an established alias preserves its
+        referent and installs no replacement alias capability.]
     ]
 
     [td:
@@ -344,12 +341,13 @@ Per-event runtime meaning, complete for all 16 `EventKind` variants:
     [td:
         [: `Rebind { destination, value }`]
         [: `RebindValue::Fresh` follows the transition table with a fresh slot generation. On a
-        destination that is not alias-backed, `RebindValue::AliasFromPlace(place)` is
+        `Define` destination or a non-alias update, `RebindValue::AliasFromPlace(place)` is
         value-producing too, taking the slot generation of `resolve(place)` and returning typed
         `UndecidableOverlap` when that resolution keeps a residual undecidable path. On an
-        alias-backed destination it instead checks the source's availability, writes through to
-        the existing referent and returns before resolving the source place, so it adopts no
-        resolved node and refuses no residual path. `RebindValue::Alias(origins)` is unsupported
+        alias-backed `Update` destination it captures the source's resolved target, writes through to
+        the existing referent and preserves the destination's alias target and generation. Both paths
+        issue shared provenance held by the destination. That capability can carry a residual path
+        on an alias update, so only slot installation refuses it. `RebindValue::Alias(origins)` is unsupported
         and returns typed `Inconclusive`, see the unsupported-shapes section.]
     ]
 
@@ -370,7 +368,7 @@ Per-event runtime meaning, complete for all 16 `EventKind` variants:
 
     [td:
         [: `Terminator { kind }`]
-        [: control flow only, no state effect]
+        [: control-flow choice. A `Jump` also owns its atomic argument transfer]
     ]
 
     [td:
@@ -405,8 +403,10 @@ Terminator events carry one of the nine terminator kinds:
     ]
 
     [td:
-        [: `Jump { target }`]
-        [: one successor]
+        [: `Jump { target, arguments }`]
+        [: capture every incoming source before defining the explicit destinations as value-backed
+        bindings, then take the single successor. Paired source-read and destination-write
+        accesses remain normalized evidence]
     ]
 
     [td:
@@ -452,7 +452,7 @@ Terminator events carry one of the nine terminator kinds:
 
 Recoverable success and error arms become distinct executions because they are distinct terminators or distinct branch targets. The oracle never merges them.
 
-The projection element for `EventKind::Projection` comes from the `origin` row's `OriginKind::Projection { projection, .. }`. If the origin row has any other kind the problem is malformed and the oracle returns `CompilerError`. The builder normally makes the destination place the source place extended by that element. The oracle does not depend on it, because `emit_projection_write` targets an unrelated destination place.
+The projection element for `EventKind::Projection` comes from the `origin` row's `OriginKind::Projection { projection, .. }`. If the origin row has any other kind the problem is malformed and the oracle returns `CompilerError`. Expression projection reads the projected source and defines its produced value in a separate compiler temporary. An operation's projection result instead writes its explicit destination. Neither path defines or mutates source storage merely to prepare value provenance.
 
 The parameter entry rule above applies to the builder's explicit parameter `Fresh` events. It
 does not add a separate normalized event or capability.
@@ -471,7 +471,13 @@ Dynamic state is keyed by `PlaceId`, and a place is a root binding plus a projec
 
 When no candidate has state the accessed place is uninitialized. A definition access is then legal as initialization and installs no state, so the paired provenance event still observes an `Unavailable` destination and owns the role decision, per the uninitialised-destination rules above. Any other access is malformed normalized input and returns `CompilerError`.
 
-The access kind comes from `UseKind`: `Read` and `LoanObservation` are `Shared`, `Write` is `Exclusive`. `LoanObservation` behaves exactly like a read.
+The access kind comes from `UseKind`: `Read` and `LoanObservation` are `Shared`,
+while `Write` and `BindingWrite` are `Exclusive`. `LoanObservation` behaves exactly
+like a read. A paired `BindingWrite(Define(...))` checks a new binding occurrence
+rather than mutation through the destination's prior alias. A paired `Update`
+retains ordinary slot or alias checks. `Use.definition` remains separate generation
+replacement evidence for a slot update. An alias update stays a mutation regardless
+of that bit.
 
 Dynamic node overlap is decided by the oracle's own comparison and never by a static helper. Two targets with different nodes are disjoint. With the same node, compare remaining paths element by element over the common length. The element rules are:
 
@@ -484,9 +490,9 @@ Dynamic node overlap is decided by the oracle's own comparison and never by a st
 
 Undecidable is not a legality answer. The lazy rule applies only in the completed execution interval scan. There it records `UndecidableOverlap` when a pair has overlapping intervals and conflicting kinds, then returns `Inconclusive` only if no proven conflict is found.
 
-It does not apply to a writer that must store the resolved node. `Slot` state holds a generation and nothing else, so a residual undecidable path cannot be carried: storing the base node alone would make the destination compare EQUAL to the whole base node and manufacture a definite overlap out of an undecidable one, which is a false conflict rather than a lost precision. Every such writer therefore returns `UndecidableOverlap` immediately, before issuing capabilities or considering conflicts, carrying the resolved target as its left operand and the same node with an empty path as its right. Those writers are `Copy`, `Aggregate`, `Projection`, `RebindValue::AliasFromPlace` and a direct alias replacing a slot-backed destination.
+It does not apply to a writer that must store the resolved node. `Slot` state holds a generation and nothing else, so a residual undecidable path cannot be carried: storing the base node alone would make the destination compare EQUAL to the whole base node and manufacture a definite overlap out of an undecidable one, which is a false conflict rather than a lost precision. Every such writer therefore returns `UndecidableOverlap` immediately, before issuing capabilities or considering conflicts, carrying the resolved target as its left operand and the same node with an empty path as its right. Those writers are `Copy`, `Aggregate`, `Projection` and `RebindValue::AliasFromPlace` when they install a slot.
 
-A direct alias onto an `Unavailable` destination is the exception, because `Alias` state holds a target node AND a path, so it represents the residual faithfully and needs no refusal.
+A direct alias installation is the exception, because `Alias` state holds a target node AND a path, so it represents the residual faithfully and needs no refusal.
 
 ## Conflict decision: exact interval on a completed execution
 
@@ -578,31 +584,31 @@ One consequence touches an unsettled accepted rule. A capability that is never e
 
 `copy` creates a new dynamic graph that preserves internal alias topology.
 
-An alias-backed destination skips all of that: `Copy` performs only a non-materialising
+An `Update` destination that is alias-backed skips all of that: `Copy` performs only a non-materialising
 availability check on the source, applies the alias write-through row and returns, so source
-resolution, graph reconstruction and the residual-path refusal below apply only when the
-destination is not alias-backed.
+resolution, graph reconstruction and the residual-path refusal below apply to definitions
+and non-alias updates.
 
-When the destination is not alias-backed, resolve the source target through the evaluation-order descent. If resolution leaves any non-empty path, `Copy` returns typed `UndecidableOverlap` immediately. It does not copy the selected node or issue capabilities. The refusal carries the resolved target as its left operand and the same node with an empty path as its right operand.
+For a `Define` destination or an update that is not alias-backed, resolve the source target through the evaluation-order descent. If resolution leaves any non-empty path, `Copy` returns typed `UndecidableOverlap` immediately. It does not copy the selected node or issue capabilities. The refusal carries the resolved target as its left operand and the same node with an empty path as its right operand.
 
 Only an empty-path source proceeds. Walk every node reachable from its root through aggregate child edges. Create exactly one fresh node per distinct reachable source node and record the correspondence in a map. Rebuild each child edge between corresponding nodes.
 
 Because the correspondence is a map keyed by source node, two child edges that shared one source node still share one result node. Internal sharing is preserved and the result graph is disjoint from the source graph.
 
-The destination follows the transition table with the copied root as the event-defined slot generation. This step is reached only when the destination is not alias-backed and source resolution leaves an empty path.
+The destination follows the transition table with the copied root as the event-defined slot generation. This step requires a `Define` destination or a non-alias update and an empty-path source resolution.
 
 ## Aggregates
 
 `Aggregate { destination, origin, fields }` branches on the destination's row. An alias-backed
-destination writes through with no aggregate construction, and otherwise the event creates one
+`Update` destination writes through with no aggregate construction, and otherwise the event creates one
 fresh outer node and gives it to the transition table as the event-defined slot generation.
 
-An alias-backed destination first checks every field source is available without materialising
+An alias-backed `Update` destination first checks every field source is available without materialising
 state, then applies the alias write-through row, which allocates no outer generation and records
 no aggregate children. It still resolves each field source through descent and refuses a residual
 undecidable field path the same way before the event completes.
 
-On a destination that is not alias-backed, each field source is resolved through descent. If any
+For a `Define` destination or an update that is not alias-backed, each field source is resolved through descent. If any
 resolved source retains a non-empty path, `Aggregate` returns typed `UndecidableOverlap`
 immediately. It does not create the aggregate outer node or issue a capability. The refusal
 carries the resolved source target as its left operand and the same node with an empty path as
@@ -613,7 +619,7 @@ Two fields whose source places resolve to the same node therefore share one chil
 
 Two fields resolving to DIFFERENT nodes under one repeated projection are a different matter in the arm that records children. The children map keys on the projection alone, so keeping both is impossible and keeping the later one would detach the earlier child from every later observation of that position. The reference has semantics for the shape either way: its aggregate arm extends the projected place's alternatives with every repeated field's origins, so the projected slot ends up holding the union (`origins.rs:1253-1322`). The runtime graph holds one node per position and cannot represent that union, so the repeat returns typed `Inconclusive`. This applies to an identified `Field` or `FixedIndex` exactly as it does to a keyless domain. A keyless domain has no key to tell its children apart and an identified position would need the union, and neither is representable here.
 
-Aggregate construction is not an access to the child, so it performs no access check there. The arm that records children issues one shared provenance capability per field, held by the projected child place, because the child genuinely aliases the field source. An alias-backed destination that writes through issues those same capabilities after resolving its fields, even though it records no children. Accesses that reach a child through the parent resolve to the child node by the descent in the evaluation-order section.
+Aggregate construction is not an access to the child, so it performs no access check there. The arm that records children issues one shared provenance capability per field, held by the projected child place, because the child genuinely aliases the field source. An alias-backed `Update` destination that writes through issues those same capabilities after resolving its fields, even though it records no children. Accesses that reach a child through the parent resolve to the child node by the descent in the evaluation-order section.
 
 ## Calls
 
@@ -662,7 +668,7 @@ Two rules keep the exercise records of sibling arguments and repeated invocation
     ]
 ]
 
-Both supported arms install a generation only when the result place is not already alias-backed. When it is, the alias write-through row applies: the call writes through to the referent and defines no generation, so there is nothing for the trailing definition to confirm. That trailing write therefore stays a plain write-through definition and remains conflict-checked under the direct rule, rather than becoming a pending confirmation.
+Both supported arms install a generation for `Define` destinations and for slot-backed updates. An alias-backed `Update` applies the alias write-through row: the call writes through to the referent and defines no generation, so there is nothing for the trailing definition to confirm. That trailing write therefore stays a plain write-through definition and remains conflict-checked under the direct rule, rather than becoming a pending confirmation.
 
 A pending confirmation is registered only for a result that installs or replaces a slot at a place with no projections. A projected result place can never be confirmed, because the builder emits call results into a local's root place and validation rejects a projected defining write, so registering one could only leave an entry that never clears.
 
@@ -680,7 +686,7 @@ Unsupported normalized shapes return typed `Inconclusive`. They never become imp
 - `CallResultProvenance::Alias(origins)`: same reason.
 - `CallResultProvenance::Unknown(reason)`: carry the `CallResultUnknownReason`.
 - An undecidable projection comparison that would change a conflict outcome, per the evaluation-order section.
-- A writer whose resolved source keeps a residual undecidable path where the destination can store only a node, reported as `UndecidableOverlap` before anything is installed. This covers `Copy`, `Aggregate`, `Projection`, `RebindValue::AliasFromPlace` and a direct alias replacing a slot-backed destination. A direct alias onto an `Unavailable` destination is not affected, because `Alias` state carries the path.
+- A writer whose resolved source keeps a residual undecidable path where the destination can store only a node, reported as `UndecidableOverlap` before anything is installed. This covers slot-installing `Copy`, `Aggregate`, `Projection` and `RebindValue::AliasFromPlace`. A direct alias installation is not affected, because `Alias` state carries the path.
 - Every bound truncation, per the bounds section.
 - An aggregate storing two distinct nodes under one repeated projection, reported as `RepeatedProjectionChild`. The children map holds one node per position, and the reference instead unions every repeated field's origins into the projected slot, which this graph cannot represent. Two fields resolving to the SAME node stay supported, because that is one shared child rather than a collision, and it is what makes a repeated child alias observable. Modelling a position that holds several nodes belongs to the aggregate and builtin storage package.
 - A `Loan` row naming several DISTINCT holders, reported as `MultiHolderLoan`. The runtime ends a capability once, so a partly retired capability would report safe for an access its surviving holders do not cover. There is no reference semantics to mirror: the static solver accepts such a row but applies its `uses` and `kills` capability-wide rather than per holder, so per-holder retirement would be invented rather than checked. Nothing in production emits one, since HIR extraction publishes an empty explicit loan table and every derived loan fact and generated row carries exactly one holder. The count is over distinct places, because validation does not require holder uniqueness and a repeated place collapses to one holder with nothing to retire twice, so a row naming one place twice reaches a real outcome.

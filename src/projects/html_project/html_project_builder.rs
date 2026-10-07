@@ -614,7 +614,7 @@ impl HtmlProjectBuilder {
             type_environment: &module.executable.type_environment,
             const_fragments: &module.metadata.const_top_level_fragments,
             page_metadata_plan,
-            borrow_analysis: &module.executable.borrow_analysis,
+            borrow_facts: module.executable.borrow_analysis.borrow_facts(),
             numeric_proofs: &module.executable.numeric_proofs,
             project_name,
             document_config,

@@ -9,9 +9,9 @@ use crate::backends::js::JsEmitter;
 impl<'hir> JsEmitter<'hir> {
     /// Emits binding-mode transition helpers for borrow and value assignment.
     ///
-    /// WHAT: `__moth_assign_borrow` makes a fresh slot binding point at another reference (alias
-    /// mode), or write-through if already an alias; `__moth_assign_value` collapses an alias and
-    /// writes a plain value into the binding's slot.
+    /// WHAT: `__moth_assign_borrow` makes an existing slot binding point at another reference,
+    /// or writes through if it is already an alias. `__moth_assign_value` writes a plain value
+    /// through an alias or into the binding's own slot.
     /// WHY: Moth has distinct borrow-assign and value-assign semantics that must map to
     /// distinct JS operations — conflating them would silently break aliasing.
     pub(crate) fn emit_runtime_alias_helpers(&mut self) {
@@ -23,6 +23,9 @@ impl<'hir> JsEmitter<'hir> {
             emitter
                 .with_indent(|em| em.emit_line("return __moth_write(binding, __moth_read(ref));"));
             emitter.emit_line("}");
+            // Rebinding a slot to itself, including through an existing alias, would install a
+            // cyclic alias chain that `__moth_resolve` cannot terminate.
+            emitter.emit_line("if (__moth_resolve(ref) === binding) { return binding; }");
             emitter.emit_line("binding.__moth_mode = \"alias\";");
             emitter.emit_line("binding.__moth_target = ref;");
             emitter.emit_line("return binding;");

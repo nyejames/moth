@@ -174,6 +174,7 @@ impl DiagnosticPayload {
             }
 
             DiagnosticPayload::SourceSpanCapacity { .. }
+            | DiagnosticPayload::CompilerCapacityExceeded { .. }
             | DiagnosticPayload::InvalidCharacter { .. }
             | DiagnosticPayload::InvalidPath { .. }
             | DiagnosticPayload::InvalidStructDefaultValue => {}

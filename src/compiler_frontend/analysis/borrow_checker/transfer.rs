@@ -13,11 +13,14 @@ mod facts;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::diagnostics::BorrowDiagnostics;
 use crate::compiler_frontend::analysis::borrow_checker::state::{BorrowState, FunctionLayout};
+#[cfg(any(test, feature = "show_borrow_checker"))]
+use crate::compiler_frontend::analysis::borrow_checker::types::BorrowStateSnapshot;
 use crate::compiler_frontend::analysis::borrow_checker::types::{
-    BorrowStateSnapshot, StatementBorrowFact, TerminatorBorrowFact, ValueBorrowFact,
+    StatementBorrowFact, TerminatorBorrowFact, ValueBorrowFact,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::HirBlock;
+use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
@@ -41,6 +44,7 @@ pub(super) struct BorrowTransferContext<'a> {
     pub module_private_call_summaries:
         &'a FxHashMap<ModulePrivateExecutableIdentity, PublicCallSummary>,
     pub generated_call_summaries: &'a FxHashMap<GeneratedFunctionIdentity, PublicCallSummary>,
+    pub expressions: &'a HirExpressionStore,
     pub diagnostics: BorrowDiagnostics<'a>,
 }
 
@@ -53,7 +57,8 @@ pub(super) struct BlockTransferStats {
     pub conflicts_checked: usize,
     pub mutable_call_sites: usize,
 
-    // Per-statement entry snapshots.
+    // Per-statement snapshots are diagnostic presentation data, not borrow facts.
+    #[cfg(any(test, feature = "show_borrow_checker"))]
     pub statement_entry_states: Vec<(HirNodeId, BorrowStateSnapshot)>,
 
     // Emitted borrow facts.
@@ -76,6 +81,7 @@ pub(super) fn transfer_block(
     let mut value_fact_buffer = ValueFactBuffer::new(layout.local_count());
 
     for statement in &block.statements {
+        #[cfg(any(test, feature = "show_borrow_checker"))]
         stats
             .statement_entry_states
             .push((statement.id, state.to_snapshot(&layout.local_ids)));
@@ -105,6 +111,7 @@ pub(super) fn transfer_block(
     // Aggregate literal children in return terminators receive optional transfer analysis.
     let mut aggregate_context = AggregateTransferContext {
         diagnostics: &context.diagnostics,
+        expressions: context.expressions,
         value_fact_buffer: &mut value_fact_buffer,
     };
 
@@ -117,7 +124,7 @@ pub(super) fn transfer_block(
             transfer_aggregate_expression_ownership(
                 layout,
                 state,
-                value,
+                *value,
                 block.id,
                 terminator_order,
                 location,
@@ -130,7 +137,7 @@ pub(super) fn transfer_block(
             transfer_aggregate_expression_ownership(
                 layout,
                 state,
-                result,
+                *result,
                 block.id,
                 terminator_order,
                 location,

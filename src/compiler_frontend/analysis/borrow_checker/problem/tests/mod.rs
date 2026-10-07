@@ -3,20 +3,22 @@
 mod fixtures;
 
 use super::{
-    AccessKind, BindingId, BlockId, BorrowProblem, Call, CallArgument, CallEffect, CallId,
-    CallResult, CallResultProvenance, CallResultUnknownReason, Event, EventId, EventKind,
-    EventSource, OriginKind, PlaceId, PlaceOverlap, PointId, ProgramPoint, ProjectionElem,
-    RebindValue, TerminatorEventKind, Use, UseId, UseKind, ValueOrigin, ValueOriginId, from_hir,
+    AccessKind, BindingDestination, BindingId, BlockId, BorrowProblem, Call, CallArgument,
+    CallEffect, CallId, CallResult, CallResultProvenance, CallResultUnknownReason, Event, EventId,
+    EventKind, EventSource, OriginKind, PlaceId, PlaceOverlap, PointId, ProgramPoint,
+    ProjectionElem, RebindValue, TerminatorEventKind, Use, UseId, UseKind, ValueOrigin,
+    ValueOriginId, from_hir,
 };
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
-use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::{
@@ -25,8 +27,10 @@ use crate::compiler_frontend::hir::ids::{
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::regions::HirRegion;
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
+};
+use crate::compiler_frontend::hir::terminators::{HirJumpArgument, HirTerminator};
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
     PublicCallParameterSummary, PublicCallSummary, PublicCallTransferEffect,
@@ -128,6 +132,22 @@ fn borrow_problem_rejects_projected_binding_definitions() {
 }
 
 #[test]
+fn borrow_problem_rejects_typed_definition_of_projected_place() {
+    let mut parts = copy();
+    let projected = PlaceId::new(1);
+    parts.places[projected.index()] =
+        super::Place::new(projected, BindingId::new(0), vec![ProjectionElem::Field(0)]);
+    let EventKind::Fresh { destination, .. } = &mut parts.events[0].kind else {
+        unreachable!("copy fixture starts with a fresh writer")
+    };
+    *destination = BindingDestination::Define(projected);
+
+    let error = BorrowProblem::new(parts).expect_err("a definition must name a local binding");
+    assert!(matches!(error.error_type, ErrorType::Compiler));
+    assert!(error.msg.contains("cannot define projected place"));
+}
+
+#[test]
 fn borrow_problem_same_statement_access_fixture_preserves_event_order_at_one_point() {
     let problem = BorrowProblem::new(same_statement_access_order())
         .expect("same-statement access fixture should validate");
@@ -165,7 +185,7 @@ fn borrow_problem_malformed_unowned_event_fails_atomic_construction() {
         EventId::new(1),
         PointId::new(1),
         EventKind::Fresh {
-            destination: PlaceId::new(0),
+            destination: BindingDestination::Define(PlaceId::new(0)),
             origin: ValueOriginId::new(0),
         },
         EventSource::none(),
@@ -194,6 +214,7 @@ fn borrow_problem_rejects_nonterminal_terminator_on_an_exit_block() {
     parts.events[0].kind = EventKind::Terminator {
         kind: TerminatorEventKind::Jump {
             target: BlockId::new(0),
+            arguments: Box::new([]),
         },
     };
 
@@ -324,7 +345,7 @@ fn borrow_problem_rejects_call_result_alias_parameter_out_of_range() {
     ));
     if let EventKind::CallEffect(effect) = &mut parts.events[1].kind {
         effect.result = Some(CallResult {
-            place: PlaceId::new(0),
+            destination: BindingDestination::Define(PlaceId::new(0)),
             origin: ValueOriginId::new(1),
         });
     }
@@ -346,7 +367,7 @@ fn borrow_problem_rejects_empty_alias_params() {
     ));
     if let EventKind::CallEffect(effect) = &mut parts.events[1].kind {
         effect.result = Some(CallResult {
-            place: PlaceId::new(0),
+            destination: BindingDestination::Define(PlaceId::new(0)),
             origin: ValueOriginId::new(1),
         });
     }
@@ -400,7 +421,7 @@ fn borrow_problem_rejects_call_result_origin_from_another_call() {
     ));
     if let EventKind::CallEffect(effect) = &mut parts.events[1].kind {
         effect.result = Some(CallResult {
-            place: PlaceId::new(0),
+            destination: BindingDestination::Define(PlaceId::new(0)),
             origin: ValueOriginId::new(1),
         });
     }
@@ -466,6 +487,47 @@ fn borrow_problem_hir_extractor_preserves_ordered_events_and_scope_exit() {
 }
 
 #[test]
+fn borrow_problem_hir_extractor_keeps_direct_self_update_as_non_defining_access() {
+    let (module, function) = hir_direct_self_update_fixture();
+    let problem = from_hir(&module, &function, None, None).expect("self-update HIR should extract");
+    let self_update_events = problem
+        .events()
+        .iter()
+        .filter(|event| event.source.hir_node == Some(HirNodeId(1)))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        self_update_events.len(),
+        2,
+        "a direct self-update should only read the place and check its write"
+    );
+    let EventKind::Access {
+        use_id: read_use_id,
+    } = &self_update_events[0].kind
+    else {
+        panic!("the self-update should read its source before writing")
+    };
+    let EventKind::Access {
+        use_id: write_use_id,
+    } = &self_update_events[1].kind
+    else {
+        panic!("the self-update should end with an ordinary write access")
+    };
+    let read_use = &problem.uses()[(*read_use_id).index()];
+    let write_use = &problem.uses()[(*write_use_id).index()];
+
+    assert_eq!(read_use.kind, UseKind::Read);
+    assert_eq!(write_use.kind, UseKind::Write);
+    assert_eq!(read_use.place, write_use.place);
+    assert!(!write_use.definition);
+    assert!(
+        problem.places()[write_use.place.index()]
+            .projections
+            .is_empty()
+    );
+}
+
+#[test]
 fn borrow_problem_hir_extractor_handles_constant_and_runtime_structural_strings() {
     let (module, function) = hir_structural_string_return_fixture(ValueKind::Const);
     let constant = from_hir(&module, &function, None, None)
@@ -494,13 +556,18 @@ fn borrow_problem_hir_extractor_handles_constant_and_runtime_structural_strings(
 fn borrow_problem_hir_extractor_reads_the_returned_value_before_scope_exit() {
     let local = LocalId(0);
     let region = RegionId(0);
-    let module = module_with_block(HirBlock {
-        id: HirBlockId(0),
-        region,
-        locals: vec![hir_local(local, region)],
-        statements: Vec::new(),
-        terminator: HirTerminator::Return(load_expression(0, local, region)),
-    });
+    let mut expressions = HirExpressionStore::default();
+    let returned = load_expression(&mut expressions, local, region);
+    let module = module_with_block(
+        HirBlock {
+            id: HirBlockId(0),
+            region,
+            locals: vec![hir_local(local, region)],
+            statements: Vec::new(),
+            terminator: HirTerminator::Return(returned),
+        },
+        expressions,
+    );
     let function = HirFunction {
         id: FunctionId(0),
         entry: HirBlockId(0),
@@ -536,7 +603,10 @@ fn borrow_problem_hir_extractor_reads_the_returned_value_before_scope_exit() {
 fn borrow_problem_hir_extractor_transfers_jump_argument_before_edge_scope_exit() {
     let source_local = LocalId(0);
     let destination_local = LocalId(1);
-    let (module, function) = jump_argument_fixture(vec![source_local]);
+    let (module, function) = jump_argument_fixture(vec![HirJumpArgument {
+        source: source_local,
+        destination: destination_local,
+    }]);
     let problem =
         from_hir(&module, &function, None, None).expect("jump argument HIR should extract");
 
@@ -573,7 +643,8 @@ fn borrow_problem_hir_extractor_transfers_jump_argument_before_edge_scope_exit()
         EventKind::Access { use_id } => {
             let use_row = &problem.uses()[use_id.index()];
             use_row.place == destination_place
-                && use_row.kind == UseKind::Write
+                && use_row.kind
+                    == UseKind::BindingWrite(BindingDestination::Define(destination_place))
                 && use_row.definition
         }
         _ => false,
@@ -599,9 +670,12 @@ fn borrow_problem_hir_extractor_transfers_jump_argument_before_edge_scope_exit()
 }
 
 #[test]
-fn borrow_problem_hir_extractor_uses_alias_from_place_for_jump_argument_destination() {
+fn borrow_problem_hir_extractor_records_jump_as_atomic_edge_definition() {
     let source_local = LocalId(0);
-    let (module, function) = jump_argument_fixture(vec![source_local]);
+    let (module, function) = jump_argument_fixture(vec![HirJumpArgument {
+        source: source_local,
+        destination: LocalId(1),
+    }]);
     let problem =
         from_hir(&module, &function, None, None).expect("jump argument HIR should extract");
 
@@ -618,28 +692,73 @@ fn borrow_problem_hir_extractor_uses_alias_from_place_for_jump_argument_destinat
         .expect("destination place should be interned")
         .id;
 
-    assert!(problem.events().iter().any(|event| matches!(
-        &event.kind,
-        EventKind::AliasFromPlace { source, destination }
-            if *source == source_place && *destination == destination_place
-    )));
+    let jump_index = problem
+        .events()
+        .iter()
+        .position(|event| {
+            matches!(
+                &event.kind,
+                EventKind::Terminator {
+                    kind: TerminatorEventKind::Jump { .. }
+                }
+            )
+        })
+        .expect("jump terminator should be emitted");
+    let arguments = match &problem.events()[jump_index].kind {
+        EventKind::Terminator {
+            kind: TerminatorEventKind::Jump { arguments, .. },
+        } => arguments,
+        _ => unreachable!(),
+    };
+    assert_eq!(
+        arguments.as_ref(),
+        [super::JumpArgument {
+            source: source_place,
+            destination: BindingDestination::Define(destination_place),
+        }]
+    );
     assert!(!problem.events().iter().any(|event| matches!(
         &event.kind,
-        EventKind::Fresh { destination, .. } if *destination == destination_place
+        EventKind::AliasFromPlace { .. } | EventKind::ExclusiveAliasFromPlace { .. }
     )));
+    let source_read = problem
+        .events()
+        .iter()
+        .position(|event| match &event.kind {
+            EventKind::Access { use_id } => {
+                let use_row = &problem.uses()[use_id.index()];
+                use_row.place == source_place && use_row.kind == UseKind::Read
+            }
+            _ => false,
+        })
+        .expect("jump must read its source before the edge transfer");
+    let destination_write = problem
+        .events()
+        .iter()
+        .position(|event| match &event.kind {
+            EventKind::Access { use_id } => {
+                let use_row = &problem.uses()[use_id.index()];
+                use_row.kind == UseKind::BindingWrite(BindingDestination::Define(destination_place))
+            }
+            _ => false,
+        })
+        .expect("jump must record its edge destination definition");
+    assert!(source_read < destination_write);
+    assert!(destination_write < jump_index);
 }
 
 #[test]
-fn borrow_problem_hir_extractor_rejects_jump_argument_count_above_successor_locals() {
-    let (module, function) = jump_argument_fixture(vec![LocalId(0), LocalId(0)]);
+fn borrow_problem_hir_extractor_rejects_duplicate_jump_destinations() {
+    let duplicate = HirJumpArgument {
+        source: LocalId(0),
+        destination: LocalId(1),
+    };
+    let (module, function) = jump_argument_fixture(vec![duplicate, duplicate]);
     let error = from_hir(&module, &function, None, None)
-        .expect_err("too many jump arguments must fail extraction");
+        .expect_err("an edge cannot define one destination more than once");
 
     assert!(matches!(error.error_type, ErrorType::Compiler));
-    assert!(error.msg.contains("jump edge into block"));
-    assert!(error.msg.contains("BlockId(1)"));
-    assert!(error.msg.contains("2 argument(s)"));
-    assert!(error.msg.contains("only 1 local(s)"));
+    assert!(error.msg.contains("destination"));
 }
 
 #[test]
@@ -667,23 +786,33 @@ fn borrow_problem_hir_extractor_lowers_multiple_disjoint_jump_arguments() {
     let destination_left = place_for_local(LocalId(2));
     let destination_right = place_for_local(LocalId(3));
 
-    let transfers = problem
+    let arguments = problem
         .events()
         .iter()
         .filter_map(|event| match &event.kind {
-            EventKind::AliasFromPlace {
-                source,
-                destination,
-            } => Some((*source, *destination)),
+            EventKind::Terminator {
+                kind: TerminatorEventKind::Jump { arguments, .. },
+            } if !arguments.is_empty() => Some(arguments),
             _ => None,
         })
-        .collect::<Vec<_>>();
-    assert_eq!(transfers.len(), 2);
-    assert!(transfers.contains(&(source_right, destination_left)));
-    assert!(transfers.contains(&(source_left, destination_right)));
+        .next()
+        .expect("back edge should retain its parallel argument pairs");
+    assert_eq!(
+        arguments.as_ref(),
+        [
+            super::JumpArgument {
+                source: source_right,
+                destination: BindingDestination::Define(destination_left),
+            },
+            super::JumpArgument {
+                source: source_left,
+                destination: BindingDestination::Define(destination_right),
+            },
+        ]
+    );
 }
 #[test]
-fn borrow_problem_hir_extractor_skips_self_copy_jump_argument_but_transfers_disjoint_pair() {
+fn borrow_problem_hir_extractor_defines_self_and_disjoint_jump_arguments() {
     let (module, function) = self_copy_and_disjoint_jump_argument_fixture();
     let problem = from_hir(&module, &function, None, None).expect("jump arguments should extract");
 
@@ -705,67 +834,93 @@ fn borrow_problem_hir_extractor_skips_self_copy_jump_argument_but_transfers_disj
     let source_place = place_for_local(LocalId(0));
     let destination_place = place_for_local(LocalId(2));
 
-    let self_copy_events = problem
+    let arguments = problem
         .events()
         .iter()
-        .filter(|event| match &event.kind {
-            EventKind::Access { use_id } => problem.uses()[use_id.index()].place == self_copy_place,
-            EventKind::AliasFromPlace {
-                source,
-                destination,
-            }
-            | EventKind::ExclusiveAliasFromPlace {
-                source,
-                destination,
-            } => *source == self_copy_place || *destination == self_copy_place,
-            _ => false,
-        })
-        .count();
-    assert_eq!(self_copy_events, 0);
-
-    let transfers = problem
-        .events()
-        .iter()
-        .filter_map(|event| match &event.kind {
-            EventKind::AliasFromPlace {
-                source,
-                destination,
-            }
-            | EventKind::ExclusiveAliasFromPlace {
-                source,
-                destination,
-            } => Some((*source, *destination)),
+        .find_map(|event| match &event.kind {
+            EventKind::Terminator {
+                kind: TerminatorEventKind::Jump { arguments, .. },
+            } => Some(arguments),
             _ => None,
         })
-        .collect::<Vec<_>>();
-    assert_eq!(transfers, vec![(source_place, destination_place)]);
+        .expect("jump edge should retain both argument definitions");
+    assert_eq!(
+        arguments.as_ref(),
+        [
+            super::JumpArgument {
+                source: self_copy_place,
+                destination: BindingDestination::Define(self_copy_place),
+            },
+            super::JumpArgument {
+                source: source_place,
+                destination: BindingDestination::Define(destination_place),
+            },
+        ]
+    );
 }
 
 #[test]
-fn borrow_problem_hir_extractor_rejects_cross_pair_jump_argument_overlap() {
+fn borrow_problem_hir_extractor_keeps_cross_pair_jump_swaps_atomic() {
     let (module, function) = overlapping_jump_argument_fixture();
-    let error = from_hir(&module, &function, None, None)
-        .expect_err("cross-pair jump argument overlap must fail extraction");
-
-    assert!(matches!(error.error_type, ErrorType::Compiler));
-    assert!(error.msg.contains("overlapping jump arguments"));
-    assert!(error.msg.contains("BlockId(0)"));
-    assert!(error.msg.contains("LocalId(0)"));
-    assert!(error.msg.contains("pair 0"));
-    assert!(error.msg.contains("pair 1"));
+    let problem = from_hir(&module, &function, None, None)
+        .expect("cross-pair source and destination reuse is a parallel swap");
+    let place_for_local = |local| {
+        let binding = problem
+            .bindings()
+            .iter()
+            .find(|binding| binding.hir_local == Some(local))
+            .expect("fixture local should have a normalized binding")
+            .id;
+        problem
+            .places()
+            .iter()
+            .find(|place| place.root == binding && place.projections.is_empty())
+            .map(|place| place.id)
+            .expect("fixture local should have a normalized place")
+    };
+    let left = place_for_local(LocalId(0));
+    let right = place_for_local(LocalId(1));
+    let arguments = problem
+        .events()
+        .iter()
+        .find_map(|event| match &event.kind {
+            EventKind::Terminator {
+                kind: TerminatorEventKind::Jump { arguments, .. },
+            } if !arguments.is_empty() => Some(arguments),
+            _ => None,
+        })
+        .expect("back edge should retain its parallel swap arguments");
+    assert_eq!(
+        arguments.as_ref(),
+        [
+            super::JumpArgument {
+                source: right,
+                destination: BindingDestination::Define(left),
+            },
+            super::JumpArgument {
+                source: left,
+                destination: BindingDestination::Define(right),
+            },
+        ]
+    );
 }
 
 #[test]
 fn borrow_problem_hir_extractor_seeds_parameter_origins() {
     let local = LocalId(0);
     let region = RegionId(0);
-    let module = module_with_block(HirBlock {
-        id: HirBlockId(0),
-        region,
-        locals: vec![hir_local(local, region)],
-        statements: Vec::new(),
-        terminator: HirTerminator::Return(load_expression(0, local, region)),
-    });
+    let mut expressions = HirExpressionStore::default();
+    let returned = load_expression(&mut expressions, local, region);
+    let module = module_with_block(
+        HirBlock {
+            id: HirBlockId(0),
+            region,
+            locals: vec![hir_local(local, region)],
+            statements: Vec::new(),
+            terminator: HirTerminator::Return(returned),
+        },
+        expressions,
+    );
     let function = HirFunction {
         id: FunctionId(0),
         entry: HirBlockId(0),
@@ -782,7 +937,7 @@ fn borrow_problem_hir_extractor_seeds_parameter_origins() {
     );
     assert!(problem.events().iter().any(|event| matches!(
         event.kind,
-        EventKind::Fresh { destination, .. } if destination.raw() == 0
+        EventKind::Fresh { destination, .. } if destination.place().raw() == 0
     )));
 }
 
@@ -791,16 +946,18 @@ fn borrow_problem_hir_extractor_places_scope_exit_on_the_losing_edge() {
     let parent = RegionId(0);
     let child = RegionId(1);
     let local = LocalId(0);
-    let condition = HirExpression {
-        id: HirValueId(0),
-        kind: HirExpressionKind::Bool(true),
-        ty: builtin_type_ids::BOOL,
-        value_kind: ValueKind::RValue,
-        region: child,
-        span: None,
-    };
-    let module = HirModule {
-        blocks: vec![
+    let mut expressions = HirExpressionStore::default();
+    let condition = hir_expression(
+        &mut expressions,
+        HirExpressionKind::Bool(true),
+        builtin_type_ids::BOOL,
+        ValueKind::RValue,
+        child,
+    );
+    let then_value = int_expression(&mut expressions, 1, child);
+    let else_value = int_expression(&mut expressions, 2, parent);
+    let module = module_with_blocks(
+        vec![
             HirBlock {
                 id: HirBlockId(0),
                 region: child,
@@ -817,22 +974,22 @@ fn borrow_problem_hir_extractor_places_scope_exit_on_the_losing_edge() {
                 region: child,
                 locals: Vec::new(),
                 statements: Vec::new(),
-                terminator: HirTerminator::Return(int_expression(1, 1, child)),
+                terminator: HirTerminator::Return(then_value),
             },
             HirBlock {
                 id: HirBlockId(2),
                 region: parent,
                 locals: Vec::new(),
                 statements: Vec::new(),
-                terminator: HirTerminator::Return(int_expression(2, 2, parent)),
+                terminator: HirTerminator::Return(else_value),
             },
         ],
-        regions: vec![
+        vec![
             HirRegion::lexical(parent, None),
             HirRegion::lexical(child, Some(parent)),
         ],
-        ..HirModule::new()
-    };
+        expressions,
+    );
     let function = function_for(HirBlockId(0));
     let problem = from_hir(&module, &function, None, None).expect("edge scope HIR should extract");
 
@@ -894,8 +1051,11 @@ fn borrow_problem_hir_extractor_places_scope_exit_on_the_losing_edge() {
     assert!(matches!(
         &problem.events()[edge_events[1].index()].kind,
         EventKind::Terminator {
-            kind: TerminatorEventKind::Jump { target }
-        } if *target == outgoing_edges[0].to
+            kind: TerminatorEventKind::Jump {
+                target,
+                arguments,
+            }
+        } if *target == outgoing_edges[0].to && arguments.is_empty()
     ));
 }
 
@@ -904,8 +1064,18 @@ fn borrow_problem_hir_extractor_carries_ancestor_scope_exit_to_later_blocks() {
     let parent = RegionId(0);
     let child = RegionId(1);
     let local = LocalId(0);
-    let module = HirModule {
-        blocks: vec![
+    let mut expressions = HirExpressionStore::default();
+    let condition = hir_expression(
+        &mut expressions,
+        HirExpressionKind::Bool(true),
+        builtin_type_ids::BOOL,
+        ValueKind::RValue,
+        child,
+    );
+    let child_value = int_expression(&mut expressions, 2, child);
+    let parent_value = int_expression(&mut expressions, 3, parent);
+    let module = module_with_blocks(
+        vec![
             HirBlock {
                 id: HirBlockId(0),
                 region: child,
@@ -922,14 +1092,7 @@ fn borrow_problem_hir_extractor_carries_ancestor_scope_exit_to_later_blocks() {
                 locals: Vec::new(),
                 statements: Vec::new(),
                 terminator: HirTerminator::If {
-                    condition: HirExpression {
-                        id: HirValueId(1),
-                        kind: HirExpressionKind::Bool(true),
-                        ty: builtin_type_ids::BOOL,
-                        value_kind: ValueKind::RValue,
-                        region: child,
-                        span: None,
-                    },
+                    condition,
                     then_block: HirBlockId(2),
                     else_block: HirBlockId(3),
                 },
@@ -939,22 +1102,22 @@ fn borrow_problem_hir_extractor_carries_ancestor_scope_exit_to_later_blocks() {
                 region: child,
                 locals: Vec::new(),
                 statements: Vec::new(),
-                terminator: HirTerminator::Return(int_expression(2, 2, child)),
+                terminator: HirTerminator::Return(child_value),
             },
             HirBlock {
                 id: HirBlockId(3),
                 region: parent,
                 locals: Vec::new(),
                 statements: Vec::new(),
-                terminator: HirTerminator::Return(int_expression(3, 3, parent)),
+                terminator: HirTerminator::Return(parent_value),
             },
         ],
-        regions: vec![
+        vec![
             HirRegion::lexical(parent, None),
             HirRegion::lexical(child, Some(parent)),
         ],
-        ..HirModule::new()
-    };
+        expressions,
+    );
     let function = function_for(HirBlockId(0));
     let problem = from_hir(&module, &function, None, None)
         .expect("ancestor scope should survive through the intermediate block");
@@ -1002,22 +1165,24 @@ fn borrow_problem_hir_extractor_deduplicates_repeated_scope_exit_successors() {
     let parent = RegionId(0);
     let child = RegionId(1);
     let local = LocalId(0);
-    let module = HirModule {
-        blocks: vec![
+    let mut expressions = HirExpressionStore::default();
+    let condition = hir_expression(
+        &mut expressions,
+        HirExpressionKind::Bool(true),
+        builtin_type_ids::BOOL,
+        ValueKind::RValue,
+        child,
+    );
+    let returned = int_expression(&mut expressions, 1, parent);
+    let module = module_with_blocks(
+        vec![
             HirBlock {
                 id: HirBlockId(0),
                 region: child,
                 locals: vec![hir_local(local, child)],
                 statements: Vec::new(),
                 terminator: HirTerminator::If {
-                    condition: HirExpression {
-                        id: HirValueId(0),
-                        kind: HirExpressionKind::Bool(true),
-                        ty: builtin_type_ids::BOOL,
-                        value_kind: ValueKind::RValue,
-                        region: child,
-                        span: None,
-                    },
+                    condition,
                     then_block: HirBlockId(1),
                     else_block: HirBlockId(1),
                 },
@@ -1027,15 +1192,15 @@ fn borrow_problem_hir_extractor_deduplicates_repeated_scope_exit_successors() {
                 region: parent,
                 locals: Vec::new(),
                 statements: Vec::new(),
-                terminator: HirTerminator::Return(int_expression(1, 1, parent)),
+                terminator: HirTerminator::Return(returned),
             },
         ],
-        regions: vec![
+        vec![
             HirRegion::lexical(parent, None),
             HirRegion::lexical(child, Some(parent)),
         ],
-        ..HirModule::new()
-    };
+        expressions,
+    );
     let function = function_for(HirBlockId(0));
     let problem = from_hir(&module, &function, None, None)
         .expect("repeated branch targets should share one edge block");
@@ -1066,31 +1231,37 @@ fn borrow_problem_hir_extractor_deduplicates_repeated_scope_exit_successors() {
 fn borrow_problem_hir_extractor_emits_aggregate_storage_events() {
     let region = RegionId(0);
     let target = LocalId(0);
-    let expression = HirExpression {
-        id: HirValueId(0),
-        kind: HirExpressionKind::Collection(vec![
-            int_expression(1, 1, region),
-            int_expression(2, 2, region),
-        ]),
-        ty: builtin_type_ids::INT,
-        value_kind: ValueKind::RValue,
+    let mut expressions = HirExpressionStore::default();
+    let first = int_expression(&mut expressions, 1, region);
+    let second = int_expression(&mut expressions, 2, region);
+    let elements = expressions
+        .append_values(&[first, second], None)
+        .expect("collection elements should fit the expression store");
+    let collection = hir_expression(
+        &mut expressions,
+        HirExpressionKind::Collection(elements),
+        builtin_type_ids::INT,
+        ValueKind::RValue,
         region,
-        span: None,
-    };
-    let module = module_with_block(HirBlock {
-        id: HirBlockId(0),
-        region,
-        locals: vec![hir_local(target, region)],
-        statements: vec![HirStatement {
-            id: HirNodeId(0),
-            kind: HirStatementKind::Assign {
-                target: HirPlace::Local(target),
-                value: expression,
-            },
-            span: None,
-        }],
-        terminator: HirTerminator::Return(load_expression(3, target, region)),
-    });
+    );
+    let returned = load_expression(&mut expressions, target, region);
+    let module = module_with_block(
+        HirBlock {
+            id: HirBlockId(0),
+            region,
+            locals: vec![hir_local(target, region)],
+            statements: vec![HirStatement {
+                id: HirNodeId(0),
+                kind: HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(target),
+                    value: collection,
+                },
+                span: None,
+            }],
+            terminator: HirTerminator::Return(returned),
+        },
+        expressions,
+    );
     let function = function_for(HirBlockId(0));
     let problem = from_hir(&module, &function, None, None).expect("aggregate HIR should extract");
 
@@ -1102,7 +1273,7 @@ fn borrow_problem_hir_extractor_emits_aggregate_storage_events() {
                 destination,
                 fields,
                 ..
-            } if fields.len() == 2 => Some((*destination, fields)),
+            } if fields.len() == 2 => Some((destination.place(), fields)),
             _ => None,
         })
         .expect("aggregate event should retain its children");
@@ -1121,31 +1292,36 @@ fn borrow_problem_hir_extractor_maps_oversized_index_to_dynamic_projection() {
     let target = LocalId(1);
 
     // Above `u32::MAX`, so the `FixedIndex` path cannot represent it.
-    let index = int_expression(10, i64::from(u32::MAX) + 1, region);
-    let module = module_with_block(HirBlock {
-        id: HirBlockId(0),
+    let mut expressions = HirExpressionStore::default();
+    let index = int_expression(&mut expressions, i64::from(u32::MAX) + 1, region);
+    let indexed_place = HirPlace::local(source)
+        .with_index(index, &mut expressions, None)
+        .expect("index projection should fit the expression store");
+    let indexed_load = hir_expression(
+        &mut expressions,
+        HirExpressionKind::Load(indexed_place),
+        builtin_type_ids::INT,
+        ValueKind::RValue,
         region,
-        locals: vec![hir_local(source, region), hir_local(target, region)],
-        statements: vec![HirStatement {
-            id: HirNodeId(0),
-            kind: HirStatementKind::Assign {
-                target: HirPlace::Local(target),
-                value: HirExpression {
-                    id: HirValueId(11),
-                    kind: HirExpressionKind::Load(HirPlace::Index {
-                        base: Box::new(HirPlace::Local(source)),
-                        index: Box::new(index),
-                    }),
-                    ty: builtin_type_ids::INT,
-                    value_kind: ValueKind::RValue,
-                    region,
-                    span: None,
+    );
+    let returned = load_expression(&mut expressions, target, region);
+    let module = module_with_block(
+        HirBlock {
+            id: HirBlockId(0),
+            region,
+            locals: vec![hir_local(source, region), hir_local(target, region)],
+            statements: vec![HirStatement {
+                id: HirNodeId(0),
+                kind: HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(target),
+                    value: indexed_load,
                 },
-            },
-            span: None,
-        }],
-        terminator: HirTerminator::Return(load_expression(12, target, region)),
-    });
+                span: None,
+            }],
+            terminator: HirTerminator::Return(returned),
+        },
+        expressions,
+    );
     let function = function_for(HirBlockId(0));
     let problem = from_hir(&module, &function, None, None).expect("indexed load should extract");
 
@@ -1163,34 +1339,44 @@ fn borrow_problem_hir_extractor_imports_call_access_and_result_alias_facts() {
     let region = RegionId(0);
     let source_local = LocalId(0);
     let result_local = LocalId(1);
-    let module = module_with_block(HirBlock {
-        id: HirBlockId(0),
-        region,
-        locals: vec![
-            hir_local(source_local, region),
-            hir_local(result_local, region),
-        ],
-        statements: vec![
-            HirStatement {
-                id: HirNodeId(0),
-                kind: HirStatementKind::Assign {
-                    target: HirPlace::Local(source_local),
-                    value: int_expression(0, 1, region),
+    let mut expressions = HirExpressionStore::default();
+    let initial_value = int_expression(&mut expressions, 1, region);
+    let call_argument = load_expression(&mut expressions, source_local, region);
+    let call_arguments = expressions
+        .append_values(&[call_argument], None)
+        .expect("call argument should fit the expression store");
+    let returned = load_expression(&mut expressions, result_local, region);
+    let module = module_with_block(
+        HirBlock {
+            id: HirBlockId(0),
+            region,
+            locals: vec![
+                hir_local(source_local, region),
+                hir_local(result_local, region),
+            ],
+            statements: vec![
+                HirStatement {
+                    id: HirNodeId(0),
+                    kind: HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(source_local),
+                        value: initial_value,
+                    },
+                    span: None,
                 },
-                span: None,
-            },
-            HirStatement {
-                id: HirNodeId(1),
-                kind: HirStatementKind::Call {
-                    target: CallTarget::Local(FunctionId(9)),
-                    args: vec![load_expression(2, source_local, region)],
-                    result: Some(result_local),
+                HirStatement {
+                    id: HirNodeId(1),
+                    kind: HirStatementKind::Call {
+                        target: CallTarget::Local(FunctionId(9)),
+                        args: call_arguments,
+                        result: Some(HirLocalDestination::Define(result_local)),
+                    },
+                    span: None,
                 },
-                span: None,
-            },
-        ],
-        terminator: HirTerminator::Return(load_expression(3, result_local, region)),
-    });
+            ],
+            terminator: HirTerminator::Return(returned),
+        },
+        expressions,
+    );
     let function = function_for(HirBlockId(0));
     let mut summaries = rustc_hash::FxHashMap::default();
     summaries.insert(
@@ -1247,34 +1433,44 @@ fn borrow_problem_hir_extractor_uses_conservative_generated_fallback_without_sum
         Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]),
         Box::new([]),
     );
-    let module = module_with_block(HirBlock {
-        id: HirBlockId(0),
-        region,
-        locals: vec![
-            hir_local(source_local, region),
-            hir_local(result_local, region),
-        ],
-        statements: vec![
-            HirStatement {
-                id: HirNodeId(0),
-                kind: HirStatementKind::Assign {
-                    target: HirPlace::Local(source_local),
-                    value: int_expression(0, 1, region),
+    let mut expressions = HirExpressionStore::default();
+    let initial = int_expression(&mut expressions, 1, region);
+    let argument = load_expression(&mut expressions, source_local, region);
+    let arguments = expressions
+        .append_values(&[argument], None)
+        .expect("call argument should fit the expression store");
+    let returned = load_expression(&mut expressions, result_local, region);
+    let module = module_with_block(
+        HirBlock {
+            id: HirBlockId(0),
+            region,
+            locals: vec![
+                hir_local(source_local, region),
+                hir_local(result_local, region),
+            ],
+            statements: vec![
+                HirStatement {
+                    id: HirNodeId(0),
+                    kind: HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(source_local),
+                        value: initial,
+                    },
+                    span: None,
                 },
-                span: None,
-            },
-            HirStatement {
-                id: HirNodeId(1),
-                kind: HirStatementKind::Call {
-                    target: CallTarget::Generated(generated_identity),
-                    args: vec![load_expression(2, source_local, region)],
-                    result: Some(result_local),
+                HirStatement {
+                    id: HirNodeId(1),
+                    kind: HirStatementKind::Call {
+                        target: CallTarget::Generated(generated_identity),
+                        args: arguments,
+                        result: Some(HirLocalDestination::Define(result_local)),
+                    },
+                    span: None,
                 },
-                span: None,
-            },
-        ],
-        terminator: HirTerminator::Return(load_expression(3, result_local, region)),
-    });
+            ],
+            terminator: HirTerminator::Return(returned),
+        },
+        expressions,
+    );
     let function = function_for(HirBlockId(0));
     let problem = from_hir(&module, &function, None, None)
         .expect("generated call without a summary should extract conservatively");
@@ -1322,34 +1518,44 @@ fn borrow_problem_hir_extractor_rejects_missing_imported_summary() {
         ),
         "missing".to_owned(),
     );
-    let module = module_with_block(HirBlock {
-        id: HirBlockId(0),
-        region,
-        locals: vec![
-            hir_local(source_local, region),
-            hir_local(result_local, region),
-        ],
-        statements: vec![
-            HirStatement {
-                id: HirNodeId(0),
-                kind: HirStatementKind::Assign {
-                    target: HirPlace::Local(source_local),
-                    value: int_expression(0, 1, region),
+    let mut expressions = HirExpressionStore::default();
+    let initial = int_expression(&mut expressions, 1, region);
+    let argument = load_expression(&mut expressions, source_local, region);
+    let arguments = expressions
+        .append_values(&[argument], None)
+        .expect("call argument should fit the expression store");
+    let returned = load_expression(&mut expressions, result_local, region);
+    let module = module_with_block(
+        HirBlock {
+            id: HirBlockId(0),
+            region,
+            locals: vec![
+                hir_local(source_local, region),
+                hir_local(result_local, region),
+            ],
+            statements: vec![
+                HirStatement {
+                    id: HirNodeId(0),
+                    kind: HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(source_local),
+                        value: initial,
+                    },
+                    span: None,
                 },
-                span: None,
-            },
-            HirStatement {
-                id: HirNodeId(1),
-                kind: HirStatementKind::Call {
-                    target: CallTarget::CrossModule(imported_identity),
-                    args: vec![load_expression(2, source_local, region)],
-                    result: Some(result_local),
+                HirStatement {
+                    id: HirNodeId(1),
+                    kind: HirStatementKind::Call {
+                        target: CallTarget::CrossModule(imported_identity),
+                        args: arguments,
+                        result: Some(HirLocalDestination::Define(result_local)),
+                    },
+                    span: None,
                 },
-                span: None,
-            },
-        ],
-        terminator: HirTerminator::Return(load_expression(3, result_local, region)),
-    });
+            ],
+            terminator: HirTerminator::Return(returned),
+        },
+        expressions,
+    );
     let function = function_for(HirBlockId(0));
     let error = from_hir(&module, &function, None, None)
         .expect_err("missing imported call summaries must fail extraction");
@@ -1360,13 +1566,17 @@ fn borrow_problem_hir_extractor_rejects_missing_imported_summary() {
 #[test]
 fn borrow_problem_hir_extractor_preserves_fallible_success_and_error_edges() {
     let region = RegionId(0);
+    let mut expressions = HirExpressionStore::default();
+    let branch_result = int_expression(&mut expressions, 0, region);
+    let success_result = int_expression(&mut expressions, 1, region);
+    let error_result = int_expression(&mut expressions, 2, region);
     let branch = HirBlock {
         id: HirBlockId(0),
         region,
         locals: vec![],
         statements: vec![],
         terminator: HirTerminator::FallibleBranch {
-            result: int_expression(0, 0, region),
+            result: branch_result,
             success_block: HirBlockId(1),
             error_block: HirBlockId(2),
         },
@@ -1376,20 +1586,20 @@ fn borrow_problem_hir_extractor_preserves_fallible_success_and_error_edges() {
         region,
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::ReturnSuccess(int_expression(1, 1, region)),
+        terminator: HirTerminator::ReturnSuccess(success_result),
     };
     let error = HirBlock {
         id: HirBlockId(2),
         region,
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::ReturnError(int_expression(2, 2, region)),
+        terminator: HirTerminator::ReturnError(error_result),
     };
-    let module = HirModule {
-        blocks: vec![branch, success, error],
-        regions: vec![HirRegion::lexical(region, None)],
-        ..HirModule::new()
-    };
+    let module = module_with_blocks(
+        vec![branch, success, error],
+        vec![HirRegion::lexical(region, None)],
+        expressions,
+    );
     let function = function_for(HirBlockId(0));
     let problem =
         from_hir(&module, &function, None, None).expect("fallible control-flow HIR should extract");
@@ -1415,22 +1625,25 @@ fn borrow_problem_hir_extractor_preserves_fallible_success_and_error_edges() {
     assert_eq!(problem.control_flow().edges.len(), 2);
 }
 
-fn jump_argument_fixture(args: Vec<LocalId>) -> (HirModule, HirFunction) {
+fn jump_argument_fixture(args: Vec<HirJumpArgument>) -> (HirModule, HirFunction) {
     let parent = RegionId(0);
     let child = RegionId(1);
     let source_local = LocalId(0);
     let destination_local = LocalId(1);
-    let mut module = HirModule {
-        blocks: vec![
+    let mut expressions = HirExpressionStore::default();
+    let initial = int_expression(&mut expressions, 7, child);
+    let returned = load_expression(&mut expressions, destination_local, parent);
+    let mut module = module_with_blocks(
+        vec![
             HirBlock {
                 id: HirBlockId(0),
                 region: child,
                 locals: vec![hir_local(source_local, child)],
                 statements: vec![HirStatement {
                     id: HirNodeId(0),
-                    kind: HirStatementKind::Assign {
-                        target: HirPlace::Local(source_local),
-                        value: int_expression(1, 7, child),
+                    kind: HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(source_local),
+                        value: initial,
                     },
                     span: None,
                 }],
@@ -1444,15 +1657,15 @@ fn jump_argument_fixture(args: Vec<LocalId>) -> (HirModule, HirFunction) {
                 region: parent,
                 locals: vec![hir_local(destination_local, parent)],
                 statements: Vec::new(),
-                terminator: HirTerminator::Return(load_expression(2, destination_local, parent)),
+                terminator: HirTerminator::Return(returned),
             },
         ],
-        regions: vec![
+        vec![
             HirRegion::lexical(parent, None),
             HirRegion::lexical(child, Some(parent)),
         ],
-        ..HirModule::new()
-    };
+        expressions,
+    );
     // Merge locals are compiler temporaries, whose load assignments use shared alias provenance.
     module.side_table.bind_local_origin(
         destination_local,
@@ -1469,23 +1682,35 @@ fn self_copy_and_disjoint_jump_argument_fixture() -> (HirModule, HirFunction) {
     let source = LocalId(0);
     let self_copy = LocalId(1);
     let destination = LocalId(2);
-    let mut module = HirModule {
-        blocks: vec![
+    let mut expressions = HirExpressionStore::default();
+    let initial = int_expression(&mut expressions, 7, child);
+    let returned = load_expression(&mut expressions, destination, parent);
+    let mut module = module_with_blocks(
+        vec![
             HirBlock {
                 id: HirBlockId(0),
                 region: child,
                 locals: vec![hir_local(source, child)],
                 statements: vec![HirStatement {
                     id: HirNodeId(0),
-                    kind: HirStatementKind::Assign {
-                        target: HirPlace::Local(source),
-                        value: int_expression(1, 7, child),
+                    kind: HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(source),
+                        value: initial,
                     },
                     span: None,
                 }],
                 terminator: HirTerminator::Jump {
                     target: HirBlockId(1),
-                    args: vec![self_copy, source],
+                    args: vec![
+                        HirJumpArgument {
+                            source: self_copy,
+                            destination: self_copy,
+                        },
+                        HirJumpArgument {
+                            source,
+                            destination,
+                        },
+                    ],
                 },
             },
             HirBlock {
@@ -1493,15 +1718,15 @@ fn self_copy_and_disjoint_jump_argument_fixture() -> (HirModule, HirFunction) {
                 region: parent,
                 locals: vec![hir_local(self_copy, parent), hir_local(destination, parent)],
                 statements: Vec::new(),
-                terminator: HirTerminator::Return(load_expression(2, destination, parent)),
+                terminator: HirTerminator::Return(returned),
             },
         ],
-        regions: vec![
+        vec![
             HirRegion::lexical(parent, None),
             HirRegion::lexical(child, Some(parent)),
         ],
-        ..HirModule::new()
-    };
+        expressions,
+    );
     for local in [self_copy, destination] {
         module
             .side_table
@@ -1517,8 +1742,12 @@ fn multi_jump_argument_fixture() -> (HirModule, HirFunction) {
     let source_right = LocalId(1);
     let destination_left = LocalId(2);
     let destination_right = LocalId(3);
-    let mut module = HirModule {
-        blocks: vec![
+    let mut expressions = HirExpressionStore::default();
+    let left_value = int_expression(&mut expressions, 7, child);
+    let right_value = int_expression(&mut expressions, 9, child);
+    let returned = load_expression(&mut expressions, destination_left, parent);
+    let mut module = module_with_blocks(
+        vec![
             HirBlock {
                 id: HirBlockId(0),
                 region: child,
@@ -1529,24 +1758,33 @@ fn multi_jump_argument_fixture() -> (HirModule, HirFunction) {
                 statements: vec![
                     HirStatement {
                         id: HirNodeId(0),
-                        kind: HirStatementKind::Assign {
-                            target: HirPlace::Local(source_left),
-                            value: int_expression(1, 7, child),
+                        kind: HirStatementKind::Write {
+                            target: HirWriteTarget::DefineLocal(source_left),
+                            value: left_value,
                         },
                         span: None,
                     },
                     HirStatement {
                         id: HirNodeId(1),
-                        kind: HirStatementKind::Assign {
-                            target: HirPlace::Local(source_right),
-                            value: int_expression(2, 9, child),
+                        kind: HirStatementKind::Write {
+                            target: HirWriteTarget::DefineLocal(source_right),
+                            value: right_value,
                         },
                         span: None,
                     },
                 ],
                 terminator: HirTerminator::Jump {
                     target: HirBlockId(1),
-                    args: vec![source_right, source_left],
+                    args: vec![
+                        HirJumpArgument {
+                            source: source_right,
+                            destination: destination_left,
+                        },
+                        HirJumpArgument {
+                            source: source_left,
+                            destination: destination_right,
+                        },
+                    ],
                 },
             },
             HirBlock {
@@ -1557,15 +1795,15 @@ fn multi_jump_argument_fixture() -> (HirModule, HirFunction) {
                     hir_local(destination_right, parent),
                 ],
                 statements: Vec::new(),
-                terminator: HirTerminator::Return(load_expression(3, destination_left, parent)),
+                terminator: HirTerminator::Return(returned),
             },
         ],
-        regions: vec![
+        vec![
             HirRegion::lexical(parent, None),
             HirRegion::lexical(child, Some(parent)),
         ],
-        ..HirModule::new()
-    };
+        expressions,
+    );
     for local in [destination_left, destination_right] {
         module
             .side_table
@@ -1579,16 +1817,19 @@ fn overlapping_jump_argument_fixture() -> (HirModule, HirFunction) {
     let child = RegionId(1);
     let left = LocalId(0);
     let right = LocalId(1);
-    let condition = HirExpression {
-        id: HirValueId(2),
-        kind: HirExpressionKind::Bool(false),
-        ty: builtin_type_ids::BOOL,
-        value_kind: ValueKind::Const,
-        region: parent,
-        span: None,
-    };
-    let module = HirModule {
-        blocks: vec![
+    let mut expressions = HirExpressionStore::default();
+    let left_value = int_expression(&mut expressions, 1, parent);
+    let right_value = int_expression(&mut expressions, 2, parent);
+    let condition = hir_expression(
+        &mut expressions,
+        HirExpressionKind::Bool(false),
+        builtin_type_ids::BOOL,
+        ValueKind::Const,
+        parent,
+    );
+    let returned = load_expression(&mut expressions, left, parent);
+    let module = module_with_blocks(
+        vec![
             HirBlock {
                 id: HirBlockId(0),
                 region: parent,
@@ -1596,17 +1837,17 @@ fn overlapping_jump_argument_fixture() -> (HirModule, HirFunction) {
                 statements: vec![
                     HirStatement {
                         id: HirNodeId(0),
-                        kind: HirStatementKind::Assign {
-                            target: HirPlace::Local(left),
-                            value: int_expression(0, 1, parent),
+                        kind: HirStatementKind::Write {
+                            target: HirWriteTarget::DefineLocal(left),
+                            value: left_value,
                         },
                         span: None,
                     },
                     HirStatement {
                         id: HirNodeId(1),
-                        kind: HirStatementKind::Assign {
-                            target: HirPlace::Local(right),
-                            value: int_expression(1, 2, parent),
+                        kind: HirStatementKind::Write {
+                            target: HirWriteTarget::DefineLocal(right),
+                            value: right_value,
                         },
                         span: None,
                     },
@@ -1623,8 +1864,17 @@ fn overlapping_jump_argument_fixture() -> (HirModule, HirFunction) {
                 locals: Vec::new(),
                 statements: Vec::new(),
                 terminator: HirTerminator::Jump {
-                    target: HirBlockId(0),
-                    args: vec![right, left],
+                    target: HirBlockId(1),
+                    args: vec![
+                        HirJumpArgument {
+                            source: right,
+                            destination: left,
+                        },
+                        HirJumpArgument {
+                            source: left,
+                            destination: right,
+                        },
+                    ],
                 },
             },
             HirBlock {
@@ -1632,41 +1882,42 @@ fn overlapping_jump_argument_fixture() -> (HirModule, HirFunction) {
                 region: parent,
                 locals: Vec::new(),
                 statements: Vec::new(),
-                terminator: HirTerminator::Return(load_expression(3, left, parent)),
+                terminator: HirTerminator::Return(returned),
             },
         ],
-        regions: vec![
+        vec![
             HirRegion::lexical(parent, None),
             HirRegion::lexical(child, Some(parent)),
         ],
-        ..HirModule::new()
-    };
+        expressions,
+    );
     (module, function_for(HirBlockId(0)))
 }
 
 fn hir_structural_string_return_fixture(value_kind: ValueKind) -> (HirModule, HirFunction) {
     let region = RegionId(0);
-    let expression = HirExpression {
-        id: HirValueId(0),
-        kind: HirExpressionKind::StructuralString {
-            pieces: vec![ConstStringPiece::SiteRoot],
-        },
-        ty: builtin_type_ids::STRING,
+    let mut expressions = HirExpressionStore::default();
+    let pieces = expressions
+        .append_string_pieces(&[ConstStringPiece::SiteRoot], None)
+        .expect("structural-string piece should fit the expression store");
+    let expression = hir_expression(
+        &mut expressions,
+        HirExpressionKind::StructuralString { pieces },
+        builtin_type_ids::STRING,
         value_kind,
         region,
-        span: None,
-    };
-    let module = HirModule {
-        blocks: vec![HirBlock {
+    );
+    let module = module_with_blocks(
+        vec![HirBlock {
             id: HirBlockId(0),
             region,
             locals: Vec::new(),
             statements: Vec::new(),
             terminator: HirTerminator::Return(expression),
         }],
-        regions: vec![HirRegion::lexical(region, None)],
-        ..HirModule::new()
-    };
+        vec![HirRegion::lexical(region, None)],
+        expressions,
+    );
     let function = HirFunction {
         id: FunctionId(0),
         entry: HirBlockId(0),
@@ -1676,27 +1927,53 @@ fn hir_structural_string_return_fixture(value_kind: ValueKind) -> (HirModule, Hi
     (module, function)
 }
 
+fn hir_direct_self_update_fixture() -> (HirModule, HirFunction) {
+    let local = LocalId(0);
+    let region = RegionId(0);
+    let mut expressions = HirExpressionStore::default();
+    let initial_value = int_expression(&mut expressions, 1, region);
+    let self_value = load_expression(&mut expressions, local, region);
+    let module = module_with_block(
+        HirBlock {
+            id: HirBlockId(0),
+            region,
+            locals: vec![hir_local(local, region)],
+            statements: vec![
+                HirStatement {
+                    id: HirNodeId(0),
+                    kind: HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(local),
+                        value: initial_value,
+                    },
+                    span: None,
+                },
+                HirStatement {
+                    id: HirNodeId(1),
+                    kind: HirStatementKind::Write {
+                        target: HirWriteTarget::AssignPlace(HirPlace::local(local)),
+                        value: self_value,
+                    },
+                    span: None,
+                },
+            ],
+            terminator: HirTerminator::RuntimeFailure {
+                message: "self-update fixture complete".to_owned(),
+                cause: None,
+            },
+        },
+        expressions,
+    );
+    (module, function_for(HirBlockId(0)))
+}
+
 fn hir_literal_fixture() -> (HirModule, HirFunction) {
     let local = LocalId(0);
     let region = RegionId(0);
-    let literal = HirExpression {
-        id: HirValueId(0),
-        kind: HirExpressionKind::Int(7),
-        ty: builtin_type_ids::INT,
-        value_kind: ValueKind::RValue,
-        region,
-        span: None,
-    };
-    let load = HirExpression {
-        id: HirValueId(1),
-        kind: HirExpressionKind::Load(HirPlace::Local(local)),
-        ty: builtin_type_ids::INT,
-        value_kind: ValueKind::Place,
-        region,
-        span: None,
-    };
-    let module = HirModule {
-        blocks: vec![HirBlock {
+    let mut expressions = HirExpressionStore::default();
+    let literal = int_expression(&mut expressions, 7, region);
+    let load = load_expression(&mut expressions, local, region);
+    let module = module_with_blocks(
+        vec![HirBlock {
             id: HirBlockId(0),
             region,
             locals: vec![HirLocal {
@@ -1708,18 +1985,17 @@ fn hir_literal_fixture() -> (HirModule, HirFunction) {
             }],
             statements: vec![HirStatement {
                 id: HirNodeId(0),
-                kind: HirStatementKind::Assign {
-                    target: HirPlace::Local(local),
+                kind: HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(local),
                     value: literal,
                 },
                 span: None,
             }],
             terminator: HirTerminator::Return(load),
         }],
-        functions: vec![],
-        regions: vec![HirRegion::lexical(region, None)],
-        ..HirModule::new()
-    };
+        vec![HirRegion::lexical(region, None)],
+        expressions,
+    );
     let function = HirFunction {
         id: FunctionId(0),
         entry: HirBlockId(0),
@@ -1729,11 +2005,25 @@ fn hir_literal_fixture() -> (HirModule, HirFunction) {
     (module, function)
 }
 
-fn module_with_block(block: HirBlock) -> HirModule {
+fn module_with_block(block: HirBlock, expressions: HirExpressionStore) -> HirModule {
     let region = block.region;
+    module_with_blocks(
+        vec![block],
+        vec![HirRegion::lexical(region, None)],
+        expressions,
+    )
+}
+
+fn module_with_blocks(
+    blocks: Vec<HirBlock>,
+    regions: Vec<HirRegion>,
+    mut expressions: HirExpressionStore,
+) -> HirModule {
+    expressions.freeze();
     HirModule {
-        blocks: vec![block],
-        regions: vec![HirRegion::lexical(region, None)],
+        expressions,
+        blocks,
+        regions,
         ..HirModule::new()
     }
 }
@@ -1757,26 +2047,48 @@ fn hir_local(id: LocalId, region: RegionId) -> HirLocal {
     }
 }
 
-fn int_expression(id: u32, value: i64, region: RegionId) -> HirExpression {
-    HirExpression {
-        id: HirValueId(id),
-        kind: HirExpressionKind::Int(value),
-        ty: builtin_type_ids::INT,
-        value_kind: ValueKind::RValue,
+fn int_expression(
+    expressions: &mut HirExpressionStore,
+    value: i64,
+    region: RegionId,
+) -> HirValueId {
+    crate::compiler_frontend::tests::hir_fixture_support::expression(
+        HirExpressionKind::Int(value),
+        builtin_type_ids::INT,
         region,
-        span: None,
-    }
+        ValueKind::RValue,
+        expressions,
+    )
 }
 
-fn load_expression(id: u32, local: LocalId, region: RegionId) -> HirExpression {
-    HirExpression {
-        id: HirValueId(id),
-        kind: HirExpressionKind::Load(HirPlace::Local(local)),
-        ty: builtin_type_ids::INT,
-        value_kind: ValueKind::Place,
+fn hir_expression(
+    expressions: &mut HirExpressionStore,
+    kind: HirExpressionKind,
+    type_id: TypeId,
+    value_kind: ValueKind,
+    region: RegionId,
+) -> HirValueId {
+    crate::compiler_frontend::tests::hir_fixture_support::expression(
+        kind,
+        type_id,
         region,
-        span: None,
-    }
+        value_kind,
+        expressions,
+    )
+}
+
+fn load_expression(
+    expressions: &mut HirExpressionStore,
+    local: LocalId,
+    region: RegionId,
+) -> HirValueId {
+    crate::compiler_frontend::tests::hir_fixture_support::expression(
+        HirExpressionKind::Load(HirPlace::local(local)),
+        builtin_type_ids::INT,
+        region,
+        ValueKind::Place,
+        expressions,
+    )
 }
 
 fn granular_call_parts() -> super::BorrowProblemParts {

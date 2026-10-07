@@ -5,14 +5,13 @@
 //! WHY: keeping this recursive classifier separate from metadata construction leaves the metadata
 //!      module focused on retained layouts and effects.
 
-use super::{BorrowChecker, root_local_for_place};
+use super::BorrowChecker;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalReturnAlias};
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
+use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId};
-use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalId};
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -21,7 +20,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 struct AliasProjectionContext<'a> {
     function: &'a HirFunction,
     return_alias: &'a FunctionReturnAliasSummary,
-    args: &'a [HirExpression],
+    args: &'a [HirValueId],
     param_index_by_local: &'a FxHashMap<LocalId, usize>,
     reachable_blocks: &'a [BlockId],
     callee_description: &'a str,
@@ -57,7 +56,7 @@ impl<'a> BorrowChecker<'a> {
             let return_summary = self.classify_return_expression(
                 function,
                 &reachable_blocks,
-                value,
+                *value,
                 &param_index_by_local,
             )?;
             summary = merge_return_alias(summary, return_summary);
@@ -79,7 +78,7 @@ impl<'a> BorrowChecker<'a> {
         &self,
         function: &HirFunction,
         reachable_blocks: &[BlockId],
-        expression: &HirExpression,
+        expression: HirValueId,
         param_index_by_local: &FxHashMap<LocalId, usize>,
     ) -> Result<FunctionReturnAliasSummary, BorrowCheckError> {
         let mut visiting_locals = FxHashSet::default();
@@ -96,23 +95,21 @@ impl<'a> BorrowChecker<'a> {
         &self,
         function: &HirFunction,
         reachable_blocks: &[BlockId],
-        expression: &HirExpression,
+        expression: HirValueId,
         param_index_by_local: &FxHashMap<LocalId, usize>,
         visiting_locals: &mut FxHashSet<LocalId>,
     ) -> Result<FunctionReturnAliasSummary, BorrowCheckError> {
-        match &expression.kind {
+        match &self.module.expressions.expression(expression).kind {
             HirExpressionKind::FallibleUnwrapSuccess { result } => self
                 .classify_unwrapped_success_payload(
                     function,
                     reachable_blocks,
-                    result,
+                    *result,
                     param_index_by_local,
                     visiting_locals,
                 ),
             HirExpressionKind::Load(place) => {
-                let Some(root_local) = root_local_for_place(place) else {
-                    return Ok(FunctionReturnAliasSummary::Unknown);
-                };
+                let root_local = place.root;
 
                 if let Some(param_index) = param_index_by_local.get(&root_local).copied() {
                     return Ok(FunctionReturnAliasSummary::AliasParams(vec![param_index]));
@@ -131,13 +128,13 @@ impl<'a> BorrowChecker<'a> {
                 // union. Each projected result receives that union until the public summary
                 // grows per-result provenance.
                 let mut summary = FunctionReturnAliasSummary::Fresh;
-                for element in elements {
+                for element in self.module.expressions.values(*elements) {
                     summary = merge_return_alias(
                         summary,
                         self.classify_return_expression_with_visiting(
                             function,
                             reachable_blocks,
-                            element,
+                            *element,
                             param_index_by_local,
                             visiting_locals,
                         )?,
@@ -152,7 +149,7 @@ impl<'a> BorrowChecker<'a> {
                 .classify_return_expression_with_visiting(
                     function,
                     reachable_blocks,
-                    tuple,
+                    *tuple,
                     param_index_by_local,
                     visiting_locals,
                 ),
@@ -184,18 +181,28 @@ impl<'a> BorrowChecker<'a> {
 
             for statement in &block.statements {
                 let writer_summary = match &statement.kind {
-                    HirStatementKind::Assign { target, value } => {
-                        let HirPlace::Local(target_local) = target else {
-                            continue;
+                    HirStatementKind::Write { target, value } => {
+                        let target_local = match target {
+                            HirWriteTarget::DefineLocal(target_local) => *target_local,
+                            HirWriteTarget::AssignPlace(place)
+                                if self
+                                    .module
+                                    .expressions
+                                    .projections(place.projections)
+                                    .is_empty() =>
+                            {
+                                place.root
+                            }
+                            HirWriteTarget::AssignPlace(_) => continue,
                         };
-                        if *target_local != local {
+                        if target_local != local {
                             continue;
                         }
 
                         Some(self.classify_return_expression_with_visiting(
                             function,
                             reachable_blocks,
-                            value,
+                            *value,
                             param_index_by_local,
                             visiting_locals,
                         )?)
@@ -204,10 +211,10 @@ impl<'a> BorrowChecker<'a> {
                         target,
                         args,
                         result: Some(result_local),
-                    } if *result_local == local => Some(self.classify_call_result(
+                    } if result_local.local() == local => Some(self.classify_call_result(
                         function,
                         target.clone(),
-                        args,
+                        self.module.expressions.values(*args),
                         param_index_by_local,
                         reachable_blocks,
                         visiting_locals,
@@ -217,9 +224,9 @@ impl<'a> BorrowChecker<'a> {
                         receiver,
                         result: Some(result_local),
                         ..
-                    } if *result_local == local => Some(self.classify_map_result(
+                    } if result_local.local() == local => Some(self.classify_map_result(
                         *op,
-                        receiver,
+                        *receiver,
                         function,
                         reachable_blocks,
                         param_index_by_local,
@@ -244,12 +251,12 @@ impl<'a> BorrowChecker<'a> {
                     | HirStatementKind::ValidateFloat {
                         result: result_local,
                         ..
-                    } if *result_local == local => Some(FunctionReturnAliasSummary::Fresh),
+                    } if result_local.local() == local => Some(FunctionReturnAliasSummary::Fresh),
                     HirStatementKind::FloatRangeCandidate {
                         candidate_result,
                         in_range_result,
                         ..
-                    } if *candidate_result == local || *in_range_result == local => {
+                    } if candidate_result.local() == local || in_range_result.local() == local => {
                         Some(FunctionReturnAliasSummary::Fresh)
                     }
                     _ => None,
@@ -294,21 +301,30 @@ impl<'a> BorrowChecker<'a> {
         &self,
         function: &HirFunction,
         reachable_blocks: &[BlockId],
-        result: &HirExpression,
+        result: HirValueId,
         param_index_by_local: &FxHashMap<LocalId, usize>,
         visiting_locals: &mut FxHashSet<LocalId>,
     ) -> Result<FunctionReturnAliasSummary, BorrowCheckError> {
         // Direct `return fallible_call()!` unwraps the success payload from a fresh carrier local.
         // The carrier itself is not an alias; payload aliasing comes from the callee metadata and
         // must be projected back through the forwarded call arguments.
-        let HirExpressionKind::Load(HirPlace::Local(result_local)) = &result.kind else {
+        let HirExpressionKind::Load(place) = &self.module.expressions.expression(result).kind
+        else {
             return Ok(FunctionReturnAliasSummary::Unknown);
         };
+        if !self
+            .module
+            .expressions
+            .projections(place.projections)
+            .is_empty()
+        {
+            return Ok(FunctionReturnAliasSummary::Unknown);
+        }
 
         self.classify_unwrapped_success_local(
             function,
             reachable_blocks,
-            *result_local,
+            place.root,
             param_index_by_local,
             visiting_locals,
         )
@@ -339,42 +355,63 @@ impl<'a> BorrowChecker<'a> {
                         args,
                         result: Some(call_result),
                         ..
-                    } if *call_result == result_local => Some(self.classify_call_success_payload(
-                        function,
-                        target.clone(),
-                        args,
-                        param_index_by_local,
-                        reachable_blocks,
-                        visiting_locals,
-                    )?),
+                    } if call_result.local() == result_local => {
+                        Some(self.classify_call_success_payload(
+                            function,
+                            target.clone(),
+                            self.module.expressions.values(*args),
+                            param_index_by_local,
+                            reachable_blocks,
+                            visiting_locals,
+                        )?)
+                    }
                     HirStatementKind::MapOp {
                         op,
                         receiver,
                         result: Some(operation_result),
                         ..
-                    } if *operation_result == result_local => Some(self.classify_map_result(
-                        *op,
-                        receiver,
-                        function,
-                        reachable_blocks,
-                        param_index_by_local,
-                        visiting_locals,
-                    )?),
-                    HirStatementKind::Assign {
-                        target: HirPlace::Local(target_local),
-                        value,
-                    } if *target_local == result_local => match &value.kind {
-                        HirExpressionKind::Load(HirPlace::Local(source_local)) => {
-                            Some(self.classify_unwrapped_success_local(
-                                function,
-                                reachable_blocks,
-                                *source_local,
-                                param_index_by_local,
-                                visiting_locals,
-                            )?)
+                    } if operation_result.local() == result_local => {
+                        Some(self.classify_map_result(
+                            *op,
+                            *receiver,
+                            function,
+                            reachable_blocks,
+                            param_index_by_local,
+                            visiting_locals,
+                        )?)
+                    }
+                    HirStatementKind::Write { target, value }
+                        if match target {
+                            HirWriteTarget::DefineLocal(local) => *local == result_local,
+                            HirWriteTarget::AssignPlace(place) => {
+                                place.root == result_local
+                                    && self
+                                        .module
+                                        .expressions
+                                        .projections(place.projections)
+                                        .is_empty()
+                            }
+                        } =>
+                    {
+                        match &self.module.expressions.expression(*value).kind {
+                            HirExpressionKind::Load(place)
+                                if self
+                                    .module
+                                    .expressions
+                                    .projections(place.projections)
+                                    .is_empty() =>
+                            {
+                                Some(self.classify_unwrapped_success_local(
+                                    function,
+                                    reachable_blocks,
+                                    place.root,
+                                    param_index_by_local,
+                                    visiting_locals,
+                                )?)
+                            }
+                            _ => Some(FunctionReturnAliasSummary::Unknown),
                         }
-                        _ => Some(FunctionReturnAliasSummary::Unknown),
-                    },
+                    }
                     HirStatementKind::CastOp {
                         result: Some(operation_result),
                         ..
@@ -394,14 +431,16 @@ impl<'a> BorrowChecker<'a> {
                     | HirStatementKind::ValidateFloat {
                         result: operation_result,
                         ..
-                    } if *operation_result == result_local => {
+                    } if operation_result.local() == result_local => {
                         Some(FunctionReturnAliasSummary::Fresh)
                     }
                     HirStatementKind::FloatRangeCandidate {
                         candidate_result,
                         in_range_result,
                         ..
-                    } if *candidate_result == result_local || *in_range_result == result_local => {
+                    } if candidate_result.local() == result_local
+                        || in_range_result.local() == result_local =>
+                    {
                         Some(FunctionReturnAliasSummary::Fresh)
                     }
                     _ => None,
@@ -433,7 +472,7 @@ impl<'a> BorrowChecker<'a> {
         &self,
         function: &HirFunction,
         target: CallTarget,
-        args: &[HirExpression],
+        args: &[HirValueId],
         param_index_by_local: &FxHashMap<LocalId, usize>,
         reachable_blocks: &[BlockId],
         visiting_locals: &mut FxHashSet<LocalId>,
@@ -510,7 +549,7 @@ impl<'a> BorrowChecker<'a> {
         &self,
         function: &HirFunction,
         target: CallTarget,
-        args: &[HirExpression],
+        args: &[HirValueId],
         param_index_by_local: &FxHashMap<LocalId, usize>,
         reachable_blocks: &[BlockId],
         visiting_locals: &mut FxHashSet<LocalId>,
@@ -584,7 +623,7 @@ impl<'a> BorrowChecker<'a> {
         &self,
         function: &HirFunction,
         callee_id: FunctionId,
-        args: &[HirExpression],
+        args: &[HirValueId],
         param_index_by_local: &FxHashMap<LocalId, usize>,
         reachable_blocks: &[BlockId],
         visiting_locals: &mut FxHashSet<LocalId>,
@@ -619,7 +658,7 @@ impl<'a> BorrowChecker<'a> {
         &self,
         function: &HirFunction,
         origin: &crate::compiler_frontend::semantic_identity::OriginFunctionId,
-        args: &[HirExpression],
+        args: &[HirValueId],
         param_index_by_local: &FxHashMap<LocalId, usize>,
         reachable_blocks: &[BlockId],
         visiting_locals: &mut FxHashSet<LocalId>,
@@ -650,7 +689,7 @@ impl<'a> BorrowChecker<'a> {
         &self,
         function: &HirFunction,
         identity: &crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity,
-        args: &[HirExpression],
+        args: &[HirValueId],
         param_index_by_local: &FxHashMap<LocalId, usize>,
         reachable_blocks: &[BlockId],
         visiting_locals: &mut FxHashSet<LocalId>,
@@ -681,7 +720,7 @@ impl<'a> BorrowChecker<'a> {
         &self,
         function: &HirFunction,
         identity: &crate::compiler_frontend::semantic_identity::ModulePrivateExecutableIdentity,
-        args: &[HirExpression],
+        args: &[HirValueId],
         param_index_by_local: &FxHashMap<LocalId, usize>,
         reachable_blocks: &[BlockId],
         visiting_locals: &mut FxHashSet<LocalId>,
@@ -712,7 +751,7 @@ impl<'a> BorrowChecker<'a> {
         &self,
         function: &HirFunction,
         return_alias: &ExternalReturnAlias,
-        args: &[HirExpression],
+        args: &[HirValueId],
         param_index_by_local: &FxHashMap<LocalId, usize>,
         reachable_blocks: &[BlockId],
         visiting_locals: &mut FxHashSet<LocalId>,
@@ -774,7 +813,7 @@ impl<'a> BorrowChecker<'a> {
             match self.classify_return_expression_with_visiting(
                 function,
                 reachable_blocks,
-                argument,
+                *argument,
                 param_index_by_local,
                 visiting_locals,
             )? {
@@ -801,7 +840,7 @@ impl<'a> BorrowChecker<'a> {
     fn classify_map_result(
         &self,
         op: crate::compiler_frontend::hir::expressions::HirMapOp,
-        receiver: &HirExpression,
+        receiver: HirValueId,
         function: &HirFunction,
         reachable_blocks: &[BlockId],
         param_index_by_local: &FxHashMap<LocalId, usize>,

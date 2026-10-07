@@ -243,7 +243,7 @@ The exact Rust representation may differ. These invariants do not:
 - CFG edges connect valid event boundaries
 - every loan issue, use, kill and conflict can name one point
 - every point can map back to its owning HIR/source location
-- a jump argument is lowered as a read of the argument place followed by an alias write defining the successor local, so the builder records real `Use` rows and `EventKind::Access` events for both operations because the edge genuinely reads the argument and defines the successor local
+- jump transfers carry explicit source and destination places. The builder records real source reads and destination write accesses, while the jump event captures every incoming value before defining any successor binding. Destination order cannot change another incoming value
 - unreachable blocks do not create live loans or future uses
 
 ## Typed identities
@@ -414,13 +414,24 @@ A mutable declaration from an existing place carries mutation-capable access to 
 
 Binding mutability and exclusive loan state are separate facts. A fresh mutable declaration creates a mutable slot with a fresh origin rather than a mutable alias. A mutable function parameter retains its parameter origin but is alias-mode inside the callee, so writes through it mutate caller-provided storage.
 
-The reference extractor also distinguishes an alias-only binding from a slot-backed binding. A
-write through an alias preserves the referent generation and is checked against other holders; a
-write to a slot-backed binding replaces that binding's origin generation. At CFG joins, only the
-paths proven alias-only use the write-through interpretation; mixed or uncertain paths remain
-conservative. Rebinding a slot-backed binding to an existing value does not change the binding's
-slot-backed mode, so a later fresh, copy, aggregate or call-result write still replaces that slot
-generation.
+HIR owns whether a write defines a local or updates an existing place. The normalized
+writer carries `BindingDestination::Define` or `BindingDestination::Update` directly from
+that operation. Every execution of a definition retires the destination's prior binding
+state, including loop re-entry, after capturing the incoming value. A direct place source
+establishes an alias. An rvalue establishes a slot even when its allocation provenance is
+shared with another value. An internal result-local load may be an rvalue.
+
+An update through an alias preserves the referent generation and is checked against other
+holders. An update to a slot replaces its represented value. A direct place source can make
+that slot alias-backed, while an rvalue keeps it slot-backed. Mixed or uncertain paths remain
+conservative at CFG joins. Solver modes describe these possible states. They do not select
+whether the source operation was a definition or an update, and backends do not consume them
+to reconstruct that distinction.
+
+An exact unprojected place self-update emits a source Read followed by a
+non-defining Write access without a provenance writer. The access checks mutation
+legality and preserves the binding's role, generation, provenance and holder
+capabilities. Other writes retain their explicit destination and transition.
 
 ### Joins
 
@@ -566,7 +577,9 @@ Boracle may represent repeated internal aliases in a copied graph so tests can p
 
 ## Rebinding and storage generations
 
-Distinct fresh writes to one binding create distinct origin classes.
+Distinct fresh value writes create distinct origin classes. A repeated local definition
+establishes a new dynamic binding occurrence independently of its static local or definition
+site. Shared allocation provenance does not merge binding cells.
 
 Loops make this harder because one definition site can execute many times:
 

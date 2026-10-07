@@ -5,10 +5,10 @@
 //! construction is isolated here to keep the main fallible lowering focused on source calls.
 
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::source::SourceSpan;
 
@@ -39,7 +39,7 @@ impl<'a> HirBuilder<'a> {
         result_type_ids: &[FrontendTypeId],
         error_type_id: FrontendTypeId,
         span: &Option<SourceSpan>,
-    ) -> Result<(TypeId, TypeId, TypeId), CompilerError> {
+    ) -> Result<(TypeId, TypeId, TypeId), HirConstructionFailure> {
         let ok_type = self.lower_call_result_type(result_type_ids, span)?;
         let err_type = self.lower_type_id(error_type_id, span)?;
         let carrier_type = self
@@ -57,7 +57,7 @@ impl<'a> HirBuilder<'a> {
         result_type_ids: &[FrontendTypeId],
         error_type_id: FrontendTypeId,
         call_span: &Option<SourceSpan>,
-    ) -> Result<EmittedFallibleCarrier, CompilerError> {
+    ) -> Result<EmittedFallibleCarrier, HirConstructionFailure> {
         let (carrier_type, ok_type, err_type) =
             self.fallible_call_carrier_from_slots(result_type_ids, error_type_id, call_span)?;
         let result_local = self.emit_result_call_to_current_block(

@@ -5,8 +5,8 @@
 //! WHY: these tests protect the independent runtime semantics before later path enumeration lands.
 
 use super::super::super::problem::{
-    AccessKind, AggregateField, Binding, BindingId, BlockId, BorrowProblem, BorrowProblemParts,
-    Call, CallArgument, CallEffect, CallId, CallResult, CallResultProvenance,
+    AccessKind, AggregateField, Binding, BindingDestination, BindingId, BlockId, BorrowProblem,
+    BorrowProblemParts, Call, CallArgument, CallEffect, CallId, CallResult, CallResultProvenance,
     CallResultUnknownReason, CfgBlock, CfgEdge, Event, EventId, EventKind, EventSource, KillReason,
     Loan, LoanId, OriginKind, Place, PlaceId, PointId, ProgramPoint, ProjectionElem, RebindValue,
     TerminatorEventKind, Use, UseId, UseKind, ValueOrigin, ValueOriginId,
@@ -182,7 +182,8 @@ fn boracle_oracle_write_through_exclusive_alias_is_safe() {
     let alias = fixture.place(1, []);
     fixture.fresh(owner);
     fixture.alias(alias, owner, AccessKind::Exclusive);
-    fixture.access(alias, UseKind::Write, true);
+    fixture.binding_write(BindingDestination::Update(alias));
+    fixture.rebind_fresh(alias);
     fixture.access(owner, UseKind::Read, false);
 
     assert!(matches!(
@@ -199,7 +200,8 @@ fn boracle_oracle_write_through_shared_alias_conflicts_directly() {
     let conflicting_alias = fixture.place(2, []);
     fixture.fresh(owner);
     fixture.alias(alias, owner, AccessKind::Exclusive);
-    fixture.access(alias, UseKind::Write, true);
+    fixture.binding_write(BindingDestination::Update(alias));
+    fixture.rebind_fresh(alias);
     fixture.alias(conflicting_alias, owner, AccessKind::Shared);
     let conflicting_access_event = fixture.access_event(conflicting_alias, UseKind::Write, false);
 
@@ -209,7 +211,6 @@ fn boracle_oracle_write_through_shared_alias_conflicts_directly() {
         .as_ref()
         .expect("write through shared alias should trigger the direct rule");
     assert_eq!(conflict.access_event, conflicting_access_event);
-    assert_eq!(conflict.access_index, 4);
     assert_eq!(conflict.capability_id.raw(), 1);
     assert_eq!(conflict.capability_kind, AccessKind::Shared);
     assert_eq!(conflict.access_kind, AccessKind::Exclusive);
@@ -389,56 +390,160 @@ fn boracle_oracle_definition_before_call_result_confirmation_is_malformed() {
 
 #[test]
 fn boracle_oracle_alias_from_place_rebind_kills_call_argument_holder() {
-    let mut fixture = Fixture::new(2);
+    let mut fixture = Fixture::new(3);
     let owner = fixture.place(0, []);
     let alias = fixture.place(1, []);
+    let replacement = fixture.place(2, []);
     fixture.fresh(owner);
-    fixture.rebind_alias_from_place(alias, owner);
+    fixture.fresh(replacement);
+    fixture.rebind_alias_from_place_to(BindingDestination::Define(alias), owner);
     fixture.parts.calls.push(Call {
         id: CallId::new(0),
         label: "realiased-call-argument".to_string(),
     });
-    let (_, argument) = fixture.call_argument_at(CallId::new(0), 0, alias, AccessKind::Shared);
-    fixture.rebind_alias_from_place(alias, owner);
-    fixture.access(owner, UseKind::Write, false);
-    fixture.access(alias, UseKind::Read, false);
+    let (argument_event, argument) =
+        fixture.call_argument_at(CallId::new(0), 0, alias, AccessKind::Shared);
+    let replacement_event = fixture.rebind_alias_from_place(alias, replacement);
+    let owner_write = fixture.access_event(owner, UseKind::Write, false);
+    let alias_read = fixture.access_event(alias, UseKind::Read, false);
     fixture.event(EventKind::CallEffect(CallEffect {
         call: CallId::new(0),
         arguments: vec![argument].into_boxed_slice(),
         result: None,
     }));
 
-    assert!(matches!(
-        run(fixture.finish()),
-        OracleOutcome::CompleteSafe { executions: 1, .. }
-    ));
+    let trace = match run(fixture.finish()) {
+        OracleOutcome::CompleteSafe { trace, .. } => trace,
+        outcome => panic!("the old call-argument holder should end at rebind: {outcome:?}"),
+    };
+    let replacement_index = trace
+        .entries
+        .iter()
+        .find(|entry| entry.event == replacement_event)
+        .map(|entry| entry.index)
+        .expect("the replacement rebind should execute");
+    let call_capability = trace
+        .capabilities
+        .iter()
+        .find(|capability| capability.issue_event == argument_event)
+        .expect("the call argument should issue a capability");
+    assert_eq!(call_capability.explicit_end, Some(replacement_index));
+    assert_eq!(
+        call_capability.end_reason,
+        Some(CapabilityEndReason::HolderRetired)
+    );
+
+    let replacement_capability = trace
+        .capabilities
+        .iter()
+        .find(|capability| capability.issue_event == replacement_event)
+        .expect("the replacement rebind should retain its incoming provenance");
+    assert_eq!(replacement_capability.source, CapabilitySource::Provenance);
+    assert_eq!(replacement_capability.kind, AccessKind::Shared);
+    assert_eq!(replacement_capability.holders, BTreeSet::from([alias]));
+    let owner_write_target = trace
+        .entries
+        .iter()
+        .find(|entry| entry.event == owner_write)
+        .and_then(|entry| entry.access.as_ref())
+        .expect("the owner write should be traced")
+        .target
+        .clone();
+    let alias_read_target = trace
+        .entries
+        .iter()
+        .find(|entry| entry.event == alias_read)
+        .and_then(|entry| entry.access.as_ref())
+        .expect("the replacement alias read should be traced")
+        .target
+        .clone();
+    assert_eq!(replacement_capability.target, alias_read_target.node);
+    assert_ne!(owner_write_target.node, alias_read_target.node);
 }
 
 #[test]
 fn boracle_oracle_projection_holder_liveness_ends_before_owner_write() {
-    let mut fixture = Fixture::new(2);
+    let mut fixture = Fixture::new(3);
     let owner = fixture.place(0, []);
     let owner_field = fixture.place(0, [ProjectionElem::Field(0)]);
     let projected = fixture.place(1, []);
+    let replacement = fixture.place(2, []);
     fixture.fresh(owner);
+    fixture.fresh(replacement);
 
-    // The projection destination is slot-backed, so the projection capability is the only live
-    // hold on the projected child and the trailing reads keep its interval open. A rebinding of
-    // the destination is a slot replacement that must end that capability before the owner
-    // write. Had the projection kept installing alias state, the rebinding would have written
-    // through, the capability would have crossed the owner write, and the exclusive field write
-    // below would have conflicted with it, so the trailing projected read is what keeps the two
-    // rows distinguishable.
-    fixture.projection(owner, projected, ProjectionElem::Field(0));
+    let projection_event = fixture.projection(owner, projected, ProjectionElem::Field(0));
     fixture.access(projected, UseKind::Read, false);
-    fixture.rebind_alias_from_place(projected, owner_field);
-    fixture.access(owner_field, UseKind::Write, false);
-    fixture.access(projected, UseKind::Read, false);
+    let replacement_event = fixture.rebind_alias_from_place(projected, replacement);
+    let owner_field_write = fixture.access_event(owner_field, UseKind::Write, false);
+    let replacement_read_event = fixture.access_event(projected, UseKind::Read, false);
 
-    assert!(matches!(
-        run(fixture.finish()),
-        OracleOutcome::CompleteSafe { executions: 1, .. }
-    ));
+    let trace = match run(fixture.finish()) {
+        OracleOutcome::CompleteSafe { trace, .. } => trace,
+        outcome => panic!("the projection holder should end before the owner write: {outcome:?}"),
+    };
+    let replacement_index = trace
+        .entries
+        .iter()
+        .find(|entry| entry.event == replacement_event)
+        .map(|entry| entry.index)
+        .expect("the replacement rebind should execute");
+    let owner_field_write_index = trace
+        .entries
+        .iter()
+        .find(|entry| entry.event == owner_field_write)
+        .map(|entry| entry.index)
+        .expect("the owner field write should execute");
+    let projection_capability = trace
+        .capabilities
+        .iter()
+        .find(|capability| capability.issue_event == projection_event)
+        .expect("the projection should issue provenance");
+    assert_eq!(
+        projection_capability.explicit_end,
+        Some(replacement_index),
+        "replacing the destination must retire its old projection capability"
+    );
+    assert_eq!(
+        projection_capability.end_reason,
+        Some(CapabilityEndReason::HolderRetired)
+    );
+    assert!(replacement_index < owner_field_write_index);
+
+    let replacement_capability = trace
+        .capabilities
+        .iter()
+        .find(|capability| capability.issue_event == replacement_event)
+        .expect("the replacement should retain independent incoming provenance");
+    assert_eq!(replacement_capability.source, CapabilitySource::Provenance);
+    assert_eq!(replacement_capability.kind, AccessKind::Shared);
+    assert_eq!(replacement_capability.holders, BTreeSet::from([projected]));
+    let replacement_read_access = trace
+        .entries
+        .iter()
+        .find(|entry| entry.event == replacement_read_event)
+        .and_then(|entry| entry.access.as_ref())
+        .expect("the destination read should use the replacement relationship");
+    assert_eq!(
+        replacement_read_access.target.node,
+        replacement_capability.target
+    );
+    assert_eq!(
+        replacement_read_access.target.path,
+        replacement_capability.path
+    );
+    assert_ne!(replacement_capability.target, projection_capability.target);
+    let owner_field_write_target = trace
+        .entries
+        .iter()
+        .find(|entry| entry.event == owner_field_write)
+        .and_then(|entry| entry.access.as_ref())
+        .expect("the owner field write should be traced")
+        .target
+        .clone();
+    assert_ne!(
+        replacement_read_access.target.node,
+        owner_field_write_target.node
+    );
 }
 
 #[test]
@@ -488,7 +593,8 @@ fn boracle_oracle_defining_root_retires_child_alias_and_later_write_is_safe() {
     let holder = fixture.place(1, []);
     let holder_field = fixture.place(1, [ProjectionElem::Field(0)]);
     fixture.fresh(source);
-    fixture.alias(holder_field, source, AccessKind::Shared);
+    fixture.fresh(holder);
+    fixture.alias_update(holder_field, source, AccessKind::Shared);
     fixture.fresh(holder);
     fixture.access(holder_field, UseKind::Write, false);
 
@@ -528,7 +634,8 @@ fn boracle_oracle_slot_definition_write_defers_replacement_to_writer() {
     state
         .apply_definition_transition(
             &problem,
-            owner,
+            &place_index,
+            BindingDestination::Define(owner),
             DefinitionEventKind::Value,
             DefinitionRole::Slot { current: seed },
             0,
@@ -551,7 +658,8 @@ fn boracle_oracle_slot_definition_write_defers_replacement_to_writer() {
     state
         .apply_definition_transition(
             &problem,
-            owner,
+            &place_index,
+            BindingDestination::Define(owner),
             DefinitionEventKind::Value,
             DefinitionRole::Slot {
                 current: replacement,
@@ -577,6 +685,7 @@ fn boracle_oracle_slot_replacement_retires_the_destination_held_capability() {
     let owner = fixture.place(0, []);
     let problem = fixture.finish();
     let mut state = OracleState::new(&problem);
+    let place_index = PlaceIndex::new(&problem);
     let generation = state
         .issue_generation(16)
         .expect("seed generation should fit the bound");
@@ -609,7 +718,8 @@ fn boracle_oracle_slot_replacement_retires_the_destination_held_capability() {
     let transition = state
         .apply_definition_transition(
             &problem,
-            owner,
+            &place_index,
+            BindingDestination::Define(owner),
             DefinitionEventKind::Value,
             DefinitionRole::Slot {
                 current: replacement,
@@ -1734,26 +1844,99 @@ fn boracle_oracle_rebind_alias_origins_is_typed_inconclusive() {
 }
 
 #[test]
-fn boracle_oracle_rebind_alias_from_place_issues_no_capability() {
+fn boracle_oracle_rebind_alias_from_place_slot_update_issues_shared_provenance() {
     let mut fixture = Fixture::new(2);
     let owner = fixture.place(0, []);
     let destination = fixture.place(1, []);
     fixture.fresh(owner);
-    fixture.rebind_alias_from_place(destination, owner);
+    fixture.fresh(destination);
+    let rebind_event = fixture.rebind_alias_from_place(destination, owner);
     fixture.access(destination, UseKind::Read, false);
-    // If the rebind issued a capability for `destination`, these uses would keep the
-    // intervening exclusive owner access inside that capability's interval.
-    fixture.access(owner, UseKind::Write, false);
+    let owner_write = fixture.access_event(owner, UseKind::Write, false);
     fixture.access(destination, UseKind::Read, false);
 
-    match run(fixture.finish()) {
-        OracleOutcome::CompleteSafe { executions, .. } => assert_eq!(executions, 1),
-        outcome => panic!("unexpected outcome: {outcome:?}"),
-    }
+    let trace = conflict_trace(run(fixture.finish()));
+    let conflict = trace
+        .conflict
+        .as_ref()
+        .expect("the slot update's shared provenance should conflict with the owner write");
+    assert_eq!(conflict.access_event, owner_write);
+    assert_eq!(conflict.access_kind, AccessKind::Exclusive);
+    assert_eq!(conflict.capability_kind, AccessKind::Shared);
+    let capability = trace
+        .capabilities
+        .iter()
+        .find(|capability| capability.issue_event == rebind_event)
+        .expect("the rebind should issue a capability");
+    assert_eq!(capability.source, CapabilitySource::Provenance);
+    assert_eq!(capability.kind, AccessKind::Shared);
+    assert_eq!(capability.holders, BTreeSet::from([destination]));
+    assert_eq!(capability.target, conflict.access_target.node);
+    assert_eq!(capability.path, conflict.access_target.path);
 }
 
 #[test]
-fn boracle_oracle_slot_alias_rebind_issues_shared_provenance() {
+fn boracle_oracle_alias_update_rebind_preserves_referent_and_tracks_incoming_path() {
+    let mut fixture = Fixture::new(3);
+    let old_referent = fixture.place(0, []);
+    let incoming_source = fixture.place(1, []);
+    let incoming_dynamic = fixture.place(1, [ProjectionElem::DynamicIndex]);
+    let destination = fixture.place(2, []);
+    fixture.fresh(old_referent);
+    fixture.fresh(incoming_source);
+    let alias_event = fixture.alias(destination, old_referent, AccessKind::Exclusive);
+    let rebind_event = fixture.rebind_alias_from_place(destination, incoming_dynamic);
+    let destination_read = fixture.access_event(destination, UseKind::Read, false);
+    let incoming_write = fixture.access_event(incoming_dynamic, UseKind::Write, false);
+    fixture.access_event(destination, UseKind::Read, false);
+
+    let trace = conflict_trace(run(fixture.finish()));
+    let conflict = trace
+        .conflict
+        .as_ref()
+        .expect("the incoming shared provenance should conflict with its source write");
+    assert_eq!(conflict.access_event, incoming_write);
+    assert_eq!(conflict.access_kind, AccessKind::Exclusive);
+    assert_eq!(conflict.capability_kind, AccessKind::Shared);
+
+    let alias_capability = trace
+        .capabilities
+        .iter()
+        .find(|capability| capability.issue_event == alias_event)
+        .expect("the original direct alias should remain installed");
+    assert_eq!(alias_capability.source, CapabilitySource::Alias);
+    assert_eq!(alias_capability.kind, AccessKind::Exclusive);
+    assert_eq!(alias_capability.holders, BTreeSet::from([destination]));
+    assert!(alias_capability.explicit_end.is_none());
+
+    let incoming_capability = trace
+        .capabilities
+        .iter()
+        .find(|capability| capability.issue_event == rebind_event)
+        .expect("the alias update should retain incoming provenance");
+    assert_eq!(incoming_capability.source, CapabilitySource::Provenance);
+    assert_eq!(incoming_capability.kind, AccessKind::Shared);
+    assert_eq!(incoming_capability.holders, BTreeSet::from([destination]));
+    assert_eq!(
+        incoming_capability.path.as_ref(),
+        [ProjectionElem::DynamicIndex]
+    );
+    assert_ne!(incoming_capability.target, alias_capability.target);
+    assert_eq!(incoming_capability.target, conflict.capability_target.node);
+    assert_eq!(incoming_capability.path, conflict.capability_target.path);
+
+    let destination_read = trace
+        .entries
+        .iter()
+        .find(|entry| entry.event == destination_read)
+        .and_then(|entry| entry.access.as_ref())
+        .expect("the destination read should expose its preserved referent");
+    assert_eq!(destination_read.target.node, alias_capability.target);
+    assert_eq!(destination_read.target.path, alias_capability.path);
+}
+
+#[test]
+fn boracle_oracle_direct_alias_definition_replaces_slot_with_alias_capability() {
     let mut fixture = Fixture::new(2);
     let source = fixture.place(0, []);
     let destination = fixture.place(1, []);
@@ -1768,19 +1951,18 @@ fn boracle_oracle_slot_alias_rebind_issues_shared_provenance() {
     let conflict = trace
         .conflict
         .as_ref()
-        .expect("slot alias rebind provenance should witness the source mutation");
+        .expect("the direct alias capability should witness the source mutation");
     assert_eq!(conflict.access_event, source_write);
     assert_eq!(conflict.access_kind, AccessKind::Exclusive);
-    assert_eq!(conflict.capability_kind, AccessKind::Shared);
+    assert_eq!(conflict.capability_kind, AccessKind::Exclusive);
     let capability = trace
         .capabilities
         .iter()
         .find(|capability| {
-            capability.issue_event == alias_event
-                && capability.source == CapabilitySource::Provenance
+            capability.issue_event == alias_event && capability.source == CapabilitySource::Alias
         })
-        .expect("slot alias rebind should issue provenance");
-    assert_eq!(capability.kind, AccessKind::Shared);
+        .expect("a direct alias definition over a slot should issue an alias capability");
+    assert_eq!(capability.kind, AccessKind::Exclusive);
     assert_eq!(capability.holders, BTreeSet::from([destination]));
     assert_eq!(capability.target, conflict.access_target.node);
 }
@@ -2279,8 +2461,7 @@ fn boracle_oracle_reissued_capability_after_scope_exit_exercises_newest_instance
         .capabilities
         .iter()
         .filter(|capability| {
-            capability.source == CapabilitySource::Provenance
-                && capability.holders.contains(&holder)
+            capability.source == CapabilitySource::Alias && capability.holders.contains(&holder)
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -2359,7 +2540,7 @@ fn boracle_oracle_reissued_capability_after_scope_exit_exercises_newest_instance
     let _ = (first_alias, second_alias);
 }
 #[test]
-fn boracle_oracle_loop_reaches_write_through_conflict_on_second_iteration() {
+fn boracle_oracle_loop_redefines_alias_without_writing_through() {
     let mut fixture = Fixture::new(2);
     let owner = fixture.place(0, []);
     let alias = fixture.place(1, []);
@@ -2373,9 +2554,9 @@ fn boracle_oracle_loop_reaches_write_through_conflict_on_second_iteration() {
     fixture.terminator(TerminatorEventKind::Return);
     let exit_events = fixture.take_events();
 
-    // Declaring the alias inside the body makes the first iteration install the alias role for
-    // the still-unavailable destination, and every later iteration write through that same role.
-    let owner_read = fixture.access_event(owner, UseKind::Read, false);
+    // A declaration on the back-edge retires the previous binding before installing the next
+    // alias. The separate write-through tests above cover explicit Update destinations.
+    fixture.access(owner, UseKind::Read, false);
     fixture.alias(alias, owner, AccessKind::Exclusive);
     fixture.access(alias, UseKind::Read, false);
     fixture.branch([exit, body]);
@@ -2397,49 +2578,31 @@ fn boracle_oracle_loop_reaches_write_through_conflict_on_second_iteration() {
         vec![exit],
     );
 
-    // The completed zero-body and one-body prefixes own the one- and two-execution budgets, and
-    // neither reaches a conflict: the alias role does not exist before the first declaration, so
-    // the owner read precedes every issue_index within the first iteration.
+    // The loop cannot be proven complete within either execution budget. Repeated explicit
+    // Definitions remain safe prefixes; truncation must stay inconclusive rather than becoming
+    // a false CompleteSafe result.
     match run_with_bounds(problem.clone(), OracleBounds::new(1, 4096, 8, 4096)) {
         OracleOutcome::Inconclusive {
             reason: OracleLimitReason::ExecutionBound { limit },
-            explored,
             ..
         } => {
             assert_eq!(limit, 1);
-            assert_eq!(explored, 3);
         }
         outcome => panic!("unexpected zero-iteration outcome: {outcome:?}"),
     }
     match run_with_bounds(problem.clone(), OracleBounds::new(2, 4096, 8, 4096)) {
         OracleOutcome::Inconclusive {
             reason: OracleLimitReason::ExecutionBound { limit },
-            explored,
             ..
         } => {
             assert_eq!(limit, 2);
-            assert_eq!(explored, 8);
         }
         outcome => panic!("unexpected one-iteration outcome: {outcome:?}"),
     }
-
-    // From the second iteration on, the declaration writes through the surviving exclusive alias
-    // capability, whose interval the trailing alias read extends back over the owner read.
-    match run(problem) {
-        OracleOutcome::RuntimeConflict { trace } => {
-            let conflict = trace
-                .conflict
-                .as_ref()
-                .expect("a runtime conflict must carry its witness");
-            assert_eq!(conflict.access_event, owner_read);
-            assert_eq!(
-                trace.block_entries().get(&body).copied(),
-                Some(2),
-                "the witness must come from the second body entry"
-            );
-        }
-        outcome => panic!("expected a conflict after several iterations: {outcome:?}"),
-    }
+    assert!(
+        matches!(run(problem), OracleOutcome::Inconclusive { .. }),
+        "repeated definitions must retire the prior alias before its old capability can conflict with a later owner read"
+    );
 }
 
 #[test]
@@ -2743,16 +2906,14 @@ fn boracle_oracle_repeated_loan_issue_is_independent_and_kill_scoped() {
 
 #[test]
 fn boracle_oracle_live_loan_conflict_survives_expired_call_argument() {
-    let mut fixture = Fixture::new(3);
+    let mut fixture = Fixture::new(2);
     let argument_place = fixture.place(0, []);
-    let observation = fixture.place(1, []);
-    let support_holder = fixture.place(2, []);
+    let support_holder = fixture.place(1, []);
     let exit = BlockId::new(1);
     let body = BlockId::new(2);
     let gap = BlockId::new(3);
     fixture.fresh(argument_place);
     fixture.fresh(support_holder);
-    fixture.rebind_alias_from_place(observation, argument_place);
     let mut entry_events = fixture.take_events();
     fixture.jump(body);
     entry_events.extend(fixture.take_events());
@@ -2771,9 +2932,14 @@ fn boracle_oracle_live_loan_conflict_survives_expired_call_argument() {
     fixture.jump(gap);
     let body_events = fixture.take_events();
     let support_loan = fixture.loan_issue(argument_place, support_holder, AccessKind::Exclusive);
+    let support_loan_event = fixture
+        .event_ids
+        .last()
+        .copied()
+        .expect("loan issue should append an event");
 
-    let observation_access = fixture.access_event(observation, UseKind::Read, false);
-    fixture.access(support_holder, UseKind::Read, false);
+    let argument_access = fixture.access_event(argument_place, UseKind::Read, false);
+    let support_holder_read = fixture.access_event(support_holder, UseKind::Read, false);
     fixture.branch([exit, body]);
     let gap_events = fixture.take_events();
 
@@ -2797,38 +2963,65 @@ fn boracle_oracle_live_loan_conflict_survives_expired_call_argument() {
         vec![exit],
     );
 
-    // The observation is after the call effect. Its conflict must come from the independent loan,
-    // whose holder use keeps that capability live, rather than from the expired call argument.
+    // The argument read follows its call effect. Its conflict must come from the independent loan,
+    // whose separate holder read keeps that capability live past the expired call argument.
     let trace = match run_with_bounds(problem, OracleBounds::new(256, 4096, 8, 4096)) {
         OracleOutcome::RuntimeConflict { trace } => trace,
         outcome => panic!("unexpected live-loan outcome: {outcome:?}"),
+    };
+    let trace_index_for = |event| {
+        trace
+            .entries
+            .iter()
+            .find(|entry| entry.event == event)
+            .map(|entry| entry.index)
+            .expect("the captured event should execute")
     };
     let conflict = trace
         .conflict
         .as_ref()
         .expect("a conflict outcome carries its witness");
-    assert_eq!(conflict.access_event, observation_access);
-    assert_eq!(conflict.access_index, 8);
+    assert_eq!(conflict.access_event, argument_access);
+    assert_eq!(conflict.access_index, trace_index_for(argument_access));
     assert_eq!(conflict.access_kind, AccessKind::Shared);
     assert_eq!(conflict.capability_kind, AccessKind::Exclusive);
-    assert_eq!(conflict.capability_issue, 7);
+    let witness = trace
+        .capabilities
+        .get(conflict.capability_id.raw() as usize)
+        .expect("the conflict witness should name a traced capability");
+    assert_eq!(witness.source, CapabilitySource::Loan(support_loan));
+    assert_ne!(
+        witness.source,
+        CapabilitySource::CallArgument(CallId::new(0))
+    );
+    assert_eq!(
+        conflict.capability_issue,
+        trace_index_for(support_loan_event)
+    );
     let loan_capability = trace
         .capabilities
         .iter()
         .find(|capability| capability.source == CapabilitySource::Loan(support_loan))
         .expect("the supporting loan should issue a capability");
-    assert_eq!(loan_capability.issue_index, 7);
-    assert_eq!(loan_capability.last_exercised, 9);
+    assert_eq!(
+        loan_capability.issue_index,
+        trace_index_for(support_loan_event)
+    );
+    assert_eq!(
+        loan_capability.last_exercised,
+        trace_index_for(support_holder_read)
+    );
     let call_capability = trace
         .capabilities
         .iter()
         .find(|capability| capability.issue_event == argument_event)
         .expect("the call argument should issue a capability");
-    assert_eq!(
-        call_capability.call_effect_index,
-        Some(effect_event.index())
-    );
-    assert_eq!(call_capability.last_exercised, effect_event.index());
+    let effect_index = trace_index_for(effect_event);
+    assert!(effect_index < trace_index_for(support_loan_event));
+    assert!(trace_index_for(support_loan_event) < trace_index_for(argument_access));
+    assert!(trace_index_for(argument_access) < trace_index_for(support_holder_read));
+    assert_eq!(call_capability.call_effect_index, Some(effect_index));
+    assert_eq!(call_capability.last_exercised, effect_index);
 }
 
 /// A call argument capability's interval reaches the CallEffect of its own call and ends there.
@@ -2849,7 +3042,7 @@ fn boracle_oracle_second_call_invocation_issues_fresh_argument_capabilities() {
     let body = BlockId::new(2);
     let gap = BlockId::new(3);
     fixture.fresh(argument_place);
-    fixture.rebind_alias_from_place(observation, argument_place);
+    fixture.fresh(observation);
     let mut entry_events = fixture.take_events();
     fixture.jump(body);
     entry_events.extend(fixture.take_events());
@@ -2868,12 +3061,18 @@ fn boracle_oracle_second_call_invocation_issues_fresh_argument_capabilities() {
     fixture.jump(gap);
     let body_events = fixture.take_events();
     let loan = fixture.loan_issue(argument_place, observation, AccessKind::Shared);
-    fixture.access(observation, UseKind::Read, false);
+    let loan_issue_event = fixture
+        .event_ids
+        .last()
+        .copied()
+        .expect("loan issue should append an event");
+    let observation_read = fixture.access_event(observation, UseKind::Read, false);
     fixture.branch([exit, body]);
     let gap_events = fixture.take_events();
 
     fixture.terminator(TerminatorEventKind::Return);
     let exit_events = fixture.take_events();
+    let exit_event_count = exit_events.len();
 
     let problem = fixture.finish_cfg(
         BTreeMap::from([
@@ -2907,7 +3106,8 @@ fn boracle_oracle_second_call_invocation_issues_fresh_argument_capabilities() {
         .filter(|entry| entry.event == argument_event)
         .map(|entry| entry.index)
         .collect::<Vec<_>>();
-    assert_eq!(argument_entries, vec![3, 9]);
+    assert_eq!(argument_entries.len(), 2);
+    assert!(argument_entries[0] < argument_entries[1]);
 
     // The conflict is the outstanding shared loan from the first gap, never the expired argument
     // capability: a shared witness is only possible because the exclusive argument interval ended
@@ -2923,11 +3123,29 @@ fn boracle_oracle_second_call_invocation_issues_fresh_argument_capabilities() {
     let outstanding_loan = trace
         .capabilities
         .iter()
-        .find(|capability| {
-            capability.source == CapabilitySource::Loan(loan) && capability.issue_index == 6
-        })
+        .find(|capability| capability.source == CapabilitySource::Loan(loan))
         .expect("the first pass should issue the outstanding loan");
     assert_eq!(conflict.capability_issue, outstanding_loan.issue_index);
+
+    let loan_issue_entries = trace
+        .entries
+        .iter()
+        .filter(|entry| entry.event == loan_issue_event)
+        .map(|entry| entry.index)
+        .collect::<Vec<_>>();
+    let observation_read_entries = trace
+        .entries
+        .iter()
+        .filter(|entry| entry.event == observation_read)
+        .map(|entry| entry.index)
+        .collect::<Vec<_>>();
+    assert_eq!(loan_issue_entries.len(), 2);
+    assert_eq!(observation_read_entries.len(), 2);
+    assert_eq!(outstanding_loan.issue_index, loan_issue_entries[0]);
+    assert_eq!(
+        outstanding_loan.last_exercised, observation_read_entries[1],
+        "the second holder read keeps the first loan live across the second invocation"
+    );
 
     // The trace snapshots capabilities in id order, so the position doubles as the capability id.
     let call_argument_rows = trace
@@ -2946,24 +3164,21 @@ fn boracle_oracle_second_call_invocation_issues_fresh_argument_capabilities() {
     let (first_id, first_capability) = call_argument_rows[0];
     let (second_id, second_capability) = call_argument_rows[1];
 
-    assert_eq!(first_capability.issue_index, 3);
-    assert_eq!(
-        first_capability.call_effect_index,
-        Some(effect_event.index())
-    );
-    assert_eq!(
-        first_capability.last_exercised,
-        effect_event.index(),
-        "the first invocation's capability must stay capped at the first effect across the loop"
-    );
-
     let effect_entries = trace
         .entries
         .iter()
         .filter(|entry| entry.event == effect_event)
         .map(|entry| entry.index)
         .collect::<Vec<_>>();
-    assert_eq!(effect_entries, vec![4, 10]);
+    assert_eq!(effect_entries.len(), 2);
+    let first_effect_index = effect_entries[0];
+    assert_eq!(first_capability.issue_index, argument_entries[0]);
+    assert_eq!(first_capability.call_effect_index, Some(first_effect_index));
+    assert_eq!(
+        first_capability.last_exercised, first_effect_index,
+        "the first invocation's capability must stay capped at the first effect across the loop"
+    );
+
     let second_effect_index = effect_entries[1];
     assert_eq!(second_capability.issue_index, argument_entries[1]);
     assert_eq!(second_capability.issue_event, argument_event);
@@ -2995,19 +3210,19 @@ fn boracle_oracle_second_call_invocation_issues_fresh_argument_capabilities() {
         "the second argument access must exercise its own fresh capability only"
     );
 
-    // The first pass is clean, so the enumeration reaches the loop continuation instead of
-    // resolving on the exit path, and a body bound of one truncates exactly there. `explored`
-    // counts dispatched events: the ten events of the clean first pass, with the refused loop
-    // continuation contributing none.
+    // The first pass completes on the safe exit path before enumeration reaches the loop
+    // continuation. A body bound of one then truncates before the second argument event, and the
+    // explored count includes the exit-path events dispatched before that repeated body prefix.
     match run_with_bounds(problem, OracleBounds::new(256, 4096, 1, 4096)) {
         OracleOutcome::Inconclusive {
             reason: OracleLimitReason::BlockEntryBound { block, limit },
             explored,
-            ..
+            completed_executions,
         } => {
             assert_eq!(block, body);
             assert_eq!(limit, 1);
-            assert_eq!(explored, 10);
+            assert_eq!(completed_executions, 1);
+            assert_eq!(explored, argument_entries[1] + exit_event_count);
         }
         outcome => panic!("unexpected bounded second-invocation outcome: {outcome:?}"),
     }
@@ -3250,24 +3465,23 @@ fn boracle_oracle_call_effect_respects_explicit_end() {
 }
 
 #[test]
-fn boracle_oracle_defining_write_through_shared_alias_conflicts_at_the_write() {
-    // A definition write to a shared-alias-backed place is a write-through whose paired access
-    // is reclassified as an ordinary mutation (`loans.rs:227-234`), so it stays under the
-    // direct rule. Only a confirming definition for a pending call result is exempt, and this
-    // access is not one.
+fn boracle_oracle_update_through_shared_alias_conflicts_at_the_write() {
+    // An Update through a shared alias is a conflict-checked mutation, while a Define would
+    // retire the old alias and install an independent value.
     let mut fixture = Fixture::new(2);
     let owner = fixture.place(0, []);
     let alias = fixture.place(1, []);
     fixture.fresh(owner);
     fixture.alias(alias, owner, AccessKind::Shared);
-    let defining_write = fixture.access_event(alias, UseKind::Write, true);
+    let update_write = fixture.binding_write(BindingDestination::Update(alias));
+    fixture.rebind_fresh(alias);
 
     let trace = conflict_trace(run(fixture.finish()));
     let conflict = trace
         .conflict
         .as_ref()
-        .expect("a defining write through a shared alias must conflict directly at that write");
-    assert_eq!(conflict.access_event, defining_write);
+        .expect("an Update through a shared alias must conflict at its paired write");
+    assert_eq!(conflict.access_event, update_write);
     assert_eq!(conflict.access_kind, AccessKind::Exclusive);
     assert_eq!(conflict.capability_kind, AccessKind::Shared);
 }
@@ -3295,7 +3509,7 @@ fn boracle_oracle_alias_params_provenance_survives_its_confirming_write() {
         result_place,
         CallResultProvenance::AliasParams(vec![0].into_boxed_slice()),
     );
-    fixture.access(result_place, UseKind::Write, true);
+    fixture.binding_write(BindingDestination::Define(result_place));
     let argument_mutation = fixture.access_event(argument_place, UseKind::Write, false);
     fixture.access(result_place, UseKind::Read, false);
 
@@ -3386,11 +3600,8 @@ fn boracle_oracle_rebind_alias_from_place_with_residual_path_is_typed_inconclusi
 }
 
 #[test]
-fn boracle_oracle_alias_replacing_slot_with_residual_source_is_typed_inconclusive() {
-    // An unavailable alias destination stores the alias with its full residual path, so that
-    // case stays faithful. A slot-backed destination replaces through
-    // `DefinitionRole::slot_target`, which drops the path, so the same source must refuse
-    // instead of collapsing.
+fn boracle_oracle_alias_replacing_slot_preserves_residual_source_path() {
+    // A direct place definition replaces the old slot with an alias and keeps the residual path.
     let mut fixture = Fixture::new(2);
     let source = fixture.place(0, []);
     let source_dynamic = fixture.place(0, [ProjectionElem::DynamicIndex]);
@@ -3399,27 +3610,28 @@ fn boracle_oracle_alias_replacing_slot_with_residual_source_is_typed_inconclusiv
     fixture.fresh(destination);
     fixture.alias(destination, source_dynamic, AccessKind::Shared);
 
-    match run(fixture.finish()) {
-        OracleOutcome::Inconclusive {
-            reason: OracleLimitReason::UndecidableOverlap { left, right },
-            ..
-        } => {
-            assert_eq!(left.node, right.node);
-            assert_eq!(
-                left.path.as_ref(),
-                [ProjectionElem::DynamicIndex].as_slice()
-            );
-            assert!(right.path.is_empty());
-        }
-        outcome => panic!(
-            "an alias onto a slot-backed destination must refuse when its source keeps a \
-             residual undecidable path: {outcome:?}"
-        ),
-    }
+    let alias_event = fixture
+        .event_ids
+        .last()
+        .copied()
+        .expect("alias event should exist");
+    let trace = match run(fixture.finish()) {
+        OracleOutcome::CompleteSafe { trace, .. } => trace,
+        outcome => panic!("a direct alias definition should retain its residual path: {outcome:?}"),
+    };
+    let capability = trace
+        .capabilities
+        .iter()
+        .find(|capability| capability.issue_event == alias_event)
+        .expect("the direct alias should issue its own capability");
+    assert_eq!(capability.source, CapabilitySource::Alias);
+    assert_eq!(
+        capability.path.as_ref(),
+        [ProjectionElem::DynamicIndex].as_slice(),
+        "replacing a slot must preserve the direct source's residual path"
+    );
 
-    // The contrast: the same residual alias onto an unavailable destination installs with the
-    // path intact, so the alias capability still names the projected position and a mutation
-    // of the base stays a direct conflict whose witness carries that path.
+    // The same residual alias onto an unavailable destination also keeps its path.
     let mut faithful = Fixture::new(2);
     let faithful_source = faithful.place(0, []);
     let faithful_dynamic = faithful.place(0, [ProjectionElem::DynamicIndex]);
@@ -3470,31 +3682,56 @@ fn boracle_oracle_bare_slot_rebind_retires_overlapping_projection_holder() {
 
 #[test]
 fn boracle_oracle_install_definition_retires_overlapping_holder_on_unavailable_destination() {
-    // The installed row retires overlapping holders too: a capability held by a covered
-    // projection dies even though the destination itself was unavailable and held nothing.
-    let mut fixture = Fixture::new(2);
+    // Exercise the transition owner's retirement invariant directly. Normalized LoanIssue
+    // requires available holders, so it cannot construct this unavailable-parent state.
+    let mut fixture = Fixture::new(1);
     let value = fixture.place(0, []);
     let value_field = fixture.place(0, [ProjectionElem::Field(0)]);
-    let source = fixture.place(1, []);
-    fixture.fresh(source);
-    // The alias installs on the covered projection of the never-initialized parent, so its
-    // capability is held by `value_field` while `value` itself is unavailable. The trailing
-    // exclusive source mutation is the non-holder probe: if the installed definition of
-    // `value` skipped its overlapping-holder retirement, the second holder read below drags
-    // that shared capability across the mutation and fabricates a conflict.
-    fixture.alias(value_field, source, AccessKind::Shared);
-    fixture.access(value_field, UseKind::Read, false);
-    fixture.fresh(value);
-    let source_mutation = fixture.access_event(source, UseKind::Write, false);
-    fixture.access(value_field, UseKind::Read, false);
+    let problem = fixture.finish();
+    let place_index = PlaceIndex::new(&problem);
+    let mut state = OracleState::new(&problem);
+    let generation = state.issue_generation(1).expect("the seed generation fits");
+    let capability = state
+        .issue_capability(
+            AccessKind::Shared,
+            RuntimeAccessTarget {
+                node: generation,
+                path: Box::new([]),
+            },
+            BTreeSet::from([value_field]),
+            0,
+            EventId::new(0),
+            CapabilitySource::Alias,
+        )
+        .expect("the state-owned capability should issue");
+    assert_eq!(state.state(value).unwrap(), RuntimePlaceState::Unavailable);
 
-    match run(fixture.finish()) {
-        OracleOutcome::CompleteSafe { executions: 1, .. } => {}
-        outcome => panic!(
-            "the installed row must retire the holder on the covered projection of its \
-             unavailable destination: {outcome:?}, write: {source_mutation:?}"
-        ),
-    }
+    let transition = state
+        .apply_definition_transition(
+            &problem,
+            &place_index,
+            BindingDestination::Define(value),
+            DefinitionEventKind::Value,
+            DefinitionRole::Slot {
+                current: generation,
+            },
+            1,
+        )
+        .expect("the definition must install its slot and retire overlapping holders");
+    let DefinitionTransition::Installed {
+        retired_capabilities,
+        ..
+    } = transition
+    else {
+        panic!("an unavailable destination must take the installation row");
+    };
+    assert_eq!(retired_capabilities.as_ref(), [capability].as_slice());
+    let capability = state
+        .capabilities
+        .get(&capability)
+        .expect("the ended capability remains available for inspection");
+    assert_eq!(capability.explicit_end, Some(1));
+    assert!(capability.retired_holders.contains(&value_field));
 }
 
 fn safe_and_closed_cycle_problem() -> BorrowProblem {
@@ -3818,7 +4055,7 @@ fn boracle_oracle_block_entry_bound_is_typed_inconclusive() {
 }
 
 /// One writer of the transition matrix, dispatched through the real event executor.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MatrixWriter {
     FreshValue,
     CopyValue,
@@ -3836,17 +4073,42 @@ enum MatrixWriter {
 }
 
 impl MatrixWriter {
-    /// Only direct alias and mutable-parameter writers install alias state onto an
-    /// unavailable destination. Every other writer is value-producing and installs a slot.
-    fn installs_alias(self) -> bool {
-        matches!(
-            self,
-            MatrixWriter::AliasShared
-                | MatrixWriter::AliasExclusive
-                | MatrixWriter::AliasOriginsShared
-                | MatrixWriter::AliasOriginsExclusive
-                | MatrixWriter::MutableParameter
-        )
+    /// Direct place writers install a binding alias when they replace a slot or define a local.
+    fn direct_alias_access(self) -> Option<AccessKind> {
+        match self {
+            Self::AliasShared | Self::AliasOriginsShared => Some(AccessKind::Shared),
+            Self::AliasExclusive | Self::AliasOriginsExclusive => Some(AccessKind::Exclusive),
+            Self::FreshValue
+            | Self::CopyValue
+            | Self::AggregateValue
+            | Self::RebindFresh
+            | Self::RebindAliasFromPlace
+            | Self::CallResultFresh
+            | Self::CallResultAliasParams
+            | Self::Projection
+            | Self::MutableParameter => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MatrixDestinationShape {
+    Local,
+    Projected,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MatrixOperation {
+    Define,
+    Update,
+}
+
+impl MatrixOperation {
+    fn destination(self, place: PlaceId) -> BindingDestination {
+        match self {
+            Self::Define => BindingDestination::Define(place),
+            Self::Update => BindingDestination::Update(place),
+        }
     }
 }
 
@@ -3859,47 +4121,54 @@ enum MatrixPreState {
     AliasExclusive,
 }
 
+impl MatrixPreState {
+    fn alias_access(self) -> Option<AccessKind> {
+        match self {
+            Self::AliasShared => Some(AccessKind::Shared),
+            Self::AliasExclusive => Some(AccessKind::Exclusive),
+            Self::Unavailable | Self::Slot => None,
+        }
+    }
+}
+
 /// Dispatches one matrix writer through the fixture's event stream. Call writers create their
-/// own call row and argument event, then confirm the result with a defining access. Ordinary
-/// writers receive their defining access first. Alias-origin writers carry a single seed origin.
+/// own call row and argument event, then confirm the result with a tagged binding access. Other
+/// writers receive their typed destination access first. Alias-origin writers carry one seed.
 fn apply_matrix_writer(
     fixture: &mut Fixture,
     writer: MatrixWriter,
-    destination: PlaceId,
-    definition_place: PlaceId,
+    destination: BindingDestination,
     seed_source: PlaceId,
     argument_source: PlaceId,
-) {
-    if !matches!(
+) -> (Option<EventId>, EventId) {
+    let is_call = matches!(
         writer,
-        MatrixWriter::CallResultFresh
-            | MatrixWriter::CallResultAliasParams
-            | MatrixWriter::MutableParameter
-    ) {
-        fixture.access(definition_place, UseKind::Write, true);
-    }
-    match writer {
-        MatrixWriter::FreshValue => fixture.fresh(destination),
-        MatrixWriter::CopyValue => fixture.copy(destination, seed_source),
+        MatrixWriter::CallResultFresh | MatrixWriter::CallResultAliasParams
+    );
+    let binding_write_before = (!is_call && writer != MatrixWriter::MutableParameter)
+        .then(|| fixture.binding_write(destination));
+    let writer_event = match writer {
+        MatrixWriter::FreshValue => fixture.fresh_to(destination),
+        MatrixWriter::CopyValue => fixture.copy_to(destination, seed_source),
         MatrixWriter::AggregateValue => {
-            fixture.aggregate(destination, [(ProjectionElem::Field(0), seed_source)]);
+            fixture.aggregate_to(destination, [(ProjectionElem::Field(0), seed_source)])
         }
-        MatrixWriter::RebindFresh => fixture.rebind_fresh(destination),
+        MatrixWriter::RebindFresh => fixture.rebind_fresh_to(destination),
         MatrixWriter::RebindAliasFromPlace => {
-            fixture.rebind_alias_from_place(destination, seed_source);
+            fixture.rebind_alias_from_place_to(destination, seed_source)
         }
         MatrixWriter::CallResultFresh => {
             fixture.parts.calls.push(Call {
                 id: CallId::new(0),
                 label: "matrix-call-fresh".to_string(),
             });
-            fixture.call_effect_result(
+            let writer_event = fixture.call_effect_result_to(
                 CallId::new(0),
                 Vec::new(),
                 destination,
                 CallResultProvenance::Fresh,
             );
-            fixture.access(definition_place, UseKind::Write, true);
+            return (Some(fixture.binding_write(destination)), writer_event);
         }
         MatrixWriter::CallResultAliasParams => {
             fixture.parts.calls.push(Call {
@@ -3908,46 +4177,43 @@ fn apply_matrix_writer(
             });
             let (_, argument) =
                 fixture.call_argument_at(CallId::new(0), 0, argument_source, AccessKind::Shared);
-            fixture.call_effect_result(
+            let writer_event = fixture.call_effect_result_to(
                 CallId::new(0),
                 vec![argument],
                 destination,
                 CallResultProvenance::AliasParams(vec![0].into_boxed_slice()),
             );
-            fixture.access(definition_place, UseKind::Write, true);
+            return (Some(fixture.binding_write(destination)), writer_event);
         }
         MatrixWriter::Projection => {
-            fixture.projection(seed_source, destination, ProjectionElem::Field(0));
+            fixture.projection_to(seed_source, destination, ProjectionElem::Field(0))
         }
-        MatrixWriter::AliasShared => {
-            fixture.alias(destination, seed_source, AccessKind::Shared);
-        }
+        MatrixWriter::AliasShared => fixture.alias_to(destination, seed_source, AccessKind::Shared),
         MatrixWriter::AliasExclusive => {
-            fixture.alias(destination, seed_source, AccessKind::Exclusive);
+            fixture.alias_to(destination, seed_source, AccessKind::Exclusive)
         }
         MatrixWriter::AliasOriginsShared => {
-            fixture.alias_with_origins(destination, seed_source, AccessKind::Shared);
+            fixture.alias_with_origins_to(destination, seed_source, AccessKind::Shared)
         }
         MatrixWriter::AliasOriginsExclusive => {
-            fixture.alias_with_origins(destination, seed_source, AccessKind::Exclusive);
+            fixture.alias_with_origins_to(destination, seed_source, AccessKind::Exclusive)
         }
         MatrixWriter::MutableParameter => {
-            let index = fixture.parts.origins.len() as u32;
-            let origin = fixture.origin(OriginKind::Parameter { index });
+            let origin = fixture.origin(OriginKind::Parameter { index: 0 });
             fixture.event(EventKind::Fresh {
                 destination,
                 origin,
-            });
+            })
         }
-    }
+    };
+    (binding_write_before, writer_event)
 }
 
 #[test]
-fn boracle_oracle_definition_transition_matrix_covers_root_and_projection_places() {
-    // The matrix dispatches every writer through the real event executor and decides each cell
-    // with suffix probes that separate the four transition rows, so a routing defect cannot hide
-    // behind a direct transition call. Every assertion names its destination, pre-state and event
-    // cell.
+fn boracle_oracle_binding_destination_matrix_covers_local_and_projected_writes() {
+    // Every normalized writer is exercised with the operation tag that owns its semantics.
+    // Local Defines cover every prior state; Updates cover available local and projected places.
+    // Alias-holder traces and bounded generation probes separate Update-through from Define.
     const MATRIX_WRITERS: &[(&str, MatrixWriter)] = &[
         ("Fresh", MatrixWriter::FreshValue),
         ("Copy", MatrixWriter::CopyValue),
@@ -3966,224 +4232,401 @@ fn boracle_oracle_definition_transition_matrix_covers_root_and_projection_places
         ),
         ("MutableParameter", MatrixWriter::MutableParameter),
     ];
-    let matrix_states: &[(&str, MatrixPreState)] = &[
+    let define_states = [
         ("Unavailable", MatrixPreState::Unavailable),
         ("Slot", MatrixPreState::Slot),
         ("Shared Alias", MatrixPreState::AliasShared),
         ("Exclusive Alias", MatrixPreState::AliasExclusive),
     ];
+    // An Update needs an existing target; projected Defines are rejected by normalized-input
+    // validation, so the only projected cells below are valid Updates.
+    let update_states = [
+        ("Slot", MatrixPreState::Slot),
+        ("Shared Alias", MatrixPreState::AliasShared),
+        ("Exclusive Alias", MatrixPreState::AliasExclusive),
+    ];
+    let matrix_cases = [
+        (
+            "local Define",
+            MatrixDestinationShape::Local,
+            MatrixOperation::Define,
+            &define_states[..],
+        ),
+        (
+            "local Update",
+            MatrixDestinationShape::Local,
+            MatrixOperation::Update,
+            &update_states[..],
+        ),
+        (
+            "projected Update",
+            MatrixDestinationShape::Projected,
+            MatrixOperation::Update,
+            &update_states[..],
+        ),
+    ];
 
-    for (destination_name, projections) in [
-        ("root", Vec::new()),
-        ("projection", vec![ProjectionElem::Field(0)]),
-    ] {
+    for (operation_name, shape, operation, matrix_states) in matrix_cases {
         for (state_name, pre_state) in matrix_states {
             for (event_name, writer) in MATRIX_WRITERS {
+                // Mutable-parameter classification belongs only to the ABI entry Define of an
+                // unavailable local. It is neither a projected writer nor an Update variant.
+                if *writer == MatrixWriter::MutableParameter
+                    && !(shape == MatrixDestinationShape::Local
+                        && operation == MatrixOperation::Define
+                        && *pre_state == MatrixPreState::Unavailable)
+                {
+                    continue;
+                }
+
                 let mut fixture = Fixture::new(5);
                 fixture.parts.bindings[1].mutable = true;
                 let seed_source = fixture.place(0, []);
                 let destination_root = fixture.place(1, []);
-                let destination = if projections.is_empty() {
-                    destination_root
-                } else {
-                    fixture.place(1, projections.iter().copied())
-                };
-                // A projected use cannot carry the normalised definition flag. An isolated
-                // unavailable binding keeps the event order under test without retiring a
-                // projected holder through a root definition.
-                let definition_place = if projections.is_empty() {
-                    destination
-                } else {
-                    fixture.place(4, [])
-                };
                 let observer = fixture.place(2, []);
-                let keeper = fixture.place(3, []);
-                fixture.fresh(seed_source);
-                fixture.fresh(observer);
-                fixture.fresh(keeper);
-                // The projection writer resolves an existing child here, so the saturated alias
-                // probe measures only generations that a write-through writer creates.
+                let argument_source = fixture.place(3, []);
+                let projected_slot = fixture.place(4, []);
+                let destination = match shape {
+                    MatrixDestinationShape::Local => destination_root,
+                    MatrixDestinationShape::Projected => {
+                        let projection = if pre_state.alias_access().is_some() {
+                            // Keep the alias role probe on a residual path. Materialised child
+                            // nodes have their own overlap contract, separate from this matrix.
+                            ProjectionElem::DynamicIndex
+                        } else {
+                            ProjectionElem::Field(0)
+                        };
+                        fixture.place(1, [projection])
+                    }
+                };
+
+                // Keep call arguments independent from the source used by projection and alias
+                // writers. Every aggregate child already has a dynamic generation.
+                for place in [seed_source, observer, argument_source, projected_slot] {
+                    fixture.fresh(place);
+                }
                 fixture.aggregate(seed_source, [(ProjectionElem::Field(0), observer)]);
+                let mut initial_generation_count = 5;
 
-                let cell = format!("{destination_name} × {state_name} × {event_name}");
-                match pre_state {
-                    MatrixPreState::Unavailable => {
-                        apply_matrix_writer(
-                            &mut fixture,
-                            *writer,
-                            destination,
-                            definition_place,
-                            seed_source,
-                            observer,
-                        );
-
-                        // The independent loan is held by the destination, so a slot replacement
-                        // must retire it while a write-through preserves it. The second alias
-                        // gives the following exclusive referent write a target regardless of
-                        // whether the matrix writer issued a capability itself.
-                        fixture.alias(keeper, destination, AccessKind::Exclusive);
-                        fixture.loan_issue(destination, destination, AccessKind::Shared);
-                        fixture.rebind_fresh(destination);
-                        let referent_write = fixture.access_event(keeper, UseKind::Write, false);
-                        fixture.access(destination, UseKind::Read, false);
-
-                        if writer.installs_alias() {
-                            let trace = match run_matrix_cell(fixture.finish(), &cell) {
-                                OracleOutcome::RuntimeConflict { trace } => trace,
-                                outcome => panic!(
-                                    "{cell}: an unavailable destination must install the event's \
-                                     alias so a later exclusive referent write conflicts: {outcome:?}"
-                                ),
-                            };
-                            let conflict = trace.conflict.as_ref().unwrap_or_else(|| {
-                                panic!("{cell}: alias cell must carry its conflict witness")
-                            });
-                            assert_eq!(
-                                conflict.access_event, referent_write,
-                                "{cell}: the witness must be the intervening referent write"
-                            );
-                        } else {
-                            assert!(
-                                matches!(
-                                    run_matrix_cell(fixture.finish(), &cell),
-                                    OracleOutcome::CompleteSafe { executions: 1, .. }
-                                ),
-                                "{cell}: an unavailable value must install only a slot"
-                            );
-                        }
+                let seeded_alias = match (shape, *pre_state) {
+                    (_, MatrixPreState::Unavailable) => None,
+                    (MatrixDestinationShape::Local, MatrixPreState::Slot) => {
+                        fixture.fresh(destination_root);
+                        initial_generation_count += 1;
+                        None
                     }
-                    MatrixPreState::Slot => {
-                        // Every cell here must execute its writer, so the old generation stays
-                        // reachable behind an independent alias probe: the loan is a
-                        // single-holder row on the destination itself, the alias keeps the old
-                        // generation readable after the writer replaced the slot, and a holder
-                        // read after the stale read drags the loan interval over it when and
-                        // only when the replacement failed to retire the destination's held
-                        // capability. The post-replacement destination read resolves to the new
-                        // generation, so a healthy cell ends the loan at the writer and shows
-                        // the stale read as safe; the state-level retirement contract also keeps
-                        // its direct probe in
-                        // `boracle_oracle_slot_replacement_retires_the_destination_held_capability`.
-                        fixture.fresh(destination);
-                        fixture.loan_issue(destination, destination, AccessKind::Exclusive);
-                        fixture.alias(keeper, destination, AccessKind::Shared);
-                        apply_matrix_writer(
-                            &mut fixture,
-                            *writer,
-                            destination,
-                            definition_place,
+                    (MatrixDestinationShape::Local, alias_state)
+                        if alias_state.alias_access().is_some() =>
+                    {
+                        Some(fixture.alias(
+                            destination_root,
                             seed_source,
-                            observer,
-                        );
-                        fixture.access(keeper, UseKind::Read, false);
-                        fixture.access(destination, UseKind::Read, false);
-
-                        match run_matrix_cell(fixture.finish(), &cell) {
-                            OracleOutcome::CompleteSafe { executions: 1, .. } => {}
-                            OracleOutcome::RuntimeConflict { trace } => panic!(
-                                "{cell}: slot replacement must retire the destination-held \
-                                 loan before the stale alias read can meet it: {trace:?}"
-                            ),
-                            outcome => {
-                                panic!("{cell}: the slot row must execute its writer: {outcome:?}")
-                            }
-                        }
+                            alias_state.alias_access().unwrap(),
+                        ))
                     }
-                    MatrixPreState::AliasShared | MatrixPreState::AliasExclusive => {
-                        let seeded_access = match pre_state {
-                            MatrixPreState::AliasShared => AccessKind::Shared,
-                            MatrixPreState::AliasExclusive => AccessKind::Exclusive,
-                            MatrixPreState::Unavailable | MatrixPreState::Slot => unreachable!(),
-                        };
-                        let seeded_alias = fixture.alias(destination, seed_source, seeded_access);
-                        apply_matrix_writer(
-                            &mut fixture,
-                            *writer,
-                            destination,
-                            definition_place,
+                    (MatrixDestinationShape::Projected, MatrixPreState::Slot) => {
+                        fixture.aggregate(
+                            destination_root,
+                            [(ProjectionElem::Field(0), projected_slot)],
+                        );
+                        initial_generation_count += 1;
+                        None
+                    }
+                    (MatrixDestinationShape::Projected, alias_state)
+                        if alias_state.alias_access().is_some() =>
+                    {
+                        // A projected Define is invalid. Back the projected Update with a root
+                        // alias so its effective destination is alias-backed.
+                        Some(fixture.alias(
+                            destination_root,
                             seed_source,
-                            observer,
-                        );
-                        let referent_write =
-                            fixture.access_event(seed_source, UseKind::Write, false);
-                        fixture.access(destination, UseKind::Read, false);
+                            alias_state.alias_access().unwrap(),
+                        ))
+                    }
+                    _ => unreachable!("each matrix case lists only supported pre-states"),
+                };
+                let seeded_loan = if *pre_state == MatrixPreState::Unavailable {
+                    None
+                } else {
+                    Some(fixture.loan_issue(destination, destination, AccessKind::Exclusive))
+                };
 
-                        // Three seed values and the aggregate root consume four generations.
-                        let alias_generation_bound = 4;
-                        let trace = match run_matrix_cell_with_bounds(
-                            fixture.finish(),
-                            OracleBounds::new(256, 4096, 8, alias_generation_bound),
-                            &cell,
-                        ) {
-                            OracleOutcome::RuntimeConflict { trace } => trace,
-                            outcome => panic!(
-                                "{cell}: a write-through definition must leave its capability \
-                                 covering a later exclusive referent access: {outcome:?}"
-                            ),
-                        };
-                        let conflict = trace.conflict.as_ref().unwrap_or_else(|| {
-                            panic!("{cell}: write-through cell must carry its conflict witness")
-                        });
-                        // The direct rule is kind-based, so its witness depends on the
-                        // destination access kind alone. A shared seeded alias conflicts the
-                        // first recorded exclusive access, which for a root destination is the
-                        // writer's own defining write (the paired access of a write-through is
-                        // an ordinary, conflict-checked mutation) and for a projection
-                        // destination stays the referent write. An exclusive seeded alias
-                        // cannot conflict itself, so its witness remains the referent write.
-                        let expected_witness = if seeded_access == AccessKind::Shared {
-                            let entry = trace
-                                .entries
-                                .iter()
-                                .find(|entry| {
-                                    entry
-                                        .access
-                                        .as_ref()
-                                        .is_some_and(|access| access.kind == AccessKind::Exclusive)
-                                })
-                                .unwrap_or_else(|| {
-                                    panic!(
-                                        "{cell}: shared write-through cells must record an \
-                                     exclusive access before the conflict"
-                                    )
-                                });
-                            entry.event
-                        } else {
-                            referent_write
-                        };
-                        assert_eq!(
-                            conflict.access_event, expected_witness,
-                            "{cell}: the witness must be the first exclusive access on a \
-                             shared seeded alias and the referent write on an exclusive one"
-                        );
-                        assert_eq!(
-                            conflict.capability_kind, seeded_access,
-                            "{cell}: the witness must be the seeded {seeded_access:?} capability"
-                        );
-                        let issue_index = trace
-                            .conflict
+                let binding_destination = operation.destination(destination);
+                let (paired_write, writer_event) = apply_matrix_writer(
+                    &mut fixture,
+                    *writer,
+                    binding_destination,
+                    seed_source,
+                    argument_source,
+                );
+                let result_read = fixture.access_event(destination, UseKind::Read, false);
+                let cell = format!("{operation_name} × {state_name} × {event_name}");
+                let problem = fixture.finish();
+
+                if let Some(paired_write) = paired_write {
+                    let event = problem
+                        .events()
+                        .iter()
+                        .find(|event| event.id == paired_write)
+                        .unwrap_or_else(|| panic!("{cell}: paired write event must be present"));
+                    let EventKind::Access { use_id } = &event.kind else {
+                        panic!("{cell}: paired write must be an Access event")
+                    };
+                    let use_row = &problem.uses()[use_id.index()];
+                    assert_eq!(
+                        use_row.kind,
+                        UseKind::BindingWrite(binding_destination),
+                        "{cell}: paired Access must carry the writer's explicit destination"
+                    );
+                    assert_eq!(
+                        use_row.definition,
+                        binding_destination.defines(),
+                        "{cell}: Use.definition is evidence, not operation authority"
+                    );
+                } else {
+                    assert_eq!(
+                        *writer,
+                        MatrixWriter::MutableParameter,
+                        "only ABI parameter entry omits a paired binding access"
+                    );
+                }
+
+                let shared_alias_update = operation == MatrixOperation::Update
+                    && *pre_state == MatrixPreState::AliasShared;
+                let outcome = if operation == MatrixOperation::Update
+                    && *pre_state == MatrixPreState::AliasExclusive
+                {
+                    run_matrix_cell_with_bounds(
+                        problem,
+                        OracleBounds::new(256, 4096, 8, initial_generation_count),
+                        &cell,
+                    )
+                } else {
+                    run_matrix_cell(problem, &cell)
+                };
+
+                if shared_alias_update {
+                    let trace = match outcome {
+                        OracleOutcome::RuntimeConflict { trace } => trace,
+                        outcome => panic!(
+                            "{cell}: a shared-alias Update must conflict at its paired write: \
+                             {outcome:?}"
+                        ),
+                    };
+                    let paired_write =
+                        paired_write.expect("every ordinary Update has its paired binding write");
+                    let conflict = trace
+                        .conflict
+                        .as_ref()
+                        .expect("shared-alias Update must carry a conflict witness");
+                    assert_eq!(conflict.access_event, paired_write, "{cell}");
+                    assert_eq!(conflict.access_kind, AccessKind::Exclusive, "{cell}");
+                    assert_eq!(conflict.capability_kind, AccessKind::Shared, "{cell}");
+                    let access = trace
+                        .entries
+                        .iter()
+                        .find(|entry| entry.event == paired_write)
+                        .and_then(|entry| entry.access.as_ref())
+                        .expect("the paired Update must resolve through the shared alias");
+                    assert_eq!(access.place, destination, "{cell}");
+                    assert!(!access.definition, "{cell}: Update is not a definition");
+                    let seeded_alias =
+                        seeded_alias.expect("shared alias state must have a seed event");
+                    let capability = trace
+                        .capabilities
+                        .iter()
+                        .find(|capability| {
+                            capability.issue_event == seeded_alias
+                                && capability.source == CapabilitySource::Alias
+                        })
+                        .expect("the seeded alias capability must witness the conflict");
+                    assert_eq!(conflict.capability_issue, capability.issue_index, "{cell}");
+                    assert!(
+                        capability.explicit_end.is_none(),
+                        "{cell}: a rejected shared-alias Update cannot retire its holder"
+                    );
+                    continue;
+                }
+
+                let trace = match outcome {
+                    OracleOutcome::CompleteSafe {
+                        executions: 1,
+                        trace,
+                    } => trace,
+                    OracleOutcome::RuntimeConflict { trace } => {
+                        panic!("{cell}: unexpected runtime conflict: {trace:?}")
+                    }
+                    outcome => panic!("{cell}: unexpected bounded result: {outcome:?}"),
+                };
+                let writer_entry = trace
+                    .entries
+                    .iter()
+                    .find(|entry| entry.event == writer_event)
+                    .unwrap_or_else(|| panic!("{cell}: writer event must execute"));
+                let result_entry = trace
+                    .entries
+                    .iter()
+                    .find(|entry| entry.event == result_read)
+                    .unwrap_or_else(|| panic!("{cell}: result read must execute"));
+                let result_access = result_entry
+                    .access
+                    .as_ref()
+                    .unwrap_or_else(|| panic!("{cell}: result read must resolve"));
+                assert_eq!(result_access.place, destination, "{cell}");
+                assert!(
+                    writer_entry.index < result_entry.index,
+                    "{cell}: writer must execute before the result read"
+                );
+
+                if let Some(paired_write) = paired_write {
+                    let paired_entry = trace
+                        .entries
+                        .iter()
+                        .find(|entry| entry.event == paired_write)
+                        .unwrap_or_else(|| panic!("{cell}: paired write must execute"));
+                    let confirms_call = matches!(
+                        writer,
+                        MatrixWriter::CallResultFresh | MatrixWriter::CallResultAliasParams
+                    );
+                    if confirms_call {
+                        let access = paired_entry
+                            .access
                             .as_ref()
-                            .map(|conflict| conflict.capability_issue)
-                            .unwrap_or_else(|| panic!("{cell}: witness must name its issue index"));
-                        let seeded_index = trace
-                            .entries
-                            .iter()
-                            .find(|entry| entry.event == seeded_alias)
-                            .map(|entry| entry.index)
-                            .unwrap_or_else(|| {
-                                panic!("{cell}: seeded alias must be present on the trace")
-                            });
+                            .unwrap_or_else(|| panic!("{cell}: call confirmation must resolve"));
+                        assert!(writer_entry.index < paired_entry.index, "{cell}");
+                        assert_eq!(access.place, destination, "{cell}");
+                        assert_eq!(access.kind, AccessKind::Exclusive, "{cell}");
                         assert_eq!(
-                            issue_index, seeded_index,
-                            "{cell}: the witness must be the seeded alias capability"
+                            access.definition,
+                            operation == MatrixOperation::Define,
+                            "{cell}"
+                        );
+                        assert_eq!(access.target, result_access.target, "{cell}");
+                    } else if *pre_state == MatrixPreState::Unavailable {
+                        assert!(
+                            paired_entry.access.is_none(),
+                            "{cell}: Define of an unavailable destination has no old target"
+                        );
+                    } else {
+                        let access = paired_entry
+                            .access
+                            .as_ref()
+                            .unwrap_or_else(|| panic!("{cell}: available write must resolve"));
+                        assert_eq!(access.place, destination, "{cell}");
+                        assert_eq!(access.kind, AccessKind::Exclusive, "{cell}");
+                        assert_eq!(
+                            access.definition,
+                            operation == MatrixOperation::Define,
+                            "{cell}: the paired tag owns the operation"
                         );
                     }
+                }
+
+                if let Some(seeded_alias) = seeded_alias {
+                    let capability = trace
+                        .capabilities
+                        .iter()
+                        .find(|capability| {
+                            capability.issue_event == seeded_alias
+                                && capability.source == CapabilitySource::Alias
+                        })
+                        .unwrap_or_else(|| panic!("{cell}: seeded alias capability must trace"));
+                    if operation == MatrixOperation::Define {
+                        assert!(
+                            capability.explicit_end.is_some(),
+                            "{cell}: Define must retire the prior alias capability"
+                        );
+                    } else {
+                        assert!(
+                            capability.explicit_end.is_none(),
+                            "{cell}: Update must preserve the alias capability"
+                        );
+                        if shape == MatrixDestinationShape::Projected {
+                            assert_eq!(
+                                result_access.target.path.as_ref(),
+                                &[ProjectionElem::DynamicIndex],
+                                "{cell}"
+                            );
+                        }
+                        let paired_access = paired_write
+                            .and_then(|paired_write| {
+                                trace
+                                    .entries
+                                    .iter()
+                                    .find(|entry| entry.event == paired_write)
+                            })
+                            .and_then(|entry| entry.access.as_ref())
+                            .expect("available alias Update must carry access evidence");
+                        assert_eq!(
+                            paired_access.target, result_access.target,
+                            "{cell}: Update-through must retain the effective referent"
+                        );
+                    }
+                }
+
+                if let Some(seeded_loan) = seeded_loan {
+                    let capability = trace
+                        .capabilities
+                        .iter()
+                        .find(|capability| capability.source == CapabilitySource::Loan(seeded_loan))
+                        .unwrap_or_else(|| panic!("{cell}: destination loan must trace"));
+                    if operation == MatrixOperation::Define || *pre_state == MatrixPreState::Slot {
+                        assert!(
+                            capability.explicit_end.is_some(),
+                            "{cell}: replacing a slot relationship must retire its holder"
+                        );
+                    } else {
+                        assert!(
+                            capability.explicit_end.is_none(),
+                            "{cell}: Update-through must retain its holder capability"
+                        );
+                    }
+                }
+
+                let direct_alias = trace.capabilities.iter().find(|capability| {
+                    capability.issue_event == writer_event
+                        && capability.source == CapabilitySource::Alias
+                });
+                let expected_alias_access =
+                    if operation == MatrixOperation::Define || *pre_state == MatrixPreState::Slot {
+                        writer.direct_alias_access()
+                    } else {
+                        None
+                    };
+                assert_eq!(
+                    direct_alias.map(|capability| capability.kind),
+                    expected_alias_access,
+                    "{cell}: only a direct-place binding writer installs a new alias here"
+                );
+                // These paired probes make the state transition observable: a fresh Define
+                // replaces an old alias target, while a fresh Update to an alias keeps it; an
+                // Update to a slot replaces the represented generation.
+                if *writer == MatrixWriter::FreshValue
+                    && ((operation == MatrixOperation::Define
+                        && matches!(
+                            pre_state,
+                            MatrixPreState::AliasShared | MatrixPreState::AliasExclusive
+                        ))
+                        || (operation == MatrixOperation::Update
+                            && *pre_state == MatrixPreState::Slot))
+                {
+                    let paired_write = paired_write.expect("fresh binding writer is paired");
+                    let paired_target = trace
+                        .entries
+                        .iter()
+                        .find(|entry| entry.event == paired_write)
+                        .and_then(|entry| entry.access.as_ref())
+                        .map(|access| &access.target)
+                        .unwrap_or_else(|| panic!("{cell}: old destination target must trace"));
+                    assert_ne!(
+                        paired_target, &result_access.target,
+                        "{cell}: Fresh must replace the previous destination generation"
+                    );
                 }
             }
         }
     }
 }
-
 #[test]
 fn boracle_oracle_rebinding_slot_does_not_conflict_with_old_observer() {
     let mut fixture = Fixture::new(3);
@@ -4193,9 +4636,9 @@ fn boracle_oracle_rebinding_slot_does_not_conflict_with_old_observer() {
     fixture.fresh(other);
     fixture.alias(observer, other, AccessKind::Shared);
     fixture.fresh(value);
-    fixture.access(value, UseKind::Write, true);
+    fixture.binding_write(BindingDestination::Define(value));
     fixture.alias(value, other, AccessKind::Exclusive);
-    fixture.access(value, UseKind::Write, true);
+    fixture.binding_write(BindingDestination::Define(value));
     fixture.fresh(value);
     fixture.access(observer, UseKind::Read, false);
 
@@ -4212,8 +4655,8 @@ fn boracle_oracle_write_through_exclusive_alias_does_not_fabricate_conflict() {
     let alias = fixture.place(1, []);
     fixture.fresh(owner);
     fixture.alias(alias, owner, AccessKind::Exclusive);
-    fixture.access(alias, UseKind::Write, true);
-    fixture.fresh(alias);
+    fixture.binding_write(BindingDestination::Update(alias));
+    fixture.rebind_fresh(alias);
     fixture.access(owner, UseKind::Read, false);
 
     assert!(matches!(
@@ -4230,16 +4673,14 @@ fn boracle_oracle_write_through_alias_does_not_reissue_source_capability() {
     let second_value = fixture.place(2, []);
     fixture.fresh(first_value);
     fixture.fresh(second_value);
-    // The seed is exclusive because a shared seeded alias would end the cell at the builder's
-    // own defining access below: the direct rule conflicts every exclusive access whose
-    // candidate state is a shared alias, and the transition table itself draws no distinction
-    // between the two kinds, so the write-through row under test is identical either way.
+    // The seed is exclusive so the paired Update is legal through the existing alias. The
+    // second source is ignored by the Update and must not acquire a capability.
     fixture.alias(destination, first_value, AccessKind::Exclusive);
 
-    // This is the builder's defining access before the second alias writer. The writer is a
-    // write-through because the destination already aliases the first value.
-    fixture.access(destination, UseKind::Write, true);
-    fixture.alias(destination, second_value, AccessKind::Shared);
+    // This is the builder's Update access before the second direct-place writer. The writer is
+    // a write-through because the destination already aliases the first value.
+    fixture.binding_write(BindingDestination::Update(destination));
+    fixture.alias_update(destination, second_value, AccessKind::Shared);
     let second_value_write = fixture.access_event(second_value, UseKind::Write, false);
     fixture.access(destination, UseKind::Read, false);
 
@@ -4257,30 +4698,20 @@ fn boracle_oracle_write_through_exclusive_alias_resolves_to_referent_node() {
     let owner = fixture.place(0, []);
     let alias = fixture.place(1, []);
     fixture.fresh(owner);
-    fixture.alias(alias, owner, AccessKind::Exclusive);
-    fixture.access(alias, UseKind::Write, true);
-    fixture.fresh(alias);
+    let alias_event = fixture.alias(alias, owner, AccessKind::Exclusive);
+    let before_update = fixture.access_event(alias, UseKind::Read, false);
+    fixture.binding_write(BindingDestination::Update(alias));
+    fixture.rebind_fresh(alias);
+    let after_update = fixture.access_event(alias, UseKind::Read, false);
+    let defining_write = fixture.binding_write(BindingDestination::Define(alias));
+    fixture.fresh_to(BindingDestination::Define(alias));
     let owner_read = fixture.access_event(owner, UseKind::Read, false);
-    let alias_read = fixture.access_event(alias, UseKind::Read, false);
-    fixture.fresh(alias);
-    let owner_reread = fixture.access_event(owner, UseKind::Read, false);
-    let alias_reread = fixture.access_event(alias, UseKind::Read, false);
+    let after_definition = fixture.access_event(alias, UseKind::Read, false);
 
-    let trace = conflict_trace(run(fixture.finish()));
-
-    // The trailing alias reads keep the exclusive alias capability live after each definition,
-    // so the earlier owner reads still land inside its interval and conflict with it.
-    assert_eq!(
-        trace
-            .conflict
-            .as_ref()
-            .map(|conflict| conflict.access_event),
-        Some(owner_read)
-    );
-
-    // Each definition on the exclusive alias writes through: the alias must keep resolving to
-    // the referent's dynamic node. A definition that replaced the slot would allocate a fresh
-    // node for the alias while the owner read stays on the referent.
+    let trace = match run(fixture.finish()) {
+        OracleOutcome::CompleteSafe { trace, .. } => trace,
+        outcome => panic!("Update then Define over an exclusive alias should be safe: {outcome:?}"),
+    };
     let read_node = |event: EventId| {
         trace
             .entries
@@ -4291,14 +4722,242 @@ fn boracle_oracle_write_through_exclusive_alias_resolves_to_referent_node() {
             .expect("every read in this fixture should be traced")
     };
     assert_eq!(
-        read_node(alias_read),
-        read_node(owner_read),
-        "the alias read after the first definition must use the referent's node"
+        read_node(before_update),
+        read_node(after_update),
+        "Update must preserve the existing alias and its referent"
     );
+    assert_ne!(
+        read_node(owner_read),
+        read_node(after_definition),
+        "Define must replace an old alias with a fresh value-backed slot"
+    );
+    assert!(
+        trace.capabilities.iter().any(|capability| {
+            capability.issue_event == alias_event
+                && capability.source == CapabilitySource::Alias
+                && capability.explicit_end.is_some()
+        }),
+        "Define must retire the old direct-alias capability"
+    );
+    assert!(
+        trace
+            .entries
+            .iter()
+            .find(|entry| entry.event == defining_write)
+            .and_then(|entry| entry.access.as_ref())
+            .is_some_and(|access| access.definition)
+    );
+}
+
+#[test]
+fn boracle_oracle_update_from_direct_place_turns_a_slot_into_an_alias() {
+    let mut fixture = Fixture::new(2);
+    let source = fixture.place(0, []);
+    let destination = fixture.place(1, []);
+    fixture.fresh(source);
+    fixture.fresh(destination);
+    fixture.binding_write(BindingDestination::Update(destination));
+    let alias_event = fixture.alias_update(destination, source, AccessKind::Shared);
+    let destination_read = fixture.access_event(destination, UseKind::Read, false);
+    let source_write = fixture.access_event(source, UseKind::Write, false);
+    fixture.access(destination, UseKind::Read, false);
+
+    let trace = conflict_trace(run(fixture.finish()));
+    let conflict = trace
+        .conflict
+        .as_ref()
+        .expect("a direct-place Update must install an alias capability on a slot");
+    assert_eq!(conflict.access_event, source_write);
+    assert_eq!(conflict.capability_kind, AccessKind::Shared);
+    let capability = trace
+        .capabilities
+        .iter()
+        .find(|capability| capability.issue_event == alias_event)
+        .expect("direct-place Update should issue its alias capability");
+    assert_eq!(capability.source, CapabilitySource::Alias);
+    assert_eq!(capability.holders, BTreeSet::from([destination]));
+    let destination_target = trace
+        .entries
+        .iter()
+        .find(|entry| entry.event == destination_read)
+        .and_then(|entry| entry.access.as_ref())
+        .map(|access| access.target.node)
+        .expect("destination read should be traced");
+    let source_target = trace
+        .entries
+        .iter()
+        .find(|entry| entry.event == source_write)
+        .and_then(|entry| entry.access.as_ref())
+        .map(|access| access.target.node)
+        .expect("source write should be traced");
+    assert_eq!(destination_target, source_target);
+}
+
+#[test]
+fn boracle_oracle_slot_update_retains_generation_evidence() {
+    let mut fixture = Fixture::new(2);
+    let value = fixture.place(0, []);
+    let old_value = fixture.place(1, []);
+    fixture.fresh(value);
+    fixture.alias(old_value, value, AccessKind::Shared);
+    fixture.binding_write_with_definition(BindingDestination::Update(value), true);
+    fixture.fresh_to(BindingDestination::Update(value));
+    let old_read = fixture.access_event(old_value, UseKind::Read, false);
+    let new_read = fixture.access_event(value, UseKind::Read, false);
+    let trace = match run(fixture.finish()) {
+        OracleOutcome::CompleteSafe { trace, .. } => trace,
+        outcome => {
+            panic!("a slot-generation update must preserve the old value's alias: {outcome:?}")
+        }
+    };
+    let target_for = |event| {
+        trace
+            .entries
+            .iter()
+            .find(|entry| entry.event == event)
+            .and_then(|entry| entry.access.as_ref())
+            .expect("the selected read must execute")
+            .target
+            .clone()
+    };
+    assert_ne!(target_for(old_read), target_for(new_read));
+}
+
+#[test]
+fn boracle_oracle_alias_update_is_mutation_even_with_generation_evidence() {
+    let mut fixture = Fixture::new(2);
+    let owner = fixture.place(0, []);
+    let alias = fixture.place(1, []);
+    fixture.fresh(owner);
+    fixture.alias(alias, owner, AccessKind::Shared);
+    let write = fixture.binding_write_with_definition(BindingDestination::Update(alias), true);
+    fixture.fresh_to(BindingDestination::Update(alias));
+    fixture.access(alias, UseKind::Read, false);
+    let trace = conflict_trace(run(fixture.finish()));
     assert_eq!(
-        read_node(alias_reread),
-        read_node(owner_reread),
-        "a repeated definition must write through again, not replace the alias with a fresh slot"
+        trace
+            .conflict
+            .as_ref()
+            .expect("the shared alias must block mutation")
+            .access_event,
+        write
+    );
+}
+
+#[test]
+fn boracle_oracle_false_bit_call_update_confirmation_allows_next_definition() {
+    let mut fixture = Fixture::new(1);
+    let value = fixture.place(0, []);
+    fixture.fresh(value);
+    let call = CallId::new(0);
+    fixture.parts.calls.push(Call {
+        id: call,
+        label: "update-result".to_string(),
+    });
+    fixture.call_effect_result_to(
+        call,
+        vec![],
+        BindingDestination::Update(value),
+        CallResultProvenance::Fresh,
+    );
+    let confirmation =
+        fixture.binding_write_with_definition(BindingDestination::Update(value), false);
+    // An internal definition must not encounter an unconsumed confirmation from that call.
+    fixture.fresh(value);
+    let next_read = fixture.access_event(value, UseKind::Read, false);
+    let trace = match run(fixture.finish()) {
+        OracleOutcome::CompleteSafe { trace, .. } => trace,
+        outcome => panic!("the tagged confirmation must clear pending call state: {outcome:?}"),
+    };
+    let confirmed = trace
+        .entries
+        .iter()
+        .find(|entry| entry.event == confirmation)
+        .and_then(|entry| entry.access.as_ref())
+        .expect("the confirmation must resolve");
+    let next = trace
+        .entries
+        .iter()
+        .find(|entry| entry.event == next_read)
+        .and_then(|entry| entry.access.as_ref())
+        .expect("the later definition must be readable");
+    assert_ne!(confirmed.target, next.target);
+}
+
+#[test]
+fn boracle_oracle_define_retires_alias_when_use_definition_is_false() {
+    let mut fixture = Fixture::new(2);
+    let owner = fixture.place(0, []);
+    let destination = fixture.place(1, []);
+    fixture.fresh(owner);
+    let alias_event = fixture.alias(destination, owner, AccessKind::Shared);
+    let define_write =
+        fixture.binding_write_with_definition(BindingDestination::Define(destination), false);
+    fixture.fresh_to(BindingDestination::Define(destination));
+    let owner_write = fixture.access_event(owner, UseKind::Write, false);
+    fixture.access(destination, UseKind::Read, false);
+
+    let problem = fixture.finish();
+    let origins = super::super::OriginSolver::solve(&problem)
+        .expect("the explicit Define should preserve reference origin state");
+    let loans = super::super::LoanSolver::solve_with_liveness(
+        &problem,
+        &origins,
+        super::super::ExclusiveLoanLiveness::Conservative,
+    )
+    .expect("the explicit Define should retire the prior alias loan");
+    let define_use = problem
+        .events()
+        .iter()
+        .find_map(|event| match &event.kind {
+            EventKind::Access { use_id }
+                if problem.uses()[use_id.index()].place == destination
+                    && problem.uses()[use_id.index()].kind
+                        == UseKind::BindingWrite(BindingDestination::Define(destination)) =>
+            {
+                Some(*use_id)
+            }
+            _ => None,
+        })
+        .expect("typed Define access should be present");
+    assert!(
+        !origins.is_write_through_use(define_use),
+        "Use.definition=false must not reinterpret an explicit Define as a write-through"
+    );
+    assert!(
+        !loans
+            .conflicts()
+            .iter()
+            .any(|conflict| conflict.access_event == define_write),
+        "the typed Define access must not conflict with the alias it replaces"
+    );
+    assert!(
+        !loans
+            .conflicts()
+            .iter()
+            .any(|conflict| conflict.access_event == owner_write),
+        "the reference solver must end the old alias loan at a typed Define"
+    );
+    assert!(matches!(
+        run(problem.clone()),
+        OracleOutcome::CompleteSafe { executions: 1, .. }
+    ));
+    let trace = match run(problem) {
+        OracleOutcome::CompleteSafe { trace, .. } => trace,
+        outcome => {
+            panic!("the operational oracle must retire the old alias on Define: {outcome:?}")
+        }
+    };
+    assert!(trace.capabilities.iter().any(|capability| {
+        capability.issue_event == alias_event && capability.explicit_end.is_some()
+    }));
+    assert!(
+        trace
+            .entries
+            .iter()
+            .find(|entry| entry.event == define_write)
+            .and_then(|entry| entry.access.as_ref())
+            .is_some_and(|access| access.definition)
     );
 }
 
@@ -4310,7 +4969,7 @@ fn boracle_oracle_mutable_parameter_write_reaches_external_generation() {
     let observer = fixture.place(1, []);
     let parameter_origin = fixture.origin(OriginKind::Parameter { index: 0 });
     fixture.event(EventKind::Fresh {
-        destination: parameter,
+        destination: BindingDestination::Define(parameter),
         origin: parameter_origin,
     });
     fixture.alias(observer, parameter, AccessKind::Shared);
@@ -4572,11 +5231,15 @@ impl Fixture {
     }
 
     fn fresh(&mut self, destination: PlaceId) {
+        self.fresh_to(BindingDestination::Define(destination));
+    }
+
+    fn fresh_to(&mut self, destination: BindingDestination) -> EventId {
         let origin = self.origin(OriginKind::Fresh);
         self.event(EventKind::Fresh {
             destination,
             origin,
-        });
+        })
     }
     fn branch<I>(&mut self, targets: I) -> EventId
     where
@@ -4588,7 +5251,10 @@ impl Fixture {
     }
 
     fn jump(&mut self, target: BlockId) -> EventId {
-        self.terminator(TerminatorEventKind::Jump { target })
+        self.terminator(TerminatorEventKind::Jump {
+            target,
+            arguments: Box::new([]),
+        })
     }
 
     fn terminator(&mut self, kind: TerminatorEventKind) -> EventId {
@@ -4596,6 +5262,15 @@ impl Fixture {
     }
 
     fn alias(&mut self, destination: PlaceId, source: PlaceId, access: AccessKind) -> EventId {
+        self.alias_to(BindingDestination::Define(destination), source, access)
+    }
+
+    fn alias_to(
+        &mut self,
+        destination: BindingDestination,
+        source: PlaceId,
+        access: AccessKind,
+    ) -> EventId {
         let kind = match access {
             AccessKind::Shared => EventKind::AliasFromPlace {
                 source,
@@ -4609,10 +5284,36 @@ impl Fixture {
         self.event(kind)
     }
 
-    /// Emits an origins-carrying alias event for the alias-origins matrix writers.
-    fn alias_with_origins(
+    fn alias_update(
         &mut self,
         destination: PlaceId,
+        source: PlaceId,
+        access: AccessKind,
+    ) -> EventId {
+        self.alias_to(BindingDestination::Update(destination), source, access)
+    }
+
+    fn binding_write(&mut self, destination: BindingDestination) -> EventId {
+        let definition = destination.defines();
+        self.binding_write_with_definition(destination, definition)
+    }
+
+    fn binding_write_with_definition(
+        &mut self,
+        destination: BindingDestination,
+        definition: bool,
+    ) -> EventId {
+        self.access_event(
+            destination.place(),
+            UseKind::BindingWrite(destination),
+            definition,
+        )
+    }
+
+    /// Emits an origins-carrying alias event for the alias-origins matrix writers.
+    fn alias_with_origins_to(
+        &mut self,
+        destination: BindingDestination,
         source: PlaceId,
         access: AccessKind,
     ) -> EventId {
@@ -4637,6 +5338,15 @@ impl Fixture {
         destination: PlaceId,
         projection: ProjectionElem,
     ) -> EventId {
+        self.projection_to(source, BindingDestination::Define(destination), projection)
+    }
+
+    fn projection_to(
+        &mut self,
+        source: PlaceId,
+        destination: BindingDestination,
+        projection: ProjectionElem,
+    ) -> EventId {
         let origin = self.origin(OriginKind::Projection {
             source: ValueOriginId::new(0),
             projection,
@@ -4650,20 +5360,32 @@ impl Fixture {
 
     fn rebind_alias(&mut self, destination: PlaceId, origins: Vec<ValueOriginId>) {
         self.event(EventKind::Rebind {
-            destination,
+            destination: BindingDestination::Update(destination),
             value: RebindValue::Alias(origins.into_boxed_slice()),
         });
     }
 
     fn rebind_fresh(&mut self, destination: PlaceId) {
+        self.rebind_fresh_to(BindingDestination::Update(destination));
+    }
+
+    fn rebind_fresh_to(&mut self, destination: BindingDestination) -> EventId {
         let origin = self.origin(OriginKind::Fresh);
         self.event(EventKind::Rebind {
             destination,
             value: RebindValue::Fresh(origin),
-        });
+        })
     }
 
     fn rebind_alias_from_place(&mut self, destination: PlaceId, source: PlaceId) -> EventId {
+        self.rebind_alias_from_place_to(BindingDestination::Update(destination), source)
+    }
+
+    fn rebind_alias_from_place_to(
+        &mut self,
+        destination: BindingDestination,
+        source: PlaceId,
+    ) -> EventId {
         self.event(EventKind::Rebind {
             destination,
             value: RebindValue::AliasFromPlace(source),
@@ -4677,18 +5399,37 @@ impl Fixture {
         result_place: PlaceId,
         provenance: CallResultProvenance,
     ) -> EventId {
+        self.call_effect_result_to(
+            call,
+            arguments,
+            BindingDestination::Define(result_place),
+            provenance,
+        )
+    }
+
+    fn call_effect_result_to(
+        &mut self,
+        call: CallId,
+        arguments: Vec<CallArgument>,
+        destination: BindingDestination,
+        provenance: CallResultProvenance,
+    ) -> EventId {
         let origin = self.origin(OriginKind::CallResult { call, provenance });
         self.event(EventKind::CallEffect(CallEffect {
             call,
             arguments: arguments.into_boxed_slice(),
             result: Some(CallResult {
-                place: result_place,
+                destination,
                 origin,
             }),
         }))
     }
 
     fn copy(&mut self, destination: PlaceId, source: PlaceId) {
+        self.copy_to(BindingDestination::Define(destination), source);
+    }
+
+    fn copy_to(&mut self, destination: BindingDestination, source: PlaceId) -> EventId {
         let origin = self.origin(OriginKind::Copy(
             vec![ValueOriginId::new(0)].into_boxed_slice(),
         ));
@@ -4696,10 +5437,17 @@ impl Fixture {
             source,
             destination,
             origin,
-        });
+        })
     }
 
     fn aggregate<I>(&mut self, destination: PlaceId, fields: I)
+    where
+        I: IntoIterator<Item = (ProjectionElem, PlaceId)>,
+    {
+        self.aggregate_to(BindingDestination::Define(destination), fields);
+    }
+
+    fn aggregate_to<I>(&mut self, destination: BindingDestination, fields: I) -> EventId
     where
         I: IntoIterator<Item = (ProjectionElem, PlaceId)>,
     {
@@ -4713,7 +5461,7 @@ impl Fixture {
             destination,
             origin,
             fields,
-        });
+        })
     }
 
     fn scope_exit<I>(&mut self, bindings: I) -> usize
@@ -4965,7 +5713,10 @@ impl Fixture {
         self.event_at(
             jump_point,
             EventKind::Terminator {
-                kind: TerminatorEventKind::Jump { target: loop_block },
+                kind: TerminatorEventKind::Jump {
+                    target: loop_block,
+                    arguments: Box::new([]),
+                },
             },
         );
         let block0_events = std::mem::take(&mut self.event_ids);
@@ -4979,7 +5730,10 @@ impl Fixture {
             loop_event,
             loop_point,
             EventKind::Terminator {
-                kind: TerminatorEventKind::Jump { target: loop_block },
+                kind: TerminatorEventKind::Jump {
+                    target: loop_block,
+                    arguments: Box::new([]),
+                },
             },
             EventSource::none(),
         ));

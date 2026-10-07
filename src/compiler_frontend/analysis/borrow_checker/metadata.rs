@@ -10,14 +10,17 @@ use super::state::{FunctionLayout, FunctionLayoutInputs, RootSet};
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalAccessKind};
 
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
+use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirProjection};
+use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocation};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::patterns::HirPattern;
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
+};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::utils::terminator_targets;
 use crate::compiler_frontend::public_call_summary::{
@@ -311,18 +314,20 @@ impl<'a> BorrowChecker<'a> {
                 };
 
                 match &statement.kind {
-                    HirStatementKind::Assign { .. } => {
+                    HirStatementKind::Write { .. } => {
                         for root in &statement_fact.mutable_roots {
                             mutates_parameter(root);
                         }
                     }
                     HirStatementKind::Call { target, args, .. } => {
-                        for (argument_index, argument) in args.iter().enumerate() {
+                        for (argument_index, argument) in
+                            self.module.expressions.values(*args).iter().enumerate()
+                        {
                             if !self.call_argument_writes(target, argument_index, statement)? {
                                 continue;
                             }
 
-                            let Some(argument_fact) = report.analysis.value_facts.get(&argument.id)
+                            let Some(argument_fact) = report.analysis.value_facts.get(argument)
                             else {
                                 return Err(self.diagnostics.internal_error(
                                     format!(
@@ -341,8 +346,7 @@ impl<'a> BorrowChecker<'a> {
                     HirStatementKind::MapOp { op, receiver, .. }
                         if op.requires_mutable_receiver() =>
                     {
-                        let Some(receiver_fact) = report.analysis.value_facts.get(&receiver.id)
-                        else {
+                        let Some(receiver_fact) = report.analysis.value_facts.get(receiver) else {
                             return Err(self.diagnostics.internal_error(
                                 format!(
                                     "Borrow checker is missing map receiver value facts while finalizing public call summary for function '{}'",
@@ -586,14 +590,24 @@ impl<'a> BorrowChecker<'a> {
                         max_use_order[index] = max_use_order[index].max(order_key);
                     }
                 });
-                collect_statement_loaded_locals(statement, &mut |local_id| {
-                    if let Some(index) = local_index_by_id.get(&local_id).copied() {
-                        local_last_use_order[index] = local_last_use_order[index].max(order_key);
-                        max_use_order[index] = max_use_order[index].max(order_key);
-                    }
-                });
+                collect_statement_loaded_locals(
+                    &self.module.expressions,
+                    statement,
+                    &mut |local_id| {
+                        if let Some(index) = local_index_by_id.get(&local_id).copied() {
+                            local_last_use_order[index] =
+                                local_last_use_order[index].max(order_key);
+                            max_use_order[index] = max_use_order[index].max(order_key);
+                        }
+                    },
+                );
 
-                record_statement_liveness(statement, &local_index_by_id, &mut liveness);
+                record_statement_liveness(
+                    &self.module.expressions,
+                    statement,
+                    &local_index_by_id,
+                    &mut liveness,
+                );
             }
 
             for (target_index, source_roots) in
@@ -617,13 +631,18 @@ impl<'a> BorrowChecker<'a> {
             next_order_key += 1;
             terminator_order_by_block.insert(*block_id, terminator_order);
 
-            collect_terminator_loaded_locals(&block.terminator, &mut |local_id| {
-                if let Some(index) = local_index_by_id.get(&local_id).copied() {
-                    local_last_use_order[index] = local_last_use_order[index].max(terminator_order);
-                    max_use_order[index] = max_use_order[index].max(terminator_order);
-                    liveness.record_read(index);
-                }
-            });
+            collect_terminator_loaded_locals(
+                &self.module.expressions,
+                &block.terminator,
+                &mut |local_id| {
+                    if let Some(index) = local_index_by_id.get(&local_id).copied() {
+                        local_last_use_order[index] =
+                            local_last_use_order[index].max(terminator_order);
+                        max_use_order[index] = max_use_order[index].max(terminator_order);
+                        liveness.record_read(index);
+                    }
+                },
+            );
 
             // A read of a direct alias carrier is a read of the roots it carries. Union the source
             // roots in unconditionally: an in-block definition of a source root cannot be proven to
@@ -698,28 +717,44 @@ impl<'a> BorrowChecker<'a> {
         for block_id in reachable_blocks {
             let block = self.block_by_id_or_error(*block_id, function.id)?;
             for statement in &block.statements {
-                let HirStatementKind::Assign {
-                    target: HirPlace::Local(target_local),
-                    value,
-                } = &statement.kind
-                else {
-                    continue;
+                let (target_local, value) = match &statement.kind {
+                    HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(local),
+                        value,
+                    } => (*local, *value),
+                    HirStatementKind::Write {
+                        target: HirWriteTarget::AssignPlace(place),
+                        value,
+                    } if self
+                        .module
+                        .expressions
+                        .projections(place.projections)
+                        .is_empty() =>
+                    {
+                        (place.root, *value)
+                    }
+                    _ => continue,
                 };
 
-                if self.module.side_table.local_origin_kind(*target_local)
+                if self.module.side_table.local_origin_kind(target_local)
                     != Some(HirLocalOriginKind::CompilerTemp)
                 {
                     continue;
                 }
 
-                let HirExpressionKind::Load(place) = &value.kind else {
+                let HirExpressionKind::Load(place) =
+                    &self.module.expressions.expression(value).kind
+                else {
                     continue;
                 };
-                let Some(source_local) = root_local_for_place(place) else {
+                if self.module.expressions.expression(value).value_kind
+                    != crate::compiler_frontend::hir::expressions::ValueKind::Place
+                {
                     continue;
-                };
+                }
+                let source_local = place.root;
 
-                let Some(target_index) = local_index_by_id.get(target_local).copied() else {
+                let Some(target_index) = local_index_by_id.get(&target_local).copied() else {
                     continue;
                 };
                 let Some(source_index) = local_index_by_id.get(&source_local).copied() else {
@@ -980,22 +1015,29 @@ fn combine_successor_facts(
 // WHY: operands are read before the result is written, so a self-referential rebind such as
 //      `total = total + 1` still exposes a read at block entry while ending the old value's life.
 fn record_statement_liveness(
+    expressions: &HirExpressionStore,
     statement: &HirStatement,
     local_index_by_id: &FxHashMap<LocalId, usize>,
     liveness: &mut BlockLiveness,
 ) {
     let defined_locals = statement_defined_locals(statement);
 
-    if let HirStatementKind::Assign {
-        target: HirPlace::Local(local_id),
-        ..
-    } = &statement.kind
-        && let Some(index) = local_index_by_id.get(local_id).copied()
-    {
-        liveness.direct_assignments.insert(index);
+    if let HirStatementKind::Write { target, .. } = &statement.kind {
+        let local = match target {
+            HirWriteTarget::DefineLocal(local) => Some(*local),
+            HirWriteTarget::AssignPlace(place)
+                if expressions.projections(place.projections).is_empty() =>
+            {
+                Some(place.root)
+            }
+            HirWriteTarget::AssignPlace(_) => None,
+        };
+        if let Some(index) = local.and_then(|local| local_index_by_id.get(&local).copied()) {
+            liveness.direct_assignments.insert(index);
+        }
     }
 
-    collect_statement_loaded_locals(statement, &mut |local_id| {
+    collect_statement_loaded_locals(expressions, statement, &mut |local_id| {
         if let Some(index) = local_index_by_id.get(&local_id).copied() {
             liveness.record_read(index);
         }
@@ -1023,37 +1065,33 @@ fn record_statement_liveness(
 // WHY: only whole-local writes end the previous value's life; projected writes leave the
 //      surrounding value observable.
 fn statement_defined_locals(statement: &HirStatement) -> [Option<LocalId>; 2] {
+    let defined_local = |destination: &HirLocalDestination| {
+        matches!(destination, HirLocalDestination::Define(_)).then(|| destination.local())
+    };
     match &statement.kind {
-        HirStatementKind::Assign {
-            target: HirPlace::Local(local),
+        HirStatementKind::Write {
+            target: HirWriteTarget::DefineLocal(local),
             ..
         } => [Some(*local), None],
-        HirStatementKind::Call {
-            result: Some(local),
-            ..
+        HirStatementKind::Call { result, .. }
+        | HirStatementKind::MapOp { result, .. }
+        | HirStatementKind::CastOp { result, .. } => {
+            [result.as_ref().and_then(defined_local), None]
         }
-        | HirStatementKind::MapOp {
-            result: Some(local),
-            ..
-        }
-        | HirStatementKind::CastOp {
-            result: Some(local),
-            ..
-        } => [Some(*local), None],
         HirStatementKind::NumericOp { result, .. }
         | HirStatementKind::RangeStepFailure { result, .. }
         | HirStatementKind::FormatFloat { result, .. }
-        | HirStatementKind::ValidateFloat { result, .. } => [Some(*result), None],
+        | HirStatementKind::ValidateFloat { result, .. } => [defined_local(result), None],
         HirStatementKind::FloatRangeCandidate {
             candidate_result,
             in_range_result,
             ..
-        } => [Some(*candidate_result), Some(*in_range_result)],
+        } => [
+            defined_local(candidate_result),
+            defined_local(in_range_result),
+        ],
 
-        HirStatementKind::Assign { .. }
-        | HirStatementKind::Call { result: None, .. }
-        | HirStatementKind::MapOp { result: None, .. }
-        | HirStatementKind::CastOp { result: None, .. }
+        HirStatementKind::Write { .. }
         | HirStatementKind::Expr(_)
         | HirStatementKind::Drop(_)
         | HirStatementKind::PushRuntimeFragment { .. } => [None, None],
@@ -1082,40 +1120,39 @@ fn reaches_function(
     false
 }
 
-fn root_local_for_place(place: &HirPlace) -> Option<LocalId> {
-    match place {
-        HirPlace::Local(local) => Some(*local),
-        HirPlace::Field { base, .. } | HirPlace::Index { base, .. } => root_local_for_place(base),
-    }
-}
-
-fn collect_statement_loaded_locals(statement: &HirStatement, visitor: &mut impl FnMut(LocalId)) {
+fn collect_statement_loaded_locals(
+    expressions: &HirExpressionStore,
+    statement: &HirStatement,
+    visitor: &mut impl FnMut(LocalId),
+) {
     match &statement.kind {
-        HirStatementKind::Assign { target, value } => {
-            collect_place_index_loaded_locals(target, visitor);
-            collect_expression_loaded_locals(value, visitor);
+        HirStatementKind::Write { target, value } => {
+            if let HirWriteTarget::AssignPlace(place) = target {
+                collect_place_index_loaded_locals(expressions, place, visitor);
+            }
+            collect_expression_loaded_locals(expressions, *value, visitor);
         }
         HirStatementKind::Call { args, .. } => {
-            for arg in args {
-                collect_expression_loaded_locals(arg, visitor);
+            for arg in expressions.values(*args) {
+                collect_expression_loaded_locals(expressions, *arg, visitor);
             }
         }
         HirStatementKind::MapOp { receiver, args, .. } => {
-            collect_expression_loaded_locals(receiver, visitor);
-            for arg in args {
-                collect_expression_loaded_locals(arg, visitor);
+            collect_expression_loaded_locals(expressions, *receiver, visitor);
+            for arg in expressions.values(*args) {
+                collect_expression_loaded_locals(expressions, *arg, visitor);
             }
         }
         HirStatementKind::CastOp { source, .. } => {
-            collect_expression_loaded_locals(source, visitor);
+            collect_expression_loaded_locals(expressions, *source, visitor);
         }
         HirStatementKind::NumericOp { operands, .. } => match operands {
             HirNumericOperands::Unary { operand } => {
-                collect_expression_loaded_locals(operand, visitor);
+                collect_expression_loaded_locals(expressions, *operand, visitor);
             }
             HirNumericOperands::Binary { left, right } => {
-                collect_expression_loaded_locals(left, visitor);
-                collect_expression_loaded_locals(right, visitor);
+                collect_expression_loaded_locals(expressions, *left, visitor);
+                collect_expression_loaded_locals(expressions, *right, visitor);
             }
         },
         HirStatementKind::FloatRangeCandidate {
@@ -1125,34 +1162,37 @@ fn collect_statement_loaded_locals(statement: &HirStatement, visitor: &mut impl 
             ascending,
             ..
         } => {
-            collect_expression_loaded_locals(current, visitor);
-            collect_expression_loaded_locals(step, visitor);
-            collect_expression_loaded_locals(end, visitor);
-            collect_expression_loaded_locals(ascending, visitor);
+            collect_expression_loaded_locals(expressions, *current, visitor);
+            collect_expression_loaded_locals(expressions, *step, visitor);
+            collect_expression_loaded_locals(expressions, *end, visitor);
+            collect_expression_loaded_locals(expressions, *ascending, visitor);
         }
         HirStatementKind::FormatFloat { source, .. }
         | HirStatementKind::ValidateFloat { source, .. } => {
-            collect_expression_loaded_locals(source, visitor);
+            collect_expression_loaded_locals(expressions, *source, visitor);
         }
         HirStatementKind::Expr(expression) => {
-            collect_expression_loaded_locals(expression, visitor);
+            collect_expression_loaded_locals(expressions, *expression, visitor);
         }
         HirStatementKind::Drop(local) => visitor(*local),
         HirStatementKind::RangeStepFailure { .. } => {}
         HirStatementKind::PushRuntimeFragment { vec_local, value } => {
             visitor(*vec_local);
-            collect_expression_loaded_locals(value, visitor);
+            collect_expression_loaded_locals(expressions, *value, visitor);
         }
     }
 }
 
 fn collect_statement_written_locals(statement: &HirStatement, visitor: &mut impl FnMut(LocalId)) {
     match &statement.kind {
-        HirStatementKind::Assign { target, .. } => collect_place_written_local(target, visitor),
+        HirStatementKind::Write { target, .. } => match target {
+            HirWriteTarget::DefineLocal(local) => visitor(*local),
+            HirWriteTarget::AssignPlace(place) => collect_place_written_local(place, visitor),
+        },
         HirStatementKind::Call {
             result: Some(local),
             ..
-        } => visitor(*local),
+        } => visitor(local.local()),
         HirStatementKind::MapOp {
             result: Some(local),
             ..
@@ -1160,19 +1200,19 @@ fn collect_statement_written_locals(statement: &HirStatement, visitor: &mut impl
         | HirStatementKind::CastOp {
             result: Some(local),
             ..
-        } => visitor(*local),
+        } => visitor(local.local()),
         HirStatementKind::NumericOp { result, .. }
-        | HirStatementKind::RangeStepFailure { result, .. } => visitor(*result),
+        | HirStatementKind::RangeStepFailure { result, .. } => visitor(result.local()),
         HirStatementKind::FloatRangeCandidate {
             candidate_result,
             in_range_result,
             ..
         } => {
-            visitor(*candidate_result);
-            visitor(*in_range_result);
+            visitor(candidate_result.local());
+            visitor(in_range_result.local());
         }
         HirStatementKind::FormatFloat { result, .. }
-        | HirStatementKind::ValidateFloat { result, .. } => visitor(*result),
+        | HirStatementKind::ValidateFloat { result, .. } => visitor(result.local()),
         HirStatementKind::Call { result: None, .. }
         | HirStatementKind::MapOp { result: None, .. }
         | HirStatementKind::CastOp { result: None, .. }
@@ -1183,37 +1223,37 @@ fn collect_statement_written_locals(statement: &HirStatement, visitor: &mut impl
 }
 
 fn collect_place_written_local(place: &HirPlace, visitor: &mut impl FnMut(LocalId)) {
-    match place {
-        HirPlace::Local(local) => visitor(*local),
-        HirPlace::Field { base, .. } | HirPlace::Index { base, .. } => {
-            collect_place_written_local(base, visitor)
+    visitor(place.root);
+}
+
+fn collect_place_index_loaded_locals(
+    expressions: &HirExpressionStore,
+    place: &HirPlace,
+    visitor: &mut impl FnMut(LocalId),
+) {
+    for projection in expressions.projections(place.projections) {
+        if let HirProjection::Index(index) = projection {
+            collect_expression_loaded_locals(expressions, *index, visitor);
         }
     }
 }
 
-fn collect_place_index_loaded_locals(place: &HirPlace, visitor: &mut impl FnMut(LocalId)) {
-    match place {
-        HirPlace::Local(_) => {}
-        HirPlace::Field { base, .. } => collect_place_index_loaded_locals(base, visitor),
-        HirPlace::Index { base, index } => {
-            collect_place_index_loaded_locals(base, visitor);
-            collect_expression_loaded_locals(index, visitor);
-        }
-    }
-}
-
-fn collect_terminator_loaded_locals(terminator: &HirTerminator, visitor: &mut impl FnMut(LocalId)) {
+fn collect_terminator_loaded_locals(
+    expressions: &HirExpressionStore,
+    terminator: &HirTerminator,
+    visitor: &mut impl FnMut(LocalId),
+) {
     match terminator {
         // Jump argument passing is CFG plumbing, not a semantic value use.
         HirTerminator::Jump { .. } => {}
         HirTerminator::If { condition, .. } => {
-            collect_expression_loaded_locals(condition, visitor);
+            collect_expression_loaded_locals(expressions, *condition, visitor);
         }
         HirTerminator::FallibleBranch { result, .. } => {
-            collect_expression_loaded_locals(result, visitor);
+            collect_expression_loaded_locals(expressions, *result, visitor);
         }
         HirTerminator::Match { scrutinee, arms } => {
-            collect_expression_loaded_locals(scrutinee, visitor);
+            collect_expression_loaded_locals(expressions, *scrutinee, visitor);
             for arm in arms {
                 if let HirPattern::Literal(expression)
                 | HirPattern::OptionValue { value: expression }
@@ -1221,20 +1261,20 @@ fn collect_terminator_loaded_locals(terminator: &HirTerminator, visitor: &mut im
                     value: expression, ..
                 } = &arm.pattern
                 {
-                    collect_expression_loaded_locals(expression, visitor);
+                    collect_expression_loaded_locals(expressions, *expression, visitor);
                 }
-                if let Some(guard) = &arm.guard {
-                    collect_expression_loaded_locals(guard, visitor);
+                if let Some(guard) = arm.guard {
+                    collect_expression_loaded_locals(expressions, guard, visitor);
                 }
             }
         }
         HirTerminator::Return(value)
         | HirTerminator::ReturnSuccess(value)
         | HirTerminator::ReturnError(value) => {
-            collect_expression_loaded_locals(value, visitor);
+            collect_expression_loaded_locals(expressions, *value, visitor);
         }
         HirTerminator::AssertFailure { message, .. } => {
-            collect_expression_loaded_locals(message, visitor);
+            collect_expression_loaded_locals(expressions, *message, visitor);
         }
 
         HirTerminator::RuntimeFailure { .. } => {
@@ -1248,50 +1288,55 @@ fn collect_terminator_loaded_locals(terminator: &HirTerminator, visitor: &mut im
     }
 }
 
-fn collect_expression_loaded_locals(expression: &HirExpression, visitor: &mut impl FnMut(LocalId)) {
-    match &expression.kind {
-        HirExpressionKind::Load(place) => collect_place_loaded_locals(place, visitor),
-        HirExpressionKind::Copy(place) => collect_place_loaded_locals(place, visitor),
+fn collect_expression_loaded_locals(
+    expressions: &HirExpressionStore,
+    expression_id: crate::compiler_frontend::hir::ids::HirValueId,
+    visitor: &mut impl FnMut(LocalId),
+) {
+    match &expressions.expression(expression_id).kind {
+        HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
+            collect_place_loaded_locals(expressions, place, visitor)
+        }
         HirExpressionKind::BinOp { left, right, .. } => {
-            collect_expression_loaded_locals(left, visitor);
-            collect_expression_loaded_locals(right, visitor);
+            collect_expression_loaded_locals(expressions, *left, visitor);
+            collect_expression_loaded_locals(expressions, *right, visitor);
         }
         HirExpressionKind::UnaryOp { operand, .. } => {
-            collect_expression_loaded_locals(operand, visitor);
+            collect_expression_loaded_locals(expressions, *operand, visitor);
         }
         HirExpressionKind::StructConstruct { fields, .. } => {
-            for (_, value) in fields {
-                collect_expression_loaded_locals(value, visitor);
+            for (_, value) in expressions.struct_fields(*fields) {
+                collect_expression_loaded_locals(expressions, *value, visitor);
             }
         }
         HirExpressionKind::Collection(elements)
         | HirExpressionKind::TupleConstruct { elements } => {
-            for element in elements {
-                collect_expression_loaded_locals(element, visitor);
+            for element in expressions.values(*elements) {
+                collect_expression_loaded_locals(expressions, *element, visitor);
             }
         }
         HirExpressionKind::MapLiteral(entries) => {
-            for entry in entries {
-                collect_expression_loaded_locals(&entry.key, visitor);
-                collect_expression_loaded_locals(&entry.value, visitor);
+            for entry in expressions.map_entries(*entries) {
+                collect_expression_loaded_locals(expressions, entry.key, visitor);
+                collect_expression_loaded_locals(expressions, entry.value, visitor);
             }
         }
         HirExpressionKind::TupleGet { tuple, .. } => {
-            collect_expression_loaded_locals(tuple, visitor);
+            collect_expression_loaded_locals(expressions, *tuple, visitor);
         }
         HirExpressionKind::Range { start, end } => {
-            collect_expression_loaded_locals(start, visitor);
-            collect_expression_loaded_locals(end, visitor);
+            collect_expression_loaded_locals(expressions, *start, visitor);
+            collect_expression_loaded_locals(expressions, *end, visitor);
         }
         HirExpressionKind::VariantConstruct { fields, .. } => {
-            for field in fields {
-                collect_expression_loaded_locals(&field.value, visitor);
+            for field in expressions.variant_fields(*fields) {
+                collect_expression_loaded_locals(expressions, field.value, visitor);
             }
         }
         HirExpressionKind::FallibleUnwrapSuccess { result }
         | HirExpressionKind::FallibleUnwrapError { result }
         | HirExpressionKind::Cast { source: result, .. } => {
-            collect_expression_loaded_locals(result, visitor);
+            collect_expression_loaded_locals(expressions, *result, visitor);
         }
         HirExpressionKind::Number(_)
         | HirExpressionKind::Uint(_)
@@ -1304,18 +1349,20 @@ fn collect_expression_loaded_locals(expression: &HirExpression, visitor: &mut im
         | HirExpressionKind::StructuralString { .. } => {}
 
         HirExpressionKind::VariantPayloadGet { source, .. } => {
-            collect_expression_loaded_locals(source, visitor);
+            collect_expression_loaded_locals(expressions, *source, visitor);
         }
     }
 }
 
-fn collect_place_loaded_locals(place: &HirPlace, visitor: &mut impl FnMut(LocalId)) {
-    match place {
-        HirPlace::Local(local) => visitor(*local),
-        HirPlace::Field { base, .. } => collect_place_loaded_locals(base, visitor),
-        HirPlace::Index { base, index } => {
-            collect_place_loaded_locals(base, visitor);
-            collect_expression_loaded_locals(index, visitor);
+fn collect_place_loaded_locals(
+    expressions: &HirExpressionStore,
+    place: &HirPlace,
+    visitor: &mut impl FnMut(LocalId),
+) {
+    visitor(place.root);
+    for projection in expressions.projections(place.projections) {
+        if let HirProjection::Index(index) = projection {
+            collect_expression_loaded_locals(expressions, *index, visitor);
         }
     }
 }

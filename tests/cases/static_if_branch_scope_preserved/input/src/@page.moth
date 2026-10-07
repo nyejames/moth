@@ -9,20 +9,20 @@ observed ~= ""
 
 if enabled:
     branch_local = "then-local"
-    observed = branch_local
+    observed = copy branch_local
 else
     branch_local = "else-local"
-    observed = branch_local
+    observed = copy branch_local
 ;
 
 nested ~= ""
 if enabled:
     if not enabled:
         branch_local = "unreachable"
-        nested = branch_local
+        nested = copy branch_local
     else
         branch_local = "nested-else"
-        nested = branch_local
+        nested = copy branch_local
     ;
 ;
 

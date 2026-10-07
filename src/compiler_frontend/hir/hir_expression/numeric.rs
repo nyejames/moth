@@ -9,20 +9,23 @@
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::builtins::casts::evidence::type_id_for_builtin_target;
 use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::{
     NumericOperator, binary_operation_domain, negation_domain, numeric_operation_cannot_fail,
 };
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
-use crate::compiler_frontend::hir::ids::LocalId;
+use crate::compiler_frontend::hir::ids::{HirValueId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
 };
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::places::HirPlace;
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
+};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
@@ -46,7 +49,7 @@ impl<'a> HirBuilder<'a> {
         success_type: TypeId,
         span: &Option<SourceSpan>,
         discharged: bool,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         let failure_mode = if discharged {
             NumericFailureMode::Infallible
         } else if self.active_handler_accepts_builtin_failure(span)? {
@@ -80,17 +83,23 @@ impl<'a> HirBuilder<'a> {
         operands: HirNumericOperands,
         success_type: TypeId,
         span: &Option<SourceSpan>,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         debug_assert!(matches!(
             failure_mode,
             NumericFailureMode::Trap | NumericFailureMode::Infallible
         ));
         let result_local = self.allocate_temp_local(success_type, None)?;
-        self.emit_numeric_op_statement(op, failure_mode, operands, result_local, span)?;
+        self.emit_numeric_op_statement(
+            op,
+            failure_mode,
+            operands,
+            HirLocalDestination::Define(result_local),
+            span,
+        )?;
 
         let region = self.current_region_or_error(span)?;
         let no_span = None;
-        Ok(self.make_local_load_expression(result_local, success_type, &no_span, region))
+        self.make_local_load_expression(result_local, success_type, &no_span, region)
     }
 
     /// Shares arithmetic's failure owner and carrier shape so private-lane installation can
@@ -99,7 +108,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         cause: RangeStepFailureCause,
         span: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let failure_mode = if self.active_handler_accepts_builtin_failure(span)? {
             NumericFailureMode::ReturnError
         } else {
@@ -122,7 +131,7 @@ impl<'a> HirBuilder<'a> {
             HirStatementKind::RangeStepFailure {
                 cause,
                 failure_mode,
-                result: result_local,
+                result: HirLocalDestination::Define(result_local),
             },
             span,
             *span,
@@ -131,17 +140,17 @@ impl<'a> HirBuilder<'a> {
         if let Some(error_type) = error_type {
             let region = self.current_region_or_error(span)?;
             let error_result =
-                self.make_local_load_expression(result_local, result_type, &None, region);
+                self.make_local_load_expression(result_local, result_type, &None, region)?;
             let error_payload = self.make_expression(
                 span,
                 HirExpressionKind::FallibleUnwrapError {
-                    result: Box::new(error_result),
+                    result: error_result,
                 },
                 error_type,
                 ValueKind::RValue,
                 region,
             );
-            self.emit_terminator(block, HirTerminator::ReturnError(error_payload), span)?;
+            self.emit_terminator(block, HirTerminator::ReturnError(error_payload?), span)?;
         } else {
             self.emit_terminator(
                 block,
@@ -168,7 +177,7 @@ impl<'a> HirBuilder<'a> {
         operands: HirNumericOperands,
         success_type: TypeId,
         span: &Option<SourceSpan>,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         let builtin_error_type = self.builtin_error_type_id(span)?;
         let carrier_type = self
             .type_environment
@@ -179,7 +188,7 @@ impl<'a> HirBuilder<'a> {
             op,
             NumericFailureMode::ReturnError,
             operands,
-            result_local,
+            HirLocalDestination::Define(result_local),
             span,
         )?;
 
@@ -199,9 +208,9 @@ impl<'a> HirBuilder<'a> {
         op: HirNumericOp,
         failure_mode: NumericFailureMode,
         operands: HirNumericOperands,
-        result: LocalId,
+        result: HirLocalDestination,
         span: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let statement = HirStatement {
             id: self.allocate_node_id(),
             kind: HirStatementKind::NumericOp {
@@ -226,9 +235,9 @@ impl<'a> HirBuilder<'a> {
     ///      Moth-owned formatter instead of relying on target-native stringification.
     pub(crate) fn emit_formatted_float_value(
         &mut self,
-        source: HirExpression,
+        source: HirValueId,
         span: &Option<SourceSpan>,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         let failure_mode = self.select_float_integrity_failure_mode(span)?;
         let string_type = self.lower_type_id(self.type_environment.builtins().string, span)?;
 
@@ -251,16 +260,16 @@ impl<'a> HirBuilder<'a> {
     /// Emits a trapping `FormatFloat` and returns the scalar `String` local load.
     fn emit_trapping_formatted_float_value(
         &mut self,
-        source: HirExpression,
+        source: HirValueId,
         string_type: TypeId,
         span: &Option<SourceSpan>,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         let result_local = self.allocate_temp_local(string_type, None)?;
         self.emit_format_float_statement(source, NumericFailureMode::Trap, result_local, span)?;
 
         let region = self.current_region_or_error(span)?;
         let no_span = None;
-        Ok(self.make_local_load_expression(result_local, string_type, &no_span, region))
+        self.make_local_load_expression(result_local, string_type, &no_span, region)
     }
 
     /// Emits a recoverable `FormatFloat` and returns the unwrapped formatted string.
@@ -272,10 +281,10 @@ impl<'a> HirBuilder<'a> {
     ///      error path visible to borrow validation.
     fn emit_recoverable_formatted_float_value(
         &mut self,
-        source: HirExpression,
+        source: HirValueId,
         string_type: TypeId,
         span: &Option<SourceSpan>,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         let builtin_error_type = self.builtin_error_type_id(span)?;
         let carrier_type = self
             .type_environment
@@ -310,9 +319,9 @@ impl<'a> HirBuilder<'a> {
     ///      validated as finite before ordinary Moth code observes them.
     pub(crate) fn emit_validated_float_value(
         &mut self,
-        source: HirExpression,
+        source: HirValueId,
         span: &Option<SourceSpan>,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         let failure_mode = self.select_float_integrity_failure_mode(span)?;
         let float_type = self.lower_type_id(self.type_environment.builtins().float, span)?;
 
@@ -335,16 +344,16 @@ impl<'a> HirBuilder<'a> {
     /// Emits a trapping `ValidateFloat` and returns the scalar `Float` local load.
     fn emit_trapping_validated_float_value(
         &mut self,
-        source: HirExpression,
+        source: HirValueId,
         float_type: TypeId,
         span: &Option<SourceSpan>,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         let result_local = self.allocate_temp_local(float_type, None)?;
         self.emit_validate_float_statement(source, NumericFailureMode::Trap, result_local, span)?;
 
         let region = self.current_region_or_error(span)?;
         let no_span = None;
-        Ok(self.make_local_load_expression(result_local, float_type, &no_span, region))
+        self.make_local_load_expression(result_local, float_type, &no_span, region)
     }
 
     /// Emits a recoverable `ValidateFloat` and returns the unwrapped finite `Float`.
@@ -356,10 +365,10 @@ impl<'a> HirBuilder<'a> {
     ///      error path visible to borrow validation.
     fn emit_recoverable_validated_float_value(
         &mut self,
-        source: HirExpression,
+        source: HirValueId,
         float_type: TypeId,
         span: &Option<SourceSpan>,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         let builtin_error_type = self.builtin_error_type_id(span)?;
         let carrier_type = self
             .type_environment
@@ -388,7 +397,7 @@ impl<'a> HirBuilder<'a> {
     fn active_handler_accepts_builtin_failure(
         &mut self,
         span: &Option<SourceSpan>,
-    ) -> Result<bool, CompilerError> {
+    ) -> Result<bool, HirConstructionFailure> {
         let Some(handler) = self.active_catch_handler else {
             return Ok(false);
         };
@@ -399,7 +408,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         carrier: EmittedFallibleCarrier,
         span: &Option<SourceSpan>,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         if self.active_handler_accepts_builtin_failure(span)? {
             self.lower_carrier_to_active_catch_success(carrier, span)
         } else {
@@ -410,17 +419,17 @@ impl<'a> HirBuilder<'a> {
     /// Emits the `ValidateFloat` statement itself.
     fn emit_validate_float_statement(
         &mut self,
-        source: HirExpression,
+        source: HirValueId,
         failure_mode: NumericFailureMode,
         result: LocalId,
         span: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let statement = HirStatement {
             id: self.allocate_node_id(),
             kind: HirStatementKind::ValidateFloat {
                 source,
                 failure_mode,
-                result,
+                result: HirLocalDestination::Define(result),
             },
             span: *span,
         };
@@ -431,17 +440,17 @@ impl<'a> HirBuilder<'a> {
     /// Emits the `FormatFloat` statement itself.
     fn emit_format_float_statement(
         &mut self,
-        source: HirExpression,
+        source: HirValueId,
         failure_mode: NumericFailureMode,
         result: LocalId,
         span: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let statement = HirStatement {
             id: self.allocate_node_id(),
             kind: HirStatementKind::FormatFloat {
                 source,
                 failure_mode,
-                result,
+                result: HirLocalDestination::Define(result),
             },
             span: *span,
         };
@@ -449,23 +458,22 @@ impl<'a> HirBuilder<'a> {
         self.emit_statement_to_current_block(statement, span)
     }
 
-    /// Emits a checked numeric operation and assigns its success value into `target`.
+    /// Emits a checked numeric operation and writes its success value to `target`.
     ///
     /// WHAT: uses the same failure-mode selection as source-authored arithmetic, then stores the
-    ///       success value into an existing local.
-    /// WHY: compiler-generated arithmetic, such as range-loop counter updates, must preserve the
-    ///      same recoverable-vs-trapping semantics as the enclosing source context instead of
-    ///      silently taking a separate trap-only path.
+    ///       success value to an explicitly classified local destination.
+    /// WHY: compiler-generated arithmetic must preserve both its recoverable-vs-trapping semantics
+    ///      and whether the caller defines scratch storage or updates persistent loop state.
     pub(crate) fn emit_checked_numeric_assignment(
         &mut self,
-        target: LocalId,
+        target: HirLocalDestination,
         op: HirNumericOp,
-        left: HirExpression,
-        right: HirExpression,
+        left: HirValueId,
+        right: HirValueId,
         span: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let discharged =
-            self.pre_conversion_operands_cannot_fail(op.operator, &left, Some(&right), op.domain);
+            self.pre_conversion_operands_cannot_fail(op.operator, left, Some(right), op.domain);
         let (left, right) = self.lower_checked_numeric_binary_operands(op, left, right, span)?;
         let operands = HirNumericOperands::Binary { left, right };
         if discharged {
@@ -490,7 +498,13 @@ impl<'a> HirBuilder<'a> {
         let success_type = self.checked_numeric_result_type(op, span)?;
         let success_value =
             self.emit_recoverable_numeric_value(op, operands, success_type, span)?;
-        self.emit_assign_local_statement(target, success_value, span)
+        let write_target = match target {
+            HirLocalDestination::Define(local) => HirWriteTarget::DefineLocal(local),
+            HirLocalDestination::Update(local) => {
+                HirWriteTarget::AssignPlace(HirPlace::local(local))
+            }
+        };
+        self.emit_write_statement(write_target, success_value, span)
     }
 
     /// Returns the scalar success type for a checked numeric operation.
@@ -502,7 +516,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         op: HirNumericOp,
         span: &Option<SourceSpan>,
-    ) -> Result<TypeId, CompilerError> {
+    ) -> Result<TypeId, HirConstructionFailure> {
         let domain_type = op.domain.type_id(&self.type_environment);
         self.lower_type_id(domain_type, span)
     }
@@ -513,7 +527,7 @@ impl<'a> HirBuilder<'a> {
     fn select_float_integrity_failure_mode(
         &mut self,
         span: &Option<SourceSpan>,
-    ) -> Result<NumericFailureMode, CompilerError> {
+    ) -> Result<NumericFailureMode, HirConstructionFailure> {
         let function_id = self.current_function_id_or_error(span)?;
         if self.module.start_function == Some(function_id) {
             return Ok(NumericFailureMode::Trap);
@@ -539,7 +553,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn select_numeric_failure_mode(
         &mut self,
         span: &Option<SourceSpan>,
-    ) -> Result<NumericFailureMode, CompilerError> {
+    ) -> Result<NumericFailureMode, HirConstructionFailure> {
         let current_function_id = self.current_function_id_or_error(span)?;
         let function = self.function_by_id_or_error(current_function_id, span)?;
         let Some((_, error_type)) = self
@@ -584,14 +598,16 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn classify_checked_numeric_binop(
         &mut self,
         op: &Operator,
-        left: &HirExpression,
-        right: &HirExpression,
+        left: HirValueId,
+        right: HirValueId,
     ) -> Option<(HirNumericOp, TypeId, bool)> {
         let operator = op.numeric_operator()?;
+        let left_type = self.module.expressions.expression(left).ty;
+        let right_type = self.module.expressions.expression(right).ty;
         let domain = binary_operation_domain(
             operator,
-            NumericScalar::from_type_id(left.ty, &self.type_environment)?,
-            NumericScalar::from_type_id(right.ty, &self.type_environment)?,
+            NumericScalar::from_type_id(left_type, &self.type_environment)?,
+            NumericScalar::from_type_id(right_type, &self.type_environment)?,
         )?;
         let discharged =
             self.pre_conversion_operands_cannot_fail(operator, left, Some(right), domain);
@@ -612,15 +628,15 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn lower_checked_numeric_binary_operands(
         &mut self,
         op: HirNumericOp,
-        left: HirExpression,
-        right: HirExpression,
+        left: HirValueId,
+        right: HirValueId,
         span: &Option<SourceSpan>,
-    ) -> Result<(HirExpression, HirExpression), CompilerError> {
+    ) -> Result<(HirValueId, HirValueId), HirConstructionFailure> {
         let left = self.convert_numeric_operand_to_domain(left, op.domain, span)?;
 
         if op.operator == NumericOperator::Power && matches!(op.domain, NumericScalar::Number(_)) {
             let int_type = self.type_environment.builtins().int;
-            if right.ty != int_type {
+            if self.module.expressions.expression(right).ty != int_type {
                 return_hir_transformation_error!(
                     "Dec power exponent must remain the canonical Int type",
                     self.hir_error_location(span)
@@ -642,9 +658,10 @@ impl<'a> HirBuilder<'a> {
     ///      unsupported.
     pub(crate) fn classify_checked_numeric_negation(
         &self,
-        operand: &HirExpression,
+        operand: HirValueId,
     ) -> Option<(HirNumericOp, TypeId, bool)> {
-        let operand_scalar = NumericScalar::from_type_id(operand.ty, &self.type_environment)?;
+        let operand_type = self.module.expressions.expression(operand).ty;
+        let operand_scalar = NumericScalar::from_type_id(operand_type, &self.type_environment)?;
         let domain = negation_domain(operand_scalar)?;
         let discharged = self.pre_conversion_operands_cannot_fail(
             NumericOperator::Negate,
@@ -671,28 +688,29 @@ impl<'a> HirBuilder<'a> {
     ///      explicit. Dec power keeps its exponent in the canonical profile Int type.
     pub(crate) fn convert_numeric_operand_to_domain(
         &mut self,
-        value: HirExpression,
+        value: HirValueId,
         domain: NumericScalar,
         span: &Option<SourceSpan>,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         let target_type = domain.type_id(&self.type_environment);
-        if value.ty == target_type {
+        let value_row = self.module.expressions.expression(value);
+        if value_row.ty == target_type {
             return Ok(value);
         }
 
-        let Some(source) = NumericScalar::from_type_id(value.ty, &self.type_environment) else {
+        let Some(source) = NumericScalar::from_type_id(value_row.ty, &self.type_environment) else {
             return_hir_transformation_error!(
                 "Numeric operation operand has no numeric conversion domain",
                 self.hir_error_location(span)
             );
         };
 
-        let region = value.region;
+        let region = value_row.region;
         let no_span = None;
-        Ok(self.make_expression(
+        self.make_expression(
             &no_span,
             HirExpressionKind::Cast {
-                source: Box::new(value),
+                source: value,
                 policy: BuiltinCastPolicyId::NumericConversion {
                     source,
                     target: domain,
@@ -701,7 +719,7 @@ impl<'a> HirBuilder<'a> {
             target_type,
             ValueKind::RValue,
             region,
-        ))
+        )
     }
 
     /// Whether pre-conversion HIR operand types discharge a checked operation.
@@ -714,16 +732,20 @@ impl<'a> HirBuilder<'a> {
     fn pre_conversion_operands_cannot_fail(
         &self,
         operator: NumericOperator,
-        left: &HirExpression,
-        right: Option<&HirExpression>,
+        left: HirValueId,
+        right: Option<HirValueId>,
         domain: NumericScalar,
     ) -> bool {
         let environment: &TypeEnvironment = &self.type_environment;
-        let Some(left) = NumericScalar::from_type_id(left.ty, environment) else {
+        let left_type = self.module.expressions.expression(left).ty;
+        let Some(left) = NumericScalar::from_type_id(left_type, environment) else {
             return false;
         };
         let right = match right {
-            Some(operand) => match NumericScalar::from_type_id(operand.ty, environment) {
+            Some(operand) => match NumericScalar::from_type_id(
+                self.module.expressions.expression(operand).ty,
+                environment,
+            ) {
                 Some(scalar) => Some(scalar),
                 None => return false,
             },

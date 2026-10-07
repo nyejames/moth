@@ -31,8 +31,8 @@ pub(crate) use builder::from_hir;
 pub(crate) use control_flow::{CfgBlock, CfgEdge, ControlFlow, ProgramPoint};
 #[allow(unused_imports)]
 pub(crate) use events::{
-    AccessKind, AggregateField, Call, CallArgument, CallEffect, CallResult, Event, EventKind,
-    EventSource, Loan, TerminatorEventKind, Use, UseKind,
+    AccessKind, AggregateField, BindingDestination, Call, CallArgument, CallEffect, CallResult,
+    Event, EventKind, EventSource, JumpArgument, Loan, TerminatorEventKind, Use, UseKind,
 };
 #[allow(unused_imports)]
 pub(crate) use events::{KillReason, RebindValue};

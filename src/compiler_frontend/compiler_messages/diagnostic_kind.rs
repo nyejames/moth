@@ -101,6 +101,7 @@ pub enum SyntaxDiagnosticKind {
     UnescapedImplicitTemplateClose,
     InvalidStringEscape,
     SourceSpanCapacity,
+    CompilerCapacityExceeded,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

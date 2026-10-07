@@ -17,8 +17,9 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
 };
-use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatementKind, HirWriteTarget,
+};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -287,13 +288,21 @@ fn lowers_range_loop_with_index_binding() {
     };
 
     let body_statements = &module.blocks[body_block.0 as usize].statements;
-    let assign_count = body_statements
+    let binding_definition_count = body_statements
         .iter()
-        .filter(|statement| matches!(statement.kind, HirStatementKind::Assign { .. }))
+        .filter(|statement| {
+            matches!(
+                statement.kind,
+                HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(_),
+                    ..
+                }
+            )
+        })
         .count();
     assert_eq!(
-        assign_count, 2,
-        "expected value + index binding assignments"
+        binding_definition_count, 2,
+        "expected definitions for the value and index bindings"
     );
 
     let has_index_increment = module.blocks.iter().any(|block| {
@@ -308,8 +317,12 @@ fn lowers_range_loop_with_index_binding() {
                             domain: NumericScalar::Int,
                         },
                     operands: HirNumericOperands::Binary { right, .. },
+                    result: HirLocalDestination::Update(_),
                     ..
-                } => matches!(right.kind, HirExpressionKind::Int(1)),
+                } => matches!(
+                    &module.expressions.expression(*right).kind,
+                    HirExpressionKind::Int(1)
+                ),
                 _ => false,
             })
     });
@@ -585,16 +598,13 @@ fn lowers_collection_loop_item_binding_from_indexed_place() {
             .statements
             .iter()
             .any(|statement| {
-                matches!(
-                    statement.kind,
-                    HirStatementKind::Assign {
-                        value: crate::compiler_frontend::hir::expressions::HirExpression {
-                            kind: HirExpressionKind::Load(HirPlace::Index { .. }),
-                            ..
-                        },
-                        ..
-                    }
-                )
+                super::write_value(&module, statement).is_some_and(|value| {
+                    matches!(
+                        &value.kind,
+                        HirExpressionKind::Load(place)
+                            if super::place_outermost_projection_is_index(&module, place)
+                    )
+                })
             });
 
     assert!(
@@ -658,28 +668,21 @@ fn lowers_collection_loop_optional_index_binding() {
 
     let statements = &module.blocks[body_block.0 as usize].statements;
     let has_item_assign = statements.iter().any(|statement| {
-        matches!(
-            statement.kind,
-            HirStatementKind::Assign {
-                value: crate::compiler_frontend::hir::expressions::HirExpression {
-                    kind: HirExpressionKind::Load(HirPlace::Index { .. }),
-                    ..
-                },
-                ..
-            }
-        )
+        super::write_value(&module, statement).is_some_and(|value| {
+            matches!(
+                &value.kind,
+                HirExpressionKind::Load(place)
+                    if super::place_outermost_projection_is_index(&module, place)
+            )
+        })
     });
     let has_index_assign = statements.iter().any(|statement| {
-        matches!(
-            statement.kind,
-            HirStatementKind::Assign {
-                value: crate::compiler_frontend::hir::expressions::HirExpression {
-                    kind: HirExpressionKind::Load(HirPlace::Local(_)),
-                    ..
-                },
-                ..
-            }
-        )
+        super::write_value(&module, statement).is_some_and(|value| {
+            matches!(
+                &value.kind,
+                HirExpressionKind::Load(place) if super::is_local_place(place)
+            )
+        })
     });
 
     assert!(has_item_assign, "expected indexed item assignment");

@@ -1,0 +1,4 @@
+source ~= 1
+writer ~= source
+writer = 2
+[: source=[source]]
