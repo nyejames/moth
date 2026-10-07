@@ -131,7 +131,7 @@ Rejected: opaque data handles that hide collections or byte sequences to avoid e
 
 ### 5. Compiler-owned error codes
 
-Annotated assets are static files. They can't interpolate `BuiltinErrorCode` values the way Core helpers do, which is why `canvas.js` still hand-builds an unowned 400/404/409/500 code family. Graphics errors must use compiler-owned codes, which needs a route for assets to name them, such as `@moth/runtime` exports. This decision is shared with the canvas error-code cleanup.
+Delivered. `@moth/runtime` exports named compiler-owned codes generated from `BuiltinErrorCode` (`RUNTIME_ERROR_CODE_EXPORTS` in `external_js/runtime_module_registry.rs`), and `canvas.js` now imports its host codes by name. Graphics uses the same route and adds a new code only alongside the API that first returns it, never as a speculative catalogue.
 
 ## Implementation plan
 

@@ -1520,7 +1520,20 @@ fn builtin_web_canvas_package_parses_expanded_surface() {
             "CanvasTextMetrics",
         ],
     );
-    assert_runtime_imports(&parsed, &[("@moth/runtime", &["mothErr", "mothOk"])]);
+    assert_runtime_imports(
+        &parsed,
+        &[(
+            "@moth/runtime",
+            &[
+                "MOTH_ERROR_HOST_INVALID_ARGUMENT",
+                "MOTH_ERROR_HOST_OPERATION_FAILED",
+                "MOTH_ERROR_HOST_RESOURCE_NOT_FOUND",
+                "MOTH_ERROR_HOST_RESOURCE_UNAVAILABLE",
+                "mothErr",
+                "mothOk",
+            ],
+        )],
+    );
 
     let free_function_names: Vec<&str> = parsed
         .free_functions

@@ -35,10 +35,7 @@ WebGL belongs in `@web/graphics`, never here. `@web/canvas` stays the owner of t
 - `create_image` returns the element immediately while the browser keeps loading it. Drawing stays fallible through `assertLoadedImage` until loading completes.
 - Pixel channels cross as `Int` values clamped to 0 through 255 because the annotation subset has no `U8`. Any future binary-data design keeps numeric `U8` channels distinct from `Byte` octets. They share one-byte storage but aren't interchangeable, and this package doesn't settle a Core byte API or bitwise syntax.
 - Handles have no teardown functions. The host JavaScript runtime manages their lifetime.
-
-## Known gaps
-
-- **Error codes.** Failures still hand-build the unowned 400, 404, 409 and 500 family instead of compiler-owned `BuiltinErrorCode` values. Static assets can't interpolate codes the way Core helpers do, so the fix needs a route for assets to name them, such as `@moth/runtime` exports. `@web/graphics` needs the same route.
+- Failures use compiler-owned host error codes imported by name from `@moth/runtime`: `MOTH_ERROR_HOST_INVALID_ARGUMENT` (400), `MOTH_ERROR_HOST_RESOURCE_NOT_FOUND` (404), `MOTH_ERROR_HOST_RESOURCE_UNAVAILABLE` (409) and `MOTH_ERROR_HOST_OPERATION_FAILED` (500). `BuiltinErrorCode` owns the values. The asset never spells a number, and `web/tests/canvas_error_tests.rs` pins each category's code and message.
 
 ## Deferred surfaces
 

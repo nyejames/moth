@@ -62,8 +62,25 @@ impl CoreJsRuntimeModule {
 ///       Numeric values come from the enum when the module source is generated.
 /// WHY: package assets are static files, so they reach compiler-owned codes by name instead
 ///      of copying numbers that could drift from the canonical enum.
-pub(crate) const RUNTIME_ERROR_CODE_EXPORTS: [(&str, BuiltinErrorCode); 1] =
-    [("MOTH_ERROR_UNSUPPORTED", BuiltinErrorCode::Unsupported)];
+pub(crate) const RUNTIME_ERROR_CODE_EXPORTS: [(&str, BuiltinErrorCode); 5] = [
+    ("MOTH_ERROR_UNSUPPORTED", BuiltinErrorCode::Unsupported),
+    (
+        "MOTH_ERROR_HOST_INVALID_ARGUMENT",
+        BuiltinErrorCode::HostInvalidArgument,
+    ),
+    (
+        "MOTH_ERROR_HOST_RESOURCE_NOT_FOUND",
+        BuiltinErrorCode::HostResourceNotFound,
+    ),
+    (
+        "MOTH_ERROR_HOST_RESOURCE_UNAVAILABLE",
+        BuiltinErrorCode::HostResourceUnavailable,
+    ),
+    (
+        "MOTH_ERROR_HOST_OPERATION_FAILED",
+        BuiltinErrorCode::HostOperationFailed,
+    ),
+];
 
 /// v1 result helpers for `@moth/runtime`.
 ///

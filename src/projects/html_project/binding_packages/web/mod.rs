@@ -108,3 +108,7 @@ fn logical_source_path(package: &WebBindingPackage) -> PortableResourcePath {
     PortableResourcePath::from_relative_logical_path(Path::new(file_name))
         .expect("built-in @web logical source path is a proven internal invariant")
 }
+
+#[cfg(test)]
+#[path = "tests/canvas_error_tests.rs"]
+mod canvas_error_tests;
