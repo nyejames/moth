@@ -189,6 +189,53 @@ fn single_file_rejects_optional_core_package_not_exposed_by_builder() {
     assert_eq!(messages.string_table.resolve(package_path), "@core/text");
 }
 
+#[test]
+fn single_file_without_source_package_dependencies_skips_registered_package_materialisation() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+    let package_root = dir.join("packages/unused");
+    fs::create_dir_all(&package_root).expect("should create registered package root");
+    fs::write(
+        package_root.join("@mod.moth"),
+        "export:\n    unused || -> Int:\n        return missing_package_value\n    ;\n;\n",
+    )
+    .expect("should write semantically invalid unused package");
+
+    let moth_path = dir.join("main.moth");
+    fs::write(&moth_path, "value = 1\n").expect("should write plain consumer");
+
+    let mut config = Config::new(moth_path);
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut frontend_surface = BuilderSurface::with_mandatory_core();
+    frontend_surface.source_packages.register_filesystem_root(
+        "unused",
+        package_root,
+        PackageOrigin::Builder,
+    );
+
+    let frontend = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut string_table,
+    )
+    .expect("a single-file consumer without package dependencies should compile cleanly");
+
+    assert!(
+        !frontend.has_diagnosed_or_blocked(),
+        "an unreferenced registered package body must not add diagnostics"
+    );
+    assert_eq!(
+        frontend.source_packages.len(),
+        0,
+        "an unreferenced registered package must not be published"
+    );
+}
+
 // ── Directory-project flow ────────────────────────────────────────────────────
 
 #[test]

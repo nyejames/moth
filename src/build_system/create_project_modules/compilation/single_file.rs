@@ -54,7 +54,9 @@ use super::super::generated_store::BoundaryGeneratedFunctionStore;
 use super::super::module_artifact_store::ModuleArtifactStore;
 use super::super::module_inventory::ModuleCompilationJob;
 use super::super::module_namespace::ModuleNamespaceSet;
-use super::super::module_preparation::{ModulePreparationContext, record_module_input_counters};
+use super::super::module_preparation::{
+    ModulePreparationContext, record_module_input_counters, source_is_moth_template,
+};
 use super::super::prepared_module::PreparedModule;
 use super::super::project_module_graph::ProjectModuleGraph;
 use super::super::project_structure_diagnostics::non_utf8_filesystem_name_error;
@@ -337,25 +339,6 @@ fn compile_single_file_frontend_with_target(
         &project_path_resolver,
     )?;
     // 4. Discover all transitively reachable files.
-    let mut external_imports = source_discovery::ExternalImportDiscoveryState {
-        external_packages: &mut builder_surface.binding_packages,
-        providers: &builder_surface.external_import_providers,
-        cache: &mut builder_surface.external_import_cache,
-        resolution_table: &mut builder_surface.external_dependency_resolution_table,
-    };
-
-    let mut source_package_inventories = discover_source_package_inventories(
-        config,
-        numeric_profile,
-        &namespace_set,
-        &project_path_resolver,
-        style_directives,
-        &mut external_imports,
-        &mut resource_inputs,
-        string_table,
-        mode,
-    )?;
-
     // Register the synthetic main-project boundary before its inventory so the human summary can
     // attribute reachable discovery and module compilation as accumulated boundary work.
     #[cfg(feature = "timers")]
@@ -368,17 +351,26 @@ fn compile_single_file_frontend_with_target(
         crate::timing::TimingMetric::BoundaryInventory,
         Some(crate::timing::TimingContext::for_boundary(timing_boundary)),
     );
-    let collected = match source_discovery::collect_reachable_input_files(
-        &entry_path,
-        &namespace_set,
-        &project_path_resolver,
-        style_directives,
-        &mut external_imports,
-        &builder_surface.source_file_kinds,
-        &mut resource_inputs,
-        &mut discovery_path_fork,
-        string_table,
-    ) {
+    let collection_result = {
+        let mut external_imports = source_discovery::ExternalImportDiscoveryState {
+            external_packages: &mut builder_surface.binding_packages,
+            providers: &builder_surface.external_import_providers,
+            cache: &mut builder_surface.external_import_cache,
+            resolution_table: &mut builder_surface.external_dependency_resolution_table,
+        };
+        source_discovery::collect_reachable_input_files(
+            &entry_path,
+            &namespace_set,
+            &project_path_resolver,
+            style_directives,
+            &mut external_imports,
+            &builder_surface.source_file_kinds,
+            &mut resource_inputs,
+            &mut discovery_path_fork,
+            string_table,
+        )
+    };
+    let collected = match collection_result {
         Ok(collected) => collected,
         Err(error) => {
             let (failure, source_database) = error.into_parts();
@@ -388,15 +380,6 @@ fn compile_single_file_frontend_with_target(
             return Err(failure.into());
         }
     };
-    if mode.includes_check_only() {
-        prepare_source_package_check_only_jobs(
-            &mut source_package_inventories,
-            &namespace_set,
-            style_directives,
-            &mut external_imports,
-            string_table,
-        )?;
-    }
     let source_package_dependencies = collected.source_package_dependencies;
     let mut source_owner = collected.source_files;
     let input_files = collected.input_files;
@@ -408,14 +391,58 @@ fn compile_single_file_frontend_with_target(
     // owner that finalizes every table after the last span producer returns.
     let (source_files, mut source_spans) = source_owner.split();
     let mut path_interner = source_files.clone_path_builder();
-
-    // Share the effective external package registry immutably for the rest of the frontend
-    // pipeline so each stage does not need its own deep clone.
-    let external_packages = Arc::new(builder_surface.binding_packages.clone());
     // Every stage after the split runs inside one scoped pipeline. Its early returns funnel
     // through the single finalization tail below, so a diagnosed or infrastructure failure can
     // never drop the builder with live span owners or an unfinalized table.
     let result = (|| -> Result<SingleFileFrontendResult, BoundaryPremergeFailure> {
+        // Stage 0 indexed package roots above for namespace and collision checks. The shared
+        // inventory path materialises every registered source package when entered, so skip it
+        // only when the consumer retained no source-package edges and no selected Moth template
+        // can receive an implicit package from this builder.
+        let requires_source_package_inventories = !source_package_dependencies.is_empty()
+            || (!builder_surface
+                .implicit_template_scope_source_packages
+                .is_empty()
+                && input_files
+                    .iter()
+                    .any(|input| source_is_moth_template(source_files, input.source_id())));
+        let source_package_inventories = {
+            if requires_source_package_inventories {
+                let mut external_imports = source_discovery::ExternalImportDiscoveryState {
+                    external_packages: &mut builder_surface.binding_packages,
+                    providers: &builder_surface.external_import_providers,
+                    cache: &mut builder_surface.external_import_cache,
+                    resolution_table: &mut builder_surface.external_dependency_resolution_table,
+                };
+                let mut inventories = discover_source_package_inventories(
+                    config,
+                    numeric_profile,
+                    &namespace_set,
+                    &project_path_resolver,
+                    style_directives,
+                    &mut external_imports,
+                    &mut resource_inputs,
+                    string_table,
+                    mode,
+                )?;
+                if mode.includes_check_only() {
+                    prepare_source_package_check_only_jobs(
+                        &mut inventories,
+                        &namespace_set,
+                        style_directives,
+                        &mut external_imports,
+                        string_table,
+                    )?;
+                }
+                inventories
+            } else {
+                Vec::new()
+            }
+        };
+
+        // Share the effective external package registry only after Stage 0 has finished every
+        // provider-discovery operation that mutates it.
+        let external_packages = Arc::new(builder_surface.binding_packages.clone());
         let (completed_source_packages, transient_batches) = compile_source_package_inventories(
             config,
             build_profile,

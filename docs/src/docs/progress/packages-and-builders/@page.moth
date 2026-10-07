@@ -127,7 +127,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Builder-provided source-backed packages]
             [: Partial]
-            [: Targeted builder source-backed package root registration and HTML Builder package coverage. Direct-file and directory consumers share package boundaries for HTML constants and runtime Canvas wrappers. Both entry modes reject local source collisions with registered source-backed and binding-backed packages, including case-only names and child module scopes. Missing direct-file dependencies retain their authored clause span. Failed package diagnostics retain their source context for ordinary and Boracle single-file consumers.]
+            [: Targeted builder source-backed package root registration and HTML Builder package coverage. Direct-file and directory consumers share package boundaries for HTML constants and runtime Canvas wrappers. Both entry modes reject local source collisions with registered source-backed and binding-backed packages, including case-only names and child module scopes. Missing direct-file dependencies retain their authored clause span. Failed package diagnostics retain their source context for ordinary and Boracle single-file consumers. Direct-file consumers with no package dependencies skip package bodies while retaining namespace validation. Moth template file values include their implicit HTML helper package.]
             [: Frontend / HTML]
             [: Builders expose source-backed packages through [$html:<code>BuilderSurface.source_packages</code>]. The HTML builder provides [$html:<code>@html</code>] as a source-backed package. Builder and project-local prefix collisions are hard config errors.]
         ]

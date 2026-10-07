@@ -4589,3 +4589,95 @@ source, correction and evidence reviews report clean outcomes. Saved broad gate
 logs lack an effective Node-version header, although their invocations selected
 the pinned runtime. The upcoming main-bound gate will record that header. Phase 1
 is accepted as a feature checkpoint; full main-bound validation remains pending.
+
+## Typed semantic expressions - Phase 2 integrated control and package prerequisite (2026-10-07)
+
+Phase 1 subsequently landed on main as squash `ec1aa89d7`. The package merge
+`15c42fb88` includes all four committed `packages-work` changes through
+`814c83c2f`. Both resulting main trees passed their own `just validate-full`
+runs with Rust 1.99 and pinned Node 24.21. The resumed `expression-refactor`
+checkpoint `f99574004` has the exact integrated main tree. This resolves the
+pending main-bound validation above, without replacing the retirement baseline.
+
+The first integrated native cohort retains five invocations each of the CLI,
+frontend and data-layout suites. Its sequential, unpaired comparison against the
+retirement cohort has 82 identity-matched cases: 28 rough slower signals and 54
+unchanged, with two changed docs inputs excluded. The plain single-file cases
+gained about 7 ms of package work. This slower control remains preserved under
+`tmp/typed-semantic-expressions/raw-capture/raw/after-packages/`.
+
+Inspection found that synthetic single-file compilation entered the shared
+all-registered source-package inventory path even when its consumer needed no
+source package. The correction discovers the consumer first and skips that path
+only for an empty required set. Namespace indexing and collision validation
+remain unconditional. Selected MTF content still requires its implicit builder
+package. Nonempty package selection retains the existing implementation.
+Regressions cover a plain root with an unused broken package and both ordinary
+and module-root single-file entries using implicit HTML helpers through MTF.
+The latter exposed retained provisional source spans, now rebound at the existing
+private whole-file barrier without changing their local ranges.
+
+### Paired native frontend evidence
+
+The preserved integrated control and rebuilt corrected candidate each ran five
+times, alternating control/candidate order by pair. Every invocation used the
+unchanged native 42-case frontend suite, format 8, protocol 4, timing schema 2,
+one preflight and ten measured iterations. Rust 1.99, Node 24.21, machine identity,
+profiles and unset Rayon thread configuration match. All ten invocations exited
+zero and all 42 case identities match. Repository state stayed fixed throughout.
+The reader reuses the existing raw-cohort validation and identity functions.
+
+| Case | Control median ms | Candidate median ms | Median paired delta ms |
+| --- | ---: | ---: | ---: |
+| `type_stress_frontend` | 31.813 | 25.072 | -6.830 |
+| `fold_stress_frontend` | 28.484 | 21.803 | -6.784 |
+| `constant_chain_512_frontend` | 31.603 | 24.775 | -6.755 |
+| `generic_scaling_160_frontend` | 1016.979 | 1000.392 | -16.827 |
+
+All five paired deltas are negative for these four cases. The generic case's
+movement remains within its native dispersion threshold and is not classified
+as a resolved speed improvement. The reader applies native threshold parameters
+to five-run medians, while the production comparison uses the previous mean for
+its relative floor. This adaptation changes none of these 42 classifications:
+24 rough faster, 18 unchanged and zero slower. The median paired difference
+of summed case medians is -192.677 ms, ranging from -243.569 to -166.449 ms.
+That sum is an aggregate signal, not a single project latency or causal proof.
+Stage timings overlap and are attribution evidence, not additive components of
+the primary median.
+
+Three directory cases have positive deltas in every pair despite remaining
+below their native thresholds. Their paired median increases are 0.190 ms for
+`import_fanout_frontend`, 0.124 ms for `module_root_stress_frontend` and 0.177 ms
+for `many_medium_files_frontend`. Differences of side medians remain below 1%.
+Directory orchestration is unchanged by the empty-set gate; the shared header
+owner gains required qualifier validation. These observations do not isolate
+that check's cost. The prerequisite retains mandatory source-identity correctness
+with this explicitly reported small timing tradeoff. This is not a claim of no
+repeatable movement, and later cutover comparisons must preserve this evidence.
+No new CLI, data-layout or whole-compiler speed claim is made for the correction.
+
+Raw pairs and exact binary/diff/toolchain provenance are in
+`tmp/typed-semantic-expressions/phase2/empty-package-paired/`. The validated reader
+produced `phase2/paired-frontend-comparison.{json,md}` and the rough-threshold
+disposition is `phase2/paired-frontend-disposition.json`. The control binary is
+preserved separately under `phase2/integrated-binaries/`.
+
+### Prerequisite checks and phase boundary
+
+Final focused checks passed: `cargo test -p moth --lib spans_` (29 tests),
+`cargo test -p moth --lib --features timers source_package` (57),
+`cargo test -p moth --lib --features timers synthetic_single_file` (4),
+`cargo test -p moth --lib --features timers compile_project_frontend_tests` (61)
+and `cargo check -p moth --all-targets --features boracle,benchmark_counters`.
+The added span invariants first reproduced two failures before the remaining
+rebind corrections. Selected formatting and diff checks passed. Release docs
+generated 78 outputs; the two changed progress routes were inspected for their
+notes, titles and tables. This was not a complete link recrawl.
+
+Independent prerequisite source/correction reviews found no remaining required
+issue. These focused checks support an intermediate feature-branch checkpoint,
+not another main merge or a full-validation claim for this tree. Phase 2 remains
+incomplete while representation, reclamation, issuing domains, exact interfaces
+and migration boundaries are investigated. The standalone model measurements
+are separate evidence and do not establish compiler typing/folding or whole-IR
+memory improvements.

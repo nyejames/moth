@@ -4,9 +4,9 @@
 
 ```text
 STATUS: active, design direction approved
-CURRENT_SLICE: Phase 1 complete - main and package-fix integration
+CURRENT_SLICE: Phase 2 - representation, packing and lifetimes
 BLOCKERS: none
-NEXT_ACTION: squash this branch into main, merge committed package fixes, update this branch from main, then start Phase 2
+NEXT_ACTION: measure the integrated control and compare the four bounded representation and lifetime experiments
 ```
 
 ## Purpose and authority
