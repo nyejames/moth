@@ -1,0 +1,12 @@
+non_negative |count Int| -> Int, Error!:
+    if count < 0:
+        return! Error("negative")
+    ;
+    return count
+;
+
+outer = non_negative(-1) catch |err|:
+    inner = non_negative(-2) catch |err| then 2
+    then inner
+;
+io.line([: [outer]])

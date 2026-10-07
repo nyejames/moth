@@ -25,7 +25,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -46,8 +46,10 @@ pub(crate) struct CatchFallibleHandlerSite<'a> {
     pub(crate) compilation_stage: &'a str,
     pub(crate) value_required_span: Option<SourceSpan>,
 }
+
+/// The authored `|name|` of a catch handler, before the handler scope exists.
 struct ParsedCatchErrorBinding {
-    binding: CatchErrorBinding,
+    name: StringId,
     span: Option<SourceSpan>,
 }
 
@@ -72,14 +74,8 @@ pub(crate) fn parse_catch_fallible_handler_typed(
         None => &mut local_handler_warnings,
     };
 
-    let error_binding = parse_catch_error_binding(
-        token_stream,
-        context,
-        &site,
-        warnings,
-        string_table,
-        path_fork,
-    )?;
+    let error_binding =
+        parse_catch_error_binding(token_stream, context, &site, warnings, string_table)?;
 
     parse_catch_fallible_handler_body(
         token_stream,
@@ -124,14 +120,13 @@ pub(crate) fn parse_catch_without_error_binding_typed(
 /// Parses the `|identifier|` error binding inside a catch handler.
 ///
 /// WHAT: validates bracket tokens, extracts the handler identifier, runs naming and
-/// scope-conflict checks, and returns a `CatchErrorBinding`.
+/// scope-conflict checks, and returns the binding name for the handler scope to bind.
 fn parse_catch_error_binding(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     site: &CatchFallibleHandlerSite<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCatchErrorBinding, ExpressionParseError> {
     if token_stream.current_tag() != TokenTag::TYPE_PARAMETER_BRACKET {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
@@ -199,13 +194,44 @@ fn parse_catch_error_binding(
     token_stream.advance();
 
     Ok(ParsedCatchErrorBinding {
-        binding: CatchErrorBinding {
-            error_binding: path_fork
-                .try_intern_child(context.scope, handler_name)
-                .expect("path table exhausted while creating catch binding"),
-        },
+        name: handler_name,
         span: handler_name_span,
     })
+}
+
+/// Declares the caught error as a local of the handler scope.
+///
+/// WHY: the binding path is interned under the handler's own child scope, not the scope
+/// holding the handled expression. The binding is visible only inside its handler, so
+/// sibling handlers may reuse a name, and HIR keys function locals by this path.
+fn bind_catch_error(
+    handler_context: &mut ScopeContext,
+    error: &ParsedCatchErrorBinding,
+    error_type_id: TypeId,
+    type_interner: &AstTypeInterner<'_>,
+    path_fork: &mut PathInternerFork,
+) -> CatchErrorBinding {
+    let error_binding = path_fork
+        .try_intern_child(handler_context.scope, error.name)
+        .expect("path table exhausted while creating catch binding");
+    let error_data_type = diagnostic_type_spelling(error_type_id, type_interner.environment());
+    handler_context.add_var(
+        Declaration {
+            id: error_binding,
+            value: Expression::no_value_with_type_id(
+                error.span,
+                error_data_type,
+                error_type_id,
+                ValueMode::ImmutableOwned,
+            ),
+            binding_span: error.span,
+            config_qualifier: None,
+        },
+        error.span,
+        path_fork,
+    );
+
+    CatchErrorBinding { error_binding }
 }
 
 /// Parses the colon and statement body of a catch handler.
@@ -244,26 +270,15 @@ fn parse_catch_fallible_handler_body(
         ValueReceiverKind::CatchHandler,
     ));
 
-    if let Some(error_binding) = &error {
-        let error_data_type =
-            diagnostic_type_spelling(site.error_return_type_id, type_interner.environment());
-        let error_binding_span = error_binding.span;
-        handler_context.add_var(
-            Declaration {
-                id: error_binding.binding.error_binding,
-                value: Expression::no_value_with_type_id(
-                    error_binding_span,
-                    error_data_type,
-                    site.error_return_type_id,
-                    ValueMode::ImmutableOwned,
-                ),
-                binding_span: error_binding_span,
-                config_qualifier: None,
-            },
-            error_binding_span,
+    let error = error.map(|parsed| {
+        bind_catch_error(
+            &mut handler_context,
+            &parsed,
+            site.error_return_type_id,
+            type_interner,
             path_fork,
-        );
-    }
+        )
+    });
 
     token_stream.advance();
 
@@ -284,7 +299,7 @@ fn parse_catch_fallible_handler_body(
     )?;
 
     Ok(CatchFallibleHandler {
-        error: error.map(|parsed| parsed.binding),
+        error,
         body: handler_body,
     })
 }
@@ -332,14 +347,8 @@ pub(super) fn parse_inline_catch_fallible_handler_typed(
         Some(warnings) => warnings,
         None => &mut local_handler_warnings,
     };
-    let error_binding = parse_catch_error_binding(
-        token_stream,
-        context,
-        &site,
-        warnings,
-        string_table,
-        path_fork,
-    )?;
+    let error_binding =
+        parse_catch_error_binding(token_stream, context, &site, warnings, string_table)?;
 
     parse_inline_catch_handler_body(
         token_stream,
@@ -411,26 +420,15 @@ fn parse_inline_catch_handler_body(
     );
     handler_context.active_value_target = Some(active_target.clone());
 
-    if let Some(error_binding) = &error {
-        let error_data_type =
-            diagnostic_type_spelling(site.error_return_type_id, type_interner.environment());
-        let error_binding_span = error_binding.span;
-        handler_context.add_var(
-            Declaration {
-                id: error_binding.binding.error_binding,
-                value: Expression::no_value_with_type_id(
-                    error_binding_span,
-                    error_data_type,
-                    site.error_return_type_id,
-                    ValueMode::ImmutableOwned,
-                ),
-                binding_span: error_binding_span,
-                config_qualifier: None,
-            },
-            error_binding_span,
+    let error = error.map(|parsed| {
+        bind_catch_error(
+            &mut handler_context,
+            &parsed,
+            site.error_return_type_id,
+            type_interner,
             path_fork,
-        );
-    }
+        )
+    });
 
     let produced_values = parse_produced_values_typed(ProducedValuesParseInput {
         token_stream,
@@ -458,8 +456,5 @@ fn parse_inline_catch_handler_body(
         scope: handler_context.scope,
     }];
 
-    Ok(CatchFallibleHandler {
-        error: error.map(|parsed| parsed.binding),
-        body,
-    })
+    Ok(CatchFallibleHandler { error, body })
 }

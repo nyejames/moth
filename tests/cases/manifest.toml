@@ -5151,6 +5151,20 @@ contract = "language.results.catch_handler_binding_conflict_rejected"
 role = "primary"
 
 [[case]]
+id = "catch_handler_binding_scoped_to_handler"
+path = "catch_handler_binding_scoped_to_handler"
+tags = ["integration", "results"]
+contract = "language.results.catch_handler_binding_scoped_to_handler"
+role = "primary"
+
+[[case]]
+id = "catch_handler_nested_binding_reuse_rejected"
+path = "catch_handler_nested_binding_reuse_rejected"
+tags = ["integration", "results", "diagnostics"]
+contract = "language.results.catch_handler_binding_conflict_rejected"
+role = "boundary"
+
+[[case]]
 id = "explicit_propagation_catch_conflict_rejected"
 path = "explicit_propagation_catch_conflict_rejected"
 tags = ["integration", "results", "diagnostics"]
