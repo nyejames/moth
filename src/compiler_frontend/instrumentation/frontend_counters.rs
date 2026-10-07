@@ -191,6 +191,72 @@ pub(crate) enum FrontendCounter {
     ExternalFunctionDefinitionCloneCount,
     ExternalSymbolPathCloneCount,
     ExternalAbiParameterCloneCount,
+    // Owning-pass traffic, never observer traversal. Clone counters cover the
+    // named sites only, not every expression clone or recursively copied bytes.
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusAstValidationExpressionReads,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusHirLowerExpressionEntries,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusFoldCompileTimeExpressionEntries,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusConstantFoldEntries,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusFoldOutcomeFolded,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusFoldOutcomeRuntime,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusFoldOutcomeTextUnavailable,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusCastFoldAttempts,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusFoldReducedRpnItems,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusDefaultApplicationClones,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusParameterDefaultViewClones,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusConstructorDefaultViewClones,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusConstructorFieldViewsCreated,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusCallKnownTypeCompatibilityAttempts,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusGenericCallAndMaterialisationSignatureSubstitutions,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusHirScalarPayloadCopiesSampled,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusHirNumberPayloadClonesSampled,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusHirStructuralPiecesClonesSampled,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusCallFunctionEntries,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusCallFunctionDefaultFills,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusCallStructConstructorEntries,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusCallStructConstructorDefaultFills,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusCallChoiceConstructorEntries,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusCallChoiceConstructorDefaultFills,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusCallReceiverMethodEntries,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusCallReceiverMethodDefaultFills,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusCallBuiltinMemberEntries,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusCallBuiltinMemberDefaultFills,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusCallHostFunctionEntries,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusCallHostFunctionDefaultFills,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusCallAssertionEntries,
+    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
+    CensusCallAssertionDefaultFills,
 }
 
 #[cfg(feature = "benchmark_counters")]
@@ -337,6 +403,39 @@ mod detailed {
     static ALREADY_GLOBAL_PREPARED_OUTPUT_REMAP_SKIP_COUNT: AtomicUsize = AtomicUsize::new(0);
     static PREPARED_FILE_INVARIANT_VALIDATION_COUNT: AtomicUsize = AtomicUsize::new(0);
     static FILE_PREPARE_NON_IDENTITY_PAYLOAD_REMAPS: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_AST_VALIDATION_EXPRESSION_READS: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_HIR_LOWER_EXPRESSION_ENTRIES: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_FOLD_COMPILE_TIME_EXPRESSION_ENTRIES: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_CONSTANT_FOLD_ENTRIES: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_FOLD_OUTCOME_FOLDED: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_FOLD_OUTCOME_RUNTIME: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_FOLD_OUTCOME_TEXT_UNAVAILABLE: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_CAST_FOLD_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_FOLD_REDUCED_RPN_ITEMS: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_DEFAULT_APPLICATION_CLONES: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_PARAMETER_DEFAULT_VIEW_CLONES: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_CONSTRUCTOR_DEFAULT_VIEW_CLONES: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_CONSTRUCTOR_FIELD_VIEWS_CREATED: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_CALL_KNOWN_TYPE_COMPATIBILITY_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_GENERIC_CALL_AND_MATERIALISATION_SIGNATURE_SUBSTITUTIONS: AtomicUsize =
+        AtomicUsize::new(0);
+    static CENSUS_HIR_SCALAR_PAYLOAD_COPIES_SAMPLED: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_HIR_NUMBER_PAYLOAD_CLONES_SAMPLED: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_HIR_STRUCTURAL_PIECES_CLONES_SAMPLED: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_CALL_FUNCTION_ENTRIES: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_CALL_FUNCTION_DEFAULT_FILLS: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_CALL_STRUCT_CONSTRUCTOR_ENTRIES: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_CALL_STRUCT_CONSTRUCTOR_DEFAULT_FILLS: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_CALL_CHOICE_CONSTRUCTOR_ENTRIES: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_CALL_CHOICE_CONSTRUCTOR_DEFAULT_FILLS: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_CALL_RECEIVER_METHOD_ENTRIES: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_CALL_RECEIVER_METHOD_DEFAULT_FILLS: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_CALL_BUILTIN_MEMBER_ENTRIES: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_CALL_BUILTIN_MEMBER_DEFAULT_FILLS: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_CALL_HOST_FUNCTION_ENTRIES: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_CALL_HOST_FUNCTION_DEFAULT_FILLS: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_CALL_ASSERTION_ENTRIES: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_CALL_ASSERTION_DEFAULT_FILLS: AtomicUsize = AtomicUsize::new(0);
     #[cfg(test)]
     thread_local! {
         /// Whether this test thread is intentionally capturing global frontend counters.
@@ -581,6 +680,38 @@ mod detailed {
             FrontendCounter::ExternalFunctionDefinitionCloneCount,
             FrontendCounter::ExternalSymbolPathCloneCount,
             FrontendCounter::ExternalAbiParameterCloneCount,
+            FrontendCounter::CensusAstValidationExpressionReads,
+            FrontendCounter::CensusHirLowerExpressionEntries,
+            FrontendCounter::CensusFoldCompileTimeExpressionEntries,
+            FrontendCounter::CensusConstantFoldEntries,
+            FrontendCounter::CensusFoldOutcomeFolded,
+            FrontendCounter::CensusFoldOutcomeRuntime,
+            FrontendCounter::CensusFoldOutcomeTextUnavailable,
+            FrontendCounter::CensusCastFoldAttempts,
+            FrontendCounter::CensusFoldReducedRpnItems,
+            FrontendCounter::CensusDefaultApplicationClones,
+            FrontendCounter::CensusParameterDefaultViewClones,
+            FrontendCounter::CensusConstructorDefaultViewClones,
+            FrontendCounter::CensusConstructorFieldViewsCreated,
+            FrontendCounter::CensusCallKnownTypeCompatibilityAttempts,
+            FrontendCounter::CensusGenericCallAndMaterialisationSignatureSubstitutions,
+            FrontendCounter::CensusHirScalarPayloadCopiesSampled,
+            FrontendCounter::CensusHirNumberPayloadClonesSampled,
+            FrontendCounter::CensusHirStructuralPiecesClonesSampled,
+            FrontendCounter::CensusCallFunctionEntries,
+            FrontendCounter::CensusCallFunctionDefaultFills,
+            FrontendCounter::CensusCallStructConstructorEntries,
+            FrontendCounter::CensusCallStructConstructorDefaultFills,
+            FrontendCounter::CensusCallChoiceConstructorEntries,
+            FrontendCounter::CensusCallChoiceConstructorDefaultFills,
+            FrontendCounter::CensusCallReceiverMethodEntries,
+            FrontendCounter::CensusCallReceiverMethodDefaultFills,
+            FrontendCounter::CensusCallBuiltinMemberEntries,
+            FrontendCounter::CensusCallBuiltinMemberDefaultFills,
+            FrontendCounter::CensusCallHostFunctionEntries,
+            FrontendCounter::CensusCallHostFunctionDefaultFills,
+            FrontendCounter::CensusCallAssertionEntries,
+            FrontendCounter::CensusCallAssertionDefaultFills,
         ]
     }
 
@@ -914,6 +1045,80 @@ mod detailed {
             FrontendCounter::ExternalSymbolPathCloneCount => &EXTERNAL_SYMBOL_PATH_CLONE_COUNT,
 
             FrontendCounter::ExternalAbiParameterCloneCount => &EXTERNAL_ABI_PARAMETER_CLONE_COUNT,
+            FrontendCounter::CensusAstValidationExpressionReads => {
+                &CENSUS_AST_VALIDATION_EXPRESSION_READS
+            }
+            FrontendCounter::CensusHirLowerExpressionEntries => {
+                &CENSUS_HIR_LOWER_EXPRESSION_ENTRIES
+            }
+            FrontendCounter::CensusFoldCompileTimeExpressionEntries => {
+                &CENSUS_FOLD_COMPILE_TIME_EXPRESSION_ENTRIES
+            }
+            FrontendCounter::CensusConstantFoldEntries => &CENSUS_CONSTANT_FOLD_ENTRIES,
+            FrontendCounter::CensusFoldOutcomeFolded => &CENSUS_FOLD_OUTCOME_FOLDED,
+            FrontendCounter::CensusFoldOutcomeRuntime => &CENSUS_FOLD_OUTCOME_RUNTIME,
+            FrontendCounter::CensusFoldOutcomeTextUnavailable => {
+                &CENSUS_FOLD_OUTCOME_TEXT_UNAVAILABLE
+            }
+            FrontendCounter::CensusCastFoldAttempts => &CENSUS_CAST_FOLD_ATTEMPTS,
+            FrontendCounter::CensusFoldReducedRpnItems => &CENSUS_FOLD_REDUCED_RPN_ITEMS,
+            FrontendCounter::CensusDefaultApplicationClones => &CENSUS_DEFAULT_APPLICATION_CLONES,
+            FrontendCounter::CensusParameterDefaultViewClones => {
+                &CENSUS_PARAMETER_DEFAULT_VIEW_CLONES
+            }
+            FrontendCounter::CensusConstructorDefaultViewClones => {
+                &CENSUS_CONSTRUCTOR_DEFAULT_VIEW_CLONES
+            }
+            FrontendCounter::CensusConstructorFieldViewsCreated => {
+                &CENSUS_CONSTRUCTOR_FIELD_VIEWS_CREATED
+            }
+            FrontendCounter::CensusCallKnownTypeCompatibilityAttempts => {
+                &CENSUS_CALL_KNOWN_TYPE_COMPATIBILITY_ATTEMPTS
+            }
+            FrontendCounter::CensusGenericCallAndMaterialisationSignatureSubstitutions => {
+                &CENSUS_GENERIC_CALL_AND_MATERIALISATION_SIGNATURE_SUBSTITUTIONS
+            }
+            FrontendCounter::CensusHirScalarPayloadCopiesSampled => {
+                &CENSUS_HIR_SCALAR_PAYLOAD_COPIES_SAMPLED
+            }
+            FrontendCounter::CensusHirNumberPayloadClonesSampled => {
+                &CENSUS_HIR_NUMBER_PAYLOAD_CLONES_SAMPLED
+            }
+            FrontendCounter::CensusHirStructuralPiecesClonesSampled => {
+                &CENSUS_HIR_STRUCTURAL_PIECES_CLONES_SAMPLED
+            }
+            FrontendCounter::CensusCallFunctionEntries => &CENSUS_CALL_FUNCTION_ENTRIES,
+            FrontendCounter::CensusCallFunctionDefaultFills => &CENSUS_CALL_FUNCTION_DEFAULT_FILLS,
+            FrontendCounter::CensusCallStructConstructorEntries => {
+                &CENSUS_CALL_STRUCT_CONSTRUCTOR_ENTRIES
+            }
+            FrontendCounter::CensusCallStructConstructorDefaultFills => {
+                &CENSUS_CALL_STRUCT_CONSTRUCTOR_DEFAULT_FILLS
+            }
+            FrontendCounter::CensusCallChoiceConstructorEntries => {
+                &CENSUS_CALL_CHOICE_CONSTRUCTOR_ENTRIES
+            }
+            FrontendCounter::CensusCallChoiceConstructorDefaultFills => {
+                &CENSUS_CALL_CHOICE_CONSTRUCTOR_DEFAULT_FILLS
+            }
+            FrontendCounter::CensusCallReceiverMethodEntries => {
+                &CENSUS_CALL_RECEIVER_METHOD_ENTRIES
+            }
+            FrontendCounter::CensusCallReceiverMethodDefaultFills => {
+                &CENSUS_CALL_RECEIVER_METHOD_DEFAULT_FILLS
+            }
+            FrontendCounter::CensusCallBuiltinMemberEntries => &CENSUS_CALL_BUILTIN_MEMBER_ENTRIES,
+            FrontendCounter::CensusCallBuiltinMemberDefaultFills => {
+                &CENSUS_CALL_BUILTIN_MEMBER_DEFAULT_FILLS
+            }
+            FrontendCounter::CensusCallHostFunctionEntries => &CENSUS_CALL_HOST_FUNCTION_ENTRIES,
+            FrontendCounter::CensusCallHostFunctionDefaultFills => {
+                &CENSUS_CALL_HOST_FUNCTION_DEFAULT_FILLS
+            }
+            FrontendCounter::CensusCallAssertionEntries => &CENSUS_CALL_ASSERTION_ENTRIES,
+            FrontendCounter::CensusCallAssertionDefaultFills => {
+                &CENSUS_CALL_ASSERTION_DEFAULT_FILLS
+            }
         }
     }
 
@@ -1244,6 +1449,88 @@ mod detailed {
             FrontendCounter::ExternalSymbolPathCloneCount => "external_symbol_path_clone_count",
 
             FrontendCounter::ExternalAbiParameterCloneCount => "external_abi_parameter_clone_count",
+            FrontendCounter::CensusAstValidationExpressionReads => {
+                "frontend_census_ast_validation_expression_reads"
+            }
+            FrontendCounter::CensusHirLowerExpressionEntries => {
+                "frontend_census_hir_lower_expression_entries"
+            }
+            FrontendCounter::CensusFoldCompileTimeExpressionEntries => {
+                "frontend_census_fold_compile_time_expression_entries"
+            }
+            FrontendCounter::CensusConstantFoldEntries => "frontend_census_constant_fold_entries",
+            FrontendCounter::CensusFoldOutcomeFolded => "frontend_census_fold_outcome_folded",
+            FrontendCounter::CensusFoldOutcomeRuntime => "frontend_census_fold_outcome_runtime",
+            FrontendCounter::CensusFoldOutcomeTextUnavailable => {
+                "frontend_census_fold_outcome_text_unavailable"
+            }
+            FrontendCounter::CensusCastFoldAttempts => "frontend_census_cast_fold_attempts",
+            FrontendCounter::CensusFoldReducedRpnItems => "frontend_census_fold_reduced_rpn_items",
+            FrontendCounter::CensusDefaultApplicationClones => {
+                "frontend_census_default_application_clones"
+            }
+            FrontendCounter::CensusParameterDefaultViewClones => {
+                "frontend_census_parameter_default_view_clones"
+            }
+            FrontendCounter::CensusConstructorDefaultViewClones => {
+                "frontend_census_constructor_default_view_clones"
+            }
+            FrontendCounter::CensusConstructorFieldViewsCreated => {
+                "frontend_census_constructor_field_views_created"
+            }
+            FrontendCounter::CensusCallKnownTypeCompatibilityAttempts => {
+                "frontend_census_call_known_type_compatibility_attempts"
+            }
+            FrontendCounter::CensusGenericCallAndMaterialisationSignatureSubstitutions => {
+                "frontend_census_generic_call_and_materialisation_signature_substitutions"
+            }
+            FrontendCounter::CensusHirScalarPayloadCopiesSampled => {
+                "frontend_census_hir_scalar_payload_copies_sampled"
+            }
+            FrontendCounter::CensusHirNumberPayloadClonesSampled => {
+                "frontend_census_hir_number_payload_clones_sampled"
+            }
+            FrontendCounter::CensusHirStructuralPiecesClonesSampled => {
+                "frontend_census_hir_structural_pieces_clones_sampled"
+            }
+            FrontendCounter::CensusCallFunctionEntries => "frontend_census_call_function_entries",
+            FrontendCounter::CensusCallFunctionDefaultFills => {
+                "frontend_census_call_function_default_fills"
+            }
+            FrontendCounter::CensusCallStructConstructorEntries => {
+                "frontend_census_call_struct_constructor_entries"
+            }
+            FrontendCounter::CensusCallStructConstructorDefaultFills => {
+                "frontend_census_call_struct_constructor_default_fills"
+            }
+            FrontendCounter::CensusCallChoiceConstructorEntries => {
+                "frontend_census_call_choice_constructor_entries"
+            }
+            FrontendCounter::CensusCallChoiceConstructorDefaultFills => {
+                "frontend_census_call_choice_constructor_default_fills"
+            }
+            FrontendCounter::CensusCallReceiverMethodEntries => {
+                "frontend_census_call_receiver_method_entries"
+            }
+            FrontendCounter::CensusCallReceiverMethodDefaultFills => {
+                "frontend_census_call_receiver_method_default_fills"
+            }
+            FrontendCounter::CensusCallBuiltinMemberEntries => {
+                "frontend_census_call_builtin_member_entries"
+            }
+            FrontendCounter::CensusCallBuiltinMemberDefaultFills => {
+                "frontend_census_call_builtin_member_default_fills"
+            }
+            FrontendCounter::CensusCallHostFunctionEntries => {
+                "frontend_census_call_host_function_entries"
+            }
+            FrontendCounter::CensusCallHostFunctionDefaultFills => {
+                "frontend_census_call_host_function_default_fills"
+            }
+            FrontendCounter::CensusCallAssertionEntries => "frontend_census_call_assertion_entries",
+            FrontendCounter::CensusCallAssertionDefaultFills => {
+                "frontend_census_call_assertion_default_fills"
+            }
         }
     }
 

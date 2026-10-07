@@ -28,6 +28,8 @@ use moth_lexical::numeric::profile::FloatPrecision;
 use crate::compiler_frontend::external_packages::{
     ExternalAccessKind, ExternalFunctionDef, ExternalParameter,
 };
+#[cfg(feature = "benchmark_counters")]
+use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::type_coercion::compatibility::{
@@ -193,6 +195,8 @@ pub(crate) fn expectations_from_user_parameters(
             default_value: match parameter.value.kind {
                 ExpressionKind::NoValue => None,
                 _ => {
+                    #[cfg(feature = "benchmark_counters")]
+                    increment_frontend_counter(FrontendCounter::CensusParameterDefaultViewClones);
                     let mut default_value = parameter.value.clone();
                     default_value.reactive_template = None;
                     Some(default_value)
@@ -257,7 +261,13 @@ pub(crate) fn expectations_from_constructor_fields(
                 ConstructorFieldAccessMode::Mutable => ExpectedAccessMode::Mutable,
             },
             requires_reactive_source: false,
-            default_value: field.default_value.clone(),
+            default_value: {
+                #[cfg(feature = "benchmark_counters")]
+                if field.default_value.is_some() {
+                    increment_frontend_counter(FrontendCounter::CensusParameterDefaultViewClones);
+                }
+                field.default_value.clone()
+            },
         })
         .collect()
 }
@@ -341,6 +351,16 @@ fn resolve_call_arguments_with_type_policy(
     span: Option<SourceSpan>,
     context: CallArgumentPolicyContext<'_>,
 ) -> Result<Vec<CallArgument>, CallValidationError> {
+    #[cfg(feature = "benchmark_counters")]
+    increment_frontend_counter(match diagnostics.kind {
+        CallSurfaceKind::Function => FrontendCounter::CensusCallFunctionEntries,
+        CallSurfaceKind::StructConstructor => FrontendCounter::CensusCallStructConstructorEntries,
+        CallSurfaceKind::ChoiceConstructor => FrontendCounter::CensusCallChoiceConstructorEntries,
+        CallSurfaceKind::ReceiverMethod => FrontendCounter::CensusCallReceiverMethodEntries,
+        CallSurfaceKind::BuiltinMember => FrontendCounter::CensusCallBuiltinMemberEntries,
+        CallSurfaceKind::HostFunction => FrontendCounter::CensusCallHostFunctionEntries,
+        CallSurfaceKind::Assertion => FrontendCounter::CensusCallAssertionEntries,
+    });
     let CallArgumentPolicyContext {
         string_table,
         type_environment,
@@ -363,6 +383,8 @@ fn resolve_call_arguments_with_type_policy(
     for (slot, expectation) in expectations.iter().enumerate() {
         if resolved[slot].is_none() {
             if let Some(default_value) = &expectation.default_value {
+                #[cfg(feature = "benchmark_counters")]
+                increment_frontend_counter(FrontendCounter::CensusDefaultApplicationClones);
                 let defaulted = default_value.clone();
                 debug_assert!(
                     type_environment.get(defaulted.type_id).is_some(),
@@ -373,6 +395,26 @@ fn resolve_call_arguments_with_type_policy(
                     CallArgument::positional(defaulted, CallAccessMode::Shared, span)
                         .with_parameter_slot(ParameterSlot::new(slot)),
                 );
+                #[cfg(feature = "benchmark_counters")]
+                increment_frontend_counter(match diagnostics.kind {
+                    CallSurfaceKind::Function => FrontendCounter::CensusCallFunctionDefaultFills,
+                    CallSurfaceKind::StructConstructor => {
+                        FrontendCounter::CensusCallStructConstructorDefaultFills
+                    }
+                    CallSurfaceKind::ChoiceConstructor => {
+                        FrontendCounter::CensusCallChoiceConstructorDefaultFills
+                    }
+                    CallSurfaceKind::ReceiverMethod => {
+                        FrontendCounter::CensusCallReceiverMethodDefaultFills
+                    }
+                    CallSurfaceKind::BuiltinMember => {
+                        FrontendCounter::CensusCallBuiltinMemberDefaultFills
+                    }
+                    CallSurfaceKind::HostFunction => {
+                        FrontendCounter::CensusCallHostFunctionDefaultFills
+                    }
+                    CallSurfaceKind::Assertion => FrontendCounter::CensusCallAssertionDefaultFills,
+                });
             } else {
                 return Err(CompilerDiagnostic::invalid_call_shape(
                     InvalidCallShapeReason::MissingArgument {
@@ -592,6 +634,10 @@ fn is_call_argument_type_compatible(
             return true;
         }
     };
+    // Known-type cache-call attempts include exact identity. UnknownExternal
+    // returns above; this is deliberately not the cache lookup/miss metric.
+    #[cfg(feature = "benchmark_counters")]
+    increment_frontend_counter(FrontendCounter::CensusCallKnownTypeCompatibilityAttempts);
 
     let compatibility_mode = if passing_mode == CallPassingMode::FreshMutableValue {
         TypeCompatibilityMode::FreshMutableRvalue

@@ -38,6 +38,8 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+#[cfg(feature = "benchmark_counters")]
+use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -226,6 +228,10 @@ fn validate_expression(
     expression: &Expression,
     context: &TypeValidationContext,
 ) -> Result<(), CompilerError> {
+    // Owning required validation, including authored/candidate repeats. Census and
+    // debug-only validation deliberately never contribute to this traffic metric.
+    #[cfg(feature = "benchmark_counters")]
+    increment_frontend_counter(FrontendCounter::CensusAstValidationExpressionReads);
     validate_type_id(expression.type_id, expression.span, context)?;
 
     match &expression.kind {

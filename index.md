@@ -113,6 +113,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
         - [import projection](src/compiler_frontend/ast/module_ast/environment/builder/import_projection/): reachability-driven provider nominals, folded values, callables, and durable canonical interning.
     - [emission](src/compiler_frontend/ast/module_ast/emission/): function/start/body emission.
     - [finalization](src/compiler_frontend/ast/module_ast/finalization/): normalize constants/templates, const facts, type validation.
+        - [expression census](src/compiler_frontend/ast/module_ast/finalization/expression_census.rs): counter-feature-only published AST occurrence, payload and predecessor-layout observations.
     - [scope_context](src/compiler_frontend/ast/module_ast/scope_context/): visibility/local declarations/diagnostic sinks.
 - [type_resolution](src/compiler_frontend/ast/type_resolution/): parsed type syntax → TypeId.
     - [context.rs](src/compiler_frontend/ast/type_resolution/context.rs): state.

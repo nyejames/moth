@@ -42,10 +42,7 @@ impl CountingAllocator {
         loop {
             // A mismatched deallocation must not wrap the accounting counter. This branch is only
             // a defensive accounting fallback; the allocator contract still belongs to System.
-            let next = match current.checked_sub(bytes) {
-                Some(next) => next,
-                None => 0,
-            };
+            let next = current.saturating_sub(bytes);
             match LIVE_BYTES.compare_exchange_weak(
                 current,
                 next,

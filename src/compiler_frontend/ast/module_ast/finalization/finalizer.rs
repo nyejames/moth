@@ -473,6 +473,15 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             emitted.ast = ast_nodes;
         }
 
+        #[cfg(feature = "benchmark_counters")]
+        {
+            let template_ir_store = self.context.template_ir_store.borrow();
+            super::expression_census::record_published_expression_census(
+                &emitted.ast,
+                &template_ir_store,
+            );
+        }
+
         #[cfg(debug_assertions)]
         {
             // Runs after the builtin merge so the boundary check walks the complete

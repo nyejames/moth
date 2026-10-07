@@ -4263,3 +4263,173 @@ prefix.
 `just validate-full` exits 0 on the completion tree. It runs workspace tests
 `5636 + 17 + 44 + 846 + 1`, eight feature lanes, integration `2230/2230`, docs
 with no errors or warnings, and all three scaling series within budget.
+
+## Phase 0 evidence: typed semantic expressions baseline (2026-10-07)
+
+Phase 0 of `docs/roadmap/plans/typed-semantic-expressions-plan.md` stops at
+activation, contracts and baseline. Measurements use the dirty Phase 0
+candidate worktree over `ab706091376373451afb32081c21476b56b5752a`, not that
+pristine revision. Raw records retain `git_dirty=true` and before/after
+porcelain snapshots. Source changes add feature-gated census and owning-pass
+counters plus two behaviour-preserving Clippy fixes.
+No optimisation was applied, Phase 1 has not started and no performance
+improvement is claimed. Independent phase audits accepted the corrected source,
+contracts and measurement evidence. Final integrated review remains pending.
+
+### Before-only cohort and provenance
+
+Five sequential native rounds (sequential unpaired blocks; no paired
+before/after comparison exists yet) cover 42 frontend, 2 data-layout and 40
+CLI identities with native counts: 1 shared preflight plus 10 measured
+iterations per case. The scaling lane was not run separately. Record controls
+are format 8, benchmark protocol 4 and per-case timing schema 2, with
+`RAYON_NUM_THREADS` unset, `timers` on and counters off. Counters stay off
+for acceptance timing; the census below is a separate counter-on diagnosis.
+
+Provenance (`raw-capture/raw/before-phase1/provenance.env`): Rust
+`1.99.0 (b940084d7 2026-09-28)`, host `aarch64-apple-darwin`, LLVM `23.1.1`,
+cargo `1.99.0`, pinned Node `v24.21.0`, macOS Apple Silicon host `6D851D`.
+The release CLI compiler was rebuilt per invocation and its SHA-256
+(`4a297281...`) is identical across all five rounds; the in-process
+frontend/data-layout suites ran through a dev-profile mirror `xtask` runner
+preserving native root dev semantics. Manifest SHA-256 is `bf201ebb...`.
+Raw artifacts (15 run files, manifest, provenance, logs) live under
+`tmp/typed-semantic-expressions/raw-capture/raw/before-phase1/`; aggregated
+medians in `tmp/typed-semantic-expressions/phase0-before-baseline-summary.json`.
+The census probes ran under one counter binary (`26dc2d31...`; all 16 probes
+exit 0, with `data_layout_diagnosed` reporting its expected `Diagnosed`
+outcome and 40 diagnosed errors) and the sample/unprofiled observations under
+`9e513578...`.
+`docs`, 17 frontend rows and `data_layout_diagnosed` carry workload-changed
+identity against older history after intervening fixture and docs changes.
+They anchor the Phase 0 to Phase 1 comparison, not a historical delta. The
+comparison source baseline follows the accepted Phase 0 checkpoint rather
+than the pristine activation HEAD.
+
+Selected cases, median of five run medians with min-max range and median
+within-run SD, in ms:
+
+| Case | Suite | Median | Range | SD |
+| --- | --- | ---: | ---: | ---: |
+| `docs` | frontend | 1366.702 | 1338.564-1369.329 | 18.415 |
+| `generic_scaling_160` | frontend | 1062.409 | 1044.052-1105.753 | 22.935 |
+| `fold_stress` | frontend | 23.869 | 23.262-24.585 | 0.660 |
+| `type_stress` | frontend | 27.180 | 26.928-28.795 | 0.578 |
+| `constant_chain_512` | frontend | 25.819 | 25.500-26.556 | 0.583 |
+| `docs` | CLI check | 217.112 | 206.313-225.999 | 5.198 |
+| `generic_scaling_160` | CLI check | 252.759 | 249.657-264.557 | 6.912 |
+| `fold_stress` | CLI check | 9.146 | 8.785-9.860 | 0.433 |
+| `type_stress` | CLI check | 10.720 | 9.914-11.159 | 0.534 |
+| `constant_chain_512` | CLI check | 9.210 | 8.315-10.295 | 0.477 |
+| `data_layout_diagnosed` | data-layout | 38.516 | 37.550-40.024 | 0.722 |
+| `data_layout_warning_heavy` | data-layout | 10.441 | 10.307-10.988 | 0.372 |
+
+### Expression census (counter-on diagnosis, not acceptance timing)
+
+Sixteen real compiler probes ran with `benchmark_counters`: docs, six stress
+fixtures, `generic-scaling-160`, `module-graph`, two data-layout entries,
+three constant-chain lengths, the default-constructor split fixture and the
+unicode/CRLF/long-line fixture. Per-probe logs are
+`tmp/typed-semantic-expressions/phase0-census-corrected-*.log`, aggregated in
+`phase0-census-corrected-summary.json` with run outcomes in
+`phase0-census-corrected-run-results.json`.
+
+The census records 38 production `ExpressionKind` discriminants across 23
+typed list families (264 census metrics plus 32 owning-pass frontend
+counters). Counts cover retained emitted-AST occurrences and any reachable
+diagnostic-owned signature/default expressions, not unique allocations.
+The diagnostic partition records zero expressions in all 16 probes, so this
+census does not measure duplicate diagnostic signature/default ownership.
+Repeated published views still count as separate occurrences.
+`generic-scaling-160` sums 801 finalized-AST snapshots
+(requester plus 800 sidecars) holding 10251 expressions, 4323 declarations
+and 4808 statements; its dominant kinds are `reference` (3041), `no_value`
+(1761), `function_call` (961), `field_access` (960), `runtime` (960),
+`fixed_scalar` (801), `struct_instance` (640) and `int` (481). Pending
+numeric literals, pending groups and incomplete views are zero on all 16
+probes.
+
+Measured layout maxima (`size_of` bytes, align 8, no byte ceiling): `Expression`
+424, `ExpressionKind` 88, `RpnItem` 424, `Declaration` 504, `HirExpression`
+64, `HirExpressionKind` 40, `PlaceExpression` 88, `HirPlace` 24. Useful
+cardinality facts for representation choice on `generic-scaling-160`:
+call-arg lists peak at length 1 (sum 803), body-node lists at 323, retained
+fields at 2, RPN payloads at 3, signature parameters at 1.
+
+Memory deltas are counter-on allocator-proxy observations
+(`data_layout_memory_probe`), distinct from counter-off timing, in bytes:
+
+| Probe | Live report delta | Peak allocation delta | After-drop delta |
+| --- | ---: | ---: | ---: |
+| `docs` | 1790358 | 38427607 | 1542 |
+| `generic_scaling_160` | 13775522 | 492340644 | 1469 |
+| `default_constructor_split` | 53478 | 23855937 | 1451 |
+| `constant_chain_512` | 36212 | 4785655 | 1469 |
+
+The census excludes transient owners (parser/scope-frame arenas, transient
+expectation and constructor views, generic-validation bodies, declaration
+tables, constant stores and interned text). Its occurrence partition excludes
+observer buffers, but the allocator proxy includes their overhead. Feature-only
+buffers are freed before publication and can affect counter-on peak.
+Constant chains retain 4 expressions at lengths 32, 128 and
+512 while peak bytes grow (613961, 1448311, 4785655): folding outcomes are
+31, 127 and 511 folded with the retained graph unchanged.
+
+Clone and owning-pass traffic is reported as event counts only, with no
+copy-byte or time claims. On `default_constructor_split`: 3000 default
+application clones, 6000 parameter-view clones, 2000 constructor-view clones,
+2000 field views created, 4000 compatibility attempts and 1002 shared
+signature substitutions. On `generic-scaling-160`: 8649 validation reads,
+7689 HIR lowering entries, 1603 compatibility attempts, 2400 substitutions
+and 481 sampled HIR scalar payload copies. Zero-fill surfaces are negative
+controls, excluded from default-cost claims: `type_stress` exercises 10
+struct plus 5 choice constructor entries with 0 fills.
+
+### Operation observations and sampling limits
+
+Separate unprofiled observations (`profiling_active: false`) each run once
+with `target/profiling/moth`, the `profiling`/`detailed_timers` build with
+frame pointers. Every row, including generic-160 and docs, uses a different
+build from the baseline table and supplies no comparable performance delta.
+The table records hierarchical stage times only, in ms:
+
+| Workload | Check total | `ast.total` (env/emit/finalise) | `hir` | Borrow init/converge | Generated materialise |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `generic_scaling_160` | 321.9 | 18.63 (2.37/11.88/4.28) | 6.75 | 7.71/7.19 | 70.23 |
+| `docs` | 259.9 | 130.82 (86.67/34.31/9.50) | 2.03 | 0.71/- | 0.00 |
+| `fold_amplified` | 336.8 | 204.19 (180.49/2.30/17.64) | 5.52 | 0.04/- | 0.00 |
+| `default_constructor_amplified` | 569.4 | 132.50 (1.97/80.17/50.10) | 149.73 | 58.96/56.05 | 1.07 |
+
+The amplified fixtures are attribution-only, not comparable suite results:
+32000 independent arithmetic-fold declarations for fold, and 2000 functions
+with 4 default sites each (8x the split workload) for default constructors.
+No sampled timing inference and no compatibility, substitution or default
+leaf-cost claims follow from any of this.
+
+Both native Samply attempts on `generic_scaling_160_check` (plain and
+presymbolicated) failed with `failed_raw_addresses` (50/50 raw-address hot
+functions) even though the dSYM UUID matches the binary, so neither carries
+attribution. Four macOS `sample` captures provide source-chain observations:
+generic-160 reaches failure-lane summary refresh and convergence, docs reaches
+type resolution and constant-header/template parsing, amplified folding reaches
+constant-header resolution and `constant_fold`, and amplified defaults reach
+call/constructor preparation and HIR lowering. Sampling windows, inlining and
+late attachment limit attribution. Compatibility, signature substitution and
+default-application leaf costs remain unmeasured rather than zero or free.
+Both short negative controls supply no attribution: `fold_stress` failed
+`pid_for_task` with no output file, and `default_constructor_split` produced an
+empty call graph after a process-notification failure. Their command exit codes
+alone do not establish successful sampling. Separate unprofiled observations
+above avoid the compiler timing distortion under `sample`. Hierarchical stages
+overlap and must not be added as independent costs.
+
+### Validation state
+
+`just validate` on the corrected source: root tests `5920/5920`, integration
+`2428/2428`, docs check with no errors or warnings. The counter-feature
+library suite passes `5810/5810`, feature Clippy passes, and the exact 1 MiB
+default-windows-main-thread stack gate passes unchanged in both default and
+counter lanes. Stack pressure has only this 1 MiB pass/fail observation,
+with headroom and high-water usage unmeasured. Earlier pre-correction census
+candidates remain explicitly historical. No optimisation landed and Phase 1
+remains unstarted.

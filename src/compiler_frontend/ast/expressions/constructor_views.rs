@@ -11,6 +11,10 @@ use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::datatypes::definitions::FieldDefinition;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+#[cfg(feature = "benchmark_counters")]
+use crate::compiler_frontend::instrumentation::{
+    FrontendCounter, add_frontend_counter, increment_frontend_counter,
+};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
 /// Lightweight view of one constructor parameter for call validation.
@@ -45,6 +49,12 @@ pub(crate) enum ConstructorFieldAccessMode {
 impl ConstructorField {
     /// Build views from real AST struct-field declarations (base, non-generic case).
     pub(crate) fn from_struct_declarations(declarations: &[Declaration]) -> Vec<ConstructorField> {
+        // One view per FIELD, not per constructor definition or call.
+        #[cfg(feature = "benchmark_counters")]
+        add_frontend_counter(
+            FrontendCounter::CensusConstructorFieldViewsCreated,
+            declarations.len(),
+        );
         declarations
             .iter()
             .map(|declaration| ConstructorField {
@@ -65,6 +75,11 @@ impl ConstructorField {
         field_definitions: &[FieldDefinition],
         default_sources: &[Declaration],
     ) -> Vec<ConstructorField> {
+        #[cfg(feature = "benchmark_counters")]
+        add_frontend_counter(
+            FrontendCounter::CensusConstructorFieldViewsCreated,
+            field_definitions.len(),
+        );
         field_definitions
             .iter()
             .enumerate()
@@ -83,6 +98,11 @@ impl ConstructorField {
     pub(crate) fn from_choice_payload_fields(
         field_definitions: &[FieldDefinition],
     ) -> Vec<ConstructorField> {
+        #[cfg(feature = "benchmark_counters")]
+        add_frontend_counter(
+            FrontendCounter::CensusConstructorFieldViewsCreated,
+            field_definitions.len(),
+        );
         field_definitions
             .iter()
             .map(|field_definition| ConstructorField {
@@ -102,6 +122,10 @@ impl ConstructorField {
 fn extract_default_value(expression: &Expression) -> Option<Expression> {
     match &expression.kind {
         ExpressionKind::NoValue => None,
-        _ => Some(expression.clone()),
+        _ => {
+            #[cfg(feature = "benchmark_counters")]
+            increment_frontend_counter(FrontendCounter::CensusConstructorDefaultViewClones);
+            Some(expression.clone())
+        }
     }
 }
