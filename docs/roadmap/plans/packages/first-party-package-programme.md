@@ -365,8 +365,8 @@ Before package implementation starts:
 8. run the mandatory phase gate
 9. compress completed phase details while preserving durable implementation knowledge
 
-A simple package may need a short design checkpoint. `@core/io` requires a substantial scope and
-prelude review before major expansion.
+A simple package may need a short design checkpoint. `@core/io` required a substantial scope and
+prelude review, now recorded in [core-io.md](./core-io.md).
 
 ## Living package plan structure
 
@@ -480,7 +480,7 @@ materially safer to implement. Record the reason in the tracker rather than sile
 | 4 | `@core/time` | [core-time.md](./core-time.md) | v1 delivered: the semantic contract is published, the four defects it exposed are corrected and the accepted Duration and Timestamp arithmetic is registered and covered | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
 | 5 | `@web/canvas` | `web-canvas.md` | TODO: create when activated | Expand drawing, state, path, transform, text, image and pixel workflows deeply enough to support substantial visual stress-test programs |
 | 5a | `@html` | `html.md` | TODO: create only when needed | Add source-backed wrappers or broadly useful helpers required by canvas and HTML package work, without turning `@html` into a framework |
-| 6 | `@core/io` | `core-io.md` | TODO: create when activated | Run a dedicated scope and prelude review, then close only the agreed common gaps |
+| 6 | `@core/io` | [core-io.md](./core-io.md) | Scope and prelude review accepted and current surface audited; Phase 1 decisions await user settlement | Publish and harden the snapshot input contract, then add portable snapshot input and an ordered queue only where its final value shape crosses the binding boundary |
 | 7 | `@core/collections` | `core-collections.md` | TODO: create when activated | Audit common non-sorting gaps and integrate specialised collection work without duplicating its accepted contracts |
 | 7a | Collection sorting | [core-collections-sorting.md](./core-collections-sorting.md) | Accepted and queued behind mixed-backend prerequisites | Preserve stable-by-default sort and consume delivered fixed numeric/Byte ordering and compact layouts |
 | 8 | `@core/json` | `core-json.md` | Accepted package, TODO: design when activated | Design and implement a useful JSON v1 without reflection, generic derivation or a representation Moth cannot express correctly |
@@ -547,15 +547,12 @@ usage.
 
 #### `@core/io`
 
-Do not assume its final shape from this plan. Its dedicated design must decide:
-
-- which capabilities belong in the large prelude Core package
-- which capabilities should always be visible through bare `io`
-- which areas should become focused Core packages
-- which areas are Web or another builder's responsibility
-- how input, output, event and teardown concepts remain coherent
-
-The current broad future list stays candidate input until that review.
+Follow `core-io.md`. `io` is the broad high-level host-capability facade and the only preluded Core
+package. It may overlap a focused package at the convenient edge without duplicating that package's
+API or semantics. Input stays global, application-oriented and pull-driven through explicitly torn
+down handles. Targeted browser event control belongs to `@web/*`. Sleep, timers, event waits,
+network events and callbacks into Moth wait for structured async and a host-ingress contract, with
+no synchronous-looking stand-ins.
 
 #### `@core/collections`
 
@@ -812,12 +809,13 @@ runtime asset reachability checks and failure coverage for unavailable handles o
 
 ### Phase 7 - `@core/io` scope and current v1 slice
 
-Create `core-io.md` and complete the dedicated prelude and package-scope review before implementation.
+`core-io.md` exists and the scope and prelude review is accepted. Phase 1 publishes and hardens the
+existing snapshot input contract after its decisions are settled with the user. Portable snapshot
+additions and the ordered event investigation follow as separate phases.
 
-The design checkpoint may split implementation into later phases. Do not infer the answer from the
-candidate list in current docs.
-
-Queued browser-capability `io.set_title` is accepted Core IO follow-up owned by the HTML page-directive work, not a current IO milestone. Config and HTML entry cutover remain prerequisites for that call's host-capability path. Do not treat it as delivered by this phase.
+Queued `io.set_title` is accepted Core IO design whose implementation belongs to the HTML page
+directive work. Config and HTML entry cutover remain prerequisites for that call's host-capability
+path. Do not treat it as delivered by this phase.
 
 Mandatory closeout for every accepted IO implementation phase: full phase gate plus rich console,
 input, lifecycle and recovery coverage appropriate to that phase.
@@ -869,7 +867,7 @@ Stop the current package phase and request review when:
 - source clauses begin acquiring packages
 - package aliases, resolver fallback or transitive visibility enter the programme
 - a new package origin or importance tier appears
-- `@core/io` scope or prelude visibility expands without its dedicated review
+- `@core/io` scope or prelude visibility expands beyond the scope accepted in `core-io.md`
 - collection sorting behaviour diverges from its accepted plan
 - cryptography appears as a first-party Core proposal or example
 - one package phase crosses more than two unlisted subsystem boundaries

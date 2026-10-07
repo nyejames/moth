@@ -30,7 +30,7 @@ Prelude names participate in the ordinary no-shadowing collision model. Same-fil
 
 ### What the prelude does not include
 
-Most Core packages require explicit dependency clauses:
+`io` is the only Core package in the prelude. It's there for convenience rather than semantic importance: it gathers the common host interactions ordinary programs need immediately. Every other Core package requires an explicit dependency clause, and changing that is a language-wide decision rather than a package-level one:
 
 [codeblock, $code("moth"):
     @core/math sin
