@@ -1945,6 +1945,13 @@ contract = "language.generics.type_used_as_value_rejected"
 role = "primary"
 
 [[case]]
+id = "generic_type_application_member_separator_success"
+path = "generic_type_application_member_separator_success"
+tags = ["integration", "generics", "functions", "structs", "choices", "collections"]
+contract = "language.generics.type_application_member_separators_preserved"
+role = "primary"
+
+[[case]]
 id = "generic_type_application_value_rejected"
 path = "generic_type_application_value_rejected"
 tags = ["integration","generics","diagnostics"]

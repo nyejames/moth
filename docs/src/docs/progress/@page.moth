@@ -813,7 +813,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Generic type infrastructure]
             [: Supported]
-            [: Broad TypeId, nominal instance, alias, constructor, dependency, HIR validation, trait-bound and diagnostic coverage.]
+            [: Broad TypeId, nominal instance, alias, constructor, dependency, HIR validation, trait-bound and diagnostic coverage. Generic applications preserve following parameter and field separators, including shared and mutable receivers and multi-argument applications.]
             [: Generic structs, choices, concrete aliases, generic free functions, aligned generic receiver methods and trait-bound validation use canonical [$html:<code>TypeId</code>] identity before HIR.]
         ]
 

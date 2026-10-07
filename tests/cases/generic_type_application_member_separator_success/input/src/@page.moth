@@ -1,0 +1,68 @@
+Count as Int
+
+Box type Value = |
+    value Value,
+|
+
+Pair type Name, Amount = |
+    name Name,
+    amount Amount,
+|
+
+Grid type Item = |
+    values {Item},
+    last_index Int,
+|
+
+Holder = |
+    pair Pair of String, Count,
+    box Box of String,
+    amount Count,
+|
+
+Compact = | box Box of String, amount Count |
+
+Lookup ::
+    Present | box Box of String, amount Count |,
+    Missing,
+;
+
+at type Item |this Grid of Item, index Int| -> Item, Error!:
+    return this.values.get(index)!
+;
+
+mark type Item |this ~Grid of Item, index Int|:
+    this.last_index = index
+;
+
+describe_box |box Box of String, index Count| -> String:
+    return [: [box.value]:[index]]
+;
+
+describe_pair |pair Pair of String, Count, index ~Count| -> String:
+    return [: [pair.name]:[pair.amount]:[index]]
+;
+
+describe_int_pair |pair Pair of String, Int, label String| -> String:
+    return [: [pair.name]:[pair.amount]:[label]]
+;
+
+grid ~= Grid({"first", "second"}, 0)
+~grid.mark(1)
+second = grid.at(grid.last_index)!
+
+holder = Holder(Pair("pair", 7), Box("holder"), 8)
+compact = Compact(Box("compact"), 11)
+int_pair = Pair("int", 12)
+choice = Lookup::Present(Box("choice"), 9)
+index ~= 10
+pair_label = describe_pair(holder.pair, ~index)
+box_label = describe_box(holder.box, holder.amount)
+compact_label = describe_box(compact.box, compact.amount)
+int_pair_label = describe_int_pair(int_pair, "number")
+choice_label = if choice is:
+    Present(box, amount) => then [: [box.value]:[amount]]
+    Missing => then "missing"
+;
+
+[: generic-type-application-member-separator [second]|[pair_label]|[box_label]|[compact_label]|[int_pair_label]|[choice_label]]

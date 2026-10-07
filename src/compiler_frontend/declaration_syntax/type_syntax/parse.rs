@@ -1049,6 +1049,7 @@ fn parse_generic_arguments(
         arguments.push(argument);
 
         match token_stream.current_tag() {
+            TokenTag::COMMA if comma_separates_signature_member(token_stream, context) => break,
             TokenTag::COMMA => {
                 token_stream.advance();
                 if generic_argument_list_is_finished(token_stream.current_tag()) {
@@ -1081,6 +1082,57 @@ fn parse_generic_arguments(
         arguments,
         span,
     })
+}
+
+/// Leave member separators with the enclosing `| ... |` parser. A name followed by
+/// a type or access marker starts another member, regardless of naming conventions.
+/// A lone named type or qualified path can still be another generic argument.
+fn comma_separates_signature_member(
+    token_stream: &DeclarationCursor<'_>,
+    context: TypeAnnotationContext,
+) -> bool {
+    if !matches!(
+        context,
+        TypeAnnotationContext::SignatureParameter | TypeAnnotationContext::TraitRequirement
+    ) {
+        return false;
+    }
+
+    let mut following = token_stream.canonical_cursor();
+    following.advance();
+    while following
+        .current()
+        .is_some_and(|token| token.tag() == TokenTag::NEWLINE)
+    {
+        following.advance();
+    }
+
+    match following.current().map(TokenRef::tag) {
+        Some(TokenTag::TYPE_PARAMETER_BRACKET | TokenTag::THIS) => return true,
+        Some(TokenTag::SYMBOL) => {}
+        _ => return false,
+    }
+
+    following.advance();
+    while following
+        .current()
+        .is_some_and(|token| token.tag() == TokenTag::NEWLINE)
+    {
+        following.advance();
+    }
+    let Some(next) = following.current().map(TokenRef::tag) else {
+        return false;
+    };
+    next.is_builtin_scalar_type_name()
+        || matches!(
+            next,
+            TokenTag::SYMBOL
+                | TokenTag::OPEN_CURLY
+                | TokenTag::TRAIT_THIS
+                | TokenTag::MUTABLE
+                | TokenTag::REACTIVE
+                | TokenTag::HASH
+        )
 }
 
 fn parse_generic_type_argument(
