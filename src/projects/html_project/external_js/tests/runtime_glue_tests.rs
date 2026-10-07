@@ -14,6 +14,9 @@ use crate::compiler_frontend::external_packages::{
 use crate::compiler_frontend::module_compilation::Module;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::external_js::runtime_emission_plan::HtmlExternalRuntimeEmissionPlan;
+use crate::projects::html_project::external_js::runtime_module_registry::{
+    CoreJsRuntimeModule, RUNTIME_ERROR_CODE_EXPORTS,
+};
 use crate::projects::html_project::tests::test_support::{
     create_test_module, js_runtime_asset_import,
 };
@@ -1360,6 +1363,52 @@ function assertIntegerResultBehavior(wrapper, rawName, isBigInt, isUnsigned) {
 }
 "#,
     );
+
+    run_generated_node_script(&script);
+}
+
+/// Imports the generated `@moth/runtime` source and returns every exported error code through
+/// real fallible wrappers, so the asset-visible name, the canonical enum value and Moth's
+/// `Error.code` agree under both Int widths and both wrapper build modes.
+#[test]
+fn runtime_error_code_exports_reach_moth_error_unchanged() {
+    let runtime_source = CoreJsRuntimeModule::moth_runtime_v1().source;
+    let mut script = format!(
+        "import assert from \"node:assert/strict\";\nconst runtime = await import(\"data:text/javascript,\" + encodeURIComponent({runtime_source:?}));\n"
+    );
+
+    for (export_name, code) in RUNTIME_ERROR_CODE_EXPORTS {
+        let expected_code = code.as_u32();
+        script.push_str(&format!(
+            "assert.equal(runtime.{export_name}, {expected_code});\nfunction raw{export_name}() {{ return runtime.mothErr(runtime.{export_name}, \"{export_name} failed\"); }}\n"
+        ));
+
+        for int_width in [IntWidth::Bits32, IntWidth::Bits64] {
+            for release_build in [false, true] {
+                let profile = NumericProfile {
+                    int_width,
+                    ..NumericProfile::STANDARD
+                };
+                let wrapper_name = format!("wrap{export_name}{int_width:?}{release_build}");
+                let wrapper = generate_fallible_wrapper(
+                    &wrapper_name,
+                    &format!("raw{export_name}"),
+                    release_build,
+                    profile,
+                    &[],
+                    &[ExternalSignatureType::NativeInt],
+                )
+                .expect("fallible wrapper generation should succeed");
+                let code_field =
+                    crate::backends::js::builtin_error_code_js_field_name(release_build);
+                let message_field =
+                    crate::backends::js::builtin_error_message_js_field_name(release_build);
+                script.push_str(&format!(
+                    "{wrapper}\n{{\n    const result = {wrapper_name}();\n    assert.equal(result.tag, \"err\");\n    assert.equal(typeof result.value[{code_field:?}], \"number\");\n    assert.equal(result.value[{code_field:?}], {expected_code});\n    assert.equal(result.value[{message_field:?}], \"{export_name} failed\");\n}}\n"
+                ));
+            }
+        }
+    }
 
     run_generated_node_script(&script);
 }
