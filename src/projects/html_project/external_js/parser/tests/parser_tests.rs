@@ -1,9 +1,10 @@
 use crate::projects::html_project::external_js::parser::{
-    parse_js_module, parsed_js_module::JsDiagnosticKind,
+    parse_js_module, parsed_js_module::JsDiagnosticKind, scan_exports,
 };
 use crate::projects::html_project::external_js::runtime_module_registry::{
     RUNTIME_ERROR_CODE_EXPORTS, RuntimeModuleRegistry,
 };
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 // ------------------------
 //  Helpers
@@ -229,7 +230,68 @@ export function identityUint(value) {
 }
 
 #[test]
-fn const_export_must_be_arrow_function() {
+fn fixed_u32_and_f32_signatures_parse_parameters_and_both_result_lanes() {
+    for scalar in ["U32", "F32"] {
+        for error_slot in ["", ", Error!"] {
+            let source = format!(
+                "/** @moth.sig identity |value {scalar}| -> {scalar}{error_slot} */\nexport function identity(value) {{ return value; }}"
+            );
+            let parsed = parse(&source);
+            assert_no_diagnostics(&parsed);
+            let function = &parsed.free_functions[0];
+            assert_eq!(function.signature.parameters[0].type_name, scalar);
+            assert_eq!(function.signature.returns[0].type_name, scalar);
+            assert_eq!(function.signature.has_error_return, !error_slot.is_empty());
+        }
+    }
+}
+
+#[test]
+fn other_fixed_scalar_annotations_remain_outside_the_signature_subset() {
+    for scalar in [
+        "I8", "I16", "I32", "I64", "U8", "U16", "U64", "F16", "F64", "Byte",
+    ] {
+        let source = format!(
+            "/** @moth.sig identity |value {scalar}| -> {scalar} */\nexport function identity(value) {{ return value; }}"
+        );
+        let parsed = parse(&source);
+        assert_diagnostic_kinds(
+            &parsed,
+            &[
+                JsDiagnosticKind::UnknownExternalType,
+                JsDiagnosticKind::UnknownExternalType,
+            ],
+        );
+    }
+}
+
+#[test]
+fn fixed_scalar_annotations_do_not_admit_dotted_or_collection_types() {
+    for signature in [
+        "|value F32.extra| -> F32",
+        "|| -> F32.extra",
+        "|value {U32}| -> U32",
+    ] {
+        let source = format!(
+            "/** @moth.sig identity {signature} */\nexport function identity{} {{ return 0; }}",
+            if signature.starts_with("||") {
+                "()"
+            } else {
+                "(value)"
+            }
+        );
+        let parsed = parse(&source);
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.kind == JsDiagnosticKind::UnsupportedTypeSyntax })
+        );
+    }
+}
+
+#[test]
+fn signature_annotation_cannot_bind_literal_constant() {
     let source = r#"
 /**
  * @moth.sig answer || -> Int
@@ -237,13 +299,7 @@ fn const_export_must_be_arrow_function() {
 export const answer = 42;
 "#;
     let parsed = parse(source);
-    assert_diagnostic_kinds(
-        &parsed,
-        &[
-            JsDiagnosticKind::UnsupportedParameterPattern,
-            JsDiagnosticKind::MissingExportAfterSig,
-        ],
-    );
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::AnnotationExportKindMismatch]);
 }
 
 // ------------------------
@@ -1564,4 +1620,427 @@ fn builtin_web_canvas_package_parses_expanded_surface() {
         parsed.receiver_methods.is_empty(),
         "built-in @web/canvas must expose only opaque types and free functions"
     );
+}
+
+// Literal constants exercise scanner boundaries as well as the shared numeric receiving owner.
+#[test]
+fn literal_constants_keep_exact_u32_values_names_and_source_spans() {
+    for (literal, expected) in [("0", 0_u64), ("4", 4), ("4294967295", 4294967295)] {
+        for terminator in [";", "", "\n"] {
+            let source = format!(
+                "/** @moth.const primitive_triangles U32 */\n\
+                 export /* export const FAKE = 9; */ const /* name */ TRIANGLES \
+                 /* equals */ = /* literal */ {literal} /* end */ {terminator}"
+            );
+            let parsed = parse(&source);
+            assert_no_diagnostics(&parsed);
+            assert!(parsed.free_functions.is_empty());
+            assert_eq!(parsed.constants.len(), 1);
+            let constant = &parsed.constants[0];
+            assert_eq!(constant.moth_name, "primitive_triangles");
+            assert_eq!(constant.js_name, "TRIANGLES");
+            assert_eq!(constant.value.scalar(), FixedScalar::U32);
+            assert_eq!(constant.value.as_u64(), Some(expected));
+            assert_eq!(
+                &source[constant.literal_span.byte_start..constant.literal_span.byte_end],
+                literal
+            );
+            assert_eq!(
+                &source[constant.annotation_span.byte_start..constant.annotation_span.byte_end],
+                "/** @moth.const primitive_triangles U32 */"
+            );
+            assert!(
+                source[constant.export_span.byte_start..constant.export_span.byte_end]
+                    .starts_with("export")
+            );
+        }
+    }
+}
+
+#[test]
+fn literal_constants_reject_every_nonliteral_or_nondecimal_initializer() {
+    for initializer in [
+        "4294967296",
+        "18446744073709551616",
+        "-1",
+        "-0",
+        "+4",
+        "1.5",
+        "1.0",
+        ".5",
+        "1.",
+        "4e0",
+        "4E0",
+        "4n",
+        "4_000",
+        "0xff",
+        "0Xff",
+        "0b100",
+        "0o4",
+        "04",
+        "00",
+        "08",
+        "09",
+        "other",
+        "other.value",
+        "other()",
+        "Math.round(4)",
+        "(4)",
+        "(4",
+        "4 + 1",
+        "4+1",
+        "4 - 1",
+        "4 * 1",
+        "4 / 1",
+        "4 ** 1",
+        "4 | 1",
+        "4 << 1",
+        "4 ? 1 : 0",
+        "4, OTHER = 1",
+        "4 /* digits do not join */ 0",
+        "4 /* expression */ + /* operand */ 1",
+        "true",
+        "\"4\"",
+        "[]",
+        "{}",
+        "",
+    ] {
+        let source = format!("/** @moth.const mode U32 */\nexport const MODE = {initializer};");
+        let parsed = parse(&source);
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.kind == JsDiagnosticKind::InvalidConstant),
+            "initializer {initializer:?} must produce an InvalidConstant diagnostic: {:?}",
+            parsed.diagnostics
+        );
+        assert!(
+            parsed.constants.is_empty(),
+            "initializer {initializer:?} cannot publish a value"
+        );
+    }
+}
+
+#[test]
+fn literal_constant_annotations_reject_missing_or_unsupported_types_and_nested_names() {
+    for annotation in [
+        "mode",
+        "mode Uint",
+        "mode Int",
+        "mode F32",
+        "mode U64",
+        "mode Bool",
+        "mode {U32}",
+        "mode U32.extra",
+        "primitive.triangles U32",
+        "mode U32 extra",
+        "1mode U32",
+        "mode<U32> U32",
+        "",
+    ] {
+        let source = format!("/** @moth.const {annotation} */\nexport const MODE = 4;");
+        let parsed = parse(&source);
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.kind == JsDiagnosticKind::InvalidConstant)
+        );
+        assert!(parsed.constants.is_empty());
+    }
+}
+
+#[test]
+fn unannotated_literal_constant_remains_rejected() {
+    let parsed = parse("export const MODE = 4;");
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::UnannotatedExport]);
+    assert!(parsed.constants.is_empty());
+}
+
+#[test]
+fn constant_annotation_cannot_bind_callable_exports() {
+    for declaration in [
+        "export function mode() { return 4; }",
+        "export const mode = () => { return 4; };",
+    ] {
+        let parsed = parse(&format!("/** @moth.const mode U32 */\n{declaration}"));
+        assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::AnnotationExportKindMismatch]);
+        assert!(parsed.constants.is_empty());
+        assert!(parsed.free_functions.is_empty());
+    }
+    let missing = parse("/** @moth.const mode U32 */");
+    assert_diagnostic_kinds(&missing, &[JsDiagnosticKind::MissingExportAfterConst]);
+}
+
+#[test]
+fn constant_exports_reject_duplicate_moth_and_js_names_across_symbol_kinds() {
+    for source in [
+        "/** @moth.const same U32 */ export const FIRST = 1;\n\
+         /** @moth.const same U32 */ export const SECOND = 2;",
+        "/** @moth.sig same || -> U32 */ export function first() { return 1; }\n\
+         /** @moth.const same U32 */ export const SECOND = 2;",
+        "/** @moth.const same U32 */ export const FIRST = 1;\n\
+         /** @moth.sig same || -> U32 */ export function second() { return 2; }",
+        "/** @moth.opaque same */\n\
+         /** @moth.const same U32 */ export const FIRST = 1;",
+    ] {
+        let parsed = parse(source);
+        assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::DuplicateMothName]);
+    }
+    for source in [
+        "/** @moth.const first U32 */ export const SAME = 1;\n\
+         /** @moth.const second U32 */ export const SAME = 2;",
+        "/** @moth.sig first || -> U32 */ export function SAME() { return 1; }\n\
+         /** @moth.const second U32 */ export const SAME = 2;",
+        "/** @moth.const first U32 */ export const SAME = 1;\n\
+         /** @moth.sig second || -> U32 */ export function SAME() { return 2; }",
+    ] {
+        let parsed = parse(source);
+        assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::DuplicateJsExportName]);
+    }
+}
+
+#[test]
+fn literal_constant_scanning_ignores_comment_and_string_lookalikes() {
+    let source = r#"
+// /** @moth.const fake U32 */ export const FAKE = 4;
+/* export const FAKE = 4; @moth.const fake U32 */
+const text = "/** @moth.const fake U32 */ export const FAKE = 4;";
+const template = `/** @moth.const fake U32 */ export const FAKE = 4;`;
+const pattern = /\/\*\* @moth.const fake U32 \*\//;
+/** @moth.const actual U32 */
+export const ACTUAL /* export function fake() {} */ = 4;
+"#;
+    let parsed = parse(source);
+    assert_no_diagnostics(&parsed);
+    assert_eq!(parsed.constants.len(), 1);
+    assert_eq!(parsed.constants[0].moth_name, "actual");
+}
+
+#[test]
+fn constant_statement_boundaries_preserve_following_declarations() {
+    for first in [
+        "export const FIRST = 4",
+        "export const FIRST = 4 // trailing comment",
+        "export const FIRST = 4 /* comment\nwith newline */",
+        "export const FIRST = 4 /* comment */;",
+    ] {
+        let source = format!(
+            "/** @moth.const first U32 */\n{first}\n\
+             /** @moth.const second U32 */\nexport const SECOND = 5;\n\
+             /** @moth.sig callable || -> U32 */\nexport function callable() {{ return 6; }}"
+        );
+        let parsed = parse(&source);
+        assert_no_diagnostics(&parsed);
+        assert_eq!(parsed.constants.len(), 2);
+        assert_eq!(parsed.constants[1].moth_name, "second");
+        assert_free_functions(&parsed, &["callable"]);
+    }
+}
+
+#[test]
+fn newline_continuations_do_not_turn_expressions_into_literal_constants() {
+    for continuation in [
+        "+ 1",
+        "- 1",
+        "* 1",
+        "/ 1",
+        "** 1",
+        "% 1",
+        "| 1",
+        "& 1",
+        "^ 1",
+        "<< 1",
+        "< 5",
+        "=== 4",
+        "? 1 : 0",
+        ".toString()",
+        "(other)",
+        "[0]",
+        "`tagged`",
+        ", SECOND = 5",
+        "in other",
+        "instanceof Other",
+    ] {
+        for trivia in [
+            "\n",
+            " /* comment */\n",
+            " /*\ncomment */ ",
+            " // comment\n",
+        ] {
+            let source = format!(
+                "/** @moth.const first U32 */\nexport const FIRST = 4{trivia}{continuation};\n\
+                 /** @moth.const second U32 */\nexport const SECOND = 5;"
+            );
+            let parsed = parse(&source);
+            assert!(
+                parsed
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.kind == JsDiagnosticKind::InvalidConstant),
+                "continuation {trivia:?}{continuation} must be rejected"
+            );
+            assert_eq!(parsed.constants.len(), 1);
+            assert_eq!(parsed.constants[0].moth_name, "second");
+        }
+    }
+    let explicit_terminator = parse(
+        "/** @moth.const first U32 */ export const FIRST = 4;\n\
+         (privateCall());",
+    );
+    assert_no_diagnostics(&explicit_terminator);
+    assert_eq!(explicit_terminator.constants.len(), 1);
+}
+
+#[test]
+fn invalid_or_missing_initializer_does_not_consume_the_next_declaration() {
+    for first in [
+        "export const FIRST",
+        "export const FIRST =",
+        "export const FIRST = (4",
+        "export const FIRST = other",
+        "export const FIRST = 4 + 1",
+    ] {
+        let source = format!(
+            "/** @moth.const first U32 */\n{first}\n\
+             /** @moth.const second U32 */\nexport const SECOND = 5;"
+        );
+        let parsed = parse(&source);
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.kind == JsDiagnosticKind::InvalidConstant)
+        );
+        assert_eq!(
+            parsed.constants.len(),
+            1,
+            "declaration {first:?} must retain the next export"
+        );
+        assert_eq!(parsed.constants[0].moth_name, "second");
+    }
+}
+
+#[test]
+fn unterminated_constant_trivia_cannot_publish_a_literal() {
+    for declaration in [
+        "export const MODE = 4 /*",
+        "export const MODE = 4 /* unterminated\ncomment",
+        "export const MODE = /*",
+        "export const /*",
+    ] {
+        let source = format!("/** @moth.const mode U32 */\n{declaration}");
+        let parsed = parse(&source);
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.kind == JsDiagnosticKind::InvalidConstant)
+        );
+        assert!(parsed.constants.is_empty());
+    }
+}
+
+#[test]
+fn constant_annotation_does_not_skip_an_intervening_source_item() {
+    for intervening in ["const privateMode = 4;", "export let unsupported = 4;"] {
+        let parsed = parse(&format!(
+            "/** @moth.const first U32 */\n{intervening}\n\
+             /** @moth.const actual U32 */\nexport const ACTUAL = 5;"
+        ));
+        assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::MissingExportAfterConst]);
+        assert_eq!(parsed.constants.len(), 1);
+        assert_eq!(parsed.constants[0].moth_name, "actual");
+    }
+}
+
+#[test]
+fn duplicate_binding_annotations_cannot_move_to_the_next_export() {
+    for annotations in [
+        "/**\n * @moth.const first U32\n * @moth.sig callable || -> U32\n */",
+        "/** @moth.const first U32 */\n/** @moth.const second U32 */",
+    ] {
+        let parsed = parse(&format!(
+            "{annotations}\nexport const FIRST = 4;\n\
+             /** @moth.const actual U32 */\nexport const ACTUAL = 5;"
+        ));
+        assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::AnnotationExportKindMismatch]);
+        assert_eq!(parsed.constants.len(), 2);
+        assert_eq!(parsed.constants[1].moth_name, "actual");
+    }
+}
+
+#[test]
+fn constant_boundaries_use_js_line_terminators_including_line_comments() {
+    for line_break in ["\n", "\r\n", "\r", "\u{2028}", "\u{2029}"] {
+        let parsed = parse(&format!(
+            "/** @moth.const first U32 */\nexport const FIRST = 4 // comment{line_break}\
+             /** @moth.const second U32 */ export const SECOND = 5;"
+        ));
+        assert_no_diagnostics(&parsed);
+        assert_eq!(parsed.constants.len(), 2);
+    }
+}
+
+#[test]
+fn constant_range_diagnostic_identifies_the_authored_literal_span() {
+    let source = "/** @moth.const overflow U32 */ export const OVERFLOW = 4294967296;";
+    let parsed = parse(source);
+    assert_diagnostic_kinds(&parsed, &[JsDiagnosticKind::InvalidConstant]);
+    let span = &parsed.diagnostics[0].span;
+    assert_eq!(&source[span.byte_start..span.byte_end], "4294967296");
+}
+
+#[test]
+fn newline_prefix_update_statement_does_not_continue_a_constant_initializer() {
+    for update in ["++counter", "--counter"] {
+        for trivia in ["\n", " // comment\n", " /* comment\n */ "] {
+            let source = format!(
+                "let counter = 0;\n\
+                 /** @moth.const mode U32 */\nexport const MODE = 4{trivia}{update};"
+            );
+            let parsed = parse(&source);
+            assert_no_diagnostics(&parsed);
+            assert_eq!(parsed.constants.len(), 1);
+            assert_eq!(parsed.constants[0].value.as_u64(), Some(4));
+        }
+    }
+}
+
+#[test]
+fn constant_initializer_scanning_preserves_module_loading_diagnostics() {
+    for (initializer, expected) in [
+        (
+            "require(\"third-party\")",
+            JsDiagnosticKind::CommonJsRequire,
+        ),
+        (
+            "load(import(\"third-party\"))",
+            JsDiagnosticKind::DynamicImport,
+        ),
+    ] {
+        let source = format!("export const dependency = {initializer};");
+        let scanned = scan_exports(&source, &RuntimeModuleRegistry::v1());
+        assert!(
+            scanned
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.kind == expected),
+            "initializer {initializer:?} must retain {expected:?}: {:?}",
+            scanned.diagnostics
+        );
+        let parsed = parse(&format!(
+            "/** @moth.const dependency U32 */\nexport const dependency = {initializer};\n\
+             /** @moth.const actual U32 */\nexport const ACTUAL = 5;"
+        ));
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.kind == expected)
+        );
+        assert_eq!(parsed.constants.len(), 1);
+        assert_eq!(parsed.constants[0].moth_name, "actual");
+    }
 }

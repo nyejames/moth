@@ -18,7 +18,7 @@ use crate::compiler_frontend::external_packages::{
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 fn import_path(
     components: &[&str],
@@ -372,9 +372,13 @@ fn empty_void_function(name: &str) -> ExternalFunctionDef {
 fn scalar_int_constant(name: &str, value: i32) -> ExternalConstantDef {
     ExternalConstantDef {
         name: name.to_owned(),
-        data_type: ExternalAbiType::I32.into(),
-        value: ExternalConstantValue::Int(value),
+        data_type: ExternalAbiType::Fixed(FixedScalar::I32).into(),
+        value: fixed_constant_value(FixedScalarValue::signed(FixedScalar::I32, i64::from(value))),
     }
+}
+
+fn fixed_constant_value(value: Option<FixedScalarValue>) -> ExternalConstantValue {
+    ExternalConstantValue::Fixed(value.expect("test fixed constant payload is in range"))
 }
 
 #[test]
@@ -389,13 +393,23 @@ fn constant_registration_rejects_mismatched_numeric_payload_types_without_publis
     let mismatches = [
         (
             "F64_WITH_INT",
-            ExternalSignatureType::Abi(ExternalAbiType::F64),
+            ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::F64)),
             ExternalConstantValue::Int(7),
         ),
         (
             "I32_WITH_FLOAT",
-            ExternalSignatureType::Abi(ExternalAbiType::I32),
+            ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)),
             ExternalConstantValue::Float(1.5),
+        ),
+        (
+            "U32_WITH_I32_PAYLOAD",
+            ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::U32)),
+            fixed_constant_value(FixedScalarValue::signed(FixedScalar::I32, 7)),
+        ),
+        (
+            "UINT_WITH_FIXED_U32",
+            ExternalSignatureType::NativeUint,
+            fixed_constant_value(FixedScalarValue::unsigned(FixedScalar::U32, 7)),
         ),
         (
             "UINT_WITH_INT",
@@ -435,34 +449,45 @@ fn constant_registration_rejects_mismatched_numeric_payload_types_without_publis
         );
     }
 
-    let valid_path = ExternalSymbolPath::from_single("VALID_F64");
-    registry
-        .register_constant_at_path(
-            package_id,
-            valid_path.clone(),
-            ExternalConstantId(704),
-            ExternalConstantDef {
-                name: "VALID_F64".to_owned(),
-                data_type: ExternalSignatureType::Abi(ExternalAbiType::F64),
-                value: ExternalConstantValue::Float(3.25),
-            },
-        )
-        .expect("a matching F64 constant should register");
-    let (_, valid_constant) = registry
-        .resolve_package_constant_by_path("@test/constant_types", &valid_path)
-        .expect("the matching F64 constant should resolve");
-    assert_eq!(
-        valid_constant.data_type,
-        ExternalSignatureType::Abi(ExternalAbiType::F64)
-    );
-    assert_eq!(valid_constant.value, ExternalConstantValue::Float(3.25));
+    for (index, value) in [
+        FixedScalarValue::signed(FixedScalar::I32, i64::from(i32::MIN)),
+        FixedScalarValue::unsigned(FixedScalar::U32, u64::from(u32::MAX)),
+        FixedScalarValue::binary_float(FixedScalar::F32, -0.0),
+        FixedScalarValue::binary_float(FixedScalar::F64, 3.25),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let value = value.expect("fixed test value is exact and in range");
+        let scalar = value.scalar();
+        let valid_path = ExternalSymbolPath::from_single(scalar.name());
+        let valid_value = ExternalConstantValue::Fixed(value);
+        let signature = ExternalSignatureType::Abi(ExternalAbiType::Fixed(scalar));
+        registry
+            .register_constant_at_path(
+                package_id,
+                valid_path.clone(),
+                ExternalConstantId(730 + index as u32),
+                ExternalConstantDef {
+                    name: scalar.name().to_owned(),
+                    data_type: signature.clone(),
+                    value: valid_value,
+                },
+            )
+            .expect("matching fixed constant registers");
+        let (_, valid_constant) = registry
+            .resolve_package_constant_by_path("@test/constant_types", &valid_path)
+            .expect("matching fixed constant resolves");
+        assert_eq!(valid_constant.data_type, signature);
+        assert_eq!(valid_constant.value, valid_value);
+    }
 
     let uint_path = ExternalSymbolPath::from_single("VALID_UINT");
     registry
         .register_constant_at_path(
             package_id,
             uint_path.clone(),
-            ExternalConstantId(705),
+            ExternalConstantId(721),
             ExternalConstantDef {
                 name: "VALID_UINT".to_owned(),
                 data_type: ExternalSignatureType::NativeUint,
@@ -820,8 +845,8 @@ fn function_constant_collision_at_same_path_rejected() {
         ExternalConstantId(41),
         ExternalConstantDef {
             name: "foo".to_owned(),
-            data_type: ExternalAbiType::F64.into(),
-            value: ExternalConstantValue::Float(1.0),
+            data_type: ExternalAbiType::Fixed(FixedScalar::F64).into(),
+            value: fixed_constant_value(FixedScalarValue::binary_float(FixedScalar::F64, 1.0)),
         },
     );
 
@@ -932,13 +957,13 @@ fn native_numeric_signatures_keep_native_ids_and_abi_widths_keep_fixed_ids() {
     let native_float_id = type_environment.builtins().float;
     let builtin_error_type_id = type_environment.builtins().none;
     let fixed_i32_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let fixed_u32_id = builtin_type_ids::fixed_scalar(FixedScalar::U32);
+    let fixed_f32_id = builtin_type_ids::fixed_scalar(FixedScalar::F32);
     let fixed_f64_id = builtin_type_ids::fixed_scalar(FixedScalar::F64);
 
     let native_int = ExternalSignatureType::NativeInt;
     let native_uint = ExternalSignatureType::NativeUint;
     let native_float = ExternalSignatureType::NativeFloat;
-    let abi_i32 = ExternalSignatureType::Abi(ExternalAbiType::I32);
-    let abi_f64 = ExternalSignatureType::Abi(ExternalAbiType::F64);
 
     assert_eq!(native_int.to_datatype(), Some(DataType::Int));
     assert_eq!(native_uint.to_datatype(), Some(DataType::Uint));
@@ -967,31 +992,29 @@ fn native_numeric_signatures_keep_native_ids_and_abi_widths_keep_fixed_ids() {
         native_float.to_type_id(&mut type_environment, builtin_error_type_id),
         Some(native_float_id),
     );
-    assert_eq!(
-        abi_i32.to_datatype(),
-        Some(DataType::FixedScalar(FixedScalar::I32)),
-    );
-    assert_eq!(
-        abi_f64.to_datatype(),
-        Some(DataType::FixedScalar(FixedScalar::F64)),
-    );
-    assert_eq!(
-        abi_i32.to_type_id(&mut type_environment, builtin_error_type_id),
-        Some(fixed_i32_id),
-    );
-    assert_eq!(
-        abi_f64.to_type_id(&mut type_environment, builtin_error_type_id),
-        Some(fixed_f64_id),
-    );
-    assert_eq!(
-        abi_i32.to_parameter_type_id(&mut type_environment),
-        Some(fixed_i32_id),
-    );
-    assert_eq!(
-        abi_f64.to_parameter_type_id(&mut type_environment),
-        Some(fixed_f64_id),
-    );
+    // Every fixed foreign slot resolves to the same seeded TypeId a source-authored spelling of
+    // that scalar uses, so `U32` and `F32` stay distinct from profile-selected Uint and Float.
+    for scalar in [
+        FixedScalar::I32,
+        FixedScalar::U32,
+        FixedScalar::F32,
+        FixedScalar::F64,
+    ] {
+        let fixed = ExternalSignatureType::Abi(ExternalAbiType::Fixed(scalar));
+        let source_type_id = builtin_type_ids::fixed_scalar(scalar);
+        assert_eq!(fixed.to_datatype(), Some(DataType::FixedScalar(scalar)));
+        assert_eq!(
+            fixed.to_type_id(&mut type_environment, builtin_error_type_id),
+            Some(source_type_id),
+        );
+        assert_eq!(
+            fixed.to_parameter_type_id(&mut type_environment),
+            Some(source_type_id),
+        );
+    }
     assert_ne!(native_int_id, fixed_i32_id);
+    assert_ne!(native_uint_id, fixed_u32_id);
+    assert_ne!(native_float_id, fixed_f32_id);
     assert_ne!(native_float_id, fixed_f64_id);
     assert_ne!(
         native_uint_id, native_int_id,
@@ -999,7 +1022,7 @@ fn native_numeric_signatures_keep_native_ids_and_abi_widths_keep_fixed_ids() {
     );
     assert_ne!(
         ExternalSignatureType::NativeUint,
-        ExternalSignatureType::Abi(ExternalAbiType::I32),
+        ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::U32)),
         "Uint must not collapse into a fixed foreign width"
     );
     let native_returns = external_success_returns(native_float, ExternalReturnAlias::Fresh);

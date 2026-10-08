@@ -1,0 +1,3 @@
+export:
+    @gl_constants.js primitive_triangles as triangles_ns, u32_max as max_ns
+;

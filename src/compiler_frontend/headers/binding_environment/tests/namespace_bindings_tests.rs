@@ -54,6 +54,7 @@ use crate::compiler_frontend::source::{
 use crate::compiler_frontend::symbols::identity::{DependencySelectionId, DependencyShellId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 fn intern_path(
@@ -797,8 +798,10 @@ fn external_nested_namespace_tree_builds_correctly() {
             ExternalConstantId(102),
             ExternalConstantDef {
                 name: "DEFAULT".to_owned(),
-                data_type: ExternalAbiType::I32.into(),
-                value: ExternalConstantValue::Int(1),
+                data_type: ExternalAbiType::Fixed(FixedScalar::I32).into(),
+                value: ExternalConstantValue::Fixed(
+                    FixedScalarValue::signed(FixedScalar::I32, 1).expect("one fits I32"),
+                ),
             },
         )
         .expect("nested constant should register");
@@ -1962,8 +1965,10 @@ fn binding_provider_with_members(
                 symbol_id,
                 ExternalConstantDef {
                     name: name.to_owned(),
-                    data_type: ExternalAbiType::I32.into(),
-                    value: ExternalConstantValue::Int(1),
+                    data_type: ExternalAbiType::Fixed(FixedScalar::I32).into(),
+                    value: ExternalConstantValue::Fixed(
+                        FixedScalarValue::signed(FixedScalar::I32, 1).expect("one fits I32"),
+                    ),
                 },
             )
             .expect("binding provider constant should register");

@@ -907,3 +907,139 @@ fn build_project_keeps_one_shared_string_table_for_multi_module_diagnostics() {
         "path-only backend warnings are spanless",
     );
 }
+#[test]
+fn build_html_project_literal_const_change_reaches_next_build_without_asset() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
+    let src = root.join("src");
+    let helper = src.join("helper");
+    fs::create_dir_all(&helper).expect("should create helper dir");
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
+        "@helper as helper_ns\n#[:constant=[helper_ns.triangles_ns is 4]]\n",
+    )
+    .expect("should write page");
+    fs::write(
+        helper.join("@mod.moth"),
+        "export:\n    @gl_constants.js primitive_triangles as triangles_ns\n;\n",
+    )
+    .expect("should write helper");
+    fs::write(
+        helper.join("gl_constants.js"),
+        "import { mothOk } from \"@moth/runtime\";\n/** @moth.const primitive_triangles U32 */\nexport const TRIANGLES = 4;\nthrow new Error(\"constant-only modules must not execute their JS source at compile time\");\n",
+    )
+    .expect("should write js");
+
+    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let entry = root.to_str().expect("temp dir should be UTF-8");
+
+    let first = build_project(&builder, entry, &[], &BuildConfigInputSet::new())
+        .expect("first literal const build should succeed");
+    let first_outputs = BuiltOutputs::index(&first.project);
+    let first_html = html_text(first_outputs.at("index.html"));
+    assert!(
+        first_html.contains("constant=true"),
+        "the first build should fold the authored literal: {first_html}"
+    );
+    first_outputs.none_matching("JS artifact", |path| path.ends_with(".js"));
+
+    fs::write(
+        helper.join("gl_constants.js"),
+        "import { mothOk } from \"@moth/runtime\";\n/** @moth.const primitive_triangles U32 */\nexport const TRIANGLES = 5;\nthrow new Error(\"constant-only modules must not execute their JS source at compile time\");\n",
+    )
+    .expect("should rewrite literal");
+
+    let second = build_project(&builder, entry, &[], &BuildConfigInputSet::new())
+        .expect("second literal const build should succeed");
+    let second_outputs = BuiltOutputs::index(&second.project);
+    let second_html = html_text(second_outputs.at("index.html"));
+    assert!(
+        second_html.contains("constant=false"),
+        "the next build should observe the rewritten literal: {second_html}"
+    );
+    second_outputs.none_matching("JS artifact", |path| path.ends_with(".js"));
+
+    for project in [&first.project, &second.project] {
+        assert!(
+            !project.deferred_resources.iter().any(|resource| {
+                resource
+                    .relative_output_path
+                    .extension()
+                    .is_some_and(|extension| extension == "js")
+            }),
+            "constant-only dependencies must not emit deferred JS assets"
+        );
+    }
+}
+
+#[test]
+fn build_html_project_mixed_const_and_function_emits_single_glue_module() {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let root = _temp.path().to_path_buf();
+
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("should create src");
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
+        "@gl_mixed.js primitive_triangles, u32_max, double_u32\n\ndoubled U32 = double_u32(primitive_triangles)\ndoubled_again U32 = double_u32(doubled)\n[:mixed doubled=[doubled]/[doubled_again] const=[primitive_triangles is 4]]\n",
+    )
+    .expect("should write page");
+    fs::write(
+        src.join("gl_mixed.js"),
+        "/** @moth.const primitive_triangles U32 */\nexport const TRIANGLES = 4;\n/** @moth.const u32_max U32 */\nexport const U32_MAX = 4294967295;\n/** @moth.sig double_u32 |value U32| -> U32 */\nexport function doubleU32(value) {\n    return value * 2;\n}\n",
+    )
+    .expect("should write js");
+
+    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let entry = root.to_str().expect("temp dir should be UTF-8");
+    let built = build_project(&builder, entry, &[], &BuildConfigInputSet::new())
+        .expect("mixed const and function build should succeed");
+    let outputs = BuiltOutputs::index(&built.project);
+
+    // Exactly one glue module across multiple semantic uses of one provider module:
+    // a second glue module would mean split emission rather than shared lowering.
+    let glue_path = outputs
+        .exactly_one_path("generated glue module", |path| {
+            path.starts_with(GLUE_MODULE_PREFIX)
+        })
+        .to_owned();
+    let html = html_text(outputs.at("index.html"));
+    assert!(
+        html.contains(&format!("from \"./{glue_path}\"")),
+        "the page should import the emitted glue module '{glue_path}': {html}"
+    );
+
+    // The provider JS asset is a deferred resource output at its declared stable path
+    // `_moth/js/gl_mixed.js` (provider path owner: logical source spelling under
+    // `_moth/js/`), and the emitted glue imports that same file.
+    let provider_paths: Vec<String> = built
+        .project
+        .deferred_resources
+        .iter()
+        .map(|resource| portable_path_text(&resource.relative_output_path))
+        .filter(|path| path.starts_with("_moth/js/gl_mixed.js"))
+        .collect();
+    assert_eq!(
+        provider_paths,
+        vec!["_moth/js/gl_mixed.js".to_owned()],
+        "the provider asset should emit once at its declared path"
+    );
+    let glue = js_text(outputs.exactly_one("generated glue module", |path| {
+        path.starts_with(GLUE_MODULE_PREFIX)
+    }));
+    assert!(
+        glue.contains("gl_mixed.js"),
+        "the single glue module should import the provider asset: {glue}"
+    );
+}

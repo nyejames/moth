@@ -18,6 +18,7 @@ This README is the package's living development document. It holds design direct
 - `graphics.js` exports nothing. Registration still parses it on every HTML build, so the asset can't drift out of the accepted annotation subset.
 - The package is HTML-JS only. A future Wasm path follows the same rule as `@web/canvas`: reachable calls are rejected before lowering until a lowering exists.
 - No API slice has started. Every Phase 1 operation depends on at least one binding prerequisite below.
+- Fixed `U32` and `F32` scalar slots, flat named `U32` constants and compiler-owned error-code exports are delivered in the shared boundary. Shared opaque type references, nested annotation paths and bulk collection/data mapping remain unresolved.
 
 ## Role and boundary
 
@@ -65,15 +66,15 @@ Families with meaningful explicit deletion get deliberate teardown functions. Br
 
 Use ordinary Moth failure where an operation has a result the program can act on: context acquisition, shader compilation, program linking, host-fallible resource creation and wrapper-level invalid operations that can be diagnosed coherently. Shader and program failures carry the host's info log as the error message, so nobody reproduces the JavaScript sequence that retrieves it.
 
-State-changing calls aren't mechanically `Error!`. WebGL's deferred `getError` model and wrapper validation need one deliberate contract that decides which failures become immediate Moth errors and which low-level error and state inspection stays available for advanced use.
+State-changing calls aren't mechanically `Error!`. Wrapper validation needs one deliberate contract that decides which failures become immediate Moth errors and which low-level error and state inspection stays available for advanced use. Check the Khronos WebGL2 specification for each low-level error route before fixing that contract. Keep each verified spec fact apart from proposed wrapper policy below.
 
 ### Constants and closed domains
 
-The public API isn't built from unexplained numeric WebGL constants. Primitive modes, buffer targets and usages, texture formats, compare functions, blend factors and similar closed domains should be typed or clearly named Moth forms. Where the binding boundary can't express the final form yet, that part of the surface is deferred. No temporary string or opaque stand-ins.
+The public API isn't built from unexplained numeric WebGL constants. Primitive modes, buffer targets and usages, texture formats, compare functions, blend factors and similar closed domains should be clearly named Moth forms backed by named `U32` constants. That carrier is delivered under prerequisite 3. Where the final form needs more than a named constant, that part of the surface is deferred. No temporary string or opaque stand-ins.
 
 ### Numeric precision
 
-WebGL consumes 32-bit floats for vertex data, uniforms and clear values. Moth `Float` follows the boundary-wide numeric profile, so Float64 programs round at the host boundary. The canonical reference must state that rounding when the first Float-carrying operation ships.
+WebGL consumes 32-bit floats for vertex data, uniforms and clear values. Fixed `F32` gives an exact profile-independent binary32 slot where the API needs it. Moth `Float` follows the boundary-wide numeric profile, so Float64 programs round at the host boundary. The canonical reference must state that rounding when the first `Float`-carrying operation ships.
 
 ### Async and callback boundary
 
@@ -81,11 +82,11 @@ The package is synchronous. It adds no JavaScript callbacks, promises, asynchron
 
 ## Binding prerequisites
 
-Each prerequisite below is a capability of the shared binding boundary, not a graphics-local workaround. Its accepted design belongs in `external-binding-contracts.mtf` and the compiler or build authority that owns it. The graphics API waits for the final shape rather than shipping around the gap.
+Each prerequisite below is a capability of the shared binding boundary, not a graphics-local workaround. Each accepted design belongs in `external-binding-contracts.mtf` and the compiler or build authority that owns it. Delivered prerequisites stay delivered through those owners. The graphics API waits for the unresolved shape rather than shipping around the gap.
 
 ### 1. Shared canvas identity
 
-Context creation needs the canonical `CanvasElement` owned by `@web/canvas`.
+Unresolved. Context creation needs the canonical `CanvasElement` owned by `@web/canvas`.
 
 - An opaque external type's identity is its package, symbol path and origin (`CanonicalBindingSymbolIdentity` in `src/compiler_frontend/external_packages/ids.rs`). Compiler type equality uses the registered `ExternalTypeId`.
 - Annotated JavaScript resolves a signature type name only against built-in scalars and `@moth.opaque` declarations in the same file (`validate_type_name` in `src/projects/html_project/external_js/parser/mod.rs`). A second `@moth.opaque CanvasElement` in `graphics.js` would mint a different, incompatible type.
@@ -102,17 +103,17 @@ Open: how a project without `@web/canvas` supplies its canvas. Element lookup by
 
 ### 2. Nested namespaces
 
-`graphics.gl.*` and `graphics.frame.*` need nested symbol paths. The registry supports them, and `@core/io` registers `io.input.*` through the path-aware Rust API. Annotated JavaScript can't: annotation names are single identifiers (`parser/comment_extractor.rs`) and `register_parsed_js_module` uses the single-component registration calls.
+Unresolved. `graphics.gl.*` and `graphics.frame.*` need nested symbol paths. The registry supports them, and `@core/io` registers `io.input.*` through the path-aware Rust API. Annotated JavaScript can't: annotation names are single identifiers (`parser/comment_extractor.rs`) and `register_parsed_js_module` uses the single-component registration calls.
 
 Tentative preference: let annotations declare a nested Moth path so `graphics.js` stays the single owner of its signatures. Rust path registration for a JavaScript-backed package would split signature ownership between Rust and the asset.
 
 ### 3. Closed-domain values
 
-Annotated signatures accept `Int`, `Uint`, `Float`, `Bool`, `String`, `Char` and same-file opaque types. Annotated JavaScript can't export choices or constants. Typed WebGL domains need one of these to cross the boundary, decided at the binding-contract level. Every operation whose final signature takes a closed domain waits for it.
+Delivered for the carrier this package uses. `@moth.sig` accepts fixed `U32` and `F32` in scalar parameters and success results through the shared fixed-scalar owner (`ExternalAbiType::Fixed(FixedScalar)`). `@moth.const` exposes one flat Moth name with fixed `U32` type from its authored literal without running JavaScript (`ExternalConstantValue::Fixed(FixedScalarValue)`). The binding contract owns the exact literal form, the rejection list and the constant-only emission rule. Native `Int`, `Uint` and `Float` keep their profile-selected meaning. The shared boundary canonicalises integer zero and rounds `F32` results once at binary32 while preserving signed zero. Closed WebGL domains cross as named `U32` constants and those names don't make domains nominally distinct. Nominal foreign enums stay pending in the binding contract and this package doesn't wait for them.
 
 ### 4. Bulk numeric and byte data
 
-GPU data upload is central, so a clean data path is required for a genuinely useful v1. Annotated signatures reject collections, and `Byte` and fixed-width numeric types aren't in the annotation subset. Operations that need the path:
+Unresolved. GPU data upload is central, so a clean data path is required for a genuinely useful v1. Annotated signatures still reject collections and options. Fixed `U32` and `F32` scalars and flat `U32` constants are delivered under prerequisite 3 but they don't carry bulk arrays. Operations that need the path:
 
 - vertex-buffer and index-buffer upload and partial update
 - texture pixel upload
@@ -139,12 +140,12 @@ Each phase is a coherent workflow. Phases that ship public symbols update the ca
 
 | Phase | Work | Needs |
 |---|---|---|
-| 0 | Settle prerequisites 1 to 5 in their owning authorities and implement the binding capabilities | User design review per prerequisite |
-| 1 | Context acquisition, drawing-buffer size, viewport, clear colour and buffers, capability and context-loss inspection | 1, 2, 3, 5 |
-| 2 | Shaders and programs with compile and link diagnostics, program use | 2, 5 |
-| 3 | Buffers, vertex arrays, attributes, instancing state, array and indexed drawing | 3, 4. First triangle-capable slice |
-| 4 | Uniforms including matrices and sampler bindings, textures, samplers and mipmaps | 3, 4 |
-| 5 | Depth, stencil, blend, cull, scissor and mask state, framebuffers, renderbuffers and completeness, instanced drawing | 3 |
+| 0 | Settle unresolved prerequisites 1, 2 and 4 in their owning authorities and implement the binding capabilities | User design review per unresolved prerequisite |
+| 1 | Context acquisition, drawing-buffer size, viewport, clear colour and buffers, capability and context-loss inspection | 1, 2 |
+| 2 | Shaders and programs with compile and link diagnostics, program use | 2 |
+| 3 | Buffers, vertex arrays, attributes, instancing state, array and indexed drawing | 2, 4. First triangle-capable slice |
+| 4 | Uniforms including matrices and sampler bindings, textures, samplers and mipmaps | 2, 4 |
+| 5 | Depth, stencil, blend, cull, scissor and mask state, framebuffers, renderbuffers and completeness, instanced drawing | 2 |
 | 6 | Transform feedback, queries, sync, uniform buffers, pixel buffers, multiple render targets, readback | Phases 1 to 5 coherent |
 
 Useful v1 means phases 1 to 5: a complete textured, indexed and instanced renderer written directly against the package. Richness comes from coherent workflows, not API counts.
@@ -153,9 +154,9 @@ Useful v1 means phases 1 to 5: a complete textured, indexed and instanced render
 
 ## Open questions
 
-- **Post-delete use.** WebGL generally ignores an operation on a deleted object and records `INVALID_OPERATION`. Decide whether the wrapper tracks deletion and returns an error, and whether deletion should consume the handle once the language can express that for opaque types.
-- **Context ownership.** Every resource belongs to one context and WebGL rejects cross-context use. Decide whether handles carry their context for wrapper validation.
-- **Context loss.** Calls on a lost context are host no-ops. Decide what the wrapper reports and how loss is inspected without callbacks.
+- **Post-delete use.** Check `deleteShader` with an attached shader, its later `detachShader` and program teardown, `deleteBuffer` with a bound buffer and later bind or update calls, and vertex-array deletion followed by reuse. Record each operation's Khronos-specified behaviour separately before deciding whether the wrapper tracks deletion, returns an error or consumes a handle.
+- **Context ownership.** Check foreign-context handles in `attachShader`, `useProgram` and `bindBuffer`, and a uniform location used with another program. Keep those host rules separate from any proposed context or program identity checks in Moth handles.
+- **Context loss.** Check `getError`, `isContextLost`, resource-creation results and readback operations during loss separately. Use those operation-specific facts to decide what the wrapper reports and how programs inspect loss without callbacks. A blanket no-op rule doesn't define the contract.
 - **Binding state.** Decide which bind points stay explicit and where a bind-free helper removes awkwardness without hiding meaningful state.
 - **Testing.** The integration harness has no browser host and no GPU. Likely owners are executable Node tests with a recording fake WebGL2 context, following `src/backends/js/tests/io_input_runtime.rs`, plus integration cases for reachability, type rejection and Wasm rejection.
 

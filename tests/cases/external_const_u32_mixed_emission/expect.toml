@@ -1,0 +1,22 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "external const mixed doubled=8/16 const=true max=true"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "./_moth/js/glue/module-",
+]
+must_contain_exactly_once = ["./_moth/js/glue/module-"]
+must_not_contain = [
+    "_moth/js/runtime/moth-runtime",
+]
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0058"]

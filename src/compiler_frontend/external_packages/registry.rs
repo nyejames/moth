@@ -7,10 +7,9 @@
 //! the ID-indexed maps, and the prelude.
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 
-use super::abi::{ExternalAbiType, ExternalSignatureType};
 use super::definitions::{
-    ExternalConstantDef, ExternalConstantValue, ExternalFunctionDef, ExternalFunctionSpec,
-    ExternalPackage, ExternalTypeDef, ExternalTypeSpec,
+    ExternalConstantDef, ExternalFunctionDef, ExternalFunctionSpec, ExternalPackage,
+    ExternalTypeDef, ExternalTypeSpec,
 };
 use super::ids::{
     CanonicalBindingSymbolIdentity, ExternalConstantId, ExternalFunctionId, ExternalPackageId,
@@ -403,26 +402,7 @@ impl ExternalPackageRegistry {
 
         constant.name = path.leaf().to_owned();
 
-        if !matches!(
-            (&constant.data_type, constant.value),
-            (
-                ExternalSignatureType::NativeInt | ExternalSignatureType::Abi(ExternalAbiType::I32),
-                ExternalConstantValue::Int(_)
-            ) | (
-                ExternalSignatureType::NativeUint,
-                ExternalConstantValue::Uint(_)
-            ) | (
-                ExternalSignatureType::NativeFloat
-                    | ExternalSignatureType::Abi(ExternalAbiType::F64),
-                ExternalConstantValue::Float(_)
-            ) | (
-                ExternalSignatureType::Abi(ExternalAbiType::Bool),
-                ExternalConstantValue::Bool(_)
-            ) | (
-                ExternalSignatureType::Abi(ExternalAbiType::Utf8Str),
-                ExternalConstantValue::StringSlice(_)
-            )
-        ) {
+        if !constant.value.matches_signature_type(&constant.data_type) {
             return_compiler_error!(
                 "External constant '{}' declares semantic type {:?} incompatible with payload {:?}.",
                 constant.name,

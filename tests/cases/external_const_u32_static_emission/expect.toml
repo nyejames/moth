@@ -1,0 +1,32 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "constant max=4294967295 triangles=4",
+]
+must_not_contain = [
+    "_moth/js/",
+    "<script type=\"importmap\">",
+    "<script type=\"module\">",
+]
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "constant max=4294967295 triangles=4",
+]
+must_not_contain = [
+    "_moth/js/",
+    "<script type=\"importmap\">",
+    "<script type=\"module\">",
+]

@@ -1,0 +1,22 @@
+@gl_constants.js zero_value, small_value as small_renamed, signed_max_plus_one, primitive_triangles, u32_max
+@helper as helper_ns
+
+is_max_u32 |value U32| -> Bool:
+    return value is 4294967295
+;
+
+is_wide_u32 |value U32| -> Bool:
+    return value is 2147483648
+;
+
+zero_matches = zero_value is 0
+small_matches = small_renamed is 17
+above_signed_direct = signed_max_plus_one is 2147483648
+above_signed_fn = is_wide_u32(signed_max_plus_one)
+renamed_matches = primitive_triangles is 4
+max_matches = u32_max is 4294967295
+max_fn_matches = is_max_u32(u32_max)
+ns_renamed = helper_ns.triangles_ns is 4
+ns_max = helper_ns.max_ns is 4294967295
+ns_max_fn = is_max_u32(helper_ns.max_ns)
+[:external const u32 zero=[zero_matches] small=[small_matches] above_signed=[above_signed_direct]/[above_signed_fn] renamed=[renamed_matches] max=[max_matches]/[max_fn_matches] ns=[ns_renamed]/[ns_max]/[ns_max_fn]]

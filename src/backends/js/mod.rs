@@ -27,6 +27,7 @@ mod tests;
 
 pub(crate) use emitter::JsEmitter;
 pub use emitter::lower_hir_to_js;
+pub(crate) use numeric_carrier::JsNumericCarrier;
 pub(crate) use runtime::collection_javascript_helpers;
 pub(crate) use symbols::{builtin_error_code_js_field_name, builtin_error_message_js_field_name};
 
