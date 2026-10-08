@@ -10,11 +10,11 @@
 use super::differential::{OracleComparisonClass, OracleComparisonSet, compare_problem_parts};
 use super::oracle::{OracleBounds, OracleLimitReason, OracleOutcome, execute_bounded};
 use crate::compiler_frontend::analysis::borrow_checker::problem::{
-    AccessKind, AggregateField, Binding, BindingId, BlockId, BorrowProblem, BorrowProblemParts,
-    Call, CallArgument, CallEffect, CallId, CallResult, CallResultProvenance, CfgBlock, CfgEdge,
-    Event, EventId, EventKind, KillReason, Loan, LoanId, OriginKind, Place, PlaceId, PointId,
-    ProgramPoint, ProjectionElem, RebindValue, TerminatorEventKind, Use, UseId, UseKind,
-    ValueOrigin, ValueOriginId,
+    AccessKind, AggregateField, Binding, BindingDestination, BindingId, BlockId, BorrowProblem,
+    BorrowProblemParts, Call, CallArgument, CallEffect, CallId, CallResult, CallResultProvenance,
+    CfgBlock, CfgEdge, Event, EventId, EventKind, KillReason, Loan, LoanId, OriginKind, Place,
+    PlaceId, PointId, ProgramPoint, ProjectionElem, RebindValue, TerminatorEventKind, Use, UseId,
+    UseKind, ValueOrigin, ValueOriginId,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 
@@ -675,7 +675,9 @@ fn remap_parts(parts: BorrowProblemParts, keep: &KeepRows) -> Option<BorrowProbl
                 id: mapped(&use_map, index)?,
                 point: mapped(&point_map, use_row.point.index())?,
                 place: mapped(&place_map, use_row.place.index())?,
-                kind: use_row.kind,
+                kind: remap_use_kind(use_row.kind, |destination| {
+                    remap_binding_destination(destination, |id| mapped(&place_map, id.index()))
+                })?,
                 definition: use_row.definition,
             })
         })
@@ -815,12 +817,14 @@ fn remap_event_kind(
     let place = |id: PlaceId| mapped(place_map, id.index());
     let origin = |id: ValueOriginId| mapped(origin_map, id.index());
     let call = |id: CallId| mapped(call_map, id.index());
+    let binding_destination =
+        |destination: BindingDestination| remap_binding_destination(destination, &place);
     match kind {
         EventKind::Fresh {
             destination,
             origin: origin_id,
         } => Some(EventKind::Fresh {
-            destination: place(*destination)?,
+            destination: binding_destination(*destination)?,
             origin: origin(*origin_id)?,
         }),
         EventKind::Alias {
@@ -829,7 +833,7 @@ fn remap_event_kind(
             origins,
         } => Some(EventKind::Alias {
             source: place(*source)?,
-            destination: place(*destination)?,
+            destination: binding_destination(*destination)?,
             origins: remap_values(origins, origin)?,
         }),
         EventKind::AliasFromPlace {
@@ -837,7 +841,7 @@ fn remap_event_kind(
             destination,
         } => Some(EventKind::AliasFromPlace {
             source: place(*source)?,
-            destination: place(*destination)?,
+            destination: binding_destination(*destination)?,
         }),
         EventKind::ExclusiveAlias {
             source,
@@ -845,7 +849,7 @@ fn remap_event_kind(
             origins,
         } => Some(EventKind::ExclusiveAlias {
             source: place(*source)?,
-            destination: place(*destination)?,
+            destination: binding_destination(*destination)?,
             origins: remap_values(origins, origin)?,
         }),
         EventKind::ExclusiveAliasFromPlace {
@@ -853,7 +857,7 @@ fn remap_event_kind(
             destination,
         } => Some(EventKind::ExclusiveAliasFromPlace {
             source: place(*source)?,
-            destination: place(*destination)?,
+            destination: binding_destination(*destination)?,
         }),
         EventKind::Copy {
             source,
@@ -861,7 +865,7 @@ fn remap_event_kind(
             origin: origin_id,
         } => Some(EventKind::Copy {
             source: place(*source)?,
-            destination: place(*destination)?,
+            destination: binding_destination(*destination)?,
             origin: origin(*origin_id)?,
         }),
         EventKind::Projection {
@@ -870,11 +874,11 @@ fn remap_event_kind(
             origin: origin_id,
         } => Some(EventKind::Projection {
             source: place(*source)?,
-            destination: place(*destination)?,
+            destination: binding_destination(*destination)?,
             origin: origin(*origin_id)?,
         }),
         EventKind::Rebind { destination, value } => Some(EventKind::Rebind {
-            destination: place(*destination)?,
+            destination: binding_destination(*destination)?,
             value: remap_rebind_value(value, place, origin)?,
         }),
         EventKind::Aggregate {
@@ -882,7 +886,7 @@ fn remap_event_kind(
             origin: origin_id,
             fields,
         } => Some(EventKind::Aggregate {
-            destination: place(*destination)?,
+            destination: binding_destination(*destination)?,
             origin: origin(*origin_id)?,
             fields: fields
                 .iter()
@@ -908,7 +912,7 @@ fn remap_event_kind(
             argument: remap_call_argument(argument, place, use_map)?,
         }),
         EventKind::Terminator { kind } => Some(EventKind::Terminator {
-            kind: remap_terminator_kind(kind, block_map)?,
+            kind: remap_terminator_kind(kind, block_map, place_map)?,
         }),
         EventKind::CallEffect(effect) => Some(EventKind::CallEffect(remap_call_effect(
             effect, place, origin, use_map, call,
@@ -940,6 +944,28 @@ fn remap_rebind_value(
     }
 }
 
+fn remap_binding_destination(
+    destination: BindingDestination,
+    mut place: impl FnMut(PlaceId) -> Option<PlaceId>,
+) -> Option<BindingDestination> {
+    match destination {
+        BindingDestination::Define(id) => Some(BindingDestination::Define(place(id)?)),
+        BindingDestination::Update(id) => Some(BindingDestination::Update(place(id)?)),
+    }
+}
+
+fn remap_use_kind(
+    kind: UseKind,
+    mut destination: impl FnMut(BindingDestination) -> Option<BindingDestination>,
+) -> Option<UseKind> {
+    match kind {
+        UseKind::BindingWrite(binding_destination) => {
+            Some(UseKind::BindingWrite(destination(binding_destination)?))
+        }
+        UseKind::Read | UseKind::Write | UseKind::LoanObservation => Some(kind),
+    }
+}
+
 fn remap_call_argument(
     argument: &CallArgument,
     place: impl Fn(PlaceId) -> Option<PlaceId>,
@@ -961,7 +987,7 @@ fn remap_call_effect(
 ) -> Option<CallEffect> {
     let result = match effect.result {
         Some(result) => Some(CallResult {
-            place: place(result.place)?,
+            destination: remap_binding_destination(result.destination, &place)?,
             origin: origin(result.origin)?,
         }),
         None => None,
@@ -981,10 +1007,22 @@ fn remap_call_effect(
 fn remap_terminator_kind(
     kind: &TerminatorEventKind,
     block_map: &[Option<BlockId>],
+    place_map: &[Option<PlaceId>],
 ) -> Option<TerminatorEventKind> {
+    let place = |id: PlaceId| mapped(place_map, id.index());
     match kind {
-        TerminatorEventKind::Jump { target } => Some(TerminatorEventKind::Jump {
+        TerminatorEventKind::Jump { target, arguments } => Some(TerminatorEventKind::Jump {
             target: mapped(block_map, target.index())?,
+            arguments: arguments
+                .iter()
+                .map(|argument| {
+                    Some(super::super::problem::JumpArgument {
+                        source: place(argument.source)?,
+                        destination: remap_binding_destination(argument.destination, &place)?,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?
+                .into_boxed_slice(),
         }),
         TerminatorEventKind::Branch { targets } => Some(TerminatorEventKind::Branch {
             targets: remap_values(targets, |target| mapped(block_map, target.index()))?,
@@ -1236,7 +1274,13 @@ pub(super) fn terminator_after_edge_removal(
         }
         TerminatorEventKind::Jump { .. } => match outgoing_targets {
             [] => Some(TerminatorEventKind::Return),
-            [target] => Some(TerminatorEventKind::Jump { target: *target }),
+            [target] => match kind {
+                TerminatorEventKind::Jump { arguments, .. } => Some(TerminatorEventKind::Jump {
+                    target: *target,
+                    arguments: arguments.clone(),
+                }),
+                _ => None,
+            },
             _ => None,
         },
         TerminatorEventKind::Break { .. } => match outgoing_targets {
@@ -1523,7 +1567,7 @@ fn place_is_referenced(parts: &BorrowProblemParts, place_id: PlaceId) -> bool {
 
 fn event_kind_references_place(kind: &EventKind, place_id: PlaceId) -> bool {
     match kind {
-        EventKind::Fresh { destination, .. } => *destination == place_id,
+        EventKind::Fresh { destination, .. } => destination.place() == place_id,
         EventKind::Alias {
             source,
             destination,
@@ -1551,24 +1595,31 @@ fn event_kind_references_place(kind: &EventKind, place_id: PlaceId) -> bool {
             source,
             destination,
             ..
-        } => *source == place_id || *destination == place_id,
+        } => *source == place_id || destination.place() == place_id,
         EventKind::Rebind { destination, value } => {
-            *destination == place_id
+            destination.place() == place_id
                 || matches!(value, RebindValue::AliasFromPlace(source) if *source == place_id)
         }
         EventKind::Aggregate {
             destination,
             fields,
             ..
-        } => *destination == place_id || fields.iter().any(|field| field.source == place_id),
+        } => destination.place() == place_id || fields.iter().any(|field| field.source == place_id),
         EventKind::CallArgument { argument, .. } => argument.place == place_id,
         EventKind::CallEffect(effect) => {
             effect
                 .arguments
                 .iter()
                 .any(|argument| argument.place == place_id)
-                || effect.result.is_some_and(|result| result.place == place_id)
+                || effect
+                    .result
+                    .is_some_and(|result| result.destination.place() == place_id)
         }
+        EventKind::Terminator {
+            kind: TerminatorEventKind::Jump { arguments, .. },
+        } => arguments.iter().any(|argument| {
+            argument.source == place_id || argument.destination.place() == place_id
+        }),
         EventKind::ScopeExit { .. }
         | EventKind::Terminator { .. }
         | EventKind::Access { .. }
@@ -2006,7 +2057,7 @@ fn render_event_kind(kind: &EventKind) -> String {
             origin,
         } => format!(
             "EventKind::Fresh {{ destination: {}, origin: {} }}",
-            render_place_id(*destination),
+            render_binding_destination(*destination),
             render_origin_id(*origin)
         ),
         EventKind::Alias {
@@ -2016,7 +2067,7 @@ fn render_event_kind(kind: &EventKind) -> String {
         } => format!(
             "EventKind::Alias {{ source: {}, destination: {}, origins: {} }}",
             render_place_id(*source),
-            render_place_id(*destination),
+            render_binding_destination(*destination),
             render_boxed(origins, |id| render_origin_id(*id))
         ),
         EventKind::AliasFromPlace {
@@ -2025,7 +2076,7 @@ fn render_event_kind(kind: &EventKind) -> String {
         } => format!(
             "EventKind::AliasFromPlace {{ source: {}, destination: {} }}",
             render_place_id(*source),
-            render_place_id(*destination)
+            render_binding_destination(*destination)
         ),
         EventKind::ExclusiveAlias {
             source,
@@ -2034,7 +2085,7 @@ fn render_event_kind(kind: &EventKind) -> String {
         } => format!(
             "EventKind::ExclusiveAlias {{ source: {}, destination: {}, origins: {} }}",
             render_place_id(*source),
-            render_place_id(*destination),
+            render_binding_destination(*destination),
             render_boxed(origins, |id| render_origin_id(*id))
         ),
         EventKind::ExclusiveAliasFromPlace {
@@ -2043,7 +2094,7 @@ fn render_event_kind(kind: &EventKind) -> String {
         } => format!(
             "EventKind::ExclusiveAliasFromPlace {{ source: {}, destination: {} }}",
             render_place_id(*source),
-            render_place_id(*destination)
+            render_binding_destination(*destination)
         ),
         EventKind::Copy {
             source,
@@ -2052,7 +2103,7 @@ fn render_event_kind(kind: &EventKind) -> String {
         } => format!(
             "EventKind::Copy {{ source: {}, destination: {}, origin: {} }}",
             render_place_id(*source),
-            render_place_id(*destination),
+            render_binding_destination(*destination),
             render_origin_id(*origin)
         ),
         EventKind::Projection {
@@ -2062,12 +2113,12 @@ fn render_event_kind(kind: &EventKind) -> String {
         } => format!(
             "EventKind::Projection {{ source: {}, destination: {}, origin: {} }}",
             render_place_id(*source),
-            render_place_id(*destination),
+            render_binding_destination(*destination),
             render_origin_id(*origin)
         ),
         EventKind::Rebind { destination, value } => format!(
             "EventKind::Rebind {{ destination: {}, value: {} }}",
-            render_place_id(*destination),
+            render_binding_destination(*destination),
             render_rebind_value(value)
         ),
         EventKind::Aggregate {
@@ -2076,7 +2127,7 @@ fn render_event_kind(kind: &EventKind) -> String {
             fields,
         } => format!(
             "EventKind::Aggregate {{ destination: {}, origin: {}, fields: {} }}",
-            render_place_id(*destination),
+            render_binding_destination(*destination),
             render_origin_id(*origin),
             render_boxed(fields, render_aggregate_field)
         ),
@@ -2134,8 +2185,8 @@ fn render_call_argument(argument: &CallArgument) -> String {
 
 fn render_call_result(result: CallResult) -> String {
     format!(
-        "CallResult {{ place: {}, origin: {} }}",
-        render_place_id(result.place),
+        "CallResult {{ destination: {}, origin: {} }}",
+        render_binding_destination(result.destination),
         render_origin_id(result.origin)
     )
 }
@@ -2227,10 +2278,15 @@ fn render_call_result_provenance(provenance: &CallResultProvenance) -> String {
 
 fn render_terminator(kind: &TerminatorEventKind) -> String {
     match kind {
-        TerminatorEventKind::Jump { target } => {
+        TerminatorEventKind::Jump { target, arguments } => {
             format!(
-                "TerminatorEventKind::Jump {{ target: {} }}",
-                render_block_id(*target)
+                "TerminatorEventKind::Jump {{ target: {}, arguments: {} }}",
+                render_block_id(*target),
+                render_boxed(arguments, |argument| format!(
+                    "JumpArgument {{ source: {}, destination: {} }}",
+                    render_place_id(argument.source),
+                    render_binding_destination(argument.destination)
+                ))
             )
         }
         TerminatorEventKind::Branch { targets } => format!(
@@ -2275,8 +2331,23 @@ fn render_projection(projection: ProjectionElem) -> String {
 fn render_use_kind(kind: UseKind) -> String {
     match kind {
         UseKind::Read => "UseKind::Read".to_string(),
+        UseKind::BindingWrite(destination) => format!(
+            "UseKind::BindingWrite({})",
+            render_binding_destination(destination)
+        ),
         UseKind::Write => "UseKind::Write".to_string(),
         UseKind::LoanObservation => "UseKind::LoanObservation".to_string(),
+    }
+}
+
+fn render_binding_destination(destination: BindingDestination) -> String {
+    match destination {
+        BindingDestination::Define(place) => {
+            format!("BindingDestination::Define({})", render_place_id(place))
+        }
+        BindingDestination::Update(place) => {
+            format!("BindingDestination::Update({})", render_place_id(place))
+        }
     }
 }
 

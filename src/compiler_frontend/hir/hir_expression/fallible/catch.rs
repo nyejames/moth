@@ -4,11 +4,13 @@
 //! previous continuation is restored before lowering that handler, so its failures go outward.
 
 use crate::compiler_frontend::ast::expressions::expression::FallibleHandling;
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::{
     CatchHandlerTarget, HirBuilder, ValueBlockTarget,
 };
+use crate::compiler_frontend::hir::ids::HirValueId;
+use crate::compiler_frontend::hir::statements::HirWriteTarget;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
 
@@ -21,8 +23,10 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn lower_fallible_carrier_with_branching(
         &mut self,
         context: FallibleBranchingContext<'_>,
-        emit_protected: impl FnOnce(&mut HirBuilder<'_>) -> Result<LoweredExpression, CompilerError>,
-    ) -> Result<LoweredExpression, CompilerError> {
+        emit_protected: impl FnOnce(
+            &mut HirBuilder<'_>,
+        ) -> Result<LoweredExpression, HirConstructionFailure>,
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let FallibleBranchingContext {
             result_type_ids,
             handling,
@@ -55,13 +59,19 @@ impl<'a> HirBuilder<'a> {
         // No success payload or merge-local write is executed on a producer's error edge.
         match result_locals.as_slice() {
             [] => {}
-            [result_local] => {
-                self.emit_assign_local_statement(*result_local, lowered.value, span)?
-            }
+            [result_local] => self.emit_write_statement(
+                HirWriteTarget::DefineLocal(*result_local),
+                lowered.value,
+                span,
+            )?,
             _ => {
-                let tuple_type = lowered.value.ty;
+                let tuple_type = self.module.expressions.expression(lowered.value).ty;
                 let tuple_local = self.allocate_temp_local(tuple_type, None)?;
-                self.emit_assign_local_statement(tuple_local, lowered.value, span)?;
+                self.emit_write_statement(
+                    HirWriteTarget::DefineLocal(tuple_local),
+                    lowered.value,
+                    span,
+                )?;
                 for (index, result_local) in result_locals.iter().enumerate() {
                     let slot_type = self.lower_type_id(result_type_ids[index], span)?;
                     let success_region = self.current_region_or_error(span)?;
@@ -70,18 +80,19 @@ impl<'a> HirBuilder<'a> {
                         tuple_type,
                         &None,
                         success_region,
-                    );
+                    )?;
                     let value = self.make_expression(
                         &None,
-                        HirExpressionKind::TupleGet {
-                            tuple: Box::new(tuple),
-                            index,
-                        },
+                        HirExpressionKind::TupleGet { tuple, index },
                         slot_type,
                         ValueKind::RValue,
                         success_region,
-                    );
-                    self.emit_assign_local_statement(*result_local, value, span)?;
+                    )?;
+                    self.emit_write_statement(
+                        HirWriteTarget::DefineLocal(*result_local),
+                        value,
+                        span,
+                    )?;
                 }
             }
         }
@@ -104,9 +115,17 @@ impl<'a> HirBuilder<'a> {
                         false,
                         None,
                     )?;
-                    let error_payload =
-                        self.make_local_load_expression(error_local, err_type, &None, error_region);
-                    self.emit_assign_local_statement(handler_error_local, error_payload, span)?;
+                    let error_payload = self.make_local_load_expression(
+                        error_local,
+                        err_type,
+                        &None,
+                        error_region,
+                    )?;
+                    self.emit_write_statement(
+                        HirWriteTarget::DefineLocal(handler_error_local),
+                        error_payload,
+                        span,
+                    )?;
                 }
                 if result_locals.is_empty() {
                     self.lower_statement_sequence(body)?;
@@ -143,7 +162,7 @@ impl<'a> HirBuilder<'a> {
 
         self.set_current_block(merge_block, span)?;
         let value = if result_locals.is_empty() {
-            self.unit_expression(span, region)
+            self.unit_expression(span, region)?
         } else {
             self.value_block_result_expression(&result_locals, result_type_ids, span, region)?
         };
@@ -159,7 +178,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         carrier: EmittedFallibleCarrier,
         span: &Option<SourceSpan>,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         let Some(handler) = self.active_catch_handler else {
             return_hir_transformation_error!(
                 "Catch carrier lowered without an active handler",
@@ -187,17 +206,21 @@ impl<'a> HirBuilder<'a> {
             carrier.carrier_type,
             &None,
             error_region,
-        );
+        )?;
         let error_payload = self.make_expression(
             &None,
             HirExpressionKind::FallibleUnwrapError {
-                result: Box::new(error_result),
+                result: error_result,
             },
             carrier.err_type,
             ValueKind::RValue,
             error_region,
-        );
-        self.emit_assign_local_statement(handler.error_local, error_payload, span)?;
+        )?;
+        self.emit_write_statement(
+            HirWriteTarget::DefineLocal(handler.error_local),
+            error_payload,
+            span,
+        )?;
         self.emit_jump_to(
             branch.error_block,
             handler.block,
@@ -212,16 +235,16 @@ impl<'a> HirBuilder<'a> {
             carrier.carrier_type,
             &None,
             success_region,
-        );
+        )?;
         let success_payload = self.make_expression(
             &None,
             HirExpressionKind::FallibleUnwrapSuccess {
-                result: Box::new(success_result),
+                result: success_result,
             },
             carrier.ok_type,
             ValueKind::RValue,
             success_region,
-        );
+        )?;
         if carrier.validate_float_success {
             self.emit_validated_float_value(success_payload, span)
         } else {

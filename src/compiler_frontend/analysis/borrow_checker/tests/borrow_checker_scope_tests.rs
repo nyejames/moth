@@ -9,9 +9,10 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
 use crate::compiler_frontend::compiler_messages::BorrowDiagnosticKind;
 use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::builtin_type_ids::BOOL;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
-use crate::compiler_frontend::hir::ids::{HirNodeId, HirValueId};
+use crate::compiler_frontend::datatypes::builtin_type_ids::{BOOL, INT};
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::ids::HirNodeId;
+use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -71,7 +72,7 @@ fn if_branch_local_alias_does_not_escape_merge() {
                             reference_expr_with_datatype(
                                 x,
                                 DataType::Int,
-                                BOOL,
+                                INT,
                                 test_source_location(3),
                             ),
                         )),
@@ -84,7 +85,7 @@ fn if_branch_local_alias_does_not_escape_merge() {
             ),
             node(
                 NodeKind::Assignment {
-                    target: assignment_target(x, DataType::Int, BOOL, test_source_location(4)),
+                    target: assignment_target(x, DataType::Int, INT, test_source_location(4)),
                     value: Expression::int(2, test_source_location(4), ValueMode::ImmutableOwned),
                 },
                 test_source_location(4),
@@ -118,7 +119,7 @@ fn match_arm_local_alias_does_not_escape_merge() {
         body: vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 y,
-                reference_expr_with_datatype(x, DataType::Int, BOOL, test_source_location(4)),
+                reference_expr_with_datatype(x, DataType::Int, INT, test_source_location(4)),
             )),
             test_source_location(4),
         )],
@@ -153,7 +154,7 @@ fn match_arm_local_alias_does_not_escape_merge() {
             ),
             node(
                 NodeKind::Assignment {
-                    target: assignment_target(x, DataType::Int, BOOL, test_source_location(5)),
+                    target: assignment_target(x, DataType::Int, INT, test_source_location(5)),
                     value: Expression::int(2, test_source_location(5), ValueMode::ImmutableOwned),
                 },
                 test_source_location(5),
@@ -204,7 +205,7 @@ fn while_body_local_alias_does_not_escape_exit() {
                             reference_expr_with_datatype(
                                 x,
                                 DataType::Int,
-                                BOOL,
+                                INT,
                                 test_source_location(3),
                             ),
                         )),
@@ -215,7 +216,7 @@ fn while_body_local_alias_does_not_escape_exit() {
             ),
             node(
                 NodeKind::Assignment {
-                    target: assignment_target(x, DataType::Int, BOOL, test_source_location(4)),
+                    target: assignment_target(x, DataType::Int, INT, test_source_location(4)),
                     value: Expression::int(2, test_source_location(4), ValueMode::ImmutableOwned),
                 },
                 test_source_location(4),
@@ -275,7 +276,7 @@ fn dead_local_access_reports_borrow_error() {
                             reference_expr_with_datatype(
                                 x,
                                 DataType::Int,
-                                BOOL,
+                                INT,
                                 test_source_location(3),
                             ),
                         )),
@@ -288,7 +289,7 @@ fn dead_local_access_reports_borrow_error() {
             ),
             node(
                 NodeKind::Assignment {
-                    target: assignment_target(x, DataType::Int, BOOL, test_source_location(4)),
+                    target: assignment_target(x, DataType::Int, INT, test_source_location(4)),
                     value: Expression::int(2, test_source_location(4), ValueMode::ImmutableOwned),
                 },
                 test_source_location(4),
@@ -337,16 +338,13 @@ fn dead_local_access_reports_borrow_error() {
         })
         .expect("then local should exist");
 
-    let synthetic_value = HirExpression {
-        id: HirValueId(77_001),
-        kind: HirExpressionKind::Load(crate::compiler_frontend::hir::places::HirPlace::Local(
-            then_local.id,
-        )),
-        ty: then_local.ty,
-        value_kind: ValueKind::Place,
-        region: hir.blocks[merge_block.0 as usize].region,
-        span: None,
-    };
+    let synthetic_value = crate::compiler_frontend::tests::hir_fixture_support::expression(
+        HirExpressionKind::Load(HirPlace::local(then_local.id)),
+        then_local.ty,
+        hir.blocks[merge_block.0 as usize].region,
+        ValueKind::Place,
+        &mut hir.expressions,
+    );
     let synthetic_statement = HirStatement {
         id: HirNodeId(77_000),
         kind: HirStatementKind::Expr(synthetic_value),
@@ -359,7 +357,7 @@ fn dead_local_access_reports_borrow_error() {
         .map_statement(synthetic_statement.span, &synthetic_statement);
     hir.side_table.map_value(
         synthetic_statement.span,
-        HirValueId(77_001),
+        synthetic_value,
         synthetic_statement.span,
     );
 

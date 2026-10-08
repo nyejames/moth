@@ -15,10 +15,12 @@ use super::ids::ExternalTypeId;
 /// Backend-agnostic ABI values that currently cross the host boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ExternalAbiType {
-    /// Fixed signed 32-bit integer at the foreign ABI boundary.
-    I32,
-    /// Fixed IEEE binary64 float at the foreign ABI boundary.
-    F64,
+    /// Fixed-width foreign scalar such as `I32`, `U32`, `F32` or `F64`.
+    ///
+    /// The canonical `FixedScalar` identity keeps one owner for width, range and precision, so
+    /// the slot is profile-independent and shares its `TypeId` with source-authored spellings.
+    /// Each backend adapter decides which scalars it can carry and rejects the rest.
+    Fixed(FixedScalar),
     Bool,
     Utf8Str,
     Char,
@@ -34,8 +36,7 @@ impl ExternalAbiType {
     /// Maps this ABI type to the corresponding frontend `DataType` when one exists.
     pub(crate) fn to_datatype(&self) -> Option<DataType> {
         match self {
-            ExternalAbiType::I32 => Some(DataType::FixedScalar(FixedScalar::I32)),
-            ExternalAbiType::F64 => Some(DataType::FixedScalar(FixedScalar::F64)),
+            ExternalAbiType::Fixed(scalar) => Some(DataType::FixedScalar(*scalar)),
             ExternalAbiType::Bool => Some(DataType::Bool),
             ExternalAbiType::Utf8Str => Some(DataType::StringSlice),
             ExternalAbiType::Char => Some(DataType::Char),
@@ -55,8 +56,7 @@ impl ExternalAbiType {
         type_environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
     ) -> Option<crate::compiler_frontend::datatypes::ids::TypeId> {
         match self {
-            ExternalAbiType::I32 => Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
-            ExternalAbiType::F64 => Some(builtin_type_ids::fixed_scalar(FixedScalar::F64)),
+            ExternalAbiType::Fixed(scalar) => Some(builtin_type_ids::fixed_scalar(*scalar)),
             ExternalAbiType::Bool => Some(type_environment.builtins().bool),
             ExternalAbiType::Utf8Str => Some(type_environment.builtins().string),
             ExternalAbiType::Char => Some(type_environment.builtins().char),

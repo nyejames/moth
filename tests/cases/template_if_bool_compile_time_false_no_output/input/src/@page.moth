@@ -1,0 +1,5 @@
+const_wrapper #= [:<section class="const-false-wrapper">[$slot]</section>]
+
+#[const_wrapper, if false:
+    template_if_bool_compile_time_false_no_output inactive
+]

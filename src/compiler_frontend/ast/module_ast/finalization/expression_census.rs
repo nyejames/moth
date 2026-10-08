@@ -498,20 +498,15 @@ impl Census<'_> {
             OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => {
                 self.drain(Item::Expression(expression), partition)
             }
-            OwnedRuntimeTemplateNode::BranchChain { branches, .. } => {
-                record_list(branches, ListKind::HandoffBranches);
-                for branch in branches {
-                    match &branch.selector {
-                        TemplateBranchSelector::Bool(value) => {
-                            self.drain(Item::Expression(value), partition)
-                        }
-                        TemplateBranchSelector::OptionPresentCapture { scrutinee, pattern } => {
-                            self.drain(Item::Expression(scrutinee), partition);
-                            self.drain(Item::Pattern(pattern), partition);
-                        }
-                    }
+            OwnedRuntimeTemplateNode::Conditional { selector, .. } => match selector.as_ref() {
+                TemplateBranchSelector::Bool(value) => {
+                    self.drain(Item::Expression(value), partition)
                 }
-            }
+                TemplateBranchSelector::OptionPresentCapture { scrutinee, pattern } => {
+                    self.drain(Item::Expression(scrutinee), partition);
+                    self.drain(Item::Pattern(pattern), partition);
+                }
+            },
             OwnedRuntimeTemplateNode::Loop { header, .. } => match header {
                 TemplateLoopHeader::Conditional { condition } => {
                     self.drain(Item::Expression(condition), partition)
@@ -542,7 +537,6 @@ impl Census<'_> {
             }
             OwnedRuntimeTemplateNode::ConditionalWrapper { .. }
             | OwnedRuntimeTemplateNode::AggregateOutput
-            | OwnedRuntimeTemplateNode::LoopControl { .. }
             | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
             | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
             | OwnedRuntimeTemplateNode::Slot { .. } => {}
@@ -567,21 +561,13 @@ impl Census<'_> {
                         pending.push((view.clone(), *child));
                     }
                 }
-                TemplateIrNodeKind::BranchChain {
-                    branches, fallback, ..
-                } => {
-                    record_list(branches, ListKind::TirBranches);
-                    for branch in branches {
-                        if let TemplateBranchSelector::OptionPresentCapture { pattern, .. } =
-                            &branch.selector
-                        {
-                            self.drain(Item::Pattern(pattern), partition);
-                        }
-                        pending.push((view.clone(), branch.body));
+                TemplateIrNodeKind::Conditional { selector, body, .. } => {
+                    if let TemplateBranchSelector::OptionPresentCapture { pattern, .. } =
+                        selector.as_ref()
+                    {
+                        self.drain(Item::Pattern(pattern), partition);
                     }
-                    if let Some(fallback) = fallback {
-                        pending.push((view.clone(), *fallback));
-                    }
+                    pending.push((view.clone(), *body));
                 }
                 TemplateIrNodeKind::Loop {
                     header,
@@ -621,7 +607,6 @@ impl Census<'_> {
                 | TemplateIrNodeKind::Text { .. }
                 | TemplateIrNodeKind::Slot { .. }
                 | TemplateIrNodeKind::AggregateOutput
-                | TemplateIrNodeKind::LoopControl { .. }
                 | TemplateIrNodeKind::RuntimeSlotSite { .. }
                 | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => {}
             }
@@ -820,12 +805,10 @@ enum ListKind {
     MultiBindTargets,
     PatternCaptures,
     HandoffNodes,
-    HandoffBranches,
     HandoffSources,
     HandoffSites,
     OwnedStructuralPieces,
     TirChildIds,
-    TirBranches,
 }
 
 // Length/capacity units are elements of the named family, never mixed bytes.
@@ -871,16 +854,6 @@ fn record_list<T>(values: &Vec<T>, kind: ListKind) {
             AstCounter::CensusHandoffNodesSingle,
             AstCounter::CensusHandoffNodesMultiple,
         ],
-        ListKind::HandoffBranches => [
-            AstCounter::CensusHandoffBranchesLists,
-            AstCounter::CensusHandoffBranchesLengthSum,
-            AstCounter::CensusHandoffBranchesLengthMax,
-            AstCounter::CensusHandoffBranchesCapacitySum,
-            AstCounter::CensusHandoffBranchesCapacityMax,
-            AstCounter::CensusHandoffBranchesEmpty,
-            AstCounter::CensusHandoffBranchesSingle,
-            AstCounter::CensusHandoffBranchesMultiple,
-        ],
         ListKind::HandoffSources => [
             AstCounter::CensusHandoffSourcesLists,
             AstCounter::CensusHandoffSourcesLengthSum,
@@ -920,16 +893,6 @@ fn record_list<T>(values: &Vec<T>, kind: ListKind) {
             AstCounter::CensusTirChildIdsEmpty,
             AstCounter::CensusTirChildIdsSingle,
             AstCounter::CensusTirChildIdsMultiple,
-        ],
-        ListKind::TirBranches => [
-            AstCounter::CensusTirBranchesLists,
-            AstCounter::CensusTirBranchesLengthSum,
-            AstCounter::CensusTirBranchesLengthMax,
-            AstCounter::CensusTirBranchesCapacitySum,
-            AstCounter::CensusTirBranchesCapacityMax,
-            AstCounter::CensusTirBranchesEmpty,
-            AstCounter::CensusTirBranchesSingle,
-            AstCounter::CensusTirBranchesMultiple,
         ],
         ListKind::CallArgs => [
             AstCounter::CensusCallArgsLists,

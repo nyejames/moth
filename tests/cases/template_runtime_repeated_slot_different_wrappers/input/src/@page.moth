@@ -10,6 +10,12 @@ panel = [:
 
 show = true
 label = "runtime"
+empty_producer_calls ~{Int} = {}
+
+empty_producer |calls ~{Int}| -> String:
+    ~calls.push(1)
+    return ""
+;
 
 rendered = [panel:
     [$insert("item"):
@@ -17,6 +23,15 @@ rendered = [panel:
             value [label]
         ]
     ]
+    [$insert("item"):
+        [empty_producer(~empty_producer_calls)]
+    ]
+    [$insert("item"):
+        [if not show:
+            structural-no-output
+        ]
+    ]
 ]
 
 io.line(rendered)
+io.line([: empty-producer-calls=[empty_producer_calls.length()]])

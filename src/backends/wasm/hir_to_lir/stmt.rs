@@ -2,7 +2,7 @@
 
 use crate::backends::error_types::lir_transformation_error;
 use crate::backends::wasm::hir_to_lir::context::WasmFunctionLoweringContext;
-use crate::backends::wasm::hir_to_lir::expr::lower_expression;
+use crate::backends::wasm::hir_to_lir::expr::{expression_type, lower_expression};
 use crate::backends::wasm::hir_to_lir::imports::resolve_host_call_import;
 use crate::backends::wasm::lir::instructions::{
     IntegerCheckMode, WasmCalleeRef, WasmCheckedIntegerOperation, WasmIntegerOperationKind,
@@ -13,13 +13,12 @@ use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
-use crate::compiler_frontend::hir::expressions::HirExpression;
-use crate::compiler_frontend::hir::ids::{HirNodeId, LocalId};
+use crate::compiler_frontend::hir::ids::{HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, HirWriteTarget};
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
 use moth_lexical::numeric::profile::NumericProfile;
 
@@ -31,17 +30,23 @@ pub(crate) fn lower_statement(
     // Statement lowering is explicitly side-effecting: expressions append LIR
     // statements directly to preserve HIR evaluation order.
     match &statement.kind {
-        HirStatementKind::Assign { target, value } => {
-            lower_assignment(context, target, value, statements)
-        }
+        HirStatementKind::Write { target, value } => match target {
+            HirWriteTarget::DefineLocal(local) => {
+                lower_assignment(context, HirPlace::local(*local), *value, statements)
+            }
+            HirWriteTarget::AssignPlace(place) => {
+                lower_assignment(context, *place, *value, statements)
+            }
+        },
         HirStatementKind::Call {
             target,
             args,
             result,
         } => {
+            let args = context.module_context.hir_module.expressions.values(*args);
             let mut lowered_args = Vec::with_capacity(args.len());
             for arg in args {
-                let lowered = lower_expression(context, arg, statements)?;
+                let lowered = lower_expression(context, *arg, statements)?;
                 lowered_args.push(lowered.value);
             }
 
@@ -84,7 +89,7 @@ pub(crate) fn lower_statement(
 
             let dst = result
                 .as_ref()
-                .and_then(|local_id| context.local_map.get(local_id).copied());
+                .and_then(|destination| context.local_map.get(&destination.local()).copied());
 
             statements.push(WasmLirStmt::Call {
                 dst,
@@ -119,7 +124,7 @@ pub(crate) fn lower_statement(
                     *op,
                     *failure_mode,
                     operands,
-                    *result,
+                    result.local(),
                     statements,
                 )
             } else {
@@ -128,7 +133,7 @@ pub(crate) fn lower_statement(
                     *op,
                     *failure_mode,
                     operands,
-                    *result,
+                    result.local(),
                     statements,
                 )
             }
@@ -147,24 +152,24 @@ pub(crate) fn lower_statement(
             in_range_result,
         } => lower_float_range_candidate(
             context,
-            [current, step, end, ascending],
+            [*current, *step, *end, *ascending],
             *inclusive,
             *domain,
-            [*candidate_result, *in_range_result],
+            [candidate_result.local(), in_range_result.local()],
             statements,
         ),
         HirStatementKind::FormatFloat {
             source,
             failure_mode,
             result,
-        } => lower_format_float(context, source, *failure_mode, *result, statements),
+        } => lower_format_float(context, *source, *failure_mode, result.local(), statements),
         HirStatementKind::ValidateFloat {
             source,
             failure_mode,
             result,
-        } => lower_validate_float(context, source, *failure_mode, *result, statements),
+        } => lower_validate_float(context, *source, *failure_mode, result.local(), statements),
         HirStatementKind::Expr(expression) => {
-            let _ = lower_expression(context, expression, statements)?;
+            let _ = lower_expression(context, *expression, statements)?;
             Ok(())
         }
         HirStatementKind::Drop(local_id) => {
@@ -188,7 +193,7 @@ pub(crate) fn lower_statement(
             // WHAT: lower a runtime fragment push into a Wasm vec-push sequence.
             // WHY: entry start() accumulates runtime fragments via PushRuntimeFragment;
             //      the Wasm backend must append the evaluated string to the fragment vec.
-            lower_push_runtime_fragment(context, vec_local, value, statements)
+            lower_push_runtime_fragment(context, vec_local, *value, statements)
         }
     }
 }
@@ -227,7 +232,7 @@ fn lower_checked_integer_operation(
     };
     let lir_operands = match (op.operator, operands) {
         (NumericOperator::Negate, HirNumericOperands::Unary { operand }) => {
-            let lowered = lower_expression(context, operand, statements)?;
+            let lowered = lower_expression(context, *operand, statements)?;
             WasmNumericOperationOperands::Unary {
                 operand: lowered.value,
             }
@@ -241,8 +246,8 @@ fn lower_checked_integer_operation(
             | NumericOperator::Power,
             HirNumericOperands::Binary { left, right },
         ) => {
-            let lowered_left = lower_expression(context, left, statements)?;
-            let lowered_right = lower_expression(context, right, statements)?;
+            let lowered_left = lower_expression(context, *left, statements)?;
+            let lowered_right = lower_expression(context, *right, statements)?;
             WasmNumericOperationOperands::Binary {
                 left: lowered_left.value,
                 right: lowered_right.value,
@@ -340,7 +345,7 @@ fn lower_checked_integer_operation(
 
 fn lower_validate_float(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
-    source: &HirExpression,
+    source: HirValueId,
     failure_mode: NumericFailureMode,
     result: LocalId,
     statements: &mut Vec<WasmLirStmt>,
@@ -353,10 +358,11 @@ fn lower_validate_float(
 
     let type_environment = context.module_context.type_environment;
     let float_type = type_environment.builtins().float;
-    if source.ty != float_type {
+    let source_type = expression_type(context, source);
+    if source_type != float_type {
         return Err(lir_transformation_error(format!(
             "Wasm Float validation source has type {:?}, expected Float",
-            source.ty
+            source_type
         )));
     }
 
@@ -407,7 +413,7 @@ fn lower_validate_float(
 
 fn lower_format_float(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
-    source: &HirExpression,
+    source: HirValueId,
     failure_mode: NumericFailureMode,
     result: LocalId,
     statements: &mut Vec<WasmLirStmt>,
@@ -419,10 +425,11 @@ fn lower_format_float(
     }
 
     let type_environment = context.module_context.type_environment;
-    if source.ty != type_environment.builtins().float {
+    let source_type = expression_type(context, source);
+    if source_type != type_environment.builtins().float {
         return Err(lir_transformation_error(format!(
             "Wasm Float formatting source has type {:?}, expected Float",
-            source.ty
+            source_type
         )));
     }
 
@@ -504,13 +511,14 @@ fn lower_checked_float_operation(
 
     let lir_operands = match (op.operator, operands) {
         (NumericOperator::Negate, HirNumericOperands::Unary { operand }) => {
-            if operand.ty != expected_type {
+            let operand_type = expression_type(context, *operand);
+            if operand_type != expected_type {
                 return Err(lir_transformation_error(format!(
                     "Wasm checked float operand has type {:?}, expected {}",
-                    operand.ty, op.domain
+                    operand_type, op.domain
                 )));
             }
-            let lowered = lower_expression(context, operand, statements)?;
+            let lowered = lower_expression(context, *operand, statements)?;
             WasmNumericOperationOperands::Unary {
                 operand: lowered.value,
             }
@@ -524,7 +532,9 @@ fn lower_checked_float_operation(
             | NumericOperator::Power,
             HirNumericOperands::Binary { left, right },
         ) => {
-            if left.ty != expected_type || right.ty != expected_type {
+            if expression_type(context, *left) != expected_type
+                || expression_type(context, *right) != expected_type
+            {
                 return Err(lir_transformation_error(format!(
                     "Wasm checked float operands do not match {}",
                     op.domain
@@ -532,8 +542,8 @@ fn lower_checked_float_operation(
             }
 
             // Linearise both operands in source order before emitting the checked operation.
-            let lowered_left = lower_expression(context, left, statements)?;
-            let lowered_right = lower_expression(context, right, statements)?;
+            let lowered_left = lower_expression(context, *left, statements)?;
+            let lowered_right = lower_expression(context, *right, statements)?;
             WasmNumericOperationOperands::Binary {
                 left: lowered_left.value,
                 right: lowered_right.value,
@@ -576,7 +586,7 @@ fn lower_checked_float_operation(
 
 fn lower_float_range_candidate(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
-    inputs: [&HirExpression; 4],
+    inputs: [HirValueId; 4],
     inclusive: bool,
     domain: NumericScalar,
     output_ids: [LocalId; 2],
@@ -600,13 +610,18 @@ fn lower_float_range_candidate(
             ))
         })?;
     let expected_type = domain.type_id(context.module_context.type_environment);
-    if current.ty != expected_type || step.ty != expected_type || end.ty != expected_type {
+    if expression_type(context, current) != expected_type
+        || expression_type(context, step) != expected_type
+        || expression_type(context, end) != expected_type
+    {
         return Err(lir_transformation_error(format!(
             "Wasm float range candidate operands do not match {}",
             domain
         )));
     }
-    if ascending.ty != context.module_context.type_environment.builtins().bool {
+    if expression_type(context, ascending)
+        != context.module_context.type_environment.builtins().bool
+    {
         return Err(lir_transformation_error(
             "Wasm float range candidate direction must be Bool",
         ));
@@ -736,26 +751,33 @@ fn uses_32_bit_product_scratch(kind: WasmIntegerOperationKind) -> bool {
 
 fn lower_assignment(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
-    target: &HirPlace,
-    value: &crate::compiler_frontend::hir::expressions::HirExpression,
+    target: HirPlace,
+    value: HirValueId,
     statements: &mut Vec<WasmLirStmt>,
 ) -> Result<(), CompilerError> {
     // WHAT: preserve explicit move/copy distinction in LIR.
     // WHY: the current emitter keeps the ownership hook representable while transitional
     // collected scaffolding remains. Final lowering consumes `ValidatedMemoryPlan`.
-    let HirPlace::Local(target_local) = target else {
+    if !context
+        .module_context
+        .hir_module
+        .expressions
+        .projections(target.projections)
+        .is_empty()
+    {
         return Err(lir_transformation_error(
             "Wasm lowering currently supports assignments only to direct locals",
         ));
-    };
+    }
 
     let dst = context
         .local_map
-        .get(target_local)
+        .get(&target.root)
         .copied()
         .ok_or_else(|| {
             lir_transformation_error(format!(
-                "Wasm lowering could not resolve assignment target local {target_local:?}",
+                "Wasm lowering could not resolve assignment target local {:?}",
+                target.root
             ))
         })?;
 
@@ -782,7 +804,7 @@ fn lower_assignment(
 fn lower_push_runtime_fragment(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
     vec_local: &LocalId,
-    value: &HirExpression,
+    value: HirValueId,
     statements: &mut Vec<WasmLirStmt>,
 ) -> Result<(), CompilerError> {
     let vec_handle = context.local_map.get(vec_local).copied().ok_or_else(|| {

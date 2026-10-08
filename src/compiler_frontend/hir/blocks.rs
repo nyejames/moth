@@ -8,7 +8,6 @@ use crate::compiler_frontend::hir::ids::{BlockId, LocalId, RegionId};
 use crate::compiler_frontend::hir::statements::HirStatement;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 #[derive(Debug, Clone)]
 pub struct HirBlock {
     pub id: BlockId,
@@ -29,14 +28,4 @@ pub struct HirLocal {
     pub region: RegionId,
     /// Exact authored declaration/binding span; compiler-generated locals are span-free.
     pub span: Option<SourceSpan>,
-}
-
-impl HirBlock {
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        for statement in &mut self.statements {
-            statement.remap_string_ids(remap);
-        }
-
-        self.terminator.remap_string_ids(remap);
-    }
 }

@@ -12,10 +12,10 @@ use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirBlock;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, HirMapOp};
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
@@ -776,21 +776,23 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
 
     fn collect_runtime_feature_uses_from_statement(&mut self, statement: &HirStatement) {
         let span = statement.span;
+        let expression_collector =
+            RuntimeFeatureUseCollector::new(self.index.hir, self.owner_function);
 
         match &statement.kind {
             // Expressions and calls: recurse into sub-expressions only.
-            HirStatementKind::Assign { value, .. } | HirStatementKind::Expr(value) => {
-                self.collect_runtime_feature_uses_from_expression(value, span);
+            HirStatementKind::Write { value, .. } | HirStatementKind::Expr(value) => {
+                expression_collector.collect(&mut self.direct_facts, *value, span);
             }
 
             HirStatementKind::Call { args, .. } => {
-                for arg in args {
-                    self.collect_runtime_feature_uses_from_expression(arg, span);
+                for arg in self.index.hir.expressions.values(*args) {
+                    expression_collector.collect(&mut self.direct_facts, *arg, span);
                 }
             }
 
             HirStatementKind::PushRuntimeFragment { value, .. } => {
-                self.collect_runtime_feature_uses_from_expression(value, span);
+                expression_collector.collect(&mut self.direct_facts, *value, span);
             }
 
             // Map operations: record the use, then recurse into receiver and args.
@@ -801,9 +803,9 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                     kind: ReachableMapUseKind::Operation(*op),
                     span,
                 });
-                self.collect_runtime_feature_uses_from_expression(receiver, span);
-                for arg in args {
-                    self.collect_runtime_feature_uses_from_expression(arg, span);
+                expression_collector.collect(&mut self.direct_facts, *receiver, span);
+                for arg in self.index.hir.expressions.values(*args) {
+                    expression_collector.collect(&mut self.direct_facts, *arg, span);
                 }
             }
 
@@ -814,10 +816,10 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 ascending,
                 ..
             } => {
-                self.collect_runtime_feature_uses_from_expression(current, span);
-                self.collect_runtime_feature_uses_from_expression(step, span);
-                self.collect_runtime_feature_uses_from_expression(end, span);
-                self.collect_runtime_feature_uses_from_expression(ascending, span);
+                expression_collector.collect(&mut self.direct_facts, *current, span);
+                expression_collector.collect(&mut self.direct_facts, *step, span);
+                expression_collector.collect(&mut self.direct_facts, *end, span);
+                expression_collector.collect(&mut self.direct_facts, *ascending, span);
             }
             HirStatementKind::Drop(_) => {}
 
@@ -837,11 +839,11 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
 
                 match operands {
                     HirNumericOperands::Unary { operand } => {
-                        self.collect_runtime_feature_uses_from_expression(operand, span);
+                        expression_collector.collect(&mut self.direct_facts, *operand, span);
                     }
                     HirNumericOperands::Binary { left, right } => {
-                        self.collect_runtime_feature_uses_from_expression(left, span);
-                        self.collect_runtime_feature_uses_from_expression(right, span);
+                        expression_collector.collect(&mut self.direct_facts, *left, span);
+                        expression_collector.collect(&mut self.direct_facts, *right, span);
                     }
                 }
             }
@@ -868,7 +870,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                         policy: *policy,
                         form: ReachableRuntimeCastForm::Statement,
                     });
-                self.collect_runtime_feature_uses_from_expression(source, span);
+                expression_collector.collect(&mut self.direct_facts, *source, span);
             }
 
             HirStatementKind::FormatFloat {
@@ -883,7 +885,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                         failure_mode: *failure_mode,
                         span,
                     });
-                self.collect_runtime_feature_uses_from_expression(source, span);
+                expression_collector.collect(&mut self.direct_facts, *source, span);
             }
 
             HirStatementKind::ValidateFloat {
@@ -898,33 +900,35 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                         failure_mode: *failure_mode,
                         span,
                     });
-                self.collect_runtime_feature_uses_from_expression(source, span);
+                expression_collector.collect(&mut self.direct_facts, *source, span);
             }
         }
     }
 
     fn collect_runtime_feature_uses_from_terminator(&mut self, block: &HirBlock) {
         let fallback_span = self.index.hir.side_table.terminator_span(block.id).copied();
+        let expression_collector =
+            RuntimeFeatureUseCollector::new(self.index.hir, self.owner_function);
 
         match &block.terminator {
             // Terminators that carry a sub-expression to inspect.
             HirTerminator::If { condition, .. } => {
-                self.collect_runtime_feature_uses_from_expression(condition, fallback_span);
+                expression_collector.collect(&mut self.direct_facts, *condition, fallback_span);
             }
 
             HirTerminator::FallibleBranch { result, .. } => {
-                self.collect_runtime_feature_uses_from_expression(result, fallback_span);
+                expression_collector.collect(&mut self.direct_facts, *result, fallback_span);
             }
 
             HirTerminator::Match { scrutinee, .. } => {
-                self.collect_runtime_feature_uses_from_expression(scrutinee, fallback_span);
+                expression_collector.collect(&mut self.direct_facts, *scrutinee, fallback_span);
             }
 
             // Terminators that return a value.
             HirTerminator::Return(value)
             | HirTerminator::ReturnSuccess(value)
             | HirTerminator::ReturnError(value) => {
-                self.collect_runtime_feature_uses_from_expression(value, fallback_span);
+                expression_collector.collect(&mut self.direct_facts, *value, fallback_span);
             }
 
             // Terminators with no sub-expressions to inspect.
@@ -938,12 +942,13 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 message,
                 message_evaluation,
             } => {
+                let message_row = self.index.hir.expressions.expression(*message);
                 let span = self
                     .index
                     .hir
                     .side_table
-                    .value_source_span(message.id)
-                    .or(message.span)
+                    .value_source_span(*message)
+                    .or(message_row.span)
                     .or(fallback_span);
                 self.direct_facts
                     .reachable_assertion_messages
@@ -951,105 +956,108 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                         evaluation: *message_evaluation,
                         span,
                     });
-                self.collect_runtime_feature_uses_from_expression(message, fallback_span);
+                expression_collector.collect(&mut self.direct_facts, *message, fallback_span);
             }
         }
     }
 
-    fn collect_runtime_feature_uses_from_expression(
-        &mut self,
-        expression: &HirExpression,
+    fn enqueue_block(&mut self, block_id: BlockId) {
+        if !self.visited_blocks.contains(&block_id) {
+            self.block_worklist.push_back(block_id);
+        }
+    }
+}
+
+struct RuntimeFeatureUseCollector<'hir> {
+    hir: &'hir HirModule,
+    owner_function: FunctionId,
+}
+
+impl<'hir> RuntimeFeatureUseCollector<'hir> {
+    fn new(hir: &'hir HirModule, owner_function: FunctionId) -> Self {
+        Self {
+            hir,
+            owner_function,
+        }
+    }
+
+    fn collect(
+        &self,
+        direct_facts: &mut HirBlockRuntimeFacts,
+        expression_id: HirValueId,
         fallback_span: Option<SourceSpan>,
     ) {
+        let expression = self.hir.expressions.expression(expression_id);
         let expression_span = self
-            .index
             .hir
             .side_table
-            .value_source_span(expression.id)
+            .value_source_span(expression_id)
             .or(expression.span)
             .or(fallback_span);
 
         match &expression.kind {
-            // Map literals.
             HirExpressionKind::MapLiteral(entries) => {
-                self.direct_facts.reachable_map_uses.push(ReachableMapUse {
+                direct_facts.reachable_map_uses.push(ReachableMapUse {
                     kind: ReachableMapUseKind::Literal,
                     span: expression_span,
                 });
-                for entry in entries {
-                    self.collect_runtime_feature_uses_from_expression(&entry.key, expression_span);
-                    self.collect_runtime_feature_uses_from_expression(
-                        &entry.value,
-                        expression_span,
-                    );
+                for entry in self.hir.expressions.map_entries(*entries) {
+                    self.collect(direct_facts, entry.key, expression_span);
+                    self.collect(direct_facts, entry.value, expression_span);
                 }
             }
-
-            // Composite expressions: recurse into sub-expressions.
             HirExpressionKind::BinOp { left, right, .. } => {
-                self.collect_runtime_feature_uses_from_expression(left, expression_span);
-                self.collect_runtime_feature_uses_from_expression(right, expression_span);
+                self.collect(direct_facts, *left, expression_span);
+                self.collect(direct_facts, *right, expression_span);
             }
-
             HirExpressionKind::Cast {
                 source: operand,
                 policy,
             } => {
-                self.direct_facts
+                direct_facts
                     .reachable_runtime_casts
                     .push(ReachableRuntimeCastUse {
                         span: expression_span,
                         policy: *policy,
                         form: ReachableRuntimeCastForm::Expression,
                     });
-                self.collect_runtime_feature_uses_from_expression(operand, expression_span);
+                self.collect(direct_facts, *operand, expression_span);
             }
-
             HirExpressionKind::UnaryOp { operand, .. }
             | HirExpressionKind::FallibleUnwrapSuccess { result: operand }
             | HirExpressionKind::FallibleUnwrapError { result: operand }
             | HirExpressionKind::VariantPayloadGet {
                 source: operand, ..
-            } => {
-                self.collect_runtime_feature_uses_from_expression(operand, expression_span);
-            }
-
+            } => self.collect(direct_facts, *operand, expression_span),
             HirExpressionKind::StructConstruct { fields, .. } => {
-                for (_, value) in fields {
-                    self.collect_runtime_feature_uses_from_expression(value, expression_span);
+                for (_, value) in self.hir.expressions.struct_fields(*fields) {
+                    self.collect(direct_facts, *value, expression_span);
                 }
             }
-
             HirExpressionKind::Collection(elements)
             | HirExpressionKind::TupleConstruct { elements } => {
-                for element in elements {
-                    self.collect_runtime_feature_uses_from_expression(element, expression_span);
+                for element in self.hir.expressions.values(*elements) {
+                    self.collect(direct_facts, *element, expression_span);
                 }
             }
-
             HirExpressionKind::Range { start, end } => {
-                self.collect_runtime_feature_uses_from_expression(start, expression_span);
-                self.collect_runtime_feature_uses_from_expression(end, expression_span);
+                self.collect(direct_facts, *start, expression_span);
+                self.collect(direct_facts, *end, expression_span);
             }
-
             HirExpressionKind::TupleGet { tuple, .. } => {
-                self.collect_runtime_feature_uses_from_expression(tuple, expression_span);
+                self.collect(direct_facts, *tuple, expression_span);
             }
-
             HirExpressionKind::VariantConstruct { fields, .. } => {
-                for field in fields {
-                    self.collect_runtime_feature_uses_from_expression(
-                        &field.value,
-                        expression_span,
-                    );
+                for field in self.hir.expressions.variant_fields(*fields) {
+                    self.collect(direct_facts, field.value, expression_span);
                 }
             }
             HirExpressionKind::StructuralString { pieces } => {
-                for piece in pieces {
+                for piece in self.hir.expressions.string_pieces(*pieces) {
                     match piece {
                         ConstStringPiece::Text(_) => {}
                         ConstStringPiece::Resource(resource_id) => {
-                            self.direct_facts
+                            direct_facts
                                 .reachable_resource_uses
                                 .push(ReachableResourceUse {
                                     resource_id: *resource_id,
@@ -1058,7 +1066,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                                 });
                         }
                         ConstStringPiece::SiteRoot => {
-                            self.direct_facts
+                            direct_facts
                                 .reachable_site_root_uses
                                 .push(ReachableSiteRootUse {
                                     owner: self.owner_function,
@@ -1068,8 +1076,6 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                     }
                 }
             }
-
-            // Leaf values: nothing to record.
             HirExpressionKind::Uint(_)
             | HirExpressionKind::Int(_)
             | HirExpressionKind::Float(_)
@@ -1080,12 +1086,6 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
             | HirExpressionKind::Number(_)
             | HirExpressionKind::Load(_)
             | HirExpressionKind::Copy(_) => {}
-        }
-    }
-
-    fn enqueue_block(&mut self, block_id: BlockId) {
-        if !self.visited_blocks.contains(&block_id) {
-            self.block_worklist.push_back(block_id);
         }
     }
 }

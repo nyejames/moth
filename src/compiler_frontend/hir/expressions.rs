@@ -1,7 +1,8 @@
 //! HIR expressions.
 //!
-//! WHAT: typed value-producing nodes used by statements, terminators, and pattern matching.
-//! WHY: HIR keeps normal value construction as expression trees while control flow stays explicit.
+//! WHAT: typed dense expression rows used by statements, terminators, and pattern matching.
+//! WHY: one module-owned row store holds fixed child IDs and typed ranges for variable edges while
+//!      control flow stays explicit in blocks and terminators.
 //!
 //! ## Cast contract
 //!
@@ -11,15 +12,17 @@
 //! during HIR lowering, and `ResolvedCastEvidence::GenericBound` is validation-only and must not
 //! reach HIR.
 
-use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::number::NumberValue;
-use crate::compiler_frontend::hir::ids::{ChoiceId, FieldId, HirValueId, RegionId, StructId};
+use crate::compiler_frontend::hir::expression_store::{
+    HirMapEntryRange, HirStringPieceRange, HirStructFieldRange, HirValueRange, HirVariantFieldRange,
+};
+use crate::compiler_frontend::hir::ids::{ChoiceId, HirValueId, RegionId, StructId};
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
+use crate::compiler_frontend::symbols::string_interning::StringId;
 use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
 
 /// Shared carrier tag for variant construction in HIR.
@@ -42,10 +45,10 @@ pub const OPTION_SOME_VARIANT_INDEX: usize = 1;
 /// One field inside a `VariantConstruct`.
 ///
 /// WHY: payload field names are part of the runtime carrier shape for JS and future backends.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct HirVariantField {
     pub name: Option<StringId>,
-    pub value: HirExpression,
+    pub value: HirValueId,
 }
 
 /// One key/value pair inside a `MapLiteral`.
@@ -53,91 +56,10 @@ pub struct HirVariantField {
 /// WHAT: holds the lowered HIR key and value expressions for a single map entry.
 /// WHY: map literals need an explicit entry shape so lowering, validation, and backend
 ///      emission can traverse children consistently.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct HirMapEntry {
-    pub key: HirExpression,
-    pub value: HirExpression,
-}
-
-impl HirExpression {
-    /// Remap the interned names retained directly by executable expression payloads.
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        match &mut self.kind {
-            HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
-                place.remap_string_ids(remap);
-            }
-            HirExpressionKind::BinOp { left, right, .. } => {
-                left.remap_string_ids(remap);
-                right.remap_string_ids(remap);
-            }
-            HirExpressionKind::UnaryOp { operand, .. }
-            | HirExpressionKind::TupleGet { tuple: operand, .. }
-            | HirExpressionKind::FallibleUnwrapSuccess { result: operand }
-            | HirExpressionKind::FallibleUnwrapError { result: operand }
-            | HirExpressionKind::Cast {
-                source: operand, ..
-            }
-            | HirExpressionKind::VariantPayloadGet {
-                source: operand, ..
-            } => operand.remap_string_ids(remap),
-            HirExpressionKind::StructConstruct { fields, .. } => {
-                for (_, value) in fields {
-                    value.remap_string_ids(remap);
-                }
-            }
-            HirExpressionKind::Collection(elements)
-            | HirExpressionKind::TupleConstruct { elements } => {
-                for element in elements {
-                    element.remap_string_ids(remap);
-                }
-            }
-            HirExpressionKind::Range { start, end } => {
-                start.remap_string_ids(remap);
-                end.remap_string_ids(remap);
-            }
-            HirExpressionKind::VariantConstruct { fields, .. } => {
-                for field in fields {
-                    if let Some(name) = &mut field.name {
-                        *name = remap.get(*name);
-                    }
-                    field.value.remap_string_ids(remap);
-                }
-            }
-            HirExpressionKind::MapLiteral(entries) => {
-                for entry in entries {
-                    entry.key.remap_string_ids(remap);
-                    entry.value.remap_string_ids(remap);
-                }
-            }
-            HirExpressionKind::StructuralString { pieces } => {
-                for piece in pieces {
-                    match piece {
-                        // Text runs intern into the merged string table, so every handle
-                        // re-binds to the table that issued the remap.
-                        ConstStringPiece::Text(string_id) => *string_id = remap.get(*string_id),
-
-                        // A `Resource` handle is a module-local dense id paired with the
-                        // module's own resource table; a string-table merge cannot stale it.
-                        // Rewriting resource origins for generic capture is item 6's work, and
-                        // the generated lane rejects pieces it cannot maintain at its own
-                        // preflight boundary.
-                        ConstStringPiece::Resource(_) => {}
-
-                        // The site root carries no interned identity.
-                        ConstStringPiece::SiteRoot => {}
-                    }
-                }
-            }
-            HirExpressionKind::Uint(_)
-            | HirExpressionKind::Int(_)
-            | HirExpressionKind::Float(_)
-            | HirExpressionKind::FixedScalar(_)
-            | HirExpressionKind::Number(_)
-            | HirExpressionKind::Bool(_)
-            | HirExpressionKind::Char(_)
-            | HirExpressionKind::StringLiteral(_) => {}
-        }
-    }
+    pub key: HirValueId,
+    pub value: HirValueId,
 }
 
 /// Compiler-owned map operation kinds used in HIR.
@@ -181,7 +103,6 @@ impl HirMapOp {
 
 #[derive(Debug, Clone)]
 pub struct HirExpression {
-    pub id: HirValueId,
     pub kind: HirExpressionKind,
     pub ty: TypeId,
     pub value_kind: ValueKind,
@@ -222,7 +143,7 @@ pub enum HirExpressionKind {
     Char(char),
     StringLiteral(String),
     StructuralString {
-        pieces: Vec<ConstStringPiece>,
+        pieces: HirStringPieceRange,
     },
 
     // -------------------------
@@ -235,14 +156,14 @@ pub enum HirExpressionKind {
     //  Operations
     // -------------------------
     BinOp {
-        left: Box<HirExpression>,
+        left: HirValueId,
         op: HirBinOp,
-        right: Box<HirExpression>,
+        right: HirValueId,
     },
 
     UnaryOp {
         op: HirUnaryOp,
-        operand: Box<HirExpression>,
+        operand: HirValueId,
     },
 
     // -------------------------
@@ -250,14 +171,14 @@ pub enum HirExpressionKind {
     // -------------------------
     StructConstruct {
         struct_id: StructId,
-        fields: Vec<(FieldId, HirExpression)>,
+        fields: HirStructFieldRange,
     },
 
-    Collection(Vec<HirExpression>),
+    Collection(HirValueRange),
 
     Range {
-        start: Box<HirExpression>,
-        end: Box<HirExpression>,
+        start: HirValueId,
+        end: HirValueId,
     },
 
     // -------------------------
@@ -268,12 +189,12 @@ pub enum HirExpressionKind {
     /// EMPTY TUPLE IS THE UNIT TYPE ()
     /// EMPTY TUPLE == the builtin none `TypeId`.
     TupleConstruct {
-        elements: Vec<HirExpression>,
+        elements: HirValueRange,
     },
 
     /// Project a tuple slot by flat index.
     TupleGet {
-        tuple: Box<HirExpression>,
+        tuple: HirValueId,
         index: usize,
     },
 
@@ -282,12 +203,12 @@ pub enum HirExpressionKind {
     // -------------------------
     /// Extracts the success payload from an internal fallible carrier.
     FallibleUnwrapSuccess {
-        result: Box<HirExpression>,
+        result: HirValueId,
     },
 
     /// Extracts the error payload from an internal fallible carrier.
     FallibleUnwrapError {
-        result: Box<HirExpression>,
+        result: HirValueId,
     },
 
     // -------------------------
@@ -302,7 +223,7 @@ pub enum HirExpressionKind {
     ///      pure expressions, while fallible casts lower through `HirStatementKind::CastOp` so
     ///      success/error control flow remains explicit.
     Cast {
-        source: Box<HirExpression>,
+        source: HirValueId,
         policy: BuiltinCastPolicyId,
     },
 
@@ -315,7 +236,7 @@ pub enum HirExpressionKind {
     VariantConstruct {
         carrier: HirVariantCarrier,
         variant_index: usize,
-        fields: Vec<HirVariantField>,
+        fields: HirVariantFieldRange,
     },
 
     /// Extract a payload field from a variant-shaped value.
@@ -325,7 +246,7 @@ pub enum HirExpressionKind {
     /// preserves the carrier type for field-name resolution.
     VariantPayloadGet {
         carrier: HirVariantCarrier,
-        source: Box<HirExpression>,
+        source: HirValueId,
         variant_index: usize,
         field_index: usize,
     },
@@ -338,7 +259,7 @@ pub enum HirExpressionKind {
     /// WHAT: each entry is lowered independently so prelude order and side effects are
     ///       preserved before the literal value is produced.
     /// WHY: map literals are first-class compiler-owned values, not external calls.
-    MapLiteral(Vec<HirMapEntry>),
+    MapLiteral(HirMapEntryRange),
 }
 
 // Option none/some are represented through VariantConstruct with HirVariantCarrier::Option.

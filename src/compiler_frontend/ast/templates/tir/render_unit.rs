@@ -1,8 +1,7 @@
 //! TIR render-unit construction helpers.
 //!
-//! WHAT: owns TIR aggregate-wrapper candidate root construction, branch/fallback
-//! body candidate root construction, body-root formatting and loop-control
-//! boundary trimming.
+//! WHAT: owns TIR aggregate-wrapper candidate root construction, conditional
+//! body candidate root construction and body-root formatting.
 //!
 //! WHY: localizes the link between AST aggregate placeholders and TIR-native
 //! loop aggregate wrappers. Candidate roots are returned as `TemplateIrNodeId`
@@ -64,22 +63,22 @@ pub(in crate::compiler_frontend::ast::templates) fn build_aggregate_wrapper_cand
     )))
 }
 
-/// Builds a branch/fallback body-root candidate node for head-chain composition.
+/// Builds a conditional body-root candidate node for head-chain composition.
 ///
 /// WHAT: reuses the owning template's parser-emitted head-prefix TIR nodes
 ///       and appends the already-materialized body-only children as the body
 ///       fill. Returns the root sequence node ID directly.
-/// WHY: branch and fallback bodies carry the shared head prefix plus their own
+/// WHY: a conditional body carries the shared head prefix plus its own
 ///      body content. Composing from the root node avoids a scratch
 ///      `TemplateIr` that would remain in the durable store without a
 ///      referencing identity.
-pub(in crate::compiler_frontend::ast::templates) fn build_branch_body_candidate_root_from_tir_nodes(
+pub(in crate::compiler_frontend::ast::templates) fn build_conditional_body_candidate_root_from_tir_nodes(
     head_prefix_nodes: &[TemplateIrNodeId],
     body_children: &[TemplateIrNodeId],
     store: &mut TemplateIrStore,
 ) -> Result<TemplateIrNodeId, TemplateError> {
     let mut children = Vec::with_capacity(head_prefix_nodes.len() + body_children.len());
-    let root_span = branch_body_candidate_span(store, head_prefix_nodes, body_children)
+    let root_span = conditional_body_candidate_span(store, head_prefix_nodes, body_children)
         .map_err(TemplateError::from)?;
 
     // Reuse each parser-emitted head-prefix node directly. Parser template
@@ -115,11 +114,11 @@ fn head_prefix_node_span(
     }
 }
 
-/// Returns the source span for a branch/fallback body candidate root.
+/// Returns the source span for a conditional body candidate root.
 ///
 /// The first shared head-prefix node is preferred; otherwise the first prepared
 /// body child supplies the retained provenance.
-fn branch_body_candidate_span(
+fn conditional_body_candidate_span(
     store: &TemplateIrStore,
     head_prefix_nodes: &[TemplateIrNodeId],
     body_children: &[TemplateIrNodeId],
@@ -135,26 +134,11 @@ fn branch_body_candidate_span(
             .map(|node| node.span)
             .ok_or_else(|| {
                 CompilerError::compiler_error(format!(
-                    "TIR branch body candidate: selected node {} was missing from the store.",
+                    "TIR conditional body candidate: selected node {} was missing from the store.",
                     node_id
                 ))
             }),
     }
-}
-
-// ------------------------------
-//  Composed aggregate-wrapper output
-// ------------------------------
-
-/// Composed aggregate-wrapper output for TIR consumption.
-pub(in crate::compiler_frontend::ast::templates) struct PreparedLoopAggregateWrapper {
-    /// TIR root of the composed aggregate-wrapper subtree.
-    ///
-    /// WHAT: carries the internal `AggregateOutput` marker at its composed
-    ///       position inside the wrapper tree.
-    /// WHY: render-unit preparation installs this authoritative root directly
-    ///      onto the owning `Loop` node for finalization and runtime handoff.
-    pub(in crate::compiler_frontend::ast::templates) tir_root: TemplateIrNodeId,
 }
 
 // ------------------------------
@@ -250,7 +234,7 @@ pub(in crate::compiler_frontend::ast::templates) fn format_tir_body_root(
 /// when the node is missing or not a sequence.
 ///
 /// WHAT: extracts the flat child list so it can be appended after head-prefix
-///       nodes in a branch/fallback body candidate.
+///       nodes in a conditional body candidate.
 /// WHY: parser-emitted body roots are sealed under a `Sequence` node; flattening
 ///      that wrapper keeps the body nodes at the same level as the head-prefix
 ///      nodes so head-chain composition can partition them correctly.
@@ -273,101 +257,6 @@ pub(in crate::compiler_frontend::ast::templates) fn sequence_children(
     }
 }
 
-/// Returns true when a TIR node is whitespace-only literal text.
-///
-/// WHAT: checks the interned text of a Text node and reports whether it
-///       contains only whitespace.
-/// WHY: loop-control boundary trimming needs the same whitespace test used
-///      during construction without sharing construction-context internals.
-fn tir_node_is_whitespace_only_text(
-    node_id: TemplateIrNodeId,
-    store: &TemplateIrStore,
-    string_table: &StringTable,
-) -> Result<bool, CompilerError> {
-    let node = store.get_node(node_id).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "TIR loop-control trim: whitespace candidate node {} was missing from the store.",
-            node_id
-        ))
-    })?;
-
-    let TemplateIrNodeKind::Text { text, .. } = &node.kind else {
-        return Ok(false);
-    };
-
-    Ok(string_table.resolve(*text).trim().is_empty())
-}
-
-/// Trims whitespace-only text nodes that sit immediately before a top-level
-/// LoopControl node in a loop body root sequence.
-///
-/// WHAT: applies the parser-level cleanup that strips trailing whitespace
-///       before `[break]`/`[continue]` markers directly to the TIR body root.
-/// WHY: loop-control boundary whitespace trimming belongs to the authoritative
-///      loop body root and must reject malformed child references.
-pub(in crate::compiler_frontend::ast::templates) fn trim_whitespace_before_loop_control_boundary(
-    body_root: TemplateIrNodeId,
-    store: &mut TemplateIrStore,
-    string_table: &StringTable,
-) -> Result<TemplateIrNodeId, CompilerError> {
-    let (children, span) = {
-        let node = store.get_node(body_root).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "TIR loop-control trim: body root node {} was missing from the store.",
-                body_root
-            ))
-        })?;
-        match &node.kind {
-            TemplateIrNodeKind::Sequence { children } => (children.clone(), node.span),
-            _ => {
-                return Err(CompilerError::compiler_error(format!(
-                    "TIR loop-control trim: body root node {} was not a Sequence.",
-                    body_root
-                )));
-            }
-        }
-    };
-
-    let mut new_children = Vec::with_capacity(children.len());
-    let original_children_count = children.len();
-
-    for child_id in &children {
-        let child_id = *child_id;
-        let child = store.get_node(child_id).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "TIR loop-control trim: child node {} was missing from the store.",
-                child_id
-            ))
-        })?;
-        let is_loop_control = matches!(child.kind, TemplateIrNodeKind::LoopControl { .. });
-
-        if is_loop_control {
-            // Drop whitespace-only text nodes that immediately precede this
-            // loop-control marker, preserving any preceding non-whitespace output.
-            while let Some(last) = new_children.last().copied() {
-                if tir_node_is_whitespace_only_text(last, store, string_table)? {
-                    new_children.pop();
-                } else {
-                    break;
-                }
-            }
-        }
-
-        new_children.push(child_id);
-    }
-
-    if new_children.len() == original_children_count {
-        return Ok(body_root);
-    }
-
-    Ok(store.push_node(TemplateIrNode::new(
-        TemplateIrNodeKind::Sequence {
-            children: new_children,
-        },
-        span,
-    )))
-}
-
 // ------------------------------
 //  Loop aggregate-wrapper preparation
 // ------------------------------
@@ -384,7 +273,7 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_loop_aggregate_wrapp
     root_children: &[TemplateIrNodeId],
     string_table: &StringTable,
     template_ir_store: &mut TemplateIrStore,
-) -> Result<PreparedLoopAggregateWrapper, TemplateError> {
+) -> Result<TemplateIrNodeId, TemplateError> {
     // Derive the head-prefix TIR nodes from the owning template's parser-emitted
     // root children. Reusing those exact nodes preserves parser identity and
     // avoids rebuilding an equivalent head structure.
@@ -397,19 +286,17 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_loop_aggregate_wrapp
     )?;
     let composed_root =
         compose_tir_head_chain_from_root(template_ir_store, aggregate_root, string_table, true)?;
-    Ok(PreparedLoopAggregateWrapper {
-        tir_root: composed_root,
-    })
+    Ok(composed_root)
 }
 
 /// Extracts the head-prefix TIR nodes from the owning template's parser-emitted
 /// root children.
 ///
 /// WHAT: returns all root children before the first control-flow node (`Loop`
-///       or `BranchChain`). These are the same TIR nodes the parser
+///       or `Conditional`). These are the same TIR nodes the parser
 ///       materialized from the shared head-prefix atoms, so reusing them
 ///       avoids rebuilding TIR from content.
-/// WHY: loop aggregate wrappers and branch/fallback body roots both wrap the
+/// WHY: loop aggregate wrappers and conditional body roots both wrap the
 ///      shared head prefix around their respective body output. The
 ///      head-prefix nodes are structurally everything before the control-flow
 ///      node in the owning template's root sequence, so one extractor serves
@@ -428,7 +315,7 @@ pub(in crate::compiler_frontend::ast::templates) fn head_prefix_tir_nodes(
         })?;
         if matches!(
             node.kind,
-            TemplateIrNodeKind::Loop { .. } | TemplateIrNodeKind::BranchChain { .. }
+            TemplateIrNodeKind::Loop { .. } | TemplateIrNodeKind::Conditional { .. }
         ) {
             break;
         }

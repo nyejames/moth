@@ -1,10 +1,16 @@
-render_loop |keep_going Bool| -> String:
+should_continue |counter ~Int| -> Bool:
+    counter += 1
+    return counter < 4
+;
+
+render_loop || -> String:
+    counter ~= 0
     return [:
-        template_conditional_loop_runtime_multiple_iterations
-        [loop keep_going:
-            tick;
+        [loop should_continue(~counter):
+            iteration [counter]
         ]
+        final count [counter]
     ]
 ;
 
-[:template_conditional_loop_runtime_multiple_iterations]
+[:template_conditional_loop_runtime_multiple_iterations [render_loop()]]

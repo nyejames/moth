@@ -4,8 +4,8 @@
 //! WHY: these cases differ only by the final HIR expression kind, so one helper keeps the main
 //! dispatcher smaller and removes repeated region/type boilerplate.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::source::SourceSpan;
@@ -18,12 +18,12 @@ impl<'a> HirBuilder<'a> {
         span: &Option<SourceSpan>,
         type_id: FrontendTypeId,
         kind: HirExpressionKind,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let region = self.current_region_or_error(span)?;
         let ty = self.lower_type_id(type_id, span)?;
         Ok(LoweredExpression {
             prelude: vec![],
-            value: self.make_expression(span, kind, ty, ValueKind::Const, region),
+            value: self.make_expression(span, kind, ty, ValueKind::Const, region)?,
         })
     }
 }

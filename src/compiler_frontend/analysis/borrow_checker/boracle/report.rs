@@ -8,7 +8,7 @@ use super::super::last_use::{
     LastUseAnalysis, LastUseLocation, LastUseObservation, LastUseResult, LastUseSubject,
     event_for_use,
 };
-use super::super::problem::{BorrowProblem, EventId};
+use super::super::problem::{BindingDestination, BorrowProblem, EventId};
 use super::service::BoracleRuleSelection;
 use super::{LoanSolution, OriginSolution};
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -90,7 +90,12 @@ impl BoracleSolver {
 
         let mut last_use_observations = Vec::new();
         for use_row in problem.uses() {
-            if use_row.definition && !origin.is_write_through_use(use_row.id) {
+            let replaces_generation = use_row.definition
+                || use_row
+                    .kind
+                    .binding_destination()
+                    .is_some_and(BindingDestination::defines);
+            if replaces_generation && !origin.is_write_through_use(use_row.id) {
                 continue;
             }
             let event_id = event_for_use(problem, use_row.id)?;

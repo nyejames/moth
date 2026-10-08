@@ -320,6 +320,7 @@ fn number_text_and_integer_casts_keep_exact_scale_bounds_and_error_codes() {
 }
 
 fn lower_number_operation_source(scale: NumberScale) -> String {
+    let mut expressions = HirExpressionStore::default();
     use crate::compiler_frontend::datatypes::number::NumberValue;
     use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
     use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -329,7 +330,7 @@ fn lower_number_operation_source(scale: NumberScale) -> String {
     use crate::compiler_frontend::hir::numeric::{
         HirNumericOp, HirNumericOperands, NumericFailureMode,
     };
-    use crate::compiler_frontend::hir::statements::HirStatementKind;
+    use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirStatementKind};
     use crate::compiler_frontend::hir::terminators::HirTerminator;
 
     let mut string_table = StringTable::new();
@@ -339,18 +340,18 @@ fn lower_number_operation_source(scale: NumberScale) -> String {
     let region = RegionId(0);
     let number_value = NumberValue::from_integer(1, scale);
     let left = expression(
-        1,
         crate::compiler_frontend::hir::expressions::HirExpressionKind::Number(number_value.clone()),
         number_type,
         region,
         crate::compiler_frontend::hir::expressions::ValueKind::Const,
+        &mut expressions,
     );
     let right = expression(
-        2,
         crate::compiler_frontend::hir::expressions::HirExpressionKind::Number(number_value),
         number_type,
         region,
         crate::compiler_frontend::hir::expressions::ValueKind::Const,
+        &mut expressions,
     );
     let block = HirBlock {
         id: BlockId(0),
@@ -365,10 +366,10 @@ fn lower_number_operation_source(scale: NumberScale) -> String {
                 },
                 failure_mode: NumericFailureMode::Trap,
                 operands: HirNumericOperands::Binary { left, right },
-                result: LocalId(0),
+                result: HirLocalDestination::Define(LocalId(0)),
             },
         )],
-        terminator: HirTerminator::Return(unit_expression(3, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
     let function = HirFunction {
         id: FunctionId(0),
@@ -377,6 +378,7 @@ fn lower_number_operation_source(scale: NumberScale) -> String {
         return_type: types.unit,
     };
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -386,7 +388,6 @@ fn lower_number_operation_source(scale: NumberScale) -> String {
     );
     lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),

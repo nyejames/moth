@@ -10,6 +10,7 @@ use crate::compiler_frontend::analysis::borrow_checker::types::{
 use crate::compiler_frontend::hir::ids::{HirValueId, LocalId};
 use crate::compiler_frontend::source::SourceSpan;
 use rustc_hash::FxHashMap;
+use std::collections::hash_map::Entry;
 
 #[derive(Debug, Clone)]
 pub(super) struct StatementAccessTracker {
@@ -78,7 +79,29 @@ impl StatementAccessTracker {
 #[derive(Debug, Clone)]
 pub(super) struct ValueFactBuffer {
     local_count: usize,
-    facts: FxHashMap<HirValueId, (ValueAccessClassification, RootSet, OptionalTransferStatus)>,
+    facts: FxHashMap<HirValueId, BufferedValueFact>,
+    current_use_values: Vec<HirValueId>,
+}
+
+#[derive(Debug, Clone)]
+struct BufferedValueFact {
+    classification: ValueAccessClassification,
+    roots: RootSet,
+    current_use_transfer: OptionalTransferStatus,
+    completed_use_transfer: Option<OptionalTransferStatus>,
+    observed_in_current_use: bool,
+}
+
+impl BufferedValueFact {
+    fn new(local_count: usize) -> Self {
+        Self {
+            classification: ValueAccessClassification::None,
+            roots: RootSet::empty(local_count),
+            current_use_transfer: OptionalTransferStatus::NotAttempted,
+            completed_use_transfer: None,
+            observed_in_current_use: false,
+        }
+    }
 }
 
 impl ValueFactBuffer {
@@ -86,6 +109,7 @@ impl ValueFactBuffer {
         Self {
             local_count,
             facts: FxHashMap::default(),
+            current_use_values: Vec::new(),
         }
     }
 
@@ -95,16 +119,9 @@ impl ValueFactBuffer {
         classification: ValueAccessClassification,
         roots: &RootSet,
     ) {
-        let entry = self.facts.entry(value_id).or_insert_with(|| {
-            (
-                ValueAccessClassification::None,
-                RootSet::empty(self.local_count),
-                OptionalTransferStatus::NotAttempted,
-            )
-        });
-
-        entry.0 = entry.0.merge(classification);
-        entry.1.union_with(roots);
+        let entry = self.entry_for_current_use(value_id);
+        entry.classification = entry.classification.merge(classification);
+        entry.roots.union_with(roots);
     }
 
     pub(super) fn record_optional_transfer(
@@ -113,35 +130,71 @@ impl ValueFactBuffer {
         status: OptionalTransferStatus,
         roots: &RootSet,
     ) {
-        let entry = self.facts.entry(value_id).or_insert_with(|| {
-            (
-                ValueAccessClassification::None,
-                RootSet::empty(self.local_count),
-                OptionalTransferStatus::NotAttempted,
-            )
-        });
+        let entry = self.entry_for_current_use(value_id);
+        entry.roots.union_with(roots);
+        entry.current_use_transfer = entry.current_use_transfer.merge(status);
+    }
 
-        entry.1.union_with(roots);
-        entry.2 = entry.2.merge(status);
+    /// Finish collecting one statement or terminator use context.
+    ///
+    /// A row touched only by ordinary access has an observed `NotAttempted` result. Merging that
+    /// completed observation with a transfer candidate must decline the row-wide permission.
+    pub(super) fn finish_use(&mut self) {
+        for value_id in self.current_use_values.drain(..) {
+            let entry = self
+                .facts
+                .get_mut(&value_id)
+                .expect("a touched value row should have a buffered fact");
+            entry.completed_use_transfer = Some(match entry.completed_use_transfer {
+                Some(completed) => completed.merge_completed_use(entry.current_use_transfer),
+                None => entry.current_use_transfer,
+            });
+            entry.current_use_transfer = OptionalTransferStatus::NotAttempted;
+            entry.observed_in_current_use = false;
+        }
     }
 
     pub(super) fn into_serialized(
         self,
         layout: &FunctionLayout,
     ) -> Vec<(HirValueId, ValueBorrowFact)> {
+        debug_assert!(
+            self.current_use_values.is_empty(),
+            "all value-fact use contexts must be completed before serialization"
+        );
         self.facts
             .into_iter()
-            .map(|(value_id, (classification, roots, optional_transfer))| {
+            .map(|(value_id, entry)| {
                 (
                     value_id,
                     ValueBorrowFact {
-                        classification,
-                        roots: roots_to_local_ids(layout, &roots),
-                        optional_transfer,
+                        classification: entry.classification,
+                        roots: roots_to_local_ids(layout, &entry.roots),
+                        optional_transfer: entry
+                            .completed_use_transfer
+                            .expect("every buffered value row should have a completed use"),
                     },
                 )
             })
             .collect::<Vec<_>>()
+    }
+
+    fn entry_for_current_use(&mut self, value_id: HirValueId) -> &mut BufferedValueFact {
+        match self.facts.entry(value_id) {
+            Entry::Occupied(mut occupied) => {
+                if !occupied.get().observed_in_current_use {
+                    occupied.get_mut().observed_in_current_use = true;
+                    self.current_use_values.push(value_id);
+                }
+                occupied.into_mut()
+            }
+            Entry::Vacant(vacant) => {
+                self.current_use_values.push(value_id);
+                let mut fact = BufferedValueFact::new(self.local_count);
+                fact.observed_in_current_use = true;
+                vacant.insert(fact)
+            }
+        }
     }
 }
 

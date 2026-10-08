@@ -5,9 +5,9 @@
 //!
 //! WHY: runtime applications must evaluate each source once while repeated slot
 //! placeholders can still carry different `$children(..)` and `$fresh`
-//! metadata. Wrapper injection keeps the complete wrapper reference and plants
-//! the same TIR marker whether the splice sits directly in a site or inside
-//! control flow.
+//! metadata. Ordinary contributions compose wrappers around the source marker;
+//! control-flow contributions attach them conditionally to the marker's fresh
+//! template root so a skipped source emits no wrapper.
 
 use super::types::{RuntimeSlotContributionSourceDraft, RuntimeSlotSiteId};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
@@ -18,8 +18,10 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
 use crate::compiler_frontend::ast::templates::tir::{
     DerivedTemplateMetadata, TemplateIrId, TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind,
     TemplateIrStore, TemplateSlotPlanId, TemplateSlotSitePlan, TemplateWrapperSetId, TirCopyState,
-    TirSlotPlaceholderRef, collect_tir_slot_layout, collect_tir_slot_layout_from_root,
+    TirSlotPlaceholderRef, attach_conditional_wrapper_set, collect_tir_slot_layout,
+    collect_tir_slot_layout_from_root, conditional_wrapper_set_for_control_flow,
     copy_tir_subtree_with_active_slot_plan, push_runtime_slot_contribution_source,
+    tir_node_is_control_flow_root,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
@@ -81,8 +83,8 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
         drafts: &mut Vec<RuntimeSlotSiteDraft>,
     ) -> Result<(), TemplateError> {
         // Walk the TIR tree in document order to discover every unresolved slot
-        // placeholder, including those nested inside child templates, branch
-        // chains, and loops. TIR is the sole authority for slot-placeholder
+        // placeholder, including those nested inside child templates,
+        // conditionals and loops. TIR is the sole authority for slot-placeholder
         // discovery.
         // Site IDs are assigned in traversal order, matching the cursor-based
         // assignment the final materialization pass will use.
@@ -109,13 +111,29 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
             }
 
             let source = self.sources[source_index].clone();
+            let source_has_control_flow =
+                tir_node_is_control_flow_root(self.store, source.source.render_root)?;
             let source_root = push_runtime_slot_contribution_source(
                 self.store,
                 self.slot_plan_id,
                 source.source.source,
                 source.source.span,
             );
-            let wrapped_root = self.apply_site_wrappers(placeholder, &source, source_root)?;
+            let wrapped_root = if source_has_control_flow {
+                if let Some(wrapper_set_id) = conditional_wrapper_set_for_control_flow(
+                    self.store,
+                    placeholder.child_wrapper_set,
+                    placeholder.applied_child_wrapper_set,
+                    placeholder.skip_parent_child_wrappers,
+                    source.shape,
+                )? {
+                    attach_conditional_wrapper_set(self.store, source_root, wrapper_set_id)?
+                } else {
+                    source_root
+                }
+            } else {
+                self.apply_site_wrappers(placeholder, &source, source_root)?
+            };
             fill_roots.push(wrapped_root);
         }
 
@@ -382,70 +400,28 @@ fn inject_runtime_slot_fill(
             })
         }
 
-        TemplateIrNodeKind::BranchChain {
-            branches,
-            fallback,
-            else_marker,
+        TemplateIrNodeKind::Conditional {
+            selector,
+            selector_site_id,
+            body,
         } => {
-            let mut branch_results = Vec::with_capacity(branches.len());
-            let mut changed = false;
-            for branch in branches {
-                let injected_body = inject_runtime_slot_fill(
-                    branch.body,
-                    fill_root,
-                    target_key,
-                    store,
-                    copy_state,
-                )?;
-                changed |= injected_body.changed;
-                branch_results.push((
-                    branch.selector,
-                    injected_body.root,
-                    branch.span,
-                    branch.selector_site_id,
-                ));
-            }
+            let injected_body =
+                inject_runtime_slot_fill(body, fill_root, target_key, store, copy_state)?;
 
-            let injected_fallback = match fallback {
-                Some(fallback_id) => {
-                    let injected_fallback = inject_runtime_slot_fill(
-                        fallback_id,
-                        fill_root,
-                        target_key,
-                        store,
-                        copy_state,
-                    )?;
-                    changed |= injected_fallback.changed;
-                    Some(injected_fallback.root)
-                }
-                None => None,
-            };
-
-            if !changed {
+            if !injected_body.changed {
                 return Ok(RuntimeSlotInjection {
                     root: wrapper_root,
                     changed: false,
                 });
             }
 
-            let injected_branches = branch_results
-                .into_iter()
-                .map(|(selector, body, span, selector_site_id)| {
-                    crate::compiler_frontend::ast::templates::tir::TemplateIrBranch::new(
-                        selector,
-                        body,
-                        span,
-                        selector_site_id,
-                    )
-                })
-                .collect();
             copy_state.record_control_flow();
             Ok(RuntimeSlotInjection {
                 root: store.push_node(TemplateIrNode::new(
-                    TemplateIrNodeKind::BranchChain {
-                        branches: injected_branches,
-                        fallback: injected_fallback,
-                        else_marker,
+                    TemplateIrNodeKind::Conditional {
+                        selector,
+                        selector_site_id,
+                        body: injected_body.root,
                     },
                     span,
                 )),

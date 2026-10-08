@@ -1,7 +1,8 @@
 //! High-level IR modules, AST-to-HIR lowering, and invariant validation.
 //!
 //! WHAT: defines the backend-facing semantic IR, the lowering builder that converts typed AST into
-//! explicit blocks/regions/locals, and the internal validator that checks HIR invariants.
+//! explicit blocks/regions/locals plus dense expression rows, and the internal validator that
+//! checks HIR invariants.
 //! WHY: HIR is the stable semantic boundary before borrow validation and backend lowering.
 //! Compile-time page fragments, template folding, dependency syntax, and source diagnostics should
 //! already be resolved before values reach this stage.
@@ -13,18 +14,21 @@
 //! - HIR validation uses `CompilerError` with `ErrorType::HirTransformation` for invariant
 //!   failures only. It must not construct `CompilerDiagnostic`.
 //! - HIR lowering uses `CompilerError` with `ErrorType::HirTransformation` for transformation
-//!   invariants. Function-body terminality is validated by AST; fallthrough reaching HIR lowering
-//!   is an internal compiler invariant failure.
+//!   invariants, and a typed source diagnostic when an authored module exceeds a compact HIR
+//!   expression or edge capacity. Function-body terminality is validated by AST; fallthrough
+//!   reaching HIR lowering is an internal compiler invariant failure.
 //! - Borrow analysis facts are side-table metadata keyed by HIR IDs. HIR is not mutated to
 //!   encode borrow or ownership state.
 //!
-//! `hir_builder` owns lowering orchestration and mutable construction state. `validation`
-//! checks compiler invariants only; it must not become a user diagnostic layer.
+//! `hir_builder` owns lowering orchestration and mutable construction state. Its construction
+//! failure lane preserves typed capacity diagnostics alongside infrastructure failures.
+//! `validation` checks compiler invariants only; it must not become a user diagnostic layer.
 
 pub(crate) mod blocks;
 pub(crate) mod const_facts;
 pub(crate) mod constants;
 pub(crate) mod expression_rewrite;
+pub(crate) mod expression_store;
 pub(crate) mod expressions;
 pub(crate) mod failure_facts;
 pub(crate) mod functions;

@@ -39,7 +39,7 @@ pub(crate) fn transfer_terminator(
             };
             record_shared_reads_in_expression(
                 &mut read_env,
-                condition,
+                *condition,
                 location,
                 &mut RootSet::empty(layout.local_count()),
             )?;
@@ -59,7 +59,7 @@ pub(crate) fn transfer_terminator(
             };
             record_shared_reads_in_expression(
                 &mut read_env,
-                result,
+                *result,
                 location,
                 &mut RootSet::empty(layout.local_count()),
             )?;
@@ -80,7 +80,7 @@ pub(crate) fn transfer_terminator(
                 };
                 record_shared_reads_in_expression(
                     &mut read_env,
-                    scrutinee,
+                    *scrutinee,
                     location,
                     &mut RootSet::empty(layout.local_count()),
                 )?;
@@ -118,7 +118,7 @@ pub(crate) fn transfer_terminator(
             };
             record_shared_reads_in_expression(
                 &mut read_env,
-                value,
+                *value,
                 location,
                 &mut RootSet::empty(layout.local_count()),
             )?;
@@ -138,7 +138,7 @@ pub(crate) fn transfer_terminator(
             };
             record_shared_reads_in_expression(
                 &mut read_env,
-                message,
+                *message,
                 location,
                 &mut RootSet::empty(layout.local_count()),
             )?;

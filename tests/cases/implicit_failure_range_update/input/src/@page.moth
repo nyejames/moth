@@ -1,7 +1,7 @@
 walk |start Int, end Int, step Int| -> Int:
     seen ~Int = 0
     loop start to end by step |value|:
-        seen = value
+        seen = copy value
     ;
     return seen
 ;

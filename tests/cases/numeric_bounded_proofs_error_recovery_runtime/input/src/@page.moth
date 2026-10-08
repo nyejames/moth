@@ -60,32 +60,32 @@ pinned_then_call || -> U32, Error!:
 rebound |value U32| -> U32, Error!:
     small ~U32 = 0
     small = small + 1
-    small = value
+    small = copy value
     return small + 1
 ;
 
 holder ~Int = 1
 mutation_code ~U32 = 0
 mutation_result = grow_then_fail(~holder) catch |holder_error|:
-    mutation_code = holder_error.code
+    mutation_code = copy holder_error.code
     then 0
 ;
 
 zero_code ~U32 = 0
 zero_result = divide_zero(10, 0) catch |zero_error|:
-    zero_code = zero_error.code
+    zero_code = copy zero_error.code
     then 0
 ;
 
 order_code ~U32 = 0
 order_result = first_failure(2147483647, 0) catch |order_error|:
-    order_code = order_error.code
+    order_code = copy order_error.code
     then 0
 ;
 
 narrow_fail_code ~U32 = 0
 narrow_rejected = narrow_down(300) catch |narrow_error|:
-    narrow_fail_code = narrow_error.code
+    narrow_fail_code = copy narrow_error.code
     then 0
 ;
 
@@ -103,19 +103,19 @@ double_small = double_narrow(1000) catch:
 
 double_overflow_code ~U32 = 0
 double_rejected = double_narrow(3000000000) catch |double_error|:
-    double_overflow_code = double_error.code
+    double_overflow_code = copy double_error.code
     then 0
 ;
 
 pinned_code ~U32 = 0
 pinned_result = pinned_then_call() catch |pinned_error|:
-    pinned_code = pinned_error.code
+    pinned_code = copy pinned_error.code
     then 0
 ;
 
 rebound_code ~U32 = 0
 rebound_result = rebound(4294967295) catch |rebound_error|:
-    rebound_code = rebound_error.code
+    rebound_code = copy rebound_error.code
     then 0
 ;
 

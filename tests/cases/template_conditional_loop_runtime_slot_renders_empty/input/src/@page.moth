@@ -1,5 +1,16 @@
-show = false
+should_continue |counter ~Int| -> Bool:
+    counter += 1
+    return counter < 4
+;
 
-[loop show:
-    [$slot]
-]
+render_loop || -> String:
+    counter ~= 0
+    return [:
+        [loop should_continue(~counter):
+            [$slot]
+        ]
+        final count [counter]
+    ]
+;
+
+[:template_conditional_loop_runtime_slot_renders_empty [render_loop()]]

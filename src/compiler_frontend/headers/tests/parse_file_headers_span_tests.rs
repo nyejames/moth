@@ -153,12 +153,12 @@ fn dependency_ranges_survive_string_remapping_and_source_rebinding() {
 }
 
 #[test]
-fn declaration_member_return_and_variant_spans_retain_original_ranges() {
+fn declaration_initializer_reference_member_return_and_variant_spans_retain_original_ranges() {
     let member_name = format!("value_{}", "x".repeat(1100));
     let return_name = format!("Output{}", "X".repeat(1100));
     let variant_name = format!("Ready{}", "X".repeat(1100));
     let source = format!(
-        "-- é🦋\nprocess |{member_name} Int| -> {return_name}:\n;\nState ::\n{variant_name} | field Int |,\n;\nRecord = | member Int |\n"
+        "-- é🦋\nprocess |{member_name} Int| -> {return_name}:\n;\nState ::\n{variant_name} | field Int |,\n;\nRecord = | member Int |\nsource_reference #= target_value\n"
     );
     let canonical = PathBuf::from("member-spans.moth");
     let mut strings = StringTable::new();
@@ -232,6 +232,18 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
             _ => None,
         })
         .expect("choice shell");
+    let original_initializer_reference_span = prepared
+        .headers
+        .iter()
+        .find_map(|header| match &header.kind {
+            HeaderKind::Constant { declaration, .. } => declaration
+                .initializer_references
+                .first()
+                .and_then(|reference| reference.span),
+            _ => None,
+        })
+        .expect("constant initializer reference should retain its source span");
+    assert_eq!(original_initializer_reference_span.source(), source_id);
 
     let mut merged = StringTable::new();
     let mut remapped_path_fork = PathInternerFork::empty();
@@ -369,6 +381,222 @@ fn declaration_member_return_and_variant_spans_retain_original_ranges() {
         ),
         "member"
     );
+    let rebound_initializer_reference_span = prepared
+        .headers
+        .iter()
+        .find_map(|header| match &header.kind {
+            HeaderKind::Constant { declaration, .. } => declaration
+                .initializer_references
+                .first()
+                .and_then(|reference| reference.span),
+            _ => None,
+        })
+        .expect("constant initializer reference should retain its rebound source span");
+    assert_eq!(
+        rebound_initializer_reference_span.source(),
+        final_id,
+        "initializer references must use their declaration's finalized source identity"
+    );
+    assert_eq!(
+        rebound_initializer_reference_span.local(),
+        original_initializer_reference_span.local(),
+        "source rebinding must preserve the exact initializer-reference range"
+    );
+    assert_eq!(
+        resolve(rebound_initializer_reference_span),
+        "target_value",
+        "the final source database must resolve the original reference text"
+    );
+}
+
+#[test]
+fn const_template_and_config_spans_rebind_before_whole_file_freeze() {
+    let source = "release_version #Config of Int = 1\n#[if show_banner: Hello]\n";
+    let canonical = PathBuf::from("src/@page.moth");
+    let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let sources = SourceDatabase::build([&canonical], &canonical, None, &mut strings)
+        .expect("registered source");
+    let source_id = sources
+        .get_by_canonical_path(&canonical)
+        .expect("source identity")
+        .id;
+    let scope = path_fork
+        .try_intern_filesystem_path(&canonical, &mut strings)
+        .expect("source path");
+    let mut spans = ExtendedSpanBuilder::new();
+    let tokens = tokenize(
+        source,
+        scope,
+        TokenizerEntryMode::SourceFile,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut strings,
+        &mut path_fork,
+        source_id,
+        &mut spans,
+    )
+    .expect("source should tokenize");
+    let (owner, path_syntax) = super::canonical_handoff(tokens);
+    let mut prepared = parse_file_headers_with_table(
+        owner,
+        scope,
+        path_syntax,
+        &canonical,
+        &HeaderParseOptions::default(),
+        &mut strings,
+        &mut path_fork,
+        0,
+        0,
+        &mut spans,
+    )
+    .expect("headers should prepare");
+
+    let original_condition_span = prepared
+        .headers
+        .iter()
+        .find_map(|header| match &header.kind {
+            HeaderKind::ConstTemplate {
+                condition_references,
+            } => condition_references
+                .first()
+                .and_then(|reference| reference.span),
+            _ => None,
+        })
+        .expect("const-template condition reference span");
+    let (original_qualifier_span, original_declaration_type_span, original_qualifier_type_span) =
+        prepared
+            .headers
+            .iter()
+            .find_map(|header| match &header.kind {
+                HeaderKind::Constant { declaration } => {
+                    let qualifier = declaration.config_qualifier.as_ref()?;
+                    let qualifier_type_span = match &qualifier.type_annotation {
+                        ParsedTypeRef::BuiltinInt { span: Some(span) } => *span,
+                        _ => panic!("config qualifier should retain its parsed Int span"),
+                    };
+                    let declaration_type_span = match &declaration.type_annotation {
+                        ParsedTypeRef::BuiltinInt { span: Some(span) } => *span,
+                        _ => panic!("declaration should retain its parsed Int span"),
+                    };
+                    Some((
+                        qualifier.qualifier_span.expect("config qualifier span"),
+                        declaration_type_span,
+                        qualifier_type_span,
+                    ))
+                }
+                _ => None,
+            })
+            .expect("source config declaration");
+    for span in [
+        original_condition_span,
+        original_qualifier_span,
+        original_declaration_type_span,
+        original_qualifier_type_span,
+    ] {
+        assert_eq!(span.source(), source_id, "span should begin provisional");
+    }
+
+    let mut merged = StringTable::new();
+    let mut remapped_path_fork = PathInternerFork::empty();
+    merged.intern("unrelated");
+    let remap = merged.merge_from(&strings);
+    let path_remap = remapped_path_fork
+        .merge_delta_from(&path_fork, &remap)
+        .expect("source paths should remap");
+    prepared
+        .remap_string_ids(&remap)
+        .expect("header strings should remap");
+    prepared
+        .remap_path_ids(&path_remap)
+        .expect("header paths should remap");
+    drop(sources);
+
+    let earlier_source = PathBuf::from("src/0-earlier.moth");
+    let final_sources =
+        SourceDatabase::build([&earlier_source, &canonical], &canonical, None, &mut merged)
+            .expect("final source membership should register");
+    let final_id = final_sources
+        .get_by_canonical_path(&canonical)
+        .expect("final source")
+        .id;
+    assert_ne!(
+        final_id, source_id,
+        "the finalized source identity should change"
+    );
+    let final_path = remapped_path_fork
+        .try_intern_portable_path("src/@page.moth", &mut merged)
+        .expect("test path fits");
+    prepared
+        .rebind_source_identity(final_id, final_path, &mut remapped_path_fork)
+        .expect("retained source should rebind");
+
+    let rebound_condition_span = prepared
+        .headers
+        .iter()
+        .find_map(|header| match &header.kind {
+            HeaderKind::ConstTemplate {
+                condition_references,
+            } => condition_references
+                .first()
+                .and_then(|reference| reference.span),
+            _ => None,
+        })
+        .expect("rebound condition reference span");
+    let rebound_config_spans = prepared
+        .headers
+        .iter()
+        .find_map(|header| match &header.kind {
+            HeaderKind::Constant { declaration } => {
+                let qualifier = declaration.config_qualifier.as_ref()?;
+                let declaration_type_span = match &declaration.type_annotation {
+                    ParsedTypeRef::BuiltinInt { span: Some(span) } => *span,
+                    _ => panic!("declaration should retain its parsed Int span"),
+                };
+                let qualifier_type_span = match &qualifier.type_annotation {
+                    ParsedTypeRef::BuiltinInt { span: Some(span) } => *span,
+                    _ => panic!("config qualifier should retain its parsed Int span"),
+                };
+                Some((
+                    qualifier.qualifier_span.expect("rebound qualifier span"),
+                    declaration_type_span,
+                    qualifier_type_span,
+                ))
+            }
+            _ => None,
+        })
+        .expect("rebound config spans");
+    assert_eq!(rebound_condition_span.source(), final_id);
+    assert_eq!(
+        rebound_condition_span.local(),
+        original_condition_span.local()
+    );
+    for (rebound, original) in [
+        (rebound_config_spans.0, original_qualifier_span),
+        (rebound_config_spans.1, original_declaration_type_span),
+        (rebound_config_spans.2, original_qualifier_type_span),
+    ] {
+        assert_eq!(rebound.source(), final_id);
+        assert_eq!(rebound.local(), original.local());
+    }
+
+    prepared
+        .freeze_path_syntax(&merged, &mut remapped_path_fork)
+        .expect("whole-file invariants should hold at freeze");
+    let mut database = SourceDatabaseBuilder::new(final_sources);
+    database
+        .sources_mut()
+        .retain_text(final_id, source.to_owned())
+        .expect("retain source snapshot");
+    database.retain_span_builder(final_id, spans);
+    let database = database.finish().expect("install original span table");
+    let resolve = |span: SourceSpan| {
+        let range = span.byte_range(&database);
+        &source[range.start() as usize..range.end() as usize]
+    };
+    assert_eq!(resolve(rebound_condition_span), "show_banner");
+    assert_eq!(resolve(rebound_config_spans.0), "#");
+    assert_eq!(resolve(rebound_config_spans.1), "Int");
+    assert_eq!(resolve(rebound_config_spans.2), "Int");
 }
 
 #[test]

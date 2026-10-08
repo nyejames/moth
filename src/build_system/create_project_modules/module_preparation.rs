@@ -189,7 +189,7 @@ pub(super) struct ModulePreparationContext<'a> {
     pub(super) style_directives: &'a StyleDirectiveRegistry,
 }
 
-fn source_is_moth_template(source_files: &SourceDatabase, source_id: SourceId) -> bool {
+pub(super) fn source_is_moth_template(source_files: &SourceDatabase, source_id: SourceId) -> bool {
     matches!(
         source_files.get(source_id).and_then(|record| record.kind),
         Some(SourceKind::Compiler(SourceFileKind::MothTemplate))

@@ -1,5 +1,0 @@
-[backends.html]
-mode = "success"
-warnings = "forbid"
-rendered_output_contains = ["template_loop_nested_if_break_runtime", "before 1;", "after 1;", "before 2;"]
-rendered_output_not_contains = ["after 2;", "before 3;"]

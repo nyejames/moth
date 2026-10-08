@@ -1,9 +1,8 @@
 //! Scans JavaScript source text for supported export declarations.
 //!
-//! WHAT: identifies `export function name(...)` and `export const name = (...) => { ... }`
-//!       patterns, counts plain JS parameters, and provides shared JS lexical skipping used by
-//!       import scanning.
-//! WHY: the binder needs a list of JS exports to match against `@moth.sig` annotations, while
+//! WHAT: identifies callable and literal-backed `export const` declarations, counts plain
+//!       JS parameters and provides shared JS lexical skipping used by import scanning.
+//! WHY: the binder matches each annotation to the declaration's kind, while
 //!      import scanning reuses this module's cursor and lexical boundaries.
 //!      Keeping export scanning separate from comment extraction lets each stage stay focused
 //!      and testable.
@@ -11,6 +10,7 @@
 //! Supported export forms:
 //! - `export function jsName(param1, param2) { ... }`
 //! - `export const jsName = (param1, param2) => { ... }`
+//! - `export const jsName = <unsigned decimal integer literal>`
 //!
 //! Rejected forms:
 //! - `export default ...`
@@ -19,7 +19,6 @@
 //! - `export class ...`
 //! - `module.exports = ...` (CommonJS)
 //! - `exports.name = ...` (CommonJS)
-//! - `export const name = value` where value is not an arrow function
 
 use super::parsed_js_module::{
     JsDiagnosticKind, JsParserDiagnostic, JsSourceSpan, ParsedRuntimeImport,
@@ -30,8 +29,15 @@ use crate::projects::html_project::external_js::runtime_module_registry::Runtime
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsExport {
     pub js_name: String,
-    pub parameter_count: usize,
+    pub kind: JsExportKind,
     pub span: JsSourceSpan,
+}
+
+/// Retained declaration facts, not evaluated JavaScript values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JsExportKind {
+    Callable { parameter_count: usize },
+    Constant { literal_span: Option<JsSourceSpan> },
 }
 
 /// Result of scanning a JS file for exports.
@@ -52,6 +58,19 @@ pub fn scan_exports(source: &str, registry: &RuntimeModuleRegistry) -> ExportSca
     scanner.scan()
 }
 
+/// Binding annotations attach across trivia only, not across a private statement or an
+/// unsupported export. Reuse the scanner's lexical boundary instead of a second comment lexer.
+pub(super) fn annotation_precedes_export(
+    source: &str,
+    registry: &RuntimeModuleRegistry,
+    annotation_end: usize,
+    export_start: usize,
+) -> bool {
+    let mut scanner = ExportScanner::new(source, registry);
+    scanner.pos = annotation_end;
+    scanner.skip_whitespace_and_comments() && scanner.pos == export_start
+}
+
 pub(super) struct ExportScanner<'a> {
     source: &'a str,
     bytes: &'a [u8],
@@ -63,7 +82,7 @@ pub(super) struct ExportScanner<'a> {
 }
 
 impl<'a> ExportScanner<'a> {
-    fn new(source: &'a str, registry: &'a RuntimeModuleRegistry) -> Self {
+    pub(super) fn new(source: &'a str, registry: &'a RuntimeModuleRegistry) -> Self {
         Self {
             source,
             bytes: source.as_bytes(),
@@ -101,18 +120,8 @@ impl<'a> ExportScanner<'a> {
                     JsDiagnosticKind::CommonJsExport,
                 );
                 self.skip_to_statement_end();
-            } else if self.peek_str("import") && self.is_word_boundary_around("import".len()) {
-                if self
-                    .source
-                    .get(self.pos + "import".len()..)
-                    .is_some_and(|rest| rest.starts_with(".meta"))
-                {
-                    self.advance_chars("import".len());
-                } else {
-                    self.read_import_statement();
-                }
-            } else if self.peek_str("require") && self.is_word_boundary_around("require".len()) {
-                self.read_require_statement();
+            } else if self.read_module_loading_at_current() {
+                continue;
             } else if self.current_char_opt() == Some('/')
                 && !self.peek_str("//")
                 && !self.peek_str("/*")
@@ -134,6 +143,28 @@ impl<'a> ExportScanner<'a> {
         }
     }
 
+    /// Every executable scanner context applies the same module-loading policy. Lexical
+    /// lookalikes are skipped by callers before this dispatch, including inside initializers.
+    fn read_module_loading_at_current(&mut self) -> bool {
+        if self.peek_str("import") && self.is_word_boundary_around("import".len()) {
+            if self
+                .source
+                .get(self.pos + "import".len()..)
+                .is_some_and(|rest| rest.starts_with(".meta"))
+            {
+                self.advance_chars("import".len());
+            } else {
+                self.read_import_statement();
+            }
+            return true;
+        }
+        if self.peek_str("require") && self.is_word_boundary_around("require".len()) {
+            self.read_require_statement();
+            return true;
+        }
+        false
+    }
+
     // ------------------------
     //  Export statement
     // ------------------------
@@ -143,7 +174,7 @@ impl<'a> ExportScanner<'a> {
 
         // Consume `export`
         self.advance_chars("export".len());
-        self.skip_whitespace();
+        self.skip_whitespace_and_comments();
 
         if self.consume_str("default") {
             let span = self.make_span(export_start_byte);
@@ -200,15 +231,15 @@ impl<'a> ExportScanner<'a> {
         }
 
         if self.consume_str("function") && self.is_word_boundary_at(0) {
-            self.skip_whitespace();
+            self.skip_whitespace_and_comments();
             if let Some(js_name) = self.parse_identifier() {
-                self.skip_whitespace();
+                self.skip_whitespace_and_comments();
                 if self.consume_char('(') {
                     let parameter_count = self.count_plain_parameters();
                     let span = self.make_span(export_start_byte);
                     self.exports.push(JsExport {
                         js_name,
-                        parameter_count,
+                        kind: JsExportKind::Callable { parameter_count },
                         span,
                     });
                     self.skip_to_statement_end();
@@ -220,25 +251,27 @@ impl<'a> ExportScanner<'a> {
         }
 
         if self.consume_str("const") && self.is_word_boundary_at(0) {
-            self.skip_whitespace();
+            self.skip_whitespace_and_comments();
             if let Some(js_name) = self.parse_identifier() {
-                self.skip_whitespace();
-                if self.consume_char('=') {
-                    self.skip_whitespace();
-                    if self.consume_char('(') {
-                        let parameter_count = self.count_plain_parameters();
-                        self.skip_whitespace();
-                        if !self.consume_str("=>") {
-                            let span = self.make_span(export_start_byte);
-                            self.emit_diagnostic(
-                                "`export const` must be bound to an arrow function in Moth JS modules.",
-                                JsDiagnosticKind::UnsupportedParameterPattern,
-                                span,
-                            );
-                            self.skip_to_statement_end();
-                            return;
-                        }
-                        self.skip_whitespace();
+                self.skip_whitespace_and_comments();
+                if !self.consume_char('=') {
+                    self.record_constant_export(js_name, export_start_byte, None);
+                    self.emit_diagnostic_at_current(
+                        "Literal-backed exports require an initializer.",
+                        JsDiagnosticKind::InvalidConstant,
+                    );
+                    self.skip_to_statement_end();
+                    return;
+                }
+
+                self.skip_whitespace_and_comments();
+                let initializer_start = self.pos;
+                if self.consume_char('(') {
+                    let diagnostic_count = self.diagnostics.len();
+                    let parameter_count = self.count_plain_parameters();
+                    self.skip_whitespace_and_comments();
+                    if self.consume_str("=>") {
+                        self.skip_whitespace_and_comments();
                         if !self.consume_char('{') {
                             let span = self.make_span(export_start_byte);
                             self.emit_diagnostic(
@@ -253,24 +286,25 @@ impl<'a> ExportScanner<'a> {
                         let span = self.make_span(export_start_byte);
                         self.exports.push(JsExport {
                             js_name,
-                            parameter_count,
+                            kind: JsExportKind::Callable { parameter_count },
                             span,
                         });
                         self.skip_to_statement_end();
                         return;
-                    } else {
-                        // `export const name = value` where value is not an arrow function
-                        let span = self.make_span(export_start_byte);
-                        self.emit_diagnostic(
-                            "`export const` must be bound to an arrow function in Moth JS modules.",
-                            JsDiagnosticKind::UnsupportedParameterPattern,
-                            span,
-                        );
-                        self.skip_to_statement_end();
-                        return;
                     }
+                    // A grouped expression is not an arrow. Recover through the same constant
+                    // path without retaining speculative parameter-pattern diagnostics.
+                    self.pos = initializer_start;
+                    self.diagnostics.truncate(diagnostic_count);
                 }
+
+                self.read_constant_export(js_name, export_start_byte);
+                return;
             }
+            self.emit_diagnostic_at_current(
+                "Literal-backed exports require one plain JS identifier.",
+                JsDiagnosticKind::InvalidConstant,
+            );
             self.skip_to_statement_end();
             return;
         }
@@ -288,6 +322,119 @@ impl<'a> ExportScanner<'a> {
 
         // Unknown export form; skip it
         self.skip_to_statement_end();
+    }
+
+    /// Retain the authored token without interpreting its number. The binder owns numeric
+    /// grammar and U32 materialisation; this scanner only establishes the declaration boundary.
+    fn read_constant_export(&mut self, js_name: String, export_start: usize) {
+        let literal_start = self.pos;
+        if self.is_at_end()
+            || self.current_char_opt() == Some(';')
+            || (self.peek_str("export") && self.is_word_boundary_around("export".len()))
+            || (self.peek_str("import") && self.is_word_boundary_around("import".len()))
+        {
+            self.record_constant_export(js_name, export_start, None);
+            self.emit_diagnostic_at_current(
+                "Literal-backed exports require an unsigned decimal integer initializer.",
+                JsDiagnosticKind::InvalidConstant,
+            );
+            self.consume_char(';');
+            return;
+        }
+
+        while !self.is_at_end() {
+            let character = self.current_char();
+            if character.is_whitespace()
+                || matches!(character, ';' | ',')
+                || self.peek_str("//")
+                || self.peek_str("/*")
+            {
+                break;
+            }
+            if self.skip_lexical_content_at_current() {
+                continue;
+            }
+            if character == '/' && self.slash_starts_regular_expression() {
+                self.skip_regular_expression();
+                continue;
+            }
+            if self.read_module_loading_at_current() {
+                // The import/require owner may recover through the terminator. Stop this atom
+                // here so it cannot absorb the next declaration after that recovery.
+                break;
+            }
+            self.advance_char();
+        }
+        let literal_span = JsSourceSpan::range(literal_start, self.pos);
+        let literal_end = self.pos;
+        let has_closed_trivia = self.skip_whitespace_and_comments();
+        let has_line_break = self.source[literal_end..self.pos]
+            .chars()
+            .any(is_js_line_terminator);
+        let at_end = self.is_at_end();
+        let has_semicolon = self.current_char_opt() == Some(';');
+        let next_continues_expression = self.current_char_opt().is_some_and(|character| {
+            matches!(
+                character,
+                '+' | '-'
+                    | '*'
+                    | '/'
+                    | '%'
+                    | '&'
+                    | '|'
+                    | '^'
+                    | '<'
+                    | '>'
+                    | '='
+                    | '?'
+                    | '.'
+                    | '('
+                    | '['
+                    | '`'
+                    | ','
+            )
+        }) || self.peek_str("!=")
+            || ["in", "instanceof"].iter().any(|keyword| {
+                self.peek_str(keyword) && self.is_word_boundary_around(keyword.len())
+            });
+        let starts_prefix_update = self.peek_str("++") || self.peek_str("--");
+
+        let has_boundary = has_closed_trivia
+            && (at_end
+                || has_semicolon
+                || (has_line_break && (!next_continues_expression || starts_prefix_update)));
+        if has_boundary {
+            // Leave trivia before the next statement for the outer scanner. A semicolon, unlike
+            // a newline, explicitly closes the declaration even before a continuation token.
+            if has_semicolon {
+                self.advance_char();
+            } else {
+                self.pos = literal_end;
+            }
+            self.record_constant_export(js_name, export_start, Some(literal_span));
+        } else {
+            self.emit_diagnostic(
+                "Literal-backed exports require one unsigned decimal integer literal and closed \
+                 comments, not multiple declarators or expressions.",
+                JsDiagnosticKind::InvalidConstant,
+                JsSourceSpan::range(literal_start, self.pos),
+            );
+            self.record_constant_export(js_name, export_start, None);
+            self.skip_to_statement_end();
+        }
+    }
+
+    fn record_constant_export(
+        &mut self,
+        js_name: String,
+        export_start: usize,
+        literal_span: Option<JsSourceSpan>,
+    ) {
+        self.exports.push(JsExport {
+            js_name,
+            kind: JsExportKind::Constant { literal_span },
+            span: self.make_span(export_start),
+        });
     }
 
     /// Looks for a `from "..."` clause after an export list or star, including across newlines.
@@ -455,6 +602,13 @@ impl<'a> ExportScanner<'a> {
         let mut in_default_value = false;
 
         while !self.is_at_end() && depth > 0 {
+            if self.peek_str("export") && self.is_word_boundary_around("export".len()) {
+                self.emit_diagnostic_at_current(
+                    "A JS parameter list cannot contain another export declaration.",
+                    JsDiagnosticKind::UnsupportedParameterPattern,
+                );
+                break;
+            }
             if self.skip_lexical_content_at_current() {
                 continue;
             }
@@ -567,22 +721,14 @@ impl<'a> ExportScanner<'a> {
             if self.skip_lexical_content_at_current() {
                 continue;
             }
-
-            if self.peek_str("import") && self.is_word_boundary_around("import".len()) {
-                if self
-                    .source
-                    .get(self.pos + "import".len()..)
-                    .is_some_and(|rest| rest.starts_with(".meta"))
-                {
-                    self.advance_chars("import".len());
-                } else {
-                    self.read_import_statement();
-                }
-                continue;
+            if brace_depth == 0
+                && self.peek_str("export")
+                && self.is_word_boundary_around("export".len())
+            {
+                return;
             }
 
-            if self.peek_str("require") && self.is_word_boundary_around("require".len()) {
-                self.read_require_statement();
+            if self.read_module_loading_at_current() {
                 continue;
             }
 
@@ -598,7 +744,7 @@ impl<'a> ExportScanner<'a> {
             } else if ch == ';' && brace_depth == 0 {
                 self.advance_char();
                 return;
-            } else if ch == '\n' && brace_depth == 0 {
+            } else if is_js_line_terminator(ch) && brace_depth == 0 {
                 return;
             }
             self.advance_char();
@@ -642,20 +788,21 @@ impl<'a> ExportScanner<'a> {
 
     fn skip_line_comment(&mut self) {
         self.advance_chars(2);
-        while !self.is_at_end() && self.current_char() != '\n' {
+        while !self.is_at_end() && !is_js_line_terminator(self.current_char()) {
             self.advance_char();
         }
     }
 
-    fn skip_block_comment(&mut self) {
+    fn skip_block_comment(&mut self) -> bool {
         self.advance_chars(2);
         while !self.is_at_end() {
             if self.peek_str("*/") {
                 self.advance_chars(2);
-                return;
+                return true;
             }
             self.advance_char();
         }
+        false
     }
 
     fn skip_string_literal(&mut self) {
@@ -708,23 +855,7 @@ impl<'a> ExportScanner<'a> {
                     } else if self.peek_str("/*") {
                         self.skip_block_comment();
                         continue;
-                    } else if self.peek_str("import")
-                        && self.is_word_boundary_around("import".len())
-                    {
-                        if self
-                            .source
-                            .get(self.pos + "import".len()..)
-                            .is_some_and(|rest| rest.starts_with(".meta"))
-                        {
-                            self.advance_chars("import".len());
-                        } else {
-                            self.read_import_statement();
-                        }
-                        continue;
-                    } else if self.peek_str("require")
-                        && self.is_word_boundary_around("require".len())
-                    {
-                        self.read_require_statement();
+                    } else if self.read_module_loading_at_current() {
                         continue;
                     }
                     self.advance_char();
@@ -773,7 +904,7 @@ impl<'a> ExportScanner<'a> {
         }
     }
 
-    pub(super) fn skip_whitespace_and_comments(&mut self) {
+    pub(super) fn skip_whitespace_and_comments(&mut self) -> bool {
         loop {
             self.skip_whitespace();
             if self.peek_str("//") {
@@ -781,10 +912,12 @@ impl<'a> ExportScanner<'a> {
                 continue;
             }
             if self.peek_str("/*") {
-                self.skip_block_comment();
+                if !self.skip_block_comment() {
+                    return false;
+                }
                 continue;
             }
-            break;
+            return true;
         }
     }
 
@@ -887,4 +1020,8 @@ impl<'a> ExportScanner<'a> {
 
 fn is_identifier_continuation(ch: char) -> bool {
     ch.is_alphanumeric() || ch == '_' || ch == '$'
+}
+
+fn is_js_line_terminator(character: char) -> bool {
+    matches!(character, '\n' | '\r' | '\u{2028}' | '\u{2029}')
 }

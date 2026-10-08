@@ -10,6 +10,19 @@ Last-use analysis is central to the memory model. Its facts let later stages tra
 
 Recoverable numeric, cast and fallible-operation paths are already explicit HIR branches, locals and exits before borrow validation.
 
+HIR also owns local definition versus update and the incoming value's place/rvalue
+classification. A definition captures its incoming value, retires the prior dynamic
+binding state and establishes the new binding relationship. This applies on every
+loop re-entry. An update preserves ordinary slot/alias semantics, including mutable
+alias write-through. A produced rvalue can retain shared allocation provenance while
+creating a separate slot. Solver modes describe possible states and never select the
+source operation. Operation results and CFG edge destinations preserve the same contract.
+
+A direct place self-update of one unprojected binding performs the ordinary read
+and write checks while preserving its role and provenance. It introduces no new
+alias relationship. Projected writes and updates from a different binding retain
+their ordinary transition rules.
+
 ### Stable downstream fact contract
 
 Every borrow solver must publish the same semantic handoff even when its internal representation and algorithm differ. The stable downstream facts are:

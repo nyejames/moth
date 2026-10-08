@@ -16,6 +16,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::blocks::HirLocal;
+use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirValueRange};
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::hir_builder::lower_module;
@@ -55,6 +56,7 @@ pub(crate) fn lower_hir(
         path_fork,
         HirFunctionOriginLookup::default(),
         None,
+        Default::default(),
     )
     .expect("HIR lowering should succeed");
     lowering.hir_module
@@ -98,70 +100,86 @@ pub(crate) fn raw_template_expression_for_hir_invariant(
 // ---------------------------------------------------------------------------
 //  Direct HIR node construction
 //
-//  These build plain HIR nodes with no target policy in them. Both backends consume them so a
-//  HIR node-shape change is a single edit. Target-specific fixture setup (each backend's
-//  `build_type_environment` and `build_module`) stays with its backend.
+//  These append plain HIR rows to the fixture's module store and return the row-position IDs.
+//  Both backends consume the same representation, while target-specific fixture setup stays local.
 // ---------------------------------------------------------------------------
 
 pub(crate) fn expression(
-    id: u32,
     kind: HirExpressionKind,
     ty: TypeId,
     region: RegionId,
     value_kind: ValueKind,
-) -> HirExpression {
-    HirExpression {
-        id: HirValueId(id),
-        kind,
-        ty,
-        value_kind,
-        region,
-        span: None,
-    }
+    expressions: &mut HirExpressionStore,
+) -> HirValueId {
+    expressions
+        .append_expression(HirExpression {
+            kind,
+            ty,
+            value_kind,
+            region,
+            span: None,
+        })
+        .expect("test expression should fit the HIR expression store")
 }
 
-pub(crate) fn unit_expression(id: u32, ty: TypeId, region: RegionId) -> HirExpression {
+pub(crate) fn unit_expression(
+    ty: TypeId,
+    region: RegionId,
+    expressions: &mut HirExpressionStore,
+) -> HirValueId {
     expression(
-        id,
-        HirExpressionKind::TupleConstruct { elements: vec![] },
+        HirExpressionKind::TupleConstruct {
+            elements: HirValueRange::empty(),
+        },
         ty,
         region,
         ValueKind::Const,
+        expressions,
     )
 }
 
-pub(crate) fn int_expression(id: u32, value: i64, ty: TypeId, region: RegionId) -> HirExpression {
+pub(crate) fn int_expression(
+    value: i64,
+    ty: TypeId,
+    region: RegionId,
+    expressions: &mut HirExpressionStore,
+) -> HirValueId {
     expression(
-        id,
         HirExpressionKind::Int(value),
         ty,
         region,
         ValueKind::Const,
+        expressions,
     )
 }
 
-pub(crate) fn bool_expression(id: u32, value: bool, ty: TypeId, region: RegionId) -> HirExpression {
+pub(crate) fn bool_expression(
+    value: bool,
+    ty: TypeId,
+    region: RegionId,
+    expressions: &mut HirExpressionStore,
+) -> HirValueId {
     expression(
-        id,
         HirExpressionKind::Bool(value),
         ty,
         region,
         ValueKind::Const,
+        expressions,
     )
 }
 
 pub(crate) fn string_expression(
-    id: u32,
     value: &str,
     ty: TypeId,
     region: RegionId,
-) -> HirExpression {
+    expressions: &mut HirExpressionStore,
+) -> HirValueId {
     expression(
-        id,
         HirExpressionKind::StringLiteral(value.to_owned()),
         ty,
         region,
         ValueKind::Const,
+        expressions,
     )
 }
 

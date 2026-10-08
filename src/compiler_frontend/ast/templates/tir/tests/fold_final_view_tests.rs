@@ -20,8 +20,7 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    ConstRangeCursor, ConstRangeIterationValue, TemplateBranchSelector, TemplateLoopControlKind,
-    TemplateLoopHeader,
+    ConstRangeCursor, ConstRangeIterationValue, TemplateBranchSelector, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateEmission, TemplateFoldResult, TirFoldContext,
@@ -30,9 +29,7 @@ use crate::compiler_frontend::ast::templates::tir::TemplateIrBuilder;
 use crate::compiler_frontend::ast::templates::tir::fold::{
     fold_prepared_const_template_pattern, fold_prepared_template,
 };
-use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind,
-};
+use crate::compiler_frontend::ast::templates::tir::node::{TemplateIrNode, TemplateIrNodeKind};
 use crate::compiler_frontend::ast::templates::tir::overlays::TemplateViewContext;
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReference;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
@@ -105,17 +102,12 @@ fn bool_expression(value: bool) -> Expression {
 fn emission_to_string(emission: TemplateEmission, string_table: &StringTable) -> String {
     match emission {
         TemplateEmission::NoOutput => String::new(),
-        TemplateEmission::Output(ConstStringValue::Text(output))
-        | TemplateEmission::Break(Some(ConstStringValue::Text(output)))
-        | TemplateEmission::Continue(Some(ConstStringValue::Text(output))) => {
+        TemplateEmission::Output(ConstStringValue::Text(output)) => {
             string_table.resolve(output).to_owned()
         }
-        TemplateEmission::Output(ConstStringValue::Pieces(_))
-        | TemplateEmission::Break(Some(ConstStringValue::Pieces(_)))
-        | TemplateEmission::Continue(Some(ConstStringValue::Pieces(_))) => {
+        TemplateEmission::Output(ConstStringValue::Pieces(_)) => {
             panic!("structural emission reached a text-only assertion")
         }
-        TemplateEmission::Break(None) | TemplateEmission::Continue(None) => String::new(),
     }
 }
 
@@ -423,25 +415,20 @@ fn const_template_projection_preserves_nested_child_slot_order() -> Result<(), T
 }
 
 #[test]
-fn const_template_projection_preserves_selected_branch_and_fallback_slots()
--> Result<(), TemplateError> {
+fn const_template_projection_preserves_selected_conditional_slot() -> Result<(), TemplateError> {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let location = None;
 
-    let build_branch_template = |store: &mut TemplateIrStore, selected: bool| {
+    let build_conditional_template = |store: &mut TemplateIrStore| {
         let mut builder = TemplateIrBuilder::new(store);
         let selected_slot = builder.push_slot_node(SlotKey::Default, location);
-        let fallback_slot = builder.push_slot_node(SlotKey::Default, location);
-        let branch = TemplateIrBranch::new(
-            TemplateBranchSelector::Bool(bool_expression(selected)),
+        let root = builder.push_conditional_node(
+            TemplateBranchSelector::Bool(bool_expression(true)),
             selected_slot,
-            None,
-            builder.store.next_expression_site_id(),
+            location,
         );
-        let root =
-            builder.push_branch_chain_node(vec![branch], Some(fallback_slot), None, location);
         let template_id = builder.finish_template(
             root,
             Style::default(),
@@ -457,32 +444,14 @@ fn const_template_projection_preserves_selected_branch_and_fallback_slots()
             TemplateIrNodeKind::Slot { placeholder } => placeholder.occurrence_id,
             other => panic!("expected selected slot, got {other:?}"),
         };
-        let fallback_occurrence = match &store
-            .get_node(fallback_slot)
-            .expect("fallback slot exists")
-            .kind
-        {
-            TemplateIrNodeKind::Slot { placeholder } => placeholder.occurrence_id,
-            other => panic!("expected fallback slot, got {other:?}"),
-        };
-        (template_id, selected_occurrence, fallback_occurrence)
+        (template_id, selected_occurrence)
     };
 
-    let (selected_template, selected_occurrence, selected_fallback) =
-        build_branch_template(&mut store, true);
+    let (selected_template, selected_occurrence) = build_conditional_template(&mut store);
     assert_eq!(
         project_pattern_for_template(&store, selected_template, &mut string_table)?,
         vec![FoldedConstTemplatePiece::Slot(selected_occurrence)]
     );
-    assert_ne!(selected_occurrence, selected_fallback);
-
-    let (fallback_template, _selected_occurrence, fallback_occurrence) =
-        build_branch_template(&mut store, false);
-    assert_eq!(
-        project_pattern_for_template(&store, fallback_template, &mut string_table)?,
-        vec![FoldedConstTemplatePiece::Slot(fallback_occurrence)]
-    );
-
     Ok(())
 }
 
@@ -680,16 +649,14 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
     let mut store = TemplateIrStore::new();
     let location = None;
 
-    let false_branch_template = {
+    let false_conditional_template = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let hidden_slot = builder.push_slot_node(SlotKey::Default, location);
-        let branch = TemplateIrBranch::new(
+        let root = builder.push_conditional_node(
             TemplateBranchSelector::Bool(bool_expression(false)),
             hidden_slot,
-            None,
-            builder.store.next_expression_site_id(),
+            location,
         );
-        let root = builder.push_branch_chain_node(vec![branch], None, None, location);
         builder.finish_template(
             root,
             Style::default(),
@@ -699,7 +666,8 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
         )
     };
     assert!(
-        project_pattern_for_template(&store, false_branch_template, &mut string_table,)?.is_empty()
+        project_pattern_for_template(&store, false_conditional_template, &mut string_table,)?
+            .is_empty()
     );
 
     let zero_iteration_template = {
@@ -735,24 +703,22 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
 }
 
 // -------------------------
-//  Branch/fallback bodies
+//  Conditional bodies
 // -------------------------
 
 #[test]
-fn final_view_fold_branch_selects_body() {
+fn final_view_fold_true_conditional_selects_body() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
         let yes_text = string_table.intern("yes");
         let yes_node = builder.push_text_node(yes_text, 3, TemplateSegmentOrigin::Body, None);
-        let branch = TemplateIrBranch::new(
+        let root = builder.push_conditional_node(
             TemplateBranchSelector::Bool(bool_expression(true)),
             yes_node,
             None,
-            builder.store.next_expression_site_id(),
         );
-        let root = builder.push_branch_chain_node(vec![branch], None, None, None);
 
         builder.finish_template(
             root,
@@ -769,25 +735,23 @@ fn final_view_fold_branch_selects_body() {
     assert_eq!(
         emission_to_string(emission, &string_table),
         "yes",
-        "true branch body should be selected through the final view"
+        "true conditional body should be selected through the final view"
     );
 }
 
 #[test]
-fn final_view_fold_false_branch_no_else_is_no_output() {
+fn final_view_fold_false_conditional_is_no_output() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
         let yes_text = string_table.intern("yes");
         let yes_node = builder.push_text_node(yes_text, 3, TemplateSegmentOrigin::Body, None);
-        let branch = TemplateIrBranch::new(
+        let root = builder.push_conditional_node(
             TemplateBranchSelector::Bool(bool_expression(false)),
             yes_node,
             None,
-            builder.store.next_expression_site_id(),
         );
-        let root = builder.push_branch_chain_node(vec![branch], None, None, None);
 
         builder.finish_template(
             root,
@@ -804,44 +768,7 @@ fn final_view_fold_false_branch_no_else_is_no_output() {
     assert_eq!(
         emission,
         TemplateEmission::NoOutput,
-        "false branch with no else should produce structural no-output"
-    );
-}
-
-#[test]
-fn final_view_fold_false_branch_selects_fallback() {
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
-        let mut builder = TemplateIrBuilder::new(store);
-        let yes_text = string_table.intern("yes");
-        let no_text = string_table.intern("no");
-        let yes_node = builder.push_text_node(yes_text, 3, TemplateSegmentOrigin::Body, None);
-        let fallback_node = builder.push_text_node(no_text, 2, TemplateSegmentOrigin::Body, None);
-        let branch = TemplateIrBranch::new(
-            TemplateBranchSelector::Bool(bool_expression(false)),
-            yes_node,
-            None,
-            builder.store.next_expression_site_id(),
-        );
-        let root = builder.push_branch_chain_node(vec![branch], Some(fallback_node), None, None);
-
-        builder.finish_template(
-            root,
-            Style::default(),
-            TemplateType::String,
-            TemplateIrSummary::empty(),
-            None,
-        )
-    });
-
-    let emission = fold_final_view_fixture(&fixture, &mut string_table, TemplateTirPhase::Composed)
-        .expect("final view fold should succeed");
-
-    assert_eq!(
-        emission_to_string(emission, &string_table),
-        "no",
-        "fallback body should be selected when all branches are false"
+        "false conditional should produce structural no-output"
     );
 }
 
@@ -933,20 +860,25 @@ fn final_view_fold_loop_body_concatenates_iterations() {
 }
 
 #[test]
-fn final_view_fold_loop_binding_provenance_reaches_exact_result() {
+fn final_view_fold_loop_binding_and_body_provenance_reach_exact_result() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let member = SyntheticInterfaceMemberIdentity::new(
+    let header_member = SyntheticInterfaceMemberIdentity::new(
         SyntheticInterfaceClass::ProjectContext,
         "render",
         "range",
+    );
+    let body_member = SyntheticInterfaceMemberIdentity::new(
+        SyntheticInterfaceClass::ProjectContext,
+        "render",
+        "loop_body_value",
     );
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let item_path = path_fork
             .try_intern_portable_path("item", string_table)
             .expect("test path fits");
         let mut builder = TemplateIrBuilder::new(store);
-        let body = builder.push_dynamic_expression_node(
+        let item_value = builder.push_dynamic_expression_node(
             Expression::reference_with_type_id(
                 item_path,
                 DataType::Int,
@@ -958,7 +890,17 @@ fn final_view_fold_loop_binding_provenance_reaches_exact_result() {
             TemplateSegmentOrigin::Body,
             None,
         );
-        let range_provenance = SyntheticInterfaceProvenance::single(member.clone());
+        let body_text = string_table.intern("body");
+        let body_value = builder.push_dynamic_expression_node(
+            Expression::string_slice(body_text, None, ValueMode::ImmutableOwned)
+                .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
+                    body_member.clone(),
+                )),
+            TemplateSegmentOrigin::Body,
+            None,
+        );
+        let body = builder.push_sequence_node(vec![item_value, body_value], None);
+        let range_provenance = SyntheticInterfaceProvenance::single(header_member.clone());
         let header = TemplateLoopHeader::Range {
             bindings: Box::new(LoopBindings {
                 item: Some(Declaration {
@@ -1008,13 +950,119 @@ fn final_view_fold_loop_binding_provenance_reaches_exact_result() {
 
     assert_eq!(
         emission_to_string(result.emission, &string_table),
-        "01",
-        "the selected range loop should render its bound values"
+        "0body1body",
+        "the selected range loop should render its bound values and folded body payload"
+    );
+    assert!(
+        result.provenance.members().contains(&header_member),
+        "range provenance must reach the exact folded result through the resolved binding"
+    );
+    assert!(
+        result.provenance.members().contains(&body_member),
+        "folded body provenance must reach the exact result through loop aggregation"
     );
     assert_eq!(
-        result.provenance.members(),
-        &[member],
-        "range provenance must reach the exact folded result through the resolved binding"
+        result.provenance.members().len(),
+        2,
+        "the exact result should contain the distinct header and body dependencies"
+    );
+}
+
+#[test]
+fn final_view_fold_loop_preserves_visited_no_output_selector_provenance() {
+    let mut string_table = StringTable::new();
+    let body_member = SyntheticInterfaceMemberIdentity::new(
+        SyntheticInterfaceClass::ProjectContext,
+        "render",
+        "hidden_body_selector",
+    );
+    let build_loop_template =
+        |string_table: &mut StringTable, store: &mut TemplateIrStore, end: i64| {
+            let mut builder = TemplateIrBuilder::new(store);
+            let hidden_text = string_table.intern("hidden");
+            let hidden_body = builder.push_text_node(
+                hidden_text,
+                "hidden".len(),
+                TemplateSegmentOrigin::Body,
+                None,
+            );
+            let selector = bool_expression(false).with_synthetic_interface_provenance(
+                SyntheticInterfaceProvenance::single(body_member.clone()),
+            );
+            let no_output_body = builder.push_conditional_node(
+                TemplateBranchSelector::Bool(selector),
+                hidden_body,
+                None,
+            );
+            let header = TemplateLoopHeader::Range {
+                bindings: Box::new(LoopBindings {
+                    item: None,
+                    index: None,
+                }),
+                range: Box::new(RangeLoopSpec {
+                    start: int_expression(0),
+                    end: int_expression(end),
+                    step: None,
+                    end_kind: RangeEndKind::Exclusive,
+                }),
+            };
+            let root = builder.push_loop_node(header, no_output_body, None, None);
+            builder.finish_template(
+                root,
+                Style::default(),
+                TemplateType::String,
+                TemplateIrSummary::empty(),
+                None,
+            )
+        };
+    let fold_exact_view = |fixture: &FinalViewFoldFixture, string_table: &mut StringTable| {
+        let store = fixture.store.borrow();
+        let view = TirView::new(
+            &store,
+            fixture.template_id,
+            TemplateTirPhase::Composed,
+            fixture.context,
+        )
+        .expect("range loop view should construct");
+        let prepared = prepare_tir_view(&view, TemplatePreparationMode::Value)
+            .expect("range loop view should prepare");
+        assert!(matches!(
+            prepared.outcome,
+            TemplatePreparationOutcome::Foldable
+        ));
+        let mut fold_context = build_test_fold_context(string_table);
+        fold_prepared_template(&prepared, view, &mut fold_context)
+            .expect("range loop exact fold should succeed")
+    };
+
+    let visited_fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
+        build_loop_template(string_table, store, 2)
+    });
+    let visited_result = fold_exact_view(&visited_fixture, &mut string_table);
+    assert_eq!(
+        visited_result.emission,
+        TemplateEmission::NoOutput,
+        "a false conditional should leave the visited loop body at structural no-output"
+    );
+    assert_eq!(
+        visited_result.provenance.members(),
+        std::slice::from_ref(&body_member),
+        "a consumed selector dependency should survive visited no-output iterations"
+    );
+
+    let zero_iteration_fixture =
+        build_final_view_fixture(&mut string_table, |string_table, store| {
+            build_loop_template(string_table, store, 0)
+        });
+    let zero_iteration_result = fold_exact_view(&zero_iteration_fixture, &mut string_table);
+    assert_eq!(
+        zero_iteration_result.emission,
+        TemplateEmission::NoOutput,
+        "an empty range should remain structural no-output"
+    );
+    assert!(
+        zero_iteration_result.provenance.members().is_empty(),
+        "a selector dependency must not reach the result when the loop body is never visited"
     );
 }
 
@@ -1064,60 +1112,6 @@ fn final_view_fold_zero_iteration_loop_rejects_missing_body_authority() {
         error.msg.contains("TIR preparation: node"),
         "expected a stable preparation node error, got: {}",
         error.msg
-    );
-}
-
-#[test]
-fn final_view_fold_loop_preserves_output_before_break_and_continue() {
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-
-    // [break] stops the loop after the first iteration, preserving only the
-    // output produced before the break signal.
-    let break_fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
-        let mut builder = TemplateIrBuilder::new(store);
-        let dot_text = string_table.intern(".");
-        let after_text = string_table.intern("after");
-        let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
-        let break_node = builder.push_loop_control_node(TemplateLoopControlKind::Break, None);
-        let after_node = builder.push_text_node(after_text, 5, TemplateSegmentOrigin::Body, None);
-        let body_root = builder.push_sequence_node(vec![dot_node, break_node, after_node], None);
-        build_range_loop_template(string_table, store, 0, 3, body_root, None)
-    });
-    let break_emission = fold_final_view_fixture(
-        &break_fixture,
-        &mut string_table,
-        TemplateTirPhase::Composed,
-    )
-    .expect("break fold should succeed");
-    assert_eq!(
-        emission_to_string(break_emission, &string_table),
-        ".",
-        "output before [break] should be preserved once and iteration should stop"
-    );
-
-    // [continue] skips the rest of the body but continues iterating, so the
-    // output before the continue signal accumulates across all iterations.
-    let continue_fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
-        let mut builder = TemplateIrBuilder::new(store);
-        let dot_text = string_table.intern(".");
-        let after_text = string_table.intern("after");
-        let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
-        let continue_node = builder.push_loop_control_node(TemplateLoopControlKind::Continue, None);
-        let after_node = builder.push_text_node(after_text, 5, TemplateSegmentOrigin::Body, None);
-        let body_root = builder.push_sequence_node(vec![dot_node, continue_node, after_node], None);
-        build_range_loop_template(string_table, store, 0, 3, body_root, None)
-    });
-    let continue_emission = fold_final_view_fixture(
-        &continue_fixture,
-        &mut string_table,
-        TemplateTirPhase::Composed,
-    )
-    .expect("continue fold should succeed");
-    assert_eq!(
-        emission_to_string(continue_emission, &string_table),
-        "...",
-        "output before [continue] should be preserved each iteration"
     );
 }
 

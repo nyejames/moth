@@ -8,63 +8,48 @@
 
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
-use crate::compiler_frontend::ast::templates::template_control_flow::TemplateBodyEmission;
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotContributionSource,
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::hir_expression::LoweredExpression;
 use crate::compiler_frontend::hir::ids::LocalId;
+use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::return_hir_transformation_error;
 
 use super::append_context::{
-    RuntimeSlotLoopControlFlush, RuntimeSlotSourceAccumulatorContext, RuntimeTemplateAppendContext,
+    RuntimeSlotSourceAccumulatorContext, RuntimeSlotSourceLocals, RuntimeTemplateAppendContext,
 };
-
-struct RuntimeSlotContributionResult {
-    emission: TemplateBodyEmission,
-    emitted_any_contribution: LocalId,
-    renders_wrapper_unconditionally: bool,
-}
+use super::render_append::RuntimeTemplateEmission;
 
 impl<'a> HirBuilder<'a> {
     pub(super) fn lower_runtime_slot_application_template_expression(
         &mut self,
         handoff: &OwnedRuntimeSlotApplicationHandoff,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let output_accumulator = self.initialize_runtime_template_accumulator(span_ref)?;
         let append_context = RuntimeTemplateAppendContext::new(output_accumulator);
-        let emission =
-            self.append_runtime_slot_application_with_context(handoff, append_context, span_ref)?;
-
-        if matches!(
-            emission,
-            TemplateBodyEmission::Break | TemplateBodyEmission::Continue
-        ) {
-            return_hir_transformation_error!(
-                "Runtime slot application emitted loop control outside a template loop body.",
-                self.hir_error_location(span_ref)
-            );
-        }
+        self.append_runtime_slot_application_with_context(handoff, append_context, span_ref)?;
 
         let region = self.current_region_or_error(span_ref)?;
         let value = self.make_expression(
             span_ref,
-            HirExpressionKind::Copy(HirPlace::Local(output_accumulator)),
+            HirExpressionKind::Copy(HirPlace::local(output_accumulator)),
             builtin_type_ids::STRING,
             ValueKind::RValue,
             region,
-        );
+        )?;
 
         Ok(LoweredExpression {
             prelude: vec![],
@@ -74,149 +59,188 @@ impl<'a> HirBuilder<'a> {
 
     // WHAT: Appends an AST-owned runtime slot application into an existing template output
     // accumulator. WHY: slot applications inside template loops must participate in the same
-    // append-mode control-flow propagation as nested runtime template `if` / `loop` bodies.
+    // append-mode emission bookkeeping as nested runtime template `if` / `loop` bodies.
     pub(super) fn append_runtime_slot_application_with_context(
         &mut self,
         handoff: &OwnedRuntimeSlotApplicationHandoff,
         append_context: RuntimeTemplateAppendContext<'_>,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<RuntimeTemplateEmission, HirConstructionFailure> {
         let source_accumulators =
             self.initialize_runtime_slot_source_accumulators(handoff, span_ref)?;
 
-        let contribution_result = self.append_runtime_slot_contributions(
-            handoff,
-            append_context,
-            &source_accumulators,
-            span_ref,
-        )?;
-        if matches!(
-            contribution_result.emission,
-            TemplateBodyEmission::Break | TemplateBodyEmission::Continue
-        ) {
-            return Ok(contribution_result.emission);
-        }
+        let emitted_any_contribution =
+            self.append_runtime_slot_contributions(handoff, &source_accumulators, span_ref)?;
 
-        if contribution_result.renders_wrapper_unconditionally {
-            return self.append_runtime_slot_wrapper(
+        if let Some(emitted_any_contribution) = emitted_any_contribution {
+            return self.append_runtime_slot_wrapper_if_contributed(
                 handoff,
                 append_context,
                 &source_accumulators,
+                emitted_any_contribution,
                 span_ref,
             );
         }
 
-        self.append_runtime_slot_wrapper_if_contributed(
-            handoff,
-            append_context,
-            &source_accumulators,
-            contribution_result.emitted_any_contribution,
-            span_ref,
-        )
+        self.append_runtime_slot_wrapper(handoff, append_context, &source_accumulators, span_ref)
     }
 
     fn initialize_runtime_slot_source_accumulators(
         &mut self,
         handoff: &OwnedRuntimeSlotApplicationHandoff,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<RuntimeSlotSourceAccumulatorContext, CompilerError> {
+    ) -> Result<RuntimeSlotSourceAccumulatorContext, HirConstructionFailure> {
         let mut context = RuntimeSlotSourceAccumulatorContext::new();
 
         for source in &handoff.contribution_sources {
+            let guarantees_output = owned_runtime_template_node_guarantees_output(
+                &source.render_root,
+                self.string_table,
+            );
             let accumulator = self.initialize_runtime_template_accumulator(span_ref)?;
-            context.insert(source.source, accumulator);
+            let emitted_output = if guarantees_output {
+                None
+            } else {
+                Some(self.initialize_runtime_template_emitted_flag(span_ref)?)
+            };
+            context.insert(
+                source.source,
+                RuntimeSlotSourceLocals {
+                    accumulator,
+                    emitted_output,
+                },
+            );
         }
 
         Ok(context)
     }
 
+    /// Returns a contribution flag only when existing proofs leave wrapper selection conditional.
     fn append_runtime_slot_contributions(
         &mut self,
         handoff: &OwnedRuntimeSlotApplicationHandoff,
-        append_context: RuntimeTemplateAppendContext<'_>,
         source_accumulators: &RuntimeSlotSourceAccumulatorContext,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<RuntimeSlotContributionResult, CompilerError> {
-        let contribution_emitted_flag = self.initialize_runtime_template_emitted_flag(span_ref)?;
-        let mut renders_wrapper_unconditionally = handoff.contribution_sources.is_empty();
-        let loop_control_flush = RuntimeSlotLoopControlFlush {
-            wrapper_plan: &handoff.wrapper,
-            target_accumulator: append_context.target_accumulator(),
-            source_accumulators,
-            slot_sites: &handoff.slot_sites,
-            contribution_emitted_flag,
-            parent_emitted_flag: append_context.emitted_output(),
-        };
+    ) -> Result<Option<LocalId>, HirConstructionFailure> {
+        // Wrapper-owned output, such as a list shell, survives when conditional
+        // children contribute nothing; conditional sources keep their emission tracking.
+        let mut renders_wrapper_unconditionally = handoff.contribution_sources.is_empty()
+            || owned_runtime_template_node_guarantees_output(&handoff.wrapper, self.string_table);
 
+        // Reuse the per-source proof gathered during local initialization. Only
+        // allocate a shared contribution flag when it still controls wrapper selection.
         for source in &handoff.contribution_sources {
-            let Some(target_accumulator) = source_accumulators.local_for(source.source) else {
+            if renders_wrapper_unconditionally {
+                break;
+            }
+
+            let Some(source_locals) = source_accumulators.for_source(source.source) else {
                 return_hir_transformation_error!(
                     "Runtime slot contribution referenced a source with no allocated accumulator.",
                     self.hir_error_location(&source.span)
                 );
             };
 
-            // Missing slots and const-renderable contributions still render through the
-            // wrapper with empty slot accumulators when needed. Runtime-only
-            // contribution plans use the emitted flag below so false branches
-            // and no-output loops can skip wrapper output.
-            let source_renders_wrapper_unconditionally = source.renders_wrapper_unconditionally
-                && owned_runtime_template_node_guarantees_output(
-                    &source.render_root,
-                    self.string_table,
-                );
-            if source_renders_wrapper_unconditionally {
+            if source.renders_wrapper_unconditionally && source_locals.emitted_output.is_none() {
                 renders_wrapper_unconditionally = true;
             }
+        }
 
-            let emission = self.append_runtime_slot_contribution_content(
-                source,
-                target_accumulator,
-                loop_control_flush,
-                contribution_emitted_flag,
-                span_ref,
-            )?;
+        let emitted_any_contribution = if renders_wrapper_unconditionally {
+            None
+        } else {
+            Some(self.initialize_runtime_template_emitted_flag(span_ref)?)
+        };
 
-            match emission {
-                TemplateBodyEmission::NoOutput | TemplateBodyEmission::Output => {}
-                TemplateBodyEmission::Break | TemplateBodyEmission::Continue => {
-                    return Ok(RuntimeSlotContributionResult {
-                        emission,
-                        emitted_any_contribution: contribution_emitted_flag,
-                        renders_wrapper_unconditionally,
-                    });
-                }
-            }
+        for source in &handoff.contribution_sources {
+            let Some(source_locals) = source_accumulators.for_source(source.source) else {
+                return_hir_transformation_error!(
+                    "Runtime slot contribution referenced a source with no allocated accumulator.",
+                    self.hir_error_location(&source.span)
+                );
+            };
+
+            self.append_runtime_slot_contribution_content(source, source_locals, span_ref)?;
 
             let current_block = self.current_block_id_or_error(span_ref)?;
             if self.block_has_explicit_terminator(current_block, span_ref)? {
                 break;
             }
+
+            if let Some(emitted_any_contribution) = emitted_any_contribution {
+                if let Some(source_emitted_output) = source_locals.emitted_output {
+                    self.accumulate_runtime_slot_source_emission(
+                        source_emitted_output,
+                        emitted_any_contribution,
+                        span_ref,
+                    )?;
+                } else {
+                    self.mark_runtime_template_output_emitted(emitted_any_contribution, span_ref)?;
+                }
+            }
         }
 
-        Ok(RuntimeSlotContributionResult {
-            emission: TemplateBodyEmission::NoOutput,
-            emitted_any_contribution: contribution_emitted_flag,
-            renders_wrapper_unconditionally,
-        })
+        Ok(emitted_any_contribution)
     }
 
     fn append_runtime_slot_contribution_content(
         &mut self,
         source: &OwnedRuntimeSlotContributionSource,
-        target_accumulator: LocalId,
-        loop_control_flush: RuntimeSlotLoopControlFlush<'_>,
-        contribution_emitted_flag: LocalId,
+        source_locals: RuntimeSlotSourceLocals,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
-        let append_context = RuntimeTemplateAppendContext::new(target_accumulator)
-            .with_emitted_output(Some(contribution_emitted_flag))
-            .with_loop_control_flush(loop_control_flush);
+    ) -> Result<(), HirConstructionFailure> {
+        let append_context = match source_locals.emitted_output {
+            Some(emitted_output) => RuntimeTemplateAppendContext::new(source_locals.accumulator)
+                .with_emitted_output(emitted_output),
+            None => RuntimeTemplateAppendContext::new(source_locals.accumulator),
+        };
 
         self.append_owned_runtime_template_node_to_accumulator(
             &source.render_root,
             append_context,
             None,
+            span_ref,
+        )?;
+
+        Ok(())
+    }
+
+    fn accumulate_runtime_slot_source_emission(
+        &mut self,
+        source_emitted_output: LocalId,
+        any_source_emitted_output: LocalId,
+        span_ref: &Option<SourceSpan>,
+    ) -> Result<(), HirConstructionFailure> {
+        let region = self.current_region_or_error(span_ref)?;
+        let any_source_value = self.make_local_load_expression(
+            any_source_emitted_output,
+            builtin_type_ids::BOOL,
+            span_ref,
+            region,
+        )?;
+        let source_value = self.make_local_load_expression(
+            source_emitted_output,
+            builtin_type_ids::BOOL,
+            span_ref,
+            region,
+        )?;
+        let emitted_output = self.make_expression(
+            span_ref,
+            HirExpressionKind::BinOp {
+                left: any_source_value,
+                op: HirBinOp::Or,
+                right: source_value,
+            },
+            builtin_type_ids::BOOL,
+            ValueKind::RValue,
+            region,
+        )?;
+
+        self.emit_statement_kind(
+            HirStatementKind::Write {
+                target: HirWriteTarget::AssignPlace(HirPlace::local(any_source_emitted_output)),
+                value: emitted_output,
+            },
             span_ref,
         )
     }
@@ -227,7 +251,7 @@ impl<'a> HirBuilder<'a> {
         append_context: RuntimeTemplateAppendContext<'_>,
         source_accumulators: &RuntimeSlotSourceAccumulatorContext,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<RuntimeTemplateEmission, HirConstructionFailure> {
         let wrapper_context = append_context
             .with_runtime_slot_sites(source_accumulators, &handoff.slot_sites)
             .rejecting_unresolved_slots();
@@ -238,8 +262,9 @@ impl<'a> HirBuilder<'a> {
             span_ref,
         )?;
 
-        if append_context.emitted_output().is_some() && emission == TemplateBodyEmission::Output {
-            return Ok(TemplateBodyEmission::NoOutput);
+        if append_context.emitted_output().is_some() && emission == RuntimeTemplateEmission::Output
+        {
+            return Ok(RuntimeTemplateEmission::NoOutput);
         }
 
         Ok(emission)
@@ -252,7 +277,7 @@ impl<'a> HirBuilder<'a> {
         source_accumulators: &RuntimeSlotSourceAccumulatorContext,
         emitted_any_contribution: LocalId,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, CompilerError> {
+    ) -> Result<RuntimeTemplateEmission, HirConstructionFailure> {
         let condition_block = self.current_block_id_or_error(span_ref)?;
         let parent_region = self.current_region_or_error(span_ref)?;
         let rendered_region = self.create_child_region(parent_region);
@@ -265,7 +290,7 @@ impl<'a> HirBuilder<'a> {
             builtin_type_ids::BOOL,
             span_ref,
             parent_region,
-        );
+        )?;
 
         self.emit_terminator(
             condition_block,
@@ -289,9 +314,9 @@ impl<'a> HirBuilder<'a> {
         let skipped_tail = self.current_block_id_or_error(span_ref)?;
 
         let emission = if append_context.emitted_output().is_some() {
-            TemplateBodyEmission::NoOutput
+            RuntimeTemplateEmission::NoOutput
         } else {
-            TemplateBodyEmission::Output
+            RuntimeTemplateEmission::Output
         };
 
         if rendered_terminated {
@@ -341,21 +366,17 @@ fn owned_runtime_template_node_guarantees_output(
             dynamic_expression_guarantees_output(expression, string_table)
         }
 
-        OwnedRuntimeTemplateNode::ChildTemplate { template, .. } => match &template.body {
-            OwnedRuntimeTemplateBody::Render(node) => {
-                owned_runtime_template_node_guarantees_output(node, string_table)
-            }
-            OwnedRuntimeTemplateBody::RuntimeSlotApplication(_) => false,
-        },
+        OwnedRuntimeTemplateNode::ChildTemplate { template, .. } => {
+            runtime_template_handoff_guarantees_output(template, string_table)
+        }
 
         // Runtime template control flow can structurally produce no output
         // after HIR evaluates its condition or iterable. Even when the body
         // shape is otherwise const-renderable, the slot wrapper must stay
         // guarded by the emitted-output flag.
-        OwnedRuntimeTemplateNode::BranchChain { .. }
+        OwnedRuntimeTemplateNode::Conditional { .. }
         | OwnedRuntimeTemplateNode::Loop { .. }
-        | OwnedRuntimeTemplateNode::ConditionalWrapper { .. }
-        | OwnedRuntimeTemplateNode::LoopControl { .. } => false,
+        | OwnedRuntimeTemplateNode::ConditionalWrapper { .. } => false,
 
         OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
@@ -376,7 +397,9 @@ fn dynamic_expression_guarantees_output(
             runtime_template_handoff_guarantees_output(handoff, string_table)
         }
 
-        ExpressionKind::RuntimeSlotApplicationHandoff(_) => false,
+        ExpressionKind::RuntimeSlotApplicationHandoff(handoff) => {
+            owned_runtime_template_node_guarantees_output(&handoff.wrapper, string_table)
+        }
 
         ExpressionKind::Coerced { value, .. } => {
             dynamic_expression_guarantees_output(value, string_table)
@@ -411,7 +434,9 @@ fn runtime_template_handoff_guarantees_output(
         OwnedRuntimeTemplateBody::Render(node) => {
             owned_runtime_template_node_guarantees_output(node, string_table)
         }
-        OwnedRuntimeTemplateBody::RuntimeSlotApplication(_) => false,
+        OwnedRuntimeTemplateBody::RuntimeSlotApplication(handoff) => {
+            owned_runtime_template_node_guarantees_output(&handoff.wrapper, string_table)
+        }
     }
 }
 

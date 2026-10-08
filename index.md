@@ -139,15 +139,15 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [template_types.rs](src/compiler_frontend/ast/templates/template_types.rs), [template_folding.rs](src/compiler_frontend/ast/templates/template_folding.rs).
     - [template_render_units.rs](src/compiler_frontend/ast/templates/template_render_units.rs), [template_renderability.rs](src/compiler_frontend/ast/templates/template_renderability.rs).
     - [create_template_node.rs](src/compiler_frontend/ast/templates/create_template_node.rs), [top_level_templates.rs](src/compiler_frontend/ast/templates/top_level_templates.rs), [doc_fragments.rs](src/compiler_frontend/ast/templates/doc_fragments.rs), [error.rs](src/compiler_frontend/ast/templates/error.rs).
-    - [runtime_handoff.rs](src/compiler_frontend/ast/templates/runtime_handoff.rs): neutral owned AST-to-HIR template handoff vocabulary.
+    - [runtime_handoff.rs](src/compiler_frontend/ast/templates/runtime_handoff.rs): neutral owned AST-to-HIR template handoff vocabulary, with one selector/body conditional and canonical structural walkers.
     - [tir](src/compiler_frontend/ast/templates/tir/): Template IR — AST-local authoritative template representation. kw: TemplateIrStore.
-        - [store.rs](src/compiler_frontend/ast/templates/tir/store.rs), [store/control_flow.rs](src/compiler_frontend/ast/templates/tir/store/control_flow.rs), [store/slot_plans.rs](src/compiler_frontend/ast/templates/tir/store/slot_plans.rs), [store/overlays.rs](src/compiler_frontend/ast/templates/tir/store/overlays.rs), [ids.rs](src/compiler_frontend/ast/templates/tir/ids.rs), [node.rs](src/compiler_frontend/ast/templates/tir/node.rs), [summary.rs](src/compiler_frontend/ast/templates/tir/summary.rs): central owned storage, checked mutation and shape metadata.
+        - [store.rs](src/compiler_frontend/ast/templates/tir/store.rs), [store/control_flow.rs](src/compiler_frontend/ast/templates/tir/store/control_flow.rs), [store/slot_plans.rs](src/compiler_frontend/ast/templates/tir/store/slot_plans.rs), [store/overlays.rs](src/compiler_frontend/ast/templates/tir/store/overlays.rs), [ids.rs](src/compiler_frontend/ast/templates/tir/ids.rs), [node.rs](src/compiler_frontend/ast/templates/tir/node.rs), [summary.rs](src/compiler_frontend/ast/templates/tir/summary.rs): central owned storage, direct conditional and loop nodes, checked mutation and shape metadata.
         - [construction_context.rs](src/compiler_frontend/ast/templates/tir/construction_context.rs): parser-facing TIR emission into the shared store.
         - [refs.rs](src/compiler_frontend/ast/templates/tir/refs.rs), [view.rs](src/compiler_frontend/ast/templates/tir/view.rs): durable module-local references plus exact view identity, effective reads and structural transitions.
         - [expression_sites.rs](src/compiler_frontend/ast/templates/tir/expression_sites.rs): exact-view and nested expression-payload traversal.
         - [expression_overlays.rs](src/compiler_frontend/ast/templates/tir/expression_overlays.rs): structural/effective expression-overlay collection and precedence.
         - [expression_constness.rs](src/compiler_frontend/ast/templates/tir/expression_constness.rs): shared expression constness and narrow structural queries.
-        - [preparation.rs](src/compiler_frontend/ast/templates/tir/preparation.rs): exact-view semantic preparation for foldable, runtime and helper values.
+        - [preparation.rs](src/compiler_frontend/ast/templates/tir/preparation.rs): exact-view semantic preparation for foldable values, runtime values and slot-insert helpers.
         - [fold/](src/compiler_frontend/ast/templates/tir/fold/), [formatter_view.rs](src/compiler_frontend/ast/templates/tir/formatter_view.rs), [render_unit.rs](src/compiler_frontend/ast/templates/tir/render_unit.rs): TIR-native fold reducer, control-flow/wrapper owners, output estimates, format and render-unit preparation.
         - [slot_layout.rs](src/compiler_frontend/ast/templates/tir/slot_layout.rs), [slot_plan.rs](src/compiler_frontend/ast/templates/tir/slot_plan.rs), [slot_composition/](src/compiler_frontend/ast/templates/tir/slot_composition/), [wrapper_sets.rs](src/compiler_frontend/ast/templates/tir/wrapper_sets.rs): slot layout, routing and wrapper reuse.
         - [handoff_materialization.rs](src/compiler_frontend/ast/templates/tir/handoff_materialization.rs): owned runtime-template trees for HIR lowering.
@@ -160,7 +160,9 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 
 - [backend-facing semantic IR](src/compiler_frontend/hir/): kw — CFG, locals, TypeId, reachability.
     - [hir_builder](src/compiler_frontend/hir/hir_builder/), [hir_builder.rs](src/compiler_frontend/hir/hir_builder.rs): AST → HIR lowering state.
+    - [expression_store.rs](src/compiler_frontend/hir/expression_store.rs): module-owned dense expression rows, typed payload ranges, checked compact capacities and construction-to-frozen ownership.
     - [hir_expression](src/compiler_frontend/hir/hir_expression/), [hir_statement](src/compiler_frontend/hir/hir_statement/): lowering implementation owners.
+        - [hir_expression/templates](src/compiler_frontend/hir/hir_expression/templates/): lowers owned runtime-template render trees and runtime slot applications through the shared accumulator path.
     - [validation](src/compiler_frontend/hir/validation/): executable-HIR internal invariant checks only; non-HIR module metadata is validated by [module_metadata.rs](src/compiler_frontend/module_metadata.rs).
     - [reachability.rs](src/compiler_frontend/hir/reachability.rs): function/block/external/map/runtime-cast feature facts.
     - [failure_facts.rs](src/compiler_frontend/hir/failure_facts.rs): immutable per-function failure facts projected once from typed AST bodies.
@@ -205,8 +207,12 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [styles](src/projects/html_project/styles/): $html/$css/$escape_html/$code validation/rendering.
     - [code.rs](src/projects/html_project/styles/code.rs): the `$code` scanner shell, role vocabulary and span emission, with [moth_scanner.rs](src/projects/html_project/styles/moth_scanner.rs) owning the Moth contextual state machines and [language_profiles.rs](src/projects/html_project/styles/language_profiles.rs) the profile registry and non-Moth word tables.
 - [external_js](src/projects/html_project/external_js/): provider-backed JS imports, runtime modules/assets/glue.
+    - [parser](src/projects/html_project/external_js/parser/mod.rs): annotation extraction, JS export/import scanning and binding orchestration.
+        - [binding.rs](src/projects/html_project/external_js/parser/binding.rs): annotation/export matching, signature and type validation, U32 literal materialisation and runtime-import deduplication.
 - [binding_packages](src/projects/html_project/binding_packages/): builder-owned binding packages for HTML projects.
-    - [@web/canvas binding package](src/projects/html_project/binding_packages/web/canvas/): built-in JS canvas asset (`canvas.js`) and `@web/canvas` registration. Used by the `@html` canvas helpers.
+    - [@web packages](src/projects/html_project/binding_packages/web/mod.rs): shared registration of every built-in `@web/*` JS asset. Each package directory holds its asset and a `README.md` with its living design and plan.
+        - [@web/canvas](src/projects/html_project/binding_packages/web/canvas/): Canvas 2D asset (`canvas.js`). Used by the `@html` canvas helpers.
+        - [@web/graphics](src/projects/html_project/binding_packages/web/graphics/): WebGL2 package, registered with no public symbols yet.
 - [moth_template](src/projects/html_project/moth_template/): direct .mtf request normalization, content-source discovery and output packaging around the compiler's [Moth template service](src/compiler_frontend/single_source_compilation/moth_template.rs), retaining per-document source contexts with warnings.
 - [new_html_project](src/projects/html_project/new_html_project/): scaffold command.
 

@@ -18,9 +18,9 @@ use crate::compiler_frontend::ast::templates::template::{
 };
 use crate::compiler_frontend::ast::templates::template_folding::TemplateEmission;
 use crate::compiler_frontend::ast::templates::tir::{
-    FoldedConstTemplatePiece, SlotOccurrenceId, TemplateHelperKind, TemplatePreparation,
-    TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase, TirView,
-    TirViewIdentity, fold_prepared_const_template_pattern, prepare_tir_view,
+    FoldedConstTemplatePiece, SlotOccurrenceId, TemplatePreparation, TemplatePreparationMode,
+    TemplatePreparationOutcome, TemplateTirPhase, TirView, TirViewIdentity,
+    fold_prepared_const_template_pattern, prepare_tir_view,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
@@ -202,8 +202,8 @@ impl AstFinalizer<'_, '_> {
 
 /// Classify one finalization projection into the value the module constant store holds.
 ///
-/// WHAT: maps the four const-template classifications onto the store's template payload, and
-/// rejects the two that cannot be a compile-time constant value.
+/// WHAT: maps const-template classifications onto the store's template payload and rejects the
+/// `NonConst` classification.
 /// WHY: the store must not re-derive template identity, and the classification rule is the same
 /// for every module constant, so it belongs beside the projection that produced it rather than
 /// inline in the finalization sequence.
@@ -263,8 +263,8 @@ pub(super) fn const_template_value_from_projection(
             provenance: projected.provenance,
         }),
 
-        // Preparation never publishes these, so the guard above already rejected them.
-        TemplateConstValueKind::LoopControlSignal | TemplateConstValueKind::NonConst => {
+        // Preparation never publishes non-const values, so the guard above already rejected them.
+        TemplateConstValueKind::NonConst => {
             Err(CompilerError::compiler_error(
                 "A non-const template classification reached module-constant store construction with a public projection.",
             )
@@ -300,7 +300,7 @@ pub(super) fn project_const_template_value(
     let publish = matches!(prepared.outcome, TemplatePreparationOutcome::Foldable)
         || matches!(
             prepared.outcome,
-            TemplatePreparationOutcome::Helper(TemplateHelperKind::SlotInsert)
+            TemplatePreparationOutcome::SlotInsertHelper
         );
     if !publish {
         return Ok(ProjectedConstTemplateValue {
@@ -331,17 +331,9 @@ pub(super) fn project_const_template_value(
             Some(match emission {
                 TemplateEmission::NoOutput => ConstStringValue::Text(string_table.intern("")),
                 TemplateEmission::Output(value) => value,
-                TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
-                    return Err(CompilerError::compiler_error(
-                        "Folded module template emitted an unconsumed loop-control signal.",
-                    )
-                    .into());
-                }
             })
         }
-        TemplateConstValueKind::SlotInsertHelper
-        | TemplateConstValueKind::LoopControlSignal
-        | TemplateConstValueKind::NonConst => None,
+        TemplateConstValueKind::SlotInsertHelper | TemplateConstValueKind::NonConst => None,
     };
 
     Ok(ProjectedConstTemplateValue {

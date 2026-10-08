@@ -79,6 +79,21 @@ INFERRED #= 1\n"
         "parsed type anchors must reuse tokenizer rows without adding extended spans"
     );
 
+    let original_capacity_reference = prepared
+        .headers
+        .iter()
+        .flat_map(|header| &header.capacity_references)
+        .find(|reference| reference.span.is_some())
+        .expect("fixed-capacity type should retain a bare constant reference");
+    let original_capacity_span = original_capacity_reference
+        .span
+        .expect("fixed-capacity reference span");
+    assert_eq!(original_capacity_span.source(), source_id);
+    assert_eq!(
+        strings.resolve(original_capacity_reference.name),
+        long_capacity.as_str()
+    );
+
     let (type_alias_count, inferred_count, original_anchors) =
         snapshot_prepared_type_anchors(&prepared, &strings);
     assert_eq!(
@@ -168,6 +183,26 @@ INFERRED #= 1\n"
         .rebind_source_identity(final_id, final_path, &mut remapped_path_fork)
         .expect("retained source should rebind");
 
+    let rebound_capacity_span = prepared
+        .headers
+        .iter()
+        .flat_map(|header| &header.capacity_references)
+        .find_map(|reference| reference.span)
+        .expect("fixed-capacity reference should retain its rebound span");
+    assert_eq!(
+        rebound_capacity_span.source(),
+        final_id,
+        "capacity references must use the final prepared-file identity"
+    );
+    assert_eq!(
+        rebound_capacity_span.local(),
+        original_capacity_span.local(),
+        "source rebinding must preserve the capacity-reference range"
+    );
+    prepared
+        .freeze_path_syntax(&merged, &mut remapped_path_fork)
+        .expect("whole-file invariants should hold at freeze");
+
     let mut database = SourceDatabaseBuilder::new(final_sources);
     database
         .sources_mut()
@@ -175,6 +210,12 @@ INFERRED #= 1\n"
         .expect("retain snapshot");
     database.retain_span_builder(final_id, spans);
     let database = database.finish().expect("install original span table");
+    let range = rebound_capacity_span.byte_range(&database);
+    assert_eq!(
+        source.get(range.start() as usize..range.end() as usize),
+        Some(long_capacity.as_str()),
+        "capacity span must resolve to the exact authored source text"
+    );
 
     let (_, rebound_inferred_count, rebound_anchors) =
         snapshot_prepared_type_anchors(&prepared, &merged);

@@ -64,6 +64,30 @@ fn completed_boundary_summary_suppresses_rematerialisation() {
 }
 
 #[test]
+fn completed_sidecars_publish_only_after_structural_freeze() {
+    for frozen in [false, true] {
+        let known = PublishedBoundary::empty();
+        let mut transaction = GeneratedFunctionTransaction::new(known.view());
+        let identity = generated_identity("ready");
+        let request_id = transaction.register_requests([facts("ready")])[0];
+        assert_eq!(
+            transaction.enter(request_id).unwrap(),
+            GeneratedRequestEntry::Materialise
+        );
+        let mut sidecar = test_sidecar(identity, summary());
+        if frozen {
+            sidecar.module.executable.hir.expressions.freeze();
+        }
+        transaction
+            .complete(request_id, summary(), sidecar)
+            .unwrap();
+
+        // A complete semantic record is still unpublished while its graph can grow.
+        assert_eq!(transaction.finish().is_ok(), frozen);
+    }
+}
+
+#[test]
 fn a_transaction_allocates_only_new_records() {
     let known_identity = generated_identity("known");
     let known = PublishedBoundary::with(known_identity, summary());

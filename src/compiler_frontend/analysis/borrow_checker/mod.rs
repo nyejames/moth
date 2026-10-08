@@ -28,12 +28,10 @@ mod transfer;
 mod types;
 
 pub(crate) use error::BorrowCheckError;
-pub(crate) use types::{BorrowAnalysis, BorrowCheckReport, BorrowDropSiteKind, LocalMode};
+pub(crate) use types::{BorrowAnalysis, BorrowCheckReport, BorrowDropSiteKind};
 
 #[cfg(test)]
-pub(crate) use types::{
-    BorrowDropSite, BorrowStateSnapshot, LocalBorrowSnapshot, OptionalTransferStatus,
-};
+pub(crate) use types::{BorrowDropSite, LocalMode, OptionalTransferStatus};
 pub(crate) type BorrowFacts = BorrowAnalysis;
 
 // WHY: These optional re-exports expose the Boracle service to project tooling and focused tests.
@@ -54,6 +52,8 @@ pub(crate) use boracle::{
 pub(crate) use problem::{
     AccessKind, CallResultProvenance, CallResultUnknownReason, EventKind, OriginKind,
 };
+#[cfg(all(test, feature = "boracle"))]
+pub(crate) use problem::{BindingDestination, RebindValue, TerminatorEventKind, UseKind};
 
 use crate::compiler_frontend::analysis::borrow_checker::engine::BorrowChecker;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;

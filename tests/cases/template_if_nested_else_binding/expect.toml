@@ -1,5 +1,0 @@
-[backends.html]
-mode = "success"
-warnings = "forbid"
-rendered_output_contains = ["template_if_nested_else_binding", "nested else sees outer"]
-rendered_output_not_contains = ["wrong nested then", "wrong outer else"]

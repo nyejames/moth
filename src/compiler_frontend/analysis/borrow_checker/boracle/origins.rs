@@ -7,7 +7,7 @@
 
 use super::super::problem::{
     BindingId, BorrowProblem, CallResultProvenance, CallResultUnknownReason, Event, EventId,
-    EventKind, OriginKind, PlaceId, ProjectionElem, UseId, UseKind, ValueOrigin, ValueOriginId,
+    EventKind, OriginKind, PlaceId, ProjectionElem, UseId, ValueOrigin, ValueOriginId,
 };
 use super::relations::{
     CopyGraphId, OriginRegistration, OriginRelation, OriginRelations, PrecisionLossReason,
@@ -635,7 +635,8 @@ fn emit_aggregate_child_rows(
 
     let mut explained_pairs = BTreeSet::new();
     for field in fields.iter() {
-        let Some(child_place) = projected_place(problem, *destination, field.projection) else {
+        let Some(child_place) = projected_place(problem, destination.place(), field.projection)
+        else {
             continue;
         };
         let field_origins =
@@ -708,7 +709,8 @@ fn emit_copy_correspondence_rows(
         let copy_graph = CopyGraphId::new(copy_graphs);
         copy_graphs += 1;
 
-        let Some(destination_origins) = state_after_event.get(&(event.id, *destination)) else {
+        let Some(destination_origins) = state_after_event.get(&(event.id, destination.place()))
+        else {
             continue;
         };
         if !destination_origins.contains(origin) {
@@ -910,7 +912,7 @@ fn apply_block(
     let mut local_traces = Vec::new();
     let mut local_states = BTreeMap::new();
     let mut local_write_through_uses = BTreeSet::new();
-    let mut pending_write = None;
+    let mut pending_write: Option<(PlaceId, UseId)> = None;
     for (event_index, event_id) in block.events.iter().enumerate() {
         let event = problem.events().get(event_id.index()).ok_or_else(|| {
             CompilerError::compiler_error(format!(
@@ -920,10 +922,16 @@ fn apply_block(
         })?;
         let (rule, destination, inputs) =
             apply_event(problem, event, &mut state, missing_call_result_origins)?;
+        let jump_definitions = apply_jump_arguments(problem, event, &mut state)?;
         if matches!(rule, OriginTraceRule::Mixed | OriginTraceRule::WriteThrough)
             && let Some(destination) = destination
             && let Some((place, use_id)) = pending_write
             && place == destination
+            && problem
+                .uses()
+                .get(use_id.index())
+                .and_then(|use_row| use_row.kind.binding_destination())
+                .is_none_or(|binding_destination| !binding_destination.defines())
         {
             local_write_through_uses.insert(use_id);
         }
@@ -936,7 +944,12 @@ fn apply_block(
                 ..
             }) = problem.events().get(next_event_id.index())
             && problem.uses().get(use_id.index()).is_some_and(|use_row| {
-                use_row.kind == UseKind::Write && use_row.place == destination
+                use_row.kind.is_write()
+                    && use_row.place == destination
+                    && use_row
+                        .kind
+                        .binding_destination()
+                        .is_none_or(|binding_destination| !binding_destination.defines())
             })
         {
             // Call results publish their write-through origin at the CallEffect event, while
@@ -947,7 +960,7 @@ fn apply_block(
             EventKind::Access { use_id } => problem
                 .uses()
                 .get(use_id.index())
-                .filter(|use_row| use_row.kind == UseKind::Write)
+                .filter(|use_row| use_row.kind.is_write())
                 .map(|use_row| (use_row.place, *use_id)),
             _ => None,
         };
@@ -985,6 +998,22 @@ fn apply_block(
                 output_origins: Box::new([]),
             });
         }
+        for (destination, input_origins) in jump_definitions {
+            let output_origins = sorted_origins(state.origins.get(&destination));
+            local_facts.push(OriginFact {
+                event: event.id,
+                place: destination,
+                origins: output_origins.clone(),
+            });
+            local_traces.push(OriginTrace {
+                event: event.id,
+                rule: OriginTraceRule::Rebind,
+                destination: Some(destination),
+                input_origins: input_origins.into_boxed_slice(),
+                output_origins: output_origins.clone(),
+            });
+            local_states.insert((event.id, destination), output_origins);
+        }
     }
 
     if let Some((facts, traces)) = capture.as_mut() {
@@ -1011,33 +1040,20 @@ fn apply_event(
             destination,
             origin,
         } => {
-            if is_alias_only(problem, state, *destination) {
-                return Ok(write_through_result(*destination, Vec::new()));
-            }
-            if is_mixed(problem, state, *destination) {
-                return Ok(mixed_write_result(
-                    problem,
-                    state,
-                    *destination,
-                    one_origin(*origin),
-                    Vec::new(),
-                ));
-            }
-            let was_initialized = state.origins.contains_key(destination);
-            let output = one_origin(*origin);
-            let mode = if is_mutable_parameter(problem, *destination, *origin) {
+            let mode = if is_mutable_parameter(problem, destination.place(), *origin) {
                 BindingMode::Alias
             } else {
                 BindingMode::Slot
             };
-            replace_generation(problem, state, *destination, mode, output);
-            set_binding_mode(problem, state, *destination, mode);
-            let rule = if was_initialized {
-                OriginTraceRule::Rebind
-            } else {
-                OriginTraceRule::Fresh
-            };
-            Ok((rule, Some(*destination), Vec::new()))
+            Ok(apply_binding_write(
+                problem,
+                state,
+                *destination,
+                mode,
+                one_origin(*origin),
+                Vec::new(),
+                OriginTraceRule::Fresh,
+            ))
         }
         EventKind::Alias {
             source,
@@ -1054,38 +1070,15 @@ fn apply_event(
             } else {
                 origins.iter().copied().collect()
             };
-            if is_alias_only(problem, state, *destination) {
-                return Ok(write_through_result(
-                    *destination,
-                    input.into_iter().collect(),
-                ));
-            }
-            if is_mixed(problem, state, *destination) {
-                return Ok(mixed_write_result(
-                    problem,
-                    state,
-                    *destination,
-                    input.clone(),
-                    input.iter().copied().collect(),
-                ));
-            }
-            let rule = if state.origins.contains_key(destination) {
-                OriginTraceRule::Rebind
-            } else {
-                OriginTraceRule::Alias
-            };
-            let mode = if binding_mode(problem, state, *destination) == Some(BindingMode::Slot) {
-                BindingMode::Slot
-            } else {
-                BindingMode::Alias
-            };
-            replace_generation(problem, state, *destination, mode, input.clone());
-            if mode == BindingMode::Alias {
-                set_alias_mode_if_unclassified(problem, state, *destination);
-            } else {
-                set_binding_mode(problem, state, *destination, mode);
-            }
-            Ok((rule, Some(*destination), input.into_iter().collect()))
+            Ok(apply_binding_write(
+                problem,
+                state,
+                *destination,
+                BindingMode::Alias,
+                input.clone(),
+                input.into_iter().collect(),
+                OriginTraceRule::Alias,
+            ))
         }
         EventKind::AliasFromPlace {
             source,
@@ -1096,38 +1089,15 @@ fn apply_event(
             destination,
         } => {
             let input = origins_for_place(problem, &state.origins, *source);
-            if is_alias_only(problem, state, *destination) {
-                return Ok(write_through_result(
-                    *destination,
-                    input.iter().copied().collect(),
-                ));
-            }
-            if is_mixed(problem, state, *destination) {
-                return Ok(mixed_write_result(
-                    problem,
-                    state,
-                    *destination,
-                    input.clone(),
-                    input.iter().copied().collect(),
-                ));
-            }
-            let rule = if state.origins.contains_key(destination) {
-                OriginTraceRule::Rebind
-            } else {
-                OriginTraceRule::Alias
-            };
-            let mode = if binding_mode(problem, state, *destination) == Some(BindingMode::Slot) {
-                BindingMode::Slot
-            } else {
-                BindingMode::Alias
-            };
-            replace_generation(problem, state, *destination, mode, input.clone());
-            if mode == BindingMode::Alias {
-                set_alias_mode_if_unclassified(problem, state, *destination);
-            } else {
-                set_binding_mode(problem, state, *destination, mode);
-            }
-            Ok((rule, Some(*destination), input.into_iter().collect()))
+            Ok(apply_binding_write(
+                problem,
+                state,
+                *destination,
+                BindingMode::Alias,
+                input.clone(),
+                input.into_iter().collect(),
+                OriginTraceRule::Alias,
+            ))
         }
         EventKind::Copy {
             source,
@@ -1141,30 +1111,20 @@ fn apply_event(
                 return Err(CompilerError::compiler_error(format!(
                     "Boracle origin solver cannot apply copy event {:?}: origin state is \
                      missing for source place {:?} and destination place {:?}",
-                    event.id, source, destination
+                    event.id,
+                    source,
+                    destination.place()
                 )));
             }
-            if is_alias_only(problem, state, *destination) {
-                return Ok(write_through_result(*destination, source_origins));
-            }
-            if is_mixed(problem, state, *destination) {
-                return Ok(mixed_write_result(
-                    problem,
-                    state,
-                    *destination,
-                    one_origin(*origin),
-                    source_origins,
-                ));
-            }
-            replace_generation(
+            Ok(apply_binding_write(
                 problem,
                 state,
                 *destination,
                 BindingMode::Slot,
                 one_origin(*origin),
-            );
-            set_binding_mode(problem, state, *destination, BindingMode::Slot);
-            Ok((OriginTraceRule::Copy, Some(*destination), source_origins))
+                source_origins,
+                OriginTraceRule::Copy,
+            ))
         }
         EventKind::Projection {
             source,
@@ -1177,37 +1137,20 @@ fn apply_event(
                 return Err(CompilerError::compiler_error(format!(
                     "Boracle origin solver cannot apply projection event {:?}: origin state is \
                      missing for source place {:?} and destination place {:?}",
-                    event.id, source, destination
+                    event.id,
+                    source,
+                    destination.place()
                 )));
             }
             let output = input.clone();
-            if is_alias_only(problem, state, *destination) {
-                return Ok(write_through_result(
-                    *destination,
-                    input.into_iter().collect(),
-                ));
-            }
-            if is_mixed(problem, state, *destination) {
-                return Ok(mixed_write_result(
-                    problem,
-                    state,
-                    *destination,
-                    output,
-                    input.into_iter().collect(),
-                ));
-            }
-            replace_generation(
+            Ok(apply_binding_write(
                 problem,
                 state,
                 *destination,
                 BindingMode::Slot,
                 output.clone(),
-            );
-            set_binding_mode(problem, state, *destination, BindingMode::Slot);
-            Ok((
-                OriginTraceRule::Projection,
-                Some(*destination),
                 input.into_iter().collect(),
+                OriginTraceRule::Projection,
             ))
         }
         EventKind::Rebind { destination, value } => {
@@ -1220,28 +1163,15 @@ fn apply_event(
                     origins_for_place(problem, &state.origins, *source)
                 }
             };
-            let input_origins = input.iter().copied().collect();
-            if is_alias_only(problem, state, *destination) {
-                return Ok(write_through_result(*destination, input_origins));
-            }
-            if is_mixed(problem, state, *destination) {
-                return Ok(mixed_write_result(
-                    problem,
-                    state,
-                    *destination,
-                    input.clone(),
-                    input_origins,
-                ));
-            }
-            replace_generation(
+            Ok(apply_binding_write(
                 problem,
                 state,
                 *destination,
                 BindingMode::Slot,
                 input.clone(),
-            );
-            set_binding_mode(problem, state, *destination, BindingMode::Slot);
-            Ok((OriginTraceRule::Rebind, Some(*destination), input_origins))
+                input.iter().copied().collect(),
+                OriginTraceRule::Rebind,
+            ))
         }
         EventKind::Aggregate {
             destination,
@@ -1256,29 +1186,27 @@ fn apply_event(
                     return Err(CompilerError::compiler_error(format!(
                         "Boracle origin solver cannot apply aggregate event {:?}: origin state \
                          is missing for field source place {:?} and destination place {:?}",
-                        event.id, field.source, destination
+                        event.id,
+                        field.source,
+                        destination.place()
                     )));
                 }
                 input.extend(field_origins.iter().copied());
                 field_states.push((field.projection, field_origins));
             }
-            if is_alias_only(problem, state, *destination) {
-                return Ok(write_through_result(
-                    *destination,
-                    input.iter().copied().collect(),
-                ));
-            }
-            if is_mixed(problem, state, *destination) {
-                let result = mixed_write_result(
-                    problem,
-                    state,
-                    *destination,
-                    one_origin(*origin),
-                    input.iter().copied().collect(),
-                );
+            let result = apply_binding_write(
+                problem,
+                state,
+                *destination,
+                BindingMode::Slot,
+                one_origin(*origin),
+                input.iter().copied().collect(),
+                OriginTraceRule::Aggregate,
+            );
+            if result.0 == OriginTraceRule::Mixed {
                 for (projection, field_origins) in &field_states {
                     if let Some(projected_place) =
-                        projected_place(problem, *destination, *projection)
+                        projected_place(problem, destination.place(), *projection)
                     {
                         state
                             .alternatives
@@ -1290,16 +1218,10 @@ fn apply_event(
                 rebuild_origins(state);
                 return Ok(result);
             }
-            replace_generation(
-                problem,
-                state,
-                *destination,
-                BindingMode::Slot,
-                one_origin(*origin),
-            );
-            set_binding_mode(problem, state, *destination, BindingMode::Slot);
             for (projection, field_origins) in field_states {
-                if let Some(projected_place) = projected_place(problem, *destination, projection) {
+                if let Some(projected_place) =
+                    projected_place(problem, destination.place(), projection)
+                {
                     state
                         .alternatives
                         .entry((projected_place, BindingMode::Slot))
@@ -1308,11 +1230,7 @@ fn apply_event(
                 }
             }
             rebuild_origins(state);
-            Ok((
-                OriginTraceRule::Aggregate,
-                Some(*destination),
-                input.into_iter().collect(),
-            ))
+            Ok(result)
         }
         EventKind::CallEffect(effect) => {
             let Some(result) = effect.result else {
@@ -1344,27 +1262,14 @@ fn apply_event(
                 ),
                 _ => (BTreeSet::new(), one_origin(result.origin)),
             };
-            if is_alias_only(problem, state, result.place) {
-                return Ok(write_through_result(
-                    result.place,
-                    input.iter().copied().collect(),
-                ));
-            }
-            if is_mixed(problem, state, result.place) {
-                return Ok(mixed_write_result(
-                    problem,
-                    state,
-                    result.place,
-                    output,
-                    input.iter().copied().collect(),
-                ));
-            }
-            replace_generation(problem, state, result.place, BindingMode::Slot, output);
-            set_binding_mode(problem, state, result.place, BindingMode::Slot);
-            Ok((
-                OriginTraceRule::CallResult,
-                Some(result.place),
+            Ok(apply_binding_write(
+                problem,
+                state,
+                result.destination,
+                BindingMode::Slot,
+                output,
                 input.into_iter().collect(),
+                OriginTraceRule::CallResult,
             ))
         }
         EventKind::ScopeExit { bindings } => {
@@ -1388,6 +1293,55 @@ fn apply_event(
             Ok((OriginTraceRule::Noop, None, Vec::new()))
         }
     }
+}
+
+fn apply_jump_arguments(
+    problem: &BorrowProblem,
+    event: &Event,
+    state: &mut FlowState,
+) -> Result<Vec<(PlaceId, Vec<ValueOriginId>)>, CompilerError> {
+    let EventKind::Terminator {
+        kind: super::super::problem::TerminatorEventKind::Jump { arguments, .. },
+    } = &event.kind
+    else {
+        return Ok(Vec::new());
+    };
+
+    // Capture every predecessor value before any destination replaces a binding, so swaps and
+    // loop re-entry use the same parallel-edge semantics as the HIR argument list.
+    let captured = arguments
+        .iter()
+        .map(|argument| {
+            let origins = origins_for_place(problem, &state.origins, argument.source)
+                .into_iter()
+                .collect::<Vec<_>>();
+            if origins.is_empty() {
+                return Err(CompilerError::compiler_error(format!(
+                    "Boracle origin solver cannot apply jump {:?}: origin state is missing for source place {:?}",
+                    event.id, argument.source
+                )));
+            }
+            Ok((argument.destination, origins))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut definitions = Vec::with_capacity(captured.len());
+    for (destination, input_origins) in captured {
+        let (rule, destination, _) = apply_binding_write(
+            problem,
+            state,
+            destination,
+            BindingMode::Slot,
+            input_origins.iter().copied().collect(),
+            input_origins.clone(),
+            OriginTraceRule::Rebind,
+        );
+        debug_assert_eq!(rule, OriginTraceRule::Rebind);
+        if let Some(destination) = destination {
+            definitions.push((destination, input_origins));
+        }
+    }
+    Ok(definitions)
 }
 fn join_mode(left: BindingMode, right: BindingMode) -> BindingMode {
     if left == right {
@@ -1448,15 +1402,36 @@ fn set_binding_mode(
     }
 }
 
-fn set_alias_mode_if_unclassified(
+fn apply_binding_write(
     problem: &BorrowProblem,
     state: &mut FlowState,
-    destination: PlaceId,
-) {
-    let Some(binding) = destination_binding(problem, destination) else {
-        return;
+    destination: super::super::problem::BindingDestination,
+    mode: BindingMode,
+    output: OriginSet,
+    input_origins: Vec<ValueOriginId>,
+    initial_rule: OriginTraceRule,
+) -> (OriginTraceRule, Option<PlaceId>, Vec<ValueOriginId>) {
+    let place = destination.place();
+    if !destination.defines() {
+        if is_alias_only(problem, state, place) {
+            return write_through_result(place, input_origins);
+        }
+        if is_mixed(problem, state, place) {
+            return mixed_write_result(problem, state, place, output, input_origins);
+        }
+    }
+
+    let was_initialized = state.origins.contains_key(&place);
+    replace_generation(problem, state, place, mode, output);
+    set_binding_mode(problem, state, place, mode);
+    let rule = if initial_rule == OriginTraceRule::Alias {
+        OriginTraceRule::Alias
+    } else if was_initialized {
+        OriginTraceRule::Rebind
+    } else {
+        initial_rule
     };
-    state.modes.entry(binding).or_insert(BindingMode::Alias);
+    (rule, Some(place), input_origins)
 }
 
 fn write_through_result(

@@ -1133,6 +1133,44 @@ Functions that mutate the context take `~Canvas2d` (mutable access). Query funct
 
 All parameters stay positional-only. Named arguments are not supported because binding-backed packages do not expose source-function features.
 
+### Error codes
+
+Fallible canvas functions return builtin `Error` values whose `code` names a host-operation category. The compiler owns these codes and `canvas.js` imports them by name from `@moth/runtime`.
+
+[table:
+    [th:
+        [: Code]
+        [: Category]
+        [: Canvas failures]
+    ]
+
+    [td:
+        [: `400`]
+        [: Invalid host argument]
+        [: Pixel coordinates outside the image data bounds]
+    ]
+
+    [td:
+        [: `404`]
+        [: Host resource not found]
+        [: No `<canvas>` or `<img>` element with the requested id]
+    ]
+
+    [td:
+        [: `409`]
+        [: Host resource unavailable]
+        [: An image that hasn't finished loading or is broken, or a pattern the browser can't create]
+    ]
+
+    [td:
+        [: `500`]
+        [: Host operation failed]
+        [: A missing 2D context or a browser exception. The message is the exception's message when it has one.]
+    ]
+]
+
+These are host-operation categories, not HTTP status semantics.
+
 ### Opaque type rules
 
 - Do not construct opaque types with struct syntax.
@@ -1159,7 +1197,7 @@ The Wasm backend rejects reachable `@web/canvas` calls before lowering. Canvas s
 
 ### Deferred surfaces
 
-`@web/canvas` ships as a skeleton. Deferred surfaces include async image-loading helpers, `toBlob` and `captureStream`, raw typed-array and arbitrary line-dash array access, `Path2D`, `DOMMatrix`, `OffscreenCanvas`, `ImageBitmap`, video sources and WebGL. These will arrive as the language and external package ABI mature. See @../../../progress (progress matrix) for current status.
+`@web/canvas` ships as a skeleton. Deferred surfaces include async image-loading helpers, `toBlob` and `captureStream`, raw typed-array and arbitrary line-dash array access, `Path2D`, `DOMMatrix`, `OffscreenCanvas`, `ImageBitmap` and video sources. These will arrive as the language and external package ABI mature. WebGL belongs to @../graphics (@web/graphics), not this package. See @../../../progress (progress matrix) for current status.
 
 ### Related concepts
 

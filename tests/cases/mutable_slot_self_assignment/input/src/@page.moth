@@ -1,0 +1,5 @@
+-- A mutable slot can be assigned its current place without duplicating access.
+target ~= "old"
+target = target
+
+[:mutable_slot_self_assignment target=[target]]

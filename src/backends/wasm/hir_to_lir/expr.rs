@@ -13,10 +13,12 @@ use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId,
 };
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::comparison_supported;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
+use crate::compiler_frontend::hir::expression_store::{HirStringPieceRange, HirValueRange};
+use crate::compiler_frontend::hir::expressions::HirExpressionKind;
+use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass};
@@ -34,9 +36,11 @@ pub(crate) struct ExprLoweringOutput {
 
 pub(crate) fn lower_expression(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
-    expression: &HirExpression,
+    expression_id: HirValueId,
     statements: &mut Vec<WasmLirStmt>,
 ) -> Result<ExprLoweringOutput, CompilerError> {
+    let hir = context.module_context.hir_module;
+    let expression = hir.expressions.expression(expression_id);
     // This matcher is intentionally partial while Wasm support is experimental. Unsupported HIR
     // expression kinds return structured LIR transformation errors instead of panicking.
     match &expression.kind {
@@ -172,7 +176,7 @@ pub(crate) fn lower_expression(
             variant_index,
             fields,
         } => {
-            if !fields.is_empty() {
+            if !hir.expressions.variant_fields(*fields).is_empty() {
                 return Err(lir_transformation_error(
                     "Wasm backend does not yet support variant payload fields",
                 ));
@@ -260,7 +264,7 @@ pub(crate) fn lower_expression(
             ))
         }
         HirExpressionKind::StructuralString { pieces } => {
-            let rendered = render_structural_string(context, pieces)?;
+            let rendered = render_structural_string(context, *pieces)?;
             Ok(lower_concrete_string(
                 context,
                 statements,
@@ -269,27 +273,27 @@ pub(crate) fn lower_expression(
             ))
         }
         HirExpressionKind::Load(place) => {
-            let local = lower_place_local(context, place)?;
+            let local = lower_place_local(context, *place)?;
             Ok(ExprLoweringOutput {
                 value: local,
                 prefer_move: true,
             })
         }
         HirExpressionKind::Copy(place) => {
-            let local = lower_place_local(context, place)?;
+            let local = lower_place_local(context, *place)?;
             Ok(ExprLoweringOutput {
                 value: local,
                 prefer_move: false,
             })
         }
         HirExpressionKind::BinOp { left, op, right } => {
-            lower_binary_expression(context, expression, left, *op, right, statements)
+            lower_binary_expression(context, expression_id, *left, *op, *right, statements)
         }
         HirExpressionKind::UnaryOp { op, .. } => Err(lir_transformation_error(format!(
             "Wasm lowering does not yet support unary operator {op:?}"
         ))),
         HirExpressionKind::Collection(items) => {
-            if is_empty_string_collection(context, expression, items) {
+            if is_empty_string_collection(context, expression_id, *items) {
                 let dst =
                     context.alloc_local(None, WasmAbiType::Handle, WasmLocalRole::ValueHandle);
                 statements.push(WasmLirStmt::VecNew { dst });
@@ -314,16 +318,16 @@ pub(crate) fn lower_expression(
                 context,
                 source_domain,
                 target_domain,
-                source,
-                expression,
+                *source,
+                expression_id,
                 statements,
             ),
             BuiltinCastPolicyId::NumericToString(source_domain) => {
                 lower_infallible_numeric_to_string(
                     context,
                     source_domain,
-                    source,
-                    expression,
+                    *source,
+                    expression_id,
                     statements,
                 )
             }
@@ -331,16 +335,16 @@ pub(crate) fn lower_expression(
                 context,
                 FixedScalar::Byte,
                 FixedScalar::U8,
-                source,
-                expression,
+                *source,
+                expression_id,
                 statements,
             ),
             BuiltinCastPolicyId::U8ToByte => lower_infallible_byte_conversion(
                 context,
                 FixedScalar::U8,
                 FixedScalar::Byte,
-                source,
-                expression,
+                *source,
+                expression_id,
                 statements,
             ),
             _ => Err(lir_transformation_error(format!(
@@ -366,8 +370,8 @@ fn lower_infallible_numeric_conversion(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
     source_domain: NumericScalar,
     target_domain: NumericScalar,
-    source_expression: &HirExpression,
-    target_expression: &HirExpression,
+    source_expression: HirValueId,
+    target_expression: HirValueId,
     statements: &mut Vec<WasmLirStmt>,
 ) -> Result<ExprLoweringOutput, CompilerError> {
     if matches!(source_domain, NumericScalar::Number(_))
@@ -380,8 +384,8 @@ fn lower_infallible_numeric_conversion(
     let profile = context.module_context.request.numeric_profile;
     let type_environment = context.module_context.type_environment;
     if source_domain == target_domain
-        || source_expression.ty != source_domain.type_id(type_environment)
-        || target_expression.ty != target_domain.type_id(type_environment)
+        || expression_type(context, source_expression) != source_domain.type_id(type_environment)
+        || expression_type(context, target_expression) != target_domain.type_id(type_environment)
         || numeric_conversion_fallibility(source_domain, target_domain, profile)
             != BuiltinCastFallibility::Infallible
     {
@@ -495,8 +499,8 @@ fn lower_infallible_numeric_conversion(
 fn lower_infallible_numeric_to_string(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
     source_domain: NumericScalar,
-    source_expression: &HirExpression,
-    target_expression: &HirExpression,
+    source_expression: HirValueId,
+    target_expression: HirValueId,
     statements: &mut Vec<WasmLirStmt>,
 ) -> Result<ExprLoweringOutput, CompilerError> {
     if matches!(source_domain, NumericScalar::Number(_)) {
@@ -518,8 +522,8 @@ fn lower_infallible_numeric_to_string(
         .map(|(minimum, _)| minimum);
     if (!source_domain.is_integer() && float_precision.is_none())
         || (source_domain.is_integer() && source_minimum.is_none())
-        || source_expression.ty != source_domain.type_id(type_environment)
-        || target_expression.ty != type_environment.builtins().string
+        || expression_type(context, source_expression) != source_domain.type_id(type_environment)
+        || expression_type(context, target_expression) != type_environment.builtins().string
     {
         return Err(lir_transformation_error(
             "Wasm NumericToString cast has inconsistent or unsupported HIR evidence",
@@ -582,12 +586,13 @@ fn lower_infallible_byte_conversion(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
     source_scalar: FixedScalar,
     target_scalar: FixedScalar,
-    source_expression: &HirExpression,
-    target_expression: &HirExpression,
+    source_expression: HirValueId,
+    target_expression: HirValueId,
     statements: &mut Vec<WasmLirStmt>,
 ) -> Result<ExprLoweringOutput, CompilerError> {
-    if source_expression.ty != builtin_type_ids::fixed_scalar(source_scalar)
-        || target_expression.ty != builtin_type_ids::fixed_scalar(target_scalar)
+    if expression_type(context, source_expression) != builtin_type_ids::fixed_scalar(source_scalar)
+        || expression_type(context, target_expression)
+            != builtin_type_ids::fixed_scalar(target_scalar)
         || !matches!(
             (source_scalar, target_scalar),
             (FixedScalar::Byte, FixedScalar::U8) | (FixedScalar::U8, FixedScalar::Byte)
@@ -609,7 +614,7 @@ fn lower_infallible_byte_conversion(
 
 fn render_structural_string(
     context: &WasmFunctionLoweringContext<'_, '_>,
-    pieces: &[ConstStringPiece],
+    pieces: HirStringPieceRange,
 ) -> Result<String, CompilerError> {
     let Some(url_map) = context
         .module_context
@@ -622,6 +627,11 @@ fn render_structural_string(
         ));
     };
 
+    let pieces = context
+        .module_context
+        .hir_module
+        .expressions
+        .string_pieces(pieces);
     let mut rendered = String::new();
     for piece in pieces {
         match piece {
@@ -675,10 +685,10 @@ pub(crate) fn lower_concrete_string(
 
 fn lower_binary_expression(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
-    expression: &HirExpression,
-    left: &HirExpression,
+    expression: HirValueId,
+    left: HirValueId,
     op: HirBinOp,
-    right: &HirExpression,
+    right: HirValueId,
     statements: &mut Vec<WasmLirStmt>,
 ) -> Result<ExprLoweringOutput, CompilerError> {
     if matches!(op, HirBinOp::StringAppend) {
@@ -687,16 +697,19 @@ fn lower_binary_expression(
 
     let lhs_abi = expression_abi(context, left);
     let rhs_abi = expression_abi(context, right);
+    let left_type = expression_type(context, left);
+    let right_type = expression_type(context, right);
     let is_string_equality = matches!(op, HirBinOp::Eq | HirBinOp::Ne)
-        && left.ty == context.module_context.type_environment.builtins().string
-        && right.ty == context.module_context.type_environment.builtins().string;
+        && left_type == context.module_context.type_environment.builtins().string
+        && right_type == context.module_context.type_environment.builtins().string;
     let lhs = lower_expression(context, left, statements)?;
     let rhs = lower_expression(context, right, statements)?;
 
     match op {
         HirBinOp::Eq => {
             let dst = context.alloc_temp(WasmAbiType::I32);
-            let scalar_types = scalar_comparison_types(context, left.ty, right.ty, HirBinOp::Eq)?;
+            let scalar_types =
+                scalar_comparison_types(context, left_type, right_type, HirBinOp::Eq)?;
             let statement = if is_string_equality {
                 WasmLirStmt::StringEq {
                     dst,
@@ -727,7 +740,8 @@ fn lower_binary_expression(
         }
         HirBinOp::Ne => {
             let dst = context.alloc_temp(WasmAbiType::I32);
-            let scalar_types = scalar_comparison_types(context, left.ty, right.ty, HirBinOp::Ne)?;
+            let scalar_types =
+                scalar_comparison_types(context, left_type, right_type, HirBinOp::Ne)?;
             let statement = if is_string_equality {
                 WasmLirStmt::StringNe {
                     dst,
@@ -757,7 +771,7 @@ fn lower_binary_expression(
             })
         }
         HirBinOp::Lt | HirBinOp::Le | HirBinOp::Gt | HirBinOp::Ge => {
-            let scalar_types = scalar_comparison_types(context, left.ty, right.ty, op)?;
+            let scalar_types = scalar_comparison_types(context, left_type, right_type, op)?;
             let dst = context.alloc_temp(WasmAbiType::I32);
             if let Some((lhs_type, rhs_type)) = scalar_types {
                 statements.push(WasmLirStmt::ScalarCompare {
@@ -963,19 +977,21 @@ fn binop_unsupported_abi_error(op: &str, abi: WasmAbiType) -> CompilerError {
 
 fn lower_string_concat_expression(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
-    expression: &HirExpression,
+    expression_id: HirValueId,
     statements: &mut Vec<WasmLirStmt>,
 ) -> Result<ExprLoweringOutput, CompilerError> {
     // WHAT: lower compiler-owned StringAppend chains into explicit buffer operations.
     // WHY: both normal functions and runtime fragments should follow the same string-concat path
     // so control-flow-heavy runtime wrappers do not need a second lowering contract.
     let mut chunks = Vec::new();
-    collect_string_concat_chunks(context, expression, &mut chunks);
+    collect_string_concat_chunks(context, expression_id, &mut chunks);
+    let hir = context.module_context.hir_module;
 
     let buffer = context.alloc_local(None, WasmAbiType::Handle, WasmLocalRole::BufferHandle);
     statements.push(WasmLirStmt::StringNewBuffer { dst: buffer });
 
-    for chunk in chunks {
+    for chunk_id in chunks {
+        let chunk = hir.expressions.expression(chunk_id);
         match &chunk.kind {
             HirExpressionKind::StringLiteral(literal) => {
                 let static_id =
@@ -986,8 +1002,8 @@ fn lower_string_concat_expression(
                 });
             }
             _ => {
-                let lowered = lower_expression(context, chunk, statements)?;
-                let abi = expression_abi(context, chunk);
+                let lowered = lower_expression(context, chunk_id, statements)?;
+                let abi = expression_abi(context, chunk_id);
                 let chunk_handle = if chunk.ty
                     == context.module_context.type_environment.builtins().int
                 {
@@ -1030,43 +1046,48 @@ fn lower_string_concat_expression(
     })
 }
 
-fn collect_string_concat_chunks<'a>(
+fn collect_string_concat_chunks(
     context: &WasmFunctionLoweringContext<'_, '_>,
-    expression: &'a HirExpression,
-    out: &mut Vec<&'a HirExpression>,
+    expression_id: HirValueId,
+    out: &mut Vec<HirValueId>,
 ) {
+    let hir = context.module_context.hir_module;
+    let expression = hir.expressions.expression(expression_id);
     if let HirExpressionKind::BinOp { left, op, right } = &expression.kind
         && matches!(op, HirBinOp::StringAppend)
-        && is_handle_type(context, expression)
+        && is_handle_type(context, expression_id)
     {
-        collect_string_concat_chunks(context, left, out);
-        collect_string_concat_chunks(context, right, out);
+        collect_string_concat_chunks(context, *left, out);
+        collect_string_concat_chunks(context, *right, out);
         return;
     }
 
-    out.push(expression);
+    out.push(expression_id);
 }
 
-fn is_handle_type(
-    context: &WasmFunctionLoweringContext<'_, '_>,
-    expression: &HirExpression,
-) -> bool {
+fn is_handle_type(context: &WasmFunctionLoweringContext<'_, '_>, expression: HirValueId) -> bool {
     matches!(expression_abi(context, expression), WasmAbiType::Handle)
 }
 
 fn is_empty_string_collection(
     context: &WasmFunctionLoweringContext<'_, '_>,
-    expression: &HirExpression,
-    items: &[HirExpression],
+    expression: HirValueId,
+    items: HirValueRange,
 ) -> bool {
-    if !items.is_empty() {
+    if !context
+        .module_context
+        .hir_module
+        .expressions
+        .values(items)
+        .is_empty()
+    {
         return false;
     }
 
     let Some(element) = context
         .module_context
         .type_environment
-        .collection_element_type(expression.ty)
+        .collection_element_type(expression_type(context, expression))
     else {
         return false;
     };
@@ -1076,25 +1097,45 @@ fn is_empty_string_collection(
 
 fn expression_abi(
     context: &WasmFunctionLoweringContext<'_, '_>,
-    expression: &HirExpression,
+    expression: HirValueId,
 ) -> WasmAbiType {
-    lower_type_to_abi(context.module_context, expression.ty)
+    lower_type_to_abi(context.module_context, expression_type(context, expression))
+}
+
+pub(super) fn expression_type(
+    context: &WasmFunctionLoweringContext<'_, '_>,
+    expression_id: HirValueId,
+) -> TypeId {
+    context
+        .module_context
+        .hir_module
+        .expressions
+        .expression(expression_id)
+        .ty
 }
 
 fn lower_place_local(
     context: &WasmFunctionLoweringContext<'_, '_>,
-    place: &HirPlace,
+    place: HirPlace,
 ) -> Result<WasmLirLocalId, CompilerError> {
     // WHAT: place lowering currently supports direct locals only.
     // WHY: field/index projections require additional memory-model and layout work.
-    match place {
-        HirPlace::Local(local_id) => context.local_map.get(local_id).copied().ok_or_else(|| {
+    if context
+        .module_context
+        .hir_module
+        .expressions
+        .projections(place.projections)
+        .is_empty()
+    {
+        context.local_map.get(&place.root).copied().ok_or_else(|| {
             lir_transformation_error(format!(
-                "Wasm lowering could not resolve local {local_id:?}",
+                "Wasm lowering could not resolve local {:?}",
+                place.root
             ))
-        }),
-        HirPlace::Field { .. } | HirPlace::Index { .. } => Err(lir_transformation_error(
+        })
+    } else {
+        Err(lir_transformation_error(
             "Wasm lowering currently supports only direct local places",
-        )),
+        ))
     }
 }

@@ -11,6 +11,7 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
+use crate::compiler_frontend::ast::templates::template_folding::TemplateEmission;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase, TirView,
     fold_prepared_template, prepare_tir_view,
@@ -569,16 +570,10 @@ fn primitive_value_from_template(
     let fold_result = fold_prepared_template(&preparation, view, &mut fold_context)
         .map_err(ExpressionParseError::from)?;
     match fold_result.emission {
-        crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::NoOutput => {
-            Ok(Some(PrimitiveBuildValue::String(String::new())))
+        TemplateEmission::NoOutput => Ok(Some(PrimitiveBuildValue::String(String::new()))),
+        TemplateEmission::Output(value) => {
+            Ok(primitive_value_from_const_string(value, string_table))
         }
-        crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::Output(
-            value,
-        ) => Ok(primitive_value_from_const_string(value, string_table)),
-        crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::Break(_)
-        | crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::Continue(
-            _,
-        ) => Ok(None),
     }
 }
 

@@ -10,6 +10,7 @@ use super::super::definitions::{
 use super::super::ids::{ExternalConstantId, ExternalFunctionId, ExternalTypeId};
 use super::super::registry::ExternalPackageRegistry;
 use super::super::symbol_path::ExternalSymbolPath;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 /// Registers test packages `@test/pkg-a` and `@test/pkg-b` with a duplicate
 /// symbol name for integration-test coverage of package-scoped resolution.
@@ -187,8 +188,11 @@ pub(crate) fn register_test_packages_for_integration(registry: &mut ExternalPack
             ExternalConstantId(1011),
             ExternalConstantDef {
                 name: "PI".to_owned(),
-                data_type: ExternalAbiType::F64.into(),
-                value: ExternalConstantValue::Float(3.15),
+                data_type: ExternalAbiType::Fixed(FixedScalar::F64).into(),
+                value: ExternalConstantValue::Fixed(
+                    FixedScalarValue::binary_float(FixedScalar::F64, 3.15)
+                        .expect("3.15 is an exact binary64 literal"),
+                ),
             },
         )
         .expect("test nested constant registration should not collide");

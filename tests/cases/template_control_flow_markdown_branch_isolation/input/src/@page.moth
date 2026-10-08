@@ -1,9 +1,9 @@
-show_markdown = false
+show_markdown = true
 
-[if show_markdown:
-    [$md:
-        **active_markdown_branch**
+[:
+    **plain_before**
+    [if show_markdown:
+        [$md: **active_markdown_branch**]
     ]
-[else]
-    **plain_else_branch**
+    **plain_after**
 ]

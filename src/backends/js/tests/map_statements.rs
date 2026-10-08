@@ -6,7 +6,7 @@ use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp, Va
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 
 // Map operation statement lowering tests [map]
@@ -15,27 +15,28 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 /// Verifies that a map `get` statement lowers to `__moth_map_get` with receiver and key. [map]
 #[test]
 fn map_get_statement_lowers_to_helper() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
     let receiver = expression(
-        1,
-        HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
+        HirExpressionKind::Load(HirPlace::local(LocalId(0))),
         types.map_string_int,
         region,
         ValueKind::Place,
+        &mut expressions,
     );
-    let key = string_expression(2, "Priya", types.string, region);
+    let key = string_expression("Priya", types.string, region, &mut expressions);
 
     let get_stmt = statement(
         1,
         HirStatementKind::MapOp {
             op: HirMapOp::Get,
             receiver,
-            args: vec![key],
-            result: Some(LocalId(1)),
+            args: append_values(&[key], &mut expressions),
+            result: Some(HirLocalDestination::Define(LocalId(1))),
         },
     );
 
@@ -47,7 +48,7 @@ fn map_get_statement_lowers_to_helper() {
             local(1, types.int, region),
         ],
         statements: vec![get_stmt],
-        terminator: HirTerminator::Return(unit_expression(3, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
 
     let function = HirFunction {
@@ -58,6 +59,7 @@ fn map_get_statement_lowers_to_helper() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -68,7 +70,6 @@ fn map_get_statement_lowers_to_helper() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -86,35 +87,36 @@ fn map_get_statement_lowers_to_helper() {
     assert!(
         output
             .source
-            .contains("__moth_assign_value(moth_result_l1, __moth_map_get"),
-        "map get with result local must assign via __moth_assign_value"
+            .contains("moth_result_l1 = __moth_binding(__moth_map_get"),
+        "map get result definition must create a fresh value binding"
     );
 }
 
 /// Verifies that a map `set` statement without a result local emits a plain call. [map]
 #[test]
 fn map_set_statement_without_result_emits_plain_call() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
     let receiver = expression(
-        1,
-        HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
+        HirExpressionKind::Load(HirPlace::local(LocalId(0))),
         types.map_string_int,
         region,
         ValueKind::Place,
+        &mut expressions,
     );
-    let key = string_expression(2, "Priya", types.string, region);
-    let value = int_expression(3, 42, types.int, region);
+    let key = string_expression("Priya", types.string, region, &mut expressions);
+    let value = int_expression(42, types.int, region, &mut expressions);
 
     let set_stmt = statement(
         1,
         HirStatementKind::MapOp {
             op: HirMapOp::Set,
             receiver,
-            args: vec![key, value],
+            args: append_values(&[key, value], &mut expressions),
             result: None,
         },
     );
@@ -124,7 +126,7 @@ fn map_set_statement_without_result_emits_plain_call() {
         region,
         locals: vec![local(0, types.map_string_int, region)],
         statements: vec![set_stmt],
-        terminator: HirTerminator::Return(unit_expression(4, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
 
     let function = HirFunction {
@@ -135,6 +137,7 @@ fn map_set_statement_without_result_emits_plain_call() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -145,7 +148,6 @@ fn map_set_statement_without_result_emits_plain_call() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -165,27 +167,28 @@ fn map_set_statement_without_result_emits_plain_call() {
 /// Verifies that map `contains`, `clear`, and `length` lower to their helpers. [map]
 #[test]
 fn map_infallible_ops_lower_to_plain_helpers() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
     let receiver = expression(
-        1,
-        HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
+        HirExpressionKind::Load(HirPlace::local(LocalId(0))),
         types.map_string_int,
         region,
         ValueKind::Place,
+        &mut expressions,
     );
-    let key = string_expression(2, "Priya", types.string, region);
+    let key = string_expression("Priya", types.string, region, &mut expressions);
 
     let contains_stmt = statement(
         1,
         HirStatementKind::MapOp {
             op: HirMapOp::Contains,
-            receiver: receiver.clone(),
-            args: vec![key.clone()],
-            result: Some(LocalId(1)),
+            receiver,
+            args: append_values(&[key], &mut expressions),
+            result: Some(HirLocalDestination::Define(LocalId(1))),
         },
     );
 
@@ -193,8 +196,8 @@ fn map_infallible_ops_lower_to_plain_helpers() {
         2,
         HirStatementKind::MapOp {
             op: HirMapOp::Clear,
-            receiver: receiver.clone(),
-            args: vec![],
+            receiver,
+            args: append_values(&[], &mut expressions),
             result: None,
         },
     );
@@ -204,8 +207,8 @@ fn map_infallible_ops_lower_to_plain_helpers() {
         HirStatementKind::MapOp {
             op: HirMapOp::Length,
             receiver,
-            args: vec![],
-            result: Some(LocalId(2)),
+            args: append_values(&[], &mut expressions),
+            result: Some(HirLocalDestination::Define(LocalId(2))),
         },
     );
 
@@ -218,7 +221,7 @@ fn map_infallible_ops_lower_to_plain_helpers() {
             local(2, types.int, region),
         ],
         statements: vec![contains_stmt, clear_stmt, length_stmt],
-        terminator: HirTerminator::Return(unit_expression(4, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
 
     let function = HirFunction {
@@ -229,6 +232,7 @@ fn map_infallible_ops_lower_to_plain_helpers() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -243,7 +247,6 @@ fn map_infallible_ops_lower_to_plain_helpers() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -275,27 +278,28 @@ fn map_infallible_ops_lower_to_plain_helpers() {
 /// Verifies that a map `remove` statement lowers to `__moth_map_remove` with receiver and key. [map]
 #[test]
 fn map_remove_statement_lowers_to_helper() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
     let receiver = expression(
-        1,
-        HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
+        HirExpressionKind::Load(HirPlace::local(LocalId(0))),
         types.map_string_int,
         region,
         ValueKind::Place,
+        &mut expressions,
     );
-    let key = string_expression(2, "Priya", types.string, region);
+    let key = string_expression("Priya", types.string, region, &mut expressions);
 
     let remove_stmt = statement(
         1,
         HirStatementKind::MapOp {
             op: HirMapOp::Remove,
             receiver,
-            args: vec![key],
-            result: Some(LocalId(1)),
+            args: append_values(&[key], &mut expressions),
+            result: Some(HirLocalDestination::Define(LocalId(1))),
         },
     );
 
@@ -307,7 +311,7 @@ fn map_remove_statement_lowers_to_helper() {
             local(1, types.int, region),
         ],
         statements: vec![remove_stmt],
-        terminator: HirTerminator::Return(unit_expression(3, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
 
     let function = HirFunction {
@@ -318,6 +322,7 @@ fn map_remove_statement_lowers_to_helper() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -328,7 +333,6 @@ fn map_remove_statement_lowers_to_helper() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -346,7 +350,7 @@ fn map_remove_statement_lowers_to_helper() {
     assert!(
         output
             .source
-            .contains("__moth_assign_value(moth_removed_l1, __moth_map_remove"),
-        "map remove with result local must assign via __moth_assign_value"
+            .contains("moth_removed_l1 = __moth_binding(__moth_map_remove"),
+        "map remove with a defined result local must install a fresh value binding"
     );
 }

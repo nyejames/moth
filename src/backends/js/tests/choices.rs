@@ -8,7 +8,7 @@ use crate::compiler_frontend::hir::ids::{BlockId, ChoiceId, FunctionId, LocalId,
 use crate::compiler_frontend::hir::module::{HirChoiceVariant, HirModule};
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern, HirRelationalPatternOp};
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 
 // Choice lowering contract tests [choice]
@@ -30,23 +30,23 @@ fn configure_choice_layout(
 }
 
 fn choice_construct(
-    id: u32,
     variant_index: usize,
     choice_type: crate::compiler_frontend::datatypes::ids::TypeId,
     region: RegionId,
-) -> crate::compiler_frontend::hir::expressions::HirExpression {
+    expressions: &mut HirExpressionStore,
+) -> crate::compiler_frontend::hir::ids::HirValueId {
     expression(
-        id,
         HirExpressionKind::VariantConstruct {
             carrier: HirVariantCarrier::Choice {
                 choice_id: ChoiceId(0),
             },
             variant_index,
-            fields: vec![],
+            fields: append_variant_fields(&[], expressions),
         },
         choice_type,
         region,
         ValueKind::Const,
+        expressions,
     )
 }
 
@@ -60,6 +60,7 @@ fn choice_pattern(variant_index: usize) -> HirPattern {
 /// Verifies that choice variant construction emits a tagged carrier object.
 #[test]
 fn choice_variant_construction_emits_tagged_carrier() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
@@ -70,12 +71,16 @@ fn choice_variant_construction_emits_tagged_carrier() {
         locals: vec![local(0, types.choice_unit, RegionId(0))],
         statements: vec![statement(
             1,
-            HirStatementKind::Assign {
-                target: HirPlace::Local(LocalId(0)),
-                value: choice_construct(1, 2, types.choice_unit, RegionId(0)),
+            HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(LocalId(0)),
+                value: choice_construct(2, types.choice_unit, RegionId(0), &mut expressions),
             },
         )],
-        terminator: HirTerminator::Return(unit_expression(2, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -86,6 +91,7 @@ fn choice_variant_construction_emits_tagged_carrier() {
     };
 
     let mut module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -97,7 +103,6 @@ fn choice_variant_construction_emits_tagged_carrier() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -109,14 +114,15 @@ fn choice_variant_construction_emits_tagged_carrier() {
     assert!(
         output
             .source
-            .contains("__moth_assign_value(moth_status_l0, { tag: 2 })"),
-        "choice variant must lower to a tagged carrier object inside an assignment"
+            .contains("moth_status_l0 = __moth_binding({ tag: 2 });"),
+        "choice variant definition must create a fresh value-backed binding"
     );
 }
 
 /// Verifies that choice match lowers to structured if with tagged choice variants.
 #[test]
 fn choice_match_lowers_to_structured_if_with_choice_tags() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
@@ -128,18 +134,18 @@ fn choice_match_lowers_to_structured_if_with_choice_tags() {
             locals: vec![local(0, types.choice_unit, RegionId(0))],
             statements: vec![statement(
                 1,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(0)),
-                    value: choice_construct(1, 0, types.choice_unit, RegionId(0)),
+                HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(LocalId(0)),
+                    value: choice_construct(0, types.choice_unit, RegionId(0), &mut expressions),
                 },
             )],
             terminator: HirTerminator::Match {
                 scrutinee: expression(
-                    2,
-                    HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
+                    HirExpressionKind::Load(HirPlace::local(LocalId(0))),
                     types.choice_unit,
                     RegionId(0),
                     ValueKind::RValue,
+                    &mut expressions,
                 ),
                 arms: vec![
                     HirMatchArm {
@@ -195,7 +201,11 @@ fn choice_match_lowers_to_structured_if_with_choice_tags() {
             region: RegionId(0),
             locals: vec![],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(6, types.unit, RegionId(0))),
+            terminator: HirTerminator::Return(unit_expression(
+                types.unit,
+                RegionId(0),
+                &mut expressions,
+            )),
         },
     ];
 
@@ -207,6 +217,7 @@ fn choice_match_lowers_to_structured_if_with_choice_tags() {
     };
 
     let mut module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -218,7 +229,6 @@ fn choice_match_lowers_to_structured_if_with_choice_tags() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -246,6 +256,7 @@ fn choice_match_lowers_to_structured_if_with_choice_tags() {
 /// Verifies that a wildcard arm in a choice match emits a catch-all else block.
 #[test]
 fn choice_match_with_wildcard_arm_emits_true_condition() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
@@ -257,18 +268,18 @@ fn choice_match_with_wildcard_arm_emits_true_condition() {
             locals: vec![local(0, types.choice_unit, RegionId(0))],
             statements: vec![statement(
                 1,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(0)),
-                    value: choice_construct(1, 1, types.choice_unit, RegionId(0)),
+                HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(LocalId(0)),
+                    value: choice_construct(1, types.choice_unit, RegionId(0), &mut expressions),
                 },
             )],
             terminator: HirTerminator::Match {
                 scrutinee: expression(
-                    2,
-                    HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
+                    HirExpressionKind::Load(HirPlace::local(LocalId(0))),
                     types.choice_unit,
                     RegionId(0),
                     ValueKind::RValue,
+                    &mut expressions,
                 ),
                 arms: vec![
                     HirMatchArm {
@@ -309,7 +320,11 @@ fn choice_match_with_wildcard_arm_emits_true_condition() {
             region: RegionId(0),
             locals: vec![],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(4, types.unit, RegionId(0))),
+            terminator: HirTerminator::Return(unit_expression(
+                types.unit,
+                RegionId(0),
+                &mut expressions,
+            )),
         },
     ];
 
@@ -321,6 +336,7 @@ fn choice_match_with_wildcard_arm_emits_true_condition() {
     };
 
     let mut module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -332,7 +348,6 @@ fn choice_match_with_wildcard_arm_emits_true_condition() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -358,6 +373,7 @@ fn choice_match_with_wildcard_arm_emits_true_condition() {
 /// Verifies that relational match patterns emit correct JS comparison operators.
 #[test]
 fn relational_match_patterns_emit_correct_js_operators() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
@@ -369,24 +385,24 @@ fn relational_match_patterns_emit_correct_js_operators() {
             locals: vec![local(0, types.int, RegionId(0))],
             statements: vec![statement(
                 1,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(0)),
-                    value: int_expression(1, 5, types.int, RegionId(0)),
+                HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(LocalId(0)),
+                    value: int_expression(5, types.int, RegionId(0), &mut expressions),
                 },
             )],
             terminator: HirTerminator::Match {
                 scrutinee: expression(
-                    2,
-                    HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
+                    HirExpressionKind::Load(HirPlace::local(LocalId(0))),
                     types.int,
                     RegionId(0),
                     ValueKind::Place,
+                    &mut expressions,
                 ),
                 arms: vec![
                     HirMatchArm {
                         pattern: HirPattern::Relational {
                             op: HirRelationalPatternOp::LessThan,
-                            value: int_expression(3, 10, types.int, RegionId(0)),
+                            value: int_expression(10, types.int, RegionId(0), &mut expressions),
                         },
                         guard: None,
                         body: BlockId(1),
@@ -394,7 +410,7 @@ fn relational_match_patterns_emit_correct_js_operators() {
                     HirMatchArm {
                         pattern: HirPattern::Relational {
                             op: HirRelationalPatternOp::LessThanOrEqual,
-                            value: int_expression(4, 20, types.int, RegionId(0)),
+                            value: int_expression(20, types.int, RegionId(0), &mut expressions),
                         },
                         guard: None,
                         body: BlockId(2),
@@ -402,7 +418,7 @@ fn relational_match_patterns_emit_correct_js_operators() {
                     HirMatchArm {
                         pattern: HirPattern::Relational {
                             op: HirRelationalPatternOp::GreaterThan,
-                            value: int_expression(5, 30, types.int, RegionId(0)),
+                            value: int_expression(30, types.int, RegionId(0), &mut expressions),
                         },
                         guard: None,
                         body: BlockId(3),
@@ -410,7 +426,7 @@ fn relational_match_patterns_emit_correct_js_operators() {
                     HirMatchArm {
                         pattern: HirPattern::Relational {
                             op: HirRelationalPatternOp::GreaterThanOrEqual,
-                            value: int_expression(6, 40, types.int, RegionId(0)),
+                            value: int_expression(40, types.int, RegionId(0), &mut expressions),
                         },
                         guard: None,
                         body: BlockId(4),
@@ -463,7 +479,11 @@ fn relational_match_patterns_emit_correct_js_operators() {
             region: RegionId(0),
             locals: vec![],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(7, types.unit, RegionId(0))),
+            terminator: HirTerminator::Return(unit_expression(
+                types.unit,
+                RegionId(0),
+                &mut expressions,
+            )),
         },
     ];
 
@@ -475,6 +495,7 @@ fn relational_match_patterns_emit_correct_js_operators() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -485,7 +506,6 @@ fn relational_match_patterns_emit_correct_js_operators() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),

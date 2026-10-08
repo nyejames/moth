@@ -12,7 +12,7 @@ Console helpers take one string and write it to the output surface.
     io.error("error")
 ]
 
-`io.line` adds a trailing newline. `io.print` does not.
+`io.line` writes a complete line. `io.print` writes text without ending the line. The browser console shows every call as its own entry, so the two look the same there.
 
 ### Formatting values
 
@@ -28,7 +28,7 @@ Console helpers accept strings only. Use a template to interpolate values into t
 
 ### Reading input
 
-Input polling lives under `io.input.*`. Create an input handle, poll it each frame, then close it when done.
+Input polling lives under `io.input.*`. Create an input handle, update it each time your program runs, such as once per tick of an update loop, then close it when done.
 
 [codeblock, $code("moth"):
     input ~= io.input.new()!
@@ -42,7 +42,11 @@ Input polling lives under `io.input.*`. Create an input handle, poll it each fra
     io.input.close(~input)
 ]
 
-`io.input.new()` can fail when the backend does not support input. `update` and `close` need mutable access, so they use `~`. Polling reads such as `key_pressed` use shared access.
+`io.input.new()` can fail when the host does not support input. `update` and `close` need mutable access, so they use `~`. Polling reads such as `key_pressed` use shared access.
+
+Each `update` takes a snapshot of the input since the previous one. Reads return that snapshot until the next `update`, so a key pressed and released between two updates still reports both. If the window loses focus, held keys and buttons are released at the next `update`.
+
+The handle records input between updates, but recording input doesn't run your program. A loop that waits for a key press never sees one, because the browser can't deliver events while your code is running.
 
 ### Pointer input
 
@@ -57,11 +61,11 @@ Pointer helpers report button state and coordinates.
     ;
 ]
 
-Buttons use `"left"`, `"middle"` and `"right"`. Coordinates use `Float` values.
+Buttons use `"left"`, `"middle"` and `"right"`. Coordinates are `Float` values measured from the top-left of the page's visible area, with Y increasing downward.
 
-`io.set_title` is an accepted queued browser helper with one `String` input and no
-source-visible result. Reachable calls on unsupported hosts are rejected before
-lowering; it is not a `Void` form and makes no Wasm promise. See @./ (Core IO advanced)
-for the capability contract.
+`io.set_title` is an accepted queued helper that sets the title of the current host
+surface, such as the browser document title. It takes one `String` and returns no
+source-visible result. Reachable calls on hosts without a title capability are
+rejected before lowering. See @./ (Core IO advanced) for the capability contract.
 
-For the full contract including backend behaviour, teardown rules and deferred surfaces, see @./ (Core IO advanced).
+For the full contract including host capabilities, backend behaviour, teardown rules and scope boundaries, see @./ (Core IO advanced).

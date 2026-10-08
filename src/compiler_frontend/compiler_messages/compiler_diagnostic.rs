@@ -11,7 +11,7 @@ use crate::compiler_frontend::compiler_messages::{
     DeferredFeatureReason, DependencyClauseKind, DiagnosticBag, DiagnosticIdentity, DiagnosticKind,
     DiagnosticLabel, DiagnosticLabelMessage, DiagnosticOperator, DiagnosticPayload,
     DiagnosticPlace, DiagnosticSeverity, DiagnosticToken, GenericApplicationErrorReason,
-    GenericInferenceSubject, ImportDiagnosticKind, ImportPublicSurfaceType,
+    GenericInferenceSubject, HirCapacityResource, ImportDiagnosticKind, ImportPublicSurfaceType,
     IncompatibleChoiceComparisonReason, InvalidCastReason, InvalidChoiceVariantReason,
     InvalidCollectionTypeReason, InvalidCompileTimePathReason, InvalidConfigReason,
     InvalidDependencyClauseReason, InvalidExpressionReason, InvalidExternalModuleReason,
@@ -890,6 +890,18 @@ impl CompilerDiagnostic {
                 length: u32::MAX,
                 resource,
             },
+        )
+    }
+
+    /// Report authored input that exhausted one bounded dense HIR row or side store.
+    pub(crate) fn compiler_capacity_exceeded(
+        resource: HirCapacityResource,
+        span: Option<SourceSpan>,
+    ) -> Self {
+        Self::new(
+            DiagnosticKind::Syntax(SyntaxDiagnosticKind::CompilerCapacityExceeded),
+            span,
+            DiagnosticPayload::CompilerCapacityExceeded { resource },
         )
     }
 

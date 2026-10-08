@@ -1,36 +1,54 @@
 //! HIR memory places.
 //!
-//! WHAT: canonical memory projections such as locals, fields, and indexed elements.
-//! WHY: assignments, loads, copies, and borrow checking need one shared place representation.
+//! WHAT: identifies a local root and its ordered field/index projections.
+//! WHY: expression storage owns index values and one flat projection range avoids recursive
+//!      place graphs in statements and expression rows.
 
-use crate::compiler_frontend::hir::expressions::HirExpression;
-use crate::compiler_frontend::hir::ids::{FieldId, LocalId};
-use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
+use crate::compiler_frontend::hir::expression_store::{
+    HirConstructionFailure, HirExpressionStore, HirProjection, HirProjectionRange,
+};
+use crate::compiler_frontend::hir::ids::{FieldId, HirValueId, LocalId};
+use crate::compiler_frontend::source::SourceSpan;
 
-#[derive(Debug, Clone)]
-pub enum HirPlace {
-    Local(LocalId),
-
-    Field {
-        base: Box<HirPlace>,
-        field: FieldId,
-    },
-
-    Index {
-        base: Box<HirPlace>,
-        index: Box<HirExpression>,
-    },
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HirPlace {
+    pub root: LocalId,
+    pub projections: HirProjectionRange,
 }
 
 impl HirPlace {
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        match self {
-            Self::Local(_) => {}
-            Self::Field { base, .. } => base.remap_string_ids(remap),
-            Self::Index { base, index } => {
-                base.remap_string_ids(remap);
-                index.remap_string_ids(remap);
-            }
+    pub const fn local(root: LocalId) -> Self {
+        Self {
+            root,
+            projections: HirProjectionRange::empty(),
         }
+    }
+
+    pub(crate) fn with_field(
+        self,
+        field: FieldId,
+        store: &mut HirExpressionStore,
+        span: Option<SourceSpan>,
+    ) -> Result<Self, HirConstructionFailure> {
+        let projections =
+            store.extend_projections(self.projections, HirProjection::Field(field), span)?;
+        Ok(Self {
+            root: self.root,
+            projections,
+        })
+    }
+
+    pub(crate) fn with_index(
+        self,
+        index: HirValueId,
+        store: &mut HirExpressionStore,
+        span: Option<SourceSpan>,
+    ) -> Result<Self, HirConstructionFailure> {
+        let projections =
+            store.extend_projections(self.projections, HirProjection::Index(index), span)?;
+        Ok(Self {
+            root: self.root,
+            projections,
+        })
     }
 }

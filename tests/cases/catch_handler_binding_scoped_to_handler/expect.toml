@@ -1,0 +1,9 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = """
+top=negative
+first=negative
+pair=0/1
+kept=3/4
+top=10/20/after"""

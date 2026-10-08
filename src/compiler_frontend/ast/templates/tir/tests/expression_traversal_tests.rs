@@ -13,8 +13,7 @@ use super::super::expression_sites::{
 };
 use super::super::ids::{ExpressionSiteId, TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId};
 use super::super::node::{
-    TemplateIr, TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind,
-    TemplateLoopHeaderExpressionSites,
+    TemplateIr, TemplateIrNode, TemplateIrNodeKind, TemplateLoopHeaderExpressionSites,
 };
 use super::super::overlays::{
     TemplateViewContext, TirExpressionOverlay, TirSlotResolutionOverlayId,
@@ -131,27 +130,18 @@ fn mutates_direct_dynamic_expression() {
 }
 
 #[test]
-fn mutates_branch_selector_and_body_expression() {
+fn mutates_conditional_selector_and_body_expression() {
     let mut store = TemplateIrStore::new();
     let body = dynamic_node(&mut store, 2);
-    let branch = TemplateIrBranch::new(
+    let root = TemplateIrBuilder::new(&mut store).push_conditional_node(
         TemplateBranchSelector::Bool(expression(1)),
         body,
         None,
-        store.next_expression_site_id(),
     );
-    let root = store.push_node(TemplateIrNode::new(
-        TemplateIrNodeKind::BranchChain {
-            branches: vec![branch],
-            fallback: None,
-            else_marker: None,
-        },
-        None,
-    ));
     let mut mutator = CountingMutator::default();
 
     mutate_finalized_tir_body_root_expression_payloads(&mut store, root, &mut mutator)
-        .expect("branch expression walk should succeed");
+        .expect("conditional expression walk should succeed");
 
     assert_eq!(mutator.count, 2);
 }
@@ -507,14 +497,20 @@ fn mutate_from_root(
     Ok(mutator)
 }
 
-fn branch_selector_site_id(store: &TemplateIrStore, node_id: TemplateIrNodeId) -> ExpressionSiteId {
+fn conditional_selector_site_id(
+    store: &TemplateIrStore,
+    node_id: TemplateIrNodeId,
+) -> ExpressionSiteId {
     let node = store
         .get_node(node_id)
-        .expect("branch chain node should exist");
-    let TemplateIrNodeKind::BranchChain { branches, .. } = &node.kind else {
-        panic!("expected branch chain node, got {:?}", node.kind);
+        .expect("conditional node should exist");
+    let TemplateIrNodeKind::Conditional {
+        selector_site_id, ..
+    } = &node.kind
+    else {
+        panic!("expected conditional node, got {:?}", node.kind);
     };
-    branches[0].selector_site_id
+    *selector_site_id
 }
 
 fn finalized_tir_reference(
@@ -772,24 +768,15 @@ fn collects_runtime_slot_plan_wrapper_source_and_site_render_piece_dynamic_paylo
 }
 
 #[test]
-fn collects_dynamic_payloads_branch_selectors_and_loop_headers() {
+fn collects_dynamic_payloads_conditional_selectors_and_loop_headers() {
     let mut store = TemplateIrStore::new();
-    let branch_body = dynamic_node(&mut store, 2);
-    let selector_site_id = store.next_expression_site_id();
-    let branch = TemplateIrBranch::new(
+    let conditional_body = dynamic_node(&mut store, 2);
+    let conditional = TemplateIrBuilder::new(&mut store).push_conditional_node(
         TemplateBranchSelector::Bool(expression(1)),
-        branch_body,
+        conditional_body,
         None,
-        selector_site_id,
     );
-    let branch_chain = store.push_node(TemplateIrNode::new(
-        TemplateIrNodeKind::BranchChain {
-            branches: vec![branch],
-            fallback: None,
-            else_marker: None,
-        },
-        None,
-    ));
+    let selector_site_id = conditional_selector_site_id(&store, conditional);
 
     let loop_body = dynamic_node(&mut store, 4);
     let aggregate_wrapper = dynamic_node(&mut store, 5);
@@ -813,7 +800,7 @@ fn collects_dynamic_payloads_branch_selectors_and_loop_headers() {
 
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Sequence {
-            children: vec![branch_chain, loop_node],
+            children: vec![conditional, loop_node],
         },
         None,
     ));
@@ -825,14 +812,14 @@ fn collects_dynamic_payloads_branch_selectors_and_loop_headers() {
     assert_eq!(
         payloads.len(),
         5,
-        "collector should include dynamic nodes, branch selectors, and loop header expressions"
+        "collector should include dynamic nodes, conditional selectors, and loop header expressions"
     );
     assert!(
         payloads
             .iter()
             .any(|(site_id, expression)| *site_id == selector_site_id
                 && matches!(expression.kind, ExpressionKind::Int(1))),
-        "branch selector payload should be keyed by the branch selector site ID"
+        "conditional selector payload should be keyed by its selector site ID"
     );
     assert!(
         payloads
@@ -1027,18 +1014,16 @@ fn range_loop_header_positions_are_visited_by_mutation_and_collected_by_site_id(
 // -------------------------
 
 #[test]
-fn view_walker_reads_branch_selector_overlay() {
+fn view_walker_reads_effective_conditional_selector_before_body() {
     let mut store = TemplateIrStore::new();
     let (template_id, selector_site_id) = {
         let body = dynamic_node(&mut store, 2);
-        let branch = TemplateIrBranch::new(
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let root = builder.push_conditional_node(
             TemplateBranchSelector::Bool(bool_expression(false)),
             body,
             None,
-            store.next_expression_site_id(),
         );
-        let mut builder = TemplateIrBuilder::new(&mut store);
-        let root = builder.push_branch_chain_node(vec![branch], None, None, None);
         let template_id = builder.finish_template(
             root,
             Style::default(),
@@ -1046,7 +1031,7 @@ fn view_walker_reads_branch_selector_overlay() {
             TemplateIrSummary::default(),
             None,
         );
-        let selector_site_id = branch_selector_site_id(&store, root);
+        let selector_site_id = conditional_selector_site_id(&store, root);
         (template_id, selector_site_id)
     };
 
@@ -1074,22 +1059,12 @@ fn view_walker_reads_branch_selector_overlay() {
 
     assert_eq!(payloads.len(), 2);
     assert!(
-        payloads
-            .iter()
-            .any(|e| matches!(e.kind, ExpressionKind::Bool(true))),
-        "overlay branch selector should be visited"
+        matches!(payloads[0].kind, ExpressionKind::Bool(true)),
+        "the effective selector must be visited first"
     );
     assert!(
-        payloads
-            .iter()
-            .any(|e| matches!(e.kind, ExpressionKind::Int(2))),
-        "body expression should be visited"
-    );
-    assert!(
-        !payloads
-            .iter()
-            .any(|e| matches!(e.kind, ExpressionKind::Bool(false))),
-        "structural branch selector should not be visited"
+        matches!(payloads[1].kind, ExpressionKind::Int(2)),
+        "the body must follow the effective selector"
     );
 }
 

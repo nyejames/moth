@@ -161,7 +161,6 @@ pub(crate) fn compile_html_module_js(
         );
         lower_hir_to_js(
             input.hir_module,
-            input.borrow_analysis,
             input.numeric_proofs,
             string_table,
             js_lowering_config,
@@ -197,7 +196,6 @@ pub(crate) fn compile_html_module_js(
                 );
                 lower_hir_to_js(
                     &linked.module.executable.hir,
-                    &linked.module.executable.borrow_analysis,
                     &linked.module.executable.numeric_proofs,
                     string_table,
                     linked_config,

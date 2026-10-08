@@ -9,7 +9,7 @@ use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId}
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::regions::HirRegion;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
@@ -20,6 +20,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 /// lowering through the obsolete expression-level propagation helper. [result]
 #[test]
 fn nested_fallible_calls_emit_explicit_carrier_branches() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (mut type_environment, types) = build_type_environment();
@@ -30,35 +31,33 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
         Box::new([types.string, types.string]),
     );
 
-    let result_load = |id, local| {
+    let result_load = |expressions: &mut HirExpressionStore, local| {
         expression(
-            id,
-            HirExpressionKind::Load(HirPlace::Local(local)),
+            HirExpressionKind::Load(HirPlace::local(local)),
             result_type,
             region,
             ValueKind::RValue,
+            expressions,
         )
     };
-    let ok_payload = |id, inner_id, local| {
+    let ok_payload = |expressions: &mut HirExpressionStore, local| {
+        let result = result_load(expressions, local);
         expression(
-            id,
-            HirExpressionKind::FallibleUnwrapSuccess {
-                result: Box::new(result_load(inner_id, local)),
-            },
+            HirExpressionKind::FallibleUnwrapSuccess { result },
             types.string,
             region,
             ValueKind::RValue,
+            expressions,
         )
     };
-    let err_payload = |id, inner_id, local| {
+    let err_payload = |expressions: &mut HirExpressionStore, local| {
+        let result = result_load(expressions, local);
         expression(
-            id,
-            HirExpressionKind::FallibleUnwrapError {
-                result: Box::new(result_load(inner_id, local)),
-            },
+            HirExpressionKind::FallibleUnwrapError { result },
             types.string,
             region,
             ValueKind::RValue,
+            expressions,
         )
     };
 
@@ -69,10 +68,10 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
         locals: vec![],
         statements: vec![],
         terminator: HirTerminator::ReturnSuccess(string_expression(
-            1,
             "inner",
             types.string,
             region,
+            &mut expressions,
         )),
     };
     let c_function = HirFunction {
@@ -87,8 +86,8 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
         3,
         HirStatementKind::Call {
             target: CallTarget::Local(FunctionId(0)),
-            args: vec![],
-            result: Some(LocalId(0)),
+            args: append_values(&[], &mut expressions),
+            result: Some(HirLocalDestination::Define(LocalId(0))),
         },
     );
     let b_entry = HirBlock {
@@ -97,7 +96,7 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
         locals: vec![local(0, result_type, region)],
         statements: vec![b_call],
         terminator: HirTerminator::FallibleBranch {
-            result: result_load(4, LocalId(0)),
+            result: result_load(&mut expressions, LocalId(0)),
             success_block: BlockId(2),
             error_block: BlockId(3),
         },
@@ -107,14 +106,14 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
         region,
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::ReturnSuccess(ok_payload(5, 6, LocalId(0))),
+        terminator: HirTerminator::ReturnSuccess(ok_payload(&mut expressions, LocalId(0))),
     };
     let b_error = HirBlock {
         id: BlockId(3),
         region,
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::ReturnError(err_payload(7, 8, LocalId(0))),
+        terminator: HirTerminator::ReturnError(err_payload(&mut expressions, LocalId(0))),
     };
     let b_function = HirFunction {
         id: FunctionId(1),
@@ -128,8 +127,8 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
         7,
         HirStatementKind::Call {
             target: CallTarget::Local(FunctionId(1)),
-            args: vec![],
-            result: Some(LocalId(1)),
+            args: append_values(&[], &mut expressions),
+            result: Some(HirLocalDestination::Define(LocalId(1))),
         },
     );
     let a_entry = HirBlock {
@@ -138,7 +137,7 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
         locals: vec![local(1, result_type, region)],
         statements: vec![a_call],
         terminator: HirTerminator::FallibleBranch {
-            result: result_load(9, LocalId(1)),
+            result: result_load(&mut expressions, LocalId(1)),
             success_block: BlockId(5),
             error_block: BlockId(6),
         },
@@ -148,14 +147,14 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
         region,
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::ReturnSuccess(ok_payload(10, 11, LocalId(1))),
+        terminator: HirTerminator::ReturnSuccess(ok_payload(&mut expressions, LocalId(1))),
     };
     let a_error = HirBlock {
         id: BlockId(6),
         region,
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::ReturnError(err_payload(12, 13, LocalId(1))),
+        terminator: HirTerminator::ReturnError(err_payload(&mut expressions, LocalId(1))),
     };
     let a_function = HirFunction {
         id: FunctionId(2),
@@ -165,6 +164,8 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
     };
 
     let mut module = HirModule::new();
+    expressions.freeze();
+    module.expressions = expressions;
     module.blocks = vec![
         c_block, b_entry, b_success, b_error, a_entry, a_success, a_error,
     ];
@@ -215,7 +216,6 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -257,6 +257,7 @@ fn nested_fallible_calls_emit_explicit_carrier_branches() {
 /// [result]
 #[test]
 fn explicit_error_return_terminator_emits_err_carrier() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (mut type_environment, types) = build_type_environment();
@@ -272,7 +273,12 @@ fn explicit_error_return_terminator_emits_err_carrier() {
         region,
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::ReturnError(string_expression(1, "boom", types.string, region)),
+        terminator: HirTerminator::ReturnError(string_expression(
+            "boom",
+            types.string,
+            region,
+            &mut expressions,
+        )),
     };
     let function = HirFunction {
         id: FunctionId(0),
@@ -282,6 +288,8 @@ fn explicit_error_return_terminator_emits_err_carrier() {
     };
 
     let mut module = HirModule::new();
+    expressions.freeze();
+    module.expressions = expressions;
     module.blocks = vec![block];
     module.functions = vec![function];
     module.start_function = Some(FunctionId(0));
@@ -298,7 +306,6 @@ fn explicit_error_return_terminator_emits_err_carrier() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -319,6 +326,7 @@ fn explicit_error_return_terminator_emits_err_carrier() {
 /// [result]
 #[test]
 fn explicit_success_return_terminator_emits_ok_carrier() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (mut type_environment, types) = build_type_environment();
@@ -334,7 +342,12 @@ fn explicit_success_return_terminator_emits_ok_carrier() {
         region,
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::ReturnSuccess(string_expression(1, "ok", types.string, region)),
+        terminator: HirTerminator::ReturnSuccess(string_expression(
+            "ok",
+            types.string,
+            region,
+            &mut expressions,
+        )),
     };
     let function = HirFunction {
         id: FunctionId(0),
@@ -344,6 +357,8 @@ fn explicit_success_return_terminator_emits_ok_carrier() {
     };
 
     let mut module = HirModule::new();
+    expressions.freeze();
+    module.expressions = expressions;
     module.blocks = vec![block];
     module.functions = vec![function];
     module.start_function = Some(FunctionId(0));
@@ -360,7 +375,6 @@ fn explicit_success_return_terminator_emits_ok_carrier() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -381,6 +395,7 @@ fn explicit_success_return_terminator_emits_ok_carrier() {
 /// requiring a separate boolean fallible-carrier expression node. [result]
 #[test]
 fn fallible_branch_terminator_emits_success_error_tag_branch() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (mut type_environment, types) = build_type_environment();
@@ -398,11 +413,11 @@ fn fallible_branch_terminator_emits_success_error_tag_branch() {
         statements: vec![],
         terminator: HirTerminator::FallibleBranch {
             result: expression(
-                1,
-                HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
+                HirExpressionKind::Load(HirPlace::local(LocalId(0))),
                 result_type,
                 region,
                 ValueKind::RValue,
+                &mut expressions,
             ),
             success_block: BlockId(1),
             error_block: BlockId(2),
@@ -413,14 +428,14 @@ fn fallible_branch_terminator_emits_success_error_tag_branch() {
         region,
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(unit_expression(2, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
     let error_block = HirBlock {
         id: BlockId(2),
         region,
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(unit_expression(3, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
     let function = HirFunction {
         id: FunctionId(0),
@@ -430,6 +445,8 @@ fn fallible_branch_terminator_emits_success_error_tag_branch() {
     };
 
     let mut module = HirModule::new();
+    expressions.freeze();
+    module.expressions = expressions;
     module.blocks = vec![entry_block, success_block, error_block];
     module.functions = vec![function];
     module.start_function = Some(FunctionId(0));
@@ -446,7 +463,6 @@ fn fallible_branch_terminator_emits_success_error_tag_branch() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -469,6 +485,7 @@ fn fallible_branch_terminator_emits_success_error_tag_branch() {
 /// fallible carrier local that receives the call. [result] [alias]
 #[test]
 fn fallible_alias_return_call_assigns_result_carrier_as_fresh_value() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (mut type_environment, types) = build_type_environment();
@@ -484,11 +501,11 @@ fn fallible_alias_return_call_assigns_result_carrier_as_fresh_value() {
         locals: vec![local(0, types.string, region)],
         statements: vec![],
         terminator: HirTerminator::ReturnSuccess(expression(
-            1,
-            HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
+            HirExpressionKind::Load(HirPlace::local(LocalId(0))),
             types.string,
             region,
             ValueKind::RValue,
+            &mut expressions,
         )),
     };
     let callee = HirFunction {
@@ -502,14 +519,17 @@ fn fallible_alias_return_call_assigns_result_carrier_as_fresh_value() {
         2,
         HirStatementKind::Call {
             target: CallTarget::Local(FunctionId(1)),
-            args: vec![expression(
-                3,
-                HirExpressionKind::Load(HirPlace::Local(LocalId(1))),
-                types.string,
-                region,
-                ValueKind::Place,
-            )],
-            result: Some(LocalId(2)),
+            args: append_values(
+                &[expression(
+                    HirExpressionKind::Load(HirPlace::local(LocalId(1))),
+                    types.string,
+                    region,
+                    ValueKind::Place,
+                    &mut expressions,
+                )],
+                &mut expressions,
+            ),
+            result: Some(HirLocalDestination::Define(LocalId(2))),
         },
     );
     let caller_block = HirBlock {
@@ -520,7 +540,7 @@ fn fallible_alias_return_call_assigns_result_carrier_as_fresh_value() {
             local(2, result_type, region),
         ],
         statements: vec![call_aliasing_fallible],
-        terminator: HirTerminator::Return(unit_expression(4, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
     let caller = HirFunction {
         id: FunctionId(0),
@@ -530,6 +550,8 @@ fn fallible_alias_return_call_assigns_result_carrier_as_fresh_value() {
     };
 
     let mut module = HirModule::new();
+    expressions.freeze();
+    module.expressions = expressions;
     module.blocks = vec![callee_block, caller_block];
     module.functions = vec![caller, callee];
     module.start_function = Some(FunctionId(0));
@@ -567,7 +589,6 @@ fn fallible_alias_return_call_assigns_result_carrier_as_fresh_value() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -580,9 +601,9 @@ fn fallible_alias_return_call_assigns_result_carrier_as_fresh_value() {
     let callee_name = expected_dev_function_name("aliasing_fallible", 1);
 
     assert!(
-        output.source.contains(&format!(
-            "__moth_assign_value({result_name}, {callee_name}("
-        )),
+        output
+            .source
+            .contains(&format!("{result_name} = __moth_binding({callee_name}(")),
         "fallible call result carriers must be stored as fresh values"
     );
     assert!(

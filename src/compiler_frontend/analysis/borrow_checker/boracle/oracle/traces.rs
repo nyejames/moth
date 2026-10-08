@@ -61,11 +61,6 @@ impl ExecutionTrace {
     pub(crate) fn entries(&self) -> &[TraceEntry] {
         &self.entries
     }
-
-    #[cfg(test)]
-    pub(crate) fn block_entries(&self) -> &BTreeMap<BlockId, usize> {
-        &self.block_entries
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

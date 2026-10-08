@@ -1,9 +1,0 @@
-[backends.html]
-mode = "success"
-warnings = "forbid"
-rendered_output_contains = [
-  "template_runtime_slot_output_then_continue_inside_loop",
-  "before 1;",
-  "before 2;",
-]
-rendered_output_not_contains = ["after 1;", "after 2;"]

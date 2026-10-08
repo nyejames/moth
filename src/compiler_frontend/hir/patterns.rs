@@ -4,14 +4,12 @@
 //! WHY: AST validates patterns and exhaustiveness; HIR preserves the validated matching contract for
 //! backend lowering.
 
-use crate::compiler_frontend::hir::expressions::HirExpression;
-use crate::compiler_frontend::hir::ids::ChoiceId;
-use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
+use crate::compiler_frontend::hir::ids::{ChoiceId, HirValueId};
 
 #[derive(Debug, Clone)]
 pub struct HirMatchArm {
     pub pattern: HirPattern,
-    pub guard: Option<HirExpression>,
+    pub guard: Option<HirValueId>,
     pub body: crate::compiler_frontend::hir::ids::BlockId,
 }
 
@@ -25,14 +23,14 @@ pub enum HirRelationalPatternOp {
 
 #[derive(Debug, Clone)]
 pub enum HirPattern {
-    Literal(HirExpression),
+    Literal(HirValueId),
     OptionNone,
     OptionValue {
-        value: HirExpression,
+        value: HirValueId,
     },
     OptionRelational {
         op: HirRelationalPatternOp,
-        value: HirExpression,
+        value: HirValueId,
     },
     /// Matches any present option value (tag is `some`).
     ///
@@ -43,29 +41,10 @@ pub enum HirPattern {
     Wildcard,
     Relational {
         op: HirRelationalPatternOp,
-        value: HirExpression,
+        value: HirValueId,
     },
     ChoiceVariant {
         choice_id: ChoiceId,
         variant_index: usize,
     },
-}
-
-impl HirMatchArm {
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        match &mut self.pattern {
-            HirPattern::Literal(value)
-            | HirPattern::OptionValue { value }
-            | HirPattern::OptionRelational { value, .. }
-            | HirPattern::Relational { value, .. } => value.remap_string_ids(remap),
-            HirPattern::OptionNone
-            | HirPattern::OptionPresent
-            | HirPattern::Wildcard
-            | HirPattern::ChoiceVariant { .. } => {}
-        }
-
-        if let Some(guard) = &mut self.guard {
-            guard.remap_string_ids(remap);
-        }
-    }
 }

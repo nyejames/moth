@@ -110,10 +110,9 @@ impl<'a> TirView<'a> {
                 ..
             } if *expr_site_id == site_id => span,
 
-            TemplateIrNodeKind::BranchChain { branches, .. } => branches
-                .iter()
-                .find(|branch| branch.selector_site_id == site_id)
-                .and_then(|branch| branch.span),
+            TemplateIrNodeKind::Conditional {
+                selector_site_id, ..
+            } if *selector_site_id == site_id => span,
 
             TemplateIrNodeKind::Loop { header_sites, .. }
                 if expression_site_in_header(header_sites, site_id) =>
@@ -155,16 +154,7 @@ fn child_node_ids(kind: &TemplateIrNodeKind) -> Vec<TemplateIrNodeId> {
     match kind {
         TemplateIrNodeKind::Sequence { children } => children.clone(),
 
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => {
-            let mut ids: Vec<TemplateIrNodeId> =
-                branches.iter().map(|branch| branch.body).collect();
-            if let Some(fallback) = fallback {
-                ids.push(*fallback);
-            }
-            ids
-        }
+        TemplateIrNodeKind::Conditional { body, .. } => vec![*body],
 
         TemplateIrNodeKind::Loop {
             body,
@@ -184,7 +174,6 @@ fn child_node_ids(kind: &TemplateIrNodeKind) -> Vec<TemplateIrNodeId> {
         | TemplateIrNodeKind::Slot { .. }
         | TemplateIrNodeKind::InsertContribution { .. }
         | TemplateIrNodeKind::AggregateOutput
-        | TemplateIrNodeKind::LoopControl { .. }
         | TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Vec::new(),
     }
@@ -461,21 +450,9 @@ where
                 Ok(Vec::new())
             }
 
-            TemplateIrNodeKind::BranchChain {
-                branches, fallback, ..
-            } => {
-                let mut children =
-                    Vec::with_capacity(branches.len() + usize::from(fallback.is_some()));
-                for branch in branches.iter_mut() {
-                    mutate_branch_selector_expression(&mut branch.selector, self.mutator)?;
-                    children.push(TirExpressionWalkChild::Node(branch.body));
-                }
-
-                if let Some(fallback_id) = fallback {
-                    children.push(TirExpressionWalkChild::Node(*fallback_id));
-                }
-
-                Ok(children)
+            TemplateIrNodeKind::Conditional { selector, body, .. } => {
+                mutate_selector_expression(selector, self.mutator)?;
+                Ok(vec![TirExpressionWalkChild::Node(*body)])
             }
 
             TemplateIrNodeKind::Loop {
@@ -509,7 +486,6 @@ where
             TemplateIrNodeKind::Text { .. }
             | TemplateIrNodeKind::Slot { .. }
             | TemplateIrNodeKind::AggregateOutput
-            | TemplateIrNodeKind::LoopControl { .. }
             | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(Vec::new()),
         }
     }
@@ -529,7 +505,7 @@ where
     }
 }
 
-fn mutate_branch_selector_expression<M>(
+fn mutate_selector_expression<M>(
     selector: &mut TemplateBranchSelector,
     mutator: &mut M,
 ) -> Result<(), CompilerError>

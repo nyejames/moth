@@ -10,7 +10,7 @@ asc_last_index ~= 0
 loop asc_lo to & asc_hi |value, index|:
     asc_total = asc_total + value
     asc_count = asc_count + 1
-    asc_last_index = index
+    asc_last_index = copy index
 ;
 
 step_two Uint = 2
@@ -46,20 +46,20 @@ above_count ~= 0
 above_last ~Uint = 0
 loop above to & huge by huge |value|:
     above_count = above_count + 1
-    above_last = value
+    above_last = copy value
 ;
 max_lo Uint = 18446744073709551613
 max_last ~Uint = 0
 max_count ~= 0
 loop max_lo to & huge |value|:
-    max_last = value
+    max_last = copy value
     max_count = max_count + 1
 ;
 
 zero_terminal ~Uint = 99
 zero_count ~= 0
 loop step_two to & asc_lo by step_two |value|:
-    zero_terminal = value
+    zero_terminal = copy value
     zero_count = zero_count + 1
 ;
 

@@ -1,10 +1,18 @@
-render_loop |keep_going Bool| -> String:
+list_shell #= [:<ul class="conditional-aggregate-loop">[$slot]</ul>]
+
+should_continue |counter ~Int| -> Bool:
+    counter += 1
+    return counter < 4
+;
+
+render_loop || -> String:
+    counter ~= 0
     return [:
-    template_conditional_loop_head_wraps_aggregate_once
-        ["conditional-loop-head", loop keep_going:
-            item;
+        [list_shell, loop should_continue(~counter):
+            <li>iteration [counter]</li>
         ]
+        final count [counter]
     ]
 ;
 
-[:template_conditional_loop_head_wraps_aggregate_once]
+[:template_conditional_loop_head_wraps_aggregate_once [render_loop()]]

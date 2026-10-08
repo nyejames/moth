@@ -281,7 +281,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             input.scope,
             Rc::clone(input.top_level_declarations),
             Arc::clone(&self.context.external_package_registry),
-            Vec::<TypeId>::new(),
             input.scope_frame_capacity,
             self.context.template_ir_store.clone(),
             self.context.numeric_profile,
@@ -813,9 +812,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         if let Some(frozen_identity_handle) = frozen_identity_handle.as_ref() {
             context = context.with_frozen_identity_handle(frozen_identity_handle.clone());
         }
-        let expected_result_type_ids = signature.success_return_type_ids();
-        context.current_function_return_type_ids = expected_result_type_ids.clone();
-        context.expected_result_type_ids = expected_result_type_ids;
+        context.current_function_return_type_ids = signature.success_return_type_ids();
         context.expected_error_type = signature.error_return_type_id();
         context.set_local_declarations(signature.parameters.to_owned(), &*self.path_fork);
         // --------------------------
@@ -958,7 +955,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             string_table,
         )?;
         context = context.with_active_generic_type_context(generic_type_context);
-        context.expected_result_type_ids = resolved_signature.signature.success_return_type_ids();
+        context.current_function_return_type_ids =
+            resolved_signature.signature.success_return_type_ids();
         context.expected_error_type = resolved_signature.signature.error_return_type_id();
         context.set_local_declarations(
             resolved_signature.signature.parameters.clone(),
@@ -1035,11 +1033,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 scope_frame_capacity,
             })
             .with_visible_declarations(Arc::new(visible_declarations));
-        let expected_result_type_ids = resolved_signature.signature.success_return_type_ids();
-        let expected_error_type = resolved_signature.signature.error_return_type_id();
-        context.current_function_return_type_ids = expected_result_type_ids.clone();
-        context.expected_result_type_ids = expected_result_type_ids;
-        context.expected_error_type = expected_error_type;
+        context.current_function_return_type_ids =
+            resolved_signature.signature.success_return_type_ids();
+        context.expected_error_type = resolved_signature.signature.error_return_type_id();
         context.set_local_declarations(
             resolved_signature.signature.parameters.to_owned(),
             &*self.path_fork,
@@ -1280,7 +1276,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         if !matches!(preparation.outcome, TemplatePreparationOutcome::Foldable) {
             return Err(self.diagnostic_messages(
                 match preparation.outcome {
-                    TemplatePreparationOutcome::Helper(_) => {
+                    TemplatePreparationOutcome::SlotInsertHelper => {
                         CompilerDiagnostic::invalid_template_structure(
                             InvalidTemplateStructureReason::HelperInConstTemplate,
                             template.span,
@@ -1313,15 +1309,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             TemplateEmission::Output(value) => value,
             TemplateEmission::NoOutput => {
                 ConstStringValue::Text(fold_context.string_table.intern(""))
-            }
-            TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
-                drop(fold_context);
-                return Err(self.error_messages(
-                    CompilerError::compiler_error(
-                        "Template loop-control signal escaped the nearest template loop during folding.",
-                    ),
-                    string_table,
-                ));
             }
         };
 

@@ -7,17 +7,16 @@
 
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::blocks::HirLocal;
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirVariantCarrier, OPTION_SOME_VARIANT_INDEX, ValueKind,
 };
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
-use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
+use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
-use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -29,9 +28,8 @@ impl<'a> HirBuilder<'a> {
         scrutinee: &Expression,
         pattern: &MatchPattern,
         span_ref: &Option<SourceSpan>,
-        append_present: impl FnOnce(&mut HirBuilder<'a>) -> Result<(), CompilerError>,
-        append_absent: impl FnOnce(&mut HirBuilder<'a>) -> Result<(), CompilerError>,
-    ) -> Result<(), CompilerError> {
+        append_present: impl FnOnce(&mut HirBuilder<'a>) -> Result<(), HirConstructionFailure>,
+    ) -> Result<(), HirConstructionFailure> {
         let MatchPattern::OptionPresentCapture {
             binding_path,
             inner_type_id,
@@ -48,7 +46,7 @@ impl<'a> HirBuilder<'a> {
         let capture_span = (*binding_span).or(*pattern_span);
 
         let lowered_scrutinee = self.lower_expression_value_to_current_block(scrutinee)?;
-        let option_type = lowered_scrutinee.ty;
+        let option_type = self.module.expressions.expression(lowered_scrutinee).ty;
         if self
             .type_environment
             .option_inner_type(option_type)
@@ -60,9 +58,13 @@ impl<'a> HirBuilder<'a> {
             );
         }
 
-        // Materialize the scrutinee once before the match. Branch payload extraction
+        // Materialize the scrutinee once so matching and payload extraction share its value.
         let option_local = self.allocate_temp_local(option_type, None)?;
-        self.emit_assign_local_statement(option_local, lowered_scrutinee, span_ref)?;
+        self.emit_write_statement(
+            HirWriteTarget::DefineLocal(option_local),
+            lowered_scrutinee,
+            span_ref,
+        )?;
 
         let match_block = self.current_block_id_or_error(span_ref)?;
         let parent_region = self.current_region_or_error(span_ref)?;
@@ -72,7 +74,7 @@ impl<'a> HirBuilder<'a> {
             self.create_block(present_region, span_ref, "template-if-option-present")?;
         let absent_block = self.create_block(absent_region, span_ref, "template-if-option-none")?;
         let scrutinee_for_match =
-            self.make_local_load_expression(option_local, option_type, span_ref, parent_region);
+            self.make_local_load_expression(option_local, option_type, span_ref, parent_region)?;
 
         self.emit_terminator(
             match_block,
@@ -94,7 +96,6 @@ impl<'a> HirBuilder<'a> {
             span_ref,
         )?;
 
-        let mut terminated_anchor: Option<BlockId> = None;
         // The match has terminated the parent block; capture binding and present-body output
         // belong to the present arm rather than being appended after that terminator.
         self.set_current_block(present_block, span_ref)?;
@@ -119,27 +120,6 @@ impl<'a> HirBuilder<'a> {
         let present_tail_block = self.current_block_id_or_error(span_ref)?;
         let present_terminated =
             self.block_has_explicit_terminator(present_tail_block, span_ref)?;
-        if present_terminated {
-            terminated_anchor = Some(present_tail_block);
-        }
-
-        self.set_current_block(absent_block, span_ref)?;
-        append_absent(self)?;
-
-        let absent_tail_block = self.current_block_id_or_error(span_ref)?;
-        let absent_terminated = self.block_has_explicit_terminator(absent_tail_block, span_ref)?;
-        if absent_terminated && terminated_anchor.is_none() {
-            terminated_anchor = Some(absent_tail_block);
-        }
-
-        if present_terminated && absent_terminated {
-            let anchor_block = if let Some(anchor) = terminated_anchor {
-                anchor
-            } else {
-                present_block
-            };
-            return self.set_current_block(anchor_block, span_ref);
-        }
 
         let merge_block = self.create_block(parent_region, span_ref, "template-if-option-merge")?;
         if !present_terminated {
@@ -150,16 +130,17 @@ impl<'a> HirBuilder<'a> {
                 "template-if-option.present.merge",
             )?;
         }
-        if !absent_terminated {
-            self.emit_jump_to(
-                absent_tail_block,
-                merge_block,
-                span_ref,
-                "template-if-option.none.merge",
-            )?;
-        }
 
-        self.set_current_block(merge_block, span_ref)
+        self.set_current_block(absent_block, span_ref)?;
+        self.emit_jump_to(
+            absent_block,
+            merge_block,
+            span_ref,
+            "template-if-option.none.merge",
+        )?;
+
+        self.set_current_block(merge_block, span_ref)?;
+        Ok(())
     }
 
     fn register_template_option_capture_local(
@@ -168,7 +149,7 @@ impl<'a> HirBuilder<'a> {
         inner_type_id: TypeId,
         span_ref: &Option<SourceSpan>,
         binding_span: Option<SourceSpan>,
-    ) -> Result<LocalId, CompilerError> {
+    ) -> Result<LocalId, HirConstructionFailure> {
         let ty = self.lower_type_id(inner_type_id, span_ref)?;
         let region = self.current_region_or_error(span_ref)?;
         let block_id = self.current_block_id_or_error(span_ref)?;
@@ -195,28 +176,29 @@ impl<'a> HirBuilder<'a> {
         inner_type_id: TypeId,
         span_ref: &Option<SourceSpan>,
         binding_span: Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let field_ty = self.lower_type_id(inner_type_id, span_ref)?;
         let region = self.current_region_or_error(span_ref)?;
-        let source = self.make_local_load_expression(option_local, option_type, span_ref, region);
+        let source =
+            self.make_local_load_expression(option_local, option_type, span_ref, region)?;
         // Authored option capture materialization carries the binding span. Constructing the
         // value with that span keeps its side-table mapping aligned with the node itself.
         let payload_get = self.make_expression(
             &binding_span,
             HirExpressionKind::VariantPayloadGet {
                 carrier: HirVariantCarrier::Option,
-                source: Box::new(source),
+                source,
                 variant_index: OPTION_SOME_VARIANT_INDEX,
                 field_index: 0,
             },
             field_ty,
             ValueKind::RValue,
             region,
-        );
+        )?;
 
         self.emit_statement_kind_with_span(
-            HirStatementKind::Assign {
-                target: HirPlace::Local(capture_local),
+            HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(capture_local),
                 value: payload_get,
             },
             span_ref,

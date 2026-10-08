@@ -10,7 +10,7 @@ use crate::compiler_frontend::hir::expressions::{
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use std::sync::Arc;
 
@@ -20,6 +20,7 @@ use std::sync::Arc;
 /// Verifies that a HIR Copy expression emits __moth_clone_value(__moth_read(...)). [clone]
 #[test]
 fn explicit_copy_emits_clone_value_wrapped_read() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
@@ -27,24 +28,24 @@ fn explicit_copy_emits_clone_value_wrapped_read() {
     // Assign a source local, then assign a copy of it to a target local.
     let assign_source = statement(
         1,
-        HirStatementKind::Assign {
-            target: HirPlace::Local(LocalId(0)),
-            value: string_expression(1, "hello", types.string, RegionId(0)),
+        HirStatementKind::Write {
+            target: HirWriteTarget::DefineLocal(LocalId(0)),
+            value: string_expression("hello", types.string, RegionId(0), &mut expressions),
         },
     );
 
     let copy_expr = expression(
-        2,
-        HirExpressionKind::Copy(HirPlace::Local(LocalId(0))),
+        HirExpressionKind::Copy(HirPlace::local(LocalId(0))),
         types.string,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
 
     let assign_copy = statement(
         2,
-        HirStatementKind::Assign {
-            target: HirPlace::Local(LocalId(1)),
+        HirStatementKind::Write {
+            target: HirWriteTarget::DefineLocal(LocalId(1)),
             value: copy_expr,
         },
     );
@@ -57,7 +58,11 @@ fn explicit_copy_emits_clone_value_wrapped_read() {
             local(1, types.string, RegionId(0)),
         ],
         statements: vec![assign_source, assign_copy],
-        terminator: HirTerminator::Return(unit_expression(3, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -68,6 +73,7 @@ fn explicit_copy_emits_clone_value_wrapped_read() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -78,7 +84,6 @@ fn explicit_copy_emits_clone_value_wrapped_read() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -103,24 +108,28 @@ fn explicit_copy_emits_clone_value_wrapped_read() {
 /// Verifies that VariantConstruct with Option carrier lowers to tagged JS objects. [option]
 #[test]
 fn lowers_option_construct_expression() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
 
     let value_name = string_table.intern("value");
     let option_value = expression(
-        1,
         HirExpressionKind::VariantConstruct {
             carrier: HirVariantCarrier::Option,
             variant_index: 1,
-            fields: vec![HirVariantField {
-                name: Some(value_name),
-                value: int_expression(2, 10, types.int, RegionId(0)),
-            }],
+            fields: append_variant_fields(
+                &[HirVariantField {
+                    name: Some(value_name),
+                    value: int_expression(10, types.int, RegionId(0), &mut expressions),
+                }],
+                &mut expressions,
+            ),
         },
         types.option_int,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
 
     let option_statement = statement(1, HirStatementKind::Expr(option_value));
@@ -130,7 +139,11 @@ fn lowers_option_construct_expression() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![option_statement],
-        terminator: HirTerminator::Return(unit_expression(3, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -141,6 +154,7 @@ fn lowers_option_construct_expression() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -151,7 +165,6 @@ fn lowers_option_construct_expression() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -173,6 +186,7 @@ fn lowers_option_construct_expression() {
 /// Verifies that a growable collection expression lowers to a plain JS array. [fixed-collection]
 #[test]
 fn growable_collection_expression_lowers_to_array() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (mut type_environment, types) = build_type_environment();
@@ -180,14 +194,17 @@ fn growable_collection_expression_lowers_to_array() {
     let growable_type = type_environment.intern_collection(types.int, None);
 
     let collection_expr = expression(
-        1,
-        HirExpressionKind::Collection(vec![
-            int_expression(2, 1, types.int, RegionId(0)),
-            int_expression(3, 2, types.int, RegionId(0)),
-        ]),
+        HirExpressionKind::Collection(append_values(
+            &[
+                int_expression(1, types.int, RegionId(0), &mut expressions),
+                int_expression(2, types.int, RegionId(0), &mut expressions),
+            ],
+            &mut expressions,
+        )),
         growable_type,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
 
     let collection_statement = statement(1, HirStatementKind::Expr(collection_expr));
@@ -197,7 +214,11 @@ fn growable_collection_expression_lowers_to_array() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![collection_statement],
-        terminator: HirTerminator::Return(unit_expression(4, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -208,6 +229,7 @@ fn growable_collection_expression_lowers_to_array() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -218,7 +240,6 @@ fn growable_collection_expression_lowers_to_array() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -242,6 +263,7 @@ fn growable_collection_expression_lowers_to_array() {
 /// Verifies that a fixed collection expression lowers to a __moth_fixed_collection call. [fixed-collection]
 #[test]
 fn fixed_collection_expression_lowers_to_wrapper() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (mut type_environment, types) = build_type_environment();
@@ -249,14 +271,17 @@ fn fixed_collection_expression_lowers_to_wrapper() {
     let fixed_type = type_environment.intern_collection(types.int, Some(4));
 
     let collection_expr = expression(
-        1,
-        HirExpressionKind::Collection(vec![
-            int_expression(2, 10, types.int, RegionId(0)),
-            int_expression(3, 20, types.int, RegionId(0)),
-        ]),
+        HirExpressionKind::Collection(append_values(
+            &[
+                int_expression(10, types.int, RegionId(0), &mut expressions),
+                int_expression(20, types.int, RegionId(0), &mut expressions),
+            ],
+            &mut expressions,
+        )),
         fixed_type,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
 
     let collection_statement = statement(1, HirStatementKind::Expr(collection_expr));
@@ -266,7 +291,11 @@ fn fixed_collection_expression_lowers_to_wrapper() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![collection_statement],
-        terminator: HirTerminator::Return(unit_expression(4, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -277,6 +306,7 @@ fn fixed_collection_expression_lowers_to_wrapper() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -287,7 +317,6 @@ fn fixed_collection_expression_lowers_to_wrapper() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -307,6 +336,7 @@ fn fixed_collection_expression_lowers_to_wrapper() {
 /// Verifies that a fixed collection expression with zero elements emits the wrapper. [fixed-collection]
 #[test]
 fn fixed_collection_empty_expression_lowers_to_wrapper() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (mut type_environment, types) = build_type_environment();
@@ -314,11 +344,11 @@ fn fixed_collection_empty_expression_lowers_to_wrapper() {
     let fixed_type = type_environment.intern_collection(types.int, Some(2));
 
     let collection_expr = expression(
-        1,
-        HirExpressionKind::Collection(vec![]),
+        HirExpressionKind::Collection(append_values(&[], &mut expressions)),
         fixed_type,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
 
     let collection_statement = statement(1, HirStatementKind::Expr(collection_expr));
@@ -328,7 +358,11 @@ fn fixed_collection_empty_expression_lowers_to_wrapper() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![collection_statement],
-        terminator: HirTerminator::Return(unit_expression(2, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -339,6 +373,7 @@ fn fixed_collection_empty_expression_lowers_to_wrapper() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -349,7 +384,6 @@ fn fixed_collection_empty_expression_lowers_to_wrapper() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -370,25 +404,26 @@ fn fixed_collection_empty_expression_lowers_to_wrapper() {
 /// Verifies that a map literal with entries lowers to `__moth_map_new([[key, value], ...])`. [map]
 #[test]
 fn map_literal_with_entries_lowers_to_map_new() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
 
     let entry1 = HirMapEntry {
-        key: string_expression(1, "Priya", types.string, RegionId(0)),
-        value: int_expression(2, 10, types.int, RegionId(0)),
+        key: string_expression("Priya", types.string, RegionId(0), &mut expressions),
+        value: int_expression(10, types.int, RegionId(0), &mut expressions),
     };
     let entry2 = HirMapEntry {
-        key: string_expression(3, "Grace", types.string, RegionId(0)),
-        value: int_expression(4, 12, types.int, RegionId(0)),
+        key: string_expression("Grace", types.string, RegionId(0), &mut expressions),
+        value: int_expression(12, types.int, RegionId(0), &mut expressions),
     };
 
     let map_expr = expression(
-        5,
-        HirExpressionKind::MapLiteral(vec![entry1, entry2]),
+        HirExpressionKind::MapLiteral(append_map_entries(&[entry1, entry2], &mut expressions)),
         types.map_string_int,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
 
     let map_statement = statement(1, HirStatementKind::Expr(map_expr));
@@ -398,7 +433,11 @@ fn map_literal_with_entries_lowers_to_map_new() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![map_statement],
-        terminator: HirTerminator::Return(unit_expression(6, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -409,6 +448,7 @@ fn map_literal_with_entries_lowers_to_map_new() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -419,7 +459,6 @@ fn map_literal_with_entries_lowers_to_map_new() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -439,16 +478,17 @@ fn map_literal_with_entries_lowers_to_map_new() {
 /// Verifies that an empty map literal lowers to `__moth_map_new([])`. [map]
 #[test]
 fn empty_map_literal_lowers_to_map_new_with_empty_array() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
 
     let map_expr = expression(
-        1,
-        HirExpressionKind::MapLiteral(vec![]),
+        HirExpressionKind::MapLiteral(append_map_entries(&[], &mut expressions)),
         types.map_string_int,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
 
     let map_statement = statement(1, HirStatementKind::Expr(map_expr));
@@ -458,7 +498,11 @@ fn empty_map_literal_lowers_to_map_new_with_empty_array() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![map_statement],
-        terminator: HirTerminator::Return(unit_expression(2, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -469,6 +513,7 @@ fn empty_map_literal_lowers_to_map_new_with_empty_array() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -479,7 +524,6 @@ fn empty_map_literal_lowers_to_map_new_with_empty_array() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -497,6 +541,7 @@ fn empty_map_literal_lowers_to_map_new_with_empty_array() {
 /// Verifies that builder-rendered structural strings become escaped JS string literals.
 #[test]
 fn lowers_structural_string_with_url_map_as_escaped_literal() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
@@ -504,17 +549,20 @@ fn lowers_structural_string_with_url_map_as_escaped_literal() {
     let prefix = string_table.intern("before");
     let suffix = string_table.intern("after");
     let structural_expression = expression(
-        1,
         HirExpressionKind::StructuralString {
-            pieces: vec![
-                ConstStringPiece::Text(prefix),
-                ConstStringPiece::SiteRoot,
-                ConstStringPiece::Text(suffix),
-            ],
+            pieces: append_string_pieces(
+                &[
+                    ConstStringPiece::Text(prefix),
+                    ConstStringPiece::SiteRoot,
+                    ConstStringPiece::Text(suffix),
+                ],
+                &mut expressions,
+            ),
         },
         types.string,
         region,
         ValueKind::RValue,
+        &mut expressions,
     );
 
     let block = HirBlock {
@@ -531,6 +579,7 @@ fn lowers_structural_string_with_url_map_as_escaped_literal() {
         return_type: types.string,
     };
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -545,7 +594,6 @@ fn lowers_structural_string_with_url_map_as_escaped_literal() {
     };
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config().with_structural_string_urls(Arc::new(url_map)),

@@ -168,13 +168,6 @@ fn collect_doc_fragments(
                 flatten_documentation_string(pieces, fold_context.string_table, template.span)?
             }
             TemplateEmission::NoOutput => fold_context.string_table.intern(""),
-            TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
-                return Err(CompilerDiagnostic::invalid_template_structure(
-                    InvalidTemplateStructureReason::NonFoldableConstTemplate,
-                    template.span,
-                )
-                .into());
-            }
         };
 
         fragments.push(AstDocFragment {

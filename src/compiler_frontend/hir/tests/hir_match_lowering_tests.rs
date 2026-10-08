@@ -20,7 +20,6 @@ use crate::compiler_frontend::hir::expressions::{
 };
 use crate::compiler_frontend::hir::ids::ChoiceId;
 use crate::compiler_frontend::hir::patterns::HirPattern;
-use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
@@ -399,10 +398,11 @@ fn lowers_and_validates_fixed_scalar_match_pattern() {
         panic!("fixed scalar literal should lower to HirPattern::Literal");
     };
 
+    let value = module.expressions.expression(*value);
     assert_eq!(value.ty, u8_type);
     assert!(matches!(
-        value.kind,
-        HirExpressionKind::FixedScalar(lowered) if lowered == pattern_value
+        &value.kind,
+        HirExpressionKind::FixedScalar(lowered) if lowered == &pattern_value
     ));
     assert_eq!(value.value_kind, ValueKind::Const);
 
@@ -413,10 +413,11 @@ fn lowers_and_validates_fixed_scalar_match_pattern() {
     else {
         panic!("fixed scalar relational pattern should lower to HirPattern::Relational");
     };
+    let relational_value = module.expressions.expression(*relational_value);
     assert_eq!(relational_value.ty, u8_type);
     assert!(matches!(
-        relational_value.kind,
-        HirExpressionKind::FixedScalar(lowered) if lowered == relational_pattern_value
+        &relational_value.kind,
+        HirExpressionKind::FixedScalar(lowered) if lowered == &relational_pattern_value
     ));
     assert_eq!(relational_value.value_kind, ValueKind::Const);
     validate_module_for_tests(&module, &string_table, &type_environment)
@@ -486,10 +487,11 @@ fn lowers_and_validates_fixed_scalar_option_literal_pattern() {
     let HirPattern::OptionValue { value } = &arms[0].pattern else {
         panic!("fixed scalar optional literal should lower to HirPattern::OptionValue");
     };
+    let value = module.expressions.expression(*value);
     assert_eq!(value.ty, u8_type);
     assert!(matches!(
-        value.kind,
-        HirExpressionKind::FixedScalar(lowered) if lowered == pattern_value
+        &value.kind,
+        HirExpressionKind::FixedScalar(lowered) if lowered == &pattern_value
     ));
     assert_eq!(value.value_kind, ValueKind::Const);
     validate_module_for_tests(&module, &string_table, &type_environment)
@@ -913,8 +915,9 @@ fn lowers_relational_pattern_to_hir_relational() {
     );
 
     if let HirPattern::Relational { value, .. } = &arms[0].pattern {
+        let value = module.expressions.expression(*value);
         assert!(
-            matches!(value.kind, HirExpressionKind::Int(10)),
+            matches!(&value.kind, HirExpressionKind::Int(10)),
             "relational RHS should be a const int literal"
         );
         assert_eq!(value.value_kind, ValueKind::Const);
@@ -1250,11 +1253,18 @@ fn lowers_option_present_capture_to_payload_assignment() {
     let payload_assignment = capture_block
         .statements
         .iter()
-        .find_map(|statement| match &statement.kind {
-            HirStatementKind::Assign {
-                target: HirPlace::Local(_),
-                value,
-            } => match &value.kind {
+        .find_map(|statement| {
+            let value = super::write_value(&module, statement)?;
+            if !matches!(
+                &statement.kind,
+                HirStatementKind::Write {
+                    target: super::HirWriteTarget::DefineLocal(_),
+                    ..
+                }
+            ) {
+                return None;
+            }
+            match &value.kind {
                 HirExpressionKind::VariantPayloadGet {
                     carrier,
                     variant_index,
@@ -1262,8 +1272,7 @@ fn lowers_option_present_capture_to_payload_assignment() {
                     ..
                 } => Some((carrier.clone(), *variant_index, *field_index)),
                 _ => None,
-            },
-            _ => None,
+            }
         })
         .expect("option-present arm should assign the some payload to the capture local");
 

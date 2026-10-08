@@ -28,7 +28,7 @@ use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::style_directives::StyleDirectiveSpec;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::projects::html_project::binding_packages::web::canvas::register_web_canvas_package;
+use crate::projects::html_project::binding_packages::web::register_web_binding_packages;
 use crate::projects::html_project::compile_input::{
     HtmlModuleCompileContext, HtmlModuleCompileInput,
 };
@@ -378,10 +378,11 @@ impl BackendBuilder for HtmlProjectBuilder {
             &mut builder_surface.binding_packages,
         );
 
-        let canvas_metadata = register_web_canvas_package(&mut builder_surface.binding_packages);
+        let web_package_metadata =
+            register_web_binding_packages(&mut builder_surface.binding_packages);
         builder_surface
             .builder_runtime_packages
-            .push(canvas_metadata);
+            .extend(web_package_metadata);
 
         Self::register_html_config_keys(&mut builder_surface);
 
@@ -614,7 +615,7 @@ impl HtmlProjectBuilder {
             type_environment: &module.executable.type_environment,
             const_fragments: &module.metadata.const_top_level_fragments,
             page_metadata_plan,
-            borrow_analysis: &module.executable.borrow_analysis,
+            borrow_facts: module.executable.borrow_analysis.borrow_facts(),
             numeric_proofs: &module.executable.numeric_proofs,
             project_name,
             document_config,

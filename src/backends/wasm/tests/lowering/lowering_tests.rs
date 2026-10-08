@@ -22,6 +22,9 @@ use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::HirBlock;
+use crate::compiler_frontend::hir::expression_store::{
+    HirExpressionStore, HirValueRange, HirVariantFieldRange,
+};
 use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
 };
@@ -34,8 +37,12 @@ use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId}
 use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
-use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatementKind, HirWriteTarget,
+};
+use crate::compiler_frontend::hir::terminators::{
+    HirAssertionMessageEvaluation, HirJumpArgument, HirTerminator,
+};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
@@ -53,65 +60,81 @@ fn assertion_failure_module(
         .try_intern_portable_path("assertion_failure", string_table)
         .expect("test path fits");
     let region = RegionId(0);
+    let mut expressions = HirExpressionStore::default();
     let (message, locals, statements) = match message_evaluation {
-        HirAssertionMessageEvaluation::Default => (
-            expression(
-                1,
+        HirAssertionMessageEvaluation::Default => {
+            let message = expression(
                 HirExpressionKind::VariantConstruct {
                     carrier: HirVariantCarrier::Option,
                     variant_index: 0,
-                    fields: vec![],
+                    fields: HirVariantFieldRange::empty(),
                 },
                 option_string,
                 region,
                 ValueKind::Const,
-            ),
-            vec![],
-            vec![],
-        ),
-        HirAssertionMessageEvaluation::Folded => (
-            expression(
-                1,
+                &mut expressions,
+            );
+            (message, vec![], vec![])
+        }
+        HirAssertionMessageEvaluation::Folded => {
+            let folded_message =
+                string_expression("folded message", string_type, region, &mut expressions);
+            let fields = expressions
+                .append_variant_fields(
+                    &[HirVariantField {
+                        name: None,
+                        value: folded_message,
+                    }],
+                    None,
+                )
+                .expect("assertion message field should fit");
+            let message = expression(
                 HirExpressionKind::VariantConstruct {
                     carrier: HirVariantCarrier::Option,
                     variant_index: 1,
-                    fields: vec![HirVariantField {
-                        name: None,
-                        value: string_expression(2, "folded message", string_type, region),
-                    }],
+                    fields,
                 },
                 option_string,
                 region,
                 ValueKind::RValue,
-            ),
-            vec![],
-            vec![],
-        ),
-        HirAssertionMessageEvaluation::Runtime => (
-            expression(
-                1,
+                &mut expressions,
+            );
+            (message, vec![], vec![])
+        }
+        HirAssertionMessageEvaluation::Runtime => {
+            let runtime_message = load_local(&mut expressions, LocalId(0), string_type, region);
+            let assigned_message =
+                string_expression("runtime message", string_type, region, &mut expressions);
+            let fields = expressions
+                .append_variant_fields(
+                    &[HirVariantField {
+                        name: None,
+                        value: runtime_message,
+                    }],
+                    None,
+                )
+                .expect("assertion message field should fit");
+            let message = expression(
                 HirExpressionKind::VariantConstruct {
                     carrier: HirVariantCarrier::Option,
                     variant_index: 1,
-                    fields: vec![HirVariantField {
-                        name: None,
-                        value: load_local(2, LocalId(0), string_type, region),
-                    }],
+                    fields,
                 },
                 option_string,
                 region,
                 ValueKind::RValue,
-            ),
-            vec![local(0, string_type, region)],
-            vec![statement(
+                &mut expressions,
+            );
+            let statements = vec![statement(
                 3,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(0)),
-                    value: string_expression(4, "runtime message", string_type, region),
+                HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(LocalId(0)),
+                    value: assigned_message,
                 },
                 1,
-            )],
-        ),
+            )];
+            (message, vec![local(0, string_type, region)], statements)
+        }
     };
     let function = HirFunction {
         id: FunctionId(0),
@@ -133,6 +156,7 @@ fn assertion_failure_module(
     build_module(
         path_fork,
         string_table,
+        expressions,
         vec![(function, path, HirFunctionOrigin::EntryStart)],
         vec![block],
         FunctionId(0),
@@ -218,9 +242,196 @@ fn wasm_assertion_lowering_calls_host_before_trap_and_rejects_runtime_messages()
 }
 
 #[test]
+fn wasm_write_definition_and_update_have_the_same_physical_lowering() {
+    let lower_write = |target| {
+        let is_update = matches!(&target, HirWriteTarget::AssignPlace(_));
+        let mut string_table = StringTable::new();
+        let mut path_fork = PathInternerFork::empty();
+        let mut expressions = HirExpressionStore::default();
+        let (type_environment, types) = build_type_environment();
+        let function_path = path_fork
+            .try_intern_portable_path("write_equivalence", &mut string_table)
+            .expect("test path fits");
+        let write = statement(
+            1,
+            HirStatementKind::Write {
+                target,
+                value: int_expression(7, types.int, RegionId(0), &mut expressions),
+            },
+            1,
+        );
+        let block = HirBlock {
+            id: BlockId(0),
+            region: RegionId(0),
+            locals: vec![local(0, types.int, RegionId(0))],
+            statements: vec![write],
+            terminator: HirTerminator::Return(unit_expression(
+                types.unit,
+                RegionId(0),
+                &mut expressions,
+            )),
+        };
+        let function = HirFunction {
+            id: FunctionId(0),
+            entry: BlockId(0),
+            params: if is_update { vec![LocalId(0)] } else { vec![] },
+            return_type: types.unit,
+        };
+        let module = build_module(
+            &mut path_fork,
+            &mut string_table,
+            expressions,
+            vec![(function, function_path, HirFunctionOrigin::Normal)],
+            vec![block],
+            FunctionId(0),
+        );
+        let lowered = lower_hir_to_wasm_lir(
+            &module,
+            &default_borrow_facts(),
+            &default_numeric_proofs(),
+            &WasmBackendRequest::default(),
+            &string_table,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .expect("both valid local-write forms should lower");
+        lowered
+            .lir_module
+            .functions
+            .iter()
+            .find(|function| function.id == WasmLirFunctionId(0))
+            .expect("write function should be present")
+            .blocks[0]
+            .statements
+            .clone()
+    };
+
+    let definition = lower_write(HirWriteTarget::DefineLocal(LocalId(0)));
+    let update = lower_write(HirWriteTarget::AssignPlace(HirPlace::local(LocalId(0))));
+    assert_eq!(definition, update);
+}
+
+#[test]
+fn wasm_parallel_jump_cycle_uses_explicit_destinations() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
+    let (type_environment, types) = build_type_environment();
+    let function_path = path_fork
+        .try_intern_portable_path("parallel_jump_cycle", &mut string_table)
+        .expect("test path fits");
+    let function = HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: vec![],
+        return_type: types.unit,
+    };
+    let source_block = HirBlock {
+        id: BlockId(0),
+        region: RegionId(0),
+        locals: vec![
+            local(0, types.int, RegionId(0)),
+            local(1, types.int, RegionId(0)),
+        ],
+        statements: vec![
+            statement(
+                1,
+                HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(LocalId(0)),
+                    value: int_expression(10, types.int, RegionId(0), &mut expressions),
+                },
+                1,
+            ),
+            statement(
+                2,
+                HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(LocalId(1)),
+                    value: int_expression(20, types.int, RegionId(0), &mut expressions),
+                },
+                2,
+            ),
+        ],
+        terminator: HirTerminator::Jump {
+            target: BlockId(0),
+            args: vec![
+                HirJumpArgument {
+                    source: LocalId(0),
+                    destination: LocalId(1),
+                },
+                HirJumpArgument {
+                    source: LocalId(1),
+                    destination: LocalId(0),
+                },
+            ],
+        },
+    };
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        expressions,
+        vec![(function, function_path, HirFunctionOrigin::Normal)],
+        vec![source_block],
+        FunctionId(0),
+    );
+
+    let lowered = lower_hir_to_wasm_lir(
+        &module,
+        &default_borrow_facts(),
+        &default_numeric_proofs(),
+        &WasmBackendRequest::default(),
+        &string_table,
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("parallel explicit jump destinations should lower");
+    let function = lowered
+        .lir_module
+        .functions
+        .iter()
+        .find(|function| function.id == WasmLirFunctionId(0))
+        .expect("jump function should be present");
+    let local_zero = function
+        .locals
+        .iter()
+        .find(|local| local.name.as_deref() == Some("local_0"))
+        .expect("local zero should be lowered")
+        .id;
+    let local_one = function
+        .locals
+        .iter()
+        .find(|local| local.name.as_deref() == Some("local_1"))
+        .expect("local one should be lowered")
+        .id;
+    let [
+        WasmLirStmt::Copy {
+            dst: snapshot,
+            src: snapshot_source,
+        },
+        WasmLirStmt::Copy {
+            dst: first_destination,
+            src: first_source,
+        },
+        WasmLirStmt::Copy {
+            dst: second_destination,
+            src: second_source,
+        },
+    ] = function.blocks[0].statements[function.blocks[0].statements.len() - 3..]
+    else {
+        panic!("a parallel two-local cycle needs one snapshot and two copies");
+    };
+
+    assert_eq!(snapshot_source, local_one);
+    assert_eq!(first_destination, local_one);
+    assert_eq!(first_source, local_zero);
+    assert_eq!(second_destination, local_zero);
+    assert_eq!(second_source, snapshot);
+}
+
+#[test]
 fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
 
     let callee_path = path_fork
@@ -235,7 +446,12 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(100, 7, types.int, RegionId(0))),
+        terminator: HirTerminator::Return(int_expression(
+            7,
+            types.int,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let main_entry = HirBlock {
@@ -248,9 +464,9 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
         statements: vec![
             statement(
                 1,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(0)),
-                    value: bool_expression(101, true, types.boolean, RegionId(0)),
+                HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(LocalId(0)),
+                    value: bool_expression(true, types.boolean, RegionId(0), &mut expressions),
                 },
                 1,
             ),
@@ -258,14 +474,14 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
                 2,
                 HirStatementKind::Call {
                     target: CallTarget::Local(FunctionId(0)),
-                    args: vec![],
-                    result: Some(LocalId(1)),
+                    args: HirValueRange::empty(),
+                    result: Some(HirLocalDestination::Define(LocalId(1))),
                 },
                 2,
             ),
         ],
         terminator: HirTerminator::If {
-            condition: load_local(102, LocalId(0), types.boolean, RegionId(0)),
+            condition: load_local(&mut expressions, LocalId(0), types.boolean, RegionId(0)),
             then_block: BlockId(40),
             else_block: BlockId(50),
         },
@@ -276,7 +492,12 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(load_local(103, LocalId(1), types.int, RegionId(0))),
+        terminator: HirTerminator::Return(load_local(
+            &mut expressions,
+            LocalId(1),
+            types.int,
+            RegionId(0),
+        )),
     };
 
     let else_block = HirBlock {
@@ -284,7 +505,12 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(104, 0, types.int, RegionId(0))),
+        terminator: HirTerminator::Return(int_expression(
+            0,
+            types.int,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let callee = HirFunction {
@@ -303,6 +529,7 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![
             (callee, callee_path, HirFunctionOrigin::Normal),
             (main, main_path, HirFunctionOrigin::EntryStart),
@@ -380,31 +607,36 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
 fn lowers_runtime_template_with_literal_and_handle_chunks_in_order() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let runtime_path = path_fork
         .try_intern_portable_path("__moth_frag_0", &mut string_table)
         .expect("test path fits");
 
-    let concat = expression(
-        202,
+    let prefix = string_expression("a", types.string, RegionId(0), &mut expressions);
+    let handle = load_local(&mut expressions, LocalId(0), types.string, RegionId(0));
+    let partial_concat = expression(
         HirExpressionKind::BinOp {
-            left: Box::new(expression(
-                201,
-                HirExpressionKind::BinOp {
-                    left: Box::new(string_expression(200, "a", types.string, RegionId(0))),
-                    op: HirBinOp::StringAppend,
-                    right: Box::new(load_local(203, LocalId(0), types.string, RegionId(0))),
-                },
-                types.string,
-                RegionId(0),
-                ValueKind::RValue,
-            )),
+            left: prefix,
             op: HirBinOp::StringAppend,
-            right: Box::new(string_expression(204, "b", types.string, RegionId(0))),
+            right: handle,
         },
         types.string,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
+    );
+    let suffix = string_expression("b", types.string, RegionId(0), &mut expressions);
+    let concat = expression(
+        HirExpressionKind::BinOp {
+            left: partial_concat,
+            op: HirBinOp::StringAppend,
+            right: suffix,
+        },
+        types.string,
+        RegionId(0),
+        ValueKind::RValue,
+        &mut expressions,
     );
 
     let runtime_block = HirBlock {
@@ -425,6 +657,7 @@ fn lowers_runtime_template_with_literal_and_handle_chunks_in_order() {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(runtime_function, runtime_path, HirFunctionOrigin::Normal)],
         vec![runtime_block],
         FunctionId(0),
@@ -469,10 +702,32 @@ fn lowers_runtime_template_with_literal_and_handle_chunks_in_order() {
 fn lowers_runtime_template_with_cfg_before_final_return() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let runtime_path = path_fork
         .try_intern_portable_path("__moth_frag_cfg", &mut string_table)
         .expect("test path fits");
+    let initial_value = int_expression(0, types.int, RegionId(0), &mut expressions);
+    let loop_value = load_local(&mut expressions, LocalId(0), types.int, RegionId(0));
+    let limit_value = int_expression(2, types.int, RegionId(0), &mut expressions);
+    let condition = expression(
+        HirExpressionKind::BinOp {
+            left: loop_value,
+            op: HirBinOp::Lt,
+            right: limit_value,
+        },
+        types.boolean,
+        RegionId(0),
+        ValueKind::RValue,
+        &mut expressions,
+    );
+    let increment_value = load_local(&mut expressions, LocalId(0), types.int, RegionId(0));
+    let return_value = string_expression(
+        "runtime loop done",
+        types.string,
+        RegionId(0),
+        &mut expressions,
+    );
 
     let entry_block = HirBlock {
         id: BlockId(0),
@@ -480,9 +735,9 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
         locals: vec![local(0, types.int, RegionId(0))],
         statements: vec![statement(
             300,
-            HirStatementKind::Assign {
-                target: HirPlace::Local(LocalId(0)),
-                value: int_expression(301, 0, types.int, RegionId(0)),
+            HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(LocalId(0)),
+                value: initial_value,
             },
             300,
         )],
@@ -498,17 +753,7 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
         locals: vec![],
         statements: vec![],
         terminator: HirTerminator::If {
-            condition: expression(
-                302,
-                HirExpressionKind::BinOp {
-                    left: Box::new(load_local(303, LocalId(0), types.int, RegionId(0))),
-                    op: HirBinOp::Lt,
-                    right: Box::new(int_expression(304, 2, types.int, RegionId(0))),
-                },
-                types.boolean,
-                RegionId(0),
-                ValueKind::RValue,
-            ),
+            condition,
             then_block: BlockId(2),
             else_block: BlockId(3),
         },
@@ -520,9 +765,9 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
         locals: vec![],
         statements: vec![statement(
             305,
-            HirStatementKind::Assign {
-                target: HirPlace::Local(LocalId(0)),
-                value: load_local(307, LocalId(0), types.int, RegionId(0)),
+            HirStatementKind::Write {
+                target: HirWriteTarget::AssignPlace(HirPlace::local(LocalId(0))),
+                value: increment_value,
             },
             305,
         )],
@@ -537,12 +782,7 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(string_expression(
-            309,
-            "runtime loop done",
-            types.string,
-            RegionId(0),
-        )),
+        terminator: HirTerminator::Return(return_value),
     };
 
     let runtime_function = HirFunction {
@@ -555,6 +795,7 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(runtime_function, runtime_path, HirFunctionOrigin::Normal)],
         vec![entry_block, header_block, body_block, exit_block],
         FunctionId(0),
@@ -597,26 +838,24 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
 fn lowers_internal_string_append_as_buffer_concat() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let function_path = path_fork
         .try_intern_portable_path("render_title", &mut string_table)
         .expect("test path fits");
 
+    let prefix = string_expression("Title: ", types.string, RegionId(0), &mut expressions);
+    let handle = load_local(&mut expressions, LocalId(0), types.string, RegionId(0));
     let concat = expression(
-        1300,
         HirExpressionKind::BinOp {
-            left: Box::new(string_expression(
-                1301,
-                "Title: ",
-                types.string,
-                RegionId(0),
-            )),
+            left: prefix,
             op: HirBinOp::StringAppend,
-            right: Box::new(load_local(1302, LocalId(0), types.string, RegionId(0))),
+            right: handle,
         },
         types.string,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
 
     let block = HirBlock {
@@ -635,6 +874,7 @@ fn lowers_internal_string_append_as_buffer_concat() {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(function, function_path, HirFunctionOrigin::Normal)],
         vec![block],
         FunctionId(0),
@@ -675,21 +915,24 @@ fn lowers_internal_string_append_as_buffer_concat() {
 fn lowers_internal_string_append_with_i64_chunk_via_string_from_i64() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let function_path = path_fork
         .try_intern_portable_path("render_runtime_int", &mut string_table)
         .expect("test path fits");
 
+    let prefix = string_expression("", types.string, RegionId(0), &mut expressions);
+    let handle = load_local(&mut expressions, LocalId(0), types.int, RegionId(0));
     let concat = expression(
-        1310,
         HirExpressionKind::BinOp {
-            left: Box::new(string_expression(1311, "", types.string, RegionId(0))),
+            left: prefix,
             op: HirBinOp::StringAppend,
-            right: Box::new(load_local(1312, LocalId(0), types.int, RegionId(0))),
+            right: handle,
         },
         types.string,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
     let block = HirBlock {
         id: BlockId(0),
@@ -707,6 +950,7 @@ fn lowers_internal_string_append_with_i64_chunk_via_string_from_i64() {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(function, function_path, HirFunctionOrigin::Normal)],
         vec![block],
         FunctionId(0),
@@ -742,32 +986,37 @@ fn lowers_internal_string_append_with_i64_chunk_via_string_from_i64() {
 fn lowers_string_equality_by_content_comparison_operations() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let function_path = path_fork
         .try_intern_portable_path("compare_strings", &mut string_table)
         .expect("test path fits");
 
+    let equal_left = load_local(&mut expressions, LocalId(0), types.string, RegionId(0));
+    let equal_right = load_local(&mut expressions, LocalId(1), types.string, RegionId(0));
     let equal = expression(
-        1320,
         HirExpressionKind::BinOp {
-            left: Box::new(load_local(1321, LocalId(0), types.string, RegionId(0))),
+            left: equal_left,
             op: HirBinOp::Eq,
-            right: Box::new(load_local(1322, LocalId(1), types.string, RegionId(0))),
+            right: equal_right,
         },
         types.boolean,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
+    let not_equal_left = load_local(&mut expressions, LocalId(0), types.string, RegionId(0));
+    let not_equal_right = load_local(&mut expressions, LocalId(1), types.string, RegionId(0));
     let not_equal = expression(
-        1323,
         HirExpressionKind::BinOp {
-            left: Box::new(load_local(1324, LocalId(0), types.string, RegionId(0))),
+            left: not_equal_left,
             op: HirBinOp::Ne,
-            right: Box::new(load_local(1325, LocalId(1), types.string, RegionId(0))),
+            right: not_equal_right,
         },
         types.boolean,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
     let block = HirBlock {
         id: BlockId(0),
@@ -781,22 +1030,27 @@ fn lowers_string_equality_by_content_comparison_operations() {
         statements: vec![
             statement(
                 1326,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(2)),
+                HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(LocalId(2)),
                     value: equal,
                 },
                 1326,
             ),
             statement(
                 1327,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(3)),
+                HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(LocalId(3)),
                     value: not_equal,
                 },
                 1327,
             ),
         ],
-        terminator: HirTerminator::Return(load_local(1328, LocalId(3), types.boolean, RegionId(0))),
+        terminator: HirTerminator::Return(load_local(
+            &mut expressions,
+            LocalId(3),
+            types.boolean,
+            RegionId(0),
+        )),
     };
     let function = HirFunction {
         id: FunctionId(0),
@@ -807,6 +1061,7 @@ fn lowers_string_equality_by_content_comparison_operations() {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(function, function_path, HirFunctionOrigin::Normal)],
         vec![block],
         FunctionId(0),
@@ -855,21 +1110,24 @@ fn lowers_string_equality_by_content_comparison_operations() {
 fn lowers_ordered_comparison_and_control_flow() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let function_path = path_fork
         .try_intern_portable_path("loop_like_fn", &mut string_table)
         .expect("test path fits");
 
+    let comparison_left = load_local(&mut expressions, LocalId(0), types.int, RegionId(0));
+    let comparison_right = int_expression(5, types.int, RegionId(0), &mut expressions);
     let condition = expression(
-        1400,
         HirExpressionKind::BinOp {
-            left: Box::new(load_local(1401, LocalId(0), types.int, RegionId(0))),
+            left: comparison_left,
             op: HirBinOp::Le,
-            right: Box::new(int_expression(1402, 5, types.int, RegionId(0))),
+            right: comparison_right,
         },
         types.boolean,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
 
     let entry_block = HirBlock {
@@ -878,9 +1136,9 @@ fn lowers_ordered_comparison_and_control_flow() {
         locals: vec![local(0, types.int, RegionId(0))],
         statements: vec![statement(
             1,
-            HirStatementKind::Assign {
-                target: HirPlace::Local(LocalId(0)),
-                value: int_expression(1406, 0, types.int, RegionId(0)),
+            HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(LocalId(0)),
+                value: int_expression(0, types.int, RegionId(0), &mut expressions),
             },
             1,
         )],
@@ -895,14 +1153,24 @@ fn lowers_ordered_comparison_and_control_flow() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(load_local(1408, LocalId(0), types.int, RegionId(0))),
+        terminator: HirTerminator::Return(load_local(
+            &mut expressions,
+            LocalId(0),
+            types.int,
+            RegionId(0),
+        )),
     };
     let else_block = HirBlock {
         id: BlockId(2),
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(1409, 0, types.int, RegionId(0))),
+        terminator: HirTerminator::Return(int_expression(
+            0,
+            types.int,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
     let function = HirFunction {
         id: FunctionId(0),
@@ -913,6 +1181,7 @@ fn lowers_ordered_comparison_and_control_flow() {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(function, function_path, HirFunctionOrigin::Normal)],
         vec![entry_block, then_block, else_block],
         FunctionId(0),
@@ -964,6 +1233,7 @@ fn lowers_ordered_comparison_and_control_flow() {
 fn deduplicates_static_utf8_segments() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
@@ -979,22 +1249,26 @@ fn deduplicates_static_utf8_segments() {
         statements: vec![
             statement(
                 1,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(0)),
-                    value: string_expression(300, "same", types.string, RegionId(0)),
+                HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(LocalId(0)),
+                    value: string_expression("same", types.string, RegionId(0), &mut expressions),
                 },
                 1,
             ),
             statement(
                 2,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(1)),
-                    value: string_expression(301, "same", types.string, RegionId(0)),
+                HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(LocalId(1)),
+                    value: string_expression("same", types.string, RegionId(0), &mut expressions),
                 },
                 2,
             ),
         ],
-        terminator: HirTerminator::Return(unit_expression(302, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let start_function = HirFunction {
@@ -1007,6 +1281,7 @@ fn deduplicates_static_utf8_segments() {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
         vec![start_block],
         FunctionId(0),
@@ -1029,6 +1304,7 @@ fn deduplicates_static_utf8_segments() {
 fn maps_advisory_drop_sites_to_drop_if_owned_statements() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
@@ -1039,7 +1315,11 @@ fn maps_advisory_drop_sites_to_drop_if_owned_statements() {
         region: RegionId(0),
         locals: vec![local(0, types.string, RegionId(0))],
         statements: vec![],
-        terminator: HirTerminator::Return(unit_expression(401, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
@@ -1050,6 +1330,7 @@ fn maps_advisory_drop_sites_to_drop_if_owned_statements() {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
         vec![start_block],
         FunctionId(0),
@@ -1097,6 +1378,7 @@ fn maps_advisory_drop_sites_to_drop_if_owned_statements() {
 fn synthesizes_export_wrappers_with_stable_names() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
@@ -1107,7 +1389,12 @@ fn synthesizes_export_wrappers_with_stable_names() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(500, 123, types.int, RegionId(0))),
+        terminator: HirTerminator::Return(int_expression(
+            123,
+            types.int,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
@@ -1118,6 +1405,7 @@ fn synthesizes_export_wrappers_with_stable_names() {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
         vec![start_block],
         FunctionId(0),
@@ -1191,6 +1479,7 @@ fn synthesizes_export_wrappers_with_stable_names() {
 fn exported_f16_parameters_are_rounded_before_the_internal_call() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let f16_type = builtin_type_ids::fixed_scalar(FixedScalar::F16);
     let start_path = path_fork
@@ -1212,9 +1501,12 @@ fn exported_f16_parameters_are_rounded_before_the_internal_call() {
         params: vec![LocalId(10)],
         return_type: f16_type,
     };
+    let start_value = int_expression(0, types.int, RegionId(0), &mut expressions);
+    let exported_value = load_local(&mut expressions, LocalId(10), f16_type, RegionId(0));
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![
             (start_function, start_path, HirFunctionOrigin::EntryStart),
             (exported_function, exported_path, HirFunctionOrigin::Normal),
@@ -1225,19 +1517,14 @@ fn exported_f16_parameters_are_rounded_before_the_internal_call() {
                 region: RegionId(0),
                 locals: vec![],
                 statements: vec![],
-                terminator: HirTerminator::Return(int_expression(500, 0, types.int, RegionId(0))),
+                terminator: HirTerminator::Return(start_value),
             },
             HirBlock {
                 id: BlockId(1),
                 region: RegionId(0),
                 locals: vec![local(10, f16_type, RegionId(0))],
                 statements: vec![],
-                terminator: HirTerminator::Return(load_local(
-                    501,
-                    LocalId(10),
-                    f16_type,
-                    RegionId(0),
-                )),
+                terminator: HirTerminator::Return(exported_value),
             },
         ],
         FunctionId(0),
@@ -1311,6 +1598,7 @@ fn exported_f16_parameters_are_rounded_before_the_internal_call() {
 fn rejects_invalid_export_request_with_structured_diagnostic() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
@@ -1321,7 +1609,12 @@ fn rejects_invalid_export_request_with_structured_diagnostic() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(600, 1, types.int, RegionId(0))),
+        terminator: HirTerminator::Return(int_expression(
+            1,
+            types.int,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
@@ -1332,6 +1625,7 @@ fn rejects_invalid_export_request_with_structured_diagnostic() {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
         vec![start_block],
         FunctionId(0),
@@ -1371,6 +1665,7 @@ fn validate_float_test_module(
     string_table: &mut StringTable,
     type_environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
 ) -> crate::compiler_frontend::hir::module::HirModule {
+    let mut expressions = HirExpressionStore::default();
     let int_type = type_environment.builtins().int;
     let float_type = type_environment.builtins().float;
     let start_path = path_fork
@@ -1379,10 +1674,14 @@ fn validate_float_test_module(
     let validator_path = path_fork
         .try_intern_portable_path("validate_float", string_table)
         .expect("test path fits");
+    let start_value = int_expression(0, int_type, RegionId(0), &mut expressions);
+    let source = load_local(&mut expressions, LocalId(10), float_type, RegionId(0));
+    let result = load_local(&mut expressions, LocalId(20), float_type, RegionId(0));
 
     build_module(
         path_fork,
         string_table,
+        expressions,
         vec![
             (
                 HirFunction {
@@ -1411,7 +1710,7 @@ fn validate_float_test_module(
                 region: RegionId(0),
                 locals: vec![],
                 statements: vec![],
-                terminator: HirTerminator::Return(int_expression(100, 0, int_type, RegionId(0))),
+                terminator: HirTerminator::Return(start_value),
             },
             HirBlock {
                 id: BlockId(1),
@@ -1423,18 +1722,13 @@ fn validate_float_test_module(
                 statements: vec![statement(
                     102,
                     HirStatementKind::ValidateFloat {
-                        source: load_local(101, LocalId(10), float_type, RegionId(0)),
+                        source,
                         failure_mode: NumericFailureMode::Trap,
-                        result: LocalId(20),
+                        result: HirLocalDestination::Define(LocalId(20)),
                     },
                     2,
                 )],
-                terminator: HirTerminator::Return(load_local(
-                    103,
-                    LocalId(20),
-                    float_type,
-                    RegionId(0),
-                )),
+                terminator: HirTerminator::Return(result),
             },
         ],
         FunctionId(0),
@@ -1558,6 +1852,7 @@ fn lowers_validate_float_with_profile_precision_and_local_value_path() {
 fn lowers_trap_format_float_with_profile_precision_and_single_source_evaluation() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let float_type = type_environment.builtins().float;
     let start_path = path_fork
@@ -1566,9 +1861,19 @@ fn lowers_trap_format_float_with_profile_precision_and_single_source_evaluation(
     let formatter_path = path_fork
         .try_intern_portable_path("format_float", &mut string_table)
         .expect("test path fits");
+    let start_value = int_expression(0, types.int, RegionId(0), &mut expressions);
+    let float_source = expression(
+        HirExpressionKind::Float(1.5),
+        float_type,
+        RegionId(0),
+        ValueKind::Const,
+        &mut expressions,
+    );
+    let formatted_value = load_local(&mut expressions, LocalId(20), types.string, RegionId(0));
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![
             (
                 HirFunction {
@@ -1597,7 +1902,7 @@ fn lowers_trap_format_float_with_profile_precision_and_single_source_evaluation(
                 region: RegionId(0),
                 locals: vec![],
                 statements: vec![],
-                terminator: HirTerminator::Return(int_expression(200, 0, types.int, RegionId(0))),
+                terminator: HirTerminator::Return(start_value),
             },
             HirBlock {
                 id: BlockId(1),
@@ -1606,24 +1911,13 @@ fn lowers_trap_format_float_with_profile_precision_and_single_source_evaluation(
                 statements: vec![statement(
                     202,
                     HirStatementKind::FormatFloat {
-                        source: expression(
-                            201,
-                            HirExpressionKind::Float(1.5),
-                            float_type,
-                            RegionId(0),
-                            ValueKind::Const,
-                        ),
+                        source: float_source,
                         failure_mode: NumericFailureMode::Trap,
-                        result: LocalId(20),
+                        result: HirLocalDestination::Define(LocalId(20)),
                     },
                     2,
                 )],
-                terminator: HirTerminator::Return(load_local(
-                    203,
-                    LocalId(20),
-                    types.string,
-                    RegionId(0),
-                )),
+                terminator: HirTerminator::Return(formatted_value),
             },
         ],
         FunctionId(0),
@@ -1745,8 +2039,8 @@ fn lowers_fixed_float_to_string_with_source_precision_and_single_evaluation() {
             WasmAbiType::F64,
         ),
     ] {
+        let mut expressions = HirExpressionStore::default();
         let source = expression(
-            501,
             HirExpressionKind::FixedScalar(
                 FixedScalarValue::binary_float(scalar, 1.5)
                     .expect("1.5 is a finite fixed-width float"),
@@ -1754,20 +2048,23 @@ fn lowers_fixed_float_to_string_with_source_precision_and_single_evaluation() {
             builtin_type_ids::fixed_scalar(scalar),
             RegionId(0),
             ValueKind::Const,
+            &mut expressions,
         );
         let cast = expression(
-            502,
             HirExpressionKind::Cast {
-                source: Box::new(source),
+                source,
                 policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Fixed(scalar)),
             },
             types.string,
             RegionId(0),
             ValueKind::RValue,
+            &mut expressions,
         );
+        let start_value = int_expression(0, types.int, RegionId(0), &mut expressions);
         let module = build_module(
             &mut path_fork,
             &mut string_table,
+            expressions,
             vec![
                 (
                     HirFunction {
@@ -1796,12 +2093,7 @@ fn lowers_fixed_float_to_string_with_source_precision_and_single_evaluation() {
                     region: RegionId(0),
                     locals: vec![],
                     statements: vec![],
-                    terminator: HirTerminator::Return(int_expression(
-                        500,
-                        0,
-                        types.int,
-                        RegionId(0),
-                    )),
+                    terminator: HirTerminator::Return(start_value),
                 },
                 HirBlock {
                     id: BlockId(1),
@@ -1889,6 +2181,7 @@ fn lowers_fixed_float_to_string_with_source_precision_and_single_evaluation() {
 fn lowers_every_numeric_profile_with_selected_int_carrier() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
@@ -1899,7 +2192,12 @@ fn lowers_every_numeric_profile_with_selected_int_carrier() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(500, 123, types.int, RegionId(0))),
+        terminator: HirTerminator::Return(int_expression(
+            123,
+            types.int,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
@@ -1910,6 +2208,7 @@ fn lowers_every_numeric_profile_with_selected_int_carrier() {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
         vec![start_block],
         FunctionId(0),
@@ -1970,6 +2269,7 @@ fn lowers_every_numeric_profile_with_selected_int_carrier() {
 fn rejects_unsupported_host_call_with_diagnostic() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
@@ -1985,12 +2285,16 @@ fn rejects_unsupported_host_call_with_diagnostic() {
             1,
             HirStatementKind::Call {
                 target: CallTarget::External(unknown_id),
-                args: vec![],
+                args: HirValueRange::empty(),
                 result: None,
             },
             1,
         )],
-        terminator: HirTerminator::Return(unit_expression(800, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let start_function = HirFunction {
@@ -2002,6 +2306,7 @@ fn rejects_unsupported_host_call_with_diagnostic() {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
         vec![start_block],
         FunctionId(0),
@@ -2027,6 +2332,7 @@ fn rejects_unsupported_host_call_with_diagnostic() {
 fn selected_function_policy_ignores_unselected_host_calls_and_assertions() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (mut type_environment, types) = build_type_environment();
     let option_string = type_environment.intern_option(types.string);
     let start_path = path_fork
@@ -2041,7 +2347,11 @@ fn selected_function_policy_ignores_unselected_host_calls_and_assertions() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(unit_expression(900, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let unsupported_id =
@@ -2054,22 +2364,22 @@ fn selected_function_policy_ignores_unselected_host_calls_and_assertions() {
             1,
             HirStatementKind::Call {
                 target: CallTarget::External(unsupported_id),
-                args: vec![],
+                args: HirValueRange::empty(),
                 result: None,
             },
             1,
         )],
         terminator: HirTerminator::AssertFailure {
             message: expression(
-                901,
                 HirExpressionKind::VariantConstruct {
                     carrier: HirVariantCarrier::Option,
                     variant_index: 0,
-                    fields: vec![],
+                    fields: HirVariantFieldRange::empty(),
                 },
                 option_string,
                 RegionId(0),
                 ValueKind::Const,
+                &mut expressions,
             ),
             message_evaluation: HirAssertionMessageEvaluation::Default,
         },
@@ -2090,6 +2400,7 @@ fn selected_function_policy_ignores_unselected_host_calls_and_assertions() {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![
             (start_function, start_path, HirFunctionOrigin::EntryStart),
             (unused_function, unused_path, HirFunctionOrigin::Normal),
@@ -2170,6 +2481,7 @@ fn selected_function_policy_ignores_unselected_host_calls_and_assertions() {
 fn lower_type_to_abi_maps_all_hir_types_correctly() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
@@ -2181,7 +2493,12 @@ fn lower_type_to_abi_maps_all_hir_types_correctly() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(1000, 0, types.int, RegionId(0))),
+        terminator: HirTerminator::Return(int_expression(
+            0,
+            types.int,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
@@ -2192,6 +2509,7 @@ fn lower_type_to_abi_maps_all_hir_types_correctly() {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
         vec![start_block],
         FunctionId(0),
@@ -2281,55 +2599,61 @@ fn multi_fragment_template_produces_all_push_operations() {
     // produces the correct sequence: NewBuffer, PushLiteral, PushHandle, PushLiteral, PushHandle, Finish.
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let runtime_path = path_fork
         .try_intern_portable_path("__moth_frag_0", &mut string_table)
         .expect("test path fits");
 
     // Build: "prefix" + param0 + "middle" + param1 + "suffix"
+    let prefix = string_expression("prefix", types.string, RegionId(0), &mut expressions);
+    let first_handle = load_local(&mut expressions, LocalId(0), types.string, RegionId(0));
     let inner_concat_1 = expression(
-        1101,
         HirExpressionKind::BinOp {
-            left: Box::new(string_expression(1100, "prefix", types.string, RegionId(0))),
+            left: prefix,
             op: HirBinOp::StringAppend,
-            right: Box::new(load_local(1102, LocalId(0), types.string, RegionId(0))),
+            right: first_handle,
         },
         types.string,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
+    let middle = string_expression("middle", types.string, RegionId(0), &mut expressions);
     let inner_concat_2 = expression(
-        1103,
         HirExpressionKind::BinOp {
-            left: Box::new(inner_concat_1),
+            left: inner_concat_1,
             op: HirBinOp::StringAppend,
-            right: Box::new(string_expression(1104, "middle", types.string, RegionId(0))),
+            right: middle,
         },
         types.string,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
+    let second_handle = load_local(&mut expressions, LocalId(1), types.string, RegionId(0));
     let inner_concat_3 = expression(
-        1105,
         HirExpressionKind::BinOp {
-            left: Box::new(inner_concat_2),
+            left: inner_concat_2,
             op: HirBinOp::StringAppend,
-            right: Box::new(load_local(1106, LocalId(1), types.string, RegionId(0))),
+            right: second_handle,
         },
         types.string,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
+    let suffix = string_expression("suffix", types.string, RegionId(0), &mut expressions);
     let full_concat = expression(
-        1107,
         HirExpressionKind::BinOp {
-            left: Box::new(inner_concat_3),
+            left: inner_concat_3,
             op: HirBinOp::StringAppend,
-            right: Box::new(string_expression(1108, "suffix", types.string, RegionId(0))),
+            right: suffix,
         },
         types.string,
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
 
     let runtime_block = HirBlock {
@@ -2353,6 +2677,7 @@ fn multi_fragment_template_produces_all_push_operations() {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(runtime_function, runtime_path, HirFunctionOrigin::Normal)],
         vec![runtime_block],
         FunctionId(0),
@@ -2395,6 +2720,7 @@ fn multi_fragment_template_produces_all_push_operations() {
 fn debug_name_uses_source_name_when_available() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let fn_path = path_fork
         .try_intern_portable_path("my_helper", &mut string_table)
@@ -2405,7 +2731,12 @@ fn debug_name_uses_source_name_when_available() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(1200, 0, types.int, RegionId(0))),
+        terminator: HirTerminator::Return(int_expression(
+            0,
+            types.int,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
     let function = HirFunction {
         id: FunctionId(0),
@@ -2416,6 +2747,7 @@ fn debug_name_uses_source_name_when_available() {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(function, fn_path, HirFunctionOrigin::Normal)],
         vec![block],
         FunctionId(0),
@@ -2457,18 +2789,23 @@ fn debug_name_uses_source_name_when_available() {
 fn io_console_functions_are_unsupported_in_wasm() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let main_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
         .expect("test path fits");
 
+    let argument = string_expression("hello", types.string, RegionId(0), &mut expressions);
+    let arguments = expressions
+        .append_values(&[argument], None)
+        .expect("IO call argument should fit");
     let io_call = statement(
         1,
         HirStatementKind::Call {
             target: CallTarget::External(
                 crate::compiler_frontend::external_packages::ExternalFunctionId::IoLine,
             ),
-            args: vec![string_expression(2, "hello", types.string, RegionId(0))],
+            args: arguments,
             result: None,
         },
         1,
@@ -2479,7 +2816,11 @@ fn io_console_functions_are_unsupported_in_wasm() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![io_call],
-        terminator: HirTerminator::Return(unit_expression(3, types.unit, RegionId(0))),
+        terminator: HirTerminator::Return(unit_expression(
+            types.unit,
+            RegionId(0),
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
@@ -2492,6 +2833,7 @@ fn io_console_functions_are_unsupported_in_wasm() {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![(function, main_path, HirFunctionOrigin::EntryStart)],
         vec![block],
         FunctionId(0),

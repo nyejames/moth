@@ -20,15 +20,13 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
 };
 use crate::compiler_frontend::ast::templates::tir::render_unit::{
     build_aggregate_wrapper_candidate_root_from_tir_nodes,
-    build_branch_body_candidate_root_from_tir_nodes,
+    build_conditional_body_candidate_root_from_tir_nodes,
 };
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::summary::TemplateIrSummary;
 use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 use crate::compiler_frontend::ast::templates::tir::wrapper_sets::wrapper_reference_for_template;
-use crate::compiler_frontend::ast::templates::tir::{
-    head_prefix_tir_nodes, sequence_children, trim_whitespace_before_loop_control_boundary,
-};
+use crate::compiler_frontend::ast::templates::tir::{head_prefix_tir_nodes, sequence_children};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 fn push_text_node(
@@ -199,14 +197,14 @@ fn wrapper_candidates_reuse_parser_structural_child_template() {
         TemplateIrNodeKind::AggregateOutput
     ));
 
-    let branch_root = build_branch_body_candidate_root_from_tir_nodes(
+    let conditional_root = build_conditional_body_candidate_root_from_tir_nodes(
         &[parser_child_node],
         &[body_node],
         &mut store,
     )
-    .expect("branch candidate should reuse parser structural child");
-    let branch_children = candidate_root_children(&store, branch_root);
-    assert_eq!(branch_children, vec![parser_child_node, body_node]);
+    .expect("conditional body candidate should reuse parser structural child");
+    let conditional_children = candidate_root_children(&store, conditional_root);
+    assert_eq!(conditional_children, vec![parser_child_node, body_node]);
 }
 
 #[test]
@@ -250,63 +248,5 @@ fn head_prefix_rejects_missing_child_and_accepts_empty_prefix() {
             .expect("empty prefix should succeed")
             .is_empty(),
         "empty prefix should produce no head-prefix nodes"
-    );
-}
-
-#[test]
-fn trim_whitespace_rejects_every_malformed_reference_branch() {
-    let mut string_table = StringTable::new();
-
-    // Missing body root.
-    let mut missing_root_store = TemplateIrStore::new();
-    let missing_root_error = trim_whitespace_before_loop_control_boundary(
-        TemplateIrNodeId::new(99),
-        &mut missing_root_store,
-        &string_table,
-    )
-    .expect_err("missing body root should be rejected");
-    assert!(
-        missing_root_error.msg.contains("loop-control trim")
-            && missing_root_error.msg.contains("body root")
-            && missing_root_error.msg.contains("was missing"),
-        "expected a missing-root error, got: {}",
-        missing_root_error.msg
-    );
-
-    // Non-sequence body root.
-    let mut non_sequence_store = TemplateIrStore::new();
-    let text_node = push_text_node(&mut non_sequence_store, &mut string_table, "leaf");
-    let non_sequence_error = trim_whitespace_before_loop_control_boundary(
-        text_node,
-        &mut non_sequence_store,
-        &string_table,
-    )
-    .expect_err("non-sequence body root should be rejected");
-    assert!(
-        non_sequence_error.msg.contains("was not a Sequence."),
-        "expected a non-sequence-root error, got: {}",
-        non_sequence_error.msg
-    );
-
-    // Missing child inside an otherwise valid sequence.
-    let mut missing_child_store = TemplateIrStore::new();
-    let body_root = missing_child_store.push_node(TemplateIrNode::new(
-        TemplateIrNodeKind::Sequence {
-            children: vec![TemplateIrNodeId::new(99)],
-        },
-        None,
-    ));
-    let missing_child_error = trim_whitespace_before_loop_control_boundary(
-        body_root,
-        &mut missing_child_store,
-        &string_table,
-    )
-    .expect_err("missing child in sequence should be rejected");
-    assert!(
-        missing_child_error.msg.contains("loop-control trim")
-            && missing_child_error.msg.contains("child node")
-            && missing_child_error.msg.contains("was missing"),
-        "expected a missing-child error, got: {}",
-        missing_child_error.msg
     );
 }

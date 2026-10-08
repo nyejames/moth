@@ -88,6 +88,14 @@ impl SignatureScanner {
             has_error_return = return_result.has_error;
         }
 
+        self.skip_whitespace();
+        if !self.is_at_end() && self.diagnostics.is_empty() {
+            self.emit_diagnostic(
+                "Unsupported trailing syntax in Moth JS module signature.",
+                JsDiagnosticKind::UnsupportedTypeSyntax,
+            );
+        }
+
         SignatureParseResult {
             signature: ParsedSignature {
                 parameters,

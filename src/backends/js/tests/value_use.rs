@@ -15,7 +15,9 @@ use crate::compiler_frontend::hir::ids::{
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::regions::HirRegion;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatementKind, HirWriteTarget,
+};
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -26,6 +28,7 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 /// Verifies that ordinary expression lowering reads loads and clones copies.
 #[test]
 fn plain_expression_load_and_copy_use_read_and_clone() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
@@ -34,28 +37,31 @@ fn plain_expression_load_and_copy_use_read_and_clone() {
     let expression_statement = statement(
         1,
         HirStatementKind::Expr(expression(
-            1,
             HirExpressionKind::TupleConstruct {
-                elements: vec![
-                    expression(
-                        2,
-                        HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
-                        types.string,
-                        region,
-                        ValueKind::RValue,
-                    ),
-                    expression(
-                        3,
-                        HirExpressionKind::Copy(HirPlace::Local(LocalId(1))),
-                        types.string,
-                        region,
-                        ValueKind::RValue,
-                    ),
-                ],
+                elements: append_values(
+                    &[
+                        expression(
+                            HirExpressionKind::Load(HirPlace::local(LocalId(0))),
+                            types.string,
+                            region,
+                            ValueKind::RValue,
+                            &mut expressions,
+                        ),
+                        expression(
+                            HirExpressionKind::Copy(HirPlace::local(LocalId(1))),
+                            types.string,
+                            region,
+                            ValueKind::RValue,
+                            &mut expressions,
+                        ),
+                    ],
+                    &mut expressions,
+                ),
             },
             types.string,
             region,
             ValueKind::RValue,
+            &mut expressions,
         )),
     );
 
@@ -67,7 +73,7 @@ fn plain_expression_load_and_copy_use_read_and_clone() {
             local(1, types.string, region),
         ],
         statements: vec![expression_statement],
-        terminator: HirTerminator::Return(unit_expression(4, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
 
     let function = HirFunction {
@@ -78,6 +84,7 @@ fn plain_expression_load_and_copy_use_read_and_clone() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -88,7 +95,6 @@ fn plain_expression_load_and_copy_use_read_and_clone() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -114,6 +120,7 @@ fn plain_expression_load_and_copy_use_read_and_clone() {
 /// Verifies that assigning Load and Copy to non-local places emits concrete values.
 #[test]
 fn load_and_copy_in_nonlocal_assignment_emit_concrete_values() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
@@ -121,42 +128,44 @@ fn load_and_copy_in_nonlocal_assignment_emit_concrete_values() {
 
     let assign_source = statement(
         1,
-        HirStatementKind::Assign {
-            target: HirPlace::Local(LocalId(0)),
-            value: string_expression(1, "hello", types.string, region),
+        HirStatementKind::Write {
+            target: HirWriteTarget::DefineLocal(LocalId(0)),
+            value: string_expression("hello", types.string, region, &mut expressions),
         },
     );
 
     let copy_to_field = statement(
         2,
-        HirStatementKind::Assign {
-            target: HirPlace::Field {
-                base: Box::new(HirPlace::Local(LocalId(0))),
-                field: FieldId(0),
-            },
+        HirStatementKind::Write {
+            target: HirWriteTarget::AssignPlace(
+                HirPlace::local(LocalId(0))
+                    .with_field(FieldId(0), &mut expressions, None)
+                    .expect("test field projection should fit"),
+            ),
             value: expression(
-                2,
-                HirExpressionKind::Copy(HirPlace::Local(LocalId(1))),
+                HirExpressionKind::Copy(HirPlace::local(LocalId(1))),
                 types.string,
                 region,
                 ValueKind::RValue,
+                &mut expressions,
             ),
         },
     );
 
     let load_to_field = statement(
         3,
-        HirStatementKind::Assign {
-            target: HirPlace::Field {
-                base: Box::new(HirPlace::Local(LocalId(0))),
-                field: FieldId(1),
-            },
+        HirStatementKind::Write {
+            target: HirWriteTarget::AssignPlace(
+                HirPlace::local(LocalId(0))
+                    .with_field(FieldId(1), &mut expressions, None)
+                    .expect("test field projection should fit"),
+            ),
             value: expression(
-                3,
-                HirExpressionKind::Load(HirPlace::Local(LocalId(2))),
+                HirExpressionKind::Load(HirPlace::local(LocalId(2))),
                 types.string,
                 region,
                 ValueKind::RValue,
+                &mut expressions,
             ),
         },
     );
@@ -170,7 +179,7 @@ fn load_and_copy_in_nonlocal_assignment_emit_concrete_values() {
             local(2, types.string, region),
         ],
         statements: vec![assign_source, copy_to_field, load_to_field],
-        terminator: HirTerminator::Return(unit_expression(4, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
 
     let function = HirFunction {
@@ -181,6 +190,7 @@ fn load_and_copy_in_nonlocal_assignment_emit_concrete_values() {
     };
 
     let mut module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -222,7 +232,6 @@ fn load_and_copy_in_nonlocal_assignment_emit_concrete_values() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -254,9 +263,10 @@ fn load_and_copy_in_nonlocal_assignment_emit_concrete_values() {
 // Moth call arguments [value_use]
 // ---------------------------------------------------------------------------
 
-/// Verifies that Moth call arguments pass loads as refs and wrap copies in bindings.
+/// Verifies that Moth call arguments use value-kind metadata for place and rvalue loads.
 #[test]
 fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
@@ -265,14 +275,18 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
     let callee_block = HirBlock {
         id: BlockId(0),
         region,
-        locals: vec![],
+        locals: vec![
+            local(0, types.int, region),
+            local(2, types.int, region),
+            local(3, types.int, region),
+        ],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(1, 42, types.int, region)),
+        terminator: HirTerminator::Return(int_expression(42, types.int, region, &mut expressions)),
     };
     let callee = HirFunction {
         id: FunctionId(1),
         entry: BlockId(0),
-        params: vec![LocalId(0), LocalId(2)],
+        params: vec![LocalId(0), LocalId(2), LocalId(3)],
         return_type: types.int,
     };
 
@@ -280,23 +294,33 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
         1,
         HirStatementKind::Call {
             target: CallTarget::Local(FunctionId(1)),
-            args: vec![
-                expression(
-                    1,
-                    HirExpressionKind::Copy(HirPlace::Local(LocalId(0))),
-                    types.int,
-                    region,
-                    ValueKind::RValue,
-                ),
-                expression(
-                    2,
-                    HirExpressionKind::Load(HirPlace::Local(LocalId(2))),
-                    types.int,
-                    region,
-                    ValueKind::RValue,
-                ),
-            ],
-            result: Some(LocalId(1)),
+            args: append_values(
+                &[
+                    expression(
+                        HirExpressionKind::Copy(HirPlace::local(LocalId(0))),
+                        types.int,
+                        region,
+                        ValueKind::RValue,
+                        &mut expressions,
+                    ),
+                    expression(
+                        HirExpressionKind::Load(HirPlace::local(LocalId(2))),
+                        types.int,
+                        region,
+                        ValueKind::Place,
+                        &mut expressions,
+                    ),
+                    expression(
+                        HirExpressionKind::Load(HirPlace::local(LocalId(2))),
+                        types.int,
+                        region,
+                        ValueKind::RValue,
+                        &mut expressions,
+                    ),
+                ],
+                &mut expressions,
+            ),
+            result: Some(HirLocalDestination::Define(LocalId(1))),
         },
     );
 
@@ -309,7 +333,7 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
             local(2, types.int, region),
         ],
         statements: vec![call_stmt],
-        terminator: HirTerminator::Return(int_expression(2, 0, types.int, region)),
+        terminator: HirTerminator::Return(int_expression(0, types.int, region, &mut expressions)),
     };
     let caller = HirFunction {
         id: FunctionId(0),
@@ -319,6 +343,8 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
     };
 
     let mut module = HirModule::new();
+    expressions.freeze();
+    module.expressions = expressions;
     module.blocks = vec![callee_block, caller_block];
     module.functions = vec![caller, callee];
     module.start_function = Some(FunctionId(0));
@@ -353,6 +379,12 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
             .try_intern_portable_path("load_source", &mut string_table)
             .expect("test path fits"),
     );
+    module.side_table.bind_local_name(
+        LocalId(3),
+        path_fork
+            .try_intern_portable_path("rvalue_parameter", &mut string_table)
+            .expect("test path fits"),
+    );
     module
         .function_origins
         .insert(FunctionId(0), HirFunctionOrigin::Normal);
@@ -362,7 +394,6 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -377,9 +408,9 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
 
     assert!(
         output.source.contains(&format!(
-            "{callee_name}(__moth_binding(__moth_clone_value(__moth_read({copy_source_name}))), {load_source_name})"
+            "{callee_name}(__moth_binding(__moth_clone_value(__moth_read({copy_source_name}))), {load_source_name}, __moth_binding(__moth_read({load_source_name})))"
         )),
-        "Moth call arguments must wrap Copy in __moth_binding and pass Load as a ref"
+        "Moth calls must pass a Place load as a ref and wrap an RValue load after reading it"
     );
 }
 
@@ -389,6 +420,7 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
 /// Verifies that host calls receive raw values for both Load and Copy.
 #[test]
 fn load_and_copy_in_host_call_arguments_emit_raw_values() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
@@ -400,13 +432,16 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
         1,
         HirStatementKind::Call {
             target: CallTarget::External(io_id),
-            args: vec![expression(
-                1,
-                HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
-                types.string,
-                region,
-                ValueKind::RValue,
-            )],
+            args: append_values(
+                &[expression(
+                    HirExpressionKind::Load(HirPlace::local(LocalId(0))),
+                    types.string,
+                    region,
+                    ValueKind::RValue,
+                    &mut expressions,
+                )],
+                &mut expressions,
+            ),
             result: None,
         },
     );
@@ -415,13 +450,16 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
         2,
         HirStatementKind::Call {
             target: CallTarget::External(io_id),
-            args: vec![expression(
-                2,
-                HirExpressionKind::Copy(HirPlace::Local(LocalId(1))),
-                types.string,
-                region,
-                ValueKind::RValue,
-            )],
+            args: append_values(
+                &[expression(
+                    HirExpressionKind::Copy(HirPlace::local(LocalId(1))),
+                    types.string,
+                    region,
+                    ValueKind::RValue,
+                    &mut expressions,
+                )],
+                &mut expressions,
+            ),
             result: None,
         },
     );
@@ -434,7 +472,7 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
             local(1, types.string, region),
         ],
         statements: vec![load_call, copy_call],
-        terminator: HirTerminator::Return(unit_expression(3, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
 
     let function = HirFunction {
@@ -445,6 +483,7 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -455,7 +494,6 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -487,6 +525,7 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
 /// Verifies that returning a Load reads the raw value without cloning or returning a place ref.
 #[test]
 fn load_in_return_reads_value_without_cloning() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
@@ -498,11 +537,11 @@ fn load_in_return_reads_value_without_cloning() {
         locals: vec![local(0, types.int, region)],
         statements: vec![],
         terminator: HirTerminator::Return(expression(
-            1,
-            HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
+            HirExpressionKind::Load(HirPlace::local(LocalId(0))),
             types.int,
             region,
             ValueKind::RValue,
+            &mut expressions,
         )),
     };
 
@@ -514,6 +553,8 @@ fn load_in_return_reads_value_without_cloning() {
     };
 
     let mut module = HirModule::new();
+    expressions.freeze();
+    module.expressions = expressions;
     module.blocks = vec![block];
     module.functions = vec![function];
     module.start_function = Some(FunctionId(0));
@@ -536,7 +577,6 @@ fn load_in_return_reads_value_without_cloning() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -570,6 +610,7 @@ fn load_in_return_reads_value_without_cloning() {
 /// Verifies that returning a Copy clones the value even in alias-returning context.
 #[test]
 fn copy_in_return_value_emits_clone_value() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
@@ -581,11 +622,11 @@ fn copy_in_return_value_emits_clone_value() {
         locals: vec![local(0, types.int, region)],
         statements: vec![],
         terminator: HirTerminator::Return(expression(
-            1,
-            HirExpressionKind::Copy(HirPlace::Local(LocalId(0))),
+            HirExpressionKind::Copy(HirPlace::local(LocalId(0))),
             types.int,
             region,
             ValueKind::RValue,
+            &mut expressions,
         )),
     };
 
@@ -597,6 +638,8 @@ fn copy_in_return_value_emits_clone_value() {
     };
 
     let mut module = HirModule::new();
+    expressions.freeze();
+    module.expressions = expressions;
     module.blocks = vec![block];
     module.functions = vec![function];
     module.start_function = Some(FunctionId(0));
@@ -619,7 +662,6 @@ fn copy_in_return_value_emits_clone_value() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -641,34 +683,38 @@ fn copy_in_return_value_emits_clone_value() {
 /// Verifies that tuple return values recursively apply return-value handling per element.
 #[test]
 fn tuple_return_preserves_return_value_handling_per_element() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
     let return_expr = expression(
-        1,
         HirExpressionKind::TupleConstruct {
-            elements: vec![
-                expression(
-                    2,
-                    HirExpressionKind::Load(HirPlace::Local(LocalId(0))),
-                    types.int,
-                    region,
-                    ValueKind::RValue,
-                ),
-                expression(
-                    3,
-                    HirExpressionKind::Copy(HirPlace::Local(LocalId(1))),
-                    types.string,
-                    region,
-                    ValueKind::RValue,
-                ),
-            ],
+            elements: append_values(
+                &[
+                    expression(
+                        HirExpressionKind::Load(HirPlace::local(LocalId(0))),
+                        types.int,
+                        region,
+                        ValueKind::RValue,
+                        &mut expressions,
+                    ),
+                    expression(
+                        HirExpressionKind::Copy(HirPlace::local(LocalId(1))),
+                        types.string,
+                        region,
+                        ValueKind::RValue,
+                        &mut expressions,
+                    ),
+                ],
+                &mut expressions,
+            ),
         },
         types.int,
         region,
         ValueKind::RValue,
+        &mut expressions,
     );
 
     let block = HirBlock {
@@ -687,6 +733,8 @@ fn tuple_return_preserves_return_value_handling_per_element() {
     };
 
     let mut module = HirModule::new();
+    expressions.freeze();
+    module.expressions = expressions;
     module.blocks = vec![block];
     module.functions = vec![function];
     module.start_function = Some(FunctionId(0));
@@ -715,7 +763,6 @@ fn tuple_return_preserves_return_value_handling_per_element() {
 
     let output = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),

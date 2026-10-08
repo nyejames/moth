@@ -1,5 +1,0 @@
-[backends.html]
-mode = "success"
-warnings = "forbid"
-rendered_output_contains = ["template_else_if_runtime_chain", "selected editor branch"]
-rendered_output_not_contains = ["caught inactive branch", "inactive branch evaluated", "fallback branch"]

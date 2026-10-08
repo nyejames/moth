@@ -1,9 +1,0 @@
-[backends.html]
-mode = "success"
-warnings = "forbid"
-
-[[backends.html.artifact_assertions]]
-path = "index.html"
-kind = "html"
-must_contain = ["const-break-1;", "const-break-2;"]
-must_not_contain = ["const-break-3;", "const-break-4;"]

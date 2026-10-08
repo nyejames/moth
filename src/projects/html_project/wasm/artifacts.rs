@@ -124,7 +124,6 @@ pub(crate) fn compile_html_module_wasm(
     .with_structural_string_urls(Arc::clone(&structural_string_urls));
     let js_module = lower_hir_to_js(
         input.hir_module,
-        input.borrow_analysis,
         input.numeric_proofs,
         string_table,
         js_lowering_config,
@@ -157,7 +156,7 @@ pub(crate) fn compile_html_module_wasm(
         );
         lower_hir_to_wasm_module(
             input.hir_module,
-            input.borrow_analysis.borrow_facts(),
+            input.borrow_facts,
             input.numeric_proofs,
             &build_plan.wasm_request,
             string_table,

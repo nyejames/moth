@@ -8,7 +8,7 @@ Look at the page fragment again:
 ]
 ]
 
-A template is not a string with holes poked by hope. It contains structure: wrappers, slots, child values, control flow and placement order. Flatten it too early and you lose the skeleton the checker and the runtime both need.
+A template retains wrappers, slots, child values, conditionals, loops and output order. Its structure lets the checker validate composition and the runtime render selected content lazily.
 
 Moth gives templates a first-class home and a temporary **Template IR (TIR)** that lives only while AST work runs.
 
@@ -39,9 +39,9 @@ Teaching names for the parts:
 
 - **slots** name holes that receive values or nested content
 - **wrappers** wrap content in outer structure such as tags
-- **control-flow edges** capture template-local `if` and loop structure before it becomes ordinary CFG in HIR
+- **conditionals** retain one selector and body, while **loops** retain their header and body before HIR builds ordinary control flow
 
-Exact view identity includes root, phase and value context. Consumers read through that authority rather than inventing parallel overlay stacks.
+Exact view identity includes root, phase and value context. Structural walks follow each conditional's one body and each loop's header and body through that view, preserving effective overlay reads with structural fallback when no override exists. Consumers read through this authority rather than inventing parallel overlay stacks.
 
 Folding requires `Composed` or later. AST-to-HIR handoff requires `Finalized`.
 
@@ -54,7 +54,7 @@ Folding requires `Composed` or later. AST-to-HIR handoff requires `Finalized`.
             [$insert("href"): ./]
             [$insert("eyebrow"): Built]
             [$insert("title"): Structure captured as TIR]
-            Wrappers, slots, child values, control flow and placement order, kept as structure rather than flattened text.
+            Wrappers, slots, child values, conditional selector/body pairs, loop header/body pairs and placement order stay structured rather than becoming flattened text.
         ]
     ]
 
@@ -62,8 +62,8 @@ Folding requires `Composed` or later. AST-to-HIR handoff requires `Finalized`.
         [node:
             [$insert("href"): ./]
             [$insert("eyebrow"): Classified]
-            [$insert("title"): prepare_tir_view labels each piece]
-            Foldable, runtime or helper. One owner decides, so finalisation never re-litigates it.
+            [$insert("title"): prepare_tir_view classifies the value]
+            One owner decides whether the whole value is foldable, runtime or a helper, so finalisation never re-litigates it.
         ]
 
         [$insert("details"):
@@ -88,17 +88,17 @@ Folding requires `Composed` or later. AST-to-HIR handoff requires `Finalized`.
             [$insert("href"): ../hir/]
             [$insert("eyebrow"): Gone]
             [$insert("title"): The TIR store drops]
-            No TIR identity survives the completed AST. HIR sees ordinary strings and control flow.
+            No TIR identity survives the completed AST. HIR sees ordinary strings and lazy runtime control flow.
         ]
     ]
 ]
 
 ## Folded and runtime paths
 
-Classification happens in one place. `prepare_tir_view` validates reachable TIR and labels each piece foldable, runtime or helper. AST finalisation then consumes exactly that preparation rather than deciding again:
+Classification happens in one place. `prepare_tir_view` validates structurally reachable TIR and classifies the whole value as foldable, runtime or helper. In `ConstRequired` mode, validation includes retained conditional and loop bodies even when a selector is statically false. AST finalisation then consumes exactly that preparation rather than deciding again:
 
 - fully constant templates **fold into strings**
-- runtime `if` and loop bodies stay available for lazy lowering
+- runtime conditional and loop bodies stay available for lazy lowering
 - runtime slot plans prepare sources and sites
 - helper-only artefacts drop away
 - top-level page fragments emit **folded metadata** with insertion indexes

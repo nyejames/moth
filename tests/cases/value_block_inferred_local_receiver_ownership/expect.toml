@@ -1,0 +1,16 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = """
+low=small/worker/2
+middle=large/sentinel/50
+high=large/scout/80
+checked=negative/small
+annotated=annotated-negative/annotated
+described=counted/3
+bonus=11
+looped=3
+nested=big/small
+typed=plain/1/noted/0
+validated=valid/negative count/too large
+doubled=6/2/0"""

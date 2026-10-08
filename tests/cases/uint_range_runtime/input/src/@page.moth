@@ -11,7 +11,7 @@ asc_last_index ~= 0
 loop asc_lo to & asc_hi |value, index|:
     asc_total = asc_total + value
     asc_count = asc_count + 1
-    asc_last_index = index
+    asc_last_index = copy index
 ;
 
 step_two Uint = 2
@@ -53,7 +53,7 @@ loop asc_hi to & asc_hi |value|:
 zero_terminal ~Uint = 99
 zero_count ~= 0
 loop step_two to & asc_lo by step_two |value|:
-    zero_terminal = value
+    zero_terminal = copy value
     zero_count = zero_count + 1
 ;
 
@@ -62,7 +62,7 @@ max_hi Uint = 4294967295
 max_last ~Uint = 0
 max_count ~= 0
 loop max_lo to & max_hi |value|:
-    max_last = value
+    max_last = copy value
     max_count = max_count + 1
 ;
 

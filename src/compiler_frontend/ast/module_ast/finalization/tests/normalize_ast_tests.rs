@@ -29,10 +29,9 @@ use crate::compiler_frontend::ast::templates::tir::SlotOccurrenceId;
 use crate::compiler_frontend::ast::templates::tir::TirExpressionOverlayId;
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReference;
 use crate::compiler_frontend::ast::templates::tir::{
-    MalformedTirStore, TemplateIr, TemplateIrBranch, TemplateIrBuilder, TemplateIrNode,
-    TemplateIrNodeKind, TemplateIrStore, TemplateIrSummary, TemplateLoopHeaderExpressionSites,
-    TemplateSlotPlan, TemplateTirPhase, TemplateTirReference, TemplateWrapperReference,
-    TemplateWrapperSet, TirView,
+    MalformedTirStore, TemplateIr, TemplateIrBuilder, TemplateIrNode, TemplateIrNodeKind,
+    TemplateIrStore, TemplateIrSummary, TemplateLoopHeaderExpressionSites, TemplateSlotPlan,
+    TemplateTirPhase, TemplateTirReference, TemplateWrapperReference, TemplateWrapperSet, TirView,
 };
 use crate::compiler_frontend::ast::templates::tir::{
     TemplatePreparationMode, TemplatePreparationOutcome, prepare_tir_view,

@@ -20,14 +20,13 @@ use crate::compiler_frontend::ast::templates::template_slots::{
     RuntimeSlotContributionSourceId, RuntimeSlotSiteId,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    ExpressionSiteId, TemplateIr, TemplateIrBranch, TemplateIrBuilder, TemplateIrNode,
-    TemplateIrStore, TemplateIrSummary, TemplateLoopHeaderExpressionSites, TemplateTirPhase,
-    TemplateTirReference, TemplateViewContext, TirExpressionOverlay,
+    ExpressionSiteId, TemplateIr, TemplateIrBuilder, TemplateIrNode, TemplateIrStore,
+    TemplateIrSummary, TemplateLoopHeaderExpressionSites, TemplateTirPhase, TemplateTirReference,
+    TemplateViewContext, TirExpressionOverlay,
 };
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotContributionSource, OwnedRuntimeSlotSite,
-    OwnedRuntimeTemplateBody, OwnedRuntimeTemplateBranch, OwnedRuntimeTemplateHandoff,
-    OwnedRuntimeTemplateNode,
+    OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::DataType;
@@ -80,7 +79,7 @@ fn validate_owned_handoff_with_orphan_type_id(node: OwnedRuntimeTemplateNode) {
 }
 
 #[test]
-fn owned_runtime_branch_selector_type_ids_are_validated_before_inactive_elision() {
+fn owned_runtime_conditional_selector_type_ids_are_validated_before_inactive_elision() {
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let selectors = vec![
@@ -98,17 +97,12 @@ fn owned_runtime_branch_selector_type_ids_are_validated_before_inactive_elision(
     ];
 
     for selector in selectors {
-        validate_owned_handoff_with_orphan_type_id(OwnedRuntimeTemplateNode::BranchChain {
-            branches: vec![OwnedRuntimeTemplateBranch {
-                selector,
-                body: OwnedRuntimeTemplateNode::Sequence {
-                    children: Vec::new(),
-                    span: None,
-                },
+        validate_owned_handoff_with_orphan_type_id(OwnedRuntimeTemplateNode::Conditional {
+            selector: Box::new(selector),
+            body: Box::new(OwnedRuntimeTemplateNode::Sequence {
+                children: Vec::new(),
                 span: None,
-            }],
-            fallback: None,
-            else_marker: None,
+            }),
             span: None,
         });
     }
@@ -148,17 +142,12 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
             },
             contribution_sources: vec![OwnedRuntimeSlotContributionSource {
                 source: RuntimeSlotContributionSourceId(0),
-                render_root: OwnedRuntimeTemplateNode::BranchChain {
-                    branches: vec![OwnedRuntimeTemplateBranch {
-                        selector: TemplateBranchSelector::Bool(orphan_bool_expression()),
-                        body: OwnedRuntimeTemplateNode::Sequence {
-                            children: Vec::new(),
-                            span: None,
-                        },
+                render_root: OwnedRuntimeTemplateNode::Conditional {
+                    selector: Box::new(TemplateBranchSelector::Bool(orphan_bool_expression())),
+                    body: Box::new(OwnedRuntimeTemplateNode::Sequence {
+                        children: Vec::new(),
                         span: None,
-                    }],
-                    fallback: None,
-                    else_marker: None,
+                    }),
                     span: None,
                 },
                 renders_wrapper_unconditionally: false,
@@ -213,17 +202,12 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
 
 #[test]
 fn static_true_assertion_owned_handoff_is_validated_before_message_elision() {
-    let handoff = owned_render_handoff(OwnedRuntimeTemplateNode::BranchChain {
-        branches: vec![OwnedRuntimeTemplateBranch {
-            selector: TemplateBranchSelector::Bool(orphan_bool_expression()),
-            body: OwnedRuntimeTemplateNode::Sequence {
-                children: Vec::new(),
-                span: None,
-            },
+    let handoff = owned_render_handoff(OwnedRuntimeTemplateNode::Conditional {
+        selector: Box::new(TemplateBranchSelector::Bool(orphan_bool_expression())),
+        body: Box::new(OwnedRuntimeTemplateNode::Sequence {
+            children: Vec::new(),
             span: None,
-        }],
-        fallback: None,
-        else_marker: None,
+        }),
         span: None,
     });
     let node = AstNode {
@@ -652,7 +636,7 @@ fn pending_group_is_a_final_validation_invariant() {
 }
 
 #[test]
-fn finalized_tir_view_branch_selector_payload_validates_effective_overlay_span() {
+fn finalized_tir_view_conditional_selector_payload_validates_effective_overlay_span() {
     let type_environment = TypeEnvironment::new();
     let mut store = TemplateIrStore::new();
 
@@ -664,31 +648,29 @@ fn finalized_tir_view_branch_selector_payload_validates_effective_overlay_span()
 
     let (template_id, selector_site_id) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let branch_body = builder.push_sequence_node(Vec::new(), None);
-        let branch = TemplateIrBranch::new(
+        let body = builder.push_sequence_node(Vec::new(), None);
+        let conditional_node_id = builder.push_conditional_node(
             TemplateBranchSelector::Bool(structural_selector),
-            branch_body,
+            body,
             structural_span,
-            builder.store.next_expression_site_id(),
         );
-        let branch_chain_node_id = builder.push_branch_chain_node(vec![branch], None, None, None);
         let template_id = builder.finish_template(
-            branch_chain_node_id,
+            conditional_node_id,
             Style::default(),
             TemplateType::StringFunction,
             TemplateIrSummary::default(),
             None,
         );
         let selector_site_id = match &store
-            .get_node(branch_chain_node_id)
-            .expect("branch chain node should exist")
+            .get_node(conditional_node_id)
+            .expect("conditional node should exist")
             .kind
         {
-            crate::compiler_frontend::ast::templates::tir::TemplateIrNodeKind::BranchChain {
-                branches,
+            crate::compiler_frontend::ast::templates::tir::TemplateIrNodeKind::Conditional {
+                selector_site_id,
                 ..
-            } => branches[0].selector_site_id,
-            other => panic!("expected branch chain node, got {other:?}"),
+            } => *selector_site_id,
+            other => panic!("expected conditional node, got {other:?}"),
         };
         (template_id, selector_site_id)
     };

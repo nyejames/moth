@@ -412,6 +412,64 @@ fn synthetic_single_file_registered_html_package_matches_directory_build() {
     }
 }
 
+#[test]
+fn synthetic_single_file_moth_template_uses_implicit_html_package() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    for (entry_mode, ordinary_page_entry) in
+        [("selected @page.moth", false), ("selected page.moth", true)]
+    {
+        let mut fixture = EntryFixture::new(
+            "intro #= @docs/intro.mtf\n\
+             #[$html: [intro]]\n",
+            false,
+        );
+        if ordinary_page_entry {
+            fixture.select_ordinary_page_file();
+        }
+        let docs = fixture.directory.path().join("src/docs");
+        fs::create_dir_all(&docs).expect("should create Moth template directory");
+        fs::write(
+            docs.join("intro.mtf"),
+            "[p, $raw:implicit HTML package from MTF]\n",
+        )
+        .expect("should write Moth template using the implicit HTML helper");
+
+        let frontend = fixture.html_frontend();
+        assert_eq!(
+            frontend.source_packages.len(),
+            1,
+            "{entry_mode}: the implicit HTML package should publish separately"
+        );
+        assert_eq!(
+            frontend
+                .source_packages
+                .get(0)
+                .expect("the implicit HTML package should publish")
+                .package_prefix(),
+            "html",
+            "{entry_mode}: the Moth template's helper provider remains a separate package"
+        );
+
+        let built = fixture.build(&[]);
+        let html = built
+            .project
+            .output_files
+            .iter()
+            .find_map(|output| {
+                if let FileKind::Html(html) = output.file_kind() {
+                    Some(html)
+                } else {
+                    None
+                }
+            })
+            .expect("the selected source should emit an HTML page");
+        assert!(
+            html.contains("<p style=\"\">implicit HTML package from MTF</p>"),
+            "{entry_mode}: the implicitly bound Moth template should fold into the page: {html}"
+        );
+    }
+}
+
 fn assert_ambiguous_package_diagnostic(
     fixture: &EntryFixture,
     dependency_clause: &str,

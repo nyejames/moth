@@ -12,6 +12,7 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{TemplateConstValueKind, TemplateType};
+use crate::compiler_frontend::ast::templates::template_folding::TemplateEmission;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase, TirView,
     fold_prepared_template, prepare_tir_view_with_source_scope,
@@ -120,36 +121,21 @@ pub(super) fn parse_template_expression(
             let mut fold_context = template_context.new_tir_fold_context(string_table);
             let fold_result = fold_prepared_template(&preparation, view, &mut fold_context)?;
             let mut folded_expression = match fold_result.emission {
-                crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::Output(
-                    ConstStringValue::Text(value),
-                ) => Expression::string_slice(value, template_span, value_mode.as_owned()),
-                crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::Output(
-                    ConstStringValue::Pieces(pieces),
-                ) => Expression::new(
+                TemplateEmission::Output(ConstStringValue::Text(value)) => {
+                    Expression::string_slice(value, template_span, value_mode.as_owned())
+                }
+                TemplateEmission::Output(ConstStringValue::Pieces(pieces)) => Expression::new(
                     ExpressionKind::StructuralString { pieces },
                     template_span,
                     crate::compiler_frontend::datatypes::ids::builtin_type_ids::STRING,
                     crate::compiler_frontend::datatypes::DataType::StringSlice,
                     value_mode.as_owned(),
                 ),
-                crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::NoOutput => {
-                    Expression::string_slice(
-                        fold_context.string_table.intern(""),
-                        template_span,
-                        value_mode.as_owned(),
-                    )
-                }
-                crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::Break(
-                    _,
-                )
-                | crate::compiler_frontend::ast::templates::template_folding::TemplateEmission::Continue(
-                    _,
-                ) => {
-                    return Err(CompilerError::compiler_error(
-                        "Template loop-control signal escaped the nearest template loop during folding.",
-                    )
-                    .into());
-                }
+                TemplateEmission::NoOutput => Expression::string_slice(
+                    fold_context.string_table.intern(""),
+                    template_span,
+                    value_mode.as_owned(),
+                ),
             };
             folded_expression.synthetic_interface_provenance = fold_result.provenance;
             Ok(Some(folded_expression))

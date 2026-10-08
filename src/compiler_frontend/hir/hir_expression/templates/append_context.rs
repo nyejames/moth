@@ -6,17 +6,27 @@
 //! wrapping all share this state, but `render_append.rs` should remain focused on appending
 //! owned runtime-template nodes.
 
+use crate::compiler_frontend::ast::templates::OwnedRuntimeSlotSite;
 use crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotContributionSourceId;
-use crate::compiler_frontend::ast::templates::{OwnedRuntimeSlotSite, OwnedRuntimeTemplateNode};
 use crate::compiler_frontend::hir::ids::LocalId;
+
+/// Accumulator and optional emitted state owned by one runtime slot contribution source.
+///
+/// A missing emitted flag means the owned render root is already proven to produce output.
+#[derive(Clone, Copy)]
+pub(super) struct RuntimeSlotSourceLocals {
+    pub(super) accumulator: LocalId,
+    pub(super) emitted_output: Option<LocalId>,
+}
 
 /// Source locals available while HIR lowers a runtime slot application wrapper.
 ///
-/// WHAT: stores already-initialized source accumulators by AST source ID.
-/// WHY: repeated slot sites must load source output without re-lowering the
-/// authored contribution expressions.
+/// WHAT: pairs each AST source ID with its accumulator and any required structural emitted flag.
+/// WHY: repeated slot sites replay source bytes and propagate structural emission
+/// separately without re-lowering authored contribution expressions. Guaranteed-output sources
+/// need no per-source flag.
 pub(super) struct RuntimeSlotSourceAccumulatorContext {
-    locals_by_source: Vec<LocalId>,
+    locals_by_source: Vec<RuntimeSlotSourceLocals>,
 }
 
 impl RuntimeSlotSourceAccumulatorContext {
@@ -26,34 +36,24 @@ impl RuntimeSlotSourceAccumulatorContext {
         }
     }
 
-    pub(super) fn insert(&mut self, id: RuntimeSlotContributionSourceId, local: LocalId) {
+    pub(super) fn insert(
+        &mut self,
+        id: RuntimeSlotContributionSourceId,
+        locals: RuntimeSlotSourceLocals,
+    ) {
         if self.locals_by_source.len() <= id.0 {
-            self.locals_by_source.resize(id.0 + 1, local);
+            self.locals_by_source.resize(id.0 + 1, locals);
         }
 
-        self.locals_by_source[id.0] = local;
+        self.locals_by_source[id.0] = locals;
     }
 
-    pub(super) fn local_for(&self, id: RuntimeSlotContributionSourceId) -> Option<LocalId> {
+    pub(super) fn for_source(
+        &self,
+        id: RuntimeSlotContributionSourceId,
+    ) -> Option<RuntimeSlotSourceLocals> {
         self.locals_by_source.get(id.0).copied()
     }
-}
-
-/// Wrapper replay needed before a runtime slot contribution emits loop control.
-///
-/// WHAT: carries the outer slot-application wrapper state while a contribution
-/// is being accumulated into slot-local strings.
-/// WHY: if a contribution outputs text and then hits `[break]` / `[continue]`,
-/// the wrapper must be appended on that terminating CFG path before control
-/// jumps to the surrounding template loop.
-#[derive(Clone, Copy)]
-pub(super) struct RuntimeSlotLoopControlFlush<'a> {
-    pub(super) wrapper_plan: &'a OwnedRuntimeTemplateNode,
-    pub(super) target_accumulator: LocalId,
-    pub(super) source_accumulators: &'a RuntimeSlotSourceAccumulatorContext,
-    pub(super) slot_sites: &'a [OwnedRuntimeSlotSite],
-    pub(super) contribution_emitted_flag: LocalId,
-    pub(super) parent_emitted_flag: Option<LocalId>,
 }
 
 /// Policy for unresolved `OwnedRuntimeTemplateNode::Slot` placeholders.
@@ -80,7 +80,6 @@ pub(super) struct RuntimeTemplateAppendContext<'a> {
     pub(super) emitted_output: Option<LocalId>,
     pub(super) source_accumulators: Option<&'a RuntimeSlotSourceAccumulatorContext>,
     pub(super) slot_sites: Option<&'a [OwnedRuntimeSlotSite]>,
-    pub(super) loop_control_flush: Option<RuntimeSlotLoopControlFlush<'a>>,
     pub(super) slot_placeholder_policy: RuntimeSlotPlaceholderPolicy,
 }
 
@@ -91,13 +90,12 @@ impl<'a> RuntimeTemplateAppendContext<'a> {
             emitted_output: None,
             source_accumulators: None,
             slot_sites: None,
-            loop_control_flush: None,
             slot_placeholder_policy: RuntimeSlotPlaceholderPolicy::MissingSlotRendersEmpty,
         }
     }
 
-    pub(super) fn with_emitted_output(mut self, flag: Option<LocalId>) -> Self {
-        self.emitted_output = flag;
+    pub(super) fn with_emitted_output(mut self, emitted_output: LocalId) -> Self {
+        self.emitted_output = Some(emitted_output);
         self
     }
 
@@ -113,14 +111,6 @@ impl<'a> RuntimeTemplateAppendContext<'a> {
     ) -> Self {
         self.source_accumulators = Some(source_accumulators);
         self.slot_sites = Some(slot_sites);
-        self
-    }
-
-    pub(super) fn with_loop_control_flush(
-        mut self,
-        flush: RuntimeSlotLoopControlFlush<'a>,
-    ) -> Self {
-        self.loop_control_flush = Some(flush);
         self
     }
 

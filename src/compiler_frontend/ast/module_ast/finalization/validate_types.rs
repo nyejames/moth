@@ -41,12 +41,11 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// Context shared by every helper in this type-boundary validation pass.
 ///
 /// WHAT: bundles the final module `TypeEnvironment` with the module-scoped
-///       `TemplateIrStore` and `TemplateIrStore` so template-expression
+///       `TemplateIrStore` so template-expression
 ///       payload validation resolves one required finalized `TirView`.
 /// WHY: the pass is read-only and short-lived; a small context struct keeps the
 ///      recursive walk signatures focused and stage-local.
@@ -60,7 +59,6 @@ impl AstFinalizer<'_, '_> {
         &self,
         ast: &[AstNode],
         const_values: &ConstValueStore,
-        _string_table: &StringTable,
     ) -> Result<(), CompilerError> {
         let template_ir_store = self.context.template_ir_store.borrow();
         let context = TypeValidationContext {
@@ -420,11 +418,8 @@ fn validate_owned_runtime_template_node(
             validate_expression(expression, context)
         }
 
-        OwnedRuntimeTemplateNode::BranchChain { branches, .. } => {
-            for branch in branches {
-                validate_template_branch_selector(&branch.selector, context)?;
-            }
-            Ok(())
+        OwnedRuntimeTemplateNode::Conditional { selector, .. } => {
+            validate_template_branch_selector(selector, context)
         }
 
         OwnedRuntimeTemplateNode::Loop { header, .. } => {
@@ -436,7 +431,6 @@ fn validate_owned_runtime_template_node(
         | OwnedRuntimeTemplateNode::ChildTemplate { .. }
         | OwnedRuntimeTemplateNode::ConditionalWrapper { .. }
         | OwnedRuntimeTemplateNode::AggregateOutput
-        | OwnedRuntimeTemplateNode::LoopControl { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => Ok(()),

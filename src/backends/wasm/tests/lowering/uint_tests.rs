@@ -22,27 +22,29 @@ use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
+use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::operators::HirBinOp;
-use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatementKind, HirWriteTarget,
+};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 
-fn uint_literal(id: u32, value: u64) -> crate::compiler_frontend::hir::expressions::HirExpression {
+fn uint_literal(expressions: &mut HirExpressionStore, value: u64) -> HirValueId {
     expression(
-        id,
         HirExpressionKind::Uint(value),
         builtin_type_ids::UINT,
         RegionId(0),
         ValueKind::Const,
+        expressions,
     )
 }
 
@@ -61,7 +63,8 @@ fn int64_profile() -> NumericProfile {
 }
 
 fn lower_entry_returning(
-    value: crate::compiler_frontend::hir::expressions::HirExpression,
+    expressions: HirExpressionStore,
+    value: HirValueId,
     return_type: crate::compiler_frontend::datatypes::ids::TypeId,
     profile: NumericProfile,
     path_fork: &mut PathInternerFork,
@@ -87,6 +90,7 @@ fn lower_entry_returning(
     let module = build_module(
         path_fork,
         string_table,
+        expressions,
         vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
         vec![start_block],
         FunctionId(0),
@@ -135,8 +139,11 @@ fn uint_literals_lower_with_bit_pattern_preservation() {
         ),
     ];
     for (profile, value, carrier) in cases {
+        let mut expressions = HirExpressionStore::default();
+        let value_id = uint_literal(&mut expressions, value);
         let function = lower_entry_returning(
-            uint_literal(500, value),
+            expressions,
+            value_id,
             builtin_type_ids::UINT,
             profile,
             &mut path_fork,
@@ -182,6 +189,7 @@ fn uint_params_locals_and_results_use_the_selected_carrier() {
     let (type_environment, _) = build_type_environment();
 
     for profile in [int32_profile(), int64_profile()] {
+        let mut expressions = HirExpressionStore::default();
         let expected = match profile.int_width {
             IntWidth::Bits32 => WasmAbiType::I32,
             IntWidth::Bits64 => WasmAbiType::I64,
@@ -198,14 +206,19 @@ fn uint_params_locals_and_results_use_the_selected_carrier() {
             ],
             statements: vec![statement(
                 1,
-                HirStatementKind::Assign {
-                    target: HirPlace::Local(LocalId(1)),
-                    value: load_local(2, LocalId(0), builtin_type_ids::UINT, RegionId(0)),
+                HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(LocalId(1)),
+                    value: load_local(
+                        &mut expressions,
+                        LocalId(0),
+                        builtin_type_ids::UINT,
+                        RegionId(0),
+                    ),
                 },
                 1,
             )],
             terminator: HirTerminator::Return(load_local(
-                3,
+                &mut expressions,
                 LocalId(1),
                 builtin_type_ids::UINT,
                 RegionId(0),
@@ -220,6 +233,7 @@ fn uint_params_locals_and_results_use_the_selected_carrier() {
         let module = build_module(
             &mut path_fork,
             &mut string_table,
+            expressions,
             vec![(function, function_path, HirFunctionOrigin::Normal)],
             vec![block],
             FunctionId(0),
@@ -274,40 +288,42 @@ fn uint_comparisons_lower_with_unsigned_scalar_types() {
             IntWidth::Bits64 => 64,
         };
         for (operator, left_is_uint, right_is_uint) in cases {
+            let mut expressions = HirExpressionStore::default();
             let left = if left_is_uint {
-                uint_literal(600, 4_294_967_295)
+                uint_literal(&mut expressions, 4_294_967_295)
             } else {
                 expression(
-                    600,
                     HirExpressionKind::Int(-1),
                     types.int,
                     RegionId(0),
                     ValueKind::Const,
+                    &mut expressions,
                 )
             };
             let right = if right_is_uint {
-                uint_literal(601, 0)
+                uint_literal(&mut expressions, 0)
             } else {
                 expression(
-                    601,
                     HirExpressionKind::Int(-1),
                     types.int,
                     RegionId(0),
                     ValueKind::Const,
+                    &mut expressions,
                 )
             };
             let comparison = expression(
-                602,
                 HirExpressionKind::BinOp {
-                    left: Box::new(left),
+                    left,
                     op: operator,
-                    right: Box::new(right),
+                    right,
                 },
                 types.boolean,
                 RegionId(0),
                 ValueKind::RValue,
+                &mut expressions,
             );
             let function = lower_entry_returning(
+                expressions,
                 comparison,
                 types.boolean,
                 profile,
@@ -367,11 +383,11 @@ fn uint_infallible_casts_use_unsigned_conversion_opcodes() {
 
     // Uint converts directly to the profile Float without a signed intermediate.
     for profile in [int32_profile(), int64_profile(), float32_profile] {
-        let source = uint_literal(700, 3_000_000_001);
+        let mut expressions = HirExpressionStore::default();
+        let source = uint_literal(&mut expressions, 3_000_000_001);
         let cast = expression(
-            701,
             HirExpressionKind::Cast {
-                source: Box::new(source),
+                source,
                 policy: BuiltinCastPolicyId::NumericConversion {
                     source: NumericScalar::Uint,
                     target: NumericScalar::Float,
@@ -380,8 +396,10 @@ fn uint_infallible_casts_use_unsigned_conversion_opcodes() {
             builtin_type_ids::FLOAT,
             RegionId(0),
             ValueKind::RValue,
+            &mut expressions,
         );
         let function = lower_entry_returning(
+            expressions,
             cast,
             builtin_type_ids::FLOAT,
             profile,
@@ -417,11 +435,11 @@ fn uint_infallible_casts_use_unsigned_conversion_opcodes() {
     }
 
     // A Uint32 value widens into U64 with zero extension, never sign extension.
-    let source = uint_literal(710, 4_294_967_295);
+    let mut expressions = HirExpressionStore::default();
+    let source = uint_literal(&mut expressions, 4_294_967_295);
     let cast = expression(
-        711,
         HirExpressionKind::Cast {
-            source: Box::new(source),
+            source,
             policy: BuiltinCastPolicyId::NumericConversion {
                 source: NumericScalar::Uint,
                 target: NumericScalar::Fixed(moth_lexical::numeric::fixed_scalar::FixedScalar::U64),
@@ -430,8 +448,10 @@ fn uint_infallible_casts_use_unsigned_conversion_opcodes() {
         builtin_type_ids::fixed_scalar(moth_lexical::numeric::fixed_scalar::FixedScalar::U64),
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
     let function = lower_entry_returning(
+        expressions,
         cast,
         builtin_type_ids::fixed_scalar(moth_lexical::numeric::fixed_scalar::FixedScalar::U64),
         int32_profile(),
@@ -454,11 +474,11 @@ fn uint_infallible_casts_use_unsigned_conversion_opcodes() {
     );
 
     // Same-carrier Uint-to-U32 is a bit-pattern passthrough with no conversion opcode.
-    let source = uint_literal(720, 4_294_967_295);
+    let mut expressions = HirExpressionStore::default();
+    let source = uint_literal(&mut expressions, 4_294_967_295);
     let cast = expression(
-        721,
         HirExpressionKind::Cast {
-            source: Box::new(source),
+            source,
             policy: BuiltinCastPolicyId::NumericConversion {
                 source: NumericScalar::Uint,
                 target: NumericScalar::Fixed(moth_lexical::numeric::fixed_scalar::FixedScalar::U32),
@@ -467,8 +487,10 @@ fn uint_infallible_casts_use_unsigned_conversion_opcodes() {
         builtin_type_ids::fixed_scalar(moth_lexical::numeric::fixed_scalar::FixedScalar::U32),
         RegionId(0),
         ValueKind::RValue,
+        &mut expressions,
     );
     let function = lower_entry_returning(
+        expressions,
         cast,
         builtin_type_ids::fixed_scalar(moth_lexical::numeric::fixed_scalar::FixedScalar::U32),
         int32_profile(),
@@ -513,18 +535,20 @@ fn uint_to_string_formats_through_the_unsigned_helper() {
         ),
     ];
     for (profile, value, carrier) in cases {
-        let source = uint_literal(800, value);
+        let mut expressions = HirExpressionStore::default();
+        let source = uint_literal(&mut expressions, value);
         let cast = expression(
-            801,
             HirExpressionKind::Cast {
-                source: Box::new(source),
+                source,
                 policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Uint),
             },
             types.string,
             RegionId(0),
             ValueKind::RValue,
+            &mut expressions,
         );
         let function = lower_entry_returning(
+            expressions,
             cast,
             types.string,
             profile,
@@ -574,12 +598,13 @@ fn uint_trap_arithmetic_selects_unsigned_operation_kinds() {
             }
         };
         for operator in operators {
+            let mut expressions = HirExpressionStore::default();
             let function_path = path_fork
                 .try_intern_portable_path("operate", &mut string_table)
                 .expect("test path fits");
             let operands = HirNumericOperands::Binary {
-                left: uint_literal(900, 7),
-                right: uint_literal(901, 3),
+                left: uint_literal(&mut expressions, 7),
+                right: uint_literal(&mut expressions, 3),
             };
             let block = HirBlock {
                 id: BlockId(0),
@@ -594,12 +619,12 @@ fn uint_trap_arithmetic_selects_unsigned_operation_kinds() {
                         },
                         failure_mode: NumericFailureMode::Trap,
                         operands,
-                        result: LocalId(0),
+                        result: HirLocalDestination::Define(LocalId(0)),
                     },
                     902,
                 )],
                 terminator: HirTerminator::Return(load_local(
-                    903,
+                    &mut expressions,
                     LocalId(0),
                     builtin_type_ids::UINT,
                     RegionId(0),
@@ -614,6 +639,7 @@ fn uint_trap_arithmetic_selects_unsigned_operation_kinds() {
             let module = build_module(
                 &mut path_fork,
                 &mut string_table,
+                expressions,
                 vec![(function, function_path, HirFunctionOrigin::Normal)],
                 vec![block],
                 FunctionId(0),

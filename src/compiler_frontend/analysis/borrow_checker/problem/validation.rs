@@ -5,8 +5,8 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use super::LoanId;
 use super::RebindValue;
 use super::{
-    BlockId, BorrowProblem, CallArgument, CallId, CallResultProvenance, EventId, EventKind,
-    OriginKind, TerminatorEventKind, UseKind,
+    BlockId, BorrowProblem, CallArgument, CallId, CallResultProvenance, Event, EventId, EventKind,
+    OriginKind, TerminatorEventKind,
 };
 use super::{PlaceId, PointId, ValueOriginId};
 use std::collections::{BTreeMap, BTreeSet};
@@ -298,7 +298,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
             .collect::<BTreeSet<_>>();
         let actual = match &event.kind {
             EventKind::Terminator { kind } => match kind {
-                TerminatorEventKind::Jump { target }
+                TerminatorEventKind::Jump { target, .. }
                 | TerminatorEventKind::Break { target }
                 | TerminatorEventKind::Continue { target } => BTreeSet::from([target.raw()]),
                 TerminatorEventKind::Branch { targets } => {
@@ -351,7 +351,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
             "use place",
             use_row.place.raw(),
         )?;
-        if use_row.definition && use_row.kind != UseKind::Write {
+        if use_row.definition && !use_row.kind.is_write() {
             return Err(compiler_error(format!(
                 "use {:?} is marked as a definition but is not a write",
                 use_row.id
@@ -382,7 +382,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
             call_result_owners.entry(result.origin).or_default().push((
                 event.id,
                 effect.call,
-                result.place,
+                result.destination.place(),
             ));
         }
     }
@@ -605,7 +605,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                 destination,
                 origin,
             } => {
-                validate_place(*destination, places.len(), "fresh destination")?;
+                validate_binding_destination(*destination, places, "fresh destination")?;
                 validate_origin(*origin, origins.len(), "fresh origin")?;
             }
             EventKind::Alias {
@@ -619,7 +619,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                 origins: event_origins,
             } => {
                 validate_place(*source, places.len(), "alias source")?;
-                validate_place(*destination, places.len(), "alias destination")?;
+                validate_binding_destination(*destination, places, "alias destination")?;
                 validate_origin_set(event_origins, origins.len(), "alias event")?;
             }
             EventKind::AliasFromPlace {
@@ -631,7 +631,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                 destination,
             } => {
                 validate_place(*source, places.len(), "place alias source")?;
-                validate_place(*destination, places.len(), "place alias destination")?;
+                validate_binding_destination(*destination, places, "place alias destination")?;
             }
             EventKind::Copy {
                 source,
@@ -639,7 +639,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                 origin,
             } => {
                 validate_place(*source, places.len(), "copy source")?;
-                validate_place(*destination, places.len(), "copy destination")?;
+                validate_binding_destination(*destination, places, "copy destination")?;
                 validate_origin(*origin, origins.len(), "copy result")?;
             }
             EventKind::Projection {
@@ -648,11 +648,11 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                 origin,
             } => {
                 validate_place(*source, places.len(), "projection source")?;
-                validate_place(*destination, places.len(), "projection destination")?;
+                validate_binding_destination(*destination, places, "projection destination")?;
                 validate_origin(*origin, origins.len(), "projection result")?;
             }
             EventKind::Rebind { destination, value } => {
-                validate_place(*destination, places.len(), "rebind destination")?;
+                validate_binding_destination(*destination, places, "rebind destination")?;
                 match value {
                     RebindValue::Fresh(origin) => {
                         validate_origin(*origin, origins.len(), "fresh rebind")?;
@@ -670,7 +670,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                 origin,
                 fields,
             } => {
-                validate_place(*destination, places.len(), "aggregate destination")?;
+                validate_binding_destination(*destination, places, "aggregate destination")?;
                 validate_origin(*origin, origins.len(), "aggregate origin")?;
                 for field in fields.iter() {
                     validate_place(field.source, places.len(), "aggregate child")?;
@@ -744,7 +744,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                     }
                 }
                 if let Some(result) = effect.result {
-                    validate_place(result.place, places.len(), "call result")?;
+                    validate_binding_destination(result.destination, places, "call result")?;
                     validate_origin(result.origin, origins.len(), "call result origin")?;
                     let origin = &origins[result.origin.index()];
                     let OriginKind::CallResult {
@@ -789,8 +789,44 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                 }
             }
             EventKind::Terminator { kind } => match kind {
-                TerminatorEventKind::Jump { target }
-                | TerminatorEventKind::Break { target }
+                TerminatorEventKind::Jump { target, arguments } => {
+                    require_index(
+                        || target.index(),
+                        blocks.len(),
+                        "terminator target block",
+                        target.raw(),
+                    )?;
+                    let mut destinations = BTreeSet::new();
+                    for argument in arguments.iter() {
+                        validate_place(argument.source, places.len(), "jump source")?;
+                        let destination = argument.destination.place();
+                        validate_binding_destination(
+                            argument.destination,
+                            places,
+                            "jump destination",
+                        )?;
+                        if !argument.destination.defines() {
+                            return Err(compiler_error(format!(
+                                "jump destination {:?} must define a fresh binding",
+                                destination
+                            )));
+                        }
+                        if !destinations.insert(destination) {
+                            return Err(compiler_error(format!(
+                                "jump destination {:?} is defined more than once",
+                                destination
+                            )));
+                        }
+                        if !places[destination.index()].projections.is_empty()
+                            || !places[argument.source.index()].projections.is_empty()
+                        {
+                            return Err(compiler_error(
+                                "jump arguments must capture and define root local bindings",
+                            ));
+                        }
+                    }
+                }
+                TerminatorEventKind::Break { target }
                 | TerminatorEventKind::Continue { target } => {
                     require_index(
                         || target.index(),
@@ -861,6 +897,7 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
             )));
         }
     }
+    validate_binding_write_accesses(blocks, events, uses)?;
     for (index, issues) in loan_issues.iter().enumerate() {
         if *issues != 1 {
             return Err(compiler_error(format!(
@@ -883,12 +920,166 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
     Ok(())
 }
 
+fn validate_binding_write_accesses(
+    blocks: &[super::CfgBlock],
+    events: &[super::Event],
+    uses: &[super::Use],
+) -> Result<(), CompilerError> {
+    for block in blocks {
+        let jump_write_start = match block
+            .events
+            .last()
+            .and_then(|event_id| events.get(event_id.index()))
+        {
+            Some(Event {
+                kind:
+                    EventKind::Terminator {
+                        kind: TerminatorEventKind::Jump { arguments, .. },
+                    },
+                ..
+            }) if !arguments.is_empty() => {
+                let terminator_index = block.events.len() - 1;
+                let write_start =
+                    terminator_index
+                        .checked_sub(arguments.len())
+                        .ok_or_else(|| {
+                            compiler_error(format!(
+                                "jump in CFG block {:?} is missing binding-write accesses",
+                                block.id
+                            ))
+                        })?;
+                for (offset, argument) in arguments.iter().enumerate() {
+                    let event_id = block.events[write_start + offset];
+                    let event = &events[event_id.index()];
+                    let EventKind::Access { use_id } = &event.kind else {
+                        return Err(compiler_error(format!(
+                            "jump in CFG block {:?} must read all sources before writing destinations",
+                            block.id
+                        )));
+                    };
+                    let use_row = &uses[use_id.index()];
+                    if use_row.kind.binding_destination() != Some(argument.destination)
+                        || use_row.place != argument.destination.place()
+                    {
+                        return Err(compiler_error(format!(
+                            "jump in CFG block {:?} must have one binding-write access per edge definition",
+                            block.id
+                        )));
+                    }
+                }
+                let source_start = write_start.checked_sub(arguments.len()).ok_or_else(|| {
+                    compiler_error(format!(
+                        "jump in CFG block {:?} is missing source-read accesses",
+                        block.id
+                    ))
+                })?;
+                for (offset, argument) in arguments.iter().enumerate() {
+                    let event_id = block.events[source_start + offset];
+                    let event = &events[event_id.index()];
+                    let EventKind::Access { use_id } = &event.kind else {
+                        return Err(compiler_error(format!(
+                            "jump in CFG block {:?} must read all sources before writing destinations",
+                            block.id
+                        )));
+                    };
+                    let use_row = &uses[use_id.index()];
+                    if use_row.kind != super::UseKind::Read || use_row.place != argument.source {
+                        return Err(compiler_error(format!(
+                            "jump source {:?} must be read before any edge destination is defined",
+                            argument.source
+                        )));
+                    }
+                }
+                Some(write_start)
+            }
+            _ => None,
+        };
+
+        for (index, event_id) in block.events.iter().enumerate() {
+            let event = &events[event_id.index()];
+            let EventKind::Access { use_id } = &event.kind else {
+                continue;
+            };
+            let use_row = &uses[use_id.index()];
+            let Some(destination) = use_row.kind.binding_destination() else {
+                continue;
+            };
+            if destination.place() != use_row.place {
+                return Err(compiler_error(format!(
+                    "binding-write use {:?} destination does not match its access place",
+                    use_id
+                )));
+            }
+
+            let next_matches = block
+                .events
+                .get(index + 1)
+                .and_then(|next_id| events.get(next_id.index()))
+                .and_then(event_binding_destination)
+                == Some(destination);
+            let previous_call_matches = index
+                .checked_sub(1)
+                .and_then(|previous| block.events.get(previous))
+                .and_then(|previous_id| events.get(previous_id.index()))
+                .is_some_and(|previous| {
+                    matches!(
+                        &previous.kind,
+                        EventKind::CallEffect(effect)
+                            if effect.result.is_some_and(|result| result.destination == destination)
+                    )
+                });
+            let jump_matches = jump_write_start.is_some_and(|start| index >= start);
+            if usize::from(next_matches)
+                + usize::from(previous_call_matches)
+                + usize::from(jump_matches)
+                != 1
+            {
+                return Err(compiler_error(format!(
+                    "binding-write use {:?} is not paired with exactly one normalized writer",
+                    use_id
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn event_binding_destination(event: &super::Event) -> Option<super::BindingDestination> {
+    match &event.kind {
+        EventKind::Fresh { destination, .. }
+        | EventKind::Alias { destination, .. }
+        | EventKind::AliasFromPlace { destination, .. }
+        | EventKind::ExclusiveAlias { destination, .. }
+        | EventKind::ExclusiveAliasFromPlace { destination, .. }
+        | EventKind::Copy { destination, .. }
+        | EventKind::Projection { destination, .. }
+        | EventKind::Rebind { destination, .. }
+        | EventKind::Aggregate { destination, .. } => Some(*destination),
+        _ => None,
+    }
+}
+
 fn validate_place(
     place: super::PlaceId,
     place_count: usize,
     owner: &str,
 ) -> Result<(), CompilerError> {
     require_index(|| place.index(), place_count, owner, place.raw()).map(|_| ())
+}
+
+fn validate_binding_destination(
+    destination: super::BindingDestination,
+    places: &[super::Place],
+    owner: &str,
+) -> Result<(), CompilerError> {
+    validate_place(destination.place(), places.len(), owner)?;
+    if destination.defines() && !places[destination.place().index()].projections.is_empty() {
+        return Err(compiler_error(format!(
+            "{owner} cannot define projected place {:?}",
+            destination.place()
+        )));
+    }
+    Ok(())
 }
 
 fn validate_origin(

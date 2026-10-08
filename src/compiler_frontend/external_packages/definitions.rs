@@ -9,6 +9,7 @@ use super::abi::{ExternalAbiType, ExternalParameter, ExternalReturnAlias, Extern
 use super::ids::{ExternalConstantId, ExternalFunctionId, ExternalPackageId, ExternalTypeId};
 use super::symbol_path::ExternalSymbolPath;
 use crate::compiler_frontend::datatypes::DataType;
+use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
 use std::collections::HashMap;
 
 /// Backend-specific lowering metadata for an external function.
@@ -181,11 +182,18 @@ pub struct ExternalTypeDef {
 /// Compile-time value for an external package constant.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ExternalConstantValue {
+    /// Profile-selected `NativeFloat` payload, rounded at projection.
     Float(f64),
+    /// `NativeInt` payload.
     Int(i32),
     /// Exact profile-sized unsigned payload for `NativeUint` constants, covering
     /// the full `Uint64` range without signed reinterpretation.
     Uint(u64),
+    /// Exact value of a fixed foreign scalar such as `I32`, `U32` or `F64`.
+    ///
+    /// The materialised carrier keeps the declared scalar and its exact bits, so publication,
+    /// re-export and projection never pass the value through a profile `Int` or `Float`.
+    Fixed(FixedScalarValue),
     StringSlice(&'static str),
     Bool(bool),
 }
@@ -195,8 +203,28 @@ impl ExternalConstantValue {
     pub fn is_scalar(self) -> bool {
         matches!(
             self,
-            Self::Float(_) | Self::Int(_) | Self::Uint(_) | Self::Bool(_)
+            Self::Float(_) | Self::Int(_) | Self::Uint(_) | Self::Fixed(_) | Self::Bool(_)
         )
+    }
+
+    /// Returns true when this payload is the representation `data_type` requires.
+    ///
+    /// Fixed payloads must carry exactly the declared scalar, so a `U32` slot cannot hold an
+    /// `I32` value even when the number would fit.
+    pub(crate) fn matches_signature_type(self, data_type: &ExternalSignatureType) -> bool {
+        match (data_type, self) {
+            (ExternalSignatureType::NativeInt, Self::Int(_))
+            | (ExternalSignatureType::NativeUint, Self::Uint(_))
+            | (ExternalSignatureType::NativeFloat, Self::Float(_))
+            | (ExternalSignatureType::Abi(ExternalAbiType::Bool), Self::Bool(_))
+            | (ExternalSignatureType::Abi(ExternalAbiType::Utf8Str), Self::StringSlice(_)) => true,
+
+            (ExternalSignatureType::Abi(ExternalAbiType::Fixed(scalar)), Self::Fixed(value)) => {
+                value.scalar() == *scalar
+            }
+
+            _ => false,
+        }
     }
 }
 

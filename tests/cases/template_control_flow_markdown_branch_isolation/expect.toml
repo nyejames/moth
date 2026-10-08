@@ -1,5 +1,9 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["**plain_else_branch**"]
-rendered_output_not_contains = ["active_markdown_branch"]
+rendered_output_contains = [
+  "**plain_before**",
+  "<strong>active_markdown_branch</strong>",
+  "**plain_after**",
+]
+rendered_output_not_contains = ["**active_markdown_branch**"]

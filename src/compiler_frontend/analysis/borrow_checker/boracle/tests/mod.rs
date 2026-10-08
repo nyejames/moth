@@ -14,16 +14,17 @@ use super::oracle::generator::generated_problem;
 use super::super::OriginOverlapDecision;
 use super::super::last_use::{FutureUseStatus, LastUseLocation, LastUseSubject};
 use super::super::problem::{
-    AccessKind, AggregateField, Binding, BindingId, BlockId, BorrowProblem, BorrowProblemParts,
-    Call, CallArgument, CallEffect, CallResult, CfgBlock, CfgEdge, Event, EventId, EventKind,
-    EventSource, KillReason, Loan, LoanId, Place, PlaceId, PointId, ProgramPoint,
-    TerminatorEventKind, Use, UseId, UseKind, ValueOrigin, ValueOriginId,
+    AccessKind, AggregateField, Binding, BindingDestination, BindingId, BlockId, BorrowProblem,
+    BorrowProblemParts, Call, CallArgument, CallEffect, CallResult, CfgBlock, CfgEdge, Event,
+    EventId, EventKind, EventSource, KillReason, Loan, LoanId, Place, PlaceId, PointId,
+    ProgramPoint, RebindValue, TerminatorEventKind, Use, UseId, UseKind, ValueOrigin,
+    ValueOriginId,
 };
 use super::PrecisionLossReason;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{
     BlockId as HirBlockId, FunctionId, HirValueId, LocalId, RegionId,
@@ -31,7 +32,7 @@ use crate::compiler_frontend::hir::ids::{
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::regions::HirRegion;
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -318,7 +319,20 @@ fn boracle_hir_projection_to_distinct_destination_preserves_stored_child_origin(
             _ => None,
         })
         .expect("HIR tuple assignment should emit a projection");
-    assert_ne!(projection.1, projection.2);
+    let source_binding = problem.places()[projection.1.index()].root;
+    let projection_destination = &problem.places()[projection.2.place().index()];
+    assert_ne!(projection.1, projection.2.place());
+    assert!(projection_destination.projections.is_empty());
+    assert_ne!(source_binding, projection_destination.root);
+    assert!(problem.uses().iter().any(|use_row| {
+        use_row.kind == UseKind::Read
+            && problem.places()[use_row.place.index()].root == source_binding
+            && problem.places()[use_row.place.index()].projections.as_ref()
+                == [super::super::problem::ProjectionElem::FixedIndex(0)]
+    }));
+    assert!(problem.uses().iter().any(|use_row| {
+        use_row.kind == UseKind::BindingWrite(projection.2) && use_row.place == projection.2.place()
+    }));
 
     let solution = super::OriginSolver::solve(&problem).expect("HIR projection should solve");
     let child_origins = solution
@@ -326,9 +340,17 @@ fn boracle_hir_projection_to_distinct_destination_preserves_stored_child_origin(
         .expect("aggregate child origin should be retained");
     assert_eq!(
         solution
-            .origins_after_event(projection.0, projection.2)
+            .origins_after_event(projection.0, projection.2.place())
             .expect("distinct projection destination should retain child origin"),
         child_origins
+    );
+    assert_eq!(
+        solution
+            .origins_after_event(projection.0, projection.1)
+            .expect("projection should retain the source aggregate origin"),
+        solution
+            .origins_after_event(aggregate.0, projection.1)
+            .expect("aggregate should publish its source origin")
     );
 }
 
@@ -359,7 +381,7 @@ fn boracle_hir_aggregate_rebinding_replaces_stale_child_origin() {
         .expect("current aggregate child should have an origin");
     assert_eq!(
         solution
-            .origins_after_event(projection.0, projection.1)
+            .origins_after_event(projection.0, projection.1.place())
             .expect("projection should use the current aggregate generation"),
         current_child
     );
@@ -482,7 +504,7 @@ fn boracle_generated_problems_preserve_copy_and_rebind_semantics() {
                     .origins_for_place_after_event(problem, copy_event.0, copy_event.1);
             let copy_origins = report
                 .origin
-                .origins_after_event(copy_event.0, copy_event.2)
+                .origins_after_event(copy_event.0, copy_event.2.place())
                 .expect("generated copy should publish a destination origin");
             assert!(!source_origins.is_empty(), "seed={seed} cyclic={cyclic}");
             assert!(!copy_origins.is_empty(), "seed={seed} cyclic={cyclic}");
@@ -497,7 +519,7 @@ fn boracle_generated_problems_preserve_copy_and_rebind_semantics() {
                 .events()
                 .iter()
                 .find_map(|event| match event.kind {
-                    EventKind::Rebind { destination, .. } => Some((event.id, destination)),
+                    EventKind::Rebind { destination, .. } => Some((event.id, destination.place())),
                     _ => None,
                 })
                 .expect("generated problem should contain its fresh rebind event");
@@ -761,58 +783,56 @@ fn hir_shared_subset(kind: SharedSubsetKind) -> (HirModule, HirFunction) {
     let region = RegionId(0);
     let source = LocalId(0);
     let result = LocalId(1);
-    let module = HirModule {
-        blocks: vec![HirBlock {
-            id: HirBlockId(0),
-            region,
-            locals: vec![hir_local(source, region), hir_local(result, region)],
-            statements: vec![
-                HirStatement {
-                    id: crate::compiler_frontend::hir::ids::HirNodeId(0),
-                    kind: HirStatementKind::Assign {
-                        target: HirPlace::Local(source),
-                        value: hir_int_expression(0, 1, region),
-                    },
-                    span: None,
+    let mut module = HirModule::new();
+    let initial_value = append_hir_expression(
+        &mut module,
+        HirExpressionKind::Int(1),
+        ValueKind::RValue,
+        region,
+    );
+    let copied_or_loaded_value = append_hir_expression(
+        &mut module,
+        match kind {
+            SharedSubsetKind::Copy => HirExpressionKind::Copy(HirPlace::local(source)),
+            SharedSubsetKind::Alias => HirExpressionKind::Load(HirPlace::local(source)),
+        },
+        match kind {
+            SharedSubsetKind::Copy => ValueKind::RValue,
+            SharedSubsetKind::Alias => ValueKind::Place,
+        },
+        region,
+    );
+    let return_value = append_hir_expression(
+        &mut module,
+        HirExpressionKind::Load(HirPlace::local(result)),
+        ValueKind::Place,
+        region,
+    );
+    module.blocks = vec![HirBlock {
+        id: HirBlockId(0),
+        region,
+        locals: vec![hir_local(source, region), hir_local(result, region)],
+        statements: vec![
+            HirStatement {
+                id: crate::compiler_frontend::hir::ids::HirNodeId(0),
+                kind: HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(source),
+                    value: initial_value,
                 },
-                HirStatement {
-                    id: crate::compiler_frontend::hir::ids::HirNodeId(1),
-                    kind: HirStatementKind::Assign {
-                        target: HirPlace::Local(result),
-                        value: HirExpression {
-                            id: HirValueId(1),
-                            kind: match kind {
-                                SharedSubsetKind::Copy => {
-                                    HirExpressionKind::Copy(HirPlace::Local(source))
-                                }
-                                SharedSubsetKind::Alias => {
-                                    HirExpressionKind::Load(HirPlace::Local(source))
-                                }
-                            },
-                            ty: builtin_type_ids::INT,
-                            value_kind: match kind {
-                                SharedSubsetKind::Copy => ValueKind::RValue,
-                                SharedSubsetKind::Alias => ValueKind::Place,
-                            },
-                            region,
-                            span: None,
-                        },
-                    },
-                    span: None,
-                },
-            ],
-            terminator: HirTerminator::Return(HirExpression {
-                id: HirValueId(2),
-                kind: HirExpressionKind::Load(HirPlace::Local(result)),
-                ty: builtin_type_ids::INT,
-                value_kind: ValueKind::Place,
-                region,
                 span: None,
-            }),
-        }],
-        regions: vec![HirRegion::lexical(region, None)],
-        ..HirModule::new()
-    };
+            },
+            HirStatement {
+                id: crate::compiler_frontend::hir::ids::HirNodeId(1),
+                kind: HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(result),
+                    value: copied_or_loaded_value,
+                },
+                span: None,
+            },
+        ],
+        terminator: HirTerminator::Return(return_value),
+    }];
+    module.regions = vec![HirRegion::lexical(region, None)];
     let function = HirFunction {
         id: FunctionId(0),
         entry: HirBlockId(0),
@@ -960,14 +980,22 @@ fn alias_or_copy_property_problem(seed: u32, kind: PropertyValueKind) -> BorrowP
         &mut events,
         &mut points,
         EventKind::Fresh {
-            destination: PlaceId::new(0),
+            destination: BindingDestination::Define(PlaceId::new(0)),
             origin: ValueOriginId::new(0),
+        },
+    );
+    push_event(
+        &mut events,
+        &mut points,
+        EventKind::Fresh {
+            destination: BindingDestination::Define(PlaceId::new(1)),
+            origin: ValueOriginId::new(2),
         },
     );
     uses.push(Use {
         id: UseId::new(0),
         point: PointId::new(points.len() as u32),
-        place: PlaceId::new(0),
+        place: PlaceId::new(2),
         kind: UseKind::Read,
         definition: false,
     });
@@ -997,8 +1025,8 @@ fn alias_or_copy_property_problem(seed: u32, kind: PropertyValueKind) -> BorrowP
             &mut events,
             &mut points,
             EventKind::AliasFromPlace {
-                source: PlaceId::new(0),
-                destination: PlaceId::new(1),
+                source: PlaceId::new(2),
+                destination: BindingDestination::Update(PlaceId::new(1)),
             },
         );
     } else {
@@ -1006,8 +1034,8 @@ fn alias_or_copy_property_problem(seed: u32, kind: PropertyValueKind) -> BorrowP
             &mut events,
             &mut points,
             EventKind::Copy {
-                source: PlaceId::new(0),
-                destination: PlaceId::new(1),
+                source: PlaceId::new(2),
+                destination: BindingDestination::Update(PlaceId::new(1)),
                 origin: ValueOriginId::new(1),
             },
         );
@@ -1060,14 +1088,11 @@ fn alias_or_copy_property_problem(seed: u32, kind: PropertyValueKind) -> BorrowP
         entry: BlockId::new(0),
         exits: vec![BlockId::new(0)],
         places: vec![
+            Place::new(PlaceId::new(0), BindingId::new(0), Vec::new()),
+            Place::new(PlaceId::new(1), BindingId::new(1), Vec::new()),
             Place::new(
-                PlaceId::new(0),
+                PlaceId::new(2),
                 BindingId::new(0),
-                vec![super::super::problem::ProjectionElem::Field(projection)],
-            ),
-            Place::new(
-                PlaceId::new(1),
-                BindingId::new(1),
                 vec![super::super::problem::ProjectionElem::Field(projection)],
             ),
         ],
@@ -1079,6 +1104,7 @@ fn alias_or_copy_property_problem(seed: u32, kind: PropertyValueKind) -> BorrowP
                     vec![ValueOriginId::new(0)].into_boxed_slice(),
                 ),
             ),
+            ValueOrigin::fresh(ValueOriginId::new(2)),
         ],
         uses,
         events,
@@ -1198,7 +1224,7 @@ fn fresh_rebind_property_problem() -> BorrowProblem {
             EventId::new(0),
             PointId::new(1),
             EventKind::Fresh {
-                destination: PlaceId::new(0),
+                destination: BindingDestination::Define(PlaceId::new(0)),
                 origin: ValueOriginId::new(0),
             },
             EventSource::none(),
@@ -1224,7 +1250,7 @@ fn fresh_rebind_property_problem() -> BorrowProblem {
             PointId::new(4),
             EventKind::AliasFromPlace {
                 source: PlaceId::new(0),
-                destination: PlaceId::new(1),
+                destination: BindingDestination::Define(PlaceId::new(1)),
             },
             EventSource::none(),
         ),
@@ -1240,7 +1266,7 @@ fn fresh_rebind_property_problem() -> BorrowProblem {
             EventId::new(5),
             PointId::new(6),
             EventKind::Rebind {
-                destination: PlaceId::new(0),
+                destination: BindingDestination::Define(PlaceId::new(0)),
                 value: super::super::problem::RebindValue::Fresh(ValueOriginId::new(1)),
             },
             EventSource::none(),
@@ -1424,7 +1450,7 @@ fn branch_separation_property_problem(split: bool) -> BorrowProblem {
             EventId::new(0),
             PointId::new(1),
             EventKind::Fresh {
-                destination: PlaceId::new(0),
+                destination: BindingDestination::Define(PlaceId::new(0)),
                 origin: ValueOriginId::new(0),
             },
             EventSource::none(),
@@ -1450,7 +1476,7 @@ fn branch_separation_property_problem(split: bool) -> BorrowProblem {
             PointId::new(4),
             EventKind::AliasFromPlace {
                 source: PlaceId::new(0),
-                destination: PlaceId::new(1),
+                destination: BindingDestination::Define(PlaceId::new(1)),
             },
             EventSource::none(),
         ),
@@ -1479,6 +1505,7 @@ fn branch_separation_property_problem(split: bool) -> BorrowProblem {
                 kind: if split {
                     TerminatorEventKind::Jump {
                         target: BlockId::new(3),
+                        arguments: Box::new([]),
                     }
                 } else {
                     TerminatorEventKind::Return
@@ -1632,7 +1659,7 @@ fn mixed_binding_problem() -> BorrowProblem {
             EventId::new(0),
             PointId::new(1),
             EventKind::Fresh {
-                destination: PlaceId::new(0),
+                destination: BindingDestination::Define(PlaceId::new(0)),
                 origin: ValueOriginId::new(0),
             },
             EventSource::none(),
@@ -1652,7 +1679,7 @@ fn mixed_binding_problem() -> BorrowProblem {
             PointId::new(4),
             EventKind::AliasFromPlace {
                 source: PlaceId::new(0),
-                destination: PlaceId::new(1),
+                destination: BindingDestination::Define(PlaceId::new(1)),
             },
             EventSource::none(),
         ),
@@ -1662,6 +1689,7 @@ fn mixed_binding_problem() -> BorrowProblem {
             EventKind::Terminator {
                 kind: TerminatorEventKind::Jump {
                     target: BlockId::new(3),
+                    arguments: Box::new([]),
                 },
             },
             EventSource::none(),
@@ -1670,7 +1698,7 @@ fn mixed_binding_problem() -> BorrowProblem {
             EventId::new(4),
             PointId::new(7),
             EventKind::Fresh {
-                destination: PlaceId::new(1),
+                destination: BindingDestination::Define(PlaceId::new(1)),
                 origin: ValueOriginId::new(1),
             },
             EventSource::none(),
@@ -1681,6 +1709,7 @@ fn mixed_binding_problem() -> BorrowProblem {
             EventKind::Terminator {
                 kind: TerminatorEventKind::Jump {
                     target: BlockId::new(3),
+                    arguments: Box::new([]),
                 },
             },
             EventSource::none(),
@@ -1689,7 +1718,7 @@ fn mixed_binding_problem() -> BorrowProblem {
             EventId::new(6),
             PointId::new(9),
             EventKind::Fresh {
-                destination: PlaceId::new(2),
+                destination: BindingDestination::Define(PlaceId::new(2)),
                 origin: ValueOriginId::new(2),
             },
             EventSource::none(),
@@ -1699,7 +1728,7 @@ fn mixed_binding_problem() -> BorrowProblem {
             PointId::new(11),
             EventKind::AliasFromPlace {
                 source: PlaceId::new(2),
-                destination: PlaceId::new(1),
+                destination: BindingDestination::Update(PlaceId::new(1)),
             },
             EventSource::none(),
         ),
@@ -1739,7 +1768,7 @@ fn mixed_binding_problem() -> BorrowProblem {
             EventId::new(12),
             PointId::new(1),
             EventKind::Fresh {
-                destination: PlaceId::new(2),
+                destination: BindingDestination::Define(PlaceId::new(2)),
                 origin: ValueOriginId::new(2),
             },
             EventSource::none(),
@@ -1747,9 +1776,9 @@ fn mixed_binding_problem() -> BorrowProblem {
         Event::new(
             EventId::new(13),
             PointId::new(7),
-            EventKind::AliasFromPlace {
-                source: PlaceId::new(2),
-                destination: PlaceId::new(1),
+            EventKind::Rebind {
+                destination: BindingDestination::Update(PlaceId::new(1)),
+                value: RebindValue::AliasFromPlace(PlaceId::new(2)),
             },
             EventSource::none(),
         ),
@@ -1757,8 +1786,16 @@ fn mixed_binding_problem() -> BorrowProblem {
             EventId::new(14),
             PointId::new(12),
             EventKind::Fresh {
-                destination: PlaceId::new(1),
+                destination: BindingDestination::Update(PlaceId::new(1)),
                 origin: ValueOriginId::new(3),
+            },
+            EventSource::none(),
+        ),
+        Event::new(
+            EventId::new(15),
+            PointId::new(12),
+            EventKind::Access {
+                use_id: UseId::new(3),
             },
             EventSource::none(),
         ),
@@ -1797,6 +1834,7 @@ fn mixed_binding_problem() -> BorrowProblem {
                     EventId::new(6),
                     EventId::new(11),
                     EventId::new(7),
+                    EventId::new(15),
                     EventId::new(14),
                     EventId::new(8),
                     EventId::new(9),
@@ -1828,8 +1866,8 @@ fn mixed_binding_problem() -> BorrowProblem {
                 id: UseId::new(0),
                 point: PointId::new(10),
                 place: PlaceId::new(1),
-                kind: UseKind::Write,
-                definition: true,
+                kind: UseKind::BindingWrite(BindingDestination::Update(PlaceId::new(1))),
+                definition: false,
             },
             Use {
                 id: UseId::new(1),
@@ -1843,6 +1881,13 @@ fn mixed_binding_problem() -> BorrowProblem {
                 point: PointId::new(13),
                 place: PlaceId::new(1),
                 kind: UseKind::Read,
+                definition: false,
+            },
+            Use {
+                id: UseId::new(3),
+                point: PointId::new(12),
+                place: PlaceId::new(1),
+                kind: UseKind::BindingWrite(BindingDestination::Update(PlaceId::new(1))),
                 definition: false,
             },
         ],
@@ -1926,7 +1971,7 @@ fn alias_params_call_parts(parameter_indices: Vec<usize>) -> BorrowProblemParts 
                 EventId::new(0),
                 PointId::new(1),
                 EventKind::Fresh {
-                    destination: PlaceId::new(0),
+                    destination: BindingDestination::Define(PlaceId::new(0)),
                     origin: ValueOriginId::new(0),
                 },
                 EventSource::none(),
@@ -1957,7 +2002,7 @@ fn alias_params_call_parts(parameter_indices: Vec<usize>) -> BorrowProblemParts 
                     }]
                     .into_boxed_slice(),
                     result: Some(CallResult {
-                        place: PlaceId::new(1),
+                        destination: BindingDestination::Define(PlaceId::new(1)),
                         origin: ValueOriginId::new(1),
                     }),
                 }),
@@ -2056,7 +2101,7 @@ fn uninitialized_argument_alias_params_problem() -> BorrowProblem {
                     }]
                     .into_boxed_slice(),
                     result: Some(CallResult {
-                        place: PlaceId::new(1),
+                        destination: BindingDestination::Define(PlaceId::new(1)),
                         origin: ValueOriginId::new(1),
                     }),
                 }),
@@ -2144,7 +2189,7 @@ fn partial_argument_alias_params_problem() -> BorrowProblem {
                 EventId::new(0),
                 PointId::new(1),
                 EventKind::Fresh {
-                    destination: PlaceId::new(0),
+                    destination: BindingDestination::Define(PlaceId::new(0)),
                     origin: ValueOriginId::new(0),
                 },
                 EventSource::none(),
@@ -2196,7 +2241,7 @@ fn partial_argument_alias_params_problem() -> BorrowProblem {
                     ]
                     .into_boxed_slice(),
                     result: Some(CallResult {
-                        place: PlaceId::new(2),
+                        destination: BindingDestination::Define(PlaceId::new(2)),
                         origin: ValueOriginId::new(1),
                     }),
                 }),
@@ -2267,7 +2312,7 @@ fn aggregate_problem() -> BorrowProblem {
                 EventId::new(0),
                 PointId::new(1),
                 EventKind::Fresh {
-                    destination: PlaceId::new(0),
+                    destination: BindingDestination::Define(PlaceId::new(0)),
                     origin: ValueOriginId::new(0),
                 },
                 EventSource::none(),
@@ -2276,7 +2321,7 @@ fn aggregate_problem() -> BorrowProblem {
                 EventId::new(1),
                 PointId::new(2),
                 EventKind::Aggregate {
-                    destination: PlaceId::new(1),
+                    destination: BindingDestination::Define(PlaceId::new(1)),
                     origin: ValueOriginId::new(1),
                     fields: vec![AggregateField {
                         projection: super::super::problem::ProjectionElem::FixedIndex(0),
@@ -2291,7 +2336,7 @@ fn aggregate_problem() -> BorrowProblem {
                 PointId::new(3),
                 EventKind::Projection {
                     source: PlaceId::new(1),
-                    destination: PlaceId::new(3),
+                    destination: BindingDestination::Define(PlaceId::new(3)),
                     origin: ValueOriginId::new(2),
                 },
                 EventSource::none(),
@@ -2396,7 +2441,7 @@ fn projection_replacement_problem() -> BorrowProblem {
                 EventId::new(0),
                 PointId::new(1),
                 EventKind::Fresh {
-                    destination: PlaceId::new(0),
+                    destination: BindingDestination::Define(PlaceId::new(0)),
                     origin: ValueOriginId::new(0),
                 },
                 EventSource::none(),
@@ -2405,7 +2450,7 @@ fn projection_replacement_problem() -> BorrowProblem {
                 EventId::new(1),
                 PointId::new(2),
                 EventKind::Fresh {
-                    destination: PlaceId::new(1),
+                    destination: BindingDestination::Define(PlaceId::new(1)),
                     origin: ValueOriginId::new(1),
                 },
                 EventSource::none(),
@@ -2415,7 +2460,7 @@ fn projection_replacement_problem() -> BorrowProblem {
                 PointId::new(3),
                 EventKind::Projection {
                     source: PlaceId::new(0),
-                    destination: PlaceId::new(2),
+                    destination: BindingDestination::Define(PlaceId::new(2)),
                     origin: ValueOriginId::new(2),
                 },
                 EventSource::none(),
@@ -2425,7 +2470,7 @@ fn projection_replacement_problem() -> BorrowProblem {
                 PointId::new(4),
                 EventKind::Projection {
                     source: PlaceId::new(1),
-                    destination: PlaceId::new(2),
+                    destination: BindingDestination::Define(PlaceId::new(2)),
                     origin: ValueOriginId::new(3),
                 },
                 EventSource::none(),
@@ -2487,7 +2532,7 @@ fn aggregate_rebinding_problem() -> BorrowProblem {
                 EventId::new(0),
                 PointId::new(1),
                 EventKind::Fresh {
-                    destination: PlaceId::new(2),
+                    destination: BindingDestination::Define(PlaceId::new(2)),
                     origin: ValueOriginId::new(0),
                 },
                 EventSource::none(),
@@ -2496,7 +2541,7 @@ fn aggregate_rebinding_problem() -> BorrowProblem {
                 EventId::new(1),
                 PointId::new(2),
                 EventKind::Aggregate {
-                    destination: PlaceId::new(0),
+                    destination: BindingDestination::Define(PlaceId::new(0)),
                     origin: ValueOriginId::new(1),
                     fields: vec![AggregateField {
                         projection,
@@ -2510,7 +2555,7 @@ fn aggregate_rebinding_problem() -> BorrowProblem {
                 EventId::new(2),
                 PointId::new(3),
                 EventKind::Fresh {
-                    destination: PlaceId::new(3),
+                    destination: BindingDestination::Define(PlaceId::new(3)),
                     origin: ValueOriginId::new(2),
                 },
                 EventSource::none(),
@@ -2519,7 +2564,7 @@ fn aggregate_rebinding_problem() -> BorrowProblem {
                 EventId::new(3),
                 PointId::new(4),
                 EventKind::Aggregate {
-                    destination: PlaceId::new(0),
+                    destination: BindingDestination::Define(PlaceId::new(0)),
                     origin: ValueOriginId::new(3),
                     fields: vec![AggregateField {
                         projection,
@@ -2630,72 +2675,89 @@ fn hir_distinct_projection_problem() -> BorrowProblem {
     let region = RegionId(0);
     let source = LocalId(0);
     let result = LocalId(1);
-    let tuple = HirExpression {
-        id: HirValueId(0),
-        kind: HirExpressionKind::TupleConstruct {
-            elements: vec![
-                hir_int_expression(1, 1, region),
-                hir_int_expression(2, 2, region),
-            ],
-        },
-        ty: builtin_type_ids::INT,
-        value_kind: ValueKind::RValue,
+    let mut module = HirModule::new();
+    let first_element = append_hir_expression(
+        &mut module,
+        HirExpressionKind::Int(1),
+        ValueKind::RValue,
         region,
-        span: None,
-    };
-    let projected = HirExpression {
-        id: HirValueId(3),
-        kind: HirExpressionKind::TupleGet {
-            tuple: Box::new(HirExpression {
-                id: HirValueId(4),
-                kind: HirExpressionKind::Load(HirPlace::Local(source)),
-                ty: builtin_type_ids::INT,
-                value_kind: ValueKind::Place,
-                region,
-                span: None,
-            }),
+    );
+    let second_element = append_hir_expression(
+        &mut module,
+        HirExpressionKind::Int(2),
+        ValueKind::RValue,
+        region,
+    );
+    let tuple_elements = module
+        .expressions
+        .append_values(&[first_element, second_element], None)
+        .expect("tuple elements should fit the HIR expression store");
+    let tuple = append_hir_expression(
+        &mut module,
+        HirExpressionKind::TupleConstruct {
+            elements: tuple_elements,
+        },
+        ValueKind::RValue,
+        region,
+    );
+    let source_load = append_hir_expression(
+        &mut module,
+        HirExpressionKind::Load(HirPlace::local(source)),
+        ValueKind::Place,
+        region,
+    );
+    let projected = append_hir_expression(
+        &mut module,
+        HirExpressionKind::TupleGet {
+            tuple: source_load,
             index: 0,
         },
-        ty: builtin_type_ids::INT,
-        value_kind: ValueKind::RValue,
+        ValueKind::RValue,
         region,
-        span: None,
-    };
-    let module = HirModule {
-        blocks: vec![HirBlock {
-            id: HirBlockId(0),
-            region,
-            locals: vec![hir_local(source, region), hir_local(result, region)],
-            statements: vec![
-                HirStatement {
-                    id: crate::compiler_frontend::hir::ids::HirNodeId(0),
-                    kind: HirStatementKind::Assign {
-                        target: HirPlace::Local(source),
-                        value: tuple,
-                    },
-                    span: None,
+    );
+    let result_elements = module
+        .expressions
+        .append_values(&[projected], None)
+        .expect("projected tuple element should fit the HIR expression store");
+    let result_tuple = append_hir_expression(
+        &mut module,
+        HirExpressionKind::TupleConstruct {
+            elements: result_elements,
+        },
+        ValueKind::RValue,
+        region,
+    );
+    let result_load = append_hir_expression(
+        &mut module,
+        HirExpressionKind::Load(HirPlace::local(result)),
+        ValueKind::Place,
+        region,
+    );
+    module.blocks = vec![HirBlock {
+        id: HirBlockId(0),
+        region,
+        locals: vec![hir_local(source, region), hir_local(result, region)],
+        statements: vec![
+            HirStatement {
+                id: crate::compiler_frontend::hir::ids::HirNodeId(0),
+                kind: HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(source),
+                    value: tuple,
                 },
-                HirStatement {
-                    id: crate::compiler_frontend::hir::ids::HirNodeId(1),
-                    kind: HirStatementKind::Assign {
-                        target: HirPlace::Local(result),
-                        value: projected,
-                    },
-                    span: None,
-                },
-            ],
-            terminator: HirTerminator::Return(HirExpression {
-                id: HirValueId(5),
-                kind: HirExpressionKind::Load(HirPlace::Local(result)),
-                ty: builtin_type_ids::INT,
-                value_kind: ValueKind::Place,
-                region,
                 span: None,
-            }),
-        }],
-        regions: vec![HirRegion::lexical(region, None)],
-        ..HirModule::new()
-    };
+            },
+            HirStatement {
+                id: crate::compiler_frontend::hir::ids::HirNodeId(1),
+                kind: HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(result),
+                    value: result_tuple,
+                },
+                span: None,
+            },
+        ],
+        terminator: HirTerminator::Return(result_load),
+    }];
+    module.regions = vec![HirRegion::lexical(region, None)];
     let function = HirFunction {
         id: FunctionId(0),
         entry: HirBlockId(0),
@@ -2710,87 +2772,97 @@ fn hir_aggregate_rebinding_problem() -> BorrowProblem {
     let region = RegionId(0);
     let source = LocalId(0);
     let result = LocalId(1);
-    let tuple_one = HirExpression {
-        id: HirValueId(0),
-        kind: HirExpressionKind::TupleConstruct {
-            elements: vec![hir_int_expression(1, 1, region)],
-        },
-        ty: builtin_type_ids::INT,
-        value_kind: ValueKind::RValue,
+    let mut module = HirModule::new();
+    let first_element = append_hir_expression(
+        &mut module,
+        HirExpressionKind::Int(1),
+        ValueKind::RValue,
         region,
-        span: None,
-    };
-    let tuple_two = HirExpression {
-        id: HirValueId(2),
-        kind: HirExpressionKind::TupleConstruct {
-            elements: vec![hir_int_expression(3, 2, region)],
+    );
+    let first_elements = module
+        .expressions
+        .append_values(&[first_element], None)
+        .expect("first tuple element should fit the HIR expression store");
+    let tuple_one = append_hir_expression(
+        &mut module,
+        HirExpressionKind::TupleConstruct {
+            elements: first_elements,
         },
-        ty: builtin_type_ids::INT,
-        value_kind: ValueKind::RValue,
+        ValueKind::RValue,
         region,
-        span: None,
-    };
-    let projected = HirExpression {
-        id: HirValueId(4),
-        kind: HirExpressionKind::TupleGet {
-            tuple: Box::new(HirExpression {
-                id: HirValueId(5),
-                kind: HirExpressionKind::Load(HirPlace::Local(source)),
-                ty: builtin_type_ids::INT,
-                value_kind: ValueKind::Place,
-                region,
-                span: None,
-            }),
+    );
+    let second_element = append_hir_expression(
+        &mut module,
+        HirExpressionKind::Int(2),
+        ValueKind::RValue,
+        region,
+    );
+    let second_elements = module
+        .expressions
+        .append_values(&[second_element], None)
+        .expect("second tuple element should fit the HIR expression store");
+    let tuple_two = append_hir_expression(
+        &mut module,
+        HirExpressionKind::TupleConstruct {
+            elements: second_elements,
+        },
+        ValueKind::RValue,
+        region,
+    );
+    let source_load = append_hir_expression(
+        &mut module,
+        HirExpressionKind::Load(HirPlace::local(source)),
+        ValueKind::Place,
+        region,
+    );
+    let projected = append_hir_expression(
+        &mut module,
+        HirExpressionKind::TupleGet {
+            tuple: source_load,
             index: 0,
         },
-        ty: builtin_type_ids::INT,
-        value_kind: ValueKind::RValue,
+        ValueKind::RValue,
         region,
-        span: None,
-    };
-    let module = HirModule {
-        blocks: vec![HirBlock {
-            id: HirBlockId(0),
-            region,
-            locals: vec![hir_local(source, region), hir_local(result, region)],
-            statements: vec![
-                HirStatement {
-                    id: crate::compiler_frontend::hir::ids::HirNodeId(0),
-                    kind: HirStatementKind::Assign {
-                        target: HirPlace::Local(source),
-                        value: tuple_one,
-                    },
-                    span: None,
+    );
+    let result_load = append_hir_expression(
+        &mut module,
+        HirExpressionKind::Load(HirPlace::local(result)),
+        ValueKind::Place,
+        region,
+    );
+    module.blocks = vec![HirBlock {
+        id: HirBlockId(0),
+        region,
+        locals: vec![hir_local(source, region), hir_local(result, region)],
+        statements: vec![
+            HirStatement {
+                id: crate::compiler_frontend::hir::ids::HirNodeId(0),
+                kind: HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(source),
+                    value: tuple_one,
                 },
-                HirStatement {
-                    id: crate::compiler_frontend::hir::ids::HirNodeId(1),
-                    kind: HirStatementKind::Assign {
-                        target: HirPlace::Local(source),
-                        value: tuple_two,
-                    },
-                    span: None,
-                },
-                HirStatement {
-                    id: crate::compiler_frontend::hir::ids::HirNodeId(2),
-                    kind: HirStatementKind::Assign {
-                        target: HirPlace::Local(result),
-                        value: projected,
-                    },
-                    span: None,
-                },
-            ],
-            terminator: HirTerminator::Return(HirExpression {
-                id: HirValueId(6),
-                kind: HirExpressionKind::Load(HirPlace::Local(result)),
-                ty: builtin_type_ids::INT,
-                value_kind: ValueKind::Place,
-                region,
                 span: None,
-            }),
-        }],
-        regions: vec![HirRegion::lexical(region, None)],
-        ..HirModule::new()
-    };
+            },
+            HirStatement {
+                id: crate::compiler_frontend::hir::ids::HirNodeId(1),
+                kind: HirStatementKind::Write {
+                    target: HirWriteTarget::AssignPlace(HirPlace::local(source)),
+                    value: tuple_two,
+                },
+                span: None,
+            },
+            HirStatement {
+                id: crate::compiler_frontend::hir::ids::HirNodeId(2),
+                kind: HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(result),
+                    value: projected,
+                },
+                span: None,
+            },
+        ],
+        terminator: HirTerminator::Return(result_load),
+    }];
+    module.regions = vec![HirRegion::lexical(region, None)];
     let function = HirFunction {
         id: FunctionId(0),
         entry: HirBlockId(0),
@@ -2811,15 +2883,19 @@ fn hir_local(id: LocalId, region: RegionId) -> HirLocal {
     }
 }
 
-fn hir_int_expression(id: u32, value: i64, region: RegionId) -> HirExpression {
-    HirExpression {
-        id: HirValueId(id),
-        kind: HirExpressionKind::Int(value),
-        ty: builtin_type_ids::INT,
-        value_kind: ValueKind::RValue,
+fn append_hir_expression(
+    module: &mut HirModule,
+    kind: HirExpressionKind,
+    value_kind: ValueKind,
+    region: RegionId,
+) -> HirValueId {
+    crate::compiler_frontend::tests::hir_fixture_support::expression(
+        kind,
+        builtin_type_ids::INT,
         region,
-        span: None,
-    }
+        value_kind,
+        &mut module.expressions,
+    )
 }
 
 fn loan_conflict_problem() -> BorrowProblem {
@@ -2964,7 +3040,7 @@ fn dead_exclusive_alias_problem() -> BorrowProblem {
                 EventId::new(0),
                 PointId::new(1),
                 EventKind::Fresh {
-                    destination: PlaceId::new(0),
+                    destination: BindingDestination::Define(PlaceId::new(0)),
                     origin: ValueOriginId::new(0),
                 },
                 EventSource::none(),
@@ -2974,7 +3050,7 @@ fn dead_exclusive_alias_problem() -> BorrowProblem {
                 PointId::new(2),
                 EventKind::ExclusiveAliasFromPlace {
                     source: PlaceId::new(0),
-                    destination: PlaceId::new(1),
+                    destination: BindingDestination::Define(PlaceId::new(1)),
                 },
                 EventSource::none(),
             ),
@@ -3059,7 +3135,7 @@ fn copy_problem() -> BorrowProblem {
                 EventId::new(0),
                 PointId::new(1),
                 EventKind::Fresh {
-                    destination: PlaceId::new(0),
+                    destination: BindingDestination::Define(PlaceId::new(0)),
                     origin: ValueOriginId::new(0),
                 },
                 EventSource::none(),
@@ -3069,7 +3145,7 @@ fn copy_problem() -> BorrowProblem {
                 PointId::new(2),
                 EventKind::Copy {
                     source: PlaceId::new(0),
-                    destination: PlaceId::new(1),
+                    destination: BindingDestination::Define(PlaceId::new(1)),
                     origin: ValueOriginId::new(1),
                 },
                 EventSource::none(),

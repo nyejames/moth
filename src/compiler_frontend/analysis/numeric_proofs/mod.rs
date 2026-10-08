@@ -33,13 +33,13 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_operators::negation_domain;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
-use crate::compiler_frontend::hir::ids::{HirNodeId, LocalId};
+use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
+use crate::compiler_frontend::hir::expressions::HirExpressionKind;
+use crate::compiler_frontend::hir::ids::{HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
-use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use moth_lexical::numeric::profile::NumericProfile;
 
@@ -104,6 +104,7 @@ pub(crate) fn analyse_numeric_proofs(
 ) -> NumericProofs {
     let mut analyser = BlockAnalyser {
         environment,
+        expressions: &hir.expressions,
         profile,
         cache: None,
         facts: NumericProofs {
@@ -128,6 +129,7 @@ pub(crate) fn analyse_numeric_proofs(
 /// One block walk's conservative state.
 struct BlockAnalyser<'a> {
     environment: &'a TypeEnvironment,
+    expressions: &'a HirExpressionStore,
     profile: NumericProfile,
     /// The single last-written-local interval cache. `None` means no value-specific fact.
     cache: Option<(LocalId, Interval)>,
@@ -138,17 +140,29 @@ impl BlockAnalyser<'_> {
     /// Visits one statement, updating the proof table and the interval cache.
     fn visit_statement(&mut self, statement: &HirStatement) {
         match &statement.kind {
-            HirStatementKind::Assign { target, value } => {
+            HirStatementKind::Write { target, value } => {
                 // Derive the source interval before any invalidation.
-                let interval = self.expression_interval(value);
-                match target {
+                let interval = self.expression_interval(*value);
+                let target_local = match target {
+                    crate::compiler_frontend::hir::statements::HirWriteTarget::DefineLocal(
+                        local,
+                    ) => Some(*local),
+                    crate::compiler_frontend::hir::statements::HirWriteTarget::AssignPlace(
+                        place,
+                    ) if self.expressions.projections(place.projections).is_empty() => {
+                        Some(place.root)
+                    }
+                    crate::compiler_frontend::hir::statements::HirWriteTarget::AssignPlace(_) => {
+                        None
+                    }
+                };
+                if let Some(target_local) = target_local {
                     // Supported direct-local assignments retain only the destination's current
                     // interval; the one-entry cache makes every earlier fact unreachable.
-                    HirPlace::Local(local) => {
-                        self.cache = interval.map(|interval| (*local, interval));
-                    }
+                    self.cache = interval.map(|interval| (target_local, interval));
+                } else {
                     // Projection writes may reach any value behind the base place.
-                    HirPlace::Field { .. } | HirPlace::Index { .. } => self.cache = None,
+                    self.cache = None;
                 }
             }
             HirStatementKind::NumericOp {
@@ -167,7 +181,7 @@ impl BlockAnalyser<'_> {
                         // A safe trap operation writes the scalar success value directly, so
                         // the destination keeps its exact proven interval. A discharged
                         // operation is already semantically safe and writes the same scalar.
-                        self.cache = Some((*result, result_interval));
+                        self.cache = Some((result.local(), result_interval));
                         return;
                     }
                 }
@@ -177,7 +191,7 @@ impl BlockAnalyser<'_> {
             }
             HirStatementKind::CastOp { policy, source, .. } => {
                 // Source facts are derived before invalidation.
-                if let Some(source_interval) = self.expression_interval(source)
+                if let Some(source_interval) = self.expression_interval(*source)
                     && self.cast_narrowing_is_provable(policy, source_interval)
                 {
                     self.facts.safe_narrowings.insert(statement.id);
@@ -286,7 +300,7 @@ impl BlockAnalyser<'_> {
                 let HirNumericOperands::Unary { operand } = operands else {
                     return None;
                 };
-                let (low, high) = self.expression_interval(operand)?;
+                let (low, high) = self.expression_interval(*operand)?;
                 (high.checked_neg()?, low.checked_neg()?)
             }
             // Real division computes in float domains and power always retains its checks.
@@ -302,8 +316,8 @@ impl BlockAnalyser<'_> {
             return None;
         };
         Some((
-            self.expression_interval(left)?,
-            self.expression_interval(right)?,
+            self.expression_interval(*left)?,
+            self.expression_interval(*right)?,
         ))
     }
 
@@ -332,7 +346,8 @@ impl BlockAnalyser<'_> {
     ///
     /// Loads and copies use the current cache only for the exact direct local it names; every
     /// other value falls back to complete canonical integer type bounds.
-    fn expression_interval(&self, expression: &HirExpression) -> Option<Interval> {
+    fn expression_interval(&self, expression_id: HirValueId) -> Option<Interval> {
+        let expression = self.expressions.expression(expression_id);
         match &expression.kind {
             // Literals are singleton exact values.
             HirExpressionKind::Uint(value) => {
@@ -359,20 +374,19 @@ impl BlockAnalyser<'_> {
                     return None;
                 };
                 let target_range = target.integer_range(self.profile)?;
-                let source_interval = self.expression_interval(source)?;
+                let source_interval = self.expression_interval(*source)?;
                 let low = source_interval.0.max(target_range.0);
                 let high = source_interval.1.min(target_range.1);
                 (low <= high).then_some((low, high))
             }
-            HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => match place {
-                HirPlace::Local(local) => match self.cache {
-                    Some((cached_local, interval)) if cached_local == *local => Some(interval),
+            HirExpressionKind::Load(place) | HirExpressionKind::Copy(place)
+                if self.expressions.projections(place.projections).is_empty() =>
+            {
+                match self.cache {
+                    Some((cached_local, interval)) if cached_local == place.root => Some(interval),
                     _ => self.canonical_interval(expression.ty),
-                },
-                HirPlace::Field { .. } | HirPlace::Index { .. } => {
-                    self.canonical_interval(expression.ty)
                 }
-            },
+            }
             // Unwraps, constructions and every other value shape read complete canonical
             // integer bounds; non-integer types have no interval at all.
             _ => self.canonical_interval(expression.ty),

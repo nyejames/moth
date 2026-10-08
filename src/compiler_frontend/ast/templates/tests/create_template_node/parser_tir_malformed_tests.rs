@@ -1,8 +1,8 @@
 //! Focused malformed-template tests for parser-to-TIR surfaces.
 //!
 //! WHAT: adds diagnostic parity coverage around body text, nested child
-//! templates, control-flow sentinels, slot/insert helpers, and suppressed
-//! child-template brackets now that the parser emits TIR nodes directly.
+//! templates, slot/insert helpers, and suppressed child-template brackets
+//! now that the parser emits TIR nodes directly.
 //!
 //! WHY: body and head parsing record TIR nodes incrementally. If an
 //! error is raised after some nodes have been recorded, the diagnostic reason
@@ -101,42 +101,6 @@ fn parse_template_diagnostic_with_replaced_body_token(
     (diagnostic, span_builder)
 }
 
-fn parse_template_diagnostic_with_span_builder(
-    source: &str,
-) -> (CompilerDiagnostic, ExtendedSpanBuilder) {
-    let mut string_table = StringTable::new();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let mut path_fork = PathInternerFork::empty();
-    let file_tokens =
-        template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let source_path = file_tokens.source_path;
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
-    let canonical_range = canonical_owner
-        .full_range()
-        .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
-        .expect("test token stream must expose an AST cursor");
-    token_stream
-        .set_position(file_tokens.opener_index)
-        .expect("template opener position must remain in the canonical range");
-    let context = new_constant_context(source_path, &path_fork);
-
-    let diagnostic = expect_template_diagnostic(
-        Template::new(
-            &mut token_stream,
-            source_path,
-            &context,
-            vec![],
-            &mut string_table,
-            &mut path_fork,
-        )
-        .expect_err("template source should fail to parse"),
-    );
-    (diagnostic, span_builder)
-}
-
 /// Asserts that a diagnostic is an `InvalidTemplateStructure` with the given reason.
 fn assert_invalid_template_structure(
     diagnostic: &CompilerDiagnostic,
@@ -160,28 +124,6 @@ fn assert_span_is_meaningful(diagnostic: &CompilerDiagnostic) {
     );
 }
 
-fn assert_exact_marker_span(
-    diagnostic: &CompilerDiagnostic,
-    source: &str,
-    span_builder: &ExtendedSpanBuilder,
-) {
-    let marker_start = source
-        .find("else")
-        .expect("test source should contain an else marker");
-    let marker_end = marker_start + "else".len();
-    let primary_span = diagnostic
-        .primary_span
-        .expect("else boundary diagnostic should retain its exact marker span");
-    assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
-    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
-    assert_eq!(
-        (range.start(), range.end()),
-        (marker_start as u32, marker_end as u32)
-    );
-    assert_eq!(&source[marker_start..marker_end], "else");
-    assert!(diagnostic.labels.is_empty());
-}
-
 #[test]
 fn unexpected_template_body_token_retains_exact_primary_span() {
     let source = "[:π]";
@@ -203,50 +145,6 @@ fn unexpected_template_body_token_retains_exact_primary_span() {
 }
 
 #[test]
-fn orphan_template_break_retains_exact_marker_span() {
-    let source = "[: before [break] after]";
-    let (diagnostic, span_builder) = parse_template_diagnostic_with_span_builder(source);
-
-    assert_invalid_template_structure(
-        &diagnostic,
-        InvalidTemplateStructureReason::OrphanTemplateBreak,
-    );
-    let primary_span = diagnostic
-        .primary_span
-        .expect("orphan loop control should retain its exact marker span");
-    assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
-    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
-    assert_eq!((range.start(), range.end()), (11, 16));
-    assert_eq!(
-        &source[range.start() as usize..range.end() as usize],
-        "break"
-    );
-    assert!(diagnostic.labels.is_empty());
-}
-
-#[test]
-fn orphan_template_else_retains_exact_multibyte_marker_span() {
-    let source = "[: π\n[else] after]";
-    let (diagnostic, span_builder) = parse_template_diagnostic_with_span_builder(source);
-
-    assert_invalid_template_structure(
-        &diagnostic,
-        InvalidTemplateStructureReason::OrphanTemplateElse,
-    );
-    let primary_span = diagnostic
-        .primary_span
-        .expect("orphan template else should retain its exact marker span");
-    assert_eq!(primary_span.source(), SourceId::COMPILATION_ROOT);
-    let range = primary_span.resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT));
-    assert_eq!((range.start(), range.end()), (7, 11));
-    assert_eq!(
-        &source[range.start() as usize..range.end() as usize],
-        "else"
-    );
-    assert!(diagnostic.labels.is_empty());
-}
-
-#[test]
 fn truncated_nested_template_body_reports_eof_with_meaningful_span() {
     let diagnostic = parse_template_diagnostic("[: outer [: inner]");
 
@@ -257,50 +155,6 @@ fn truncated_nested_template_body_reports_eof_with_meaningful_span() {
         ),
         "expected unexpected-end-of-file for truncated nested body, got {:?}",
         diagnostic.payload
-    );
-    assert_span_is_meaningful(&diagnostic);
-}
-
-#[test]
-fn malformed_loop_control_missing_close_reports_malformed_break() {
-    let diagnostic = parse_template_diagnostic("[loop true: body [break");
-
-    assert_invalid_template_structure(
-        &diagnostic,
-        InvalidTemplateStructureReason::MalformedTemplateBreak,
-    );
-    assert_span_is_meaningful(&diagnostic);
-}
-
-#[test]
-fn malformed_loop_control_missing_close_reports_malformed_continue() {
-    let diagnostic = parse_template_diagnostic("[loop true: body [continue");
-
-    assert_invalid_template_structure(
-        &diagnostic,
-        InvalidTemplateStructureReason::MalformedTemplateContinue,
-    );
-    assert_span_is_meaningful(&diagnostic);
-}
-
-#[test]
-fn orphan_break_in_normal_body_reports_orphan_break() {
-    let diagnostic = parse_template_diagnostic("[: before [break] after]");
-
-    assert_invalid_template_structure(
-        &diagnostic,
-        InvalidTemplateStructureReason::OrphanTemplateBreak,
-    );
-    assert_span_is_meaningful(&diagnostic);
-}
-
-#[test]
-fn orphan_continue_in_normal_body_reports_orphan_continue() {
-    let diagnostic = parse_template_diagnostic("[: before [continue] after]");
-
-    assert_invalid_template_structure(
-        &diagnostic,
-        InvalidTemplateStructureReason::OrphanTemplateContinue,
     );
     assert_span_is_meaningful(&diagnostic);
 }
@@ -374,75 +228,5 @@ fn slot_definition_with_body_is_rejected() {
     let diagnostic = parse_template_diagnostic("[$slot: body]");
 
     assert_invalid_template_structure(&diagnostic, InvalidTemplateStructureReason::SlotInHead);
-    assert_span_is_meaningful(&diagnostic);
-}
-
-#[test]
-fn malformed_else_if_missing_condition_keeps_non_default_span() {
-    let diagnostic = parse_template_diagnostic("[if true:\n    Then\n[else if]\n    Hidden\n]");
-
-    assert_invalid_template_structure(
-        &diagnostic,
-        InvalidTemplateStructureReason::MissingTemplateElseIfCondition,
-    );
-    assert_span_is_meaningful(&diagnostic);
-}
-
-#[test]
-fn malformed_else_if_missing_condition_retains_exact_multibyte_marker_span() {
-    let source = "[if true:\n    π\n[else if]\n    Hidden\n]";
-    let (diagnostic, span_builder) = parse_template_diagnostic_with_span_builder(source);
-
-    assert_invalid_template_structure(
-        &diagnostic,
-        InvalidTemplateStructureReason::MissingTemplateElseIfCondition,
-    );
-    assert_exact_marker_span(&diagnostic, source, &span_builder);
-}
-
-#[test]
-fn malformed_else_if_sentinel_retains_exact_multibyte_marker_span() {
-    let source = "[if true:\n    π\n[else if false, nope]\n    Hidden\n]";
-    let (diagnostic, span_builder) = parse_template_diagnostic_with_span_builder(source);
-
-    assert_invalid_template_structure(
-        &diagnostic,
-        InvalidTemplateStructureReason::MalformedTemplateElseIf,
-    );
-    assert_exact_marker_span(&diagnostic, source, &span_builder);
-}
-
-#[test]
-fn inline_else_if_boundary_retains_exact_multibyte_marker_span() {
-    let source = "[if true:\n    π\n[else if false] inline\n]";
-    let (diagnostic, span_builder) = parse_template_diagnostic_with_span_builder(source);
-
-    assert_invalid_template_structure(
-        &diagnostic,
-        InvalidTemplateStructureReason::InlineTemplateElseIf,
-    );
-    assert_exact_marker_span(&diagnostic, source, &span_builder);
-}
-
-#[test]
-fn inline_else_fallback_boundary_retains_exact_multibyte_marker_span() {
-    let source = "[if true:\n    π\n[else] inline\n]";
-    let (diagnostic, span_builder) = parse_template_diagnostic_with_span_builder(source);
-
-    assert_invalid_template_structure(
-        &diagnostic,
-        InvalidTemplateStructureReason::InlineTemplateElse,
-    );
-    assert_exact_marker_span(&diagnostic, source, &span_builder);
-}
-
-#[test]
-fn malformed_else_sentinel_keeps_non_default_span() {
-    let diagnostic = parse_template_diagnostic("[if true:\nThen\n[else: nope]\n]");
-
-    assert_invalid_template_structure(
-        &diagnostic,
-        InvalidTemplateStructureReason::MalformedTemplateElse,
-    );
     assert_span_is_meaningful(&diagnostic);
 }

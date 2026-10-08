@@ -1,5 +1,0 @@
-[backends.html]
-mode = "success"
-warnings = "forbid"
-rendered_output_contains = ["template_else_if_option_present_capture", "hello Priya"]
-rendered_output_not_contains = ["hidden branch", "hello guest"]

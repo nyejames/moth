@@ -273,6 +273,15 @@ impl<'a> GeneratedFunctionTransaction<'a> {
                 record.identity
             )));
         }
+        if self
+            .completed_records
+            .iter()
+            .any(|record| !record.sidecar.module.executable.hir.expressions.is_frozen())
+        {
+            return Err(CompilerError::compiler_error(
+                "Generated transaction cannot publish a growing HIR expression store",
+            ));
+        }
         Ok(GeneratedFunctionDelta::from_records(self.completed_records))
     }
 }

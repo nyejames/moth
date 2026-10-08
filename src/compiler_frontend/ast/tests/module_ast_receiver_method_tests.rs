@@ -62,7 +62,6 @@ fn context_for_source_file(
         PathId::ROOT,
         Rc::new(TopLevelDeclarationTable::new(vec![], path_fork)),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     )
     .with_source_file_scope(source_file)

@@ -212,6 +212,9 @@ fn render_payload_message(
             length,
             resource,
         } => source_span_capacity_message(*start, *length, *resource),
+        DiagnosticPayload::CompilerCapacityExceeded { resource } => {
+            hir_capacity_message(*resource)
+        }
         DiagnosticPayload::InvalidStringEscape { reason } => invalid_string_escape_message(*reason),
         DiagnosticPayload::InvalidNumberLiteral {
             literal_text,
@@ -596,6 +599,19 @@ fn source_span_capacity_message(
              source-owned token store cannot address another token."
         ),
     }
+}
+
+fn hir_capacity_message(resource: HirCapacityResource) -> String {
+    let resource_name = match resource {
+        HirCapacityResource::ExpressionRows => "expression rows",
+        HirCapacityResource::ValueEdges => "value edges",
+        HirCapacityResource::StructFields => "struct fields",
+        HirCapacityResource::VariantFields => "variant fields",
+        HirCapacityResource::MapEntries => "map entries",
+        HirCapacityResource::StringPieces => "string pieces",
+        HirCapacityResource::PlaceProjections => "place projections",
+    };
+    format!("This source exceeds the compiler's capacity for HIR {resource_name}.")
 }
 
 fn source_kind_name(source_kind: SourceFileKind) -> &'static str {

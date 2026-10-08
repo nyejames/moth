@@ -1426,7 +1426,6 @@ impl Expression {
     ) -> ConstValueKind {
         match template_kind {
             TemplateConstValueKind::RenderableString => ConstValueKind::RenderableTemplate,
-            TemplateConstValueKind::LoopControlSignal => ConstValueKind::Composite,
             TemplateConstValueKind::WrapperTemplate => ConstValueKind::TemplateWrapper,
             TemplateConstValueKind::SlotInsertHelper => ConstValueKind::SlotInsertTemplate,
             TemplateConstValueKind::NonConst => ConstValueKind::NonConst,

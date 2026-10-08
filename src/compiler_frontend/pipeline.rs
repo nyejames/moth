@@ -585,6 +585,7 @@ impl<'a> CompilerFrontend<'a> {
         ast: Ast,
         function_origin_lookup: HirFunctionOriginLookup,
         module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
+        capacity_estimate: FrontendArenaCapacityEstimate,
     ) -> Result<HirLoweringResult, CompilerMessages> {
         let static_if_function_provenance = ast.static_if_function_provenance.clone();
         let mut result = lower_module(
@@ -593,6 +594,7 @@ impl<'a> CompilerFrontend<'a> {
             &mut self.path_fork,
             function_origin_lookup,
             module_resources,
+            capacity_estimate,
         )?;
         for (function_path, provenance) in static_if_function_provenance {
             let Some(function_id) = result.hir_module.functions.iter().find_map(|function| {

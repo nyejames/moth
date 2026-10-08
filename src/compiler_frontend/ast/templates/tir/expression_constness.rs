@@ -33,7 +33,7 @@ pub(crate) fn effective_branch_selector_for_view(
     view: &TirView<'_>,
     selector: &TemplateBranchSelector,
     site_id: ExpressionSiteId,
-) -> Result<TemplateBranchSelector, TemplateError> {
+) -> Result<TemplateBranchSelector, CompilerError> {
     let Some(expression) = view.effective_expression_for_site(site_id)? else {
         return Ok(selector.clone());
     };
@@ -53,7 +53,7 @@ pub(crate) fn effective_loop_header_for_view(
     view: &TirView<'_>,
     header: &TemplateLoopHeader,
     header_sites: TemplateLoopHeaderExpressionSites,
-) -> Result<TemplateLoopHeader, TemplateError> {
+) -> Result<TemplateLoopHeader, CompilerError> {
     Ok(match (header, header_sites) {
         (
             TemplateLoopHeader::Conditional { condition },
@@ -85,9 +85,8 @@ pub(crate) fn effective_loop_header_for_view(
                 }
                 _ => {
                     return Err(CompilerError::compiler_error(
-                        "TIR preparation: loop range header/site step shape mismatch.",
-                    )
-                    .into());
+                        "TIR range-loop header/site step shape mismatch.",
+                    ));
                 }
             }
 
@@ -109,9 +108,8 @@ pub(crate) fn effective_loop_header_for_view(
         },
         _ => {
             return Err(CompilerError::compiler_error(
-                "TIR preparation: loop header shape does not match its expression sites.",
-            )
-            .into());
+                "TIR loop header shape does not match its expression sites.",
+            ));
         }
     })
 }
@@ -279,9 +277,7 @@ fn tir_tree_is_const_evaluable_standalone_value(
             Ok(true)
         }
         TemplateIrNodeKind::Text { .. } => Ok(true),
-        TemplateIrNodeKind::Slot { .. }
-        | TemplateIrNodeKind::AggregateOutput
-        | TemplateIrNodeKind::LoopControl { .. } => Ok(true),
+        TemplateIrNodeKind::Slot { .. } | TemplateIrNodeKind::AggregateOutput => Ok(true),
         TemplateIrNodeKind::DynamicExpression { expression, .. } => {
             let kind =
                 expression.const_value_kind_with_template_classifier(&mut |template| {
@@ -351,40 +347,19 @@ fn tir_tree_is_const_evaluable_standalone_value(
             visiting_templates.remove(template_id);
             result
         }
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => {
-            for branch in branches {
-                let Some(bindings) = selector_is_const(
-                    &branch.selector,
-                    &[],
-                    store,
-                    string_table,
-                    visiting_templates,
-                )?
-                else {
-                    return Ok(false);
-                };
-                if !tir_tree_is_const_evaluable_value(
-                    store,
-                    branch.body,
-                    &bindings,
-                    string_table,
-                    visiting_templates,
-                )? {
-                    return Ok(false);
-                }
-            }
-            if let Some(fallback) = fallback {
-                return tir_tree_is_const_evaluable_value(
-                    store,
-                    *fallback,
-                    &[],
-                    string_table,
-                    visiting_templates,
-                );
-            }
-            Ok(true)
+        TemplateIrNodeKind::Conditional { selector, body, .. } => {
+            let Some(bindings) =
+                selector_is_const(selector, &[], store, string_table, visiting_templates)?
+            else {
+                return Ok(false);
+            };
+            tir_tree_is_const_evaluable_value(
+                store,
+                *body,
+                &bindings,
+                string_table,
+                visiting_templates,
+            )
         }
         TemplateIrNodeKind::Loop {
             header,
@@ -450,9 +425,7 @@ fn tir_tree_is_const_evaluable_value(
             Ok(true)
         }
         TemplateIrNodeKind::Text { .. } => Ok(true),
-        TemplateIrNodeKind::Slot { .. }
-        | TemplateIrNodeKind::AggregateOutput
-        | TemplateIrNodeKind::LoopControl { .. } => Ok(true),
+        TemplateIrNodeKind::Slot { .. } | TemplateIrNodeKind::AggregateOutput => Ok(true),
         TemplateIrNodeKind::DynamicExpression { expression, .. } => expression_is_const_evaluable(
             expression,
             loop_binding_paths,
@@ -502,40 +475,24 @@ fn tir_tree_is_const_evaluable_value(
             visiting_templates.remove(template_id);
             result
         }
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => {
-            for branch in branches {
-                let Some(bindings) = selector_is_const(
-                    &branch.selector,
-                    loop_binding_paths,
-                    store,
-                    string_table,
-                    visiting_templates,
-                )?
-                else {
-                    return Ok(false);
-                };
-                if !tir_tree_is_const_evaluable_value(
-                    store,
-                    branch.body,
-                    &bindings,
-                    string_table,
-                    visiting_templates,
-                )? {
-                    return Ok(false);
-                }
-            }
-            if let Some(fallback) = fallback {
-                return tir_tree_is_const_evaluable_value(
-                    store,
-                    *fallback,
-                    loop_binding_paths,
-                    string_table,
-                    visiting_templates,
-                );
-            }
-            Ok(true)
+        TemplateIrNodeKind::Conditional { selector, body, .. } => {
+            let Some(bindings) = selector_is_const(
+                selector,
+                loop_binding_paths,
+                store,
+                string_table,
+                visiting_templates,
+            )?
+            else {
+                return Ok(false);
+            };
+            tir_tree_is_const_evaluable_value(
+                store,
+                *body,
+                &bindings,
+                string_table,
+                visiting_templates,
+            )
         }
         TemplateIrNodeKind::Loop {
             header,

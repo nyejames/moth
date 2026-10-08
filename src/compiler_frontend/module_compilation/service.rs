@@ -684,6 +684,7 @@ fn run_semantic_stages(
             function_origin_lookup,
             Some(Rc::clone(&module_resources)),
             None,
+            capacity_estimate,
         )
     )?;
     let HirLoweringResult {
@@ -700,6 +701,8 @@ fn run_semantic_stages(
 
     #[cfg(feature = "boracle")]
     if request == SemanticStageRequest::Boracle {
+        // This analysis-only handoff has no summary-dependent structural producer.
+        hir_module.expressions.freeze();
         return Ok(SemanticStageOutput::Boracle(Box::new(BoracleModuleInput {
             hir: hir_module,
             external_package_registry: Arc::clone(compiler.external_package_registry),
@@ -740,6 +743,9 @@ fn run_semantic_stages(
         #[cfg(feature = "timers")]
         timing_context,
     )?;
+    // Private failure lanes and their final link facts are complete. Publication may
+    // still rebase interned scalar identities, but expression topology is now fixed.
+    hir_module.expressions.freeze();
     // Reinstall after convergence: the fixed point may have widened a callee summary the
     // pre-materialisation pass recorded, and the frozen context must carry the final one.
     install_exact_concrete_call_summaries(
@@ -1033,9 +1039,18 @@ fn record_borrow_counters(report: &BorrowCheckReport) {
         report.stats.conflicts_checked,
     );
 
-    let state_snapshot_count = report.analysis.block_entry_states.len()
-        + report.analysis.block_exit_states.len()
-        + report.analysis.statement_entry_states.len();
+    let state_snapshot_count = {
+        #[cfg(any(test, feature = "show_borrow_checker"))]
+        {
+            report.analysis.block_entry_states.len()
+                + report.analysis.block_exit_states.len()
+                + report.analysis.statement_entry_states.len()
+        }
+        #[cfg(not(any(test, feature = "show_borrow_checker")))]
+        {
+            0
+        }
+    };
     add_frontend_counter(
         FrontendCounter::BorrowStateSnapshotCount,
         state_snapshot_count,

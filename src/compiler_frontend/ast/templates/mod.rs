@@ -40,7 +40,6 @@
 //! | `create_template_node.rs` | Coordinate head/body parsing and finish parser TIR construction |
 //! | `template_head_parser/` | Parse directives, head expressions, slots, and control-flow suffixes |
 //! | `template_body_parser.rs` | Parse body text, nested templates, and expression splices |
-//! | `template_body_sentinels.rs` | Parse body-only control-flow markers |
 //! | `template_build_state.rs` | Hold parser-local template construction state |
 //! | `template.rs` | Define the thin `Template` handle and shared template vocabulary |
 //! | `template_control_flow/` | Define template `if`/`loop` metadata, validation, and const helpers |
@@ -66,7 +65,6 @@ pub(crate) mod runtime_handoff;
 pub(crate) mod styles;
 pub(crate) mod template;
 pub(crate) mod template_body_parser;
-mod template_body_sentinels;
 mod template_build_state;
 pub(crate) mod template_control_flow;
 pub(crate) mod template_folding;
@@ -88,8 +86,7 @@ pub(crate) mod tir;
 
 pub(crate) use runtime_handoff::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotContributionSource, OwnedRuntimeSlotSite,
-    OwnedRuntimeTemplateBody, OwnedRuntimeTemplateBranch, OwnedRuntimeTemplateHandoff,
-    OwnedRuntimeTemplateNode,
+    OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 
 // -------------------------

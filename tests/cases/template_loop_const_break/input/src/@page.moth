@@ -1,6 +1,0 @@
-#[loop 1 to & 4 |numeric_value|:
-    [if numeric_value is 3:
-        [break]
-    ]
-    const-break-[numeric_value];
-]

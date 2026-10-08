@@ -28,8 +28,8 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrStore, finalized_tir_view_for_template, walk_tir_view_expression_payloads,
 };
 use crate::compiler_frontend::ast::templates::{
-    OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff,
-    OwnedRuntimeTemplateNode,
+    OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
+    runtime_handoff,
 };
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
@@ -39,11 +39,12 @@ use crate::compiler_frontend::datatypes::definitions::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use std::convert::Infallible;
 
 /// Context shared by every helper in this debug validation pass.
 ///
 /// WHAT: bundles the final module `TypeEnvironment` with the module-scoped
-///       `TemplateIrStore` and `TemplateIrStore` so template-expression
+///       `TemplateIrStore` so template-expression
 ///       payload validation resolves one required finalized `TirView`.
 /// WHY: debug validation is read-only and short-lived; a small context struct
 ///      keeps the recursive walk signatures focused.
@@ -732,29 +733,20 @@ fn debug_validate_loop_bindings_type_ids(
 //  Owned runtime-template handoff traversal
 // -------------------------
 //
-// These helpers walk the owned runtime handoff shapes that the finalizer
-// materializes before this debug check runs so every dynamic expression
-// payload carried by finalized HIR-bound templates is validated.
+// The canonical runtime-handoff walker owns structural recursion. This local
+// callback validates the expression-bearing selector, header and dynamic
+// payloads that are not represented as child nodes.
 
 fn debug_validate_runtime_template_handoff_type_ids(
     handoff: &OwnedRuntimeTemplateHandoff,
     context: &DebugTypeValidationContext,
 ) {
-    debug_validate_runtime_template_body_type_ids(&handoff.body, context);
-}
-
-fn debug_validate_runtime_template_body_type_ids(
-    body: &OwnedRuntimeTemplateBody,
-    context: &DebugTypeValidationContext,
-) {
-    match body {
-        OwnedRuntimeTemplateBody::Render(node) => {
-            debug_validate_runtime_template_node_type_ids(node, context);
-        }
-
-        OwnedRuntimeTemplateBody::RuntimeSlotApplication(slot_handoff) => {
-            debug_validate_runtime_slot_application_handoff_type_ids(slot_handoff, context);
-        }
+    let result = runtime_handoff::walk_owned_runtime_template_handoff(handoff, &mut |node| {
+        debug_validate_runtime_template_node_type_ids(node, context);
+        Ok::<(), Infallible>(())
+    });
+    if let Err(never) = result {
+        match never {}
     }
 }
 
@@ -763,53 +755,23 @@ fn debug_validate_runtime_template_node_type_ids(
     context: &DebugTypeValidationContext,
 ) {
     match node {
-        OwnedRuntimeTemplateNode::Sequence { children, .. } => {
-            for child in children {
-                debug_validate_runtime_template_node_type_ids(child, context);
-            }
-        }
-
         OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => {
             debug_validate_expression_type_id(expression, context);
         }
 
-        OwnedRuntimeTemplateNode::ChildTemplate { template, .. } => {
-            debug_validate_runtime_template_handoff_type_ids(template, context);
+        OwnedRuntimeTemplateNode::Conditional { selector, .. } => {
+            debug_validate_template_branch_selector_type_ids(selector, context);
         }
 
-        OwnedRuntimeTemplateNode::ConditionalWrapper { child, wrapper, .. } => {
-            debug_validate_runtime_template_node_type_ids(child, context);
-            debug_validate_runtime_template_node_type_ids(wrapper, context);
-        }
-
-        OwnedRuntimeTemplateNode::BranchChain {
-            branches, fallback, ..
-        } => {
-            for branch in branches {
-                debug_validate_template_branch_selector_type_ids(&branch.selector, context);
-                debug_validate_runtime_template_node_type_ids(&branch.body, context);
-            }
-            if let Some(fallback) = fallback {
-                debug_validate_runtime_template_node_type_ids(fallback, context);
-            }
-        }
-
-        OwnedRuntimeTemplateNode::Loop {
-            header,
-            body,
-            aggregate_wrapper,
-            ..
-        } => {
+        OwnedRuntimeTemplateNode::Loop { header, .. } => {
             debug_validate_template_loop_header_type_ids(header, context);
-            debug_validate_runtime_template_node_type_ids(body, context);
-            if let Some(aggregate_wrapper) = aggregate_wrapper {
-                debug_validate_runtime_template_node_type_ids(aggregate_wrapper, context);
-            }
         }
 
-        OwnedRuntimeTemplateNode::Text { .. }
+        OwnedRuntimeTemplateNode::Sequence { .. }
+        | OwnedRuntimeTemplateNode::ChildTemplate { .. }
+        | OwnedRuntimeTemplateNode::ConditionalWrapper { .. }
+        | OwnedRuntimeTemplateNode::Text { .. }
         | OwnedRuntimeTemplateNode::AggregateOutput
-        | OwnedRuntimeTemplateNode::LoopControl { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => {}
@@ -858,14 +820,13 @@ fn debug_validate_runtime_slot_application_handoff_type_ids(
     handoff: &OwnedRuntimeSlotApplicationHandoff,
     context: &DebugTypeValidationContext,
 ) {
-    debug_validate_runtime_template_node_type_ids(&handoff.wrapper, context);
-
-    for source in &handoff.contribution_sources {
-        debug_validate_runtime_template_node_type_ids(&source.render_root, context);
-    }
-
-    for site in &handoff.slot_sites {
-        debug_validate_runtime_template_node_type_ids(&site.render_root, context);
+    let result =
+        runtime_handoff::walk_owned_runtime_slot_application_handoff(handoff, &mut |node| {
+            debug_validate_runtime_template_node_type_ids(node, context);
+            Ok::<(), Infallible>(())
+        });
+    if let Err(never) = result {
+        match never {}
     }
 }
 

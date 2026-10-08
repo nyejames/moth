@@ -17,15 +17,50 @@ pub(crate) struct EventSource {
 /// The control-flow meaning attached to a terminator event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TerminatorEventKind {
-    Jump { target: BlockId },
-    Branch { targets: Box<[BlockId]> },
+    Jump {
+        target: BlockId,
+        arguments: Box<[JumpArgument]>,
+    },
+    Branch {
+        targets: Box<[BlockId]>,
+    },
     Return,
     ReturnSuccess,
     ReturnError,
-    Break { target: BlockId },
-    Continue { target: BlockId },
+    Break {
+        target: BlockId,
+    },
+    Continue {
+        target: BlockId,
+    },
     RuntimeFailure,
     AssertFailure,
+}
+
+/// One value captured from the predecessor and installed as a new edge definition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct JumpArgument {
+    pub(crate) source: PlaceId,
+    pub(crate) destination: BindingDestination,
+}
+
+/// Whether a normalized write creates a binding generation or updates the current place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BindingDestination {
+    Define(PlaceId),
+    Update(PlaceId),
+}
+
+impl BindingDestination {
+    pub(crate) const fn place(self) -> PlaceId {
+        match self {
+            Self::Define(place) | Self::Update(place) => place,
+        }
+    }
+
+    pub(crate) const fn defines(self) -> bool {
+        matches!(self, Self::Define(_))
+    }
 }
 
 impl EventSource {
@@ -72,6 +107,8 @@ pub(crate) struct Use {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UseKind {
     Read,
+    /// A write access paired with an explicit HIR local definition or place update.
+    BindingWrite(BindingDestination),
     Write,
     // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (loop-generation epochs and edge last use).
     #[allow(dead_code)]
@@ -83,7 +120,18 @@ impl UseKind {
         match self {
             Self::Read => AccessKind::Shared,
             Self::LoanObservation => AccessKind::Shared,
-            Self::Write => AccessKind::Exclusive,
+            Self::Write | Self::BindingWrite(_) => AccessKind::Exclusive,
+        }
+    }
+
+    pub(crate) const fn is_write(self) -> bool {
+        matches!(self, Self::Write | Self::BindingWrite(_))
+    }
+
+    pub(crate) const fn binding_destination(self) -> Option<BindingDestination> {
+        match self {
+            Self::BindingWrite(destination) => Some(destination),
+            Self::Read | Self::Write | Self::LoanObservation => None,
         }
     }
 }
@@ -138,7 +186,7 @@ pub(crate) struct CallArgument {
 /// One result place and its preliminary origin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CallResult {
-    pub(crate) place: PlaceId,
+    pub(crate) destination: BindingDestination,
     pub(crate) origin: ValueOriginId,
 }
 
@@ -175,49 +223,49 @@ pub(crate) enum RebindValue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum EventKind {
     Fresh {
-        destination: PlaceId,
+        destination: BindingDestination,
         origin: ValueOriginId,
     },
     // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
     #[allow(dead_code)]
     Alias {
         source: PlaceId,
-        destination: PlaceId,
+        destination: BindingDestination,
         origins: Box<[ValueOriginId]>,
     },
     AliasFromPlace {
         source: PlaceId,
-        destination: PlaceId,
+        destination: BindingDestination,
     },
     // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
     #[allow(dead_code)]
     ExclusiveAlias {
         source: PlaceId,
-        destination: PlaceId,
+        destination: BindingDestination,
         origins: Box<[ValueOriginId]>,
     },
     ExclusiveAliasFromPlace {
         source: PlaceId,
-        destination: PlaceId,
+        destination: BindingDestination,
     },
     Copy {
         source: PlaceId,
-        destination: PlaceId,
+        destination: BindingDestination,
         origin: ValueOriginId,
     },
     Projection {
         source: PlaceId,
-        destination: PlaceId,
+        destination: BindingDestination,
         origin: ValueOriginId,
     },
     // Boracle plan: docs/roadmap/plans/boracle-next-research-plans/ (conflict-directed relational refinement).
     #[allow(dead_code)]
     Rebind {
-        destination: PlaceId,
+        destination: BindingDestination,
         value: RebindValue,
     },
     Aggregate {
-        destination: PlaceId,
+        destination: BindingDestination,
         origin: ValueOriginId,
         fields: Box<[AggregateField]>,
     },

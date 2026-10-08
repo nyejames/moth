@@ -21,14 +21,17 @@ use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
+};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::validate_hir_module;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
@@ -67,7 +70,7 @@ struct NumericFixture {
     locals: Vec<HirLocal>,
     local_names: Vec<(LocalId, &'static str)>,
     statements: Vec<HirStatement>,
-    return_value: HirExpression,
+    return_value: crate::compiler_frontend::hir::ids::HirValueId,
 }
 
 /// Both generated modules for one fixture plus the analysed table and emitted function name.
@@ -82,15 +85,20 @@ struct LoweredFixture {
 fn lower_numeric_fixture(
     function_name: &str,
     profile: NumericProfile,
-    borrow_report: BorrowCheckReport,
-    build: impl FnOnce(&TypeIds, &mut TypeEnvironment, RegionId) -> NumericFixture,
+    build: impl FnOnce(
+        &TypeIds,
+        &mut TypeEnvironment,
+        RegionId,
+        &mut HirExpressionStore,
+    ) -> NumericFixture,
 ) -> LoweredFixture {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (mut type_environment, types) = build_type_environment();
     let region = RegionId(0);
-    let fixture = build(&types, &mut type_environment, region);
-    let return_type = fixture.return_value.ty;
+    let mut expressions = HirExpressionStore::default();
+    let fixture = build(&types, &mut type_environment, region, &mut expressions);
+    let return_type = expressions.expression(fixture.return_value).ty;
 
     let block = HirBlock {
         id: BlockId(0),
@@ -108,6 +116,7 @@ fn lower_numeric_fixture(
     // Hand-built fixtures carry the same entry-start function-origin tag production lowering
     // records, so the fixture shape matches what HIR validation accepts.
     let mut module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         function_name,
@@ -125,7 +134,6 @@ fn lower_numeric_fixture(
     let config = JsLoweringConfig::direct_js(false, profile);
     let analysed_module = lower_hir_to_js(
         &module,
-        &borrow_report,
         &analysed_table,
         &string_table,
         config.clone(),
@@ -135,7 +143,6 @@ fn lower_numeric_fixture(
     .expect("analysed-table lowering should succeed");
     let retained_module = lower_hir_to_js(
         &module,
-        &borrow_report,
         &NumericProofs::default(),
         &string_table,
         config,
@@ -171,44 +178,60 @@ fn named_locals(
     (locals, names)
 }
 
-fn int_const(id: u32, value: i64, ty: TypeId, region: RegionId) -> HirExpression {
+fn fixed_const(
+    value: FixedScalarValue,
+    ty: TypeId,
+    region: RegionId,
+    expressions: &mut HirExpressionStore,
+) -> crate::compiler_frontend::hir::ids::HirValueId {
     expression(
-        id,
-        HirExpressionKind::Int(value),
-        ty,
-        region,
-        ValueKind::Const,
-    )
-}
-
-fn fixed_const(id: u32, value: FixedScalarValue, ty: TypeId, region: RegionId) -> HirExpression {
-    expression(
-        id,
         HirExpressionKind::FixedScalar(value),
         ty,
         region,
         ValueKind::Const,
+        expressions,
     )
 }
 
-fn load_local(id: u32, target: u32, ty: TypeId, region: RegionId) -> HirExpression {
+fn load_local(
+    target: u32,
+    ty: TypeId,
+    region: RegionId,
+    expressions: &mut HirExpressionStore,
+) -> crate::compiler_frontend::hir::ids::HirValueId {
     expression(
-        id,
-        HirExpressionKind::Load(HirPlace::Local(LocalId(target))),
+        HirExpressionKind::Load(HirPlace::local(LocalId(target))),
         ty,
         region,
         ValueKind::RValue,
+        expressions,
     )
 }
 
-fn assign_local(target: u32, value: HirExpression) -> HirStatementKind {
-    HirStatementKind::Assign {
-        target: HirPlace::Local(LocalId(target)),
+fn assign_local(
+    target: u32,
+    value: crate::compiler_frontend::hir::ids::HirValueId,
+) -> HirStatementKind {
+    HirStatementKind::Write {
+        target: HirWriteTarget::AssignPlace(HirPlace::local(LocalId(target))),
         value,
     }
 }
 
-fn binary_operands(left: HirExpression, right: HirExpression) -> HirNumericOperands {
+fn define_local(
+    target: u32,
+    value: crate::compiler_frontend::hir::ids::HirValueId,
+) -> HirStatementKind {
+    HirStatementKind::Write {
+        target: HirWriteTarget::DefineLocal(LocalId(target)),
+        value,
+    }
+}
+
+fn binary_operands(
+    left: crate::compiler_frontend::hir::ids::HirValueId,
+    right: crate::compiler_frontend::hir::ids::HirValueId,
+) -> HirNumericOperands {
     HirNumericOperands::Binary { left, right }
 }
 
@@ -222,29 +245,29 @@ fn trap_op(
         op: HirNumericOp { operator, domain },
         failure_mode: NumericFailureMode::Trap,
         operands,
-        result: LocalId(result),
+        result: HirLocalDestination::Define(LocalId(result)),
     }
 }
 
 fn return_error_op(
     operator: NumericOperator,
     domain: NumericScalar,
-    left: HirExpression,
-    right: HirExpression,
+    left: crate::compiler_frontend::hir::ids::HirValueId,
+    right: crate::compiler_frontend::hir::ids::HirValueId,
     result: u32,
 ) -> HirStatementKind {
     HirStatementKind::NumericOp {
         op: HirNumericOp { operator, domain },
         failure_mode: NumericFailureMode::ReturnError,
         operands: binary_operands(left, right),
-        result: LocalId(result),
+        result: HirLocalDestination::Define(LocalId(result)),
     }
 }
 
 fn narrowing_cast(
     source_scalar: FixedScalar,
     target_scalar: FixedScalar,
-    source: HirExpression,
+    source: crate::compiler_frontend::hir::ids::HirValueId,
     result: u32,
 ) -> HirStatementKind {
     HirStatementKind::CastOp {
@@ -253,7 +276,7 @@ fn narrowing_cast(
             target: NumericScalar::Fixed(target_scalar),
         },
         source,
-        result: Some(LocalId(result)),
+        result: Some(HirLocalDestination::Define(LocalId(result))),
     }
 }
 
@@ -304,8 +327,7 @@ fn proven_operation_chain_matches_retained_runtime_without_helper_family() {
     let lowered = lower_numeric_fixture(
         "proven_chain",
         NumericProfile::STANDARD,
-        BorrowCheckReport::default(),
-        |types, _environment, region| {
+        |types, _environment, region, expressions| {
             let (locals, local_names) = named_locals(
                 &[
                     (0, types.int, "a"),
@@ -322,15 +344,18 @@ fn proven_operation_chain_matches_retained_runtime_without_helper_family() {
                 locals,
                 local_names,
                 statements: vec![
-                    statement(1, assign_local(0, int_const(100, 2, int, region))),
+                    statement(
+                        1,
+                        define_local(0, int_expression(2, int, region, expressions)),
+                    ),
                     statement(
                         2,
                         trap_op(
                             NumericOperator::Add,
                             NumericScalar::Int,
                             binary_operands(
-                                load_local(101, 0, int, region),
-                                int_const(102, 3, int, region),
+                                load_local(0, int, region, expressions),
+                                int_expression(3, int, region, expressions),
                             ),
                             1,
                         ),
@@ -341,8 +366,8 @@ fn proven_operation_chain_matches_retained_runtime_without_helper_family() {
                             NumericOperator::Multiply,
                             NumericScalar::Int,
                             binary_operands(
-                                load_local(103, 1, int, region),
-                                int_const(104, 4, int, region),
+                                load_local(1, int, region, expressions),
+                                int_expression(4, int, region, expressions),
                             ),
                             2,
                         ),
@@ -353,8 +378,8 @@ fn proven_operation_chain_matches_retained_runtime_without_helper_family() {
                             NumericOperator::Subtract,
                             NumericScalar::Int,
                             binary_operands(
-                                load_local(105, 2, int, region),
-                                int_const(106, 5, int, region),
+                                load_local(2, int, region, expressions),
+                                int_expression(5, int, region, expressions),
                             ),
                             3,
                         ),
@@ -365,8 +390,8 @@ fn proven_operation_chain_matches_retained_runtime_without_helper_family() {
                             NumericOperator::IntegerDivide,
                             NumericScalar::Int,
                             binary_operands(
-                                load_local(107, 3, int, region),
-                                int_const(108, 2, int, region),
+                                load_local(3, int, region, expressions),
+                                int_expression(2, int, region, expressions),
                             ),
                             4,
                         ),
@@ -377,14 +402,14 @@ fn proven_operation_chain_matches_retained_runtime_without_helper_family() {
                             NumericOperator::Remainder,
                             NumericScalar::Int,
                             binary_operands(
-                                load_local(109, 4, int, region),
-                                int_const(110, 4, int, region),
+                                load_local(4, int, region, expressions),
+                                int_expression(4, int, region, expressions),
                             ),
                             5,
                         ),
                     ),
                 ],
-                return_value: load_local(111, 5, int, region),
+                return_value: load_local(5, int, region, expressions),
             }
         },
     );
@@ -428,20 +453,24 @@ fn proven_operation_chain_matches_retained_runtime_without_helper_family() {
 /// Runs one proven zero-producing operation through the signed-zero probe in both tables.
 fn assert_proven_zero_normalization(
     name: &str,
-    build_operation: impl FnOnce(&TypeIds, &mut TypeEnvironment, RegionId) -> (HirStatementKind, TypeId),
+    build_operation: impl FnOnce(
+        &TypeIds,
+        &mut TypeEnvironment,
+        RegionId,
+        &mut HirExpressionStore,
+    ) -> (HirStatementKind, TypeId),
 ) {
     let lowered = lower_numeric_fixture(
         name,
         NumericProfile::STANDARD,
-        BorrowCheckReport::default(),
-        |types, environment, region| {
-            let (operation, destination) = build_operation(types, environment, region);
+        |types, environment, region, expressions| {
+            let (operation, destination) = build_operation(types, environment, region, expressions);
             let (locals, local_names) = named_locals(&[(0, destination, "v")], region);
             NumericFixture {
                 locals,
                 local_names,
                 statements: vec![statement(1, operation)],
-                return_value: load_local(10, 0, destination, region),
+                return_value: load_local(0, destination, region, expressions),
             }
         },
     );
@@ -470,14 +499,14 @@ fn assert_proven_zero_normalization(
 /// like the checked helpers' success boundary.
 #[test]
 fn proven_signed_zero_normalization_matches_retained_checks() {
-    assert_proven_zero_normalization("zero_mul", |types, _environment, region| {
+    assert_proven_zero_normalization("zero_mul", |types, _environment, region, expressions| {
         (
             trap_op(
                 NumericOperator::Multiply,
                 NumericScalar::Int,
                 binary_operands(
-                    int_const(1, 0, types.int, region),
-                    int_const(2, -5, types.int, region),
+                    int_expression(0, types.int, region, expressions),
+                    int_expression(-5, types.int, region, expressions),
                 ),
                 0,
             ),
@@ -486,7 +515,7 @@ fn proven_signed_zero_normalization_matches_retained_checks() {
     });
     assert_proven_zero_normalization(
         "zero_mul_negative_times_zero",
-        |_types, _environment, region| {
+        |_types, _environment, region, expressions| {
             // Fixed narrow integers promote to their common I32 computation domain in validated
             // HIR, so the negative-times-zero fixture multiplies I32 literals.
             let i32_ty = builtin_type_ids::fixed_scalar(FixedScalar::I32);
@@ -496,17 +525,17 @@ fn proven_signed_zero_normalization_matches_retained_checks() {
                     NumericScalar::Fixed(FixedScalar::I32),
                     binary_operands(
                         fixed_const(
-                            1,
                             FixedScalarValue::signed(FixedScalar::I32, -128)
                                 .expect("-128 fits I32"),
                             i32_ty,
                             region,
+                            expressions,
                         ),
                         fixed_const(
-                            2,
                             FixedScalarValue::signed(FixedScalar::I32, 0).expect("0 fits I32"),
                             i32_ty,
                             region,
+                            expressions,
                         ),
                     ),
                     0,
@@ -515,7 +544,7 @@ fn proven_signed_zero_normalization_matches_retained_checks() {
             )
         },
     );
-    assert_proven_zero_normalization("zero_neg", |types, _environment, region| {
+    assert_proven_zero_normalization("zero_neg", |types, _environment, region, expressions| {
         (
             HirStatementKind::NumericOp {
                 op: HirNumericOp {
@@ -524,35 +553,35 @@ fn proven_signed_zero_normalization_matches_retained_checks() {
                 },
                 failure_mode: NumericFailureMode::Trap,
                 operands: HirNumericOperands::Unary {
-                    operand: int_const(1, 0, types.int, region),
+                    operand: int_expression(0, types.int, region, expressions),
                 },
-                result: LocalId(0),
+                result: HirLocalDestination::Define(LocalId(0)),
             },
             types.int,
         )
     });
-    assert_proven_zero_normalization("zero_div", |types, _environment, region| {
+    assert_proven_zero_normalization("zero_div", |types, _environment, region, expressions| {
         (
             trap_op(
                 NumericOperator::IntegerDivide,
                 NumericScalar::Int,
                 binary_operands(
-                    int_const(1, 0, types.int, region),
-                    int_const(2, -3, types.int, region),
+                    int_expression(0, types.int, region, expressions),
+                    int_expression(-3, types.int, region, expressions),
                 ),
                 0,
             ),
             types.int,
         )
     });
-    assert_proven_zero_normalization("zero_mod", |types, _environment, region| {
+    assert_proven_zero_normalization("zero_mod", |types, _environment, region, expressions| {
         (
             trap_op(
                 NumericOperator::Remainder,
                 NumericScalar::Int,
                 binary_operands(
-                    int_const(1, -7, types.int, region),
-                    int_const(2, 7, types.int, region),
+                    int_expression(-7, types.int, region, expressions),
+                    int_expression(7, types.int, region, expressions),
                 ),
                 0,
             ),
@@ -568,8 +597,7 @@ fn proven_negative_literal_negation_matches_positive_number_literal() {
     let lowered = lower_numeric_fixture(
         "negative_literal_negation_number",
         NumericProfile::STANDARD,
-        BorrowCheckReport::default(),
-        |types, _environment, region| {
+        |types, _environment, region, expressions| {
             let int = types.int;
             let (locals, local_names) = named_locals(&[(0, int, "v")], region);
             NumericFixture {
@@ -584,12 +612,12 @@ fn proven_negative_literal_negation_matches_positive_number_literal() {
                         },
                         failure_mode: NumericFailureMode::Trap,
                         operands: HirNumericOperands::Unary {
-                            operand: int_const(2, -5, int, region),
+                            operand: int_expression(-5, int, region, expressions),
                         },
-                        result: LocalId(0),
+                        result: HirLocalDestination::Define(LocalId(0)),
                     },
                 )],
-                return_value: load_local(10, 0, int, region),
+                return_value: load_local(0, int, region, expressions),
             }
         },
     );
@@ -623,8 +651,7 @@ fn proven_negative_literal_negation_matches_positive_bigint_literal() {
     let lowered = lower_numeric_fixture(
         "negative_literal_negation_bigint",
         NumericProfile::STANDARD,
-        BorrowCheckReport::default(),
-        |_types, _environment, region| {
+        |_types, _environment, region, expressions| {
             let i64_ty = builtin_type_ids::fixed_scalar(FixedScalar::I64);
             let (locals, local_names) = named_locals(&[(0, i64_ty, "v")], region);
             NumericFixture {
@@ -640,17 +667,17 @@ fn proven_negative_literal_negation_matches_positive_bigint_literal() {
                         failure_mode: NumericFailureMode::Trap,
                         operands: HirNumericOperands::Unary {
                             operand: fixed_const(
-                                2,
                                 FixedScalarValue::signed(FixedScalar::I64, -5)
                                     .expect("-5 fits I64"),
                                 i64_ty,
                                 region,
+                                expressions,
                             ),
                         },
-                        result: LocalId(0),
+                        result: HirLocalDestination::Define(LocalId(0)),
                     },
                 )],
-                return_value: load_local(10, 0, i64_ty, region),
+                return_value: load_local(0, i64_ty, region, expressions),
             }
         },
     );
@@ -684,8 +711,7 @@ fn unproven_operations_keep_runtime_errors_identical_across_tables() {
     let overflow = lower_numeric_fixture(
         "u32_overflow",
         NumericProfile::STANDARD,
-        BorrowCheckReport::default(),
-        |_types, _environment, region| {
+        |_types, _environment, region, expressions| {
             // Fixed narrow integers promote to their common U32 computation domain in validated
             // HIR, so the unsigned overflow fixture multiplies U32 literals past U32::MAX.
             let u32_ty = builtin_type_ids::fixed_scalar(FixedScalar::U32);
@@ -700,24 +726,24 @@ fn unproven_operations_keep_runtime_errors_identical_across_tables() {
                         NumericScalar::Fixed(FixedScalar::U32),
                         binary_operands(
                             fixed_const(
-                                10,
                                 FixedScalarValue::unsigned(FixedScalar::U32, 4_000_000_000)
                                     .expect("4000000000 fits U32"),
                                 u32_ty,
                                 region,
+                                expressions,
                             ),
                             fixed_const(
-                                11,
                                 FixedScalarValue::unsigned(FixedScalar::U32, 2)
                                     .expect("2 fits U32"),
                                 u32_ty,
                                 region,
+                                expressions,
                             ),
                         ),
                         0,
                     ),
                 )],
-                return_value: load_local(12, 0, u32_ty, region),
+                return_value: load_local(0, u32_ty, region, expressions),
             }
         },
     );
@@ -747,8 +773,7 @@ fn unproven_operations_keep_runtime_errors_identical_across_tables() {
     let divide_by_zero = lower_numeric_fixture(
         "divide_by_zero",
         NumericProfile::STANDARD,
-        BorrowCheckReport::default(),
-        |types, _environment, region| {
+        |types, _environment, region, expressions| {
             let (locals, local_names) = named_locals(&[(0, types.int, "v")], region);
             NumericFixture {
                 locals,
@@ -759,13 +784,13 @@ fn unproven_operations_keep_runtime_errors_identical_across_tables() {
                         NumericOperator::IntegerDivide,
                         NumericScalar::Int,
                         binary_operands(
-                            int_const(10, 5, types.int, region),
-                            int_const(11, 0, types.int, region),
+                            int_expression(5, types.int, region, expressions),
+                            int_expression(0, types.int, region, expressions),
                         ),
                         0,
                     ),
                 )],
-                return_value: load_local(12, 0, types.int, region),
+                return_value: load_local(0, types.int, region, expressions),
             }
         },
     );
@@ -800,8 +825,7 @@ fn power_always_retains_checked_lowering() {
     let lowered = lower_numeric_fixture(
         "power_checked",
         NumericProfile::STANDARD,
-        BorrowCheckReport::default(),
-        |types, _environment, region| {
+        |types, _environment, region, expressions| {
             let (locals, local_names) = named_locals(&[(0, types.int, "v")], region);
             NumericFixture {
                 locals,
@@ -812,13 +836,13 @@ fn power_always_retains_checked_lowering() {
                         NumericOperator::Power,
                         NumericScalar::Int,
                         binary_operands(
-                            int_const(10, 2, types.int, region),
-                            int_const(11, 3, types.int, region),
+                            int_expression(2, types.int, region, expressions),
+                            int_expression(3, types.int, region, expressions),
                         ),
                         0,
                     ),
                 )],
-                return_value: load_local(12, 0, types.int, region),
+                return_value: load_local(0, types.int, region, expressions),
             }
         },
     );
@@ -853,6 +877,7 @@ fn power_always_retains_checked_lowering() {
 /// identical to the retained table on the same HIR.
 #[test]
 fn proven_return_error_lowers_to_native_carrier_with_unchanged_branch() {
+    let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (mut type_environment, types) = build_type_environment();
@@ -868,7 +893,10 @@ fn proven_return_error_lowers_to_native_carrier_with_unchanged_branch() {
         region,
         locals,
         statements: vec![
-            statement(1, assign_local(0, int_const(100, 2, int, region))),
+            statement(
+                1,
+                define_local(0, int_expression(2, int, region, &mut expressions)),
+            ),
             statement(
                 2,
                 HirStatementKind::NumericOp {
@@ -878,15 +906,15 @@ fn proven_return_error_lowers_to_native_carrier_with_unchanged_branch() {
                     },
                     failure_mode: NumericFailureMode::ReturnError,
                     operands: binary_operands(
-                        load_local(101, 0, int, region),
-                        int_const(102, 3, int, region),
+                        load_local(0, int, region, &mut expressions),
+                        int_expression(3, int, region, &mut expressions),
                     ),
-                    result: LocalId(1),
+                    result: HirLocalDestination::Define(LocalId(1)),
                 },
             ),
         ],
         terminator: HirTerminator::FallibleBranch {
-            result: load_local(103, 1, carrier, region),
+            result: load_local(1, carrier, region, &mut expressions),
             success_block: BlockId(1),
             error_block: BlockId(2),
         },
@@ -897,13 +925,13 @@ fn proven_return_error_lowers_to_native_carrier_with_unchanged_branch() {
         locals: vec![],
         statements: vec![],
         terminator: HirTerminator::ReturnSuccess(expression(
-            106,
             HirExpressionKind::FallibleUnwrapSuccess {
-                result: Box::new(load_local(104, 1, carrier, region)),
+                result: load_local(1, carrier, region, &mut expressions),
             },
             int,
             region,
             ValueKind::RValue,
+            &mut expressions,
         )),
     };
     let error_block = HirBlock {
@@ -912,13 +940,13 @@ fn proven_return_error_lowers_to_native_carrier_with_unchanged_branch() {
         locals: vec![],
         statements: vec![],
         terminator: HirTerminator::ReturnError(expression(
-            105,
             HirExpressionKind::FallibleUnwrapError {
-                result: Box::new(load_local(108, 1, carrier, region)),
+                result: load_local(1, carrier, region, &mut expressions),
             },
             error_type,
             region,
             ValueKind::RValue,
+            &mut expressions,
         )),
     };
 
@@ -929,6 +957,7 @@ fn proven_return_error_lowers_to_native_carrier_with_unchanged_branch() {
         return_type: carrier,
     };
     let mut module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "proven_return_error",
@@ -947,7 +976,6 @@ fn proven_return_error_lowers_to_native_carrier_with_unchanged_branch() {
     let config = JsLoweringConfig::direct_js(false, NumericProfile::STANDARD);
     let analysed_module = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &analysed_table,
         &string_table,
         config.clone(),
@@ -957,7 +985,6 @@ fn proven_return_error_lowers_to_native_carrier_with_unchanged_branch() {
     .expect("analysed-table lowering should succeed");
     let retained_module = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         config,
@@ -1003,8 +1030,7 @@ fn proven_return_error_with_unsafe_sibling_keeps_checked_family() {
     let lowered = lower_numeric_fixture(
         "return_error_sibling",
         NumericProfile::STANDARD,
-        BorrowCheckReport::default(),
-        |types, environment, region| {
+        |types, environment, region, expressions| {
             let carrier = fixture_carrier(environment, types.int);
             let tuple_type = environment.intern_tuple(vec![types.int, carrier]);
             let (locals, local_names) = named_locals(
@@ -1020,51 +1046,57 @@ fn proven_return_error_with_unsafe_sibling_keeps_checked_family() {
                 locals,
                 local_names,
                 statements: vec![
-                    statement(1, assign_local(0, int_const(100, 2, int, region))),
+                    statement(
+                        1,
+                        define_local(0, int_expression(2, int, region, expressions)),
+                    ),
                     statement(
                         2,
                         return_error_op(
                             NumericOperator::Add,
                             NumericScalar::Int,
-                            load_local(101, 0, int, region),
-                            int_const(102, 3, int, region),
+                            load_local(0, int, region, expressions),
+                            int_expression(3, int, region, expressions),
                             1,
                         ),
                     ),
                     statement(
                         3,
-                        assign_local(0, int_const(103, i32::MAX as i64, int, region)),
+                        assign_local(0, int_expression(i32::MAX as i64, int, region, expressions)),
                     ),
                     statement(
                         4,
                         return_error_op(
                             NumericOperator::Add,
                             NumericScalar::Int,
-                            load_local(104, 0, int, region),
-                            int_const(105, 3, int, region),
+                            load_local(0, int, region, expressions),
+                            int_expression(3, int, region, expressions),
                             2,
                         ),
                     ),
                 ],
                 return_value: expression(
-                    106,
                     HirExpressionKind::TupleConstruct {
-                        elements: vec![
-                            expression(
-                                107,
-                                HirExpressionKind::FallibleUnwrapSuccess {
-                                    result: Box::new(load_local(108, 1, carrier, region)),
-                                },
-                                int,
-                                region,
-                                ValueKind::RValue,
-                            ),
-                            load_local(109, 2, carrier, region),
-                        ],
+                        elements: append_values(
+                            &[
+                                expression(
+                                    HirExpressionKind::FallibleUnwrapSuccess {
+                                        result: load_local(1, carrier, region, expressions),
+                                    },
+                                    int,
+                                    region,
+                                    ValueKind::RValue,
+                                    expressions,
+                                ),
+                                load_local(2, carrier, region, expressions),
+                            ],
+                            expressions,
+                        ),
                     },
                     tuple_type,
                     region,
                     ValueKind::RValue,
+                    expressions,
                 ),
             }
         },
@@ -1111,8 +1143,7 @@ fn proven_narrowing_elides_checked_cast_helpers() {
     let lowered = lower_numeric_fixture(
         "proven_narrow",
         NumericProfile::STANDARD,
-        BorrowCheckReport::default(),
-        |_types, environment, region| {
+        |_types, environment, region, expressions| {
             // The cast policy owns fixed I32 as its source domain, so the fixture literal carries
             // the actual I32 TypeId rather than the profile Int type.
             let i32_ty = builtin_type_ids::fixed_scalar(FixedScalar::I32);
@@ -1128,15 +1159,15 @@ fn proven_narrowing_elides_checked_cast_helpers() {
                         FixedScalar::I32,
                         FixedScalar::I8,
                         fixed_const(
-                            10,
                             FixedScalarValue::signed(FixedScalar::I32, 100).expect("100 fits I32"),
                             i32_ty,
                             region,
+                            expressions,
                         ),
                         0,
                     ),
                 )],
-                return_value: load_local(11, 0, carrier, region),
+                return_value: load_local(0, carrier, region, expressions),
             }
         },
     );
@@ -1179,8 +1210,7 @@ fn proven_bigint_narrowing_keeps_carrier_conversion() {
     let lowered = lower_numeric_fixture(
         "bigint_narrow",
         NumericProfile::STANDARD,
-        BorrowCheckReport::default(),
-        |_types, environment, region| {
+        |_types, environment, region, expressions| {
             let i32_ty = builtin_type_ids::fixed_scalar(FixedScalar::I32);
             let i64_ty = builtin_type_ids::fixed_scalar(FixedScalar::I64);
             let carrier = fixture_carrier(environment, i32_ty);
@@ -1194,16 +1224,16 @@ fn proven_bigint_narrowing_keeps_carrier_conversion() {
                         FixedScalar::I64,
                         FixedScalar::I32,
                         fixed_const(
-                            10,
                             FixedScalarValue::signed(FixedScalar::I64, 1000)
                                 .expect("1000 fits I64"),
                             i64_ty,
                             region,
+                            expressions,
                         ),
                         0,
                     ),
                 )],
-                return_value: load_local(11, 0, carrier, region),
+                return_value: load_local(0, carrier, region, expressions),
             }
         },
     );
@@ -1234,8 +1264,7 @@ fn narrowing_policy_with_retained_use_keeps_checked_helpers() {
     let lowered = lower_numeric_fixture(
         "shared_narrow",
         NumericProfile::STANDARD,
-        BorrowCheckReport::default(),
-        |_types, environment, region| {
+        |_types, environment, region, expressions| {
             // The cast policy owns fixed I32 as its source domain, so both fixture literals carry
             // the actual I32 TypeId rather than the profile Int type.
             let i32_ty = builtin_type_ids::fixed_scalar(FixedScalar::I32);
@@ -1254,11 +1283,11 @@ fn narrowing_policy_with_retained_use_keeps_checked_helpers() {
                             FixedScalar::I32,
                             FixedScalar::I8,
                             fixed_const(
-                                10,
                                 FixedScalarValue::signed(FixedScalar::I32, 100)
                                     .expect("100 fits I32"),
                                 i32_ty,
                                 region,
+                                expressions,
                             ),
                             0,
                         ),
@@ -1269,27 +1298,30 @@ fn narrowing_policy_with_retained_use_keeps_checked_helpers() {
                             FixedScalar::I32,
                             FixedScalar::I8,
                             fixed_const(
-                                11,
                                 FixedScalarValue::signed(FixedScalar::I32, 200)
                                     .expect("200 fits I32"),
                                 i32_ty,
                                 region,
+                                expressions,
                             ),
                             1,
                         ),
                     ),
                 ],
                 return_value: expression(
-                    12,
                     HirExpressionKind::TupleConstruct {
-                        elements: vec![
-                            load_local(110, 0, carrier, region),
-                            load_local(111, 1, carrier, region),
-                        ],
+                        elements: append_values(
+                            &[
+                                load_local(0, carrier, region, expressions),
+                                load_local(1, carrier, region, expressions),
+                            ],
+                            expressions,
+                        ),
                     },
                     tuple_type,
                     region,
                     ValueKind::RValue,
+                    expressions,
                 ),
             }
         },
@@ -1335,8 +1367,7 @@ fn proven_u64_remainder_stays_on_bigint_carrier() {
     let lowered = lower_numeric_fixture(
         "u64_remainder",
         NumericProfile::STANDARD,
-        BorrowCheckReport::default(),
-        |_types, _environment, region| {
+        |_types, _environment, region, expressions| {
             let u64_ty = builtin_type_ids::fixed_scalar(FixedScalar::U64);
             let (locals, local_names) = named_locals(&[(0, u64_ty, "v")], region);
             NumericFixture {
@@ -1349,24 +1380,24 @@ fn proven_u64_remainder_stays_on_bigint_carrier() {
                         NumericScalar::Fixed(FixedScalar::U64),
                         binary_operands(
                             fixed_const(
-                                10,
                                 FixedScalarValue::unsigned(FixedScalar::U64, 7)
                                     .expect("7 fits U64"),
                                 u64_ty,
                                 region,
+                                expressions,
                             ),
                             fixed_const(
-                                11,
                                 FixedScalarValue::unsigned(FixedScalar::U64, 3)
                                     .expect("3 fits U64"),
                                 u64_ty,
                                 region,
+                                expressions,
                             ),
                         ),
                         0,
                     ),
                 )],
-                return_value: load_local(12, 0, u64_ty, region),
+                return_value: load_local(0, u64_ty, region, expressions),
             }
         },
     );
@@ -1400,8 +1431,7 @@ fn proven_lowering_preserves_numeric_statement_order() {
     let lowered = lower_numeric_fixture(
         "proven_numeric_chain",
         NumericProfile::STANDARD,
-        BorrowCheckReport::default(),
-        |types, _environment, region| {
+        |types, _environment, region, expressions| {
             let (locals, local_names) = named_locals(
                 &[
                     (0, types.int, "a"),
@@ -1418,15 +1448,18 @@ fn proven_lowering_preserves_numeric_statement_order() {
                 locals,
                 local_names,
                 statements: vec![
-                    statement(1, assign_local(0, int_const(100, 2, int, region))),
+                    statement(
+                        1,
+                        define_local(0, int_expression(2, int, region, expressions)),
+                    ),
                     statement(
                         2,
                         trap_op(
                             NumericOperator::Add,
                             NumericScalar::Int,
                             binary_operands(
-                                load_local(101, 0, int, region),
-                                int_const(102, 3, int, region),
+                                load_local(0, int, region, expressions),
+                                int_expression(3, int, region, expressions),
                             ),
                             1,
                         ),
@@ -1437,8 +1470,8 @@ fn proven_lowering_preserves_numeric_statement_order() {
                             NumericOperator::Multiply,
                             NumericScalar::Int,
                             binary_operands(
-                                load_local(103, 1, int, region),
-                                int_const(104, 4, int, region),
+                                load_local(1, int, region, expressions),
+                                int_expression(4, int, region, expressions),
                             ),
                             2,
                         ),
@@ -1449,8 +1482,8 @@ fn proven_lowering_preserves_numeric_statement_order() {
                             NumericOperator::Subtract,
                             NumericScalar::Int,
                             binary_operands(
-                                load_local(105, 2, int, region),
-                                int_const(106, 5, int, region),
+                                load_local(2, int, region, expressions),
+                                int_expression(5, int, region, expressions),
                             ),
                             3,
                         ),
@@ -1461,8 +1494,8 @@ fn proven_lowering_preserves_numeric_statement_order() {
                             NumericOperator::IntegerDivide,
                             NumericScalar::Int,
                             binary_operands(
-                                load_local(107, 3, int, region),
-                                int_const(108, 2, int, region),
+                                load_local(3, int, region, expressions),
+                                int_expression(2, int, region, expressions),
                             ),
                             4,
                         ),
@@ -1473,14 +1506,14 @@ fn proven_lowering_preserves_numeric_statement_order() {
                             NumericOperator::Remainder,
                             NumericScalar::Int,
                             binary_operands(
-                                load_local(109, 4, int, region),
-                                int_const(110, 4, int, region),
+                                load_local(4, int, region, expressions),
+                                int_expression(4, int, region, expressions),
                             ),
                             5,
                         ),
                     ),
                 ],
-                return_value: load_local(111, 5, int, region),
+                return_value: load_local(5, int, region, expressions),
             }
         },
     );

@@ -16,9 +16,9 @@ use super::traces::{RuntimeConflictWitness, TraceAccess, TraceBuilder};
 use super::{OracleBounds, OracleLimitReason};
 use crate::compiler_frontend::analysis::borrow_checker::problem::RebindValue;
 use crate::compiler_frontend::analysis::borrow_checker::problem::{
-    AccessKind, AggregateField, BlockId, BorrowProblem, Call, CallId, CfgBlock, Event, EventId,
-    EventKind, OriginKind, Place, PlaceId, TerminatorEventKind, Use, UseId, ValueOrigin,
-    ValueOriginId,
+    AccessKind, AggregateField, BindingDestination, BlockId, BorrowProblem, Call, CallId, CfgBlock,
+    Event, EventId, EventKind, OriginKind, Place, PlaceId, TerminatorEventKind, Use, UseId,
+    ValueOrigin, ValueOriginId,
 };
 use crate::compiler_frontend::analysis::borrow_checker::problem::{Loan, LoanId};
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -214,7 +214,7 @@ fn dispatch_event<'problem, 'path>(
             argument,
         } => calls::execute_call_argument(context, event, *call, *index, argument),
 
-        EventKind::Terminator { kind } => execute_terminator(context, kind),
+        EventKind::Terminator { kind } => execute_terminator(context, event, kind),
 
         EventKind::CallEffect(effect) => calls::execute_call_effect(context, event, effect),
 
@@ -245,18 +245,26 @@ fn dispatch_event<'problem, 'path>(
 
 fn execute_fresh<'problem>(
     context: &mut OracleExecutionContext<'problem, '_>,
-    destination: PlaceId,
+    binding_destination: BindingDestination,
     origin: ValueOriginId,
 ) -> Result<EventExecutionResult<'problem>, CompilerError> {
     let problem = context.problem;
+    let destination = binding_destination.place();
     require_place(problem, destination, "fresh destination")?;
     require_origin(problem, origin, "fresh origin")?;
-    if let RuntimePlaceState::Alias { target, .. } = context.state.state(destination)? {
+    if let Some(target) =
+        context
+            .state
+            .write_through_target(problem, context.place_index, binding_destination)?
+    {
         let transition = context.state.apply_definition_transition(
             problem,
-            destination,
+            context.place_index,
+            binding_destination,
             DefinitionEventKind::Value,
-            DefinitionRole::Slot { current: target },
+            DefinitionRole::Slot {
+                current: target.node,
+            },
             context.trace_index,
         )?;
         finish_definition_transition(context, &transition);
@@ -290,7 +298,8 @@ fn execute_fresh<'problem>(
     };
     let transition = context.state.apply_definition_transition(
         problem,
-        destination,
+        context.place_index,
+        binding_destination,
         event_kind,
         role,
         context.trace_index,
@@ -325,6 +334,10 @@ pub(super) fn record_retired_capabilities(
             ..
         }
         | DefinitionTransition::ReplacedSlot {
+            retired_capabilities,
+            ..
+        }
+        | DefinitionTransition::ReplacedAlias {
             retired_capabilities,
             ..
         } => retired_capabilities,
@@ -371,19 +384,24 @@ fn execute_alias<'problem>(
     context: &mut OracleExecutionContext<'problem, '_>,
     event: &Event,
     source: PlaceId,
-    destination: PlaceId,
+    binding_destination: BindingDestination,
     access: AccessKind,
 ) -> Result<EventExecutionResult<'problem>, CompilerError> {
     let problem = context.problem;
     let place_index = context.place_index;
     let trace_index = context.trace_index;
     let bounds = context.bounds;
+    let destination = binding_destination.place();
     require_place(problem, source, "alias source")?;
     require_place(problem, destination, "alias destination")?;
 
     // The transition owner decides whether this source is consumed. A write-through keeps the
     // existing referent, so only validate source availability without materialising its target.
-    if let RuntimePlaceState::Alias { target, .. } = context.state.state(destination)? {
+    if let Some(target) =
+        context
+            .state
+            .write_through_target(problem, context.place_index, binding_destination)?
+    {
         if !is_place_available_without_materialising(problem, context.state, source)? {
             return Err(oracle_error(format!(
                 "alias source {:?} is unavailable at event {:?}",
@@ -392,9 +410,12 @@ fn execute_alias<'problem>(
         }
         let transition = context.state.apply_definition_transition(
             problem,
-            destination,
+            context.place_index,
+            binding_destination,
             DefinitionEventKind::DirectAlias,
-            DefinitionRole::Slot { current: target },
+            DefinitionRole::Slot {
+                current: target.node,
+            },
             trace_index,
         )?;
         finish_definition_transition(context, &transition);
@@ -416,31 +437,10 @@ fn execute_alias<'problem>(
         }
         Err(reason) => return Ok(EventExecutionResult::Inconclusive(reason)),
     };
-    // An unavailable destination installs the alias with its full residual path, so the alias
-    // state stays faithful. A slot-backed destination cannot: its replacement collapses through
-    // `DefinitionRole::slot_target` to a bare generation, which would make the destination
-    // compare equal to the whole base node and manufacture the definite overlap the contract
-    // classifies as UNDECIDABLE. Refuse before the transition, in the shape the Copy and
-    // Aggregate arms use.
-    if !resolved.target.path.is_empty()
-        && matches!(
-            context.state.state(destination)?,
-            RuntimePlaceState::Slot { .. }
-        )
-    {
-        return Ok(EventExecutionResult::Inconclusive(
-            OracleLimitReason::UndecidableOverlap {
-                left: resolved.target.clone(),
-                right: RuntimeAccessTarget {
-                    node: resolved.target.node,
-                    path: Box::new([]),
-                },
-            },
-        ));
-    }
     let transition = context.state.apply_definition_transition(
         problem,
-        destination,
+        context.place_index,
+        binding_destination,
         DefinitionEventKind::DirectAlias,
         DefinitionRole::Alias {
             target: resolved.target.clone(),
@@ -449,11 +449,11 @@ fn execute_alias<'problem>(
         trace_index,
     )?;
     finish_definition_transition(context, &transition);
-    // A slot replacement is a value rebind even when the syntax is exclusive. The reference
-    // carries that relationship as a shared provenance capability rather than a direct alias.
     match transition {
         DefinitionTransition::WriteThroughAlias { .. } => {}
-        DefinitionTransition::Installed { .. } => {
+        DefinitionTransition::Installed { .. }
+        | DefinitionTransition::ReplacedAlias { .. }
+        | DefinitionTransition::ReplacedSlot { .. } => {
             let capability_id = context.state.issue_capability(
                 access,
                 resolved.target,
@@ -461,17 +461,6 @@ fn execute_alias<'problem>(
                 trace_index,
                 event.id,
                 CapabilitySource::Alias,
-            )?;
-            context.trace.record_issue(trace_index, capability_id);
-        }
-        DefinitionTransition::ReplacedSlot { .. } => {
-            let capability_id = context.state.issue_capability(
-                AccessKind::Shared,
-                resolved.target,
-                BTreeSet::from([destination]),
-                trace_index,
-                event.id,
-                CapabilitySource::Provenance,
             )?;
             context.trace.record_issue(trace_index, capability_id);
         }
@@ -483,19 +472,22 @@ fn execute_copy<'problem>(
     context: &mut OracleExecutionContext<'problem, '_>,
     _event: &Event,
     source: PlaceId,
-    destination: PlaceId,
+    binding_destination: BindingDestination,
 ) -> Result<EventExecutionResult<'problem>, CompilerError> {
     let problem = context.problem;
     let place_index = context.place_index;
     let state = &mut *context.state;
     let bounds = context.bounds;
+    let destination = binding_destination.place();
     require_place(problem, source, "copy source")?;
     require_place(problem, destination, "copy destination")?;
     // The destination action is decided before any graph copy: an alias-backed destination
     // writes through, so allocating copied generations here would both consume the generation
     // bound and insert dynamic nodes for a value the event does not create. The source still
     // needs a non-materialising availability check because the reference validates every input.
-    if let RuntimePlaceState::Alias { target, .. } = state.state(destination)? {
+    if let Some(target) =
+        state.write_through_target(problem, context.place_index, binding_destination)?
+    {
         if !is_place_available_without_materialising(problem, state, source)? {
             return Err(oracle_error(format!(
                 "copy source {:?} is unavailable",
@@ -504,9 +496,12 @@ fn execute_copy<'problem>(
         }
         let transition = context.state.apply_definition_transition(
             problem,
-            destination,
+            context.place_index,
+            binding_destination,
             DefinitionEventKind::Value,
-            DefinitionRole::Slot { current: target },
+            DefinitionRole::Slot {
+                current: target.node,
+            },
             context.trace_index,
         )?;
         finish_definition_transition(context, &transition);
@@ -593,7 +588,8 @@ fn execute_copy<'problem>(
         .ok_or_else(|| oracle_error("copy correspondence is missing its root node"))?;
     let transition = state.apply_definition_transition(
         problem,
-        destination,
+        context.place_index,
+        binding_destination,
         DefinitionEventKind::Value,
         DefinitionRole::Slot {
             current: copied_root,
@@ -608,13 +604,14 @@ fn execute_projection<'problem>(
     context: &mut OracleExecutionContext<'problem, '_>,
     event: &Event,
     source: PlaceId,
-    destination: PlaceId,
+    binding_destination: BindingDestination,
     origin: ValueOriginId,
 ) -> Result<EventExecutionResult<'problem>, CompilerError> {
     let problem = context.problem;
     let place_index = context.place_index;
     let trace_index = context.trace_index;
     let bounds = context.bounds;
+    let destination = binding_destination.place();
     require_place(problem, source, "projection source")?;
     require_place(problem, destination, "projection destination")?;
     let origin_row = require_origin(problem, origin, "projection origin")?;
@@ -681,7 +678,8 @@ fn execute_projection<'problem>(
     // must never produce.
     let transition = context.state.apply_definition_transition(
         problem,
-        destination,
+        context.place_index,
+        binding_destination,
         DefinitionEventKind::Value,
         DefinitionRole::Slot {
             current: target.node,
@@ -704,24 +702,32 @@ fn execute_projection<'problem>(
 fn execute_rebind<'problem>(
     context: &mut OracleExecutionContext<'problem, '_>,
     event: &Event,
-    destination: PlaceId,
+    binding_destination: BindingDestination,
     value: &RebindValue,
 ) -> Result<EventExecutionResult<'problem>, CompilerError> {
     let problem = context.problem;
     let place_index = context.place_index;
     let trace_index = context.trace_index;
     let bounds = context.bounds;
+    let destination = binding_destination.place();
     require_place(problem, destination, "rebind destination")?;
     match value {
         RebindValue::Fresh(_) => {
             // Like every value-producing writer the destination action is decided before the
             // generation is allocated, so a write-through cannot consume generation bound.
-            if let RuntimePlaceState::Alias { target, .. } = context.state.state(destination)? {
+            if let Some(target) = context.state.write_through_target(
+                problem,
+                context.place_index,
+                binding_destination,
+            )? {
                 let transition = context.state.apply_definition_transition(
                     problem,
-                    destination,
+                    context.place_index,
+                    binding_destination,
                     DefinitionEventKind::Value,
-                    DefinitionRole::Slot { current: target },
+                    DefinitionRole::Slot {
+                        current: target.node,
+                    },
                     trace_index,
                 )?;
                 finish_definition_transition(context, &transition);
@@ -736,7 +742,8 @@ fn execute_rebind<'problem>(
             };
             let transition = context.state.apply_definition_transition(
                 problem,
-                destination,
+                context.place_index,
+                binding_destination,
                 DefinitionEventKind::Value,
                 DefinitionRole::Slot {
                     current: generation,
@@ -754,24 +761,21 @@ fn execute_rebind<'problem>(
         RebindValue::AliasFromPlace(source) => {
             require_place(problem, *source, "place rebind source")?;
 
-            // The value is ignored by a write-through. Check its availability without descending
-            // projections, then let the transition owner preserve the existing alias.
-            if let RuntimePlaceState::Alias { target, .. } = context.state.state(destination)? {
-                if !is_place_available_without_materialising(problem, context.state, *source)? {
-                    return Err(oracle_error(format!(
-                        "rebind source {:?} is unavailable at event {:?}",
-                        source, event.id
-                    )));
-                }
-                let transition = context.state.apply_definition_transition(
-                    problem,
-                    destination,
-                    DefinitionEventKind::Value,
-                    DefinitionRole::Slot { current: target },
-                    trace_index,
-                )?;
-                finish_definition_transition(context, &transition);
-                return Ok(EventExecutionResult::Continue);
+            // The destination role decides whether the binding is replaced, but the assigned
+            // value still contributes shared provenance on both slot writes and alias updates.
+            // Capture it before the transition can retire an overlapping destination holder.
+            let write_through_target = context.state.write_through_target(
+                problem,
+                context.place_index,
+                binding_destination,
+            )?;
+            if write_through_target.is_some()
+                && !is_place_available_without_materialising(problem, context.state, *source)?
+            {
+                return Err(oracle_error(format!(
+                    "rebind source {:?} is unavailable at event {:?}",
+                    source, event.id
+                )));
             }
 
             let resolved = match context.state.resolve_place(
@@ -789,11 +793,10 @@ fn execute_rebind<'problem>(
                 }
                 Err(reason) => return Ok(EventExecutionResult::Inconclusive(reason)),
             };
-            // The slot can only carry a generation node, so a source resolution that leaves a
-            // residual undecidable path would collapse the destination onto the whole base node
-            // and manufacture a definite overlap the contract classifies as UNDECIDABLE. Refuse
-            // before installing, in the same shape the Copy and Aggregate arms use.
-            if !resolved.target.path.is_empty() {
+
+            // A slot stores only a generation node, while an alias-update provenance capability
+            // can faithfully retain the source's residual path in its runtime target.
+            if write_through_target.is_none() && !resolved.target.path.is_empty() {
                 return Ok(EventExecutionResult::Inconclusive(
                     OracleLimitReason::UndecidableOverlap {
                         left: resolved.target.clone(),
@@ -804,19 +807,34 @@ fn execute_rebind<'problem>(
                     },
                 ));
             }
-            // An alias-from-place rebind produces a value and a slot: it is routed through the
-            // slot-producing event category so that a slot-backed destination has its slot
-            // replaced and its holder retired, which an alias row would never do.
-            let transition = context.state.apply_definition_transition(
-                problem,
-                destination,
-                DefinitionEventKind::Value,
-                DefinitionRole::Slot {
+
+            let destination_role = match write_through_target {
+                Some(target) => DefinitionRole::Slot {
+                    current: target.node,
+                },
+                None => DefinitionRole::Slot {
                     current: resolved.target.node,
                 },
+            };
+            let transition = context.state.apply_definition_transition(
+                problem,
+                context.place_index,
+                binding_destination,
+                DefinitionEventKind::Value,
+                destination_role,
                 trace_index,
             )?;
             finish_definition_transition(context, &transition);
+
+            let capability_id = context.state.issue_capability(
+                AccessKind::Shared,
+                resolved.target,
+                BTreeSet::from([destination]),
+                trace_index,
+                event.id,
+                CapabilitySource::Provenance,
+            )?;
+            context.trace.record_issue(trace_index, capability_id);
             Ok(EventExecutionResult::Continue)
         }
     }
@@ -825,15 +843,20 @@ fn execute_rebind<'problem>(
 fn execute_aggregate<'problem>(
     context: &mut OracleExecutionContext<'problem, '_>,
     event: &Event,
-    destination: PlaceId,
+    binding_destination: BindingDestination,
     fields: &[AggregateField],
 ) -> Result<EventExecutionResult<'problem>, CompilerError> {
     let problem = context.problem;
+    let destination = binding_destination.place();
     require_place(problem, destination, "aggregate destination")?;
     // The destination action is decided before the aggregate graph is built: a write-through
     // onto an alias must not allocate an outer node or register its children. Each field still
     // needs a non-materialising availability check because the reference validates every input.
-    if let RuntimePlaceState::Alias { target, .. } = context.state.state(destination)? {
+    if let Some(target) =
+        context
+            .state
+            .write_through_target(problem, context.place_index, binding_destination)?
+    {
         for field in fields {
             require_place(problem, field.source, "aggregate child")?;
             if !is_place_available_without_materialising(problem, context.state, field.source)? {
@@ -845,9 +868,12 @@ fn execute_aggregate<'problem>(
         }
         let transition = context.state.apply_definition_transition(
             problem,
-            destination,
+            context.place_index,
+            binding_destination,
             DefinitionEventKind::Value,
-            DefinitionRole::Slot { current: target },
+            DefinitionRole::Slot {
+                current: target.node,
+            },
             context.trace_index,
         )?;
         finish_definition_transition(context, &transition);
@@ -901,7 +927,8 @@ fn execute_aggregate<'problem>(
         .insert(outer, super::state::RuntimeAggregate { children });
     let transition = context.state.apply_definition_transition(
         problem,
-        destination,
+        context.place_index,
+        binding_destination,
         DefinitionEventKind::Value,
         DefinitionRole::Slot { current: outer },
         context.trace_index,
@@ -1003,6 +1030,8 @@ pub(super) fn execute_access(
     let use_row = require_use(problem, use_id, "access")?;
     require_place(problem, use_row.place, "access place")?;
     let access_kind = use_row.kind.access_kind();
+    let binding_destination = use_row.kind.binding_destination();
+    let explicit_definition = binding_destination.is_some_and(BindingDestination::defines);
     let pending_result = state.pending_call_results.contains_key(&use_row.place);
     let resolved = match state.resolve_place(
         problem,
@@ -1014,15 +1043,15 @@ pub(super) fn execute_access(
         Err(reason) => return Ok(AccessExecutionResult::Inconclusive(reason)),
     };
     let (target, existing_state) = match resolved {
-        // A defining write never installs anything: it resolves through the destination's state
-        // as it was before the paired provenance event consumes that state, and the writer owns
-        // the role transition alone. The reference still kills holders for a defining write
+        // A paired Define access never installs anything: it resolves through the destination's
+        // state as it was before the paired provenance event consumes that state, and the writer
+        // owns the role transition alone. The reference still kills holders for a defining write
         // independently of that writer (`holder_kills`, `loans.rs:794-800`), so this write ends
         // every capability held by a structurally overlapping place before deferring. An
         // unavailable destination resolves to nothing, but a covered holder can still exist, so
         // the kill runs even on the deferred path.
         Some(resolved) => (resolved.target, Some(resolved.state)),
-        None if use_row.definition => {
+        None if explicit_definition || (binding_destination.is_none() && use_row.definition) => {
             let retired = state.retire_overlapping_holders(problem, use_row.place, trace_index)?;
             for capability_id in retired.iter().copied() {
                 trace.record_end(trace_index, capability_id);
@@ -1046,16 +1075,16 @@ pub(super) fn execute_access(
         call,
     )?
     .into_vec();
-    // A definition is never conflict-checked: the reference's access_conflict_overlap returns
-    // Ok(None) whenever access.definition. The post-hoc interval scan mirrors that by skipping
-    // any capability the entry covers, so a non-write-through defining write must cover every
-    // capability its target could overlap, not just the ones its place already holds. A write
-    // through an alias-backed destination is different: the reference reclassifies such a use as
-    // an ordinary access (`event_accesses`, `loans.rs:233`), so its conflicts are real and the
-    // cover must not be installed for it. This is bookkeeping only: it marks the scanned entry,
-    // it does not extend any capability interval.
-    let write_through = matches!(existing_state, Some(RuntimePlaceState::Alias { .. }));
-    if use_row.definition && !write_through {
+    // Explicit Define accesses retire capabilities without reporting conflicts. Update accesses
+    // retain independent generation-replacement evidence for slots, while updates through an
+    // alias remain conflict-checked mutations. Untagged internal writes use the same generation
+    // evidence. The post-hoc interval scan mirrors Define by marking every capability
+    // its target could overlap, not only capabilities already held by its place. This is
+    // bookkeeping only: it marks the scanned entry, it does not extend any capability interval.
+    let write_through = binding_destination.is_none_or(|destination| !destination.defines())
+        && matches!(existing_state, Some(RuntimePlaceState::Alias { .. }));
+    let access_definition = explicit_definition || (use_row.definition && !write_through);
+    if access_definition {
         for capability_id in state.capabilities.keys().copied() {
             let overlapping = match state.capabilities.get(&capability_id) {
                 Some(capability) => !matches!(
@@ -1072,8 +1101,8 @@ pub(super) fn execute_access(
     }
     // The direct rule conflicts an exclusive access with a shared-alias candidate state. The
     // contract reclassifies the paired access of a write-through as an ordinary mutation
-    // (`loans.rs:227-234`), so a defining write through a shared alias stays conflict-checked
-    // exactly like a non-defining one. A pending call result never reaches this rule: its
+    // (`loans.rs:227-234`), so an Update through a shared alias stays conflict-checked exactly
+    // like any other mutation. A pending call result never reaches this rule: its
     // entry is registered for a slot-backed result, and any event that would give the place
     // a different state before the confirming write is rejected as malformed, so a live
     // pending entry and an alias-backed candidate state are mutually exclusive.
@@ -1091,7 +1120,8 @@ pub(super) fn execute_access(
     // exercise membership means the capability already passed holder coverage for this access,
     // so any non-disjoint target genuinely applies to it. Without one the access is legal and
     // falls through.
-    let shared_alias_witness = if access_kind == AccessKind::Exclusive
+    let shared_alias_witness = if !access_definition
+        && access_kind == AccessKind::Exclusive
         && matches!(
             existing_state,
             Some(RuntimePlaceState::Alias {
@@ -1121,7 +1151,7 @@ pub(super) fn execute_access(
             place: use_row.place,
             kind: access_kind,
             target: target.clone(),
-            definition: use_row.definition,
+            definition: access_definition,
             exercised: exercised.into_boxed_slice(),
         },
     );
@@ -1139,7 +1169,7 @@ pub(super) fn execute_access(
     // this defining access can hold the exemption and a stale entry can never outlive the
     // generation it was registered against. Both the bound generation and the provenance
     // capabilities must survive their confirmation.
-    if use_row.definition && !write_through && !pending_result {
+    if (use_row.definition || explicit_definition) && !write_through && !pending_result {
         let retired = state.retire_overlapping_holders(problem, use_row.place, trace_index)?;
         for capability_id in retired.iter().copied() {
             trace.record_end(trace_index, capability_id);
@@ -1168,7 +1198,7 @@ pub(super) fn execute_access(
         ));
     }
 
-    if pending_result && use_row.definition {
+    if pending_result && (binding_destination.is_some() || use_row.definition) {
         let expected = state.pending_call_results.remove(&use_row.place);
         if expected.as_ref() != Some(&target) {
             return Err(oracle_error(format!(
@@ -1291,14 +1321,90 @@ fn execute_loan_kill<'problem>(
     Ok(EventExecutionResult::Continue)
 }
 fn execute_terminator<'problem>(
-    context: &OracleExecutionContext<'problem, '_>,
+    context: &mut OracleExecutionContext<'problem, '_>,
+    event: &Event,
     kind: &'problem TerminatorEventKind,
 ) -> Result<EventExecutionResult<'problem>, CompilerError> {
     let problem = context.problem;
     match kind {
-        TerminatorEventKind::Jump { target }
-        | TerminatorEventKind::Break { target }
-        | TerminatorEventKind::Continue { target } => {
+        TerminatorEventKind::Jump { target, arguments } => {
+            require_block(problem, *target)?;
+            let mut captured = Vec::with_capacity(arguments.len());
+            for argument in arguments.iter() {
+                if !argument.destination.defines() {
+                    return Err(oracle_error(format!(
+                        "jump event {:?} has a non-defining destination",
+                        event.id
+                    )));
+                }
+                require_place(problem, argument.source, "jump source")?;
+                require_place(problem, argument.destination.place(), "jump destination")?;
+                let source = match context.state.resolve_place(
+                    problem,
+                    context.place_index,
+                    argument.source,
+                    context.bounds.max_dynamic_generations,
+                )? {
+                    Ok(Some(source)) => source,
+                    Ok(None) => {
+                        return Err(oracle_error(format!(
+                            "jump source {:?} is unavailable at event {:?}",
+                            argument.source, event.id
+                        )));
+                    }
+                    Err(reason) => return Ok(EventExecutionResult::Inconclusive(reason)),
+                };
+                let source = match context
+                    .state
+                    .resolve_target(source.target, context.bounds.max_dynamic_generations)?
+                {
+                    Ok(source) => source,
+                    Err(reason) => return Ok(EventExecutionResult::Inconclusive(reason)),
+                };
+                if !source.path.is_empty() {
+                    return Ok(EventExecutionResult::Inconclusive(
+                        OracleLimitReason::UndecidableOverlap {
+                            left: source.clone(),
+                            right: RuntimeAccessTarget {
+                                node: source.node,
+                                path: Box::new([]),
+                            },
+                        },
+                    ));
+                }
+                captured.push((*argument, source));
+            }
+
+            // Resolve all predecessor values first, so repeated block entry and swaps never
+            // read a destination after an earlier edge definition has replaced it.
+            for (argument, source) in captured {
+                let destination = argument.destination.place();
+                let transition = context.state.apply_definition_transition(
+                    problem,
+                    context.place_index,
+                    argument.destination,
+                    DefinitionEventKind::Value,
+                    DefinitionRole::Slot {
+                        current: source.node,
+                    },
+                    context.trace_index,
+                )?;
+                finish_definition_transition(context, &transition);
+                let capability_id = context.state.issue_capability(
+                    AccessKind::Shared,
+                    source,
+                    BTreeSet::from([destination]),
+                    context.trace_index,
+                    event.id,
+                    CapabilitySource::Provenance,
+                )?;
+                context
+                    .trace
+                    .record_issue(context.trace_index, capability_id);
+            }
+            Ok(EventExecutionResult::NextBlock(*target))
+        }
+        TerminatorEventKind::Break { target } | TerminatorEventKind::Continue { target } => {
             require_block(problem, *target)?;
             Ok(EventExecutionResult::NextBlock(*target))
         }

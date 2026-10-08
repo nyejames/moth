@@ -26,6 +26,7 @@ use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
+use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, LocalId, RegionId};
@@ -33,8 +34,9 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
-use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
+};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork, PathTable};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -116,11 +118,9 @@ mod fixture_locals {
     pub(crate) const WIDE_U64: LocalId = LocalId(0);
 }
 
-/// Literal statement and load ids of the isolated-width functions (`i64=6`, `u64=36` exports).
+/// Literal statement ids of the isolated-width functions (`i64=6`, `u64=36` exports).
 const WIDE_I64_LITERAL_ID: HirNodeId = HirNodeId(8000);
-const WIDE_I64_LOAD_ID: HirNodeId = HirNodeId(8013);
 const WIDE_U64_LITERAL_ID: HirNodeId = HirNodeId(9000);
-const WIDE_U64_LOAD_ID: HirNodeId = HirNodeId(9013);
 
 /// Builds the genuine HIR both proof tables analyse.
 pub(crate) fn build_proof_fixture_hir() -> ProofFixture {
@@ -128,6 +128,7 @@ pub(crate) fn build_proof_fixture_hir() -> ProofFixture {
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
+    let mut expressions = HirExpressionStore::default();
     let int_type: TypeId = types.int;
     let i64_type = builtin_type_ids::fixed_scalar(FixedScalar::I64);
     let u64_type = builtin_type_ids::fixed_scalar(FixedScalar::U64);
@@ -149,26 +150,31 @@ pub(crate) fn build_proof_fixture_hir() -> ProofFixture {
         isolated_u64_alias_multiply: HirNodeId(7200),
     };
 
-    // Builds one `Int`/fixed-scalar literal Assign; expression id is statement id*100+2.
-    let literal = |statement_id: HirNodeId, target: LocalId, value: i64, ty: TypeId| HirStatement {
+    // Builds one `Int`/fixed-scalar literal Assign.
+    let literal = |expressions: &mut HirExpressionStore,
+                   statement_id: HirNodeId,
+                   target: LocalId,
+                   value: i64,
+                   ty: TypeId| HirStatement {
         id: statement_id,
-        kind: HirStatementKind::Assign {
-            target: HirPlace::Local(target),
+        kind: HirStatementKind::Write {
+            target: HirWriteTarget::DefineLocal(target),
             value: expression(
-                statement_id.0 * 100 + 2,
                 HirExpressionKind::Int(value),
                 ty,
                 region,
                 ValueKind::Const,
+                expressions,
             ),
         },
         span: None,
     };
-    // Builds one binary NumericOp; operand ids are statement id*100 and *100+1.
-    let numeric_binary = |statement_id: HirNodeId,
+    // Builds one binary NumericOp with two module-store operands.
+    let numeric_binary = |expressions: &mut HirExpressionStore,
+                          statement_id: HirNodeId,
                           operator: NumericOperator,
                           domain: NumericScalar,
-                          dest: LocalId,
+                          dest: HirLocalDestination,
                           left: LocalId,
                           right: LocalId,
                           operand_type: TypeId| {
@@ -178,8 +184,8 @@ pub(crate) fn build_proof_fixture_hir() -> ProofFixture {
                 op: HirNumericOp { operator, domain },
                 failure_mode: NumericFailureMode::Trap,
                 operands: HirNumericOperands::Binary {
-                    left: load_local(statement_id.0 * 100, left, operand_type, region),
-                    right: load_local(statement_id.0 * 100 + 1, right, operand_type, region),
+                    left: load_local(expressions, left, operand_type, region),
+                    right: load_local(expressions, right, operand_type, region),
                 },
                 result: dest,
             },
@@ -187,24 +193,29 @@ pub(crate) fn build_proof_fixture_hir() -> ProofFixture {
         }
     };
     // Builds one unary Negate over a dynamic parameter.
-    let numeric_negate =
-        |statement_id: HirNodeId, operand: LocalId, operand_type: TypeId| HirStatement {
-            id: statement_id,
-            kind: HirStatementKind::NumericOp {
-                op: HirNumericOp {
-                    operator: NumericOperator::Negate,
-                    domain: NumericScalar::Int,
-                },
-                failure_mode: NumericFailureMode::Trap,
-                operands: HirNumericOperands::Unary {
-                    operand: load_local(statement_id.0 * 100, operand, operand_type, region),
-                },
-                result: operand,
+    let numeric_negate = |expressions: &mut HirExpressionStore,
+                          statement_id: HirNodeId,
+                          operand: LocalId,
+                          operand_type: TypeId| HirStatement {
+        id: statement_id,
+        kind: HirStatementKind::NumericOp {
+            op: HirNumericOp {
+                operator: NumericOperator::Negate,
+                domain: NumericScalar::Int,
             },
-            span: None,
-        };
+            failure_mode: NumericFailureMode::Trap,
+            operands: HirNumericOperands::Unary {
+                operand: load_local(expressions, operand, operand_type, region),
+            },
+            result: HirLocalDestination::Update(operand),
+        },
+        span: None,
+    };
     // Builds one Power over literal Int operands.
-    let numeric_literal_power = |statement_id: HirNodeId, base: i64, exponent: i64| HirStatement {
+    let numeric_literal_power = |expressions: &mut HirExpressionStore,
+                                 statement_id: HirNodeId,
+                                 base: i64,
+                                 exponent: i64| HirStatement {
         id: statement_id,
         kind: HirStatementKind::NumericOp {
             op: HirNumericOp {
@@ -214,112 +225,144 @@ pub(crate) fn build_proof_fixture_hir() -> ProofFixture {
             failure_mode: NumericFailureMode::Trap,
             operands: HirNumericOperands::Binary {
                 left: expression(
-                    statement_id.0 * 100,
                     HirExpressionKind::Int(base),
                     int_type,
                     region,
                     ValueKind::Const,
+                    expressions,
                 ),
                 right: expression(
-                    statement_id.0 * 100 + 1,
                     HirExpressionKind::Int(exponent),
                     int_type,
                     region,
                     ValueKind::Const,
+                    expressions,
                 ),
             },
-            result: fixture_locals::P,
+            result: HirLocalDestination::Define(fixture_locals::P),
         },
         span: None,
     };
 
-    // Every expression id derives from its statement id, so uniqueness is structural.
+    // Expression IDs follow append order; statement IDs continue to identify proof facts.
     let statements = vec![
-        literal(HirNodeId(1000), fixture_locals::X, 3, int_type),
+        literal(
+            &mut expressions,
+            HirNodeId(1000),
+            fixture_locals::X,
+            3,
+            int_type,
+        ),
         numeric_binary(
+            &mut expressions,
             ids.proven_alias_add,
             NumericOperator::Add,
             NumericScalar::Int,
-            fixture_locals::X,
+            HirLocalDestination::Update(fixture_locals::X),
             fixture_locals::X,
             fixture_locals::X,
             int_type,
         ),
         numeric_binary(
+            &mut expressions,
             ids.proven_alias_multiply,
             NumericOperator::Multiply,
             NumericScalar::Int,
-            fixture_locals::X,
+            HirLocalDestination::Update(fixture_locals::X),
             fixture_locals::X,
             fixture_locals::X,
             int_type,
         ),
         numeric_binary(
+            &mut expressions,
             ids.dynamic_subtract,
             NumericOperator::Subtract,
             NumericScalar::Int,
-            fixture_locals::C,
+            HirLocalDestination::Define(fixture_locals::C),
             fixture_locals::A,
             fixture_locals::D,
             int_type,
         ),
-        numeric_negate(ids.dynamic_negate, fixture_locals::B, int_type),
+        numeric_negate(
+            &mut expressions,
+            ids.dynamic_negate,
+            fixture_locals::B,
+            int_type,
+        ),
         numeric_binary(
+            &mut expressions,
             ids.dynamic_divide,
             NumericOperator::IntegerDivide,
             NumericScalar::Int,
-            fixture_locals::Q,
+            HirLocalDestination::Define(fixture_locals::Q),
             fixture_locals::X,
             fixture_locals::D,
             int_type,
         ),
-        literal(HirNodeId(2000), fixture_locals::W, 3, i64_type),
+        literal(
+            &mut expressions,
+            HirNodeId(2000),
+            fixture_locals::W,
+            3,
+            i64_type,
+        ),
         numeric_binary(
+            &mut expressions,
             ids.proven_i64_alias_add,
             NumericOperator::Add,
             NumericScalar::Fixed(FixedScalar::I64),
-            fixture_locals::W,
+            HirLocalDestination::Update(fixture_locals::W),
             fixture_locals::W,
             fixture_locals::W,
             i64_type,
         ),
-        literal(HirNodeId(3000), fixture_locals::U, 6, u64_type),
+        literal(
+            &mut expressions,
+            HirNodeId(3000),
+            fixture_locals::U,
+            6,
+            u64_type,
+        ),
         numeric_binary(
+            &mut expressions,
             ids.proven_u64_alias_divide,
             NumericOperator::IntegerDivide,
             NumericScalar::Fixed(FixedScalar::U64),
-            fixture_locals::U,
+            HirLocalDestination::Update(fixture_locals::U),
             fixture_locals::U,
             fixture_locals::U,
             u64_type,
         ),
-        numeric_literal_power(ids.power, 2, 3),
+        numeric_literal_power(&mut expressions, ids.power, 2, 3),
         // The exported checksum consumes the safe chain and every dynamic result:
         // r = ((x + q) + (a - d)) + p = 44 for the safe case. Earlier writes and Power
         // clear the cached x interval, so the checksum add keeps its runtime check.
         numeric_binary(
+            &mut expressions,
             ids.checksum_add,
             NumericOperator::Add,
             NumericScalar::Int,
-            fixture_locals::R,
+            HirLocalDestination::Define(fixture_locals::R),
             fixture_locals::X,
             fixture_locals::Q,
             int_type,
         ),
         numeric_binary(
+            &mut expressions,
             ids.consumed_checksum_subtract,
             NumericOperator::Add,
             NumericScalar::Int,
-            fixture_locals::R,
+            HirLocalDestination::Update(fixture_locals::R),
             fixture_locals::R,
             fixture_locals::C,
             int_type,
         ),
         numeric_binary(
+            &mut expressions,
             ids.consumed_checksum_power_add,
             NumericOperator::Add,
             NumericScalar::Int,
-            fixture_locals::R,
+            HirLocalDestination::Update(fixture_locals::R),
             fixture_locals::R,
             fixture_locals::P,
             int_type,
@@ -342,7 +385,12 @@ pub(crate) fn build_proof_fixture_hir() -> ProofFixture {
             local(9, int_type, region),
         ],
         statements,
-        terminator: HirTerminator::Return(load_local(9900, fixture_locals::R, int_type, region)),
+        terminator: HirTerminator::Return(load_local(
+            &mut expressions,
+            fixture_locals::R,
+            int_type,
+            region,
+        )),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
@@ -359,19 +407,26 @@ pub(crate) fn build_proof_fixture_hir() -> ProofFixture {
         region,
         locals: vec![local(0, i64_type, region)],
         statements: vec![
-            literal(WIDE_I64_LITERAL_ID, fixture_locals::WIDE_I64, 3, i64_type),
+            literal(
+                &mut expressions,
+                WIDE_I64_LITERAL_ID,
+                fixture_locals::WIDE_I64,
+                3,
+                i64_type,
+            ),
             numeric_binary(
+                &mut expressions,
                 ids.isolated_i64_alias_add,
                 NumericOperator::Add,
                 NumericScalar::Fixed(FixedScalar::I64),
-                fixture_locals::WIDE_I64,
+                HirLocalDestination::Update(fixture_locals::WIDE_I64),
                 fixture_locals::WIDE_I64,
                 fixture_locals::WIDE_I64,
                 i64_type,
             ),
         ],
         terminator: HirTerminator::Return(load_local(
-            WIDE_I64_LOAD_ID.0,
+            &mut expressions,
             fixture_locals::WIDE_I64,
             i64_type,
             region,
@@ -388,19 +443,26 @@ pub(crate) fn build_proof_fixture_hir() -> ProofFixture {
         region,
         locals: vec![local(0, u64_type, region)],
         statements: vec![
-            literal(WIDE_U64_LITERAL_ID, fixture_locals::WIDE_U64, 6, u64_type),
+            literal(
+                &mut expressions,
+                WIDE_U64_LITERAL_ID,
+                fixture_locals::WIDE_U64,
+                6,
+                u64_type,
+            ),
             numeric_binary(
+                &mut expressions,
                 ids.isolated_u64_alias_multiply,
                 NumericOperator::Multiply,
                 NumericScalar::Fixed(FixedScalar::U64),
-                fixture_locals::WIDE_U64,
+                HirLocalDestination::Update(fixture_locals::WIDE_U64),
                 fixture_locals::WIDE_U64,
                 fixture_locals::WIDE_U64,
                 u64_type,
             ),
         ],
         terminator: HirTerminator::Return(load_local(
-            WIDE_U64_LOAD_ID.0,
+            &mut expressions,
             fixture_locals::WIDE_U64,
             u64_type,
             region,
@@ -418,6 +480,7 @@ pub(crate) fn build_proof_fixture_hir() -> ProofFixture {
     let module = build_module(
         &mut path_fork,
         &mut string_table,
+        expressions,
         vec![
             (start_function, start_path, HirFunctionOrigin::EntryStart),
             (

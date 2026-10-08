@@ -1,7 +1,7 @@
 //! HIR statements.
 //!
 //! WHAT: effectful operations inside HIR blocks.
-//! WHY: statements are where assignment, calls, side-effect expressions, and runtime fragment pushes
+//! WHY: statements are where writes, calls, side-effect expressions, and runtime fragment pushes
 //! become explicit before borrow validation and backend lowering.
 //!
 //! ## Cast contract
@@ -15,14 +15,16 @@
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirMapOp};
-use crate::compiler_frontend::hir::ids::{HirNodeId, LocalId};
+use crate::compiler_frontend::hir::expression_store::HirValueRange;
+use crate::compiler_frontend::hir::expressions::{
+    HirExpression, HirExpressionKind, HirMapOp, ValueKind,
+};
+use crate::compiler_frontend::hir::ids::{HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
 };
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::StringIdRemap;
 #[derive(Debug, Clone)]
 pub struct HirStatement {
     pub id: HirNodeId,
@@ -31,11 +33,61 @@ pub struct HirStatement {
     pub span: Option<SourceSpan>,
 }
 
+/// The binding event produced by an operation that writes a local result.
+///
+/// A definition creates a new dynamic binding occurrence for this local when the operation
+/// executes while preserving the produced value's allocation provenance. An update writes an
+/// already-existing local and preserves ordinary place and alias semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HirLocalDestination {
+    Define(LocalId),
+    Update(LocalId),
+}
+
+impl HirLocalDestination {
+    pub const fn local(self) -> LocalId {
+        match self {
+            Self::Define(local) | Self::Update(local) => local,
+        }
+    }
+}
+
+/// Target of one ordinary value write.
+///
+/// Definitions target a local binding directly. Updates target an existing place, including a
+/// local or a projected field/index, so a mutable alias keeps its write-through semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HirWriteTarget {
+    DefineLocal(LocalId),
+    AssignPlace(HirPlace),
+}
+
+impl HirWriteTarget {
+    /// Whether this update reads the same unprojected binding it writes.
+    ///
+    /// A direct self-update preserves the binding's existing relationship. Definitions,
+    /// projected writes and reads from another binding keep their ordinary write semantics.
+    pub(crate) fn is_direct_self_update_of(self, value: &HirExpression) -> bool {
+        let Self::AssignPlace(destination) = self else {
+            return false;
+        };
+        if !destination.projections.is_empty() || value.value_kind != ValueKind::Place {
+            return false;
+        }
+
+        matches!(
+            &value.kind,
+            HirExpressionKind::Load(source)
+                if source.root == destination.root && source.projections.is_empty()
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum HirStatementKind {
-    Assign {
-        target: HirPlace,
-        value: HirExpression,
+    Write {
+        target: HirWriteTarget,
+        value: HirValueId,
     },
 
     /// Call a function and optionally capture the result.
@@ -46,12 +98,12 @@ pub enum HirStatementKind {
     ///      a top-level call in statement position is represented directly as a `Call`.
     Call {
         target: CallTarget,
-        args: Vec<HirExpression>,
-        result: Option<LocalId>,
+        args: HirValueRange,
+        result: Option<HirLocalDestination>,
     },
 
     /// Expression evaluated only for side effects.
-    Expr(HirExpression),
+    Expr(HirValueId),
 
     /// Accumulate one runtime string value into the entry start() fragment vec.
     ///
@@ -62,7 +114,7 @@ pub enum HirStatementKind {
         /// The local holding the Vec<String> accumulator inside entry start().
         vec_local: LocalId,
         /// Expression that produces the string value to push.
-        value: HirExpression,
+        value: HirValueId,
     },
 
     /// Explicit deterministic drop.
@@ -83,8 +135,8 @@ pub enum HirStatementKind {
     ///      result is needed as a statement-local temporary.
     CastOp {
         policy: BuiltinCastPolicyId,
-        source: HirExpression,
-        result: Option<LocalId>,
+        source: HirValueId,
+        result: Option<HirLocalDestination>,
     },
 
     // -------------------------
@@ -101,11 +153,11 @@ pub enum HirStatementKind {
         /// The specific builtin operation (get, contains, set, remove, clear, length).
         op: HirMapOp,
         /// The map value being operated on.
-        receiver: HirExpression,
+        receiver: HirValueId,
         /// Operation-specific arguments such as lookup keys or inserted values.
-        args: Vec<HirExpression>,
+        args: HirValueRange,
         /// Local that receives the operation result, if any.
-        result: Option<LocalId>,
+        result: Option<HirLocalDestination>,
     },
 
     // -------------------------
@@ -131,7 +183,7 @@ pub enum HirStatementKind {
         /// The operand(s) to the operation.
         operands: HirNumericOperands,
         /// Local that receives the operation result or fallible carrier.
-        result: LocalId,
+        result: HirLocalDestination,
     },
 
     /// Produce the failure selected by a language-defined range-step guard.
@@ -142,7 +194,7 @@ pub enum HirStatementKind {
     RangeStepFailure {
         cause: RangeStepFailureCause,
         failure_mode: NumericFailureMode,
-        result: LocalId,
+        result: HirLocalDestination,
     },
 
     /// Compute the next candidate for a compiler-generated binary-float range loop.
@@ -156,14 +208,14 @@ pub enum HirStatementKind {
     /// `domain` is limited to profile `Float` and fixed `F32`/`F64` ranges. The expressions are
     /// already converted to that domain by HIR lowering.
     FloatRangeCandidate {
-        current: HirExpression,
-        step: HirExpression,
-        end: HirExpression,
-        ascending: HirExpression,
+        current: HirValueId,
+        step: HirValueId,
+        end: HirValueId,
+        ascending: HirValueId,
         inclusive: bool,
         domain: NumericScalar,
-        candidate_result: LocalId,
-        in_range_result: LocalId,
+        candidate_result: HirLocalDestination,
+        in_range_result: HirLocalDestination,
     },
 
     // -------------------------
@@ -185,11 +237,11 @@ pub enum HirStatementKind {
     ///   validation.
     FormatFloat {
         /// The `Float` expression to format.
-        source: HirExpression,
+        source: HirValueId,
         /// How the operation should behave on failure.
         failure_mode: NumericFailureMode,
         /// Local that receives the formatted string or fallible carrier.
-        result: LocalId,
+        result: HirLocalDestination,
     },
 
     /// Validate that a `Float` value is finite before exposing it as an ordinary Moth `Float`.
@@ -208,59 +260,10 @@ pub enum HirStatementKind {
     ///   validation.
     ValidateFloat {
         /// The `Float` expression to validate.
-        source: HirExpression,
+        source: HirValueId,
         /// How the operation should behave on failure.
         failure_mode: NumericFailureMode,
         /// Local that receives the validated float or fallible carrier.
-        result: LocalId,
+        result: HirLocalDestination,
     },
-}
-
-impl HirStatement {
-    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
-        match &mut self.kind {
-            HirStatementKind::Assign { target, value } => {
-                target.remap_string_ids(remap);
-                value.remap_string_ids(remap);
-            }
-            HirStatementKind::Call { args, .. } => {
-                for argument in args {
-                    argument.remap_string_ids(remap);
-                }
-            }
-            HirStatementKind::Expr(expression) => expression.remap_string_ids(remap),
-            HirStatementKind::PushRuntimeFragment { value, .. }
-            | HirStatementKind::CastOp { source: value, .. }
-            | HirStatementKind::FormatFloat { source: value, .. }
-            | HirStatementKind::ValidateFloat { source: value, .. } => {
-                value.remap_string_ids(remap);
-            }
-            HirStatementKind::FloatRangeCandidate {
-                current,
-                step,
-                end,
-                ascending,
-                ..
-            } => {
-                current.remap_string_ids(remap);
-                step.remap_string_ids(remap);
-                end.remap_string_ids(remap);
-                ascending.remap_string_ids(remap);
-            }
-            HirStatementKind::MapOp { receiver, args, .. } => {
-                receiver.remap_string_ids(remap);
-                for argument in args {
-                    argument.remap_string_ids(remap);
-                }
-            }
-            HirStatementKind::NumericOp { operands, .. } => match operands {
-                HirNumericOperands::Unary { operand } => operand.remap_string_ids(remap),
-                HirNumericOperands::Binary { left, right } => {
-                    left.remap_string_ids(remap);
-                    right.remap_string_ids(remap);
-                }
-            },
-            HirStatementKind::RangeStepFailure { .. } | HirStatementKind::Drop(_) => {}
-        }
-    }
 }

@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-IMPORT-0022", "MOTH-IMPORT-0022"]

@@ -6,7 +6,7 @@
 
 use super::super::ids::{TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId, TemplateWrapperSetId};
 use super::super::preparation::{
-    RuntimeTemplateReason, TemplateHelperKind, TemplatePreparation, TemplatePreparationMode,
+    RuntimeTemplateReason, TemplatePreparation, TemplatePreparationMode,
     TemplatePreparationOutcome, prepare_tir_view,
 };
 use super::super::slot_plan::{
@@ -24,13 +24,11 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, Template, TemplateConstValueKind, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateBranchSelector, TemplateLoopControlKind, TemplateLoopHeader,
+    TemplateBranchSelector, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotContributionSourceId;
 use crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotSiteId;
-use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIr, TemplateIrBranch, TemplateIrNode,
-};
+use crate::compiler_frontend::ast::templates::tir::node::{TemplateIr, TemplateIrNode};
 use crate::compiler_frontend::ast::templates::tir::refs::{
     TemplateTirChildReference, TemplateTirReference, TemplateWrapperReference,
 };
@@ -209,7 +207,7 @@ fn preparation_uses_structural_const_facts_for_static_string_function() {
 }
 
 #[test]
-fn preparation_returns_explicit_helper_results() {
+fn preparation_classifies_slot_insert_helpers() {
     let (slot_insert, _) = prepare_root(
         TemplateType::SlotInsert(SlotKey::Default),
         |builder, table| {
@@ -222,41 +220,28 @@ fn preparation_returns_explicit_helper_results() {
     .expect("slot insert preparation should succeed");
     assert!(matches!(
         slot_insert.outcome,
-        TemplatePreparationOutcome::Helper(TemplateHelperKind::SlotInsert)
-    ));
-
-    let (loop_control, _) = prepare_root(
-        TemplateType::String,
-        |builder, _| builder.push_loop_control_node(TemplateLoopControlKind::Break, None),
-        TemplatePreparationMode::Value,
-    )
-    .expect("loop-control preparation should succeed");
-    assert!(matches!(
-        loop_control.outcome,
-        TemplatePreparationOutcome::Helper(TemplateHelperKind::LoopControl)
+        TemplatePreparationOutcome::SlotInsertHelper
     ));
 }
 
 #[test]
-fn preparation_mode_controls_const_required_branch_validation() {
-    let build_branch = |builder: &mut TemplateIrBuilder<'_>, table: &mut StringTable| {
+fn preparation_mode_controls_const_required_conditional_validation() {
+    let build_conditional = |builder: &mut TemplateIrBuilder<'_>, table: &mut StringTable| {
         let body_text = table.intern("body");
         let body = builder.push_text_node(body_text, 4, TemplateSegmentOrigin::Body, None);
-        let branch = TemplateIrBranch::new(
+        builder.push_conditional_node(
             TemplateBranchSelector::Bool(runtime_expression(table)),
             body,
             None,
-            builder.store.next_expression_site_id(),
-        );
-        builder.push_branch_chain_node(vec![branch], None, None, None)
+        )
     };
 
     let (value, _) = prepare_root(
         TemplateType::StringFunction,
-        build_branch,
+        build_conditional,
         TemplatePreparationMode::Value,
     )
-    .expect("Value mode should preserve lazy branch runtime semantics");
+    .expect("Value mode should preserve lazy conditional runtime semantics");
     assert!(matches!(
         value.outcome,
         TemplatePreparationOutcome::Runtime(_)
@@ -264,12 +249,12 @@ fn preparation_mode_controls_const_required_branch_validation() {
 
     let const_required = prepare_root(
         TemplateType::StringFunction,
-        build_branch,
+        build_conditional,
         TemplatePreparationMode::ConstRequired,
     )
-    .expect_err("ConstRequired mode should retain the branch diagnostic");
+    .expect_err("ConstRequired mode should retain the conditional diagnostic");
     let TemplateError::Diagnostic(diagnostic) = const_required else {
-        panic!("ConstRequired branch rejection should remain a source diagnostic");
+        panic!("ConstRequired conditional rejection should remain a source diagnostic");
     };
     assert!(matches!(
         diagnostic.payload,
@@ -534,7 +519,7 @@ fn preparation_validates_runtime_slot_plan_authority() {
 }
 
 #[test]
-fn preparation_publishes_runtime_plan_and_site_facts() {
+fn preparation_classifies_runtime_slot_plan_and_site_as_runtime() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -586,8 +571,6 @@ fn preparation_publishes_runtime_plan_and_site_facts() {
     let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)
         .expect("runtime-plan view should prepare");
 
-    assert!(preparation.facts.has_runtime_slot_plan);
-    assert!(preparation.facts.has_runtime_slot_sites);
     assert!(matches!(
         preparation.outcome,
         TemplatePreparationOutcome::Runtime(RuntimeTemplateReason::RuntimeSlotPlan)
@@ -801,13 +784,6 @@ fn runtime_contribution_constness_propagates_option_capture_bindings() {
             None,
         );
         let body = builder.push_sequence_node(vec![body_expression], None);
-        let fallback_text = builder.push_text_node(
-            string_table.intern("fallback"),
-            "fallback".len(),
-            TemplateSegmentOrigin::Body,
-            None,
-        );
-        let fallback = builder.push_sequence_node(vec![fallback_text], None);
         let selector = TemplateBranchSelector::OptionPresentCapture {
             scrutinee,
             pattern: Box::new(MatchPattern::OptionPresentCapture {
@@ -818,13 +794,7 @@ fn runtime_contribution_constness_propagates_option_capture_bindings() {
                 binding_span: None,
             }),
         };
-        let branch = TemplateIrBranch::new(
-            selector,
-            body,
-            None,
-            builder.store.next_expression_site_id(),
-        );
-        builder.push_branch_chain_node(vec![branch], Some(fallback), None, None)
+        builder.push_conditional_node(selector, body, None)
     };
 
     assert!(
@@ -834,7 +804,7 @@ fn runtime_contribution_constness_propagates_option_capture_bindings() {
             &string_table,
         )
         .expect("constness query should preserve store authority"),
-        "a const option capture must make its branch binding available to the body"
+        "a const option capture must make its binding available to the conditional body"
     );
 }
 

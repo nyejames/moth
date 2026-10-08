@@ -3,13 +3,14 @@
 //! WHAT: groups the HIR test suites and exposes common naming and relationship helpers for them.
 //! WHY: HIR tests should discover one another through a single module entry.
 
+use crate::compiler_frontend::hir::expression_store::HirProjection;
 use crate::compiler_frontend::hir::expressions::HirExpression;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
+use crate::compiler_frontend::hir::terminators::{HirJumpArgument, HirTerminator};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
@@ -89,7 +90,7 @@ pub(super) fn assert_block_has_jump_args(
     module: &HirModule,
     block_id: BlockId,
     expected_len: usize,
-) -> &[LocalId] {
+) -> &[HirJumpArgument] {
     let HirTerminator::Jump { args, .. } = &module.blocks[block_id.0 as usize].terminator else {
         panic!("block should jump with merge arguments");
     };
@@ -103,7 +104,7 @@ pub(super) fn assert_block_has_jump_args(
     args.as_slice()
 }
 
-pub(super) fn assert_block_assigns_local(
+pub(super) fn assert_block_writes_local(
     module: &HirModule,
     block_id: BlockId,
     local: LocalId,
@@ -112,11 +113,42 @@ pub(super) fn assert_block_assigns_local(
         .statements
         .iter()
         .find_map(|statement| match &statement.kind {
-            HirStatementKind::Assign {
-                target: HirPlace::Local(target),
-                value,
-            } if *target == local => Some(value),
+            HirStatementKind::Write { target, value }
+                if write_target_local(*target) == Some(local) =>
+            {
+                Some(module.expressions.expression(*value))
+            }
             _ => None,
         })
-        .expect("block should assign the expected local")
+        .expect("block should write the expected local")
+}
+
+pub(super) fn write_value<'a>(
+    module: &'a HirModule,
+    statement: &crate::compiler_frontend::hir::statements::HirStatement,
+) -> Option<&'a HirExpression> {
+    match &statement.kind {
+        HirStatementKind::Write { value, .. } => Some(module.expressions.expression(*value)),
+        _ => None,
+    }
+}
+
+pub(super) fn write_target_local(target: HirWriteTarget) -> Option<LocalId> {
+    match target {
+        HirWriteTarget::DefineLocal(local) => Some(local),
+        HirWriteTarget::AssignPlace(place) if is_local_place(&place) => Some(place.root),
+        HirWriteTarget::AssignPlace(_) => None,
+    }
+}
+
+pub(super) fn is_local_place(place: &HirPlace) -> bool {
+    place.projections.is_empty()
+}
+
+pub(super) fn place_outermost_projection_is_index(module: &HirModule, place: &HirPlace) -> bool {
+    module
+        .expressions
+        .projections(place.projections)
+        .last()
+        .is_some_and(|projection| matches!(projection, HirProjection::Index(_)))
 }

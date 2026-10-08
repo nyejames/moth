@@ -44,7 +44,7 @@ label |this NamedProfile, greeting String? = guest| -> String:
 ;
 
 format_optional_u8 |value U8?| -> String:
-    text = if value is:
+    text String = if value is:
         none => then "ABSENT"
         |payload| => then cast payload
     ;
@@ -56,7 +56,7 @@ render_u8 |value U8? = 255| -> String:
 ;
 
 format_optional_dec |value Dec2?| -> String:
-    text = if value is:
+    text String = if value is:
         none => then "ABSENT"
         |payload| => then cast payload
     ;

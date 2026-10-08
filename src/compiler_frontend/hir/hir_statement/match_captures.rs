@@ -11,25 +11,25 @@
 
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::TypeIdentityKey;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::blocks::HirLocal;
 use crate::compiler_frontend::hir::expression_rewrite::rewrite_expression_bottom_up;
+use crate::compiler_frontend::hir::expression_store::{HirConstructionFailure, HirExpressionStore};
 use crate::compiler_frontend::hir::expressions::{
-    HirExpression, HirExpressionKind, HirVariantCarrier, ValueKind,
+    HirExpressionKind, HirVariantCarrier, OPTION_SOME_VARIANT_INDEX, ValueKind,
 };
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
-use crate::compiler_frontend::hir::ids::{ChoiceId, LocalId, RegionId};
-use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::hir_side_table::HirSideTable;
+use crate::compiler_frontend::hir::ids::{ChoiceId, HirValueId, LocalId, RegionId};
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::return_hir_transformation_error;
 use rustc_hash::FxHashMap;
 
 struct MatchCaptureLoweringContext {
-    scrutinee_hir: HirExpression,
+    scrutinee_hir: HirValueId,
     choice_id: ChoiceId,
     parent_region: RegionId,
 }
@@ -41,7 +41,7 @@ impl<'a> HirBuilder<'a> {
         arm: &MatchArm,
         scrutinee_ast: &Expression,
         span: &Option<SourceSpan>,
-    ) -> Result<Vec<LocalId>, CompilerError> {
+    ) -> Result<Vec<LocalId>, HirConstructionFailure> {
         match &arm.pattern {
             MatchPattern::ChoiceVariant {
                 nominal_path,
@@ -120,33 +120,38 @@ impl<'a> HirBuilder<'a> {
     /// Replace guard reads of capture locals with direct payload reads from the scrutinee.
     pub(super) fn substitute_match_guard_captures(
         &mut self,
-        guard: &HirExpression,
+        guard: HirValueId,
         arm: &MatchArm,
         capture_locals: &[LocalId],
         scrutinee_ast: &Expression,
-        scrutinee_hir: &HirExpression,
+        scrutinee_hir: HirValueId,
         span: &Option<SourceSpan>,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         let context = self.match_capture_context(arm, scrutinee_ast, scrutinee_hir, span)?;
         let substitutions =
             self.build_guard_capture_substitutions(arm, capture_locals, &context)?;
 
         if substitutions.is_empty() {
-            return Ok(guard.clone());
+            return Ok(guard);
         }
 
-        Ok(substitute_local_expressions(guard, &substitutions))
+        substitute_local_expressions(
+            &mut self.module.expressions,
+            &mut self.side_table,
+            guard,
+            &substitutions,
+        )
     }
 
-    /// Emit `Assign` statements that materialize choice payload captures at arm entry.
+    /// Define capture locals by materializing choice payloads at arm entry.
     pub(crate) fn emit_match_arm_capture_assignments(
         &mut self,
         arm: &MatchArm,
         capture_locals: &[LocalId],
-        scrutinee_hir: &HirExpression,
+        scrutinee_hir: HirValueId,
         scrutinee_ast: &Expression,
         span: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         match &arm.pattern {
             MatchPattern::ChoiceVariant { tag, captures, .. } => {
                 let context =
@@ -170,14 +175,14 @@ impl<'a> HirBuilder<'a> {
                         capture.field_index,
                         field_ty,
                         &capture.span,
-                    );
+                    )?;
 
                     // Authored capture materialization: each arm-entry assignment
                     // carries the capture's binding span, falling back to the
                     // field span when the binding is identity-free.
                     self.emit_statement_kind_with_span(
-                        HirStatementKind::Assign {
-                            target: HirPlace::Local(local_id),
+                        HirStatementKind::Write {
+                            target: HirWriteTarget::DefineLocal(local_id),
                             value: payload_get,
                         },
                         &capture.span,
@@ -205,19 +210,18 @@ impl<'a> HirBuilder<'a> {
                     &binding_fallback_span,
                     HirExpressionKind::VariantPayloadGet {
                         carrier: HirVariantCarrier::Option,
-                        source: Box::new(scrutinee_hir.clone()),
-                        variant_index:
-                            crate::compiler_frontend::hir::expressions::OPTION_SOME_VARIANT_INDEX,
+                        source: scrutinee_hir,
+                        variant_index: OPTION_SOME_VARIANT_INDEX,
                         field_index: 0,
                     },
                     field_ty,
                     ValueKind::RValue,
                     region,
-                );
+                )?;
                 // Authored option capture materialization carries the binding span.
                 self.emit_statement_kind_with_span(
-                    HirStatementKind::Assign {
-                        target: HirPlace::Local(local_id),
+                    HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(local_id),
                         value: payload_get,
                     },
                     &binding_fallback_span,
@@ -235,8 +239,8 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         arm: &MatchArm,
         capture_locals: &[LocalId],
-        f: impl FnOnce(&mut Self) -> Result<T, CompilerError>,
-    ) -> Result<T, CompilerError> {
+        f: impl FnOnce(&mut Self) -> Result<T, HirConstructionFailure>,
+    ) -> Result<T, HirConstructionFailure> {
         let bindings = arm_capture_bindings(arm, capture_locals);
         self.with_temporary_local_bindings(bindings, f)
     }
@@ -245,9 +249,9 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         arm: &MatchArm,
         scrutinee_ast: &Expression,
-        scrutinee_hir: &HirExpression,
+        scrutinee_hir: HirValueId,
         span: &Option<SourceSpan>,
-    ) -> Result<MatchCaptureLoweringContext, CompilerError> {
+    ) -> Result<MatchCaptureLoweringContext, HirConstructionFailure> {
         let MatchPattern::ChoiceVariant { nominal_path, .. } = &arm.pattern else {
             return_hir_transformation_error!(
                 "Match capture context requires a choice-variant pattern",
@@ -260,7 +264,7 @@ impl<'a> HirBuilder<'a> {
         let parent_region = self.current_region_or_error(span)?;
 
         Ok(MatchCaptureLoweringContext {
-            scrutinee_hir: scrutinee_hir.clone(),
+            scrutinee_hir,
             choice_id,
             parent_region,
         })
@@ -271,7 +275,7 @@ impl<'a> HirBuilder<'a> {
         arm: &MatchArm,
         capture_locals: &[LocalId],
         context: &MatchCaptureLoweringContext,
-    ) -> Result<FxHashMap<LocalId, HirExpression>, CompilerError> {
+    ) -> Result<FxHashMap<LocalId, HirValueId>, HirConstructionFailure> {
         let MatchPattern::ChoiceVariant { tag, captures, .. } = &arm.pattern else {
             return Ok(FxHashMap::default());
         };
@@ -295,7 +299,7 @@ impl<'a> HirBuilder<'a> {
                 capture.field_index,
                 field_ty,
                 &capture.span,
-            );
+            )?;
             substitutions.insert(local_id, payload_get);
         }
 
@@ -309,14 +313,14 @@ impl<'a> HirBuilder<'a> {
         field_index: usize,
         field_ty: TypeId,
         span: &Option<SourceSpan>,
-    ) -> HirExpression {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         self.make_expression(
             span,
             HirExpressionKind::VariantPayloadGet {
                 carrier: HirVariantCarrier::Choice {
                     choice_id: context.choice_id,
                 },
-                source: Box::new(context.scrutinee_hir.clone()),
+                source: context.scrutinee_hir,
                 variant_index,
                 field_index,
             },
@@ -331,7 +335,7 @@ impl<'a> HirBuilder<'a> {
         nominal_path: &PathId,
         scrutinee_type_id: TypeId,
         span: &Option<SourceSpan>,
-    ) -> Result<ChoiceId, CompilerError> {
+    ) -> Result<ChoiceId, HirConstructionFailure> {
         if self
             .type_environment
             .variants_for(scrutinee_type_id)
@@ -379,14 +383,22 @@ fn arm_capture_bindings(arm: &MatchArm, capture_locals: &[LocalId]) -> Vec<(Path
 }
 
 pub(super) fn substitute_local_expressions(
-    expression: &HirExpression,
-    substitutions: &FxHashMap<LocalId, HirExpression>,
-) -> HirExpression {
-    rewrite_expression_bottom_up(expression, &mut |rewritten| match &rewritten.kind {
-        HirExpressionKind::Load(HirPlace::Local(local_id))
-        | HirExpressionKind::Copy(HirPlace::Local(local_id)) => {
-            substitutions.get(local_id).cloned()
-        }
-        _ => None,
-    })
+    store: &mut HirExpressionStore,
+    side_table: &mut HirSideTable,
+    expression: HirValueId,
+    substitutions: &FxHashMap<LocalId, HirValueId>,
+) -> Result<HirValueId, HirConstructionFailure> {
+    rewrite_expression_bottom_up(
+        store,
+        side_table,
+        expression,
+        &mut |rewritten| match &rewritten.kind {
+            HirExpressionKind::Load(place) | HirExpressionKind::Copy(place)
+                if place.projections.is_empty() =>
+            {
+                substitutions.get(&place.root).copied()
+            }
+            _ => None,
+        },
+    )
 }

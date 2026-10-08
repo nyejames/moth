@@ -9,13 +9,13 @@
 //! generic struct/choice layout registration. It is derived from canonical frontend `TypeId`
 //! information before HIR and must not become a second semantic type identity system.
 
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantPayloadDefinition, TypeDefinition,
 };
 use crate::compiler_frontend::datatypes::generic_identity_bridge::generic_instantiation_key_argument_type_ids;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::module::{HirChoice, HirChoiceField, HirChoiceVariant};
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
@@ -32,7 +32,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         type_id: FrontendTypeId,
         span: &Option<SourceSpan>,
-    ) -> Result<TypeId, CompilerError> {
+    ) -> Result<TypeId, HirConstructionFailure> {
         match self.type_environment.get(type_id) {
             Some(TypeDefinition::GenericParameter(parameter)) => {
                 return_hir_transformation_error!(
@@ -59,7 +59,7 @@ impl<'a> HirBuilder<'a> {
         nominal_path: &PathId,
         _type_id: crate::compiler_frontend::datatypes::ids::TypeId,
         span: &Option<SourceSpan>,
-    ) -> Result<crate::compiler_frontend::hir::ids::StructId, CompilerError> {
+    ) -> Result<crate::compiler_frontend::hir::ids::StructId, HirConstructionFailure> {
         if let Some(&struct_id) = self.generic_structs_by_key.get(key) {
             return Ok(struct_id);
         }
@@ -145,7 +145,7 @@ impl<'a> HirBuilder<'a> {
         nominal_path: &PathId,
         _type_id: crate::compiler_frontend::datatypes::ids::TypeId,
         _span: &Option<SourceSpan>,
-    ) -> Result<crate::compiler_frontend::hir::ids::ChoiceId, CompilerError> {
+    ) -> Result<crate::compiler_frontend::hir::ids::ChoiceId, HirConstructionFailure> {
         if let Some(&choice_id) = self.generic_choices_by_key.get(key) {
             return Ok(choice_id);
         }
@@ -203,7 +203,8 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         type_id: TypeId,
         span: &Option<SourceSpan>,
-    ) -> Result<Vec<crate::compiler_frontend::hir::module::HirChoiceVariant>, CompilerError> {
+    ) -> Result<Vec<crate::compiler_frontend::hir::module::HirChoiceVariant>, HirConstructionFailure>
+    {
         // Copy compact variant facts before allocating/lowering fields. This keeps
         // the TypeEnvironment as the single metadata owner while avoiding a long
         // immutable borrow across `self` mutations.

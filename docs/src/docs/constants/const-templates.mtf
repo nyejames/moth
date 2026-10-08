@@ -43,14 +43,17 @@ The direct form, when the root has an applicable purpose:
 [codeblock, $code("moth"):
     #[if show_heading:
         Visible heading
-    [else]
-        Hidden heading
     ]
 ]
 
-A const-required template `if` validates every branch body.
+A const template `if` conditionally includes one body when its `Bool` condition
+is true. It can also test an option with `is |name|`, making the captured value
+available only inside the selected body. A false condition or absent option
+produces structural no-output. Template `if` has no `else` or `else if` form.
 
-The selected result must fold completely.
+The selector and body must be compile-time evaluable even when the body is not
+selected. A runtime expression in an inactive body is rejected. Only a selected
+body contributes output.
 
 ### Const template loops
 
@@ -60,20 +63,11 @@ The selected result must fold completely.
     ]
 ]
 
-Const range and collection loops may use structural break and continue
-controls:
+Const collection and range loops expand their body for each iteration until the
+ordinary loop header ends. Template loops have no `break` or `continue`
+controls. Their body must fold on every expansion.
 
-[codeblock, $code("moth"):
-    #[loop items |item|:
-        [if item.done:
-            [break]
-        ]
-
-        [item]
-    ]
-]
-
-They use the project config guard:
+The project config field `template_const_loop_iteration_limit` guards expansion:
 
 [codeblock, $code("text"):
     template_const_loop_iteration_limit

@@ -24,9 +24,9 @@ use crate::compiler_frontend::external_packages::CallTarget;
 #[cfg(any(test, feature = "show_hir"))]
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 #[cfg(any(test, feature = "show_hir"))]
-use crate::compiler_frontend::hir::expressions::{
-    HirExpression, HirExpressionKind, HirVariantCarrier, ValueKind,
-};
+use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirProjection};
+#[cfg(any(test, feature = "show_hir"))]
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirVariantCarrier, ValueKind};
 #[cfg(any(test, feature = "show_hir"))]
 use crate::compiler_frontend::hir::functions::HirFunction;
 #[cfg(any(test, feature = "show_hir"))]
@@ -46,7 +46,9 @@ use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern, HirRelati
 #[cfg(any(test, feature = "show_hir"))]
 use crate::compiler_frontend::hir::places::HirPlace;
 #[cfg(any(test, feature = "show_hir"))]
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
+};
 #[cfg(any(test, feature = "show_hir"))]
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 #[cfg(any(test, feature = "show_hir"))]
@@ -162,7 +164,7 @@ impl<'a> HirDisplayContext<'a> {
             out.push_str("    (none)\n");
         } else {
             for block in &module.blocks {
-                let block_rendered = self.render_block(block);
+                let block_rendered = self.render_block(block, &module.expressions);
                 self.push_indented_multiline(&mut out, 4, &block_rendered);
             }
         }
@@ -217,7 +219,11 @@ impl<'a> HirDisplayContext<'a> {
         out
     }
 
-    pub(crate) fn render_block(&self, block: &HirBlock) -> String {
+    pub(crate) fn render_block(
+        &self,
+        block: &HirBlock,
+        expressions: &HirExpressionStore,
+    ) -> String {
         let mut out = String::new();
         let _ = write!(out, "{} ", self.block_label(block.id));
 
@@ -242,13 +248,13 @@ impl<'a> HirDisplayContext<'a> {
         } else {
             out.push_str("  statements:\n");
             for statement in &block.statements {
-                let rendered = self.render_statement(statement);
+                let rendered = self.render_statement(statement, expressions);
                 self.push_indented_line(&mut out, 4, &rendered);
             }
         }
 
         out.push_str("  terminator: ");
-        out.push_str(&self.render_terminator(&block.terminator));
+        out.push_str(&self.render_terminator(&block.terminator, expressions));
         out.push('\n');
 
         out
@@ -274,25 +280,37 @@ impl<'a> HirDisplayContext<'a> {
         out
     }
 
-    pub(crate) fn render_statement(&self, statement: &HirStatement) -> String {
+    pub(crate) fn render_statement(
+        &self,
+        statement: &HirStatement,
+        expressions: &HirExpressionStore,
+    ) -> String {
         let mut out = String::new();
 
         if self.options.include_ids {
             let _ = write!(out, "[{}] ", self.node_label(statement.id));
         }
 
-        out.push_str(&self.render_statement_kind(&statement.kind));
+        out.push_str(&self.render_statement_kind(&statement.kind, expressions));
         out
     }
 
-    pub(crate) fn render_statement_kind(&self, kind: &HirStatementKind) -> String {
+    pub(crate) fn render_statement_kind(
+        &self,
+        kind: &HirStatementKind,
+        expressions: &HirExpressionStore,
+    ) -> String {
         match kind {
-            HirStatementKind::Assign { target, value } => {
-                format!(
-                    "{} = {}",
-                    self.render_place(target),
-                    self.render_expression(value)
-                )
+            HirStatementKind::Write { target, value } => {
+                let target = match target {
+                    HirWriteTarget::DefineLocal(local) => {
+                        format!("define {}", self.local_label(*local))
+                    }
+                    HirWriteTarget::AssignPlace(place) => {
+                        format!("update {}", self.render_place(place, expressions))
+                    }
+                };
+                format!("{target} = {}", self.render_expression(expressions, *value))
             }
             HirStatementKind::Call {
                 target,
@@ -302,12 +320,13 @@ impl<'a> HirDisplayContext<'a> {
                 let mut out = String::new();
 
                 if let Some(local) = result {
-                    let _ = write!(out, "{} = ", self.local_label(*local));
+                    let _ = write!(out, "{} = ", self.render_local_destination(*local));
                 }
 
-                let args_rendered = args
+                let args_rendered = expressions
+                    .values(*args)
                     .iter()
-                    .map(|arg| self.render_expression(arg))
+                    .map(|arg| self.render_expression(expressions, *arg))
                     .collect::<Vec<_>>()
                     .join(", ");
 
@@ -320,13 +339,13 @@ impl<'a> HirDisplayContext<'a> {
 
                 out
             }
-            HirStatementKind::Expr(expr) => self.render_expression(expr),
+            HirStatementKind::Expr(expr) => self.render_expression(expressions, *expr),
             HirStatementKind::Drop(local) => format!("drop {}", self.local_label(*local)),
             HirStatementKind::PushRuntimeFragment { vec_local, value } => {
                 format!(
                     "push_fragment {} <- {}",
                     self.local_label(*vec_local),
-                    self.render_expression(value)
+                    self.render_expression(expressions, *value)
                 )
             }
 
@@ -337,9 +356,14 @@ impl<'a> HirDisplayContext<'a> {
             } => {
                 let mut out = String::new();
                 if let Some(local) = result {
-                    let _ = write!(out, "{} = ", self.local_label(*local));
+                    let _ = write!(out, "{} = ", self.render_local_destination(*local));
                 }
-                let _ = write!(out, "cast_{:?}({})", policy, self.render_expression(source));
+                let _ = write!(
+                    out,
+                    "cast_{:?}({})",
+                    policy,
+                    self.render_expression(expressions, *source)
+                );
                 out
             }
 
@@ -352,7 +376,7 @@ impl<'a> HirDisplayContext<'a> {
                 let mut out = String::new();
 
                 if let Some(local) = result {
-                    let _ = write!(out, "{} = ", self.local_label(*local));
+                    let _ = write!(out, "{} = ", self.render_local_destination(*local));
                 }
 
                 let _ = write!(
@@ -364,11 +388,11 @@ impl<'a> HirDisplayContext<'a> {
                     } else {
                         ""
                     },
-                    self.render_expression(receiver)
+                    self.render_expression(expressions, *receiver)
                 );
 
-                for arg in args {
-                    let _ = write!(out, ", {}", self.render_expression(arg));
+                for arg in expressions.values(*args) {
+                    let _ = write!(out, ", {}", self.render_expression(expressions, *arg));
                 }
 
                 out.push(')');
@@ -383,7 +407,7 @@ impl<'a> HirDisplayContext<'a> {
             } => {
                 let mut out = String::new();
 
-                let _ = write!(out, "{} = ", self.local_label(*result));
+                let _ = write!(out, "{} = ", self.render_local_destination(*result));
                 let _ = write!(
                     out,
                     "numeric_{}_{}(",
@@ -397,14 +421,14 @@ impl<'a> HirDisplayContext<'a> {
 
                 match operands {
                     HirNumericOperands::Unary { operand } => {
-                        let _ = write!(out, "{}", self.render_expression(operand));
+                        let _ = write!(out, "{}", self.render_expression(expressions, *operand));
                     }
                     HirNumericOperands::Binary { left, right } => {
                         let _ = write!(
                             out,
                             "{}, {}",
-                            self.render_expression(left),
-                            self.render_expression(right)
+                            self.render_expression(expressions, *left),
+                            self.render_expression(expressions, *right)
                         );
                     }
                 }
@@ -420,7 +444,7 @@ impl<'a> HirDisplayContext<'a> {
             } => {
                 format!(
                     "{} = range_step_failure_{:?}_{}()",
-                    self.local_label(*result),
+                    self.render_local_destination(*result),
                     cause,
                     match failure_mode {
                         NumericFailureMode::ReturnError => "err",
@@ -442,13 +466,13 @@ impl<'a> HirDisplayContext<'a> {
             } => {
                 format!(
                     "({}, {}) = float_range_candidate_{}({}, {}, {}, {}, {})",
-                    self.local_label(*candidate_result),
-                    self.local_label(*in_range_result),
+                    self.render_local_destination(*candidate_result),
+                    self.render_local_destination(*in_range_result),
                     domain,
-                    self.render_expression(current),
-                    self.render_expression(step),
-                    self.render_expression(end),
-                    self.render_expression(ascending),
+                    self.render_expression(expressions, *current),
+                    self.render_expression(expressions, *step),
+                    self.render_expression(expressions, *end),
+                    self.render_expression(expressions, *ascending),
                     if *inclusive { "inclusive" } else { "exclusive" }
                 )
             }
@@ -459,13 +483,13 @@ impl<'a> HirDisplayContext<'a> {
             } => {
                 format!(
                     "{} = format_float_{}({})",
-                    self.local_label(*result),
+                    self.render_local_destination(*result),
                     match failure_mode {
                         NumericFailureMode::ReturnError => "err",
                         NumericFailureMode::Trap => "trap",
                         NumericFailureMode::Infallible => "safe",
                     },
-                    self.render_expression(source)
+                    self.render_expression(expressions, *source)
                 )
             }
 
@@ -476,19 +500,23 @@ impl<'a> HirDisplayContext<'a> {
             } => {
                 format!(
                     "{} = validate_float_{}({})",
-                    self.local_label(*result),
+                    self.render_local_destination(*result),
                     match failure_mode {
                         NumericFailureMode::ReturnError => "err",
                         NumericFailureMode::Trap => "trap",
                         NumericFailureMode::Infallible => "safe",
                     },
-                    self.render_expression(source)
+                    self.render_expression(expressions, *source)
                 )
             }
         }
     }
 
-    pub(crate) fn render_terminator(&self, terminator: &HirTerminator) -> String {
+    pub(crate) fn render_terminator(
+        &self,
+        terminator: &HirTerminator,
+        expressions: &HirExpressionStore,
+    ) -> String {
         match terminator {
             HirTerminator::Jump { target, args } => {
                 if args.is_empty() {
@@ -496,7 +524,13 @@ impl<'a> HirDisplayContext<'a> {
                 } else {
                     let args_rendered = args
                         .iter()
-                        .map(|arg| self.local_label(*arg))
+                        .map(|arg| {
+                            format!(
+                                "{} -> define {}",
+                                self.local_label(arg.source),
+                                self.local_label(arg.destination)
+                            )
+                        })
                         .collect::<Vec<_>>()
                         .join(", ");
                     format!("jump {}({})", self.block_label(*target), args_rendered)
@@ -509,7 +543,7 @@ impl<'a> HirDisplayContext<'a> {
             } => {
                 format!(
                     "if {} -> {} else {}",
-                    self.render_expression(condition),
+                    self.render_expression(expressions, *condition),
                     self.block_label(*then_block),
                     self.block_label(*else_block)
                 )
@@ -521,7 +555,7 @@ impl<'a> HirDisplayContext<'a> {
             } => {
                 format!(
                     "fallible {} -> ok {} else err {}",
-                    self.render_expression(result),
+                    self.render_expression(expressions, *result),
                     self.block_label(*success_block),
                     self.block_label(*error_block)
                 )
@@ -530,20 +564,24 @@ impl<'a> HirDisplayContext<'a> {
                 if !self.options.multiline_match_arms {
                     let arms_rendered = arms
                         .iter()
-                        .map(|arm| self.render_match_arm(arm))
+                        .map(|arm| self.render_match_arm(arm, expressions))
                         .collect::<Vec<_>>()
                         .join(", ");
                     return format!(
                         "match {} {{ {} }}",
-                        self.render_expression(scrutinee),
+                        self.render_expression(expressions, *scrutinee),
                         arms_rendered
                     );
                 }
 
                 let mut out = String::new();
-                let _ = writeln!(out, "match {} {{", self.render_expression(scrutinee));
+                let _ = writeln!(
+                    out,
+                    "match {} {{",
+                    self.render_expression(expressions, *scrutinee)
+                );
                 for arm in arms {
-                    let _ = writeln!(out, "  {},", self.render_match_arm(arm));
+                    let _ = writeln!(out, "  {},", self.render_match_arm(arm, expressions));
                 }
                 out.push('}');
                 out
@@ -552,12 +590,14 @@ impl<'a> HirDisplayContext<'a> {
             HirTerminator::Continue { target } => {
                 format!("continue {}", self.block_label(*target))
             }
-            HirTerminator::Return(value) => format!("return {}", self.render_expression(value)),
+            HirTerminator::Return(value) => {
+                format!("return {}", self.render_expression(expressions, *value))
+            }
             HirTerminator::ReturnSuccess(value) => {
-                format!("return ok {}", self.render_expression(value))
+                format!("return ok {}", self.render_expression(expressions, *value))
             }
             HirTerminator::ReturnError(value) => {
-                format!("return! {}", self.render_expression(value))
+                format!("return! {}", self.render_expression(expressions, *value))
             }
             HirTerminator::Uninitialized => "uninitialized".to_owned(),
             HirTerminator::RuntimeFailure { message, .. } => {
@@ -568,19 +608,24 @@ impl<'a> HirDisplayContext<'a> {
                 message_evaluation,
             } => format!(
                 "assert_failure {} [{message_evaluation:?}]",
-                self.render_expression(message)
+                self.render_expression(expressions, *message)
             ),
         }
     }
 
-    pub(crate) fn render_expression(&self, expr: &HirExpression) -> String {
+    pub(crate) fn render_expression(
+        &self,
+        expressions: &HirExpressionStore,
+        expression_id: HirValueId,
+    ) -> String {
+        let expr = expressions.expression(expression_id);
         let mut out = String::new();
 
         if self.options.include_ids {
-            let _ = write!(out, "[{}] ", self.value_label(expr.id));
+            let _ = write!(out, "[{}] ", self.value_label(expression_id));
         }
 
-        out.push_str(&self.render_expression_kind(&expr.kind));
+        out.push_str(&self.render_expression_kind(&expr.kind, expressions));
 
         if self.options.include_types {
             let _ = write!(out, " : {}", self.type_label(expr.ty));
@@ -593,7 +638,11 @@ impl<'a> HirDisplayContext<'a> {
         out
     }
 
-    pub(crate) fn render_expression_kind(&self, kind: &HirExpressionKind) -> String {
+    pub(crate) fn render_expression_kind(
+        &self,
+        kind: &HirExpressionKind,
+        expressions: &HirExpressionStore,
+    ) -> String {
         match kind {
             HirExpressionKind::Uint(value) => value.to_string(),
             HirExpressionKind::Int(value) => value.to_string(),
@@ -607,23 +656,28 @@ impl<'a> HirDisplayContext<'a> {
             HirExpressionKind::StringLiteral(value) => {
                 format!("\"{}\"", value.escape_debug())
             }
-            HirExpressionKind::StructuralString { pieces } => format!("structural {pieces:?}"),
-            HirExpressionKind::Load(place) => self.render_place(place),
-            HirExpressionKind::Copy(place) => format!("copy {}", self.render_place(place)),
+            HirExpressionKind::StructuralString { pieces } => {
+                format!("structural {:?}", expressions.string_pieces(*pieces))
+            }
+            HirExpressionKind::Load(place) => self.render_place(place, expressions),
+            HirExpressionKind::Copy(place) => {
+                format!("copy {}", self.render_place(place, expressions))
+            }
             HirExpressionKind::BinOp { left, op, right } => format!(
                 "({} {} {})",
-                self.render_expression(left),
+                self.render_expression(expressions, *left),
                 op,
-                self.render_expression(right)
+                self.render_expression(expressions, *right)
             ),
             HirExpressionKind::UnaryOp { op, operand } => {
-                format!("({}{})", op, self.render_expression(operand))
+                format!("({}{})", op, self.render_expression(expressions, *operand))
             }
             HirExpressionKind::StructConstruct { struct_id, fields } => {
                 let mut out = String::new();
                 let _ = write!(out, "{} {{ ", self.struct_label(*struct_id));
 
-                for (idx, (field_id, expr)) in fields.iter().enumerate() {
+                for (idx, (field_id, expr)) in expressions.struct_fields(*fields).iter().enumerate()
+                {
                     if idx > 0 {
                         out.push_str(", ");
                     }
@@ -631,7 +685,7 @@ impl<'a> HirDisplayContext<'a> {
                         out,
                         "{}: {}",
                         self.field_label(*field_id),
-                        self.render_expression(expr)
+                        self.render_expression(expressions, *expr)
                     );
                 }
 
@@ -639,13 +693,14 @@ impl<'a> HirDisplayContext<'a> {
                 out
             }
             HirExpressionKind::MapLiteral(entries) => {
-                let joined = entries
+                let joined = expressions
+                    .map_entries(*entries)
                     .iter()
                     .map(|entry| {
                         format!(
                             "{} = {}",
-                            self.render_expression(&entry.key),
-                            self.render_expression(&entry.value)
+                            self.render_expression(expressions, entry.key),
+                            self.render_expression(expressions, entry.value)
                         )
                     })
                     .collect::<Vec<_>>()
@@ -653,9 +708,10 @@ impl<'a> HirDisplayContext<'a> {
                 format!("{{{joined}}}")
             }
             HirExpressionKind::Collection(elements) => {
-                let joined = elements
+                let joined = expressions
+                    .values(*elements)
                     .iter()
-                    .map(|element| self.render_expression(element))
+                    .map(|element| self.render_expression(expressions, *element))
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("[{joined}]")
@@ -663,18 +719,19 @@ impl<'a> HirDisplayContext<'a> {
             HirExpressionKind::Range { start, end } => {
                 format!(
                     "{start}..{end}",
-                    start = self.render_expression(start),
-                    end = self.render_expression(end)
+                    start = self.render_expression(expressions, *start),
+                    end = self.render_expression(expressions, *end)
                 )
             }
             HirExpressionKind::TupleConstruct { elements } => {
+                let elements = expressions.values(*elements);
                 if elements.is_empty() {
                     return "()".to_owned();
                 }
 
                 let joined = elements
                     .iter()
-                    .map(|element| self.render_expression(element))
+                    .map(|element| self.render_expression(expressions, *element))
                     .collect::<Vec<_>>()
                     .join(", ");
 
@@ -685,16 +742,30 @@ impl<'a> HirDisplayContext<'a> {
                 }
             }
             HirExpressionKind::TupleGet { tuple, index } => {
-                format!("tuple_get({}, {})", self.render_expression(tuple), index)
+                format!(
+                    "tuple_get({}, {})",
+                    self.render_expression(expressions, *tuple),
+                    index
+                )
             }
             HirExpressionKind::FallibleUnwrapSuccess { result } => {
-                format!("result_unwrap_ok({})", self.render_expression(result))
+                format!(
+                    "result_unwrap_ok({})",
+                    self.render_expression(expressions, *result)
+                )
             }
             HirExpressionKind::FallibleUnwrapError { result } => {
-                format!("result_unwrap_err({})", self.render_expression(result))
+                format!(
+                    "result_unwrap_err({})",
+                    self.render_expression(expressions, *result)
+                )
             }
             HirExpressionKind::Cast { source, policy } => {
-                format!("cast_{:?}({})", policy, self.render_expression(source))
+                format!(
+                    "cast_{:?}({})",
+                    policy,
+                    self.render_expression(expressions, *source)
+                )
             }
             HirExpressionKind::VariantConstruct {
                 carrier,
@@ -702,6 +773,7 @@ impl<'a> HirDisplayContext<'a> {
                 fields,
             } => {
                 let carrier_label = self.variant_carrier_label(carrier);
+                let fields = expressions.variant_fields(*fields);
                 let fields_str = if fields.is_empty() {
                     String::new()
                 } else {
@@ -712,7 +784,11 @@ impl<'a> HirDisplayContext<'a> {
                                 .name
                                 .map(|n| self.string_table.resolve(n))
                                 .unwrap_or("?");
-                            format!("{}: {}", name_str, self.render_expression(&field.value))
+                            format!(
+                                "{}: {}",
+                                name_str,
+                                self.render_expression(expressions, field.value)
+                            )
                         })
                         .collect();
                     format!(", fields=[{}]", rendered.join(", "))
@@ -731,26 +807,29 @@ impl<'a> HirDisplayContext<'a> {
                     carrier_label,
                     variant_index,
                     field_index,
-                    self.render_expression(source)
+                    self.render_expression(expressions, *source)
                 )
             }
         }
     }
 
-    pub(crate) fn render_place(&self, place: &HirPlace) -> String {
-        match place {
-            HirPlace::Local(local_id) => self.local_label(*local_id),
-            HirPlace::Field { base, field } => {
-                format!("{}.{}", self.render_place(base), self.field_label(*field))
-            }
-            HirPlace::Index { base, index } => {
-                format!(
-                    "{}[{}]",
-                    self.render_place(base),
-                    self.render_expression(index)
-                )
+    pub(crate) fn render_place(
+        &self,
+        place: &HirPlace,
+        expressions: &HirExpressionStore,
+    ) -> String {
+        let mut out = self.local_label(place.root);
+        for projection in expressions.projections(place.projections) {
+            match projection {
+                HirProjection::Field(field) => {
+                    let _ = write!(out, ".{}", self.field_label(*field));
+                }
+                HirProjection::Index(index) => {
+                    let _ = write!(out, "[{}]", self.render_expression(expressions, *index));
+                }
             }
         }
+        out
     }
 
     fn render_relational_pattern_op(&self, op: HirRelationalPatternOp) -> &'static str {
@@ -762,18 +841,22 @@ impl<'a> HirDisplayContext<'a> {
         }
     }
 
-    pub(crate) fn render_pattern(&self, pattern: &HirPattern) -> String {
+    pub(crate) fn render_pattern(
+        &self,
+        pattern: &HirPattern,
+        expressions: &HirExpressionStore,
+    ) -> String {
         match pattern {
-            HirPattern::Literal(expr) => self.render_expression(expr),
+            HirPattern::Literal(expr) => self.render_expression(expressions, *expr),
             HirPattern::OptionNone => "none".to_owned(),
             HirPattern::OptionValue { value } => {
-                format!("some({})", self.render_expression(value))
+                format!("some({})", self.render_expression(expressions, *value))
             }
             HirPattern::OptionRelational { op, value } => {
                 format!(
                     "some({} {})",
                     self.render_relational_pattern_op(*op),
-                    self.render_expression(value)
+                    self.render_expression(expressions, *value)
                 )
             }
             HirPattern::Wildcard => "_".to_owned(),
@@ -781,7 +864,7 @@ impl<'a> HirDisplayContext<'a> {
                 format!(
                     "{} {}",
                     self.render_relational_pattern_op(*op),
-                    self.render_expression(value)
+                    self.render_expression(expressions, *value)
                 )
             }
             HirPattern::OptionPresent => "|capture|".to_owned(),
@@ -798,12 +881,16 @@ impl<'a> HirDisplayContext<'a> {
         }
     }
 
-    pub(crate) fn render_match_arm(&self, arm: &HirMatchArm) -> String {
+    pub(crate) fn render_match_arm(
+        &self,
+        arm: &HirMatchArm,
+        expressions: &HirExpressionStore,
+    ) -> String {
         let mut out = String::new();
-        out.push_str(&self.render_pattern(&arm.pattern));
+        out.push_str(&self.render_pattern(&arm.pattern, expressions));
 
-        if let Some(guard) = &arm.guard {
-            let _ = write!(out, " if {}", self.render_expression(guard));
+        if let Some(guard) = arm.guard {
+            let _ = write!(out, " if {}", self.render_expression(expressions, guard));
         }
 
         let _ = write!(out, " => {}", self.block_label(arm.body));
@@ -823,6 +910,17 @@ impl<'a> HirDisplayContext<'a> {
                 format!("generated {}", identity.declaration().defining_name())
             }
             CallTarget::External(id) => id.name().to_owned(),
+        }
+    }
+
+    fn render_local_destination(&self, destination: HirLocalDestination) -> String {
+        match destination {
+            HirLocalDestination::Define(local) => {
+                format!("define {}", self.local_label(local))
+            }
+            HirLocalDestination::Update(local) => {
+                format!("update {}", self.local_label(local))
+            }
         }
     }
 
@@ -1144,8 +1242,12 @@ impl HirModule {
 #[cfg(any(test, feature = "show_hir"))]
 #[allow(dead_code)]
 impl HirBlock {
-    pub(crate) fn display_with_context(&self, display: &HirDisplayContext<'_>) -> String {
-        display.render_block(self)
+    pub(crate) fn display_with_context(
+        &self,
+        display: &HirDisplayContext<'_>,
+        expressions: &HirExpressionStore,
+    ) -> String {
+        display.render_block(self, expressions)
     }
 }
 
@@ -1168,48 +1270,60 @@ impl HirStruct {
 #[cfg(any(test, feature = "show_hir"))]
 #[allow(dead_code)]
 impl HirStatement {
-    pub(crate) fn display_with_context(&self, display: &HirDisplayContext<'_>) -> String {
-        display.render_statement(self)
+    pub(crate) fn display_with_context(
+        &self,
+        display: &HirDisplayContext<'_>,
+        expressions: &HirExpressionStore,
+    ) -> String {
+        display.render_statement(self, expressions)
     }
 }
 
 #[cfg(any(test, feature = "show_hir"))]
 #[allow(dead_code)]
 impl HirTerminator {
-    pub(crate) fn display_with_context(&self, display: &HirDisplayContext<'_>) -> String {
-        display.render_terminator(self)
-    }
-}
-
-#[cfg(any(test, feature = "show_hir"))]
-#[allow(dead_code)]
-impl HirExpression {
-    pub(crate) fn display_with_context(&self, display: &HirDisplayContext<'_>) -> String {
-        display.render_expression(self)
+    pub(crate) fn display_with_context(
+        &self,
+        display: &HirDisplayContext<'_>,
+        expressions: &HirExpressionStore,
+    ) -> String {
+        display.render_terminator(self, expressions)
     }
 }
 
 #[cfg(any(test, feature = "show_hir"))]
 #[allow(dead_code)]
 impl HirPlace {
-    pub(crate) fn display_with_context(&self, display: &HirDisplayContext<'_>) -> String {
-        display.render_place(self)
+    pub(crate) fn display_with_context(
+        &self,
+        display: &HirDisplayContext<'_>,
+        expressions: &HirExpressionStore,
+    ) -> String {
+        display.render_place(self, expressions)
     }
 }
 
 #[cfg(any(test, feature = "show_hir"))]
 #[allow(dead_code)]
 impl HirPattern {
-    pub(crate) fn display_with_context(&self, display: &HirDisplayContext<'_>) -> String {
-        display.render_pattern(self)
+    pub(crate) fn display_with_context(
+        &self,
+        display: &HirDisplayContext<'_>,
+        expressions: &HirExpressionStore,
+    ) -> String {
+        display.render_pattern(self, expressions)
     }
 }
 
 #[cfg(any(test, feature = "show_hir"))]
 #[allow(dead_code)]
 impl HirMatchArm {
-    pub(crate) fn display_with_context(&self, display: &HirDisplayContext<'_>) -> String {
-        display.render_match_arm(self)
+    pub(crate) fn display_with_context(
+        &self,
+        display: &HirDisplayContext<'_>,
+        expressions: &HirExpressionStore,
+    ) -> String {
+        display.render_match_arm(self, expressions)
     }
 }
 

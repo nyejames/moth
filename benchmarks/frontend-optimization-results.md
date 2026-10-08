@@ -4589,3 +4589,719 @@ source, correction and evidence reviews report clean outcomes. Saved broad gate
 logs lack an effective Node-version header, although their invocations selected
 the pinned runtime. The upcoming main-bound gate will record that header. Phase 1
 is accepted as a feature checkpoint; full main-bound validation remains pending.
+
+## Typed semantic expressions - Phase 2 integrated control and package prerequisite (2026-10-07)
+
+Phase 1 subsequently landed on main as squash `ec1aa89d7`. The package merge
+`15c42fb88` includes all four committed `packages-work` changes through
+`814c83c2f`. Both resulting main trees passed their own `just validate-full`
+runs with Rust 1.99 and pinned Node 24.21. The resumed `expression-refactor`
+checkpoint `f99574004` has the exact integrated main tree. This resolves the
+pending main-bound validation above, without replacing the retirement baseline.
+
+The first integrated native cohort retains five invocations each of the CLI,
+frontend and data-layout suites. Its sequential, unpaired comparison against the
+retirement cohort has 82 identity-matched cases: 28 rough slower signals and 54
+unchanged, with two changed docs inputs excluded. The plain single-file cases
+gained about 7 ms of package work. This slower control remains preserved under
+`tmp/typed-semantic-expressions/raw-capture/raw/after-packages/`.
+
+Inspection found that synthetic single-file compilation entered the shared
+all-registered source-package inventory path even when its consumer needed no
+source package. The correction discovers the consumer first and skips that path
+only for an empty required set. Namespace indexing and collision validation
+remain unconditional. Selected MTF content still requires its implicit builder
+package. Nonempty package selection retains the existing implementation.
+Regressions cover a plain root with an unused broken package and both ordinary
+and module-root single-file entries using implicit HTML helpers through MTF.
+The latter exposed retained provisional source spans, now rebound at the existing
+private whole-file barrier without changing their local ranges.
+
+### Paired native frontend evidence
+
+The preserved integrated control and rebuilt corrected candidate each ran five
+times, alternating control/candidate order by pair. Every invocation used the
+unchanged native 42-case frontend suite, format 8, protocol 4, timing schema 2,
+one preflight and ten measured iterations. Rust 1.99, Node 24.21, machine identity,
+profiles and unset Rayon thread configuration match. All ten invocations exited
+zero and all 42 case identities match. Repository state stayed fixed throughout.
+The reader reuses the existing raw-cohort validation and identity functions.
+
+| Case | Control median ms | Candidate median ms | Median paired delta ms |
+| --- | ---: | ---: | ---: |
+| `type_stress_frontend` | 31.813 | 25.072 | -6.830 |
+| `fold_stress_frontend` | 28.484 | 21.803 | -6.784 |
+| `constant_chain_512_frontend` | 31.603 | 24.775 | -6.755 |
+| `generic_scaling_160_frontend` | 1016.979 | 1000.392 | -16.827 |
+
+All five paired deltas are negative for these four cases. The generic case's
+movement remains within its native dispersion threshold and is not classified
+as a resolved speed improvement. The reader applies native threshold parameters
+to five-run medians, while the production comparison uses the previous mean for
+its relative floor. This adaptation changes none of these 42 classifications:
+24 rough faster, 18 unchanged and zero slower. The median paired difference
+of summed case medians is -192.677 ms, ranging from -243.569 to -166.449 ms.
+That sum is an aggregate signal, not a single project latency or causal proof.
+Stage timings overlap and are attribution evidence, not additive components of
+the primary median.
+
+Three directory cases have positive deltas in every pair despite remaining
+below their native thresholds. Their paired median increases are 0.190 ms for
+`import_fanout_frontend`, 0.124 ms for `module_root_stress_frontend` and 0.177 ms
+for `many_medium_files_frontend`. Differences of side medians remain below 1%.
+Directory orchestration is unchanged by the empty-set gate; the shared header
+owner gains required qualifier validation. These observations do not isolate
+that check's cost. The prerequisite retains mandatory source-identity correctness
+with this explicitly reported small timing tradeoff. This is not a claim of no
+repeatable movement, and later cutover comparisons must preserve this evidence.
+No new CLI, data-layout or whole-compiler speed claim is made for the correction.
+
+Raw pairs and exact binary/diff/toolchain provenance are in
+`tmp/typed-semantic-expressions/phase2/empty-package-paired/`. The validated reader
+produced `phase2/paired-frontend-comparison.{json,md}` and the rough-threshold
+disposition is `phase2/paired-frontend-disposition.json`. The control binary is
+preserved separately under `phase2/integrated-binaries/`.
+
+### Prerequisite checks and phase boundary
+
+Final focused checks passed: `cargo test -p moth --lib spans_` (29 tests),
+`cargo test -p moth --lib --features timers source_package` (57),
+`cargo test -p moth --lib --features timers synthetic_single_file` (4),
+`cargo test -p moth --lib --features timers compile_project_frontend_tests` (61)
+and `cargo check -p moth --all-targets --features boracle,benchmark_counters`.
+The added span invariants first reproduced two failures before the remaining
+rebind corrections. Selected formatting and diff checks passed. Release docs
+generated 78 outputs; the two changed progress routes were inspected for their
+notes, titles and tables. This was not a complete link recrawl.
+
+Independent prerequisite source/correction reviews found no remaining required
+issue. These focused checks support an intermediate feature-branch checkpoint,
+not another main merge or a full-validation claim for this tree. At this
+prerequisite checkpoint, Phase 2 remained incomplete while representation,
+reclamation, issuing domains, exact interfaces and migration boundaries were
+investigated. The standalone model measurements
+are separate evidence and do not establish compiler typing/folding or whole-IR
+memory improvements.
+
+### Phase 2 representation and lifetime decisions (2026-10-07)
+
+Phase 2 selected interfaces through four bounded evidence tracks. Independent
+review accepted the design and prototype obligations. This checkpoint selects
+the forms for implementation and does not deliver the production cutover.
+
+1. **Hot-row layout and payload capacity.** The reference is a safe Rust
+   operation enum in an array-of-structs store, with typed IDs and ranges and an
+   explicit `Zero` / `One(TypeId)` / `Multiple(TypeRange)` result shape. The
+   comparison models checked operation words (B) and a result-shape column (C).
+   Operation descriptors retain semantic meaning; the model does not make raw
+   tags into operations. The reference preserves `TypeId(0)`, full-width scalar
+   values and exact eight-byte `SourceSpan` storage.
+
+   | Capture | Rows | Candidate capacity bytes A/B/C | Construction median ns A/B/C |
+   | --- | ---: | ---: | ---: |
+   | `type_stress` main | 302 | 21,144 / 19,936 / 19,960 | 2,700.58 / 3,355.75 / 3,165.59 |
+   | `generic_scaling_160` main | 6,090 | 450,740 / 426,380 / 426,404 | 59,388.35 / 69,721.71 / 64,677.85 |
+
+   The corrected owner report covers 120 independent capture files: 21,787
+   projected expression nodes and 24,958 unique `Expression` headers, of which
+   18,858 fall inside observed allocation intervals and 6,100 fall outside.
+   It records 10,695,068 bytes of exact observed `Vec`, `Box` and `String`
+   payload capacity across those files. The isolated A model uses 1,556,056
+   bytes of candidate capacity, including reported shared model side stores.
+   The conditional 6,603,804-byte projection is
+   that A capacity plus a 5,047,748-byte remainder; it is an address-backed
+   header-replacement comparison, not a complete migrated graph or memory win.
+   All corpus sums are cumulative across captures, not resident memory.
+
+   Layout measurements used five invocations per fixture (600 process
+   observations) in fixed A/B/C order, which can bias timing comparisons.
+   `generic_scaling_160` includes only the first, last and largest of 802
+   domains. Its 6,537,216-byte median RSS includes parsing and simultaneous
+   correctness-validation candidates, not one candidate's memory. Exact raw
+   operation and payload descriptor bytes, diagnostic witnesses, declaration
+   maps, `TypeEnvironment`, `ConstValueStore`, string-table storage, unreachable
+   TIR capacity and allocator overhead remain unavailable or excluded.
+
+   The supplemental numeric capture adds 31 fixtures from eight existing
+   successful inputs. It preserves full-width integer boundaries, raw IEEE
+   negative zero and an exact 200-digit decimal coefficient with scales through
+   256. The original derived `BigInt` attribution was invalid and was corrected;
+   the raw exporter remained valid. Retained `Arc<BigInt>` limb capacity is
+   still unknown: a logical lower bound is not capacity. The model leaves exact
+   numeric owners opaque and does not test numeric semantics or numeric-profile
+   matrices. See `tmp/typed-semantic-expressions/phase2/layout/owner-byte-accounting.{md,json}`,
+   `tmp/typed-semantic-expressions/phase2/layout/owner-byte-accounting-numeric.json`
+   and `tmp/typed-semantic-expressions/phase2/layout/measurements-with-rss/`.
+
+2. **Issuing domains and TIR lifetime.** A nonzero four-byte expression ID is
+   local to its store, and each read view carries that store's borrow. The
+   corrected six-test domain probe covers the full `u32` ID bounds, same-number
+   IDs in distinct stores, child-view ownership and checked conversion from a
+   borrowed immutable prefix. It does not prove parser/TIR call sites or
+   scratch-ID identity; owner-qualified scratch checks belong to the
+   reclamation model. The corrected test log is
+   `tmp/typed-semantic-expressions/phase2/layout/expression-domain-test-results-corrected.log`.
+
+   The separate five-test TIR probe shows that dropping a view cannot reclaim
+   append-only TIR entries. Its 24,120 bytes of `Expression` headers and 9,356
+   bytes of TIR vector capacity exclude nested expression heaps. One actual
+   generic owner-drop test passes: a published sibling can materialise after
+   the declaring physical TIR owner drops. That test does not prove that all
+   retained signature, default and `ConstValueStore` expression clones have
+   been released. The stable-syntax and canonical-owned-input projection from
+   `ModuleMaterialisationPreparation` before expression-store release remains
+   a migration proof obligation. The physical owner-drop result is recorded in
+   `tmp/typed-semantic-expressions/phase2/generic-tir-release-test.log`.
+
+3. **Candidate isolation and last-reader freeze.** The selected contract
+   builds changed candidates in producer-local scratch, validates owner-bound
+   edges, promotes only reachable unique nodes and reuses unchanged roots. A
+   shared consuming freeze then runs after the last reader, remaps live roots
+   into exact-capacity frozen arrays and releases the old store. The frozen
+   model retains eight nodes and five roots for each policy; both arrays have
+   exact capacities of eight and five.
+
+   The freeze-enabled model passes ten tests. Five measured traces per policy
+   report append/rollback/promotion medians of 16,259.396 / 11,554.479 /
+   12,533.854 ns; conversion-only accounted freeze peaks of 73,200 / 27,216 /
+   2,016 bytes; and process RSS medians of 2,686,976 / 2,490,368 / 2,490,368
+   bytes, respectively. The conversion-only accounting includes old completed
+   comparison snapshots, old/new/remap/reachability/traversal conversion
+   buffers and inline headers. It excludes pre-freeze root-snapshot construction
+   maps and growing buffers, and post-freeze parity's simultaneous old/new
+   snapshots and traversal maps. Full trace time and RSS cover those phases;
+   allocator metadata and internal reallocation overlap remain excluded from
+   the accounted-capacity figure.
+
+   RSS also includes the runtime baseline and is not folding memory. The model
+   validates owner-qualified scratch IDs and promotion, but is not Moth folding,
+   TIR reclamation, production ID layout or real payload storage. The pre-freeze
+   source and measurements remain separately preserved under
+   `tmp/typed-semantic-expressions/phase2/reclamation/reclamation_model.pre-freeze.rs`
+   and `tmp/typed-semantic-expressions/phase2/reclamation/measurements/`; the
+   freeze tests and cohort are under
+   `tmp/typed-semantic-expressions/phase2/reclamation/test-results-with-freeze.log`
+   and `tmp/typed-semantic-expressions/phase2/reclamation/measurements-with-freeze/`.
+
+4. **Native call continuation.** The selected HIR interface is an
+   invoke-like terminator with ordered success destination locals and one error
+   destination. Validation requires unique destinations within each edge and
+   disjoint success/error sets. The standalone model passes 16 tests and reports
+   784 bytes for explicit successor locals versus 800 bytes for block arguments,
+   with construction/validation/drop medians across five invocations of
+   5,228.0021 versus 5,492.78335 ns. Its source evaluator does not execute either
+   candidate CFG;
+   native result transport, exactly-once execution, first-failure behaviour,
+   borrow validation, private failure installation and backend behaviour remain
+   unproved. These model sizes and timings are not compiler performance claims.
+   The durable model evidence is under
+   `tmp/typed-semantic-expressions/phase2/continuation/README.md`, `audit.md`
+   and `test-results-2.log`.
+
+The selected reference is the safe enum/AoS layout with explicit result shape.
+Its 64-byte projected row is the common-row decision ceiling, subject to actual
+operation and payload evidence rather than semantic weakening. Packed B saves
+four bytes per row but costs more construction work in both representative
+models. The column candidate adds a vector and its combined model costs more to
+construct than A without a demonstrated complete-pass benefit. These comparisons
+do not isolate the result codec or column from operation encoding. Reopen either
+only with a real compiler benefit that includes its invariants and full payload costs. Keep existing exact
+numeric/constant owners and sparse typed cold facts. No additional sharing cache,
+inline-list special case or packed failure vocabulary is selected.
+
+Scratch promotion bounds failed/discarded candidates while retaining unchanged
+roots. Append-only discarded graphs retain too much in the model. General
+suffix rollback cannot reclaim escaped roots and retains grown capacity.
+Common last-reader compaction releases committed dead nodes after TIR ends.
+Invoke-style successor-local definitions preserve the existing mutable-local CFG
+without adding block-argument storage/validator work. Production reader and
+execution proofs remain required before accepting these implementations.
+
+None of the models establishes whole-compiler retained bytes, stage or
+end-to-end speed, dev-stack headroom, full diagnostic/provenance ownership or
+every real reader's last-use boundary. The corpus accounting and model RSS must
+not be added or relabelled as a simultaneously resident graph. Actual payload
+remapping/release, generic-preparation detachment, diagnostic rendering, native
+CFG/installer/backend execution and compiler performance remain Phases 3/4
+acceptance gates. The architecture records the selected contracts.
+
+Independent design, domain and freeze reviews found no remaining required issue.
+The documentation release build passed with 78 outputs and no generated diff.
+These checks accept the research/design branch checkpoint and do not claim a
+new full-validation or production cutover result.
+
+## Typed semantic expressions - Phase 3 dense HIR and capacity foundations (2026-10-07; draft)
+
+The opening subsections preserve evidence for the **pre-hardening dense-HIR
+candidate**. The user subsequently requested local-definition/update architecture
+hardening, which reopened Phase 3. Those captures remain historical evidence for
+the measured candidate. The fresh post-hardening correctness, performance and
+cost evidence follows below, with its independent acceptance and limitations.
+Phase 3 closure and main readiness remain pending.
+
+The candidate replaces durable recursive HIR expressions and places with
+module-owned dense expression rows, `HirValueId` edges and typed side ranges.
+Places retain a root local and an ordered flat projection range; indexed
+projections refer to expression IDs. Seven dense vectors hold rows and payloads
+for values, struct fields, variant fields, map entries, String pieces and
+projections. The measured row stride is 56 bytes. Completed stores freeze after
+summary-dependent rewrites, pruning and final link-fact refresh.
+
+### Pre-hardening correctness evidence
+
+- The focused library run passed **6,011/6,011** tests
+  (`phase3/performance-corrections-library-tests.log`), including the dense
+  active-cell validator flags and direct borrow-fact insertion.
+- `just validate-full` completed successfully with exit code 0
+  (`phase3/final-corrected-full-validation.log`).
+- The final `just boracle` lane completed with exit code 0
+  (`phase3/final-corrected-boracle.log`): formatting and Clippy passed, along
+  with 42 borrow-problem tests, 5 last-use tests and 250 Boracle tests.
+
+These results all predate the requested hardening. The current correctness
+checkpoint and accepted post-hardening performance evidence are recorded below.
+
+### Pre-hardening paired frontend timing: historical candidate unaccepted
+
+The corrected quiet native capture matched **42/42** frontend cases with no
+input-identity exclusions, using five alternating invocations per side. The
+median paired delta of summed case medians was **+120.892 ms** in the initial
+quiet comparison and **+38.687 ms** after two corrections. In the corrected
+capture, the median paired case percentage changes were **+1.977%** for `docs`,
+**+1.955%** for `generic_scaling_40`, and **+3.595%** for
+`generic_scaling_80`; all three were slower in all five pairs. The latter two
+had median paired deltas of **+2.786 ms** and **+12.458 ms**. Pattern stress
+was mixed. The corrected aggregate remains positive, so this evidence does not
+accept a frontend performance improvement. Earlier contaminated and
+pre-correction captures remain diagnostic only.
+
+The final pre-hardening CLI capture matched **40/40** cases with zero
+input-identity exclusions and passed its independent timing audit. The median
+paired delta of summed case medians was **-4.782 ms**, with a five-pair range
+of **-62.410 ms to +6.150 ms**. No CLI case was slower in all five pairs;
+`generic_scaling_80` had a median paired change of **-3.910%**. This CLI result
+does not override the positive frontend result or establish a whole-compiler
+gain. The CLI and frontend comparisons must be refreshed after hardening.
+
+A separate historical 40-case CLI capture predates the frontend corrections;
+its **+5.879 ms** median paired delta is superseded for current comparison and
+kept only as diagnostic history. The relevant reports are
+`phase3/paired-frontends-corrected-quiet-comparison.json` and
+`phase3/paired-cli-final-quiet-comparison.json`.
+
+A reversible canonical-empty projection lookup experiment was rejected and
+reverted. Its five paired percentage deltas were **+0.525%, +1.120%, +1.568%,
+-0.039% and +0.230%**, which show no repeatable win. No full frame-offset table
+is reproduced here; sampled profiles are attribution evidence and do not
+isolate whole-suite changes to an individual case.
+
+### Pre-hardening native frame observations
+
+The final pre-hardening native prologue snapshot
+(`phase3/candidate-native-frames-final.json`) contains **3,403** function
+records and has no unresolved stack adjustments. The largest static prologue
+remains **19,744 bytes** in `parse_identifier_or_call`, the same as
+`phase3/baseline-native-frames.json`. `HirValidator::validate_expression` is
+**912 bytes**, compared with **17,024** in the baseline;
+`validate_expression_contents` is **5,872 bytes** separately. These are static
+per-function prologue sizes, not dynamic stack high-water measurements or
+headroom, and must not be summed. Refresh frame evidence after hardening.
+
+### Pre-hardening allocator and representation-shape observations
+
+The final pre-hardening 16-workload memory capture represents the candidate
+with `Cell`-backed validator flags and direct borrow-fact insertion. The table
+shows its five-pair reported medians in bytes; `delta` is candidate minus
+control.
+
+| Workload | Peak allocator proxy (control / candidate / delta B) | Live at report (control / candidate / delta B) | After report drop (control / candidate / delta B) |
+|---|---:|---:|---:|
+| `docs` | 38,539,520 / 38,536,970 / -2,550 | 1,790,358 / 1,791,256 / +898 | 1,542 / 1,542 / 0 |
+| `generic_scaling_160` | 491,924,775 / 485,616,751 / -6,308,024 | 13,775,522 / 13,776,420 / +898 | 1,469 / 1,469 / 0 |
+| `collection_stress` | 13,037,734 / 13,138,318 / +100,584 | 36,230 / 37,128 / +898 | 1,487 / 1,487 / 0 |
+| `pattern_stress` | 2,630,060 / 2,669,004 / +38,944 | 36,233 / 37,131 / +898 | 1,490 / 1,490 / 0 |
+| `default_constructor_split` | 23,728,679 / 24,173,444 / +444,765 | 53,478 / 54,376 / +898 | 1,451 / 1,451 / 0 |
+
+The mixed peak deltas do not establish an integrated memory win. The logical
+counting-allocator proxy excludes allocator metadata and internal reallocation
+overlap. RSS includes process mappings and observers and remains a whole-process
+measure. These memory captures also need refreshing after hardening.
+
+The quiet shape census covered **19 workloads x 5 captures**: 16 matched
+whole-compiler workloads and three supplemental shape inputs. For
+`generic_scaling_160`, the reported workload-level store-family medians span
+801 successful modules; all 801 were censused and validator-checked. The
+estimates are 7,614 HIR expressions and 22,842 value items. The table gives
+each store family's initial, builder and frozen capacities, growth events, row counts,
+useful/dead bytes and per-store sequential logical freeze bound. The byte bound
+describes builder-plus-frozen capacity for that store; it is not an allocator
+peak or a whole-compiler total.
+
+| Store | Initial / builder / frozen capacity (items) | Growth events | Length / useful / dead (items) | Builder / frozen capacity (B) | Useful / dead payload (B) | Sequential logical freeze bound (B) |
+|---|---:|---:|---:|---:|---:|---:|
+| Rows | 7,614 / 18,428 / 15,550 | 801 | 15,550 / 12,342 / 3,208 | 1,031,968 / 870,800 | 691,152 / 179,648 | 1,902,768 |
+| Values | 22,842 / 24,122 / 1,123 | 320 | 1,123 / 1,123 / 0 | 96,488 / 4,492 | 4,492 / 0 | 100,980 |
+| Struct fields | 0 / 1,024 / 800 | 9 | 800 / 800 / 0 | 8,192 / 6,400 | 6,400 / 0 | 14,592 |
+| Variant fields | 0 / 0 / 0 | 0 | 0 / 0 / 0 | 0 / 0 | 0 / 0 | 0 |
+| Map entries | 0 / 0 / 0 | 0 | 0 / 0 / 0 | 0 / 0 | 0 / 0 | 0 |
+| String pieces | 0 / 0 / 0 | 0 | 0 / 0 / 0 | 0 / 0 | 0 / 0 | 0 |
+| Projections | 0 / 2,432 / 960 | 488 | 960 / 960 / 0 | 19,456 / 7,680 | 7,680 / 0 | 27,136 |
+
+These are workload-level store-family totals summarized over five captures,
+not measurements matched by `module_N`. Per-module rows retain atomic
+completion-order IDs, so per-module costs are available only per run and have
+no owner-matched cross-run median. Do not sum the per-store freeze bounds into
+a whole-program peak. The census also records **6 String-literal rows** with
+**53 bytes** of length and capacity; Decimal coefficient and Arc payload counts
+are zero for this workload. It measured 15 map entries in
+`shape_hashmap_scalar_key_types_success`, three structural String pieces in
+`shape_generic_body_file_value_success` and expression-rewrite activity in
+`pattern_stress`. Dead nested String and Decimal payload fields were measured
+zero across all natural workloads; no synthetic case manufactured dead data.
+The number-transport supplement records 12 unique Decimal coefficients, 160
+bytes of BigInt magnitude capacity and 576 bytes of requested Arc-layout size.
+The Arc estimate excludes allocator rounding and metadata.
+
+The census describes retained-carrier reachability in the HIR store, not
+runtime liveness or backend reachability. The 18,433-byte census observer and
+39,936-byte replacement-event observer buffers are probe overhead. Drop timing
+separates store storage from observer buffers. That destruction capture
+predates the `Cell` flags and direct fact insertion, although the seven-store
+shape is unchanged; no current destruction comparison with its predecessor is
+available, so no drop-improvement claim is made. Probe time and RSS include
+instrumentation and are not clean compiler performance evidence.
+
+The cost-corpus provenance records HEAD
+`42f035a0743495ce2bef453660e9f3c0afb3db64`, root fingerprint
+`991c1d3aabb3edbb3b44625c6a6d6681eea30ccc7a0f5e1bc83507d2738c2027`, and a
+1,551,879-byte tracked diff plus three untracked implementation files. It has
+no timestamp in that provenance file. The corpus manifest records the capture
+window as 2026-10-07 14:59:58–15:00:30 UTC. Treat the census as evidence for that
+pre-hardening snapshot, not the current tree. The source summary and coverage details are in
+`phase3/dense-hir-cost-corpus-quiet/summary.json` and
+`phase3/dense-hir-cost-corpus-quiet/root-provenance.json`.
+
+### Correctness checkpoint before package integration
+
+- The focused feature-library run passed 6,060/6,060 tests in 16.64 seconds
+  (local-write-library-tests-12.log).
+- Routine4 passed formatting, Clippy, the feature-lane mapping check, the source audit
+  (1,484 files, zero findings), the first-party audit (21 files, 81 JavaScript
+  sources, zero findings), workspace tests and 2,404/2,404 integration tests in
+  15.21 seconds. The documentation check reported no errors or warnings in
+  1.51 seconds. The workspace Moth and xtask runs passed 5,913 and 854 tests
+  (local-write-routine-validation-4.log).
+- The Boracle lane passed 257 selected tests in 9.67 seconds, with
+  normalization and last-use smoke checks passing (local-write-boracle.log).
+- The all-target campaign passed Clippy in 30.64 seconds. Its generated
+  differential campaign passed 1/1 in 42.78 seconds
+  (local-write-boracle-campaign.log).
+- Fresh dense-HIR, default, normalized/oracle, backend and documentation/status/deletion audits found no unresolved required correctness finding.
+
+### Package integration validation
+
+The combined tree includes the nine committed package fixes through
+`dcfb170cc`, preserving explicit HIR definition/update semantics and the loop
+rebinding regression. Owning corrections add empty-graphics resolution and
+missing-selection coverage, and classify throwing Canvas context creation as
+the documented host error 500.
+
+- `just validate` passed on this tree: 5,922 Moth and 854 xtask workspace tests,
+  2,413/2,413 integration expectations in 13.12 seconds, source audit with zero
+  findings across 1,485 files, and first-party audit with zero findings across
+  24 files and 82 JavaScript sources. The documentation check reported no errors
+  or warnings (`packages-integrated-routine-validation-final.log`).
+- `just boracle` passed formatting, feature-enabled all-target Clippy, 44
+  normalization tests, five last-use tests and 257 Boracle tests in 9.06 seconds
+  (`packages-integrated-boracle.log`).
+- Independent AST, runtime and correction reviews found no unresolved required
+  finding. Both graphics cases and the Canvas exception test passed separately
+  with the repository Node release.
+- The refreshed post-package `just boracle-campaign` passed feature-enabled
+  all-target Clippy and the generated differential campaign in 42.84 seconds
+  (`packages-integrated-boracle-campaign-final.log`).
+
+### Fresh post-hardening performance evidence
+
+The post-hardening comparisons use the matched 42-case frontend and 40-case CLI
+cohorts at `ce4dc8831`, with the recorded binary pins, Node 24.21.0, Rust 1.99.0
+and `RAYON_NUM_THREADS` unset. Each native invocation used one warm-up and ten
+measured iterations per case. Five alternating invocations per binary give five
+paired observations. Inputs match
+with no exclusions. These are current-load captures: the host snapshots retain
+browser/game and WindowServer activity, so they do not claim a quiet-machine
+result (`phase3/after-hardening-frontend-load-before.txt` and
+`phase3/after-hardening-frontend-load-after-cli-start.txt`).
+
+The native frontend's median paired delta for the summed case medians is
+**-159.612 ms**, with all five pairs faster. `docs` is effectively flat at
+**-0.035%** with mixed pair signs. `generic_scaling_40` is **-0.988%** with
+mixed signs, while `generic_scaling_80` is **-4.313%** and
+`generic_scaling_160` is **-10.003%**, each faster in all five pairs. No case is
+slower in all five pairs. Stage sums still show **+13.934 ms** in `frontend.hir`
+alongside **-20.756 ms** in initial borrow analysis and **-9.529 ms** in borrow
+convergence. These stage totals are attribution evidence, not an explanation of
+the aggregate change or a whole-compiler claim. The comparison is recorded in
+`phase3/after-hardening-frontend-comparison-at-ce4dc8831-current-load.md` and
+`.json`.
+
+The first CLI capture also matched all 40 cases. Its paired-sum median is
+**-46.269 ms**, with all five totals faster, but the case ratios exposed two
+slowdowns: `constant_chain_128` at **+7.435%** with four positive pairs and the
+module-root build at **+3.678%** with five positive relative comparisons. That
+result triggered a full matched repeat and remains part of the evidence. The
+repeat's paired-sum median is **-45.250 ms**, again with all five totals faster.
+The module-root build is **-3.378%** and **-0.412 ms**, faster in all five
+relative comparisons. `constant_chain_128` remains mixed, with two positive and
+three negative pairs, a **-0.356 ms** paired median and a **+1.716%** ratio.
+Across all ten pairs, that case is **+0.231 ms** and **+4.886%**, with six
+positive and four negative pairs. The paired delta is within the recorded
+**0.6–0.8 ms** within-run standard-deviation range. No case remains slower in
+all five pairs in the repeat. The independent performance audit found no
+high-confidence recurring whole-case regression outside the observed variation.
+This judgement uses both series without a baseline reset or a 5% allowance.
+The initial and repeat
+reports are `phase3/after-hardening-cli-comparison-at-ce4dc8831-current-load.md`
+and `.json`, and
+`phase3/after-hardening-cli-comparison-at-ce4dc8831-repeat.md` and `.json`.
+
+### Fresh capacity, allocator and output evidence
+
+The pre-hardening and post-hardening count corpora each completed 95 process
+captures over 16 whole-compiler workloads and three supplemental shape inputs.
+The independent clean count audits found unchanged counts for the 16 main
+workloads and two comparable shape inputs. The number-transport shape has two
+additional staged values, adding two locals, two statements and two dense rows
+for **112 bytes** of row storage. Measured sizes are 8 bytes for a local
+destination, 16 for a write target and 8 for a jump argument. `HirStatementKind`
+remains 232 bytes and `HirStatement` 248 bytes. All seven store families meet
+the exact count and capacity conservation checks through freeze. Captured jumps
+have zero arguments, so non-empty jump-argument growth remains unmeasured.
+Dead nested String and Decimal payload bytes were zero across this corpus; the
+probe measures retained-carrier shape, not runtime reachability.
+
+The count probe used a private 1,511-file source snapshot with a documented
+original, cfg-corrected and build provenance chain. The initial probe hooks
+changed nine files in the private copy. The only subsequent source adjustment
+widened the cfg gate on its existing module-view iterator. Cargo resolved the
+private dependency lockfile there and built the probe with SHA-256 prefix
+`977668d`; the live repository was not patched. The counts and provenance are
+in `phase3/after-hardening-count-cost-corpus-at-ce4dc8831/summary.json`,
+`manifest.json`, `root-provenance.json` and
+`phase3/fresh-cost-source/fresh-cost-source-provenance.json`,
+`phase3/fresh-cost-source/phase3-probe-cfg-correction-provenance.json` and
+`phase3/fresh-cost-source/fresh-cost-build-provenance.json`.
+
+The fresh 16-workload allocator comparison completed all 160 observations and
+was independently checked. Its counter-on development build is allocation
+evidence, not throughput. Peak deltas are mixed: `generic_scaling_160` is
+**-62,996,240 bytes**, `collection_stress` **-7,062,592 bytes** and
+`default_constructor_split` **-9,786,163 bytes**, while `diagnosed` is
+**+4,269 bytes** and the Unicode input **+11,580 bytes**. Folding,
+environment and each constant-chain size are **+3,376 bytes**. Most workloads
+retain **+898 bytes** at report time (**+784 bytes** for `diagnosed`), with an
+after-drop delta of zero in all 16. The logical allocator proxy excludes
+allocator metadata and internal reallocation overlap; RSS is reported
+separately and includes observers and shared mappings. Candidate borrow-snapshot
+counters are zero, compared with control counts of 3,280 for collection,
+9,778 for `generic_scaling_160` and 7,005 for the default-constructor case.
+Those probe counters do not imply missing borrow facts or skipped fixed-point
+work.
+
+The original allocator capture lacked input hashes for two ignored temporary
+fixtures, so those comparisons remain historically qualified. A replacement
+20-process capture checked before/after hashes for both inputs. A fresh
+independent audit verified it and closed the gap for the replacement evidence.
+It does not add hashes to the original record. Comparison and identity evidence are in
+`phase3/after-hardening-memory-paired-at-ce4dc8831-resource-access/` and
+`phase3/memory-paired-input-identity-at-ce4dc8831/`.
+
+A clean static audit of six generated-JavaScript cases found byte deltas of
+**-161**, **+26**, **+120**, **-2,585**, **-11,334** and **-4,662**, respectively
+for alias write-through, explicit copy, mixed multi-bind, loop-body rebinding,
+fixed-integer range and fixed-float range. Defined binding helpers rise from
+eight to nine with the alias helper, and the self-assignment guard from zero to
+one occurrence. No external-JavaScript files were emitted. These are source
+size and helper-shape observations, not runtime-call counts or speed evidence
+(`phase3/js-output-cost-61b39f9238d04a0ca19a62ce7b616568/report.json`).
+
+The post-hardening native prologue snapshot contains **3,370** functions, zero
+unresolved stack adjustments and a maximum of **19,744 bytes**, matching the
+Phase 2 maximum. This reads the initial straight-line prologue only. It does not
+measure dynamic call-chain high-water usage or stack headroom
+(`phase3/after-hardening-native-frame-snapshot.json` and
+`phase3/after-hardening-native-frames.log`).
+
+### Review corrections and projection construction evidence (2026-10-08)
+
+The review of `51423958f` identified conservative transfer-proof publication,
+update preconditions and the Wasm self-update gate as required hardening. The
+correction keeps neutral accumulation within one use and separately merges
+completed observations of a shared HIR row. Ordinary and dedicated updates
+require an initialised mutable binding before their normal access checks.
+A direct unprojected self-update preserves its binding relationship on both
+supported backends. JS block clones, the duplicate test-only place lowerer and
+the newly unused HIR field/type lookup state were removed.
+
+Projection construction reuses a prefix already at the side store's tail and
+copies a prefix only when another path separates it from the append position.
+Field lowering consumes its resolved base type rather than walking the full
+place prefix again. Deterministic owner tests cover earlier prefixes, branching,
+store growth, rejected appends and exact frozen retention.
+
+The focused comparison uses the saved `51423958f` source and a verified copy of
+the review candidate. Both compile the same ignored measurement function against
+production `HirPlace::with_field`, with matching Rust 1.99.0 compiler, profile,
+features, configuration and empty Rust flags. Five alternating invocation pairs
+cover depths 1 to 256. Each invocation reports the median of seven samples of
+64 constructed and dropped chains per depth. The test profile is unoptimised.
+Frozen bytes below are logical projection storage measured separately from the
+timing, which excludes freezing, allocator metadata and RSS.
+
+| Depth | Entries before → after | Frozen bytes before → after | Median construction/drop ns before → after |
+|---|---|---|---|
+| 1 | 1 → 1 | 8 → 8 | 290 → 253 |
+| 2 | 3 → 2 | 24 → 16 | 427 → 364 |
+| 4 | 10 → 4 | 80 → 32 | 794 → 526 |
+| 8 | 36 → 8 | 288 → 64 | 1,431 → 952 |
+| 16 | 136 → 16 | 1,088 → 128 | 2,625 → 1,684 |
+| 32 | 528 → 32 | 4,224 → 256 | 4,815 → 3,074 |
+| 64 | 2,080 → 64 | 16,640 → 512 | 9,384 → 5,825 |
+| 128 | 8,256 → 128 | 66,048 → 1,024 | 18,766 → 11,625 |
+| 256 | 32,896 → 256 | 263,168 → 2,048 | 39,510 → 22,096 |
+
+Depths 64 and 256 improve in all five timing pairs, with median paired deltas
+of **-3,568 ns** and **-17,432 ns**. Across the series, 44 of 45 paired deltas
+are negative. One depth-1 pair is positive. These are isolated construction
+costs, not whole-compiler throughput results. An independent audit verified the
+source and binary hashes, effective build fingerprints, identical instrumentation
+and every raw row and summary. No timing test is retained in the live tree.
+
+Accepted local evidence is under
+`tmp/typed-semantic-expressions/phase3/review-projection-matched-five-pairs/`,
+with `review-projection-build-configuration.json`,
+`review-projection-corrected-candidate-provenance.json` and
+`measure-review-projections-matched.py` beside it. Earlier captures remain
+marked invalid or superseded after detecting a candidate-copy error and a
+compiler-fingerprint mismatch. Only the matched capture above is accepted.
+
+The review candidate passed `just validate`: 5,940 main-crate unit tests,
+854 xtask tests, the other workspace suites, all 2,415 integration checks,
+source and first-party dependency audits and the docs check. Focused HIR,
+backend and borrow runs passed 319, 299 and 161 tests respectively. The paired
+self-update and genuine-alias rejection cases each passed both backends.
+`just boracle` passed its Clippy check, 44 borrow-problem tests, five last-use
+tests and 257 Boracle tests including the bounded operational oracle.
+`just boracle-campaign` also passed its all-target Clippy check and the generated
+differential campaign.
+
+The stable non-recording native frontend check ran all 42 cases. Its stored-history
+comparison covers only 25 cases, with 17 changed workloads excluded. The stable
+CLI check ran all 40 cases and compared 38, excluding two changed workloads.
+Both comparisons are mixed and do not replace the final matched Phase 3 cohort.
+The accepted command logs are `review-corrections-bench-frontend-check-stable.log`
+and `review-corrections-bench-check-stable.log` under the local Phase 3 directory.
+An earlier CLI run rejected a tracked progress edit during measurement and is
+excluded. The subsequent read-only `just bench-report` completed successfully.
+The earlier `ce4dc8831` whole-compiler measurements remain evidence for that
+tree. Final integrated timing, native history and main readiness remain open.
+
+### Phase 3 current status (historical checkpoint)
+
+This preserves the Phase 3 checkpoint as recorded. Current template-control-flow
+evidence and gate status are in **Template control-flow simplification: Phase 10
+evidence** below.
+
+Independent performance, storage, static-output and allocator-correction audits
+accepted the bounded evidence on `ce4dc8831` with the qualifications above.
+The subsequent review corrections have clean source audits and passing routine
+and Boracle checks, with independently verified projection-construction evidence.
+These checkpoints do not establish main readiness.
+
+The root contains the nine committed package fixes through `dcfb170cc`.
+The package branch also has committed U32/F32 binding work at `6a8486849` and
+unfinished external-constant changes. These later changes have not yet been
+integrated here. Reverse synchronization waits for that checkout's stable
+committed boundary. Its local work remains preserved.
+
+The Phase 3 checkpoint and 3M closeout remain open pending package integration,
+synchronization, final matched whole-compiler timing, accepted native history
+and main-bound validation. No final main-branch full validation result, native
+benchmark-history entry, squash or pause checkpoint has been recorded. Phase 4
+waits for the user's explicit resumption after the separate template-control-flow
+removal. Record a fresh post-removal baseline before resuming its implementation.
+
+## Template control-flow simplification: Phase 10 evidence (2026-10-08)
+
+The accepted interleaved five-pair Phase 8B comparison is recorded in
+`tmp/template-control-flow/phase8-nested-comparison.json` and
+`tmp/template-control-flow/phase8-nested-comparison.md`. Control
+`981cec8d7` is the `f152` activation with matching package origins. The
+candidate patch became `5b97e59f6`, followed by Phase 9 cleanup and review
+at `eb16fdbe4`. An independent clean verification in
+`tmp/template-control-flow/phase8-final-performance-verification.md`
+recomputed 41 frontend and 39 CLI comparable cases. Only `docs_frontend`
+and `docs_check` were excluded for changed source and measurement
+identities. Results are mixed: they support no broad speed claim, Phase 8A-only
+attribution or package-origin attribution.
+
+| Case | Control → candidate medians (ms) | Median change |
+| --- | ---: | ---: |
+| `template_stress_frontend` | 36.324729 → 35.343812 | -2.700% |
+| `template_render_plan_churn_frontend` | 27.404146 → 27.835583 | +1.574% |
+| `template_stress_check` | 10.958708 → 10.614812 | -3.138% |
+| `template_render_plan_churn_check` | 9.262625 → 9.191730 | -0.765% |
+
+Five actual `just bench-frontend` and five `just bench` recording runs
+added ten history rows (43 → 53). Source/compiler identity stayed at
+`eb16fdbe4`; the ten intervening commits changed only the tracked monthly
+summary. These later runs were not interleaved with control, so the medians in
+`tmp/template-control-flow/phase10-recorded-comparison.json` are absolute
+observations, not paired or causal deltas.
+
+| Case | Five-run median (ms) |
+| --- | ---: |
+| `template_stress_frontend` | 34.7391875 |
+| `template_render_plan_churn_frontend` | 27.6284375 |
+| `template_stress_check` | 10.73825 |
+| `template_render_plan_churn_check` | 9.2745415 |
+| `speed_test_check` | 25.7352085 |
+| `speed_test_build` | 27.9733335 |
+| `root_single_file_check` | 6.5779585 |
+
+The native suites cover 42 frontend and 40 CLI cases with timing schema 2,
+history format 8 and benchmark protocol 4, using one warmup and ten measured
+iterations. Thread overrides were unset (`thread_count` recorded as `null`);
+the toolchain was Node 24.21.0, Rust 1.99.0 and LLVM 23.1.1. The tracked
+monthly summary keeps compact no-change entries; raw benchmark histories and
+profile artefacts remain local-only.
+
+No positive primary-case movement in the later batch exceeds the native case
+floors. `generic_trait_churn_frontend` has two overlapping stage totals roughly
+1.00 ms above the earlier control medians, each exceeding that median plus
+1 ms in three of five later runs. Its primary increase is 0.833 ms, below the
+2 ms floor, and two later runs are faster than control. This is an unpaired
+attribution observation and does not establish a causal regression.
+
+Separate counter-on pressure evidence changed blocks from 205 to 202,
+statements from 1,011 to 776 and guard sets from 1 to 0. Worklist size moved
+1,181 to 1,178 and joins 1,014 to 1,013 after proof reuse. Phase 9 made no
+field-layout change. Native profile symbolication still failed. The derived
+419-sample record adjusts name strings but does not provide fully symbolicated
+attribution.
+
+Phase 9 selected checks recorded C0: 890 template, 397 TIR and 63 HIR tests;
+114 parser and 67 finalisation tests; 198 template, 113 ordinary control-flow
+and 39 external integration backend blocks plus one new case. Clippy, formatting, suite
+audit (2,109 cases and 2,395 blocks), docs check and release build also recorded
+C0. `just boracle` and `just boracle-campaign` subsequently passed on the same
+production tree. The final integrated `just validate-full` passed with Node
+24.21.0 and the repository Rust pin: all ten standard feature lanes, 2,395
+integration backend blocks, the docs check, source/dependency and honesty audits,
+performance budgets, three scaling series and no-timer release-artifact checks.
+The documentation release build produced 79 outputs. Phase 3M is accepted and
+Phase 4 remains paused until explicit user resumption with a fresh baseline.
+
+Optional outbound `I32` adapter consolidation remains a separate follow-up
+in `src/projects/html_project/external_js/runtime_glue/source.rs` because the outbound
+negative-zero contract is unproven.

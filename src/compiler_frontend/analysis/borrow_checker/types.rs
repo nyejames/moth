@@ -35,11 +35,18 @@ pub(crate) struct BorrowAnalysis {
     /// contract instead of reconstructing it from separate HIR metadata caches.
     pub public_call_summaries: FxHashMap<FunctionId, PublicCallSummary>,
     pub function_summaries: FxHashMap<FunctionId, FunctionBorrowSummary>,
+    #[cfg(any(test, feature = "show_borrow_checker"))]
     pub block_entry_states: FxHashMap<BlockId, BorrowStateSnapshot>,
+    #[cfg(any(test, feature = "show_borrow_checker"))]
     pub block_exit_states: FxHashMap<BlockId, BorrowStateSnapshot>,
+    #[cfg(any(test, feature = "show_borrow_checker"))]
     pub statement_entry_states: FxHashMap<HirNodeId, BorrowStateSnapshot>,
     pub statement_facts: FxHashMap<HirNodeId, StatementBorrowFact>,
     pub terminator_facts: FxHashMap<BlockId, TerminatorBorrowFact>,
+    /// Per-value facts conservatively merged across every reachable final block context.
+    ///
+    /// A dense HIR value row can be shared by several CFG edges or functions, so its published
+    /// roots and access outcomes describe the union of those execution contexts.
     pub value_facts: FxHashMap<HirValueId, ValueBorrowFact>,
     /// Advisory drop insertion points for later lowering stages.
     ///
@@ -112,7 +119,7 @@ pub(crate) struct TerminatorBorrowFact {
     pub conflicts_checked: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ValueBorrowFact {
     pub classification: ValueAccessClassification,
     pub roots: Vec<LocalId>,
@@ -124,6 +131,19 @@ pub(crate) struct ValueBorrowFact {
     pub optional_transfer: OptionalTransferStatus,
 }
 
+impl ValueBorrowFact {
+    /// Merge facts from distinct final CFG contexts that share one immutable HIR value row.
+    pub(crate) fn merge(&mut self, other: Self) {
+        self.classification = self.classification.merge(other.classification);
+        self.roots.extend(other.roots);
+        self.roots.sort_unstable_by_key(|local| local.0);
+        self.roots.dedup_by_key(|local| local.0);
+        self.optional_transfer = self
+            .optional_transfer
+            .merge_completed_use(other.optional_transfer);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum OptionalTransferStatus {
     #[default]
@@ -133,6 +153,19 @@ pub(crate) enum OptionalTransferStatus {
 }
 
 impl OptionalTransferStatus {
+    /// Merge observations from distinct completed uses of one shared HIR value row.
+    ///
+    /// A missing transfer attempt is neutral only while collecting one use. Once a use is
+    /// complete, `NotAttempted` means that this observed context supplied no transfer proof.
+    pub(crate) fn merge_completed_use(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::NotAttempted, Self::NotAttempted) => Self::NotAttempted,
+            (Self::Transfer, Self::Transfer) => Self::Transfer,
+            _ => Self::Borrow,
+        }
+    }
+
+    /// Accumulate pieces of evidence for one use; an empty accumulator stays neutral.
     pub(crate) fn merge(self, other: Self) -> Self {
         match (self, other) {
             (Self::NotAttempted, status) | (status, Self::NotAttempted) => status,
@@ -165,11 +198,13 @@ impl ValueAccessClassification {
     }
 }
 
+#[cfg(any(test, feature = "show_borrow_checker"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BorrowStateSnapshot {
     pub locals: Vec<LocalBorrowSnapshot>,
 }
 
+#[cfg(any(test, feature = "show_borrow_checker"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LocalBorrowSnapshot {
     pub local: LocalId,

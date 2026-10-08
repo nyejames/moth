@@ -1,3 +1,10 @@
+// Host state for one `io.input.Input` handle.
+//
+// Listeners write only live state and the pending transitions coalesced since the previous update.
+// `update` is the sole publication boundary: it copies live held state and pointer position into
+// the published snapshot and swaps the pending transitions in. Reads observe the published snapshot
+// only, so repeated reads between updates agree. Storage depends on distinct keys and buttons, never
+// on how many events the host delivers.
 function __moth_io_input_map_button(button) {
     if (button === 0) return "left";
     if (button === 1) return "middle";
@@ -9,80 +16,141 @@ function __moth_io_input_normalize_key(key) {
     if (key.length === 1 && key >= "A" && key <= "Z") return key.toLowerCase();
     return key;
 }
-function __moth_io_input_release_buttons(handle) {
-    if (!handle || handle.closed) return;
-    for (const button of Array.from(handle.heldButtons)) {
-        handle.pending.push({ type: "buttonup", button });
-        handle.heldButtons.delete(button);
-    }
+// The physical `code` stays stable while modifiers change the produced `key`, so the keyup after
+// Shift+1 releases the "1" recorded at keydown rather than an unseen "!".
+function __moth_io_input_key_identity(event, name) {
+    const code = event.code;
+    if (typeof code === "string" && code !== "" && code !== "Unidentified") return "code:" + code;
+    return "key:" + name;
 }
-function __moth_io_input_release_all(handle) {
-    if (!handle || handle.closed) return;
-    for (const key of Array.from(handle.heldKeys)) {
-        handle.pending.push({ type: "keyup", key });
-        handle.heldKeys.delete(key);
-    }
-    __moth_io_input_release_buttons(handle);
-}
-function __moth_io_input_new() {
-    if (typeof window === "undefined" || typeof document === "undefined" || typeof AbortController === "undefined" || typeof window.PointerEvent === "undefined") {
-        const err = __moth_make_error("Browser input APIs unavailable", 500, null, null);
-        return { tag: "err", value: err };
-    }
-    const handle = {
-        closed: false,
-        controller: new AbortController(),
-        pending: [],
-        heldKeys: new Set(),
+function __moth_io_input_new_transitions() {
+    return {
         pressedKeys: new Set(),
         releasedKeys: new Set(),
-        heldButtons: new Set(),
         pressedButtons: new Set(),
         releasedButtons: new Set(),
-        pointerX: 0.0,
-        pointerY: 0.0,
         lastKeyPressed: null,
         lastKeyReleased: null,
         lastPointerPressed: null,
         lastPointerReleased: null,
     };
-    const signal = handle.controller.signal;
-    const options = { passive: true, signal };
+}
+function __moth_io_input_clear_transitions(transitions) {
+    transitions.pressedKeys.clear();
+    transitions.releasedKeys.clear();
+    transitions.pressedButtons.clear();
+    transitions.releasedButtons.clear();
+    transitions.lastKeyPressed = null;
+    transitions.lastKeyReleased = null;
+    transitions.lastPointerPressed = null;
+    transitions.lastPointerReleased = null;
+}
+// Two physical keys can share one logical name, such as both Shift keys. The name is down while
+// either is held, so only the first press and the last release are transitions.
+function __moth_io_input_logical_key_held(handle, name) {
+    for (const heldName of handle.liveKeys.values()) {
+        if (heldName === name) return true;
+    }
+    return false;
+}
+function __moth_io_input_press_key(handle, identity, name) {
+    // Auto-repeat delivers further keydown events for a key that is already held.
+    if (handle.liveKeys.has(identity)) return;
+    const alreadyHeld = __moth_io_input_logical_key_held(handle, name);
+    handle.liveKeys.set(identity, name);
+    if (alreadyHeld) return;
+    handle.pending.pressedKeys.add(name);
+    handle.pending.lastKeyPressed = name;
+}
+function __moth_io_input_release_key(handle, identity) {
+    // A keyup without a recorded keydown, such as one after focus loss, is not a transition.
+    const name = handle.liveKeys.get(identity);
+    if (name === undefined) return;
+    handle.liveKeys.delete(identity);
+    if (__moth_io_input_logical_key_held(handle, name)) return;
+    handle.pending.releasedKeys.add(name);
+    handle.pending.lastKeyReleased = name;
+}
+// A keyup without a usable physical code can't match a keydown recorded by code, so it releases
+// every held key with the same logical name rather than leaving one stuck.
+function __moth_io_input_release_key_event(handle, identity, name) {
+    if (handle.liveKeys.has(identity) || identity.startsWith("code:")) {
+        __moth_io_input_release_key(handle, identity);
+        return;
+    }
+    for (const [heldIdentity, heldName] of Array.from(handle.liveKeys)) {
+        if (heldName === name) __moth_io_input_release_key(handle, heldIdentity);
+    }
+}
+function __moth_io_input_press_button(handle, button) {
+    if (handle.liveButtons.has(button)) return;
+    handle.liveButtons.add(button);
+    handle.pending.pressedButtons.add(button);
+    handle.pending.lastPointerPressed = button;
+}
+function __moth_io_input_release_button(handle, button) {
+    if (!handle.liveButtons.delete(button)) return;
+    handle.pending.releasedButtons.add(button);
+    handle.pending.lastPointerReleased = button;
+}
+function __moth_io_input_release_buttons(handle) {
+    for (const button of Array.from(handle.liveButtons)) {
+        __moth_io_input_release_button(handle, button);
+    }
+}
+// Focus loss means the host stops delivering keyup and pointerup, so held input is released here
+// and the releases publish at the next update like any other transition.
+function __moth_io_input_release_all(handle) {
+    for (const identity of Array.from(handle.liveKeys.keys())) {
+        __moth_io_input_release_key(handle, identity);
+    }
+    __moth_io_input_release_buttons(handle);
+}
+function __moth_io_input_track_pointer(handle, event) {
+    handle.livePointerX = event.clientX;
+    handle.livePointerY = event.clientY;
+}
+function __moth_io_input_new() {
+    if (typeof window === "undefined" || typeof document === "undefined" || typeof AbortController === "undefined" || typeof window.PointerEvent === "undefined") {
+        return __MOTH_IO_INPUT_UNSUPPORTED_RESULT__;
+    }
+    const handle = {
+        closed: false,
+        controller: new AbortController(),
+        // Live host state, keyed by physical identity for keys.
+        liveKeys: new Map(),
+        liveButtons: new Set(),
+        livePointerX: 0.0,
+        livePointerY: 0.0,
+        pending: __moth_io_input_new_transitions(),
+        // The snapshot published by the last update.
+        heldKeys: new Set(),
+        heldButtons: new Set(),
+        pointerX: 0.0,
+        pointerY: 0.0,
+        published: __moth_io_input_new_transitions(),
+    };
+    const options = { passive: true, signal: handle.controller.signal };
     window.addEventListener("keydown", function (event) {
-        const key = __moth_io_input_normalize_key(event.key);
-        if (!handle.heldKeys.has(key)) {
-            handle.pending.push({ type: "keypress", key });
-        }
-        handle.heldKeys.add(key);
+        const name = __moth_io_input_normalize_key(event.key);
+        __moth_io_input_press_key(handle, __moth_io_input_key_identity(event, name), name);
     }, options);
     window.addEventListener("keyup", function (event) {
-        const key = __moth_io_input_normalize_key(event.key);
-        handle.pending.push({ type: "keyup", key });
-        handle.heldKeys.delete(key);
+        const name = __moth_io_input_normalize_key(event.key);
+        __moth_io_input_release_key_event(handle, __moth_io_input_key_identity(event, name), name);
     }, options);
     window.addEventListener("pointermove", function (event) {
-        handle.pointerX = event.clientX;
-        handle.pointerY = event.clientY;
+        __moth_io_input_track_pointer(handle, event);
     }, options);
     window.addEventListener("pointerdown", function (event) {
+        __moth_io_input_track_pointer(handle, event);
         const button = __moth_io_input_map_button(event.button);
-        if (button !== null) {
-            if (!handle.heldButtons.has(button)) {
-                handle.pending.push({ type: "buttonpress", button });
-            }
-            handle.heldButtons.add(button);
-        }
-        handle.pointerX = event.clientX;
-        handle.pointerY = event.clientY;
+        if (button !== null) __moth_io_input_press_button(handle, button);
     }, options);
     window.addEventListener("pointerup", function (event) {
+        __moth_io_input_track_pointer(handle, event);
         const button = __moth_io_input_map_button(event.button);
-        if (button !== null) {
-            handle.pending.push({ type: "buttonup", button });
-            handle.heldButtons.delete(button);
-        }
-        handle.pointerX = event.clientX;
-        handle.pointerY = event.clientY;
+        if (button !== null) __moth_io_input_release_button(handle, button);
     }, options);
     window.addEventListener("pointercancel", function () {
         __moth_io_input_release_buttons(handle);
@@ -91,100 +159,77 @@ function __moth_io_input_new() {
         __moth_io_input_release_all(handle);
     }, options);
     document.addEventListener("visibilitychange", function () {
-        if (document.hidden) { __moth_io_input_release_all(handle); }
+        if (document.hidden) __moth_io_input_release_all(handle);
     }, options);
     return { tag: "ok", value: handle };
 }
 function __moth_io_input_update(handle) {
-    if (!handle || handle.closed) return;
-    handle.pressedKeys.clear();
-    handle.releasedKeys.clear();
-    handle.pressedButtons.clear();
-    handle.releasedButtons.clear();
-    handle.lastKeyPressed = null;
-    handle.lastKeyReleased = null;
-    handle.lastPointerPressed = null;
-    handle.lastPointerReleased = null;
-    for (const event of handle.pending) {
-        if (event.type === "keypress") {
-            handle.pressedKeys.add(event.key);
-            handle.lastKeyPressed = event.key;
-        } else if (event.type === "keyup") {
-            handle.releasedKeys.add(event.key);
-            handle.lastKeyReleased = event.key;
-        } else if (event.type === "buttonpress") {
-            handle.pressedButtons.add(event.button);
-            handle.lastPointerPressed = event.button;
-        } else if (event.type === "buttonup") {
-            handle.releasedButtons.add(event.button);
-            handle.lastPointerReleased = event.button;
-        }
-    }
-    handle.pending.length = 0;
+    if (handle.closed) return;
+    handle.heldKeys.clear();
+    for (const name of handle.liveKeys.values()) handle.heldKeys.add(name);
+    handle.heldButtons.clear();
+    for (const button of handle.liveButtons) handle.heldButtons.add(button);
+    handle.pointerX = handle.livePointerX;
+    handle.pointerY = handle.livePointerY;
+    // Swap rather than copy so publication allocates nothing.
+    const published = handle.pending;
+    handle.pending = handle.published;
+    __moth_io_input_clear_transitions(handle.pending);
+    handle.published = published;
 }
+// Clearing every state lane leaves reads neutral, and the closed flag keeps `update` from
+// publishing anything a listener might still write.
 function __moth_io_input_close(handle) {
-    if (!handle || handle.closed) return;
+    if (handle.closed) return;
     handle.controller.abort();
     handle.closed = true;
-    handle.pending.length = 0;
+    handle.liveKeys.clear();
+    handle.liveButtons.clear();
+    handle.livePointerX = 0.0;
+    handle.livePointerY = 0.0;
+    __moth_io_input_clear_transitions(handle.pending);
     handle.heldKeys.clear();
-    handle.pressedKeys.clear();
-    handle.releasedKeys.clear();
     handle.heldButtons.clear();
-    handle.pressedButtons.clear();
-    handle.releasedButtons.clear();
     handle.pointerX = 0.0;
     handle.pointerY = 0.0;
-    handle.lastKeyPressed = null;
-    handle.lastKeyReleased = null;
-    handle.lastPointerPressed = null;
-    handle.lastPointerReleased = null;
+    __moth_io_input_clear_transitions(handle.published);
+}
+function __moth_io_input_option(value) {
+    return value === null ? { tag: "none" } : { tag: "some", value };
 }
 function __moth_io_input_key_down(handle, key) {
-    if (!handle || handle.closed) return false;
     return handle.heldKeys.has(__moth_io_input_normalize_key(key));
 }
 function __moth_io_input_key_pressed(handle, key) {
-    if (!handle || handle.closed) return false;
-    return handle.pressedKeys.has(__moth_io_input_normalize_key(key));
+    return handle.published.pressedKeys.has(__moth_io_input_normalize_key(key));
 }
 function __moth_io_input_key_released(handle, key) {
-    if (!handle || handle.closed) return false;
-    return handle.releasedKeys.has(__moth_io_input_normalize_key(key));
+    return handle.published.releasedKeys.has(__moth_io_input_normalize_key(key));
 }
 function __moth_io_input_pointer_x(handle) {
-    if (!handle || handle.closed) return 0.0;
     return handle.pointerX;
 }
 function __moth_io_input_pointer_y(handle) {
-    if (!handle || handle.closed) return 0.0;
     return handle.pointerY;
 }
 function __moth_io_input_pointer_down(handle, button) {
-    if (!handle || handle.closed) return false;
     return handle.heldButtons.has(button);
 }
 function __moth_io_input_pointer_pressed(handle, button) {
-    if (!handle || handle.closed) return false;
-    return handle.pressedButtons.has(button);
+    return handle.published.pressedButtons.has(button);
 }
 function __moth_io_input_pointer_released(handle, button) {
-    if (!handle || handle.closed) return false;
-    return handle.releasedButtons.has(button);
+    return handle.published.releasedButtons.has(button);
 }
 function __moth_io_input_last_key_pressed(handle) {
-    if (!handle || handle.closed || handle.lastKeyPressed === null) return { tag: "none" };
-    return { tag: "some", value: handle.lastKeyPressed };
+    return __moth_io_input_option(handle.published.lastKeyPressed);
 }
 function __moth_io_input_last_key_released(handle) {
-    if (!handle || handle.closed || handle.lastKeyReleased === null) return { tag: "none" };
-    return { tag: "some", value: handle.lastKeyReleased };
+    return __moth_io_input_option(handle.published.lastKeyReleased);
 }
 function __moth_io_input_last_pointer_pressed(handle) {
-    if (!handle || handle.closed || handle.lastPointerPressed === null) return { tag: "none" };
-    return { tag: "some", value: handle.lastPointerPressed };
+    return __moth_io_input_option(handle.published.lastPointerPressed);
 }
 function __moth_io_input_last_pointer_released(handle) {
-    if (!handle || handle.closed || handle.lastPointerReleased === null) return { tag: "none" };
-    return { tag: "some", value: handle.lastPointerReleased };
+    return __moth_io_input_option(handle.published.lastPointerReleased);
 }

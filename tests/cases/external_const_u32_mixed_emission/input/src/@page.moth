@@ -1,0 +1,11 @@
+@gl_mixed.js primitive_triangles, u32_max, double_u32
+
+is_max_u32 |value U32| -> Bool:
+    return value is 4294967295
+;
+
+doubled U32 = double_u32(primitive_triangles)
+doubled_again U32 = double_u32(doubled)
+const_matches = primitive_triangles is 4
+max_matches = is_max_u32(u32_max)
+[:external const mixed doubled=[doubled]/[doubled_again] const=[const_matches] max=[max_matches]]

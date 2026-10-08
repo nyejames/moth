@@ -5,13 +5,13 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
-use crate::compiler_frontend::hir::expressions::HirExpression;
 use crate::compiler_frontend::hir::functions::HirFunction;
+use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
 };
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use moth_lexical::numeric::profile::NumericProfile;
 
@@ -21,6 +21,7 @@ fn trap_mode_range_step_failure_lowers_to_fatal_throw() {
         RangeStepFailureCause::ZeroStep,
         RangeStepFailureCause::NoProgress,
     ] {
+        let mut expressions = HirExpressionStore::default();
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
         let (type_environment, types) = build_type_environment();
@@ -34,10 +35,14 @@ fn trap_mode_range_step_failure_lowers_to_fatal_throw() {
                 HirStatementKind::RangeStepFailure {
                     cause,
                     failure_mode: NumericFailureMode::Trap,
-                    result: LocalId(0),
+                    result: HirLocalDestination::Define(LocalId(0)),
                 },
             )],
-            terminator: HirTerminator::Return(unit_expression(2, types.unit, region)),
+            terminator: HirTerminator::Return(unit_expression(
+                types.unit,
+                region,
+                &mut expressions,
+            )),
         };
         let function = HirFunction {
             id: FunctionId(0),
@@ -46,6 +51,7 @@ fn trap_mode_range_step_failure_lowers_to_fatal_throw() {
             return_type: types.unit,
         };
         let module = build_module(
+            expressions,
             &mut path_fork,
             &mut string_table,
             "main",
@@ -55,7 +61,6 @@ fn trap_mode_range_step_failure_lowers_to_fatal_throw() {
         );
         let output = lower_hir_to_js(
             &module,
-            &BorrowCheckReport::default(),
             &NumericProofs::default(),
             &string_table,
             default_config(),
@@ -88,8 +93,9 @@ fn trap_mode_range_step_failure_lowers_to_fatal_throw() {
 fn lower_minimal_module_with_float_statement(
     kind: HirFloatStatementKind,
     failure_mode: NumericFailureMode,
-    source: HirExpression,
+    source: HirValueId,
     result_type: TypeId,
+    mut expressions: HirExpressionStore,
 ) -> String {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -100,12 +106,12 @@ fn lower_minimal_module_with_float_statement(
         HirFloatStatementKind::Format => HirStatementKind::FormatFloat {
             source,
             failure_mode,
-            result: LocalId(0),
+            result: HirLocalDestination::Define(LocalId(0)),
         },
         HirFloatStatementKind::Validate => HirStatementKind::ValidateFloat {
             source,
             failure_mode,
-            result: LocalId(0),
+            result: HirLocalDestination::Define(LocalId(0)),
         },
     };
 
@@ -116,7 +122,7 @@ fn lower_minimal_module_with_float_statement(
         region,
         locals: vec![local(0, result_type, region)],
         statements: vec![float_statement],
-        terminator: HirTerminator::Return(unit_expression(2, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
 
     let function = HirFunction {
@@ -127,6 +133,7 @@ fn lower_minimal_module_with_float_statement(
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -137,7 +144,6 @@ fn lower_minimal_module_with_float_statement(
 
     lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -157,19 +163,21 @@ enum HirFloatStatementKind {
 /// Verifies that trap-mode `FormatFloat` assigns the scalar formatted string to the result local.
 #[test]
 fn trap_mode_format_float_lowers_to_trapped_helper() {
+    let mut expressions = HirExpressionStore::default();
     let region = RegionId(0);
     let (_, types) = build_type_environment();
 
     let output = lower_minimal_module_with_float_statement(
         HirFloatStatementKind::Format,
         NumericFailureMode::Trap,
-        float_expression(1, 1.5, types.float, region),
+        float_expression(1.5, types.float, region, &mut expressions),
         types.string,
+        expressions,
     );
 
     assert!(
         output.contains(
-            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_format_float(1.5, 64, \"Float\")));"
+            "moth_result_l0 = __moth_binding(__moth_numeric_trap(__moth_format_float(1.5, 64, \"Float\")));"
         ),
         "trap-mode FormatFloat must assign the scalar trap result"
     );
@@ -178,20 +186,21 @@ fn trap_mode_format_float_lowers_to_trapped_helper() {
 /// Verifies that return-error-mode `FormatFloat` assigns the fallible carrier directly.
 #[test]
 fn return_error_mode_format_float_lowers_to_carrier() {
+    let mut expressions = HirExpressionStore::default();
     let region = RegionId(0);
     let (_, types) = build_type_environment();
 
     let output = lower_minimal_module_with_float_statement(
         HirFloatStatementKind::Format,
         NumericFailureMode::ReturnError,
-        float_expression(1, 1.5, types.float, region),
+        float_expression(1.5, types.float, region, &mut expressions),
         types.fallible_int_string,
+        expressions,
     );
 
     assert!(
-        output.contains(
-            "__moth_assign_value(moth_result_l0, __moth_format_float(1.5, 64, \"Float\"));"
-        ),
+        output
+            .contains("moth_result_l0 = __moth_binding(__moth_format_float(1.5, 64, \"Float\"));"),
         "ReturnError FormatFloat must assign the helper carrier directly"
     );
     assert!(
@@ -203,19 +212,21 @@ fn return_error_mode_format_float_lowers_to_carrier() {
 /// Verifies that trap-mode `ValidateFloat` assigns the scalar finite Float to the result local.
 #[test]
 fn trap_mode_validate_float_lowers_to_trapped_helper() {
+    let mut expressions = HirExpressionStore::default();
     let region = RegionId(0);
     let (_, types) = build_type_environment();
 
     let output = lower_minimal_module_with_float_statement(
         HirFloatStatementKind::Validate,
         NumericFailureMode::Trap,
-        float_expression(1, 1.5, types.float, region),
+        float_expression(1.5, types.float, region, &mut expressions),
         types.float,
+        expressions,
     );
 
     assert!(
         output.contains(
-            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_float_validate(1.5)));"
+            "moth_result_l0 = __moth_binding(__moth_numeric_trap(__moth_float_validate(1.5)));"
         ),
         "trap-mode ValidateFloat must assign the scalar trap result"
     );
@@ -224,18 +235,20 @@ fn trap_mode_validate_float_lowers_to_trapped_helper() {
 /// Verifies that return-error-mode `ValidateFloat` assigns the fallible carrier directly.
 #[test]
 fn return_error_mode_validate_float_lowers_to_carrier() {
+    let mut expressions = HirExpressionStore::default();
     let region = RegionId(0);
     let (_, types) = build_type_environment();
 
     let output = lower_minimal_module_with_float_statement(
         HirFloatStatementKind::Validate,
         NumericFailureMode::ReturnError,
-        float_expression(1, 1.5, types.float, region),
+        float_expression(1.5, types.float, region, &mut expressions),
         types.fallible_int_string,
+        expressions,
     );
 
     assert!(
-        output.contains("__moth_assign_value(moth_result_l0, __moth_float_validate(1.5));"),
+        output.contains("moth_result_l0 = __moth_binding(__moth_float_validate(1.5));"),
         "ReturnError ValidateFloat must assign the helper carrier directly"
     );
     assert!(
@@ -247,14 +260,16 @@ fn return_error_mode_validate_float_lowers_to_carrier() {
 /// Verifies that the Float formatting helper is emitted when `FormatFloat` is reachable.
 #[test]
 fn format_float_helper_emitted_when_format_float_reachable() {
+    let mut expressions = HirExpressionStore::default();
     let region = RegionId(0);
     let (_, types) = build_type_environment();
 
     let source = lower_minimal_module_with_float_statement(
         HirFloatStatementKind::Format,
         NumericFailureMode::Trap,
-        float_expression(1, 1.5, types.float, region),
+        float_expression(1.5, types.float, region, &mut expressions),
         types.string,
+        expressions,
     );
 
     assert!(
@@ -274,14 +289,16 @@ fn format_float_helper_emitted_when_format_float_reachable() {
 /// Verifies that the Float validation helper is emitted when `ValidateFloat` is reachable.
 #[test]
 fn validate_float_helper_emitted_when_validate_float_reachable() {
+    let mut expressions = HirExpressionStore::default();
     let region = RegionId(0);
     let (_, types) = build_type_environment();
 
     let source = lower_minimal_module_with_float_statement(
         HirFloatStatementKind::Validate,
         NumericFailureMode::Trap,
-        float_expression(1, 1.5, types.float, region),
+        float_expression(1.5, types.float, region, &mut expressions),
         types.float,
+        expressions,
     );
 
     assert!(
@@ -326,6 +343,7 @@ fn lower_minimal_module_with_numeric_op(
     failure_mode: NumericFailureMode,
     operands: HirNumericOperands,
     result_type: TypeId,
+    expressions: HirExpressionStore,
 ) -> String {
     lower_minimal_module_with_numeric_op_for_profile(
         op,
@@ -333,6 +351,7 @@ fn lower_minimal_module_with_numeric_op(
         operands,
         result_type,
         NumericProfile::STANDARD,
+        expressions,
     )
 }
 
@@ -353,6 +372,7 @@ fn float_op(operator: NumericOperator) -> HirNumericOp {
 /// Verifies that trap-mode Int addition assigns the scalar success value to the result local.
 #[test]
 fn trap_mode_int_add_lowers_to_trapped_helper() {
+    let mut expressions = HirExpressionStore::default();
     let region = RegionId(0);
     let (_, types) = build_type_environment();
 
@@ -360,15 +380,16 @@ fn trap_mode_int_add_lowers_to_trapped_helper() {
         int_op(NumericOperator::Add),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
-            left: int_expression(1, 1, types.int, region),
-            right: int_expression(2, 2, types.int, region),
+            left: int_expression(1, types.int, region, &mut expressions),
+            right: int_expression(2, types.int, region, &mut expressions),
         },
         types.int,
+        expressions,
     );
 
     assert!(
         output.contains(
-            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_int_add(1, 2, -2147483648, 2147483647)));"
+            "moth_result_l0 = __moth_binding(__moth_numeric_trap(__moth_int_add(1, 2, -2147483648, 2147483647)));"
         ),
         "trap-mode Int addition must assign the checked Number carrier result"
     );
@@ -377,6 +398,7 @@ fn trap_mode_int_add_lowers_to_trapped_helper() {
 /// Verifies that return-error-mode Int addition assigns the fallible carrier directly.
 #[test]
 fn return_error_mode_int_add_lowers_to_carrier() {
+    let mut expressions = HirExpressionStore::default();
     let region = RegionId(0);
     let (_, types) = build_type_environment();
 
@@ -384,15 +406,16 @@ fn return_error_mode_int_add_lowers_to_carrier() {
         int_op(NumericOperator::Add),
         NumericFailureMode::ReturnError,
         HirNumericOperands::Binary {
-            left: int_expression(1, 1, types.int, region),
-            right: int_expression(2, 2, types.int, region),
+            left: int_expression(1, types.int, region, &mut expressions),
+            right: int_expression(2, types.int, region, &mut expressions),
         },
         types.fallible_int_string,
+        expressions,
     );
 
     assert!(
         output.contains(
-            "__moth_assign_value(moth_result_l0, __moth_int_add(1, 2, -2147483648, 2147483647));"
+            "moth_result_l0 = __moth_binding(__moth_int_add(1, 2, -2147483648, 2147483647));"
         ),
         "ReturnError Int addition must assign the helper carrier directly"
     );
@@ -405,6 +428,7 @@ fn return_error_mode_int_add_lowers_to_carrier() {
 /// Verifies that a unary numeric operation lowers through the helper path.
 #[test]
 fn int_neg_lowers_to_unary_helper() {
+    let mut expressions = HirExpressionStore::default();
     let region = RegionId(0);
     let (_, types) = build_type_environment();
 
@@ -412,14 +436,15 @@ fn int_neg_lowers_to_unary_helper() {
         int_op(NumericOperator::Negate),
         NumericFailureMode::Trap,
         HirNumericOperands::Unary {
-            operand: int_expression(1, 1, types.int, region),
+            operand: int_expression(1, types.int, region, &mut expressions),
         },
         types.int,
+        expressions,
     );
 
     assert!(
         output.contains(
-            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_int_neg(1, -2147483648, 2147483647)));"
+            "moth_result_l0 = __moth_binding(__moth_numeric_trap(__moth_int_neg(1, -2147483648, 2147483647)));"
         ),
         "trap-mode Int negation must lower to the checked unary helper"
     );
@@ -428,6 +453,7 @@ fn int_neg_lowers_to_unary_helper() {
 /// Verifies that float operations also lower to the checked helper path.
 #[test]
 fn float_div_lowers_to_helper() {
+    let mut expressions = HirExpressionStore::default();
     let region = RegionId(0);
     let (_, types) = build_type_environment();
 
@@ -435,15 +461,16 @@ fn float_div_lowers_to_helper() {
         float_op(NumericOperator::Divide),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
-            left: float_expression(1, 1.0, types.float, region),
-            right: float_expression(2, 2.0, types.float, region),
+            left: float_expression(1.0, types.float, region, &mut expressions),
+            right: float_expression(2.0, types.float, region, &mut expressions),
         },
         types.float,
+        expressions,
     );
 
     assert!(
         output.contains(
-            "__moth_assign_value(moth_result_l0, __moth_numeric_trap(__moth_float_div(1, 2)));"
+            "moth_result_l0 = __moth_binding(__moth_numeric_trap(__moth_float_div(1, 2)));"
         ),
         "trap-mode Float division must lower to the checked float helper"
     );
@@ -471,6 +498,7 @@ fn numeric_helpers_not_emitted_without_numeric_op() {
 /// Verifies that the numeric helper group is emitted when a NumericOp is reachable.
 #[test]
 fn numeric_helpers_emitted_when_numeric_op_reachable() {
+    let mut expressions = HirExpressionStore::default();
     let region = RegionId(0);
     let (_, types) = build_type_environment();
 
@@ -478,10 +506,11 @@ fn numeric_helpers_emitted_when_numeric_op_reachable() {
         int_op(NumericOperator::Add),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
-            left: int_expression(1, 1, types.int, region),
-            right: int_expression(2, 2, types.int, region),
+            left: int_expression(1, types.int, region, &mut expressions),
+            right: int_expression(2, types.int, region, &mut expressions),
         },
         types.int,
+        expressions,
     );
 
     assert!(
@@ -516,6 +545,7 @@ fn numeric_helpers_emitted_when_numeric_op_reachable() {
 /// Verifies that the trap helper returns ok values and throws err values.
 #[test]
 fn numeric_trap_returns_ok_and_throws_err() {
+    let mut expressions = HirExpressionStore::default();
     let region = RegionId(0);
     let (_, types) = build_type_environment();
 
@@ -523,10 +553,11 @@ fn numeric_trap_returns_ok_and_throws_err() {
         int_op(NumericOperator::Add),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
-            left: int_expression(1, 1, types.int, region),
-            right: int_expression(2, 2, types.int, region),
+            left: int_expression(1, types.int, region, &mut expressions),
+            right: int_expression(2, types.int, region, &mut expressions),
         },
         types.int,
+        expressions,
     );
 
     let trap = helper_source(&source, "__moth_numeric_trap");
@@ -545,6 +576,7 @@ fn numeric_trap_returns_ok_and_throws_err() {
 /// Verifies that integer helper successes normalize JS `-0` to the single Moth Int zero.
 #[test]
 fn int_ok_helper_normalizes_negative_zero() {
+    let mut expressions = HirExpressionStore::default();
     let region = RegionId(0);
     let (_, types) = build_type_environment();
 
@@ -552,9 +584,10 @@ fn int_ok_helper_normalizes_negative_zero() {
         int_op(NumericOperator::Negate),
         NumericFailureMode::Trap,
         HirNumericOperands::Unary {
-            operand: int_expression(1, 0, types.int, region),
+            operand: int_expression(0, types.int, region, &mut expressions),
         },
         types.int,
+        expressions,
     );
 
     let helper = helper_source(&source, "__moth_int_ok");
@@ -568,6 +601,7 @@ fn int_ok_helper_normalizes_negative_zero() {
 /// Verifies that exact-Number integer helpers delegate range checking to `__moth_int_check`.
 #[test]
 fn int_helpers_delegate_to_int_check() {
+    let mut expressions = HirExpressionStore::default();
     let region = RegionId(0);
     let (_, types) = build_type_environment();
 
@@ -575,10 +609,11 @@ fn int_helpers_delegate_to_int_check() {
         int_op(NumericOperator::Add),
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
-            left: int_expression(1, 1, types.int, region),
-            right: int_expression(2, 2, types.int, region),
+            left: int_expression(1, types.int, region, &mut expressions),
+            right: int_expression(2, types.int, region, &mut expressions),
         },
         types.int,
+        expressions,
     );
 
     let add = helper_source(&source, "__moth_int_add");
@@ -596,6 +631,7 @@ fn int_helpers_delegate_to_int_check() {
 /// Verifies that malformed HIR arity produces a compiler error rather than invalid JS.
 #[test]
 fn numeric_op_arity_mismatch_returns_error() {
+    let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
@@ -608,9 +644,9 @@ fn numeric_op_arity_mismatch_returns_error() {
             op: int_op(NumericOperator::Add),
             failure_mode: NumericFailureMode::Trap,
             operands: HirNumericOperands::Unary {
-                operand: int_expression(1, 1, types.int, region),
+                operand: int_expression(1, types.int, region, &mut expressions),
             },
-            result: LocalId(0),
+            result: HirLocalDestination::Define(LocalId(0)),
         },
     );
 
@@ -619,7 +655,7 @@ fn numeric_op_arity_mismatch_returns_error() {
         region,
         locals: vec![local(0, types.int, region)],
         statements: vec![numeric_statement],
-        terminator: HirTerminator::Return(unit_expression(2, types.unit, region)),
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
 
     let function = HirFunction {
@@ -630,6 +666,7 @@ fn numeric_op_arity_mismatch_returns_error() {
     };
 
     let module = build_module(
+        expressions,
         &mut path_fork,
         &mut string_table,
         "main",
@@ -640,7 +677,6 @@ fn numeric_op_arity_mismatch_returns_error() {
 
     let result = lower_hir_to_js(
         &module,
-        &BorrowCheckReport::default(),
         &NumericProofs::default(),
         &string_table,
         default_config(),
@@ -651,5 +687,73 @@ fn numeric_op_arity_mismatch_returns_error() {
     assert!(
         result.is_err(),
         "NumericOp arity mismatch must fail lowering with a compiler error"
+    );
+}
+
+/// Verifies that an operation result explicitly updating an existing local uses ordinary
+/// value-assignment semantics instead of allocating a fresh binding wrapper.
+#[test]
+fn numeric_op_update_uses_value_assignment() {
+    let mut expressions = HirExpressionStore::default();
+    let mut path_fork = PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (type_environment, types) = build_type_environment();
+    let region = RegionId(0);
+    let operation = statement(
+        1,
+        HirStatementKind::NumericOp {
+            op: int_op(NumericOperator::Add),
+            failure_mode: NumericFailureMode::Trap,
+            operands: HirNumericOperands::Binary {
+                left: int_expression(1, types.int, region, &mut expressions),
+                right: int_expression(2, types.int, region, &mut expressions),
+            },
+            result: HirLocalDestination::Update(LocalId(0)),
+        },
+    );
+    let block = HirBlock {
+        id: BlockId(0),
+        region,
+        locals: vec![local(0, types.int, region)],
+        statements: vec![operation],
+        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
+    };
+    let function = HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: vec![LocalId(0)],
+        return_type: types.unit,
+    };
+    let module = build_module(
+        expressions,
+        &mut path_fork,
+        &mut string_table,
+        "main",
+        vec![block],
+        function,
+        &[(LocalId(0), "value")],
+    );
+
+    let output = lower_hir_to_js(
+        &module,
+        &NumericProofs::default(),
+        &string_table,
+        default_config(),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("an explicit numeric operation update should lower");
+    let value_name = expected_dev_local_name("value", 0);
+    assert!(
+        output.source.contains(&format!(
+            "__moth_assign_value({value_name}, __moth_numeric_trap(__moth_int_add(1, 2"
+        )),
+        "an operation update must write its produced value through the existing binding"
+    );
+    assert!(
+        !output.source.contains(&format!(
+            "{value_name} = __moth_binding(__moth_numeric_trap(__moth_int_add(1, 2"
+        )),
+        "an operation update must not create a fresh value-backed binding"
     );
 }

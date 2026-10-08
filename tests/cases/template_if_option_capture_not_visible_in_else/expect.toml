@@ -1,5 +1,0 @@
-[backends.html]
-mode = "success"
-warnings = "forbid"
-rendered_output_contains = ["template_if_option_capture_not_visible_in_else", "hello guest"]
-rendered_output_not_contains = ["hello Ada"]

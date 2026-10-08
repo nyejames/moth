@@ -32,7 +32,7 @@ use crate::projects::html_project::external_js::runtime_module_registry::Runtime
 
 /// HTML-owned JS external import provider.
 ///
-/// WHAT: parses `.js` files with `@moth.opaque` and `@moth.sig` annotations and registers
+/// WHAT: parses `.js` files with `@moth.opaque`, `@moth.sig` and `@moth.const` annotations and registers
 ///       discovered symbols in the shared `ExternalPackageRegistry`.
 /// WHY: this is the bridge between the HTML builder's JS parser and the compiler frontend's
 ///      external package system.
@@ -124,9 +124,9 @@ impl ExternalImportProvider for JsExternalImportProvider {
         );
 
         // Reject project-local JS imports that declare receiver-style signatures.
-        // WHY: source-authored `@moth.sig` signatures must expose free functions and opaque
-        //      types, not `this` receiver parameters. The shared parser still classifies
-        //      receiver-shaped signatures so every registration boundary can reject them.
+        // WHY: callable `@moth.sig` signatures must expose free functions rather than `this`
+        //      receiver parameters. The parser classifies receiver-shaped signatures so every
+        //      registration boundary can reject them.
         diagnostics.extend(reject_receiver_methods_in_project_local_js(
             &parsed,
             js_source_path,

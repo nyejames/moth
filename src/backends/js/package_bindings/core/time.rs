@@ -7,21 +7,13 @@
 use std::sync::LazyLock;
 
 use crate::backends::js::JsEmitter;
+use crate::backends::js::runtime::error_result_source;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 
 /// First renderable instant, `0000-01-01T00:00:00.000Z`.
 const RENDERABLE_MIN_MILLIS: i64 = -62_167_219_200_000;
 /// Last renderable instant, `9999-12-31T23:59:59.999Z`.
 const RENDERABLE_MAX_MILLIS: i64 = 253_402_300_799_999;
-
-/// Formats the canonical `__moth_error_result(message, code)` failure lane for one error code.
-fn error_result_source(error: BuiltinErrorCode) -> String {
-    format!(
-        "__moth_error_result(\"{}\", {})",
-        error.default_message(),
-        error.as_u32()
-    )
-}
 
 /// Builds the ISO timestamp parser helper with compiler-owned failure lanes.
 ///

@@ -1,0 +1,13 @@
+new_input || -> String, Error!:
+    input ~= io.input.new()!
+    io.input.close(~input)
+    return "opened"
+;
+
+-- The runtime harness host has no window, so input polling is unavailable
+code ~U32 = 0
+result = new_input() catch |err|:
+    code = err.code
+    then "unsupported"
+;
+[: core_io_input_new [result] code=[code]]

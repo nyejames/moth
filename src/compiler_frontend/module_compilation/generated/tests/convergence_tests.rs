@@ -96,7 +96,7 @@ fn link_facts_for_calls(targets: Vec<CallTarget>) -> HirModuleLinkFacts {
                 id: HirNodeId(index as u32),
                 kind: HirStatementKind::Call {
                     target,
-                    args: Vec::new(),
+                    args: crate::compiler_frontend::hir::expression_store::HirValueRange::empty(),
                     result: None,
                 },
                 span: None,

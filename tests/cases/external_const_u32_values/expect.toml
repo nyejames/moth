@@ -1,0 +1,14 @@
+entry = "."
+numeric_profile = "Int32/Float64"
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "external const u32 zero=true small=true above_signed=true/true renamed=true max=true/true ns=true/true/true"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_not_contain = [
+    "_moth/js/",
+]

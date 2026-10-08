@@ -49,8 +49,8 @@
 //! | `slot_layout.rs` | One cycle-guarded slot-schema and placeholder-occurrence walk |
 //! | `slot_composition/` | Compose head chains and route slot contributions |
 //! | `slot_plan.rs` | Store-owned runtime slot site and source plans |
-//! | `wrapper_sets.rs` | Reuse wrapper references and build wrapper contexts |
-//! | `contribution_shape.rs` | Share child-contribution shape decisions |
+//! | `wrapper_sets.rs` | Compose wrapper sets and build wrapper contexts |
+//! | `contribution_shape.rs` | Share child and control-flow contribution decisions |
 //! | `copy_state.rs` and `subtree_copy.rs` | Copy module-local derived subtrees for runtime slot planning |
 //! | `expression_constness.rs` | Shared expression constness, exact branch/loop overlay payload selection and the narrow runtime-contribution structural query |
 //! | `expression_sites.rs` | Walk expression payloads through exact TIR views and nested expression values |
@@ -113,9 +113,7 @@ pub(crate) use expression_sites::{
 
 #[cfg(test)]
 pub(crate) use node::TemplateLoopHeaderExpressionSites;
-pub(crate) use node::{
-    TemplateIr, TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind, TirSlotPlaceholder,
-};
+pub(crate) use node::{TemplateIr, TemplateIrNode, TemplateIrNodeKind, TirSlotPlaceholder};
 #[cfg(test)]
 pub(crate) use store::MalformedTirStore;
 pub(crate) use store::{
@@ -127,7 +125,10 @@ pub(crate) use summary::summarize_existing_root;
 
 pub(crate) use refs::{TemplateTirReference, TemplateWrapperReference};
 pub(crate) use view::{TirView, TirViewIdentity};
-pub(crate) use wrapper_sets::{attach_wrapper_context_overlay, wrapper_reference_for_template};
+pub(crate) use wrapper_sets::{
+    attach_wrapper_context_overlay, conditional_wrapper_set_for_control_flow,
+    wrapper_reference_for_template,
+};
 
 pub(crate) use overlays::TemplateViewContext;
 #[cfg(test)]
@@ -141,7 +142,9 @@ pub(crate) use store::TemplateWrapperSet;
 #[cfg(test)]
 pub(crate) use tests::builder::TemplateIrBuilder;
 
-pub(crate) use contribution_shape::{ContributionShape, classify_tir_contribution_node};
+pub(crate) use contribution_shape::{
+    ContributionShape, classify_tir_contribution_node, tir_node_is_control_flow_root,
+};
 
 pub(crate) use slot_layout::{
     TirSlotPlaceholderRef, TirSlotSchema, collect_tir_slot_layout,
@@ -149,7 +152,8 @@ pub(crate) use slot_layout::{
 };
 
 pub(crate) use slot_composition::{
-    TirSlotContributions, compose_tir_head_chain_from_root, stored_insert_contribution_templates,
+    TirSlotContributions, attach_conditional_wrapper_set, compose_tir_head_chain_from_root,
+    stored_insert_contribution_templates,
 };
 
 pub(crate) use construction_context::TemplateConstructionContext;
@@ -166,18 +170,18 @@ pub(crate) use handoff_materialization::{
     owned_runtime_slot_handoff_for_prepared_view, owned_runtime_template_handoff_for_prepared_view,
 };
 pub(crate) use preparation::{
-    RuntimeTemplateReason, TemplateHelperKind, TemplatePreparation, TemplatePreparationFacts,
-    TemplatePreparationMode, TemplatePreparationOutcome, prepare_tir_view,
-    prepare_tir_view_with_source_scope, refresh_kind_from_preparation,
+    RuntimeTemplateReason, TemplatePreparation, TemplatePreparationFacts, TemplatePreparationMode,
+    TemplatePreparationOutcome, prepare_tir_view, prepare_tir_view_with_source_scope,
+    refresh_kind_from_preparation,
 };
 
 #[cfg(test)]
 pub(crate) use formatter_view::format_tir_template;
 
 pub(in crate::compiler_frontend::ast::templates) use render_unit::{
-    build_branch_body_candidate_root_from_tir_nodes, format_tir_body_root, head_prefix_tir_nodes,
-    prepare_loop_aggregate_wrapper, run_tir_formatter_with_warnings, sequence_children,
-    trim_whitespace_before_loop_control_boundary,
+    build_conditional_body_candidate_root_from_tir_nodes, format_tir_body_root,
+    head_prefix_tir_nodes, prepare_loop_aggregate_wrapper, run_tir_formatter_with_warnings,
+    sequence_children,
 };
 
 pub(crate) use slot_plan::{

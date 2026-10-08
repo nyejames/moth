@@ -4,3 +4,6 @@ warnings = "forbid"
 rendered_output_not_contains = [
     "$slot",
 ]
+rendered_output_contains = [
+    "final count 4",
+]

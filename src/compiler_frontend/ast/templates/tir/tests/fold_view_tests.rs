@@ -4,6 +4,9 @@
 // folding at the owning TIR boundary.
 // WHY: these tests cover the semantic fold invariants of the exact-view reducer.
 
+use crate::compiler_frontend::ast::ast_nodes::{
+    Declaration, LoopBindings, RangeEndKind, RangeLoopSpec,
+};
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
@@ -12,7 +15,7 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, Template, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateBranchSelector, TemplateFoldBinding,
+    TemplateBranchSelector, TemplateFoldBinding, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateEmission, TemplateFoldResult, TirFoldContext,
@@ -23,7 +26,7 @@ use crate::compiler_frontend::ast::templates::tir::ids::{
     ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId,
 };
 use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIr, TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind,
+    TemplateIr, TemplateIrNode, TemplateIrNodeKind,
 };
 use crate::compiler_frontend::ast::templates::tir::overlays::{
     TemplateViewContext, TirExpressionOverlay, TirExpressionOverlayId, TirSlotResolution,
@@ -38,6 +41,9 @@ use crate::compiler_frontend::ast::templates::tir::summary::TemplateIrSummary;
 use crate::compiler_frontend::ast::templates::tir::view::{TemplateTirPhase, TirView};
 use crate::compiler_frontend::ast::templates::tir::{
     TemplatePreparation, TemplatePreparationMode, TemplatePreparationOutcome, prepare_tir_view,
+};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticPayload, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -106,33 +112,33 @@ fn fold_prepared_view(
     Ok(emission)
 }
 
-fn build_branch_template(
+fn build_conditional_template(
     store: &mut TemplateIrStore,
     string_table: &mut StringTable,
     selector: TemplateBranchSelector,
-    branch_text: &str,
-    fallback_text: &str,
-) -> (TemplateIrId, ExpressionSiteId, StringId, StringId) {
+    body_text: &str,
+) -> (TemplateIrId, ExpressionSiteId, StringId) {
     let mut builder = TemplateIrBuilder::new(store);
-    let branch_text_id = string_table.intern(branch_text);
-    let branch_text_node = builder.push_text_node(
-        branch_text_id,
-        branch_text.len(),
+    let body_text_id = string_table.intern(body_text);
+    let body_text_node = builder.push_text_node(
+        body_text_id,
+        body_text.len(),
         TemplateSegmentOrigin::Body,
         None,
     );
-    let branch_body = builder.push_sequence_node(vec![branch_text_node], None);
-    let fallback_text_id = string_table.intern(fallback_text);
-    let fallback_text_node = builder.push_text_node(
-        fallback_text_id,
-        fallback_text.len(),
-        TemplateSegmentOrigin::Body,
-        None,
-    );
-    let fallback = builder.push_sequence_node(vec![fallback_text_node], None);
-    let selector_site_id = builder.store.next_expression_site_id();
-    let branch = TemplateIrBranch::new(selector, branch_body, None, selector_site_id);
-    let root = builder.push_branch_chain_node(vec![branch], Some(fallback), None, None);
+    let body = builder.push_sequence_node(vec![body_text_node], None);
+    let root = builder.push_conditional_node(selector, body, None);
+    let selector_site_id = match &builder
+        .store
+        .get_node(root)
+        .expect("conditional node should exist")
+        .kind
+    {
+        TemplateIrNodeKind::Conditional {
+            selector_site_id, ..
+        } => *selector_site_id,
+        other => panic!("expected conditional node, got {other:?}"),
+    };
     let template_id = builder.finish_template(
         root,
         Style::default(),
@@ -140,12 +146,7 @@ fn build_branch_template(
         TemplateIrSummary::default(),
         None,
     );
-    (
-        template_id,
-        selector_site_id,
-        branch_text_id,
-        fallback_text_id,
-    )
+    (template_id, selector_site_id, body_text_id)
 }
 
 #[test]
@@ -364,16 +365,15 @@ fn fold_view_slot_overlay_resolves_filled_and_missing_to_empty() {
 }
 
 #[test]
-fn fold_view_branch_selectors_use_overlay_or_structural_expression() {
+fn fold_view_conditional_selectors_use_overlay_or_structural_expression() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
 
-    let (bool_template, bool_site, bool_branch_text, bool_fallback_text) = build_branch_template(
+    let (bool_template, bool_site, bool_body_text) = build_conditional_template(
         &mut store,
         &mut string_table,
         TemplateBranchSelector::Bool(Expression::bool(false, None, ValueMode::ImmutableOwned)),
-        "bool-branch",
-        "bool-fallback",
+        "bool-body",
     );
 
     let mut type_environment = TypeEnvironment::new();
@@ -400,17 +400,15 @@ fn fold_view_branch_selectors_use_overlay_or_structural_expression() {
         value: Box::new(Expression::int(7, None, ValueMode::ImmutableOwned)),
         to_type: option_some.type_id,
     };
-    let (option_template, option_site, option_branch_text, option_fallback_text) =
-        build_branch_template(
-            &mut store,
-            &mut string_table,
-            TemplateBranchSelector::OptionPresentCapture {
-                scrutinee: option_none,
-                pattern: Box::new(option_pattern),
-            },
-            "option-branch",
-            "option-fallback",
-        );
+    let (option_template, option_site, option_body_text) = build_conditional_template(
+        &mut store,
+        &mut string_table,
+        TemplateBranchSelector::OptionPresentCapture {
+            scrutinee: option_none,
+            pattern: Box::new(option_pattern),
+        },
+        "option-body",
+    );
 
     let bool_overlay_id = store
         .allocate_expression_overlay(TirExpressionOverlay {
@@ -467,23 +465,163 @@ fn fold_view_branch_selectors_use_overlay_or_structural_expression() {
     assert_eq!(
         fold_prepared_view(&bool_structural_view, &mut fold_context)
             .expect("structural bool selector should fold"),
-        TemplateEmission::Output(ConstStringValue::Text(bool_fallback_text)),
+        TemplateEmission::NoOutput,
     );
     assert_eq!(
         fold_prepared_view(&bool_overlay_view, &mut fold_context)
             .expect("overlay bool selector should fold"),
-        TemplateEmission::Output(ConstStringValue::Text(bool_branch_text)),
+        TemplateEmission::Output(ConstStringValue::Text(bool_body_text)),
     );
     assert_eq!(
         fold_prepared_view(&option_structural_view, &mut fold_context)
             .expect("structural option selector should fold"),
-        TemplateEmission::Output(ConstStringValue::Text(option_fallback_text)),
+        TemplateEmission::NoOutput,
     );
     assert_eq!(
         fold_prepared_view(&option_overlay_view, &mut fold_context)
             .expect("overlay option selector should fold"),
-        TemplateEmission::Output(ConstStringValue::Text(option_branch_text)),
+        TemplateEmission::Output(ConstStringValue::Text(option_body_text)),
     );
+}
+
+#[test]
+fn fold_view_restores_option_and_loop_bindings_after_const_loop_limit_error() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut store = TemplateIrStore::new();
+
+    let option_capture_name = string_table.intern("option_value");
+    let option_capture_path = path_fork
+        .try_intern_portable_path("main.moth/#option_value", &mut string_table)
+        .expect("option capture path fits");
+    let outer_iteration_path = path_fork
+        .try_intern_portable_path("main.moth/#outer_iteration", &mut string_table)
+        .expect("outer loop binding path fits");
+    let unrelated_outer_path = path_fork
+        .try_intern_portable_path("main.moth/#unrelated_outer", &mut string_table)
+        .expect("outer fold binding path fits");
+
+    let mut type_environment = TypeEnvironment::new();
+    let mut option_scrutinee = Expression::option_none_with_type_id(
+        builtin_type_ids::INT,
+        DataType::Int,
+        &mut type_environment,
+        None,
+    );
+    option_scrutinee.kind = ExpressionKind::Coerced {
+        value: Box::new(Expression::int(7, None, ValueMode::ImmutableOwned)),
+        to_type: option_scrutinee.type_id,
+    };
+
+    let option_pattern = MatchPattern::OptionPresentCapture {
+        name: option_capture_name,
+        binding_path: option_capture_path,
+        inner_type_id: builtin_type_ids::INT,
+        span: None,
+        binding_span: None,
+    };
+
+    let mut builder = TemplateIrBuilder::new(&mut store);
+    let inner_text = string_table.intern("iteration");
+    let inner_text_node = builder.push_text_node(
+        inner_text,
+        "iteration".len(),
+        TemplateSegmentOrigin::Body,
+        None,
+    );
+    let inner_body = builder.push_sequence_node(vec![inner_text_node], None);
+    let range_header = |item, end| TemplateLoopHeader::Range {
+        bindings: Box::new(LoopBindings { item, index: None }),
+        range: Box::new(RangeLoopSpec {
+            start: Expression::int(0, None, ValueMode::ImmutableOwned),
+            end: Expression::int(end, None, ValueMode::ImmutableOwned),
+            end_kind: RangeEndKind::Exclusive,
+            step: None,
+        }),
+    };
+    let inner_loop = builder.push_loop_node(range_header(None, 2), inner_body, None, None);
+    let outer_body = builder.push_sequence_node(vec![inner_loop], None);
+    let outer_loop = builder.push_loop_node(
+        range_header(
+            Some(Declaration {
+                id: outer_iteration_path,
+                value: Expression::int(0, None, ValueMode::ImmutableOwned),
+                binding_span: None,
+                config_qualifier: None,
+            }),
+            1,
+        ),
+        outer_body,
+        None,
+        None,
+    );
+    let conditional_body = builder.push_sequence_node(vec![outer_loop], None);
+    let conditional = builder.push_conditional_node(
+        TemplateBranchSelector::OptionPresentCapture {
+            scrutinee: option_scrutinee,
+            pattern: Box::new(option_pattern),
+        },
+        conditional_body,
+        None,
+    );
+    let root = builder.push_sequence_node(vec![conditional], None);
+    let template_id = builder.finish_template(
+        root,
+        Style::default(),
+        TemplateType::String,
+        TemplateIrSummary::default(),
+        None,
+    );
+
+    let view = TirView::new(
+        &store,
+        template_id,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )
+    .expect("nested const-control-flow view should construct");
+    let prepared = prepare_tir_view(&view, TemplatePreparationMode::Value)
+        .expect("nested const-control-flow view should prepare");
+    assert!(matches!(
+        prepared.outcome,
+        TemplatePreparationOutcome::Foldable
+    ));
+
+    let mut context = fold_context(&mut string_table);
+    context.template_const_loop_iteration_limit = 1;
+    context.bindings.push(TemplateFoldBinding {
+        path: unrelated_outer_path,
+        value: Expression::int(9, None, ValueMode::ImmutableOwned),
+    });
+
+    let error = fold_prepared_template(&prepared, view, &mut context)
+        .expect_err("the two-iteration inner range should exceed the limit of one");
+    let TemplateError::Diagnostic(diagnostic) = error else {
+        panic!("const-loop expansion limit should remain a source diagnostic");
+    };
+    assert_eq!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidTemplateStructure {
+            reason: InvalidTemplateStructureReason::TemplateConstLoopExpansionLimitExceeded {
+                limit: 1,
+            },
+        }
+    );
+
+    let remaining_binding_paths = context
+        .bindings
+        .iter()
+        .map(|binding| binding.path)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        remaining_binding_paths,
+        vec![unrelated_outer_path],
+        "the failed fold must remove the option capture and active outer loop item"
+    );
+    assert!(matches!(
+        context.bindings[0].value.kind,
+        ExpressionKind::Int(9)
+    ));
 }
 
 // -------------------------
@@ -553,11 +691,7 @@ fn fold_prepared_template_rejects_parsed_phase() {
         facts: TemplatePreparationFacts {
             is_const_evaluable_shape: true,
             has_unresolved_slot_occurrences: false,
-            has_resolved_slot_sources: false,
             has_escaped_insert_helpers: false,
-            wrapper_foldable: true,
-            has_runtime_slot_plan: false,
-            has_runtime_slot_sites: false,
             final_value_kind:
                 crate::compiler_frontend::ast::templates::template::TemplateConstValueKind::RenderableString,
         },
@@ -573,36 +707,21 @@ fn fold_prepared_template_rejects_parsed_phase() {
 }
 
 #[test]
-fn prepared_fold_rejects_missing_node_in_untaken_branch() {
+fn prepared_fold_rejects_missing_body_in_false_conditional() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
-    let body = store.push_node(TemplateIrNode::new(
-        TemplateIrNodeKind::Text {
-            text: string_table.intern("taken"),
-            byte_len: 5,
-            origin: TemplateSegmentOrigin::Body,
-        },
-        None,
-    ));
-    let branch = TemplateIrBranch::new(
-        TemplateBranchSelector::Bool(Expression::bool(false, None, ValueMode::ImmutableOwned)),
-        body,
-        None,
-        store.next_expression_site_id(),
-    );
     let missing_body = TemplateIrNodeId::new(999);
-    let untaken_branch = TemplateIrBranch::new(
-        TemplateBranchSelector::Bool(Expression::bool(true, None, ValueMode::ImmutableOwned)),
-        missing_body,
-        None,
-        store.next_expression_site_id(),
-    );
+    let selector_site_id = store.next_expression_site_id();
     let root = store.push_node(TemplateIrNode::new(
-        TemplateIrNodeKind::BranchChain {
-            branches: vec![branch, untaken_branch],
-            fallback: None,
-            else_marker: None,
+        TemplateIrNodeKind::Conditional {
+            selector: Box::new(TemplateBranchSelector::Bool(Expression::bool(
+                false,
+                None,
+                ValueMode::ImmutableOwned,
+            ))),
+            selector_site_id,
+            body: missing_body,
         },
         None,
     ));
@@ -619,7 +738,7 @@ fn prepared_fold_rejects_missing_node_in_untaken_branch() {
     let mut context = fold_context(&mut string_table);
 
     let error = fold_prepared_view(&view, &mut context)
-        .expect_err("a missing node in an untaken branch must still be rejected");
+        .expect_err("a missing body must be rejected even when the selector is false");
 
     assert!(
         format!("{error:?}").contains("node"),

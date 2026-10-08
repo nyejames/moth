@@ -85,6 +85,7 @@ fn classifies_entry_start_and_normal_functions() {
         &mut path_fork,
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
         crate::compiler_frontend::hir::functions::HirFunctionOriginLookup::default(),
+        Default::default(),
     )
     .build_hir_module(ast)
     .expect("HIR lowering should succeed");
@@ -149,6 +150,7 @@ fn lowers_exact_stable_origin_to_local_function_id() {
         &mut path_fork,
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
         lookup,
+        Default::default(),
     )
     .build_hir_module(ast)
     .expect("HIR lowering should retain the stable origin mapping")
@@ -239,6 +241,7 @@ fn rejects_unused_concrete_origin_seed() {
         &mut path_fork,
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
         lookup,
+        Default::default(),
     )
     .build_hir_module(ast);
 
@@ -289,6 +292,7 @@ fn hir_validation_rejects_two_origins_for_one_local_function() {
         &mut path_fork,
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
         lookup,
+        Default::default(),
     )
     .build_hir_module(ast)
     .expect("valid lowering should succeed");

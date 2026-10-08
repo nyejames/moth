@@ -8,24 +8,20 @@
  * @moth.opaque CanvasTextMetrics
  */
 
-import { mothOk, mothErr } from "@moth/runtime";
+import {
+    mothOk,
+    mothErr,
+    MOTH_ERROR_HOST_INVALID_ARGUMENT,
+    MOTH_ERROR_HOST_RESOURCE_NOT_FOUND,
+    MOTH_ERROR_HOST_RESOURCE_UNAVAILABLE,
+    MOTH_ERROR_HOST_OPERATION_FAILED,
+} from "@moth/runtime";
 
 // This file is a Moth-facing Canvas 2D facade over the browser API.
 // Browser Canvas has overloads, union source types, callbacks, typed arrays, and
 // async image flows; the current JS external binding ABI is concrete, synchronous,
 // and scalar/opaque only, so overloaded APIs are exposed as explicitly named wrappers.
-
-// TODO(canvas-api): Add async image-loading helpers once external packages can model
-// callbacks, promises, or an event/listener API. `create_image` creates an element
-// immediately, but drawing remains fallible until the browser has loaded it.
-// TODO(canvas-api): Add toBlob/captureStream once callback/stream values have a
-// Moth ABI shape. `to_data_url*` is available now but can be expensive for
-// large canvases because it returns one in-memory string.
-// TODO(canvas-api): Add raw typed-array and arbitrary line-dash array access once
-// JS signatures can expose collections or typed-array handles safely.
-// TODO(canvas-api): Add Path2D, DOMMatrix, OffscreenCanvas, ImageBitmap, video
-// sources, and WebGL as separate opaque APIs rather than forcing them through the
-// scalar-only 2D wrapper surface.
+// Deferred surfaces and future package direction live in this directory's README.
 
 function okVoid() {
     return mothOk();
@@ -33,19 +29,19 @@ function okVoid() {
 
 function domError(error, fallbackMessage) {
     if (error && typeof error.message === "string" && error.message.length > 0) {
-        return mothErr(500, error.message);
+        return mothErr(MOTH_ERROR_HOST_OPERATION_FAILED, error.message);
     }
 
-    return mothErr(500, fallbackMessage);
+    return mothErr(MOTH_ERROR_HOST_OPERATION_FAILED, fallbackMessage);
 }
 
 function assertLoadedImage(image) {
     if (!image.complete) {
-        return mothErr(409, "Canvas image has not finished loading");
+        return mothErr(MOTH_ERROR_HOST_RESOURCE_UNAVAILABLE, "Canvas image has not finished loading");
     }
 
     if (image.naturalWidth === 0 || image.naturalHeight === 0) {
-        return mothErr(409, "Canvas image is unavailable or broken");
+        return mothErr(MOTH_ERROR_HOST_RESOURCE_UNAVAILABLE, "Canvas image is unavailable or broken");
     }
 
     return null;
@@ -53,7 +49,7 @@ function assertLoadedImage(image) {
 
 function assertImageDataPoint(imageData, x, y) {
     if (x < 0 || y < 0 || x >= imageData.width || y >= imageData.height) {
-        return mothErr(400, "ImageData pixel coordinate is outside the image bounds");
+        return mothErr(MOTH_ERROR_HOST_INVALID_ARGUMENT, "ImageData pixel coordinate is outside the image bounds");
     }
 
     return null;
@@ -106,7 +102,7 @@ export function getCanvas(id) {
     const canvas = document.getElementById(id);
 
     if (!canvas || canvas.tagName !== "CANVAS") {
-        return mothErr(404, "Canvas element not found");
+        return mothErr(MOTH_ERROR_HOST_RESOURCE_NOT_FOUND, "Canvas element not found");
     }
 
     return mothOk(canvas);
@@ -129,12 +125,14 @@ export function getImage(id) {
     const image = document.getElementById(id);
 
     if (!image || image.tagName !== "IMG") {
-        return mothErr(404, "Image element not found");
+        return mothErr(MOTH_ERROR_HOST_RESOURCE_NOT_FOUND, "Image element not found");
     }
 
     return mothOk(image);
 }
 
+// Image creation returns the element immediately. Loading continues in the browser, so drawing
+// stays fallible through `assertLoadedImage` until the image has finished loading.
 /**
  * @moth.sig create_image |src String| -> CanvasImage
  */
@@ -157,13 +155,17 @@ export function createImageWithSize(src, width, height) {
  * @moth.sig context_2d |canvas CanvasElement| -> Canvas2d, Error!
  */
 export function context2d(canvas) {
-    const ctx = canvas.getContext("2d");
+    try {
+        const ctx = canvas.getContext("2d");
 
-    if (!ctx) {
-        return mothErr(500, "Could not get 2D context");
+        if (!ctx) {
+            return mothErr(MOTH_ERROR_HOST_OPERATION_FAILED, "Could not get 2D context");
+        }
+
+        return mothOk(ctx);
+    } catch (error) {
+        return domError(error, "Could not get 2D context");
     }
-
-    return mothOk(ctx);
 }
 
 /**
@@ -216,6 +218,8 @@ export function setCanvasSize(canvas, width, height) {
     canvas.height = height;
 }
 
+// Data URLs return the whole encoded canvas as one in-memory string, which can be expensive for
+// large canvases.
 /**
  * @moth.sig to_data_url |canvas CanvasElement| -> String, Error!
  */
@@ -924,7 +928,7 @@ export function createPattern(ctx, image, repetition) {
     try {
         const pattern = ctx.createPattern(image, repetition);
         if (!pattern) {
-            return mothErr(409, "Canvas pattern could not be created from the image");
+            return mothErr(MOTH_ERROR_HOST_RESOURCE_UNAVAILABLE, "Canvas pattern could not be created from the image");
         }
 
         return mothOk(pattern);
@@ -940,7 +944,7 @@ export function createCanvasPattern(ctx, canvas, repetition) {
     try {
         const pattern = ctx.createPattern(canvas, repetition);
         if (!pattern) {
-            return mothErr(409, "Canvas pattern could not be created from the source canvas");
+            return mothErr(MOTH_ERROR_HOST_RESOURCE_UNAVAILABLE, "Canvas pattern could not be created from the source canvas");
         }
 
         return mothOk(pattern);

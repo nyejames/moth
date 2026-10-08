@@ -8,7 +8,7 @@
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, ExpressionRpnItem,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
@@ -20,7 +20,7 @@ impl<'a> HirBuilder<'a> {
         &self,
         rpn: &ExpressionRpn,
         source_span: &Option<SourceSpan>,
-    ) -> Result<RuntimeRpnTree, CompilerError> {
+    ) -> Result<RuntimeRpnTree, HirConstructionFailure> {
         let mut stack: Vec<RuntimeRpnTree> = Vec::with_capacity(rpn.items.len());
 
         for item in &rpn.items {

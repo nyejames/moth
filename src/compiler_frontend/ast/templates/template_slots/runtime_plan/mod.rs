@@ -32,13 +32,10 @@ pub(crate) use types::{RuntimeSlotContributionSourceId, RuntimeSlotSiteId};
 ///       new TIR template entry whose `runtime_slot_plan` carries the
 ///       contribution sources and slot sites, starting from already-routed
 ///       TIR node IDs.
-/// WHY: the HIR materializes runtime slot plans through the template's
-///      `runtime_slot_plan` field. Without this path, TIR-native composition
-///      would structurally expand runtime fills, flattening wrapper text and
-///      fill content together — which breaks loop-control semantics (wrapper
-///      text would render before `continue` is reached) and drops runtime
-///      slot-site boundaries. Producing a runtime plan here ensures the HIR
-///      sees the owned `RuntimeSlotSite` / contribution-source structure.
+/// WHY: AST handoff materialization consumes this plan to produce owned
+///      contribution sources and slot sites. HIR evaluates each source once
+///      and replays it at every site, preserving structural no-output for
+///      skipped conditional or zero-iteration contributions.
 pub(in crate::compiler_frontend::ast::templates) fn materialize_tir_native_runtime_slot_plan(
     store: &mut TemplateIrStore,
     wrapper_template_id: crate::compiler_frontend::ast::templates::tir::TemplateIrId,

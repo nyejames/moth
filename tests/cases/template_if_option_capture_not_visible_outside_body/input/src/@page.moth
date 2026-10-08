@@ -1,0 +1,8 @@
+maybe_name String? = "Priya"
+
+[:template_if_option_capture_not_visible_outside_body
+    [if maybe_name is |present_name|:
+        hello [present_name]
+    ]
+    outside [present_name]
+]

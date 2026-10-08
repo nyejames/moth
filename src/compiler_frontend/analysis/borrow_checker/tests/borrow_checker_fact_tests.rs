@@ -4,6 +4,9 @@
 //! WHY: these facts are the borrow checker's source of truth, so targeted tests catch drift
 //! before it reaches higher-level diagnostics.
 
+use crate::compiler_frontend::analysis::borrow_checker::types::{
+    ValueAccessClassification, ValueBorrowFact,
+};
 use crate::compiler_frontend::analysis::borrow_checker::{LocalMode, OptionalTransferStatus};
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
@@ -20,13 +23,17 @@ use crate::compiler_frontend::external_packages::{
     ExternalReturnSlot, ExternalSignatureType,
 };
 use crate::compiler_frontend::hir::blocks::HirBlock;
+use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirValueRange};
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirMapOp, ValueKind,
 };
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, HirValueId, LocalId, RegionId};
+use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
+};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -41,12 +48,271 @@ use crate::compiler_frontend::tests::external_package_support::default_external_
 use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use crate::compiler_frontend::tests::type_id_fixture_support::{
-    build_ast_with_registered_types, runtime_expr, runtime_operand_item,
+    build_ast_with_registered_types, lower_ast, runtime_expr, runtime_operand_item,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashSet;
 use std::collections::VecDeque;
 use std::sync::Arc;
+
+#[test]
+fn shared_value_fact_merge_is_conservative_and_deterministic() {
+    let mut fact = ValueBorrowFact {
+        classification: ValueAccessClassification::SharedRead,
+        roots: vec![LocalId(5), LocalId(2)],
+        optional_transfer: OptionalTransferStatus::Transfer,
+    };
+    fact.merge(ValueBorrowFact {
+        classification: ValueAccessClassification::MutableArgument,
+        roots: vec![LocalId(5), LocalId(3)],
+        optional_transfer: OptionalTransferStatus::Borrow,
+    });
+
+    assert_eq!(fact.classification, ValueAccessClassification::Mixed);
+    assert_eq!(fact.roots, vec![LocalId(2), LocalId(3), LocalId(5)]);
+    assert_eq!(fact.optional_transfer, OptionalTransferStatus::Borrow);
+}
+
+#[test]
+fn shared_expression_row_merges_branch_roots_in_either_successor_order() {
+    let source = r#"wrapper |left String, right String, flag Bool|:
+    chosen = if flag:
+        then left
+    else
+        then right
+    ;
+;"#;
+
+    for reverse_successor_visit in [false, true] {
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+        let entry_path = ast.entry_path;
+        let wrapper_name = path_fork
+            .try_intern_child(entry_path, string_table.intern("wrapper"))
+            .expect("test path fits");
+        let (mut hir, type_environment) = lower_ast(ast, &mut string_table, &mut path_fork)
+            .expect("the valid branch source should lower");
+        let external_package_registry = default_external_package_registry(&mut string_table);
+        let wrapper = hir
+            .functions
+            .iter()
+            .find(|function| {
+                hir.side_table
+                    .function_name_path(function.id)
+                    .is_some_and(|path| path == wrapper_name)
+            })
+            .expect("wrapper should lower to HIR");
+        let left_local = wrapper.params[0];
+        let right_local = wrapper.params[1];
+
+        let (then_block_id, else_block_id) = {
+            let branch = hir
+                .blocks
+                .iter_mut()
+                .find(|block| matches!(&block.terminator, HirTerminator::If { .. }))
+                .expect("wrapper value-if should lower to one branch");
+            let HirTerminator::If {
+                then_block,
+                else_block,
+                ..
+            } = &mut branch.terminator
+            else {
+                unreachable!("the selected block terminates with an if")
+            };
+            if reverse_successor_visit {
+                std::mem::swap(then_block, else_block);
+            }
+            (*then_block, *else_block)
+        };
+
+        let (then_definition, else_definition) = {
+            let branch_definition = |block_id| {
+                let block = hir
+                    .blocks
+                    .iter()
+                    .find(|block| block.id == block_id)
+                    .expect("branch target should identify a HIR block");
+                let (index, statement) = block
+                    .statements
+                    .iter()
+                    .enumerate()
+                    .find(|(_, statement)| {
+                        matches!(
+                            &statement.kind,
+                            HirStatementKind::Write {
+                                target: HirWriteTarget::DefineLocal(_),
+                                ..
+                            }
+                        )
+                    })
+                    .expect("each value-if branch should initialize its result local");
+                let HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(target),
+                    value,
+                } = &statement.kind
+                else {
+                    unreachable!("selected branch statement is a definition")
+                };
+                let expression = hir.expressions.expression(*value);
+                let place = match &expression.kind {
+                    HirExpressionKind::Copy(place) | HirExpressionKind::Load(place) => *place,
+                    _ => panic!("branch result should read its parameter place"),
+                };
+                assert!(place.projections.is_empty());
+                assert!([left_local, right_local].contains(&place.root));
+                (index, *target, *value, place.root)
+            };
+            (
+                branch_definition(then_block_id),
+                branch_definition(else_block_id),
+            )
+        };
+        assert_eq!(then_definition.1, else_definition.1);
+        assert_ne!(then_definition.3, else_definition.3);
+
+        // The lowered branch value is an RValue Load. This fixture replaces it with a direct
+        // Place Load so the scratch local carries a branch-specific alias into the join; it tests
+        // fixed-point provenance propagation, not the source-level RValue materialization policy.
+        for (block_id, definition) in [
+            (then_block_id, then_definition),
+            (else_block_id, else_definition),
+        ] {
+            let original = hir.expressions.expression(definition.2);
+            let load = HirExpression {
+                kind: HirExpressionKind::Load(HirPlace::local(definition.3)),
+                ty: original.ty,
+                value_kind: ValueKind::Place,
+                region: original.region,
+                span: None,
+            };
+            let load_id = hir
+                .expressions
+                .append_expression(load)
+                .expect("the synthetic alias initializer should fit the test store");
+            let block = hir
+                .blocks
+                .iter_mut()
+                .find(|block| block.id == block_id)
+                .expect("the branch initialization block should exist");
+            let HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(target),
+                value,
+            } = &mut block.statements[definition.0].kind
+            else {
+                unreachable!("the selected branch statement initializes the scratch slot")
+            };
+            assert_eq!(*target, definition.1);
+            *value = load_id;
+        }
+
+        let (receiving_local_id, receiving_region, receiving_type) = hir
+            .blocks
+            .iter()
+            .flat_map(|block| &block.locals)
+            .find(|local| local.id == then_definition.1)
+            .map(|local| (local.id, local.region, local.ty))
+            .expect("the value-if result local should be defined");
+        assert_eq!(
+            hir.side_table.local_origin_kind(receiving_local_id),
+            Some(HirLocalOriginKind::CompilerTemp),
+            "the alias carrier is compiler-owned scratch"
+        );
+
+        // This HIR-only fixture adds one shared read of the compiler-owned scratch local in both
+        // branch contexts, after its alias initialization on each path.
+        let shared_read = hir
+            .expressions
+            .append_expression(HirExpression {
+                kind: HirExpressionKind::Load(HirPlace::local(receiving_local_id)),
+                ty: receiving_type,
+                value_kind: ValueKind::Place,
+                region: receiving_region,
+                span: None,
+            })
+            .expect("one shared scratch-local Load should fit the building store");
+        let mut next_statement_id = hir
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .map(|statement| statement.id.0)
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+            .expect("HIR statement IDs should have room for the two branch reads");
+        for (block_id, index) in [
+            (then_block_id, then_definition.0),
+            (else_block_id, else_definition.0),
+        ] {
+            let block = hir
+                .blocks
+                .iter_mut()
+                .find(|block| block.id == block_id)
+                .expect("branch target should remain present");
+            let read_statement = HirStatement {
+                id: HirNodeId(next_statement_id),
+                kind: HirStatementKind::Expr(shared_read),
+                span: None,
+            };
+            next_statement_id = next_statement_id
+                .checked_add(1)
+                .expect("HIR statement IDs should have room for the two branch reads");
+            hir.side_table.map_statement(None, &read_statement);
+            block.statements.insert(index + 1, read_statement);
+        }
+
+        let merge_read = hir
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .find_map(|statement| {
+                let HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(target),
+                    value,
+                } = &statement.kind
+                else {
+                    return None;
+                };
+                let expression = hir.expressions.expression(*value);
+                (*target != receiving_local_id
+                    && matches!(
+                        &expression.kind,
+                        HirExpressionKind::Load(place) if place.root == receiving_local_id
+                    ))
+                .then_some(*value)
+            })
+            .expect("the source result should have its separate merge-local Load");
+        assert_ne!(shared_read, merge_read);
+
+        crate::compiler_frontend::hir::validate_hir_module(&hir, &type_environment)
+            .expect("shared alias reads should preserve the module's HIR invariants");
+
+        let report =
+            run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+                .expect("the shared scratch alias should be borrow-safe");
+        let fact = report
+            .analysis
+            .value_fact(shared_read)
+            .expect("the shared branch Load should retain a merged fact");
+        assert!(
+            fact.roots.contains(&left_local),
+            "left root was lost: {:?}",
+            fact.roots
+        );
+        assert!(
+            fact.roots.contains(&right_local),
+            "right root was lost: {:?}",
+            fact.roots
+        );
+        let mut expected_roots = [left_local, right_local];
+        expected_roots.sort_unstable_by_key(|local| local.0);
+        assert_eq!(fact.roots, expected_roots);
+        assert_eq!(fact.classification, ValueAccessClassification::SharedRead);
+        assert_eq!(
+            fact.optional_transfer,
+            OptionalTransferStatus::NotAttempted,
+            "the same actual HIR row is observed in both final branch contexts"
+        );
+    }
+}
 
 #[test]
 fn statement_terminator_and_value_facts_are_populated() {
@@ -165,9 +431,9 @@ fn statement_terminator_and_value_facts_are_populated() {
     for block_id in &reachable {
         let block = &hir.blocks[block_id.0 as usize];
         for statement in &block.statements {
-            collect_statement_values(statement.kind.clone(), &mut value_ids);
+            collect_statement_values(&hir.expressions, &statement.kind, &mut value_ids);
         }
-        collect_terminator_values(&block.terminator, &mut value_ids);
+        collect_terminator_values(&hir.expressions, &block.terminator, &mut value_ids);
     }
 
     for value_id in value_ids {
@@ -181,24 +447,24 @@ fn statement_terminator_and_value_facts_are_populated() {
 #[test]
 fn assertion_failure_message_is_collected_as_a_borrow_value_root() {
     let _path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
-    let message = HirExpression {
-        id: HirValueId(41),
-        kind: HirExpressionKind::Load(HirPlace::Local(LocalId(7))),
-        ty: builtin_type_ids::STRING,
-        value_kind: ValueKind::RValue,
-        region: RegionId(0),
-        span: None,
-    };
+    let mut expressions = HirExpressionStore::default();
+    let message = crate::compiler_frontend::tests::hir_fixture_support::expression(
+        HirExpressionKind::Load(HirPlace::local(LocalId(7))),
+        builtin_type_ids::STRING,
+        RegionId(0),
+        ValueKind::RValue,
+        &mut expressions,
+    );
     let terminator = HirTerminator::AssertFailure {
-        message: message.clone(),
+        message,
         message_evaluation: HirAssertionMessageEvaluation::Runtime,
     };
     let mut value_ids = FxHashSet::default();
 
-    collect_terminator_values(&terminator, &mut value_ids);
+    collect_terminator_values(&expressions, &terminator, &mut value_ids);
 
     assert!(
-        value_ids.contains(&message.id),
+        value_ids.contains(&message),
         "assertion message values must remain visible to borrow fact collection"
     );
 }
@@ -347,7 +613,7 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
         .expect("reborrow after last-use should pass");
 
     let second_statement_id =
-        find_assign_statement_id_for_local_name(&hir, &path_fork, &string_table, "second_ref")
+        find_local_definition_statement_id_for_name(&hir, &path_fork, &string_table, "second_ref")
             .expect("should locate the reborrow statement");
     let data_local = find_local_by_name(&hir, &path_fork, &string_table, "data")
         .expect("should locate the source local");
@@ -431,7 +697,7 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
     let target_local = find_local_by_name(&hir, &path_fork, &string_table, "target")
         .expect("should locate the target local");
     let sentinel_statement_id =
-        find_assign_statement_id_for_local_name(&hir, &path_fork, &string_table, "sentinel")
+        find_local_definition_statement_id_for_name(&hir, &path_fork, &string_table, "sentinel")
             .expect("should locate the sentinel statement");
     let entry_state = report
         .analysis
@@ -468,25 +734,28 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
         "borrow fallback should retain the source root on the target"
     );
 
-    let assignment_value = hir
+    let target_initializer = hir
         .blocks
         .iter()
         .flat_map(|block| block.statements.iter())
         .find_map(|statement| {
-            if let HirStatementKind::Assign { target, value } = &statement.kind
-                && matches!(target, HirPlace::Local(local) if *local == target_local)
+            if let HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(local),
+                value,
+            } = &statement.kind
+                && *local == target_local
             {
-                Some(value.id)
+                Some(*value)
             } else {
                 None
             }
         })
-        .expect("should locate the optional assignment value");
+        .expect("should locate the optional target initializer");
     assert_eq!(
         report
             .analysis
-            .value_fact(assignment_value)
-            .expect("assignment value should have a borrow fact")
+            .value_fact(target_initializer)
+            .expect("target initializer should have a borrow fact")
             .optional_transfer,
         OptionalTransferStatus::Transfer
     );
@@ -524,6 +793,262 @@ fn mutable_alias_reachable_write_keeps_loan_active() {
             .expect_err("a reachable write through the holder keeps its exclusive loan active");
         assert_borrow_error_kind(&error, BorrowDiagnosticKind::SharedMutableConflict);
     }
+}
+
+#[test]
+fn slot_self_update_preserves_value_backed_role_and_provenance() {
+    let source = r#"identity |input String| -> String:
+return input
+;
+source ~= "source"
+target ~= identity(source)
+target = target
+sentinel = 0
+observed = copy target
+"#;
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("self-updating a slot must preserve its call-result value role");
+    let target = find_local_by_name(&hir, &path_fork, &string_table, "target")
+        .expect("the fixture declares a mutable target slot");
+    let source_local = find_local_by_name(&hir, &path_fork, &string_table, "source")
+        .expect("the identity call aliases the source allocation");
+    let update = hir
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .find(|statement| {
+            matches!(
+                &statement.kind,
+                HirStatementKind::Write {
+                    target: HirWriteTarget::AssignPlace(destination),
+                    value,
+                } if destination.root == target
+                    && hir.expressions.projections(destination.projections).is_empty()
+                    && matches!(
+                        &hir.expressions.expression(*value).kind,
+                        HirExpressionKind::Load(source_place)
+                            if source_place.root == target
+                                && hir.expressions.projections(source_place.projections).is_empty()
+                    )
+            )
+        })
+        .expect("the direct self-assignment should lower to a local Update");
+    let sentinel =
+        find_local_definition_statement_id_for_name(&hir, &path_fork, &string_table, "sentinel")
+            .expect("the sentinel follows the self-update");
+
+    for (statement_id, context) in [
+        (update.id, "before self-update"),
+        (sentinel, "after self-update"),
+    ] {
+        let snapshot = report.analysis.statement_entry_states[&statement_id]
+            .locals
+            .iter()
+            .find(|local| local.local == target)
+            .expect("the statement snapshot should contain the target");
+        assert_eq!(
+            snapshot.mode,
+            LocalMode::SLOT,
+            "target should remain a value-backed slot {context}"
+        );
+        assert!(
+            snapshot.alias_roots.contains(&source_local),
+            "target should retain the call-result allocation root {context}"
+        );
+        assert!(
+            !snapshot.alias_roots.contains(&target),
+            "target must not become an alias of its own binding cell {context}"
+        );
+    }
+}
+
+#[test]
+fn fresh_update_preserves_possible_alias_write_through_after_join() {
+    let source = "probe |flag Bool|:\n\
+source ~= \"source\"\n\
+target ~= \"old\"\n\
+if flag:\n\
+    target = source\n\
+else\n\
+    target = \"branch\"\n\
+;\n\
+target = \"replacement\"\n\
+sentinel = 0\n\
+;";
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("the joined update has no competing holder");
+    let target = find_local_by_name(&hir, &path_fork, &string_table, "target")
+        .expect("the fixture declares its update destination");
+    let source_local = find_local_by_name(&hir, &path_fork, &string_table, "source")
+        .expect("the alias branch has a source root");
+    let sentinel =
+        find_local_definition_statement_id_for_name(&hir, &path_fork, &string_table, "sentinel")
+            .expect("the sentinel follows the update");
+    let update = hir
+        .blocks
+        .iter()
+        .find_map(|block| {
+            let sentinel_index = block
+                .statements
+                .iter()
+                .position(|statement| statement.id == sentinel)?;
+            block.statements[..sentinel_index]
+                .iter()
+                .rfind(|statement| {
+                    matches!(
+                        &statement.kind,
+                        HirStatementKind::Write {
+                            target: HirWriteTarget::AssignPlace(place),
+                            ..
+                        } if place.root == target
+                            && hir.expressions.projections(place.projections).is_empty()
+                    )
+                })
+        })
+        .expect("the source assignment should lower to an update");
+    let update_entry = &report.analysis.statement_entry_states[&update.id];
+    let target_before = update_entry
+        .locals
+        .iter()
+        .find(|local| local.local == target)
+        .expect("the update entry should contain its destination");
+    assert!(target_before.mode.contains(LocalMode::SLOT));
+    assert!(target_before.mode.contains(LocalMode::ALIAS));
+    assert!(target_before.alias_roots.contains(&source_local));
+
+    let target_after = report.analysis.statement_entry_states[&sentinel]
+        .locals
+        .iter()
+        .find(|local| local.local == target)
+        .expect("the sentinel entry should contain the updated destination");
+    assert!(target_after.mode.contains(LocalMode::SLOT));
+    assert!(target_after.mode.contains(LocalMode::ALIAS));
+    assert!(target_after.alias_roots.contains(&source_local));
+}
+
+#[test]
+fn dedicated_alias_call_update_preserves_mixed_destination_roots() {
+    let source = "identity |input String| -> String:\n\
+return input\n\
+;\n\
+probe |flag Bool|:\n\
+argument ~= \"argument\"\n\
+source ~= \"source\"\n\
+target ~= \"old\"\n\
+if flag:\n\
+    target = source\n\
+else\n\
+    target = \"branch\"\n\
+;\n\
+unused = identity(argument)\n\
+sentinel = 0\n\
+;";
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let (mut hir, type_environment) =
+        lower_ast(ast, &mut string_table, &mut path_fork).expect("the fixture should lower");
+    let external_package_registry = default_external_package_registry(&mut string_table);
+    let target = find_local_by_name(&hir, &path_fork, &string_table, "target")
+        .expect("the fixture declares its update destination");
+
+    let (call_result, call_region) = hir
+        .blocks
+        .iter()
+        .find_map(|block| {
+            block
+                .statements
+                .iter()
+                .find_map(|statement| match &statement.kind {
+                    HirStatementKind::Call {
+                        args,
+                        result: Some(HirLocalDestination::Define(local)),
+                        ..
+                    } if args.len() == 1 => Some((*local, block.region)),
+                    _ => None,
+                })
+        })
+        .expect("the identity call should define a result local");
+    let target_type = hir
+        .blocks
+        .iter()
+        .flat_map(|block| &block.locals)
+        .find(|local| local.id == target)
+        .map(|local| local.ty)
+        .expect("the update destination should have a declared type");
+    let replacement_value = crate::compiler_frontend::tests::hir_fixture_support::expression(
+        HirExpressionKind::Load(HirPlace::local(target)),
+        target_type,
+        call_region,
+        ValueKind::Place,
+        &mut hir.expressions,
+    );
+
+    let mut updated_call_id = None;
+    let mut retargeted_consumer = false;
+    for block in &mut hir.blocks {
+        for statement in &mut block.statements {
+            match &mut statement.kind {
+                HirStatementKind::Call {
+                    args,
+                    result: Some(destination),
+                    ..
+                } if args.len() == 1
+                    && matches!(
+                        &*destination,
+                        HirLocalDestination::Define(local) if *local == call_result
+                    ) =>
+                {
+                    *destination = HirLocalDestination::Update(target);
+                    updated_call_id = Some(statement.id);
+                }
+                HirStatementKind::Write { value, .. }
+                    if matches!(
+                        &hir.expressions.expression(*value).kind,
+                        HirExpressionKind::Load(place) if place.root == call_result
+                    ) =>
+                {
+                    *value = replacement_value;
+                    retargeted_consumer = true;
+                }
+                _ => {}
+            }
+        }
+    }
+    assert!(
+        updated_call_id.is_some(),
+        "the call result should now update the mixed local"
+    );
+    assert!(
+        retargeted_consumer,
+        "the following value use should load the updated destination"
+    );
+
+    crate::compiler_frontend::hir::validate_hir_module(&hir, &type_environment)
+        .expect("the dedicated result update must remain structurally valid HIR");
+    let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+        .expect("the alias return should preserve the mixed update roots");
+    let sentinel =
+        find_local_definition_statement_id_for_name(&hir, &path_fork, &string_table, "sentinel")
+            .expect("the sentinel follows the operation update");
+    let entry = &report.analysis.statement_entry_states[&sentinel];
+    let state = entry
+        .locals
+        .iter()
+        .find(|local| local.local == target)
+        .expect("the sentinel should retain the result destination");
+    let source = find_local_by_name(&hir, &path_fork, &string_table, "source")
+        .expect("the mixed alias branch has a source root");
+    let argument = find_local_by_name(&hir, &path_fork, &string_table, "argument")
+        .expect("the returned value has an independent source root");
+    assert!(state.mode.contains(LocalMode::SLOT));
+    assert!(state.mode.contains(LocalMode::ALIAS));
+    assert!(state.alias_roots.contains(&source));
+    assert!(state.alias_roots.contains(&argument));
 }
 
 #[test]
@@ -578,30 +1103,37 @@ fn check_unequal_path_alias_activity(
         .expect("fixture declares the result alias");
     let start = hir.start_function.expect("fixture has a start function");
     let entry_id = hir.functions[start.0 as usize].entry;
-    let entry = &mut hir.blocks[entry_id.0 as usize];
-    let region = entry.region;
-    let result_local = entry
-        .locals
-        .iter_mut()
-        .find(|local| local.id == result)
-        .expect("result is declared in the entry region");
-    result_local.mutable = true;
-    let result_type = result_local.ty;
-    let assignment_index = entry
-        .statements
-        .iter()
-        .position(|statement| {
-            matches!(&statement.kind, HirStatementKind::Assign { target: HirPlace::Local(local), .. }
-                if *local == result)
-        })
-        .expect("fixture binds the result alias");
-    let success_assignment = entry.statements.remove(assignment_index);
-    let mut handler_assignment = success_assignment.clone();
-    handler_assignment.id = HirNodeId(80_000);
-    let HirStatementKind::Assign { value, .. } = &mut handler_assignment.kind else {
-        unreachable!("the selected statement is an assignment");
+    let (region, result_type, success_definition) = {
+        let entry = &mut hir.blocks[entry_id.0 as usize];
+        let region = entry.region;
+        let result_local = entry
+            .locals
+            .iter_mut()
+            .find(|local| local.id == result)
+            .expect("result is declared in the entry region");
+        result_local.mutable = true;
+        let result_type = result_local.ty;
+        let definition_index = entry
+            .statements
+            .iter()
+            .position(|statement| {
+                matches!(
+                    &statement.kind,
+                    HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(local),
+                        ..
+                    } if *local == result
+                )
+            })
+            .expect("fixture binds the result alias");
+        (
+            region,
+            result_type,
+            entry.statements.remove(definition_index),
+        )
     };
-    value.id = HirValueId(80_001);
+    let mut handler_definition = success_definition.clone();
+    handler_definition.id = HirNodeId(80_000);
     if !mutable_alias {
         hir.side_table
             .bind_local_origin(result, HirLocalOriginKind::CompilerTemp, None, None);
@@ -625,13 +1157,13 @@ fn check_unequal_path_alias_activity(
     let merge = block_id(3);
     let later_use = block_id(4);
     let exit = block_id(5);
-    let load = |id, local| {
+    let load = |expressions: &mut HirExpressionStore, local| {
         expression(
-            id,
-            HirExpressionKind::Load(HirPlace::Local(local)),
+            HirExpressionKind::Load(HirPlace::local(local)),
             result_type,
             region,
             ValueKind::Place,
+            expressions,
         )
     };
     let jump = |target| HirTerminator::Jump {
@@ -639,28 +1171,33 @@ fn check_unequal_path_alias_activity(
         args: vec![],
     };
     let exit_terminator = hir.blocks[entry_id.0 as usize].terminator.clone();
+    let condition = bool_expression(true, builtin_type_ids::BOOL, region, &mut hir.expressions);
     hir.blocks[entry_id.0 as usize].terminator = HirTerminator::If {
-        condition: bool_expression(80_002, true, builtin_type_ids::BOOL, region),
+        condition,
         then_block: success,
         else_block: transfer,
     };
     let access = if mutable_alias {
         // This exercises the companion active-mutable-loan check for a shared root read.
-        HirStatementKind::Expr(load(80_004, root))
+        HirStatementKind::Expr(load(&mut hir.expressions, root))
     } else {
         HirStatementKind::MapOp {
             op: HirMapOp::Clear,
-            receiver: load(80_004, root),
-            args: vec![],
+            receiver: load(&mut hir.expressions, root),
+            args: HirValueRange::empty(),
             result: None,
         }
     };
+    let result_read = load(&mut hir.expressions, result);
+    let later_condition =
+        bool_expression(true, builtin_type_ids::BOOL, region, &mut hir.expressions);
+    let later_read = load(&mut hir.expressions, result);
     let mut blocks = vec![
         HirBlock {
             id: success,
             region,
             locals: vec![],
-            statements: vec![success_assignment],
+            statements: vec![success_definition],
             terminator: jump(merge),
         },
         HirBlock {
@@ -674,7 +1211,7 @@ fn check_unequal_path_alias_activity(
             id: handler,
             region,
             locals: vec![],
-            statements: vec![handler_assignment],
+            statements: vec![handler_definition],
             terminator: jump(merge),
         },
         HirBlock {
@@ -682,12 +1219,12 @@ fn check_unequal_path_alias_activity(
             region,
             locals: vec![],
             statements: vec![
-                statement(80_003, HirStatementKind::Expr(load(80_003, result)), 3),
+                statement(80_003, HirStatementKind::Expr(result_read), 3),
                 statement(80_004, access, 4),
             ],
             terminator: if later_branch_use {
                 HirTerminator::If {
-                    condition: bool_expression(80_005, true, builtin_type_ids::BOOL, region),
+                    condition: later_condition,
                     then_block: later_use,
                     else_block: exit,
                 }
@@ -699,11 +1236,7 @@ fn check_unequal_path_alias_activity(
             id: later_use,
             region,
             locals: vec![],
-            statements: vec![statement(
-                80_006,
-                HirStatementKind::Expr(load(80_006, result)),
-                6,
-            )],
+            statements: vec![statement(80_006, HirStatementKind::Expr(later_read), 6)],
             terminator: jump(exit),
         },
         HirBlock {
@@ -802,13 +1335,15 @@ sentinel = 0"#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let receiver_local = find_local_by_name(&hir, &path_fork, &string_table, "scores")
+        .expect("should locate the map receiver by name");
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("a remove with no later mutation should pass");
 
     let removed_local = find_local_by_name(&hir, &path_fork, &string_table, "removed")
         .expect("should locate the remove binding by name");
     let sentinel_statement =
-        find_assign_statement_id_for_local_name(&hir, &path_fork, &string_table, "sentinel")
+        find_local_definition_statement_id_for_name(&hir, &path_fork, &string_table, "sentinel")
             .expect("should locate the sentinel statement by its assigned local");
     let entry_state = report
         .analysis
@@ -833,9 +1368,13 @@ sentinel = 0"#;
         result_snapshot.alias_roots
     );
     assert!(
-        result_snapshot.alias_roots.is_empty(),
-        "remove result should carry no alias roots, got {:?}",
+        !result_snapshot.alias_roots.contains(&receiver_local),
+        "remove result should not carry the map receiver root, got {:?}",
         result_snapshot.alias_roots
+    );
+    assert!(
+        !result_snapshot.alias_roots.is_empty(),
+        "remove result should retain its independent allocation provenance"
     );
 }
 
@@ -893,7 +1432,7 @@ sentinel = 0"#;
     );
 
     let sentinel_statement =
-        find_assign_statement_id_for_local_name(&hir, &path_fork, &string_table, "sentinel")
+        find_local_definition_statement_id_for_name(&hir, &path_fork, &string_table, "sentinel")
             .expect("should locate the sentinel statement by its assigned local");
     let entry_state = report
         .analysis
@@ -927,6 +1466,77 @@ sentinel = 0"#;
 }
 
 #[test]
+fn earlier_nonconsuming_read_of_a_shared_row_downgrades_later_transfer() {
+    let source = r#"scores ~{String = String} = {}
+key ~= "key"
+value ~= "hello"
+~scores.set(key, value) catch:
+;
+sentinel = 0"#;
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let (block_id, set_index, shared_argument) = hir
+        .blocks
+        .iter()
+        .find_map(|block| {
+            block
+                .statements
+                .iter()
+                .enumerate()
+                .find_map(|(index, statement)| match &statement.kind {
+                    HirStatementKind::MapOp {
+                        op: HirMapOp::Set,
+                        args,
+                        ..
+                    } => Some((
+                        block.id,
+                        index,
+                        *hir.expressions
+                            .values(*args)
+                            .get(1)
+                            .expect("set should have a value argument"),
+                    )),
+                    _ => None,
+                })
+        })
+        .expect("the fixture should contain a map set");
+    let next_statement_id = hir
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .map(|statement| statement.id.0)
+        .max()
+        .unwrap_or(0)
+        .checked_add(1)
+        .expect("HIR statement IDs should have room for the injected read");
+    let shared_read = HirStatement {
+        id: HirNodeId(next_statement_id),
+        kind: HirStatementKind::Expr(shared_argument),
+        span: None,
+    };
+    hir.side_table.map_statement(None, &shared_read);
+    hir.blocks
+        .iter_mut()
+        .find(|block| block.id == block_id)
+        .expect("the set block should remain present")
+        .statements
+        .insert(set_index, shared_read);
+
+    let registry = default_external_package_registry(&mut string_table);
+    let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+        .expect("the earlier shared read should not invalidate the later set");
+    let fact = report
+        .analysis
+        .value_fact(shared_argument)
+        .expect("the reused value row should retain one merged fact");
+    assert_eq!(
+        fact.optional_transfer,
+        OptionalTransferStatus::Borrow,
+        "an earlier ordinary use and later transfer candidate share one HIR row"
+    );
+}
+
+#[test]
 fn map_set_later_use_keeps_mutable_inputs_borrowed() {
     // WHAT: `set` MayConsumeShared on later-use key and value inputs borrows rather than moving.
     // WHY: last-use classification must not unconditionally move; the root stays live so
@@ -946,7 +1556,7 @@ label = value
         .expect("a later-use mutable set should borrow and keep the value usable");
 
     let first_use_statement =
-        find_assign_statement_id_for_local_name(&hir, &path_fork, &string_table, "key_label")
+        find_local_definition_statement_id_for_name(&hir, &path_fork, &string_table, "key_label")
             .expect("should locate the first later-use statement by its assigned local");
     let entry_state = report
         .analysis
@@ -1007,7 +1617,7 @@ label = value
     );
 
     let label_statement =
-        find_assign_statement_id_for_local_name(&hir, &path_fork, &string_table, "label")
+        find_local_definition_statement_id_for_name(&hir, &path_fork, &string_table, "label")
             .expect("should locate the later value use");
     let entry_state = report
         .analysis
@@ -1042,7 +1652,7 @@ sentinel = 0"#;
     let value_local = find_local_by_name(&hir, &path_fork, &string_table, "value")
         .expect("should locate the inner inserted value local by name");
     let sentinel_statement =
-        find_assign_statement_id_for_local_name(&hir, &path_fork, &string_table, "sentinel")
+        find_local_definition_statement_id_for_name(&hir, &path_fork, &string_table, "sentinel")
             .expect("should locate the sentinel statement by its assigned local");
     let entry_state = report
         .analysis
@@ -1085,12 +1695,33 @@ sentinel = 0
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("a retained aliased result should borrow its final-use argument");
 
+    let argument = hir
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .find_map(|statement| match &statement.kind {
+            HirStatementKind::Call { args, result, .. } if result.is_some() && args.len() == 1 => {
+                hir.expressions.values(*args).first().copied()
+            }
+            _ => None,
+        })
+        .expect("the alias call should have one actual argument row");
+    assert_eq!(
+        report
+            .analysis
+            .value_fact(argument)
+            .expect("the actual argument row should have a value fact")
+            .optional_transfer,
+        OptionalTransferStatus::Borrow,
+        "retained-result protection must record the downgraded row as a borrow"
+    );
+
     let value_local = find_local_by_name(&hir, &path_fork, &string_table, "value")
         .expect("should locate the aliased argument local");
     let result_local = find_local_by_name(&hir, &path_fork, &string_table, "result")
         .expect("should locate the retained result local");
     let sentinel_statement =
-        find_assign_statement_id_for_local_name(&hir, &path_fork, &string_table, "sentinel")
+        find_local_definition_statement_id_for_name(&hir, &path_fork, &string_table, "sentinel")
             .expect("should locate the sentinel statement");
     let entry_state = report
         .analysis
@@ -1128,6 +1759,517 @@ sentinel = 0
         "retained alias result should retain the named argument root, got {:?}",
         result_snapshot.alias_roots
     );
+}
+
+#[test]
+fn retained_result_and_transfer_calls_share_one_actual_row_in_either_statement_order() {
+    for retained_call_first in [false, true] {
+        let calls = if retained_call_first {
+            "retained = retain(value)\ninspect(value)\n"
+        } else {
+            "inspect(value)\nretained = retain(value)\n"
+        };
+        let source = format!(
+            "retain |input String| -> String:\nreturn input\n;\n\
+             inspect |input String|:\n;\n\
+             value ~= \"hello\"\n{calls}sentinel = 0\n"
+        );
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(&source);
+        let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);
+        let retained_call = calls_with_result_presence(&hir, true)
+            .into_iter()
+            .next()
+            .expect("the retaining call should produce a result");
+        let transfer_call = calls_with_result_presence(&hir, false)
+            .into_iter()
+            .next()
+            .expect("inspect should be the transfer candidate");
+        assert_eq!(
+            retained_call.0, transfer_call.0,
+            "both use statements should lower into one HIR block"
+        );
+        let shared_row = *transfer_call.2.first().expect("inspect has one argument");
+        assert_ne!(
+            shared_row,
+            *retained_call.2.first().expect("retain has one argument")
+        );
+        replace_call_arguments(&mut hir, retained_call.1, &[shared_row]);
+
+        let mut transfer_only_hir = hir.clone();
+        let retained_local = find_local_by_name(&hir, &path_fork, &string_table, "retained")
+            .expect("the source binds the retained alias result");
+        for block in &mut transfer_only_hir.blocks {
+            block.statements.retain(|statement| {
+                statement.id != retained_call.1
+                    && !matches!(
+                        &statement.kind,
+                        HirStatementKind::Write {
+                            target: HirWriteTarget::DefineLocal(local),
+                            ..
+                        } if *local == retained_local
+                    )
+            });
+        }
+
+        let registry = default_external_package_registry(&mut string_table);
+        let transfer_only =
+            run_borrow_checker(&transfer_only_hir, &registry, &path_fork, &string_table)
+                .expect("the isolated inspect call should remain legal");
+        assert_eq!(
+            transfer_only
+                .analysis
+                .value_fact(shared_row)
+                .expect("the shared row remains the actual inspect argument")
+                .optional_transfer,
+            OptionalTransferStatus::Transfer,
+            "the transfer statement should provide real transfer evidence in isolation"
+        );
+
+        let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+            .expect("the shared row should remain borrow-safe with a retained result");
+        assert_eq!(
+            report
+                .analysis
+                .value_fact(shared_row)
+                .expect("both actual call statements share this row")
+                .optional_transfer,
+            OptionalTransferStatus::Borrow,
+            "the retained-result borrow observation must conservatively combine with the transfer use"
+        );
+    }
+}
+
+#[test]
+fn sibling_root_and_transfer_calls_share_one_actual_row_in_both_argument_positions() {
+    for sibling_call_first in [false, true] {
+        for argument_layout in 0..3 {
+            let calls = if sibling_call_first {
+                "pair(value, value)\ninspect(value)\n"
+            } else {
+                "inspect(value)\npair(value, value)\n"
+            };
+            let source = format!(
+                "pair |first String, second String|:\n;\n\
+                 inspect |input String|:\n;\n\
+                 value ~= \"hello\"\n{calls}sentinel = 0\n"
+            );
+            let (ast, mut path_fork, mut string_table) = parse_single_file_ast(&source);
+            let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);
+            let inspect_call = calls_with_argument_count(&hir, 1)
+                .into_iter()
+                .next()
+                .expect("inspect should have one actual argument row");
+            let pair_call = calls_with_argument_count(&hir, 2)
+                .into_iter()
+                .next()
+                .expect("pair should have two sibling argument rows");
+            assert_eq!(inspect_call.0, pair_call.0);
+            let shared_row = inspect_call.2[0];
+            assert!(!pair_call.2.contains(&shared_row));
+            assert_ne!(pair_call.2[0], pair_call.2[1]);
+            let pair_roots = pair_call
+                .2
+                .iter()
+                .map(|row| match &hir.expressions.expression(*row).kind {
+                    HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => place.root,
+                    _ => panic!("pair arguments should be loads from the shared local"),
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(pair_roots[0], pair_roots[1]);
+            let other_sibling_row = pair_call.2[0];
+            let ordered_rows = match argument_layout {
+                0 => [shared_row, other_sibling_row],
+                1 => [other_sibling_row, shared_row],
+                _ => [shared_row, shared_row],
+            };
+            replace_call_arguments(&mut hir, pair_call.1, &ordered_rows);
+            assert_eq!(
+                calls_with_argument_count(&hir, 2)[0].2,
+                ordered_rows,
+                "the call must retain the intended actual shared HIR rows"
+            );
+
+            let mut transfer_only_hir = hir.clone();
+            for block in &mut transfer_only_hir.blocks {
+                block
+                    .statements
+                    .retain(|statement| statement.id != pair_call.1);
+            }
+            let registry = default_external_package_registry(&mut string_table);
+            let transfer_only =
+                run_borrow_checker(&transfer_only_hir, &registry, &path_fork, &string_table)
+                    .expect("the isolated inspect call should remain legal");
+            assert_eq!(
+                transfer_only
+                    .analysis
+                    .value_fact(shared_row)
+                    .expect("the shared row is the actual inspect argument")
+                    .optional_transfer,
+                OptionalTransferStatus::Transfer
+            );
+
+            let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+                .expect("a sibling-root call should downgrade without rejecting the source");
+            assert_eq!(
+                report
+                    .analysis
+                    .value_fact(shared_row)
+                    .expect("inspect and pair share this actual HIR row")
+                    .optional_transfer,
+                OptionalTransferStatus::Borrow,
+                "sibling-root protection must downgrade the row in either position and when repeated"
+            );
+        }
+    }
+}
+
+#[test]
+fn retained_result_and_transfer_observations_merge_across_final_cfg_contexts() {
+    let source = r#"retain |input String| -> String:
+return input
+;
+inspect |input String|:
+;
+caller |flag Bool|:
+value ~= "hello"
+if flag:
+    retained = retain(value)
+else
+    inspect(value)
+;
+sentinel = 0
+;"#;
+
+    for reverse_successor_visit in [false, true] {
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+        let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);
+        let retained_call = calls_with_result_presence(&hir, true)
+            .into_iter()
+            .next()
+            .expect("the retained-result branch should contain the alias call");
+        let transfer_call = calls_with_result_presence(&hir, false)
+            .into_iter()
+            .next()
+            .expect("the other branch should contain the inspect call");
+        assert_ne!(retained_call.0, transfer_call.0);
+        let shared_row = *transfer_call.2.first().expect("inspect has one argument");
+        replace_call_arguments(&mut hir, retained_call.1, &[shared_row]);
+        assert_eq!(
+            calls_with_result_presence(&hir, true)[0].2,
+            vec![shared_row],
+            "the retained call must use the exact HIR value row consumed by inspect"
+        );
+        if reverse_successor_visit {
+            reverse_if_successors_for_blocks(&mut hir, retained_call.0, transfer_call.0);
+        }
+
+        let registry = default_external_package_registry(&mut string_table);
+        let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+            .expect("mutually exclusive final call contexts should remain legal");
+        assert_eq!(
+            report
+                .analysis
+                .value_fact(shared_row)
+                .expect("both final CFG contexts share this actual row")
+                .optional_transfer,
+            OptionalTransferStatus::Borrow,
+            "a retained-result context must downgrade transfer in either successor visit order"
+        );
+    }
+}
+
+#[test]
+fn actual_cfg_rows_preserve_all_transfer_and_ignore_absent_contexts() {
+    let both_branches_transfer = r#"inspect |input String|:
+;
+caller |flag Bool|:
+value ~= "hello"
+if flag:
+    inspect(value)
+else
+    inspect(value)
+;
+sentinel = 0
+;"#;
+    for reverse_successor_visit in [false, true] {
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(both_branches_transfer);
+        let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);
+        let calls = calls_with_result_presence(&hir, false);
+        assert_eq!(
+            calls.len(),
+            2,
+            "both branches should have an actual call row"
+        );
+        assert_ne!(calls[0].0, calls[1].0);
+        let shared_row = *calls[0].2.first().expect("inspect has one argument");
+        replace_call_arguments(&mut hir, calls[1].1, &[shared_row]);
+        if reverse_successor_visit {
+            reverse_if_successors_for_blocks(&mut hir, calls[0].0, calls[1].0);
+        }
+
+        let registry = default_external_package_registry(&mut string_table);
+        let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+            .expect("both transfer branches should remain legal");
+        assert_eq!(
+            report
+                .analysis
+                .value_fact(shared_row)
+                .expect("both final branch observations share one actual row")
+                .optional_transfer,
+            OptionalTransferStatus::Transfer,
+            "all present CFG observations prove transfer in either successor visit order"
+        );
+    }
+
+    let one_branch_transfer = r#"inspect |input String|:
+;
+caller |flag Bool|:
+value ~= "hello"
+if flag:
+    inspect(value)
+else
+    unused ~= "unused"
+;
+sentinel = 0
+;"#;
+    for reverse_successor_visit in [false, true] {
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(one_branch_transfer);
+        let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);
+        let transfer_call = calls_with_result_presence(&hir, false)
+            .into_iter()
+            .next()
+            .expect("one branch should contain an actual transfer call");
+        if reverse_successor_visit {
+            let absent_branch = opposite_if_successor(&hir, transfer_call.0);
+            reverse_if_successors_for_blocks(&mut hir, transfer_call.0, absent_branch);
+        }
+
+        let shared_row = *transfer_call.2.first().expect("inspect has one argument");
+        let registry = default_external_package_registry(&mut string_table);
+        let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+            .expect("an absent value row in the other branch is legal");
+        assert_eq!(
+            report
+                .analysis
+                .value_fact(shared_row)
+                .expect("the one observed transfer row should remain present")
+                .optional_transfer,
+            OptionalTransferStatus::Transfer,
+            "a CFG context with no row is absent and must not downgrade the observed transfer"
+        );
+    }
+}
+
+#[test]
+fn actual_cfg_transfer_and_ordinary_definition_merge_conservatively() {
+    let source = r#"inspect |input String|:
+;
+caller |flag Bool|:
+value ~= "hello"
+if flag:
+    inspect(value)
+else
+    ordinary = value
+;
+sentinel = 0
+;"#;
+
+    for reverse_successor_visit in [false, true] {
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+        let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);
+        let transfer_call = calls_with_result_presence(&hir, false)
+            .into_iter()
+            .next()
+            .expect("the transfer branch should contain one inspect call");
+        let ordinary_local = find_local_by_name(&hir, &path_fork, &string_table, "ordinary")
+            .expect("the other branch should define an ordinary local");
+        let (ordinary_block, ordinary_statement_id, ordinary_row) = hir
+            .blocks
+            .iter()
+            .find_map(|block| {
+                block.statements.iter().find_map(|statement| {
+                    let HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(local),
+                        value,
+                    } = &statement.kind
+                    else {
+                        return None;
+                    };
+                    (*local == ordinary_local).then_some((block.id, statement.id, *value))
+                })
+            })
+            .expect("the fixture should contain the ordinary local definition");
+        assert_ne!(transfer_call.0, ordinary_block);
+        let shared_row = *transfer_call
+            .2
+            .first()
+            .expect("inspect should have one actual argument row");
+        assert_ne!(shared_row, ordinary_row);
+
+        let definition = hir
+            .blocks
+            .iter_mut()
+            .find(|block| block.id == ordinary_block)
+            .and_then(|block| {
+                block
+                    .statements
+                    .iter_mut()
+                    .find(|statement| statement.id == ordinary_statement_id)
+            })
+            .expect("the ordinary definition should remain present");
+        let HirStatementKind::Write { value, .. } = &mut definition.kind else {
+            unreachable!("the selected statement is a definition")
+        };
+        *value = shared_row;
+
+        if reverse_successor_visit {
+            reverse_if_successors_for_blocks(&mut hir, transfer_call.0, ordinary_block);
+        }
+
+        let registry = default_external_package_registry(&mut string_table);
+        let mut transfer_only_hir = hir.clone();
+        for block in &mut transfer_only_hir.blocks {
+            block
+                .statements
+                .retain(|statement| statement.id != ordinary_statement_id);
+        }
+        let transfer_only =
+            run_borrow_checker(&transfer_only_hir, &registry, &path_fork, &string_table)
+                .expect("the actual inspect call alone should remain legal");
+        assert_eq!(
+            transfer_only
+                .analysis
+                .value_fact(shared_row)
+                .expect("the shared row remains the actual inspect argument")
+                .optional_transfer,
+            OptionalTransferStatus::Transfer,
+            "the transfer context should prove transfer when the ordinary use is absent"
+        );
+
+        let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+            .expect("both mutually exclusive final contexts should remain legal");
+        assert_eq!(
+            report
+                .analysis
+                .value_fact(shared_row)
+                .expect("the call and definition share one actual HIR row")
+                .optional_transfer,
+            OptionalTransferStatus::Borrow,
+            "the observed ordinary definition must downgrade transfer in either CFG order"
+        );
+    }
+}
+
+fn calls_with_result_presence(
+    hir: &HirModule,
+    has_result: bool,
+) -> Vec<(BlockId, HirNodeId, Vec<HirValueId>)> {
+    hir.blocks
+        .iter()
+        .flat_map(|block| {
+            block.statements.iter().filter_map(move |statement| {
+                let HirStatementKind::Call { args, result, .. } = &statement.kind else {
+                    return None;
+                };
+                (result.is_some() == has_result).then(|| {
+                    (
+                        block.id,
+                        statement.id,
+                        hir.expressions.values(*args).to_vec(),
+                    )
+                })
+            })
+        })
+        .collect()
+}
+
+fn calls_with_argument_count(
+    hir: &HirModule,
+    argument_count: usize,
+) -> Vec<(BlockId, HirNodeId, Vec<HirValueId>)> {
+    hir.blocks
+        .iter()
+        .flat_map(|block| {
+            block.statements.iter().filter_map(move |statement| {
+                let HirStatementKind::Call { args, .. } = &statement.kind else {
+                    return None;
+                };
+                (args.len() == argument_count).then(|| {
+                    (
+                        block.id,
+                        statement.id,
+                        hir.expressions.values(*args).to_vec(),
+                    )
+                })
+            })
+        })
+        .collect()
+}
+
+fn replace_call_arguments(hir: &mut HirModule, statement_id: HirNodeId, rows: &[HirValueId]) {
+    let args = hir
+        .expressions
+        .append_values(rows, None)
+        .expect("the replacement call argument range should fit the HIR store");
+    let call = hir
+        .blocks
+        .iter_mut()
+        .flat_map(|block| &mut block.statements)
+        .find(|statement| statement.id == statement_id)
+        .expect("the selected call statement should remain in HIR");
+    let HirStatementKind::Call {
+        args: call_args, ..
+    } = &mut call.kind
+    else {
+        unreachable!("the selected statement is a call");
+    };
+    *call_args = args;
+}
+
+fn reverse_if_successors_for_blocks(hir: &mut HirModule, first: BlockId, second: BlockId) {
+    let branch = hir
+        .blocks
+        .iter_mut()
+        .find(|block| {
+            matches!(
+                &block.terminator,
+                HirTerminator::If {
+                    then_block,
+                    else_block,
+                    ..
+                } if [*then_block, *else_block].contains(&first)
+                    && [*then_block, *else_block].contains(&second)
+            )
+        })
+        .expect("the fixture should have an if whose successors are the selected call blocks");
+    let HirTerminator::If {
+        then_block,
+        else_block,
+        ..
+    } = &mut branch.terminator
+    else {
+        unreachable!("the selected block terminates with an if");
+    };
+    std::mem::swap(then_block, else_block);
+}
+
+fn opposite_if_successor(hir: &HirModule, selected: BlockId) -> BlockId {
+    hir.blocks
+        .iter()
+        .find_map(|block| match &block.terminator {
+            HirTerminator::If {
+                then_block,
+                else_block,
+                ..
+            } if *then_block == selected => Some(*else_block),
+            HirTerminator::If {
+                then_block,
+                else_block,
+                ..
+            } if *else_block == selected => Some(*then_block),
+            _ => None,
+        })
+        .expect("the transfer call should be on one side of the fixture if")
 }
 
 #[test]
@@ -1182,22 +2324,31 @@ return identity(load_user()!)
                 let HirStatementKind::Call {
                     target: CallTarget::Local(target),
                     args,
-                    result: Some(result),
+                    result: Some(HirLocalDestination::Define(result)),
                 } = &statement.kind
                 else {
                     return None;
                 };
-                if *target != identity_id || args.len() != 1 {
+                if *target != identity_id {
                     return None;
                 }
-                let HirExpressionKind::FallibleUnwrapSuccess { result: payload } = &args[0].kind
+                let argument_ids = hir.expressions.values(*args);
+                let [argument_id] = argument_ids else {
+                    return None;
+                };
+                let argument = hir.expressions.expression(*argument_id);
+                let HirExpressionKind::FallibleUnwrapSuccess { result: payload } = &argument.kind
                 else {
                     return None;
                 };
-                let HirExpressionKind::Load(HirPlace::Local(root)) = &payload.kind else {
+                let payload = hir.expressions.expression(*payload);
+                let HirExpressionKind::Load(place) = &payload.kind else {
                     return None;
                 };
-                Some((block.id, statement.id, *root, *result))
+                if !hir.expressions.projections(place.projections).is_empty() {
+                    return None;
+                }
+                Some((block.id, statement.id, place.root, *result))
             })
         })
         .expect("should locate the identity call with a transparent fallible projection");
@@ -1449,9 +2600,9 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
 
     let argument_local = find_local_by_name(&hir, &path_fork, &string_table, "argument")
         .expect("should locate the possible aliased argument local");
-    let result_assignment =
-        find_assign_statement_id_for_local_name(&hir, &path_fork, &string_table, "result")
-            .expect("should locate the retained result assignment");
+    let result_definition =
+        find_local_definition_statement_id_for_name(&hir, &path_fork, &string_table, "result")
+            .expect("should locate the retained result definition");
     let caller_function = hir
         .functions
         .iter()
@@ -1467,27 +2618,27 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
         .iter()
         .find_map(|statement| match &statement.kind {
             HirStatementKind::Call {
-                result: Some(result),
+                result: Some(HirLocalDestination::Define(result)),
                 ..
             } => Some(*result),
             _ => None,
         })
-        .expect("caller should retain the call result before assignment");
+        .expect("caller should retain the call result before its binding definition");
     let entry_state = report
         .analysis
         .statement_entry_states
-        .get(&result_assignment)
-        .expect("result assignment should have an entry snapshot");
+        .get(&result_definition)
+        .expect("result definition should have an entry snapshot");
     let argument_snapshot = entry_state
         .locals
         .iter()
         .find(|snapshot| snapshot.local == argument_local)
-        .expect("result assignment entry should include the possible aliased argument");
+        .expect("result definition entry should include the possible aliased argument");
     let result_snapshot = entry_state
         .locals
         .iter()
         .find(|snapshot| snapshot.local == call_result_local)
-        .expect("result assignment entry should include the retained call result");
+        .expect("result definition entry should include the retained call result");
 
     assert!(
         !argument_snapshot.mode.is_definitely_uninit(),
@@ -1528,7 +2679,21 @@ fn find_local_by_name(
         .map(|local| local.id)
 }
 
-fn find_assign_statement_id_for_local_name(
+fn is_local_place(hir: &HirModule, place: HirPlace, local: LocalId) -> bool {
+    place.root == local && hir.expressions.projections(place.projections).is_empty()
+}
+
+fn loaded_local(hir: &HirModule, expression_id: HirValueId) -> Option<LocalId> {
+    let HirExpressionKind::Load(place) = &hir.expressions.expression(expression_id).kind else {
+        return None;
+    };
+    hir.expressions
+        .projections(place.projections)
+        .is_empty()
+        .then_some(place.root)
+}
+
+fn find_local_definition_statement_id_for_name(
     hir: &crate::compiler_frontend::hir::module::HirModule,
     path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     string_table: &StringTable,
@@ -1536,8 +2701,8 @@ fn find_assign_statement_id_for_local_name(
 ) -> Option<HirNodeId> {
     for block in &hir.blocks {
         for statement in &block.statements {
-            if let HirStatementKind::Assign {
-                target: HirPlace::Local(local),
+            if let HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(local),
                 ..
             } = &statement.kind
                 && hir
@@ -1561,7 +2726,7 @@ fn find_map_op_result_and_following_statement(
         for (index, statement) in block.statements.iter().enumerate() {
             if let HirStatementKind::MapOp { op, result, .. } = &statement.kind
                 && *op == wanted_op
-                && let Some(result_local) = *result
+                && let Some(HirLocalDestination::Define(result_local)) = *result
                 && let Some(following_statement) = block.statements.get(index + 1)
             {
                 return Some((result_local, following_statement.id));
@@ -1624,34 +2789,48 @@ fn collect_reachable_blocks(
     blocks
 }
 
-fn collect_statement_values(kind: HirStatementKind, out: &mut FxHashSet<HirValueId>) {
-    let _path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+fn collect_statement_values(
+    expressions: &HirExpressionStore,
+    kind: &HirStatementKind,
+    out: &mut FxHashSet<HirValueId>,
+) {
     match kind {
-        HirStatementKind::Assign { value, .. } => collect_expression_values(&value, out),
+        HirStatementKind::Write { target, value } => {
+            if let HirWriteTarget::AssignPlace(place) = target {
+                collect_place_index_values(expressions, *place, out);
+            }
+            collect_expression_values(expressions, *value, out);
+        }
         HirStatementKind::Call { args, .. } => {
-            for arg in args {
-                collect_expression_values(&arg, out);
+            for argument in expressions.values(*args) {
+                collect_expression_values(expressions, *argument, out);
             }
         }
         HirStatementKind::MapOp { receiver, args, .. } => {
-            collect_expression_values(&receiver, out);
-            for arg in args {
-                collect_expression_values(&arg, out);
+            collect_expression_values(expressions, *receiver, out);
+            for argument in expressions.values(*args) {
+                collect_expression_values(expressions, *argument, out);
             }
         }
-        HirStatementKind::Expr(expr) => collect_expression_values(&expr, out),
-        HirStatementKind::CastOp { source, .. } => collect_expression_values(&source, out),
+        HirStatementKind::Expr(expression_id) => {
+            collect_expression_values(expressions, *expression_id, out);
+        }
+        HirStatementKind::CastOp { source, .. } => {
+            collect_expression_values(expressions, *source, out);
+        }
         HirStatementKind::NumericOp { operands, .. } => match operands {
             crate::compiler_frontend::hir::numeric::HirNumericOperands::Unary { operand } => {
-                collect_expression_values(&operand, out);
+                collect_expression_values(expressions, *operand, out);
             }
             crate::compiler_frontend::hir::numeric::HirNumericOperands::Binary { left, right } => {
-                collect_expression_values(&left, out);
-                collect_expression_values(&right, out);
+                collect_expression_values(expressions, *left, out);
+                collect_expression_values(expressions, *right, out);
             }
         },
         HirStatementKind::FormatFloat { source, .. }
-        | HirStatementKind::ValidateFloat { source, .. } => collect_expression_values(&source, out),
+        | HirStatementKind::ValidateFloat { source, .. } => {
+            collect_expression_values(expressions, *source, out);
+        }
         HirStatementKind::FloatRangeCandidate {
             current,
             step,
@@ -1659,98 +2838,137 @@ fn collect_statement_values(kind: HirStatementKind, out: &mut FxHashSet<HirValue
             ascending,
             ..
         } => {
-            collect_expression_values(&current, out);
-            collect_expression_values(&step, out);
-            collect_expression_values(&end, out);
-            collect_expression_values(&ascending, out);
+            collect_expression_values(expressions, *current, out);
+            collect_expression_values(expressions, *step, out);
+            collect_expression_values(expressions, *end, out);
+            collect_expression_values(expressions, *ascending, out);
         }
         HirStatementKind::Drop(_) | HirStatementKind::RangeStepFailure { .. } => {}
         HirStatementKind::PushRuntimeFragment { value, .. } => {
-            collect_expression_values(&value, out)
+            collect_expression_values(expressions, *value, out);
         }
     }
 }
 
-fn collect_terminator_values(terminator: &HirTerminator, out: &mut FxHashSet<HirValueId>) {
-    let _path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+fn collect_terminator_values(
+    expressions: &HirExpressionStore,
+    terminator: &HirTerminator,
+    out: &mut FxHashSet<HirValueId>,
+) {
     match terminator {
-        HirTerminator::If { condition, .. } => collect_expression_values(condition, out),
-        HirTerminator::FallibleBranch { result, .. } => collect_expression_values(result, out),
+        HirTerminator::If { condition, .. } => {
+            collect_expression_values(expressions, *condition, out);
+        }
+        HirTerminator::FallibleBranch { result, .. } => {
+            collect_expression_values(expressions, *result, out);
+        }
         HirTerminator::Match { scrutinee, arms } => {
-            collect_expression_values(scrutinee, out);
+            collect_expression_values(expressions, *scrutinee, out);
             for arm in arms {
                 if let crate::compiler_frontend::hir::patterns::HirPattern::Literal(value)
-                | crate::compiler_frontend::hir::patterns::HirPattern::OptionValue { value } =
-                    &arm.pattern
-                {
-                    collect_expression_values(value, out);
+                | crate::compiler_frontend::hir::patterns::HirPattern::OptionValue { value }
+                | crate::compiler_frontend::hir::patterns::HirPattern::OptionRelational {
+                    value,
+                    ..
                 }
-                if let Some(guard) = &arm.guard {
-                    collect_expression_values(guard, out);
+                | crate::compiler_frontend::hir::patterns::HirPattern::Relational {
+                    value,
+                    ..
+                } = &arm.pattern
+                {
+                    collect_expression_values(expressions, *value, out);
+                }
+                if let Some(guard) = arm.guard {
+                    collect_expression_values(expressions, guard, out);
                 }
             }
         }
         HirTerminator::Return(value)
         | HirTerminator::ReturnSuccess(value)
-        | HirTerminator::ReturnError(value) => collect_expression_values(value, out),
-        HirTerminator::AssertFailure { message, .. } => collect_expression_values(message, out),
-
-        HirTerminator::RuntimeFailure { .. } => {
-            // Runtime-failure messages are backend-facing text, not expressions.
+        | HirTerminator::ReturnError(value) => {
+            collect_expression_values(expressions, *value, out);
         }
-
-        HirTerminator::Uninitialized => {
-            // Internal placeholder — no expressions to visit.
+        HirTerminator::AssertFailure { message, .. } => {
+            collect_expression_values(expressions, *message, out);
         }
-        HirTerminator::Jump { .. }
+        HirTerminator::RuntimeFailure { .. }
+        | HirTerminator::Uninitialized
+        | HirTerminator::Jump { .. }
         | HirTerminator::Break { .. }
         | HirTerminator::Continue { .. } => {}
     }
 }
 
-fn collect_expression_values(expression: &HirExpression, out: &mut FxHashSet<HirValueId>) {
-    let _path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
-    out.insert(expression.id);
-
-    match &expression.kind {
-        HirExpressionKind::BinOp { left, right, .. } => {
-            collect_expression_values(left, out);
-            collect_expression_values(right, out);
+fn collect_place_index_values(
+    expressions: &HirExpressionStore,
+    place: HirPlace,
+    out: &mut FxHashSet<HirValueId>,
+) {
+    for projection in expressions.projections(place.projections) {
+        if let crate::compiler_frontend::hir::expression_store::HirProjection::Index(index) =
+            projection
+        {
+            collect_expression_values(expressions, *index, out);
         }
-        HirExpressionKind::UnaryOp { operand, .. } => collect_expression_values(operand, out),
+    }
+}
+
+fn collect_expression_values(
+    expressions: &HirExpressionStore,
+    expression_id: HirValueId,
+    out: &mut FxHashSet<HirValueId>,
+) {
+    if !out.insert(expression_id) {
+        return;
+    }
+
+    match &expressions.expression(expression_id).kind {
+        HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
+            collect_place_index_values(expressions, *place, out);
+        }
+        HirExpressionKind::BinOp { left, right, .. } => {
+            collect_expression_values(expressions, *left, out);
+            collect_expression_values(expressions, *right, out);
+        }
+        HirExpressionKind::UnaryOp { operand, .. } => {
+            collect_expression_values(expressions, *operand, out);
+        }
         HirExpressionKind::StructConstruct { fields, .. } => {
-            for (_, value) in fields {
-                collect_expression_values(value, out);
+            for (_, value) in expressions.struct_fields(*fields) {
+                collect_expression_values(expressions, *value, out);
             }
         }
         HirExpressionKind::Collection(elements)
         | HirExpressionKind::TupleConstruct { elements } => {
-            for element in elements {
-                collect_expression_values(element, out);
+            for element in expressions.values(*elements) {
+                collect_expression_values(expressions, *element, out);
             }
         }
         HirExpressionKind::MapLiteral(entries) => {
-            for entry in entries {
-                collect_expression_values(&entry.key, out);
-                collect_expression_values(&entry.value, out);
+            for entry in expressions.map_entries(*entries) {
+                collect_expression_values(expressions, entry.key, out);
+                collect_expression_values(expressions, entry.value, out);
             }
         }
         HirExpressionKind::TupleGet { tuple, .. } => {
-            collect_expression_values(tuple, out);
+            collect_expression_values(expressions, *tuple, out);
         }
         HirExpressionKind::Range { start, end } => {
-            collect_expression_values(start, out);
-            collect_expression_values(end, out);
+            collect_expression_values(expressions, *start, out);
+            collect_expression_values(expressions, *end, out);
         }
         HirExpressionKind::VariantConstruct { fields, .. } => {
-            for field in fields {
-                collect_expression_values(&field.value, out);
+            for field in expressions.variant_fields(*fields) {
+                collect_expression_values(expressions, field.value, out);
             }
         }
         HirExpressionKind::FallibleUnwrapSuccess { result }
         | HirExpressionKind::FallibleUnwrapError { result }
         | HirExpressionKind::Cast { source: result, .. } => {
-            collect_expression_values(result, out);
+            collect_expression_values(expressions, *result, out);
+        }
+        HirExpressionKind::VariantPayloadGet { source, .. } => {
+            collect_expression_values(expressions, *source, out);
         }
         HirExpressionKind::Number(_)
         | HirExpressionKind::Int(_)
@@ -1760,13 +2978,7 @@ fn collect_expression_values(expression: &HirExpression, out: &mut FxHashSet<Hir
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)
         | HirExpressionKind::StringLiteral(_)
-        | HirExpressionKind::StructuralString { .. }
-        | HirExpressionKind::Copy(_)
-        | HirExpressionKind::Load(_) => {}
-
-        HirExpressionKind::VariantPayloadGet { source, .. } => {
-            collect_expression_values(source, out);
-        }
+        | HirExpressionKind::StructuralString { .. } => {}
     }
 }
 
@@ -1799,8 +3011,11 @@ fn catch_failed_argument_releases_earlier_shared_and_mutable_call_borrows() {
             .flat_map(|block| &block.statements)
             .rfind(|statement| {
                 matches!(
-                    statement.kind,
-                    HirStatementKind::Assign { target: HirPlace::Local(local), .. } if local == data
+                    &statement.kind,
+                    HirStatementKind::Write {
+                        target: HirWriteTarget::AssignPlace(place),
+                        ..
+                    } if is_local_place(&hir, *place, data)
                 )
             })
             .expect("the handler must rebind the source");
@@ -1812,9 +3027,19 @@ fn catch_failed_argument_releases_earlier_shared_and_mutable_call_borrows() {
             .expect("the source must be visible in the handler");
         assert!(snapshot.mode.contains(LocalMode::SLOT));
         assert!(!snapshot.mode.is_definitely_uninit());
-        let first_call = hir.blocks.iter().flat_map(|block| &block.statements)
-            .find(|statement| matches!(&statement.kind, HirStatementKind::Call { args, .. }
-                if args.len() == 1 && matches!(args[0].kind, HirExpressionKind::Load(HirPlace::Local(local)) if local == data)))
+        let first_call = hir
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .find(|statement| {
+                let HirStatementKind::Call { args, .. } = &statement.kind else {
+                    return false;
+                };
+                let [argument] = hir.expressions.values(*args) else {
+                    return false;
+                };
+                loaded_local(&hir, *argument) == Some(data)
+            })
             .expect("the first argument must access the source before the failing argument");
         let fact = report
             .analysis
@@ -1853,11 +3078,16 @@ fn catch_failed_argument_keeps_optional_transfer_consistent_with_handler_use() {
             .flat_map(|block| &block.statements)
             .find_map(|statement| match &statement.kind {
                 HirStatementKind::Call { args, .. }
-                    if args.len() == 1
-                        && matches!(args[0].kind,
-                            HirExpressionKind::Load(HirPlace::Local(local)) if local == data) =>
+                    if hir
+                        .expressions
+                        .values(*args)
+                        .first()
+                        .is_some_and(|argument| {
+                            hir.expressions.values(*args).len() == 1
+                                && loaded_local(&hir, *argument) == Some(data)
+                        }) =>
                 {
-                    Some(args[0].id)
+                    hir.expressions.values(*args).first().copied()
                 }
                 _ => None,
             })
@@ -1925,14 +3155,17 @@ fn catch_handler_numeric_failure_returns_outward_without_success_local() {
         .iter()
         .flat_map(|block| &block.statements)
         .find_map(|statement| match &statement.kind {
-            HirStatementKind::Assign {
-                target: HirPlace::Local(local),
-                value:
-                    HirExpression {
-                        kind: HirExpressionKind::Load(_),
-                        ..
-                    },
-            } if *local != handler_local => Some(*local),
+            HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(local),
+                value,
+            } if *local != handler_local
+                && matches!(
+                    &hir.expressions.expression(*value).kind,
+                    HirExpressionKind::Load(_)
+                ) =>
+            {
+                Some(*local)
+            }
             _ => None,
         })
         .expect("the success path must have a result slot");
@@ -1960,10 +3193,14 @@ fn catch_handler_cannot_load_never_initialised_success_call_result() {
         .catch_protected_calls
         .iter()
         .find(|record| {
-            hir.blocks.iter().flat_map(|block| &block.statements).any(|statement| {
-            statement.id == record.statement
-                && matches!(&statement.kind, HirStatementKind::Call { args, .. } if args.len() == 2)
-        })
+            hir.blocks
+                .iter()
+                .flat_map(|block| &block.statements)
+                .any(|statement| {
+                    statement.id == record.statement
+                        && matches!(&statement.kind, HirStatementKind::Call { args, .. }
+                    if hir.expressions.values(*args).len() == 2)
+                })
         })
         .copied()
         .expect("the complete protected call must record its handler");
@@ -1971,11 +3208,11 @@ fn catch_handler_cannot_load_never_initialised_success_call_result() {
         .blocks
         .iter()
         .flat_map(|block| &block.statements)
-        .find_map(|statement| match statement.kind {
+        .find_map(|statement| match &statement.kind {
             HirStatementKind::Call {
-                result: Some(local),
+                result: Some(HirLocalDestination::Define(local)),
                 ..
-            } if statement.id == record.statement => Some(local),
+            } if statement.id == record.statement => Some(*local),
             _ => None,
         })
         .expect("the protected call must have a success local");
@@ -1986,21 +3223,23 @@ fn catch_handler_cannot_load_never_initialised_success_call_result() {
         .find(|local| local.id == success_result)
         .expect("the result local must be declared")
         .ty;
-    let handler = &mut hir.blocks[record.handler.block.0 as usize];
+    let handler_block_index = record.handler.block.0 as usize;
+    let handler_region = hir.blocks[handler_block_index].region;
+    let injected_value = crate::compiler_frontend::tests::hir_fixture_support::expression(
+        HirExpressionKind::Load(HirPlace::local(success_result)),
+        success_type,
+        handler_region,
+        ValueKind::Place,
+        &mut hir.expressions,
+    );
+    let handler = &mut hir.blocks[handler_block_index];
     // Source scoping prevents naming this scratch slot. Inject its read, as the scope suite
     // does for dead locals, to protect the borrow consumer's mandatory initialisation rule.
     handler.statements.insert(
         0,
         HirStatement {
             id: HirNodeId(90_000),
-            kind: HirStatementKind::Expr(HirExpression {
-                id: HirValueId(90_000),
-                kind: HirExpressionKind::Load(HirPlace::Local(success_result)),
-                ty: success_type,
-                value_kind: ValueKind::Place,
-                region: handler.region,
-                span: None,
-            }),
+            kind: HirStatementKind::Expr(injected_value),
             span: None,
         },
     );
@@ -2029,30 +3268,48 @@ fn equal_depth_diamond_merges_both_roots_in_one_merge_visit() {
         .expect("fixture declares the view alias");
     let start = hir.start_function.expect("fixture has a start function");
     let entry_id = hir.functions[start.0 as usize].entry;
-    let entry = &mut hir.blocks[entry_id.0 as usize];
-    let region = entry.region;
-    let view_type = entry
-        .locals
-        .iter()
-        .find(|local| local.id == view)
-        .expect("view is declared in the entry region")
-        .ty;
-    let assignment_index = entry
-        .statements
-        .iter()
-        .position(|statement| {
-            matches!(&statement.kind, HirStatementKind::Assign { target: HirPlace::Local(local), .. }
-                if *local == view)
-        })
-        .expect("fixture binds the view alias");
-    let left_assignment = entry.statements.remove(assignment_index);
-    let mut right_assignment = left_assignment.clone();
-    right_assignment.id = HirNodeId(90_000);
-    let HirStatementKind::Assign { value, .. } = &mut right_assignment.kind else {
-        unreachable!("the selected statement is an assignment");
+    let (region, view_type, left_definition) = {
+        let entry = &mut hir.blocks[entry_id.0 as usize];
+        let region = entry.region;
+        let view_type = entry
+            .locals
+            .iter()
+            .find(|local| local.id == view)
+            .expect("view is declared in the entry region")
+            .ty;
+        let definition_index = entry
+            .statements
+            .iter()
+            .position(|statement| {
+                matches!(
+                    &statement.kind,
+                    HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(local),
+                        ..
+                    } if *local == view
+                )
+            })
+            .expect("fixture binds the view alias");
+        (region, view_type, entry.statements.remove(definition_index))
     };
-    value.id = HirValueId(90_001);
-    value.kind = HirExpressionKind::Load(HirPlace::Local(right));
+    let mut right_definition = left_definition.clone();
+    right_definition.id = HirNodeId(90_000);
+    let right_value = expression(
+        HirExpressionKind::Load(HirPlace::local(right)),
+        view_type,
+        region,
+        ValueKind::Place,
+        &mut hir.expressions,
+    );
+    let HirStatementKind::Write {
+        target: HirWriteTarget::DefineLocal(target),
+        value,
+    } = &mut right_definition.kind
+    else {
+        unreachable!("the selected statement is a definition");
+    };
+    assert_eq!(*target, view);
+    *value = right_value;
 
     // Both arms sit one edge from the entry, so breadth-first scheduling reaches the merge from
     // the left arm and grows its input from the right arm before the merge is popped.
@@ -2061,8 +3318,9 @@ fn equal_depth_diamond_merges_both_roots_in_one_merge_visit() {
     let right_arm = BlockId(base + 1);
     let merge = BlockId(base + 2);
     let exit_terminator = hir.blocks[entry_id.0 as usize].terminator.clone();
+    let condition = bool_expression(true, builtin_type_ids::BOOL, region, &mut hir.expressions);
     hir.blocks[entry_id.0 as usize].terminator = HirTerminator::If {
-        condition: bool_expression(90_002, true, builtin_type_ids::BOOL, region),
+        condition,
         then_block: left_arm,
         else_block: right_arm,
     };
@@ -2071,25 +3329,25 @@ fn equal_depth_diamond_merges_both_roots_in_one_merge_visit() {
         args: vec![],
     };
     let read_view = expression(
-        90_003,
-        HirExpressionKind::Load(HirPlace::Local(view)),
+        HirExpressionKind::Load(HirPlace::local(view)),
         view_type,
         region,
         ValueKind::Place,
+        &mut hir.expressions,
     );
     hir.blocks.extend([
         HirBlock {
             id: left_arm,
             region,
             locals: vec![],
-            statements: vec![left_assignment],
+            statements: vec![left_definition],
             terminator: jump_to_merge.clone(),
         },
         HirBlock {
             id: right_arm,
             region,
             locals: vec![],
-            statements: vec![right_assignment],
+            statements: vec![right_definition],
             terminator: jump_to_merge,
         },
         HirBlock {

@@ -399,6 +399,7 @@ pub(crate) fn setup_builder<'a>(
         path_fork,
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
         crate::compiler_frontend::hir::functions::HirFunctionOriginLookup::default(),
+        Default::default(),
     );
 
     let region = RegionId(0);

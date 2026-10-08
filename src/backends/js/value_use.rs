@@ -13,7 +13,8 @@
 
 use crate::backends::js::JsEmitter;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::ids::HirValueId;
 
 /// Context in which a lowered JS expression will be consumed.
 ///
@@ -46,14 +47,14 @@ impl<'hir> JsEmitter<'hir> {
     /// (such as tuple returns) based on how the resulting JS value will be used.
     pub(crate) fn lower_expression_for_use(
         &mut self,
-        expression: &HirExpression,
+        expression_id: HirValueId,
         use_context: JsValueUse,
     ) -> Result<String, CompilerError> {
         match use_context {
             JsValueUse::PlainExpression
             | JsValueUse::AssignmentValue
-            | JsValueUse::HostCallArgument => self.lower_concrete_value(expression),
-            JsValueUse::MothCallArgument => self.lower_call_argument_value(expression),
+            | JsValueUse::HostCallArgument => self.lower_concrete_value(expression_id),
+            JsValueUse::MothCallArgument => self.lower_call_argument_value(expression_id),
         }
     }
 
@@ -66,8 +67,10 @@ impl<'hir> JsEmitter<'hir> {
     /// value, which describes whether the returned root aliases a parameter root.
     pub(crate) fn lower_moth_return_value(
         &mut self,
-        expression: &HirExpression,
+        expression_id: HirValueId,
     ) -> Result<String, CompilerError> {
+        let hir = self.hir;
+        let expression = hir.expressions.expression(expression_id);
         match &expression.kind {
             // Ordinary return: read the raw value. This preserves allocation identity. The
             // caller receives it in a fresh binding, but the underlying allocation is shared.
@@ -80,20 +83,21 @@ impl<'hir> JsEmitter<'hir> {
                 self.lower_place(place)?
             )),
             HirExpressionKind::TupleConstruct { elements } => {
-                let lowered = elements
+                let lowered = hir
+                    .expressions
+                    .values(*elements)
                     .iter()
-                    .map(|element| self.lower_moth_return_value(element))
+                    .map(|element| self.lower_moth_return_value(*element))
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(format!("[{}]", lowered.join(", ")))
             }
-            _ => self.lower_expr(expression),
+            _ => self.lower_expr(expression_id),
         }
     }
 
-    fn lower_concrete_value(
-        &mut self,
-        expression: &HirExpression,
-    ) -> Result<String, CompilerError> {
+    fn lower_concrete_value(&mut self, expression_id: HirValueId) -> Result<String, CompilerError> {
+        let hir = self.hir;
+        let expression = hir.expressions.expression(expression_id);
         match &expression.kind {
             HirExpressionKind::Load(place) => {
                 Ok(format!("__moth_read({})", self.lower_place(place)?))
@@ -102,21 +106,29 @@ impl<'hir> JsEmitter<'hir> {
                 "__moth_clone_value(__moth_read({}))",
                 self.lower_place(place)?
             )),
-            _ => self.lower_expr(expression),
+            _ => self.lower_expr(expression_id),
         }
     }
 
     fn lower_call_argument_value(
         &mut self,
-        expression: &HirExpression,
+        expression_id: HirValueId,
     ) -> Result<String, CompilerError> {
-        match &expression.kind {
-            HirExpressionKind::Load(place) => self.lower_place(place),
-            HirExpressionKind::Copy(place) => Ok(format!(
-                "__moth_binding(__moth_clone_value(__moth_read({})))",
-                self.lower_place(place)?
+        let hir = self.hir;
+        let expression = hir.expressions.expression(expression_id);
+        match expression.value_kind {
+            ValueKind::Place => {
+                let HirExpressionKind::Load(place) = &expression.kind else {
+                    return Err(CompilerError::compiler_error(
+                        "JavaScript backend received a place-valued expression without a direct place load",
+                    ));
+                };
+                self.lower_place(place)
+            }
+            ValueKind::RValue | ValueKind::Const => Ok(format!(
+                "__moth_binding({})",
+                self.lower_concrete_value(expression_id)?
             )),
-            _ => Ok(format!("__moth_binding({})", self.lower_expr(expression)?)),
         }
     }
 }

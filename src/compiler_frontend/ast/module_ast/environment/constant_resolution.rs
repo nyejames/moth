@@ -326,12 +326,6 @@ impl ConstantResolutionSession {
                             template_span,
                             ValueMode::ImmutableOwned,
                         ),
-                        TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
-                            return Err(CompilerError::compiler_error(
-                            "Template loop-control signal escaped the nearest template loop during folding.",
-                        )
-                        .into());
-                        }
                     };
                     folded_expression.synthetic_interface_provenance = fold_result.provenance;
                     folded_expression
@@ -460,7 +454,6 @@ impl ConstantResolutionSession {
             header.declaration_path.to_owned(),
             top_level_declarations,
             Arc::clone(&module_view.external_package_registry),
-            vec![],
             0,
             Rc::clone(&module_view.template_ir_store),
             module_view.numeric_profile,

@@ -3,10 +3,10 @@
 ## Status
 
 ```text
-STATUS: active, design direction approved
-CURRENT_SLICE: Phase 1 complete - main and package-fix integration
-BLOCKERS: none
-NEXT_ACTION: squash this branch into main, merge committed package fixes, update this branch from main, then start Phase 2
+STATUS: paused after Phase 3; template control-flow simplification complete
+CURRENT_SLICE: Phase 3 implementation, review corrections and 3M closeout accepted
+BLOCKERS: none for this checkpoint; further implementation requires the user's explicit resumption
+NEXT_ACTION: record a fresh post-removal baseline when the user resumes, then continue Phase 4
 ```
 
 ## Purpose and authority
@@ -471,27 +471,36 @@ graph has not won the memory comparison.
 
 ### Lifetime decisions required before cutover
 
-- [ ] For each expression, payload, default, constant and TIR view store, record
+- [x] For each expression, payload, default, constant and TIR view store, record
   its owner and last reader. Prove that every surviving ID has a live matching
   store. Reusing an integer in a sibling store does not authorise cross-access.
-- [ ] Define how a fold that discards an operand releases or bounds its retained
+- [x] Define how a fold that discards an operand releases or bounds its retained
   storage. Dropping an ID does not reclaim append-only payloads. Test repeated
   replacement and mostly-folded large bodies, not only live runtime trees.
-- [ ] Preserve immutable overlay/root isolation between candidate instantiations.
+- [x] Preserve immutable overlay/root isolation between candidate instantiations.
   Structural TIR children inherit the accepted overlay, nested value expressions
   use their own context, and runtime dependence does not skip required validation.
-- [ ] Separate throwaway generic-body validation storage from retained canonical
+- [x] Separate throwaway generic-body validation storage from retained canonical
   tokens/declaration syntax and from concrete materialisation. Prove later
   instantiation after validation storage is dropped.
-- [ ] Define AST/TIR-to-HIR ownership transfer and required failure fact snapshots.
+- [x] Define AST/TIR-to-HIR ownership transfer and required failure fact snapshots.
   Base/generated recursive summary convergence cannot depend on a retained AST.
   Diagnostics retain exact locations/types/provenance after expression/TIR drop.
-- [ ] Preserve the current diagnostic TypeEnv dependency until its own display
+- [x] Preserve the current diagnostic TypeEnv dependency until its own display
   snapshot boundary replaces it. This plan does not claim that shrinking
   expressions implements diagnostic layout Phase 4 or frees every TypeEnv early.
-- [ ] Choose the native fallible-call HIR form: proposed new block arguments with
+- [x] Choose the native fallible-call HIR form: proposed new block arguments with
   edge-defined results or an explicit invoke-like terminator. Success and error definitions
   are mutually exclusive. Do not hide a semantic carrier behind an accessor.
+
+Phase 2 selected the safe enum/AoS reference, explicit result shape, typed
+owner-local IDs/ranges, scratch promotion with last-reader compaction and an
+invoke-like HIR continuation. The compiler architecture owns these contracts
+and the benchmark evidence report records the bounded comparisons and limits.
+The checked decisions above accept design and prototype proofs. Actual payload
+and service-root release, generic-preparation detachment, diagnostic rendering,
+native CFG/backend execution and compiler-wide performance remain required
+production proofs in Phases 3 and 4.
 
 ### Prior evidence to use, not blindly repeat
 
@@ -533,33 +542,33 @@ reported design tradeoff, not an automatic acceptance because it is below 5%.
 **Produces:** the dense HIR checkpoint, with current semantics preserved and no
 durable recursive expression/place representation.
 
-- [ ] Make `HirValueId` the canonical module expression-store handle. Remove
+- [x] Make `HirValueId` the canonical module expression-store handle. Remove
   redundant expression IDs and migrate fixed children to IDs.
-- [ ] Move variable expression payloads to typed ranges: arguments, collection
+- [x] Move variable expression payloads to typed ranges: arguments, collection
   elements, map entries, struct/variant fields, structural String pieces and
   place projections. Flatten `HirPlace` to root local plus ordered projections,
   with index expressions addressed by `HirValueId`.
-- [ ] Migrate every durable carrier, including statements, terminators, patterns
+- [x] Migrate every durable carrier, including statements, terminators, patterns
   and nested records, in the same accepted cutover. Temporary lowering locals
   cannot become a retained compatibility graph.
-- [ ] Convert lowering, validation, displays, rewrites, remapping, def/use,
+- [x] Convert lowering, validation, displays, rewrites, remapping, def/use,
   numeric proof tables, link facts, borrow/lifetime inputs, Boracle extraction,
   generated materialisation and JavaScript/Wasm consumers to direct store access.
-- [ ] Preserve source locations, evaluation order, region/value facts, numeric
+- [x] Preserve source locations, evaluation order, region/value facts, numeric
   domains, failure/conversion order and existing target rejections. Do not derive
   source numeric meaning from physical carriers during this migration.
-- [ ] Extend `FrontendArenaCapacityEstimate` only where measured store growth
+- [x] Extend `FrontendArenaCapacityEstimate` only where measured store growth
   justifies it. Gather cheap source facts in existing parallel preparation and
   existing header aggregation. Use naturally known local counts. Add no separate
   sizing-only scan or duplicate policy owner. Keep hard caps and saturating math.
-- [ ] Track estimate, actual count, initial reserve, growth and retained capacity
+- [x] Track estimate, actual count, initial reserve, growth and retained capacity
   only where they answer allocation questions. Underestimation grows normally.
   Freeze completed arrays to fixed ownership without excessive peak overlap.
-- [ ] Keep convergence-dependent rewrites before final publication. Structural
+- [x] Keep convergence-dependent rewrites before final publication. Structural
   freeze fixes topology/counts but may allow owning scalar remapping. After
   private lane installation or pruning, publish link facts for the final CFG,
   including unchanged base reuse and generated sidecars.
-- [ ] Delete superseded visitors/constructors and add a narrow architecture check
+- [x] Delete superseded visitors/constructors and add a narrow architecture check
   for reliably detectable forbidden durable recursive HIR ownership.
 
 **Checks:** growth and empty/nonempty range access, flat field/index places,
@@ -568,12 +577,152 @@ profile parity, affected borrow/Boracle and both supported backend lanes. Use
 source contracts for user behaviour and owner-local tests for store invariants.
 Run the affected frontend/end-to-end benchmark checks after the cutover.
 
+### Local definition and assignment hardening
+
+Phase 3 also owns the local-write correction uncovered by the re-entered-block
+bug fixed at `9fb59805ce9a97752b2e2564d8b7c4e1335e4b24`. Preserve that fix's
+behavioural regression and replace its temporary borrow-driven JS decision.
+Complete this correction before accepting the dense-HIR checkpoint, without
+starting the native-result redesign assigned to Phase 4.
+
+HIR must distinguish a local definition from assignment to an existing place.
+Each execution of a definition establishes a new dynamic occurrence, even when
+a loop reuses one static `LocalId`. Assignment through an existing mutable alias
+writes through and does not detach it. Authored declarations are definitions.
+Compiler temporaries may also be definitions, but do not thereby acquire
+Wire-visible source binding identity. Function entry defines parameters through
+the call ABI. Operation destinations explicitly preserve definition versus
+update, and selected CFG edges define their destinations.
+
+Place-derived and rvalue-derived writes have one authoritative classification.
+A call result remains an rvalue at the caller binding boundary even when its
+lowered expression loads an internal result local. A fresh result binding may
+share an allocation without aliasing the callee's binding slot. Reuse an adequate
+dense value classification rather than duplicating it. Do not infer binding
+semantics from raw `Load` shape or borrow analysis state.
+
+The selected contract uses `Write` with `DefineLocal` or `AssignPlace`, typed
+`Define`/`Update` local destinations and explicit source/destination jump pairs.
+`ValueKind` remains the incoming-value authority. Current range `next_value`,
+`distance` and `candidate_in_range` locals are scratch definitions because each
+operation recomputes them before use. Persistent current, step and index writes
+are updates. A float candidate defines its scratch output only when in range.
+No artificial initialisation is added to turn scratch definitions into updates.
+
+Use the smallest typed representation that excludes invalid combinations.
+A local destination can distinguish definition and update, while an ordinary
+write target can distinguish local definition and assignment to a place.
+Do not use a general creation boolean, a statement-side table, a backend-specific
+bit or a compatibility conversion back to ambiguous assignment.
+
+- [x] **3A: inventory and contract.** Inventory every statement/terminator
+  `LocalId` destination and `Assign` producer as definition, update, edge
+  definition, parameter definition or no write. Include declarations,
+  assignments, multi-bind targets, loop binders, loop-body declarations, range
+  initialisation/updates, conditional state, result/tuple spills, parameters,
+  call/map/cast/numeric/range-failure/float-candidate/format/validation results,
+  value-producing if/match/catch joins, jump arguments, private failure rewrites
+  and generated functions. Audit backend reads of local-mode snapshots and
+  separate validation from semantic decisions. Bare numeric destinations can
+  update existing loop state, and `FloatRangeCandidate` can update persistent
+  destinations, so do not classify every operation result as a definition.
+- [x] **3B: producers and dense representation.** Preserve declaration versus
+  assignment through ordinary and multi-bind lowering. Read all multi-bind
+  right-hand results before updating targets. Loop binders define on each
+  iteration. Classify compiler temporary initialisation and generated state
+  updates explicitly. Encode operation destinations and the existing CFG edge
+  contract so Phase 4 can reuse them. Preserve local-origin metadata and keep
+  source binding identity separate from static locals and allocation provenance.
+- [x] **3C: validation.** Validate function ownership, local-only definition
+  targets, source/destination types, valid IDs/ranges, permitted dedicated
+  destination forms, exact CFG arity/types and parameter-entry ownership.
+  Preserve spans/origins and tags through remapping, rewriting, growth, freezing
+  and publication. Malformed completed HIR is a compiler invariant failure.
+  Do not add a second flow-sensitive initialisation solver.
+- [x] **3D: analyses.** Definitions retire stale state from earlier dynamic
+  executions before establishing their new alias/value relationships.
+  Updates retain ordinary slot/alias write-through semantics. Borrow modes
+  remain analysis state and cannot reclassify HIR operations. Project explicit
+  definition/update into normalized Boracle input, reference and operational
+  semantics without a Boracle-only interpretation or duplicate semantic table.
+- [x] **3E: JS assignment cleanup.** Define from a place with a fresh alias
+  wrapper and from an rvalue with a fresh value wrapper. Existing local writes
+  use the ordinary borrow/value assignment helpers and projected writes mutate
+  the existing place. Remove semantic `LocalMode`, `UNINIT`, statement/block
+  entry-state queries and alias-only helpers. Remove unmeasured definite-alias
+  emission specialisation. A future useful optimisation requires a narrow
+  compiler-owned lowering proof rather than exposing solver state. Remove
+  `BorrowCheckReport` from JS emitter/lowering/orchestration/test APIs if no
+  legitimate consumer remains, otherwise narrow the handoff to the required fact.
+- [x] **3F: CFG destinations.** Remove borrow block-entry queries from JS jump
+  transfer. Read every incoming source before writing any destination, and
+  establish edge-defined bindings afresh on repeated entry. Preserve the future
+  success/error edge-definition contract without implementing native channels now.
+- [x] **3G: Wasm.** Migrate visitors, validation and LIR consumers mechanically.
+  Definition and update may share a physical local operation where correct.
+  Reject selected mutable local binding aliases through the normal target
+  diagnostic until Wasm can preserve their write-through semantics. Keep
+  immutable aliases and value-backed mutable local writes supported. Add no
+  unnecessary target-specific binding abstraction.
+- [x] **3H: other consumers.** Preserve return/allocation provenance, lifetime
+  ownership, numeric interval invalidation/replacement, value-derived link facts,
+  reachability and private-failure destination tags. Definitions do not create
+  allocation families, lifetime owners or capabilities. Base and generated HIR
+  use the same contract.
+- [x] **3I: regressions.** Retain `loop_body_bindings_rebind_each_iteration`
+  covering scalar/aggregate binders, aliases, nested same-collection loops,
+  ranges, conditional loops and mutable write-through. Add owner-local HIR tests
+  for declarations/updates, place/rvalue/call initialisers, immutable/mutable
+  aliases, multi-bind categories, binders, temporary definitions, generated
+  numeric/float-candidate updates and edge destinations. Add borrow tests for
+  definition re-entry resetting prior aliases, slot/alias assignments, nested
+  binders and joins. JS tests consume explicit HIR for definition/update with
+  place/rvalue and edge transfer, replacing fabricated mode snapshots. Preserve
+  caller-result binding freshness with shared allocation and alias write-through
+  end-to-end cases. Cover supported Wasm physical equivalence once.
+- [x] **3J: architecture check.** Add a narrow reliable check against backend
+  solver-local snapshot APIs once no legitimate consumer remains. Do not ban
+  all borrow terminology or authorised compiler facts. Audit `Load` shape
+  branches that attempt to recover binding semantics.
+- [x] **3K: permanent documentation.** Update Stage 5/6 compiler contracts and
+  runtime/backend lowering authority for explicit dynamic definition/update,
+  parameter/operation/edge destinations, analysis-state authority and direct
+  lowering. Keep borrow facts as validation/assertion context, not semantic
+  reconstruction. Phase 4 consumes this destination contract.
+- [x] **3L: deletion gate.** Remove ambiguous compatibility paths, duplicate
+  definition/update tables, backend snapshot-driven assignment/jump decisions,
+  obsolete test fixtures and stale comments. Remove unused broad borrow-report
+  plumbing. No base/generated or production/oracle split may preserve the old path.
+- [x] **3M: validation and costs.** Run the parent Phase 3 gates, affected HIR,
+  borrow/Boracle, JS, supported Wasm and integration coverage plus architecture
+  checks. Measure destination and statement size, side storage, HIR node/local
+  counts, runtime helper/branch changes, JS output after removing alias
+  specialisation and frontend deltas on the same Phase 3 cohort. Refresh five-pair
+  performance evidence after the hardening. Do not trade semantic integrity for
+  a smaller record or an unmeasured optimisation.
+
+  The historical post-hardening layout, capacity, native-output and five-pair
+  evidence is recorded in `benchmarks/frontend-optimization-results.md`, with
+  its corpus and static-stack limits. The accepted interleaved removal comparison
+  covers 41 frontend and 39 CLI comparable cases. Ten subsequent native history
+  runs at the `eb16fdbe4` production tree are absolute observations, not paired
+  speed attribution. Boracle and its differential campaign passed. Final
+  integrated `just validate-full` passed with Node 24.21.0 and the repository
+  Rust pin. The committed package donor was rechecked clean at the shared
+  reviewed checkpoint before integration. Phase 4 remains paused.
+
 **Exit check:** all current HIR consumers use one dense representation directly,
 published stores keep no unnecessary growth capacity, and estimate quality has
-no semantic effect. Keep unrelated outer HIR collections and broad borrow-fact
-compaction outside this phase.
+no semantic effect. Local definition/update and place/rvalue semantics remain
+explicit through every producer, analysis and lowerer. Re-entered definitions
+cannot write through stale aliases. Keep unrelated outer HIR collections and
+broad borrow-fact compaction outside this phase.
 
 ## Phase 4 - integrated typed-expression and native-result cutover
+
+Consume Phase 3's explicit local and edge destination contract when adding
+native result channels. Do not redesign binding semantics or recover them from
+borrow state during that cutover.
 
 **Consumes:** Phase 2's final interfaces and lifetimes plus dense HIR.
 **Produces:** the typed-expression/native-result checkpoint. Treat 4A–4D as

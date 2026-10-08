@@ -700,15 +700,12 @@ pub fn resolve_declaration_syntax(
                 })
                 .unwrap_or(CastTargetContext::None);
 
-            // `DataType::Inferred` is a parse-level marker for omitted type annotations.
-            // When the type is inferred, the initializer expression inherits the parent
-            // context's expected result types; otherwise it is constrained to the
-            // resolved declared type.
-            let expression_expected_results = if let Some(declared_type_id) = declared_type_id {
-                vec![declared_type_id]
-            } else {
-                context.expected_result_type_ids.clone()
-            };
+            // The declaration owns its initializer's receiving context. An annotation is the
+            // only expected type. An omitted annotation infers one value from the initializer
+            // and never borrows an enclosing receiver's types, such as an outer value block's
+            // target or the function's result slots.
+            let expression_expected_results =
+                declared_type_id.map_or_else(Vec::new, |type_id| vec![type_id]);
             let mut expression_context = context.new_child_expression(expression_expected_results);
 
             // Body-local compile-time constants need the same constant-reference rules

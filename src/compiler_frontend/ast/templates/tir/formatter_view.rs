@@ -267,9 +267,8 @@ enum FormatterChildFact {
         reference: TemplateTirChildReference,
     },
     Sequence(Vec<TemplateIrNodeId>),
-    BranchChain {
-        branch_bodies: Vec<TemplateIrNodeId>,
-        fallback: Option<TemplateIrNodeId>,
+    Conditional {
+        body: TemplateIrNodeId,
     },
     Loop {
         body: TemplateIrNodeId,
@@ -287,12 +286,9 @@ fn extract_formatter_child_fact(kind: &TemplateIrNodeKind) -> FormatterChildFact
             reference: *reference,
         },
         TemplateIrNodeKind::Sequence { children } => FormatterChildFact::Sequence(children.clone()),
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => FormatterChildFact::BranchChain {
-            branch_bodies: branches.iter().map(|branch| branch.body).collect(),
-            fallback: *fallback,
-        },
+        TemplateIrNodeKind::Conditional { body, .. } => {
+            FormatterChildFact::Conditional { body: *body }
+        }
         TemplateIrNodeKind::Loop {
             body,
             aggregate_wrapper,
@@ -370,29 +366,13 @@ fn format_child_templates_in_subtree(
             }
         }
 
-        FormatterChildFact::BranchChain {
-            branch_bodies,
-            fallback,
-        } => {
-            for body_id in branch_bodies {
-                let branch_ref = body_id;
-                format_child_templates_in_subtree(
-                    formatter_store,
-                    branch_ref,
-                    formatted_templates,
-                    string_table,
-                )?;
-            }
-
-            if let Some(fallback_id) = fallback {
-                let fallback_ref = fallback_id;
-                format_child_templates_in_subtree(
-                    formatter_store,
-                    fallback_ref,
-                    formatted_templates,
-                    string_table,
-                )?;
-            }
+        FormatterChildFact::Conditional { body } => {
+            format_child_templates_in_subtree(
+                formatter_store,
+                body,
+                formatted_templates,
+                string_table,
+            )?;
         }
 
         FormatterChildFact::Loop {

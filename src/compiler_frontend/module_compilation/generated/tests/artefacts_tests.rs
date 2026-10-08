@@ -12,10 +12,11 @@ use super::*;
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::blocks::HirBlock;
+use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::expressions::ValueKind;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
 use crate::compiler_frontend::hir::hir_builder::fixture_resource;
-use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, HirValueId, RegionId};
+use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, RegionId};
 use crate::compiler_frontend::hir::statements::HirStatement;
 use crate::compiler_frontend::hir::statements::HirStatementKind;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -26,17 +27,25 @@ use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 /// Builds one sidecar root statement carrying a structural string with the given pieces.
-fn sidecar_structural_statement(pieces: Vec<ConstStringPiece>) -> HirStatement {
-    HirStatement {
-        id: HirNodeId(0),
-        kind: HirStatementKind::Expr(HirExpression {
-            id: HirValueId(0),
+fn sidecar_structural_statement(
+    store: &mut HirExpressionStore,
+    pieces: &[ConstStringPiece],
+) -> HirStatement {
+    let pieces = store
+        .append_string_pieces(pieces, None)
+        .expect("fixture pieces fit");
+    let value = store
+        .append_expression(HirExpression {
             kind: HirExpressionKind::StructuralString { pieces },
             ty: builtin_type_ids::STRING,
             value_kind: ValueKind::Const,
             region: RegionId(0),
             span: None,
-        }),
+        })
+        .expect("fixture row fits");
+    HirStatement {
+        id: HirNodeId(0),
+        kind: HirStatementKind::Expr(value),
         span: None,
     }
 }
@@ -53,16 +62,21 @@ fn a_resource_bearing_generated_sidecar_publishes_and_preserves_origin() {
     let mut string_table = StringTable::new();
     let label = string_table.intern("assets/");
 
+    let statement = sidecar_structural_statement(
+        &mut sidecar.module.executable.hir.expressions,
+        &[
+            ConstStringPiece::Text(label),
+            ConstStringPiece::Resource(logo),
+        ],
+    );
     sidecar.module.executable.hir.blocks.push(HirBlock {
         id: BlockId(0),
         region: RegionId(0),
         locals: vec![],
-        statements: vec![sidecar_structural_statement(vec![
-            ConstStringPiece::Text(label),
-            ConstStringPiece::Resource(logo),
-        ])],
+        statements: vec![statement],
         terminator: HirTerminator::Uninitialized,
     });
+    sidecar.module.executable.hir.expressions.freeze();
     sidecar.module.executable.resource_table = resources;
 
     let record = CompletedGeneratedFunction {
@@ -78,6 +92,8 @@ fn a_resource_bearing_generated_sidecar_publishes_and_preserves_origin() {
     let HirStatementKind::Expr(expression) = &statement.kind else {
         panic!("the sidecar root should still hold the structural expression statement");
     };
+    let store = &record.sidecar.module.executable.hir.expressions;
+    let expression = store.expression(*expression);
     let HirExpressionKind::StructuralString { pieces } = &expression.kind else {
         panic!(
             "expected the resource-bearing structural string to survive publication, got {:?}",
@@ -87,7 +103,7 @@ fn a_resource_bearing_generated_sidecar_publishes_and_preserves_origin() {
     let [
         ConstStringPiece::Text(_),
         ConstStringPiece::Resource(published_resource),
-    ] = pieces.as_slice()
+    ] = store.string_pieces(*pieces)
     else {
         panic!("expected one text piece followed by one resource piece");
     };
@@ -117,16 +133,18 @@ fn a_text_only_generated_sidecar_publishes_and_remaps_piece_handles_through_a_me
     let head = string_table.intern("docs/");
     let tail = string_table.intern("guide");
 
+    let statement = sidecar_structural_statement(
+        &mut sidecar.module.executable.hir.expressions,
+        &[ConstStringPiece::Text(head), ConstStringPiece::Text(tail)],
+    );
     sidecar.module.executable.hir.blocks.push(HirBlock {
         id: BlockId(0),
         region: RegionId(0),
         locals: vec![],
-        statements: vec![sidecar_structural_statement(vec![
-            ConstStringPiece::Text(head),
-            ConstStringPiece::Text(tail),
-        ])],
+        statements: vec![statement],
         terminator: HirTerminator::Uninitialized,
     });
+    sidecar.module.executable.hir.expressions.freeze();
 
     let record = CompletedGeneratedFunction {
         identity,
@@ -154,6 +172,8 @@ fn a_text_only_generated_sidecar_publishes_and_remaps_piece_handles_through_a_me
     let HirStatementKind::Expr(remapped) = &statement.kind else {
         panic!("the sidecar root should still hold the structural expression statement");
     };
+    let store = &delta.records()[0].sidecar.module.executable.hir.expressions;
+    let remapped = store.expression(*remapped);
     let HirExpressionKind::StructuralString { pieces } = &remapped.kind else {
         panic!(
             "expected the text-only structural string to survive the merge, got {:?}",
@@ -161,7 +181,7 @@ fn a_text_only_generated_sidecar_publishes_and_remaps_piece_handles_through_a_me
         );
     };
 
-    match pieces.as_slice() {
+    match store.string_pieces(*pieces) {
         [
             ConstStringPiece::Text(remapped_head),
             ConstStringPiece::Text(remapped_tail),

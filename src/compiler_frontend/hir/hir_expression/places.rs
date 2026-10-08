@@ -6,6 +6,7 @@
 
 #[cfg(test)]
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValuePayload};
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
@@ -18,11 +19,11 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::TypeIdentityKey;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
-use crate::compiler_frontend::hir::ids::{FieldId, FunctionId, LocalId, StructId};
+use crate::compiler_frontend::hir::ids::{FieldId, FunctionId, HirValueId, StructId};
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -38,7 +39,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn lower_ast_node_as_expression(
         &mut self,
         node: &AstNode,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         match &node.kind {
             NodeKind::ExpressionStatement(expr) => {
                 if self.expression_needs_current_block_lowering(expr) {
@@ -60,113 +61,40 @@ impl<'a> HirBuilder<'a> {
         }
     }
 
-    // WHAT: resolves an AST node into a concrete HIR place for loads, stores, and copies.
-    // WHY: place lowering must distinguish between value-producing expressions and assignable
-    //      storage locations before later borrow and mutation analysis runs.
-    #[cfg(test)]
-    pub(crate) fn lower_ast_node_to_place(
-        &mut self,
-        node: &AstNode,
-    ) -> Result<(Vec<HirStatement>, HirPlace), CompilerError> {
-        match &node.kind {
-            NodeKind::ExpressionStatement(expr) => match &expr.kind {
-                ExpressionKind::Reference(name) => {
-                    if let Some(local) = self.locals_by_name.get(name).copied() {
-                        return Ok((vec![], HirPlace::Local(local)));
-                    }
-
-                    // Field/index lowering requires a place. Module constants are lowered as
-                    // rvalues, so materialize them into a temporary local when referenced in
-                    // place-position expressions (for example `format.center`).
-                    let lowered =
-                        self.lower_reference_expression(name, expr.type_id, &expr.span)?;
-                    if let HirExpressionKind::Load(place) = &lowered.value.kind {
-                        return Ok((lowered.prelude, place.to_owned()));
-                    }
-
-                    let temp_local = self.allocate_temp_local(lowered.value.ty, None)?;
-                    let assign_statement = HirStatement {
-                        id: self.allocate_node_id(),
-                        kind: HirStatementKind::Assign {
-                            target: HirPlace::Local(temp_local),
-                            value: lowered.value,
-                        },
-                        span: None,
-                    };
-
-                    self.side_table.map_statement(node.span, &assign_statement);
-
-                    let mut prelude = lowered.prelude;
-                    prelude.push(assign_statement);
-                    Ok((prelude, HirPlace::Local(temp_local)))
-                }
-
-                _ => {
-                    let lowered = if self.expression_needs_current_block_lowering(expr) {
-                        LoweredExpression {
-                            prelude: vec![],
-                            value: self.lower_expression_value_to_current_block(expr)?,
-                        }
-                    } else {
-                        self.lower_expression(expr)?
-                    };
-
-                    if let HirExpressionKind::Load(place) = &lowered.value.kind {
-                        return Ok((lowered.prelude, place.to_owned()));
-                    }
-
-                    let temp_local = self.allocate_temp_local(lowered.value.ty, None)?;
-                    let assign_statement = HirStatement {
-                        id: self.allocate_node_id(),
-                        kind: HirStatementKind::Assign {
-                            target: HirPlace::Local(temp_local),
-                            value: lowered.value,
-                        },
-                        span: None,
-                    };
-                    self.side_table.map_statement(node.span, &assign_statement);
-
-                    let mut prelude = lowered.prelude;
-                    prelude.push(assign_statement);
-                    Ok((prelude, HirPlace::Local(temp_local)))
-                }
-            },
-
-            _ => {
-                return_hir_transformation_error!(
-                    format!("Cannot lower AST node to HIR place: {:?}", node.kind),
-                    self.hir_error_location(&node.span)
-                )
-            }
-        }
-    }
-
     // WHAT: resolves a frontend place expression into a concrete HIR place.
     // WHY: copy expressions and assignment targets now carry narrow `PlaceExpression` values
     //      instead of broad `AstNode` fragments.
     pub(crate) fn lower_place_expression_to_hir_place(
         &mut self,
         place: &PlaceExpression,
-    ) -> Result<(Vec<HirStatement>, HirPlace), CompilerError> {
+    ) -> Result<(Vec<HirStatement>, HirPlace), HirConstructionFailure> {
         match &place.kind {
             PlaceExpressionKind::Local(name) => {
                 if let Some(local) = self.locals_by_name.get(name).copied() {
-                    return Ok((vec![], HirPlace::Local(local)));
+                    return Ok((vec![], HirPlace::local(local)));
                 }
 
                 // Field/index lowering requires a place. Module constants are lowered as
                 // rvalues, so materialize them into a temporary local when referenced in
                 // place-position expressions.
                 let lowered = self.lower_reference_expression(name, place.type_id, &place.span)?;
-                if let HirExpressionKind::Load(hir_place) = &lowered.value.kind {
-                    return Ok((lowered.prelude, hir_place.to_owned()));
+                let (load_place, expression_type) = {
+                    let row = self.module.expressions.expression(lowered.value);
+                    let load_place = match &row.kind {
+                        HirExpressionKind::Load(place) => Some(*place),
+                        _ => None,
+                    };
+                    (load_place, row.ty)
+                };
+                if let Some(place) = load_place {
+                    return Ok((lowered.prelude, place));
                 }
 
-                let temp_local = self.allocate_temp_local(lowered.value.ty, None)?;
+                let temp_local = self.allocate_temp_local(expression_type, None)?;
                 let assign_statement = HirStatement {
                     id: self.allocate_node_id(),
-                    kind: HirStatementKind::Assign {
-                        target: HirPlace::Local(temp_local),
+                    kind: HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(temp_local),
                         value: lowered.value,
                     },
                     span: None,
@@ -176,24 +104,17 @@ impl<'a> HirBuilder<'a> {
 
                 let mut prelude = lowered.prelude;
                 prelude.push(assign_statement);
-                Ok((prelude, HirPlace::Local(temp_local)))
+                Ok((prelude, HirPlace::local(temp_local)))
             }
 
             PlaceExpressionKind::Field { base, field } => {
                 let (prelude, base_place) = self.lower_place_expression_to_hir_place(base)?;
-                let field_id = self.resolve_field_id_for_base_place_or_error(
-                    &base_place,
-                    *field,
-                    &place.span,
-                )?;
+                let field_id =
+                    self.resolve_field_id_for_type_or_error(base.type_id, *field, &place.span)?;
 
-                Ok((
-                    prelude,
-                    HirPlace::Field {
-                        base: Box::new(base_place),
-                        field: field_id,
-                    },
-                ))
+                let place =
+                    base_place.with_field(field_id, &mut self.module.expressions, place.span)?;
+                Ok((prelude, place))
             }
         }
     }
@@ -206,7 +127,7 @@ impl<'a> HirBuilder<'a> {
         field: StringId,
         result_type_id: FrontendTypeId,
         span: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         if let Some(lowered) =
             self.try_lower_const_record_field_access_expression(base, field, result_type_id, span)?
         {
@@ -225,7 +146,7 @@ impl<'a> HirBuilder<'a> {
                 ty,
                 ValueKind::Place,
                 region,
-            ),
+            )?,
         })
     }
 
@@ -237,26 +158,30 @@ impl<'a> HirBuilder<'a> {
         base: &Expression,
         field: StringId,
         span: &Option<SourceSpan>,
-    ) -> Result<(Vec<HirStatement>, HirPlace), CompilerError> {
+    ) -> Result<(Vec<HirStatement>, HirPlace), HirConstructionFailure> {
         let lowered = self.lower_expression(base)?;
 
-        if let HirExpressionKind::Load(base_place) = &lowered.value.kind {
-            let field_id =
-                self.resolve_field_id_for_base_place_or_error(base_place, field, span)?;
+        let (base_place, base_type) = {
+            let row = self.module.expressions.expression(lowered.value);
+            let place = match &row.kind {
+                HirExpressionKind::Load(place) => Some(*place),
+                _ => None,
+            };
+            (place, row.ty)
+        };
+        if let Some(base_place) = base_place {
+            let field_id = self.resolve_field_id_for_type_or_error(base_type, field, span)?;
             return Ok((
                 lowered.prelude,
-                HirPlace::Field {
-                    base: Box::new(base_place.to_owned()),
-                    field: field_id,
-                },
+                base_place.with_field(field_id, &mut self.module.expressions, *span)?,
             ));
         }
 
-        let temp_local = self.allocate_temp_local(lowered.value.ty, None)?;
+        let temp_local = self.allocate_temp_local(base_type, None)?;
         let assign_statement = HirStatement {
             id: self.allocate_node_id(),
-            kind: HirStatementKind::Assign {
-                target: HirPlace::Local(temp_local),
+            kind: HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(temp_local),
                 value: lowered.value,
             },
             span: None,
@@ -266,18 +191,12 @@ impl<'a> HirBuilder<'a> {
         let mut prelude = lowered.prelude;
         prelude.push(assign_statement);
 
-        let field_id = self.resolve_field_id_for_base_place_or_error(
-            &HirPlace::Local(temp_local),
-            field,
-            span,
-        )?;
+        let root_place = HirPlace::local(temp_local);
+        let field_id = self.resolve_field_id_for_type_or_error(base_type, field, span)?;
 
         Ok((
             prelude,
-            HirPlace::Field {
-                base: Box::new(HirPlace::Local(temp_local)),
-                field: field_id,
-            },
+            root_place.with_field(field_id, &mut self.module.expressions, *span)?,
         ))
     }
 
@@ -287,7 +206,7 @@ impl<'a> HirBuilder<'a> {
         field: StringId,
         result_type_id: FrontendTypeId,
         span: &Option<SourceSpan>,
-    ) -> Result<Option<LoweredExpression>, CompilerError> {
+    ) -> Result<Option<LoweredExpression>, HirConstructionFailure> {
         if let Some(base_value_id) = self.const_store_value_for_expression(base) {
             let base_metadata = self
                 .module_const_values
@@ -329,9 +248,10 @@ impl<'a> HirBuilder<'a> {
                 );
             }
 
-            let mut value = self.lower_const_store_expression(field_value_id, span)?;
-            value.ty = self.lower_type_id(result_type_id, span)?;
-            value.region = self.current_region_or_error(span)?;
+            let value = self.lower_const_store_expression(field_value_id, span)?;
+            let ty = self.lower_type_id(result_type_id, span)?;
+            let region = self.current_region_or_error(span)?;
+            let value = self.replace_expression_metadata(value, span, Some(ty), Some(region))?;
             return Ok(Some(LoweredExpression {
                 prelude: vec![],
                 value,
@@ -364,7 +284,7 @@ impl<'a> HirBuilder<'a> {
         name: &PathId,
         type_id: FrontendTypeId,
         span: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let region = self.current_region_or_error(span)?;
         let ty = self.lower_type_id(type_id, span)?;
 
@@ -373,19 +293,19 @@ impl<'a> HirBuilder<'a> {
                 prelude: vec![],
                 value: self.make_expression(
                     span,
-                    HirExpressionKind::Load(HirPlace::Local(local_id)),
+                    HirExpressionKind::Load(HirPlace::local(local_id)),
                     ty,
                     ValueKind::Place,
                     region,
-                ),
+                )?,
             });
         }
 
-        if let Some(mut constant_value) = self.try_lower_module_constant_reference(name, span)? {
+        if let Some(constant_value) = self.try_lower_module_constant_reference(name, span)? {
             // Preserve the type expected by the AST reference expression while reusing
             // the constant's lowered value shape.
-            constant_value.ty = ty;
-            constant_value.region = region;
+            let constant_value =
+                self.replace_expression_metadata(constant_value, span, Some(ty), Some(region))?;
 
             return Ok(LoweredExpression {
                 prelude: vec![],
@@ -406,7 +326,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         name: &PathId,
         span: &Option<SourceSpan>,
-    ) -> Result<Option<HirExpression>, CompilerError> {
+    ) -> Result<Option<HirValueId>, HirConstructionFailure> {
         let Some(value_id) = self.module_constants_by_name.get(name).copied() else {
             return Ok(None);
         };
@@ -455,7 +375,7 @@ impl<'a> HirBuilder<'a> {
         &self,
         name: &PathId,
         span: &Option<SourceSpan>,
-    ) -> Result<FunctionId, CompilerError> {
+    ) -> Result<FunctionId, HirConstructionFailure> {
         let Some(function_id) = self.functions_by_name.get(name).copied() else {
             return_hir_transformation_error!(
                 format!(
@@ -473,7 +393,8 @@ impl<'a> HirBuilder<'a> {
         &self,
         name: &PathId,
         span: &Option<SourceSpan>,
-    ) -> Result<crate::compiler_frontend::external_packages::CallTarget, CompilerError> {
+    ) -> Result<crate::compiler_frontend::external_packages::CallTarget, HirConstructionFailure>
+    {
         use crate::compiler_frontend::external_packages::CallTarget;
         use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 
@@ -493,7 +414,8 @@ impl<'a> HirBuilder<'a> {
                 }
                 SourceFunctionTarget::Local(_) => Err(CompilerError::compiler_error(
                     "Imported function contract carried a local function target",
-                )),
+                )
+                .into()),
             };
         }
 
@@ -514,7 +436,7 @@ impl<'a> HirBuilder<'a> {
         struct_id: StructId,
         field_name: &PathId,
         span: &Option<SourceSpan>,
-    ) -> Result<FieldId, CompilerError> {
+    ) -> Result<FieldId, HirConstructionFailure> {
         let Some(field_id) = self
             .fields_by_struct_and_name
             .get(&(struct_id, field_name.to_owned()))
@@ -537,7 +459,7 @@ impl<'a> HirBuilder<'a> {
         &self,
         nominal_path: &PathId,
         span: &Option<SourceSpan>,
-    ) -> Result<StructId, CompilerError> {
+    ) -> Result<StructId, HirConstructionFailure> {
         let Some(struct_id) = self.structs_by_name.get(nominal_path).copied() else {
             return_hir_transformation_error!(
                 format!(
@@ -551,13 +473,13 @@ impl<'a> HirBuilder<'a> {
         Ok(struct_id)
     }
 
-    fn resolve_field_id_for_base_place_or_error(
+    fn resolve_field_id_for_type_or_error(
         &mut self,
-        base_place: &HirPlace,
+        base_type: TypeId,
         field_name: StringId,
         span: &Option<SourceSpan>,
-    ) -> Result<FieldId, CompilerError> {
-        let struct_id = self.resolve_struct_id_for_place_or_error(base_place, span)?;
+    ) -> Result<FieldId, HirConstructionFailure> {
+        let struct_id = self.resolve_struct_id_for_type_or_error(base_type, span)?;
         let Some(struct_path) = self.side_table.struct_name_path(struct_id) else {
             return_hir_transformation_error!(
                 format!(
@@ -592,38 +514,32 @@ impl<'a> HirBuilder<'a> {
         Ok(field_id)
     }
 
-    fn resolve_struct_id_for_place_or_error(
+    fn resolve_struct_id_for_type_or_error(
         &mut self,
-        place: &HirPlace,
+        type_id: TypeId,
         span: &Option<SourceSpan>,
-    ) -> Result<StructId, CompilerError> {
-        let ty = self.resolve_place_type_id_or_error(place, span)?;
-        let path = match self.type_environment.get(ty).cloned() {
-            Some(TypeDefinition::Struct(def)) => Some(def.path),
+    ) -> Result<StructId, HirConstructionFailure> {
+        let generic_base = match self.type_environment.get(type_id) {
+            Some(TypeDefinition::Struct(def)) => {
+                let path = def.path;
+                let Some(struct_id) = self.structs_by_name.get(&path).copied() else {
+                    return_hir_transformation_error!(
+                        format!(
+                            "Struct '{}' is not registered in HIR builder",
+                            self.symbol_name_for_diagnostics(&path)
+                        ),
+                        self.hir_error_location(span)
+                    );
+                };
+                return Ok(struct_id);
+            }
             Some(TypeDefinition::GenericInstance(instance))
                 if self
                     .type_environment
                     .struct_definition(instance.base)
                     .is_some() =>
             {
-                let Some(nominal_path) = self.type_environment.nominal_path_by_id(instance.base)
-                else {
-                    return_hir_transformation_error!(
-                        "Generic struct instance is missing nominal path metadata",
-                        self.hir_error_location(span)
-                    );
-                };
-                let nominal_path = nominal_path.to_owned();
-                let Some(TypeIdentityKey::GenericInstance(key)) =
-                    self.type_environment.type_id_to_type_identity_key(ty)
-                else {
-                    return_hir_transformation_error!(
-                        "Generic struct instance is missing a canonical key during field access lowering",
-                        self.hir_error_location(span)
-                    );
-                };
-
-                return self.resolve_or_register_generic_struct(&key, &nominal_path, ty, span);
+                instance.base
             }
             _ => {
                 return_hir_transformation_error!(
@@ -632,63 +548,26 @@ impl<'a> HirBuilder<'a> {
                 )
             }
         };
-        let Some(path) = path else {
+
+        let Some(nominal_path) = self
+            .type_environment
+            .nominal_path_by_id(generic_base)
+            .copied()
+        else {
             return_hir_transformation_error!(
-                "Field access base is missing nominal struct path metadata",
+                "Generic struct instance is missing nominal path metadata",
+                self.hir_error_location(span)
+            );
+        };
+        let Some(TypeIdentityKey::GenericInstance(key)) =
+            self.type_environment.type_id_to_type_identity_key(type_id)
+        else {
+            return_hir_transformation_error!(
+                "Generic struct instance is missing a canonical key during field access lowering",
                 self.hir_error_location(span)
             );
         };
 
-        match self.structs_by_name.get(&path).copied() {
-            Some(struct_id) => Ok(struct_id),
-            None => {
-                return_hir_transformation_error!(
-                    format!(
-                        "Struct '{}' is not registered in HIR builder",
-                        self.symbol_name_for_diagnostics(&path)
-                    ),
-                    self.hir_error_location(span)
-                )
-            }
-        }
-    }
-
-    fn resolve_place_type_id_or_error(
-        &self,
-        place: &HirPlace,
-        span: &Option<SourceSpan>,
-    ) -> Result<TypeId, CompilerError> {
-        match place {
-            HirPlace::Local(local_id) => self.resolve_local_type_id_or_error(*local_id, span),
-            HirPlace::Field { field, .. } => self.resolve_field_type_id_or_error(*field, span),
-            HirPlace::Index { base, .. } => {
-                let base_type = self.resolve_place_type_id_or_error(base, span)?;
-                match self.type_environment.collection_element_type(base_type) {
-                    Some(element) => Ok(element),
-                    None => {
-                        return_hir_transformation_error!(
-                            "Index access base is not a collection type",
-                            self.hir_error_location(span)
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    fn resolve_local_type_id_or_error(
-        &self,
-        local_id: LocalId,
-        span: &Option<SourceSpan>,
-    ) -> Result<TypeId, CompilerError> {
-        self.local_type_id_or_error(local_id, span)
-    }
-
-    fn resolve_field_type_id_or_error(
-        &self,
-        field_id: FieldId,
-        span: &Option<SourceSpan>,
-    ) -> Result<TypeId, CompilerError> {
-        self.field_type_id_or_error(field_id, span)
+        self.resolve_or_register_generic_struct(&key, &nominal_path, type_id, span)
     }
 }

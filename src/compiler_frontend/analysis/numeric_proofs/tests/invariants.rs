@@ -20,7 +20,8 @@ use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::expression_store::HirValueRange;
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::{
     BlockId, FieldId, FunctionId, HirNodeId, HirValueId, LocalId, RegionId, StructId,
@@ -31,7 +32,9 @@ use crate::compiler_frontend::hir::numeric::{
 };
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::regions::HirRegion;
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
+};
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::validate_hir_module;
@@ -54,7 +57,6 @@ struct ProofFixture {
     path_builder: PathInternerBuilder,
     string_table: StringTable,
     next_statement_id: u32,
-    next_expression_id: u32,
 }
 
 impl ProofFixture {
@@ -65,7 +67,6 @@ impl ProofFixture {
             path_builder: PathInternerBuilder::new(),
             string_table: StringTable::new(),
             next_statement_id: 0,
-            next_expression_id: 0,
         }
     }
 
@@ -83,7 +84,7 @@ impl ProofFixture {
         self.environment.builtins().uint
     }
 
-    fn uint_literal(&mut self, value: u64, ty: TypeId) -> HirExpression {
+    fn uint_literal(&mut self, value: u64, ty: TypeId) -> HirValueId {
         self.expression(HirExpressionKind::Uint(value), ty, ValueKind::Const)
     }
 
@@ -171,21 +172,25 @@ impl ProofFixture {
         kind: HirExpressionKind,
         ty: TypeId,
         value_kind: ValueKind,
-    ) -> HirExpression {
-        let id = HirValueId(self.next_expression_id);
-        self.next_expression_id += 1;
-        expression(id.0, kind, ty, RegionId(0), value_kind)
+    ) -> HirValueId {
+        expression(
+            kind,
+            ty,
+            RegionId(0),
+            value_kind,
+            &mut self.module.expressions,
+        )
     }
 
-    fn int_literal(&mut self, value: i64, ty: TypeId) -> HirExpression {
+    fn int_literal(&mut self, value: i64, ty: TypeId) -> HirValueId {
         self.expression(HirExpressionKind::Int(value), ty, ValueKind::Const)
     }
 
-    fn float_literal(&mut self, value: f64, ty: TypeId) -> HirExpression {
+    fn float_literal(&mut self, value: f64, ty: TypeId) -> HirValueId {
         self.expression(HirExpressionKind::Float(value), ty, ValueKind::Const)
     }
 
-    fn number_literal(&mut self, value: i128, ty: TypeId) -> HirExpression {
+    fn number_literal(&mut self, value: i128, ty: TypeId) -> HirValueId {
         self.expression(
             HirExpressionKind::Number(NumberValue::from_integer(value, NumberScale::ZERO)),
             ty,
@@ -193,43 +198,41 @@ impl ProofFixture {
         )
     }
 
-    fn unsigned_literal(&mut self, scalar: FixedScalar, value: u64) -> HirExpression {
+    fn unsigned_literal(&mut self, scalar: FixedScalar, value: u64) -> HirValueId {
         let value = FixedScalarValue::unsigned(scalar, value).expect("literal fits its scalar");
         let ty = self.fixed(scalar);
         self.fixed_literal(value, ty)
     }
 
-    fn signed_literal(&mut self, scalar: FixedScalar, value: i64) -> HirExpression {
+    fn signed_literal(&mut self, scalar: FixedScalar, value: i64) -> HirValueId {
         let value = FixedScalarValue::signed(scalar, value).expect("literal fits its scalar");
         let ty = self.fixed(scalar);
         self.fixed_literal(value, ty)
     }
 
-    fn fixed_literal(&mut self, value: FixedScalarValue, ty: TypeId) -> HirExpression {
+    fn fixed_literal(&mut self, value: FixedScalarValue, ty: TypeId) -> HirValueId {
         self.expression(HirExpressionKind::FixedScalar(value), ty, ValueKind::Const)
     }
 
-    fn load(&mut self, local: LocalId, ty: TypeId) -> HirExpression {
+    fn load(&mut self, local: LocalId, ty: TypeId) -> HirValueId {
         self.expression(
-            HirExpressionKind::Load(HirPlace::Local(local)),
+            HirExpressionKind::Load(HirPlace::local(local)),
             ty,
             ValueKind::Place,
         )
     }
 
-    fn copy_of(&mut self, local: LocalId, ty: TypeId) -> HirExpression {
+    fn copy_of(&mut self, local: LocalId, ty: TypeId) -> HirValueId {
         self.expression(
-            HirExpressionKind::Copy(HirPlace::Local(local)),
+            HirExpressionKind::Copy(HirPlace::local(local)),
             ty,
             ValueKind::Place,
         )
     }
 
-    fn unwrap_success(&mut self, source: HirExpression, ty: TypeId) -> HirExpression {
+    fn unwrap_success(&mut self, source: HirValueId, ty: TypeId) -> HirValueId {
         self.expression(
-            HirExpressionKind::FallibleUnwrapSuccess {
-                result: Box::new(source),
-            },
+            HirExpressionKind::FallibleUnwrapSuccess { result: source },
             ty,
             ValueKind::RValue,
         )
@@ -237,37 +240,48 @@ impl ProofFixture {
 
     fn cast_expression(
         &mut self,
-        source: HirExpression,
+        source: HirValueId,
         policy: BuiltinCastPolicyId,
         ty: TypeId,
-    ) -> HirExpression {
+    ) -> HirValueId {
         self.expression(
-            HirExpressionKind::Cast {
-                source: Box::new(source),
-                policy,
-            },
+            HirExpressionKind::Cast { source, policy },
             ty,
             ValueKind::RValue,
         )
     }
 
-    fn assign(&mut self, target: HirPlace, value: HirExpression) -> HirStatement {
+    fn update_place(&mut self, target: HirPlace, value: HirValueId) -> HirStatement {
         HirStatement {
             id: self.statement_id(),
-            kind: HirStatementKind::Assign { target, value },
+            kind: HirStatementKind::Write {
+                target: HirWriteTarget::AssignPlace(target),
+                value,
+            },
             span: None,
         }
     }
 
-    fn assign_local(&mut self, target: LocalId, value: HirExpression) -> HirStatement {
-        self.assign(HirPlace::Local(target), value)
+    fn define_local(&mut self, target: LocalId, value: HirValueId) -> HirStatement {
+        HirStatement {
+            id: self.statement_id(),
+            kind: HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(target),
+                value,
+            },
+            span: None,
+        }
+    }
+
+    fn update_local(&mut self, target: LocalId, value: HirValueId) -> HirStatement {
+        self.update_place(HirPlace::local(target), value)
     }
 
     fn numeric_op(
         &mut self,
         op: HirNumericOp,
         operands: HirNumericOperands,
-        result: LocalId,
+        result: HirLocalDestination,
         failure_mode: NumericFailureMode,
     ) -> HirStatement {
         HirStatement {
@@ -285,7 +299,7 @@ impl ProofFixture {
     fn cast_op(
         &mut self,
         policy: BuiltinCastPolicyId,
-        source: HirExpression,
+        source: HirValueId,
         result: LocalId,
     ) -> HirStatement {
         HirStatement {
@@ -293,7 +307,7 @@ impl ProofFixture {
             kind: HirStatementKind::CastOp {
                 policy,
                 source,
-                result: Some(result),
+                result: Some(HirLocalDestination::Define(result)),
             },
             span: None,
         }
@@ -304,7 +318,7 @@ impl ProofFixture {
             id: self.statement_id(),
             kind: HirStatementKind::Call {
                 target: CallTarget::Local(FunctionId(0)),
-                args: vec![],
+                args: HirValueRange::empty(),
                 result: None,
             },
             span: None,
@@ -313,7 +327,9 @@ impl ProofFixture {
 
     fn return_unit(&mut self) -> HirTerminator {
         let unit = self.expression(
-            HirExpressionKind::TupleConstruct { elements: vec![] },
+            HirExpressionKind::TupleConstruct {
+                elements: HirValueRange::empty(),
+            },
             self.environment.builtins().none,
             ValueKind::RValue,
         );
@@ -356,6 +372,7 @@ impl ProofFixture {
             .function_provenance
             .insert(FunctionId(0), Default::default());
         self.module.regions = vec![HirRegion::lexical(RegionId(0), None)];
+        self.module.expressions.freeze();
 
         (self.module, self.environment)
     }
@@ -383,11 +400,11 @@ fn fixed_op(operator: NumericOperator, domain: NumericScalar) -> HirNumericOp {
     HirNumericOp { operator, domain }
 }
 
-fn binary(left: HirExpression, right: HirExpression) -> HirNumericOperands {
+fn binary(left: HirValueId, right: HirValueId) -> HirNumericOperands {
     HirNumericOperands::Binary { left, right }
 }
 
-fn unary(operand: HirExpression) -> HirNumericOperands {
+fn unary(operand: HirValueId) -> HirNumericOperands {
     HirNumericOperands::Unary { operand }
 }
 
@@ -413,7 +430,7 @@ fn proven_trap_results_retain_their_exact_intervals() {
     let first = fixture.numeric_op(
         int_op(NumericOperator::Add),
         binary(left, right),
-        sum,
+        HirLocalDestination::Define(sum),
         NumericFailureMode::Trap,
     );
     let sum_load_left = fixture.load(sum, int);
@@ -421,7 +438,7 @@ fn proven_trap_results_retain_their_exact_intervals() {
     let second = fixture.numeric_op(
         int_op(NumericOperator::Add),
         binary(sum_load_left, sum_load_right),
-        result,
+        HirLocalDestination::Define(result),
         NumericFailureMode::Trap,
     );
     let first_id = first.id;
@@ -447,13 +464,13 @@ fn operand_facts_are_derived_before_the_destination_write() {
     // x = 10; y = x - 4; — the left operand reads the cache entry written by x's own assign
     // before y's destination write happens.
     let literal = fixture.int_literal(10, int);
-    let write = fixture.assign_local(x, literal);
+    let write = fixture.define_local(x, literal);
     let left = fixture.load(x, int);
     let right = fixture.int_literal(4, int);
     let operation = fixture.numeric_op(
         int_op(NumericOperator::Subtract),
         binary(left, right),
-        y,
+        HirLocalDestination::Define(y),
         NumericFailureMode::Trap,
     );
     let operation_id = operation.id;
@@ -486,7 +503,7 @@ fn canonical_bounds_cannot_prove_unchecked_parameter_addition() {
     let operation = fixture.numeric_op(
         int_op(NumericOperator::Add),
         binary(left, right),
-        sum,
+        HirLocalDestination::Define(sum),
         NumericFailureMode::Trap,
     );
     let operation_id = operation.id;
@@ -509,7 +526,7 @@ fn unsigned_subtraction_below_zero_is_never_proven() {
     let (x, difference) = (LocalId(0), LocalId(1));
     // x = 2; difference = x - 3; — borrows below zero for U32.
     let literal = fixture.unsigned_literal(FixedScalar::U32, 2);
-    let write = fixture.assign_local(x, literal);
+    let write = fixture.define_local(x, literal);
     let left = fixture.load(x, u32_type);
     let right = fixture.unsigned_literal(FixedScalar::U32, 3);
     let operation = fixture.numeric_op(
@@ -518,7 +535,7 @@ fn unsigned_subtraction_below_zero_is_never_proven() {
             NumericScalar::Fixed(FixedScalar::U32),
         ),
         binary(left, right),
-        difference,
+        HirLocalDestination::Define(difference),
         NumericFailureMode::Trap,
     );
     let operation_id = operation.id;
@@ -549,7 +566,7 @@ fn division_with_possible_zero_divisor_keeps_its_check() {
             NumericScalar::Fixed(FixedScalar::U32),
         ),
         binary(left, right),
-        quotient,
+        HirLocalDestination::Define(quotient),
         NumericFailureMode::Trap,
     );
     let operation_id = operation.id;
@@ -577,7 +594,7 @@ fn division_with_nonzero_literal_divisor_is_proven() {
     let (x, quotient) = (LocalId(0), LocalId(1));
     // x = 9; quotient = x / 2; — divisor excludes zero and every quotient fits U32.
     let literal = fixture.unsigned_literal(FixedScalar::U32, 9);
-    let write = fixture.assign_local(x, literal);
+    let write = fixture.define_local(x, literal);
     let left = fixture.load(x, u32_type);
     let right = fixture.unsigned_literal(FixedScalar::U32, 2);
     let operation = fixture.numeric_op(
@@ -586,7 +603,7 @@ fn division_with_nonzero_literal_divisor_is_proven() {
             NumericScalar::Fixed(FixedScalar::U32),
         ),
         binary(left, right),
-        quotient,
+        HirLocalDestination::Define(quotient),
         NumericFailureMode::Trap,
     );
     let operation_id = operation.id;
@@ -611,17 +628,17 @@ fn signed_minimum_divided_by_minus_one_keeps_its_check_while_remainder_stays_exa
     let (x, quotient, remainder) = (LocalId(0), LocalId(1), LocalId(2));
     // x = I64::MIN; quotient = x / -1 overflows; remainder = x % -1 is the specified zero.
     let minimum = fixture.signed_literal(FixedScalar::I64, i64::MIN);
-    let write = fixture.assign_local(x, minimum);
+    let write = fixture.define_local(x, minimum);
     let minus_one = fixture.signed_literal(FixedScalar::I64, -1);
     let x_load = fixture.load(x, i64_type);
-    let division_right = minus_one.clone();
+    let division_right = minus_one;
     let division = fixture.numeric_op(
         fixed_op(
             NumericOperator::IntegerDivide,
             NumericScalar::Fixed(FixedScalar::I64),
         ),
         binary(x_load, division_right),
-        quotient,
+        HirLocalDestination::Define(quotient),
         NumericFailureMode::Trap,
     );
     let x_reload = fixture.load(x, i64_type);
@@ -631,7 +648,7 @@ fn signed_minimum_divided_by_minus_one_keeps_its_check_while_remainder_stays_exa
             NumericScalar::Fixed(FixedScalar::I64),
         ),
         binary(x_reload, minus_one),
-        remainder,
+        HirLocalDestination::Define(remainder),
         NumericFailureMode::Trap,
     );
     let division_id = division.id;
@@ -663,7 +680,7 @@ fn product_bounds_overflowing_the_domain_or_i128_never_prove() {
     // U64 max squared overflows even the i128 product bound; full-range I64 parameters fit
     // i128 but overflow the I64 domain, so both keep their checks.
     let maximum = fixture.unsigned_literal(FixedScalar::U64, u64::MAX);
-    let write = fixture.assign_local(wide, maximum);
+    let write = fixture.define_local(wide, maximum);
     let wide_left = fixture.load(wide, u64_type);
     let wide_right = fixture.load(wide, u64_type);
     let wide_operation = fixture.numeric_op(
@@ -672,7 +689,7 @@ fn product_bounds_overflowing_the_domain_or_i128_never_prove() {
             NumericScalar::Fixed(FixedScalar::U64),
         ),
         binary(wide_left, wide_right),
-        wide_product,
+        HirLocalDestination::Define(wide_product),
         NumericFailureMode::Trap,
     );
     let left_load = fixture.load(signed_left, i64_type);
@@ -683,7 +700,7 @@ fn product_bounds_overflowing_the_domain_or_i128_never_prove() {
             NumericScalar::Fixed(FixedScalar::I64),
         ),
         binary(left_load, right_load),
-        signed_product,
+        HirLocalDestination::Define(signed_product),
         NumericFailureMode::Trap,
     );
     let wide_id = wide_operation.id;
@@ -714,13 +731,13 @@ fn u64_interval_arithmetic_is_exact_at_the_domain_edge() {
     let (x, exact, overflow) = (LocalId(0), LocalId(1), LocalId(2));
     // x = u64::MAX - 1: x + 1 stays exactly inside U64, x + 2 overflows it.
     let literal = fixture.unsigned_literal(FixedScalar::U64, u64::MAX - 1);
-    let write = fixture.assign_local(x, literal);
+    let write = fixture.define_local(x, literal);
     let exact_left = fixture.load(x, u64_type);
     let exact_right = fixture.unsigned_literal(FixedScalar::U64, 1);
     let exact_operation = fixture.numeric_op(
         fixed_op(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::U64)),
         binary(exact_left, exact_right),
-        exact,
+        HirLocalDestination::Define(exact),
         NumericFailureMode::Trap,
     );
     let overflow_left = fixture.load(x, u64_type);
@@ -728,7 +745,7 @@ fn u64_interval_arithmetic_is_exact_at_the_domain_edge() {
     let overflow_operation = fixture.numeric_op(
         fixed_op(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::U64)),
         binary(overflow_left, overflow_right),
-        overflow,
+        HirLocalDestination::Define(overflow),
         NumericFailureMode::Trap,
     );
     let exact_id = exact_operation.id;
@@ -760,7 +777,7 @@ fn negate_is_proven_only_for_signed_domains_inside_their_range() {
     // Signed minimum cannot negate inside I64; unsigned negation is not a valid source shape
     // and must never become a proven raw operation, even for a known zero operand.
     let minimum = fixture.signed_literal(FixedScalar::I64, i64::MIN);
-    let signed_write = fixture.assign_local(signed_x, minimum);
+    let signed_write = fixture.define_local(signed_x, minimum);
     let signed_operand = fixture.load(signed_x, i64_type);
     let signed_operation = fixture.numeric_op(
         fixed_op(
@@ -768,11 +785,11 @@ fn negate_is_proven_only_for_signed_domains_inside_their_range() {
             NumericScalar::Fixed(FixedScalar::I64),
         ),
         unary(signed_operand),
-        signed_negation,
+        HirLocalDestination::Define(signed_negation),
         NumericFailureMode::Trap,
     );
     let zero = fixture.unsigned_literal(FixedScalar::U8, 0);
-    let unsigned_write = fixture.assign_local(unsigned_x, zero);
+    let unsigned_write = fixture.define_local(unsigned_x, zero);
     let unsigned_operand = fixture.load(unsigned_x, u8_type);
     let unsigned_operation = fixture.numeric_op(
         fixed_op(
@@ -780,7 +797,7 @@ fn negate_is_proven_only_for_signed_domains_inside_their_range() {
             NumericScalar::Fixed(FixedScalar::U8),
         ),
         unary(unsigned_operand),
-        unsigned_negation,
+        HirLocalDestination::Define(unsigned_negation),
         NumericFailureMode::Trap,
     );
     let signed_id = signed_operation.id;
@@ -824,15 +841,15 @@ fn power_float_and_number_domains_always_stay_checked() {
         LocalId(5),
     );
     let base_literal = fixture.int_literal(2, int);
-    let base_write = fixture.assign_local(base, base_literal);
+    let base_write = fixture.define_local(base, base_literal);
     let exponent_literal = fixture.int_literal(3, int);
-    let exponent_write = fixture.assign_local(exponent, exponent_literal);
+    let exponent_write = fixture.define_local(exponent, exponent_literal);
     let power_left = fixture.load(base, int);
     let power_right = fixture.load(exponent, int);
     let power_operation = fixture.numeric_op(
         int_op(NumericOperator::Power),
         binary(power_left, power_right),
-        power_result,
+        HirLocalDestination::Define(power_result),
         NumericFailureMode::Trap,
     );
     let float_left = fixture.float_literal(1.0, float);
@@ -840,7 +857,7 @@ fn power_float_and_number_domains_always_stay_checked() {
     let float_operation = fixture.numeric_op(
         fixed_op(NumericOperator::Add, NumericScalar::Float),
         binary(float_left, float_right),
-        float_result,
+        HirLocalDestination::Define(float_result),
         NumericFailureMode::Trap,
     );
     let f32_left = fixture.float_literal(1.0, f32_type);
@@ -848,7 +865,7 @@ fn power_float_and_number_domains_always_stay_checked() {
     let f32_operation = fixture.numeric_op(
         fixed_op(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::F32)),
         binary(f32_left, f32_right),
-        f32_result,
+        HirLocalDestination::Define(f32_result),
         NumericFailureMode::Trap,
     );
     let number_left = fixture.number_literal(1, number_type);
@@ -859,7 +876,7 @@ fn power_float_and_number_domains_always_stay_checked() {
             NumericScalar::Number(NumberScale::ZERO),
         ),
         binary(number_left, number_right),
-        number_result,
+        HirLocalDestination::Define(number_result),
         NumericFailureMode::Trap,
     );
     let power_id = power_operation.id;
@@ -915,7 +932,7 @@ fn narrowing_is_proven_only_when_the_source_interval_fits_the_target() {
     };
     let carrier_type = fixture.carrier(u8_type);
     let literal = fixture.unsigned_literal(FixedScalar::U32, 5);
-    let write = fixture.assign_local(source, literal);
+    let write = fixture.define_local(source, literal);
     let proven_source = fixture.load(source, u32_type);
     let proven_cast = fixture.cast_op(policy, proven_source, carrier);
     let unproven_source = fixture.load(wide_source, u32_type);
@@ -992,7 +1009,7 @@ fn infallible_cast_expressions_preserve_operand_intervals() {
     // sum = narrowed + narrowed is exact [400, 400] inside I32 only because the cast
     // preserved the source interval instead of falling back to full I32 bounds.
     let literal = fixture.unsigned_literal(FixedScalar::U8, 200);
-    let write = fixture.assign_local(source, literal);
+    let write = fixture.define_local(source, literal);
     let cast_operand = fixture.load(source, u8_type);
     let cast_value = fixture.cast_expression(
         cast_operand,
@@ -1002,13 +1019,13 @@ fn infallible_cast_expressions_preserve_operand_intervals() {
         },
         i32_type,
     );
-    let cast_write = fixture.assign_local(narrowed, cast_value);
+    let cast_write = fixture.define_local(narrowed, cast_value);
     let left = fixture.load(narrowed, i32_type);
     let right = fixture.load(narrowed, i32_type);
     let operation = fixture.numeric_op(
         fixed_op(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::I32)),
         binary(left, right),
-        sum,
+        HirLocalDestination::Define(sum),
         NumericFailureMode::Trap,
     );
     let operation_id = operation.id;
@@ -1042,15 +1059,15 @@ fn reassignment_replaces_the_cached_interval() {
         let u32_type = fixture.fixed(FixedScalar::U32);
         let (x, sum) = (LocalId(0), LocalId(1));
         let first = fixture.unsigned_literal(FixedScalar::U32, 3);
-        let first_write = fixture.assign_local(x, first);
+        let first_write = fixture.define_local(x, first);
         let second = fixture.unsigned_literal(FixedScalar::U32, u32::MAX.into());
-        let second_write = fixture.assign_local(x, second);
+        let second_write = fixture.update_local(x, second);
         let left = fixture.load(x, u32_type);
         let right = fixture.unsigned_literal(FixedScalar::U32, 1);
         let operation = fixture.numeric_op(
             fixed_op(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::U32)),
             binary(left, right),
-            sum,
+            HirLocalDestination::Define(sum),
             NumericFailureMode::Trap,
         );
         let operation_id = operation.id;
@@ -1073,15 +1090,15 @@ fn reassignment_replaces_the_cached_interval() {
         let u32_type = fixture.fixed(FixedScalar::U32);
         let (x, sum) = (LocalId(0), LocalId(1));
         let first = fixture.unsigned_literal(FixedScalar::U32, u32::MAX.into());
-        let first_write = fixture.assign_local(x, first);
+        let first_write = fixture.define_local(x, first);
         let second = fixture.unsigned_literal(FixedScalar::U32, 3);
-        let second_write = fixture.assign_local(x, second);
+        let second_write = fixture.update_local(x, second);
         let left = fixture.load(x, u32_type);
         let right = fixture.unsigned_literal(FixedScalar::U32, 1);
         let operation = fixture.numeric_op(
             fixed_op(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::U32)),
             binary(left, right),
-            sum,
+            HirLocalDestination::Define(sum),
             NumericFailureMode::Trap,
         );
         let operation_id = operation.id;
@@ -1106,15 +1123,15 @@ fn an_intermediate_write_to_another_local_drops_the_single_entry_cache() {
     // x = 3; y = 4; sum = x + x; — x's fact was displaced by y's write, so x reads canonical
     // bounds whose sum overflows U32.
     let x_literal = fixture.unsigned_literal(FixedScalar::U32, 3);
-    let x_write = fixture.assign_local(x, x_literal);
+    let x_write = fixture.define_local(x, x_literal);
     let y_literal = fixture.unsigned_literal(FixedScalar::U32, 4);
-    let y_write = fixture.assign_local(y, y_literal);
+    let y_write = fixture.define_local(y, y_literal);
     let left = fixture.load(x, u32_type);
     let right = fixture.load(x, u32_type);
     let operation = fixture.numeric_op(
         fixed_op(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::U32)),
         binary(left, right),
-        sum,
+        HirLocalDestination::Define(sum),
         NumericFailureMode::Trap,
     );
     let operation_id = operation.id;
@@ -1147,15 +1164,15 @@ fn alias_copies_carry_intervals_until_the_next_call() {
     // operands and canonical Int bounds. Without call invalidation the retained [6, 6]
     // would prove the post-call operation too and flip the second assertion.
     let literal = fixture.int_literal(3, int);
-    let write = fixture.assign_local(x, literal);
+    let write = fixture.define_local(x, literal);
     let aliased = fixture.copy_of(x, int);
-    let alias_write = fixture.assign_local(alias, aliased);
+    let alias_write = fixture.define_local(alias, aliased);
     let first_left = fixture.load(alias, int);
     let first_right = fixture.load(alias, int);
     let first = fixture.numeric_op(
         int_op(NumericOperator::Add),
         binary(first_left, first_right),
-        alias,
+        HirLocalDestination::Update(alias),
         NumericFailureMode::Trap,
     );
     let call = fixture.call();
@@ -1164,7 +1181,7 @@ fn alias_copies_carry_intervals_until_the_next_call() {
     let after = fixture.numeric_op(
         int_op(NumericOperator::Add),
         binary(after_left, after_right),
-        after_sum,
+        HirLocalDestination::Define(after_sum),
         NumericFailureMode::Trap,
     );
     let first_id = first.id;
@@ -1196,21 +1213,18 @@ fn projection_writes_invalidate_the_cached_interval() {
     // x's fact. `record` is typed at the registered single-field record, and FieldId(0) is
     // that struct's paired HIR layout field.
     let literal = fixture.int_literal(3, int);
-    let write = fixture.assign_local(x, literal);
+    let write = fixture.define_local(x, literal);
     let field_value = fixture.int_literal(4, int);
-    let projection_write = fixture.assign(
-        HirPlace::Field {
-            base: Box::new(HirPlace::Local(record)),
-            field: FieldId(0),
-        },
-        field_value,
-    );
+    let projection_target = HirPlace::local(record)
+        .with_field(FieldId(0), &mut fixture.module.expressions, None)
+        .expect("record field projection should fit the HIR expression store");
+    let projection_write = fixture.update_place(projection_target, field_value);
     let left = fixture.load(x, int);
     let right = fixture.load(x, int);
     let operation = fixture.numeric_op(
         int_op(NumericOperator::Add),
         binary(left, right),
-        sum,
+        HirLocalDestination::Define(sum),
         NumericFailureMode::Trap,
     );
     let operation_id = operation.id;
@@ -1239,13 +1253,13 @@ fn return_error_results_never_propagate_carrier_success_facts() {
     // x = 3; carrier = x + 1 (ReturnError); sum = x + x; — the proven operation records its
     // fact but its carrier result must leave no narrower success interval behind.
     let literal = fixture.int_literal(3, int);
-    let write = fixture.assign_local(x, literal);
+    let write = fixture.define_local(x, literal);
     let left = fixture.load(x, int);
     let right = fixture.int_literal(1, int);
     let operation = fixture.numeric_op(
         int_op(NumericOperator::Add),
         binary(left, right),
-        carrier,
+        HirLocalDestination::Define(carrier),
         NumericFailureMode::ReturnError,
     );
     let follow_left = fixture.load(x, int);
@@ -1253,7 +1267,7 @@ fn return_error_results_never_propagate_carrier_success_facts() {
     let follow_up = fixture.numeric_op(
         int_op(NumericOperator::Add),
         binary(follow_left, follow_right),
-        sum,
+        HirLocalDestination::Define(sum),
         NumericFailureMode::Trap,
     );
     let operation_id = operation.id;
@@ -1284,13 +1298,13 @@ fn unwrapped_success_values_fall_back_to_canonical_bounds() {
     // x = 3; carrier = x + 1 (ReturnError); sum = unwrap(carrier) + unwrap(carrier);
     // unwraps have no interval fact, so complete Int bounds overflow and keep the check.
     let literal = fixture.int_literal(3, int);
-    let write = fixture.assign_local(x, literal);
+    let write = fixture.define_local(x, literal);
     let left = fixture.load(x, int);
     let right = fixture.int_literal(1, int);
     let operation = fixture.numeric_op(
         int_op(NumericOperator::Add),
         binary(left, right),
-        carrier,
+        HirLocalDestination::Define(carrier),
         NumericFailureMode::ReturnError,
     );
     let carrier_load_left = fixture.load(carrier, carrier_type);
@@ -1300,7 +1314,7 @@ fn unwrapped_success_values_fall_back_to_canonical_bounds() {
     let follow_up = fixture.numeric_op(
         int_op(NumericOperator::Add),
         binary(unwrap_left, unwrap_right),
-        sum,
+        HirLocalDestination::Define(sum),
         NumericFailureMode::Trap,
     );
     let follow_up_id = follow_up.id;
@@ -1332,13 +1346,13 @@ fn joined_blocks_reset_value_specific_state() {
     // Entry: x = 3; x = x + x (exact [6, 6] cached in the very local the join reads); jump join.
     // Join:  sum = x + x; — the join resets state, so x reads canonical U32 bounds.
     let literal = fixture.unsigned_literal(FixedScalar::U32, 3);
-    let write = fixture.assign_local(x, literal);
+    let write = fixture.define_local(x, literal);
     let entry_left = fixture.load(x, u32_type);
     let entry_right = fixture.load(x, u32_type);
     let entry_operation = fixture.numeric_op(
         fixed_op(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::U32)),
         binary(entry_left, entry_right),
-        x,
+        HirLocalDestination::Update(x),
         NumericFailureMode::Trap,
     );
     let join_left = fixture.load(x, u32_type);
@@ -1346,7 +1360,7 @@ fn joined_blocks_reset_value_specific_state() {
     let join_operation = fixture.numeric_op(
         fixed_op(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::U32)),
         binary(join_left, join_right),
-        sum,
+        HirLocalDestination::Define(sum),
         NumericFailureMode::Trap,
     );
     let entry_id = entry_operation.id;
@@ -1381,17 +1395,17 @@ fn loop_headers_reset_state_against_back_edge_writes() {
     // resets state, so the doubling cannot lean on the entry's [3, 3] singleton even though
     // the back edge later writes the Int maximum into the very same local.
     let literal = fixture.int_literal(3, int);
-    let write = fixture.assign_local(counter, literal);
+    let write = fixture.define_local(counter, literal);
     let left = fixture.load(counter, int);
     let right = fixture.load(counter, int);
     let header_operation = fixture.numeric_op(
         int_op(NumericOperator::Add),
         binary(left, right),
-        doubled,
+        HirLocalDestination::Define(doubled),
         NumericFailureMode::Trap,
     );
     let back_edge_write = fixture.int_literal(IntWidth::Bits32.max_value(), int);
-    let counter_write = fixture.assign_local(counter, back_edge_write);
+    let counter_write = fixture.update_local(counter, back_edge_write);
     let header_id = header_operation.id;
     let (module, environment) = fixture.finish(vec![
         (vec![declared(counter, int)], vec![write], jump(BlockId(1))),
@@ -1415,13 +1429,13 @@ fn loop_body_writes_prove_operations_within_the_same_block_walk() {
     // A self-jumping header that writes its counter first can still prove an operation on it
     // inside the same block walk: index = 2; doubled = index + index; jump self.
     let literal = fixture.unsigned_literal(FixedScalar::U32, 2);
-    let write = fixture.assign_local(index, literal);
+    let write = fixture.define_local(index, literal);
     let left = fixture.load(index, u32_type);
     let right = fixture.load(index, u32_type);
     let operation = fixture.numeric_op(
         fixed_op(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::U32)),
         binary(left, right),
-        doubled,
+        HirLocalDestination::Define(doubled),
         NumericFailureMode::Trap,
     );
     let operation_id = operation.id;
@@ -1444,13 +1458,13 @@ fn profile_mismatch_returns_false_and_empty_tables_retain_everything() {
     let int = fixture.int();
     let (x, sum) = (LocalId(0), LocalId(1));
     let literal = fixture.int_literal(3, int);
-    let write = fixture.assign_local(x, literal);
+    let write = fixture.define_local(x, literal);
     let left = fixture.load(x, int);
     let right = fixture.int_literal(1, int);
     let operation = fixture.numeric_op(
         int_op(NumericOperator::Add),
         binary(left, right),
-        sum,
+        HirLocalDestination::Define(sum),
         NumericFailureMode::Trap,
     );
     let operation_id = operation.id;
@@ -1490,7 +1504,7 @@ fn uint_singletons_prove_exact_arithmetic_and_reject_overflow() {
     let exact_operation = fixture.numeric_op(
         uint_op(NumericOperator::Add),
         binary(exact_left, exact_right),
-        exact,
+        HirLocalDestination::Define(exact),
         NumericFailureMode::Trap,
     );
     let overflow_left = fixture.uint_literal(profile_max - 1, uint);
@@ -1498,7 +1512,7 @@ fn uint_singletons_prove_exact_arithmetic_and_reject_overflow() {
     let overflow_operation = fixture.numeric_op(
         uint_op(NumericOperator::Add),
         binary(overflow_left, overflow_right),
-        overflow,
+        HirLocalDestination::Define(overflow),
         NumericFailureMode::Trap,
     );
     let exact_id = exact_operation.id;
@@ -1533,7 +1547,7 @@ fn uint64_singletons_prove_exact_arithmetic_above_i64_max() {
     let exact_operation = fixture.numeric_op(
         uint_op(NumericOperator::Add),
         binary(exact_left, exact_right),
-        exact,
+        HirLocalDestination::Define(exact),
         NumericFailureMode::Trap,
     );
     let overflow_left = fixture.uint_literal(u64::MAX - 1, uint);
@@ -1541,7 +1555,7 @@ fn uint64_singletons_prove_exact_arithmetic_above_i64_max() {
     let overflow_operation = fixture.numeric_op(
         uint_op(NumericOperator::Add),
         binary(overflow_left, overflow_right),
-        overflow,
+        HirLocalDestination::Define(overflow),
         NumericFailureMode::Trap,
     );
     let exact_id = exact_operation.id;
@@ -1570,7 +1584,7 @@ fn uint_subtraction_below_zero_is_never_proven() {
     let operation = fixture.numeric_op(
         uint_op(NumericOperator::Subtract),
         binary(left, right),
-        difference,
+        HirLocalDestination::Define(difference),
         NumericFailureMode::Trap,
     );
     let operation_id = operation.id;
@@ -1601,7 +1615,7 @@ fn uint_narrowing_is_proven_only_when_the_source_interval_fits() {
     };
     let carrier_type = fixture.carrier(int);
     let literal = fixture.uint_literal(5, uint);
-    let write = fixture.assign_local(source, literal);
+    let write = fixture.define_local(source, literal);
     let proven_source = fixture.load(source, uint);
     let proven_cast = fixture.cast_op(policy, proven_source, carrier);
     let unproven_source = fixture.load(wide_source, uint);
@@ -1642,7 +1656,7 @@ fn uint_proof_marks_recoverable_operation_safe_but_gate_still_rejects_delivery()
     let operation = fixture.numeric_op(
         uint_op(NumericOperator::Add),
         binary(left, right),
-        carrier,
+        HirLocalDestination::Define(carrier),
         NumericFailureMode::ReturnError,
     );
     let operation_id = operation.id;

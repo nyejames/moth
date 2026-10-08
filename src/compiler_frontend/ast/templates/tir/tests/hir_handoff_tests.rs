@@ -19,8 +19,8 @@ use crate::compiler_frontend::ast::templates::tir::ids::{
     ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId,
 };
 use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIr, TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind,
-    TemplateLoopHeaderExpressionSites, TirSlotPlaceholder,
+    TemplateIr, TemplateIrNode, TemplateIrNodeKind, TemplateLoopHeaderExpressionSites,
+    TirSlotPlaceholder,
 };
 use crate::compiler_frontend::ast::templates::tir::overlays::{
     TemplateViewContext, TirExpressionOverlay, TirSlotResolution, TirSlotResolutionOverlay,
@@ -38,13 +38,13 @@ use crate::compiler_frontend::ast::templates::tir::summary::{
 use crate::compiler_frontend::ast::templates::tir::view::{TemplateTirPhase, TirView};
 use crate::compiler_frontend::ast::templates::tir::{
     RuntimeTemplateReason, TemplatePreparation, TemplatePreparationOutcome,
-    owned_runtime_template_handoff_for_prepared_view,
+    owned_runtime_slot_handoff_for_prepared_view, owned_runtime_template_handoff_for_prepared_view,
 };
 use crate::compiler_frontend::ast::templates::tir::{TemplateSlotPlan, TemplateSlotSitePlan};
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateNode,
 };
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::datatype::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
@@ -68,11 +68,7 @@ fn prepared_runtime(view: &TirView<'_>) -> TemplatePreparation {
         facts: TemplatePreparationFacts {
             is_const_evaluable_shape: false,
             has_unresolved_slot_occurrences: false,
-            has_resolved_slot_sources: false,
             has_escaped_insert_helpers: false,
-            wrapper_foldable: false,
-            has_runtime_slot_plan: false,
-            has_runtime_slot_sites: false,
             final_value_kind: TemplateConstValueKind::NonConst,
         },
         outcome: TemplatePreparationOutcome::Runtime(RuntimeTemplateReason::RuntimeExpression),
@@ -265,25 +261,16 @@ fn assert_owned_text_node(node: &OwnedRuntimeTemplateNode, expected: &str) {
 //  Wrapper template builders
 // ---------------------------------------------------------------------------
 
-fn build_branch_wrapper_template(store: &mut TemplateIrStore) -> TemplateIrId {
+fn build_conditional_wrapper_template(store: &mut TemplateIrStore) -> TemplateIrId {
     let mut builder = TemplateIrBuilder::new(store);
     let default_slot = builder.push_slot_node(SlotKey::Default, None);
     let positional_slot = builder.push_slot_node(SlotKey::Positional(2), None);
-    let branches = vec![
-        TemplateIrBranch::new(
-            TemplateBranchSelector::Bool(Expression::bool(true, None, ValueMode::ImmutableOwned)),
-            default_slot,
-            None,
-            builder.store.next_expression_site_id(),
-        ),
-        TemplateIrBranch::new(
-            TemplateBranchSelector::Bool(Expression::bool(false, None, ValueMode::ImmutableOwned)),
-            positional_slot,
-            None,
-            builder.store.next_expression_site_id(),
-        ),
-    ];
-    let root = builder.push_branch_chain_node(branches, None, None, None);
+    let body = builder.push_sequence_node(vec![default_slot, positional_slot], None);
+    let root = builder.push_conditional_node(
+        TemplateBranchSelector::Bool(Expression::bool(true, None, ValueMode::ImmutableOwned)),
+        body,
+        None,
+    );
     builder.finish_template(
         root,
         Style::default(),
@@ -1068,7 +1055,7 @@ fn runtime_child_reference_uses_structural_handoff() {
 }
 
 #[test]
-fn child_infrastructure_error_propagates_through_hir_handoff() {
+fn missing_child_node_authority_propagates_as_compiler_error_through_hir_handoff() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -1100,9 +1087,11 @@ fn child_infrastructure_error_propagates_through_hir_handoff() {
     let error = materialize_parent_handoff_result(store, parent_id, &mut strings, context)
         .expect_err("malformed child authority must reach the HIR handoff caller");
 
+    assert_eq!(error.error_type, ErrorType::Compiler);
     assert!(
-        error.msg.contains("missing node"),
-        "expected a stable infrastructure lane, got: {}",
+        error.msg.contains("TirView::effective_node")
+            && error.msg.contains("TemplateIrNodeId(999)"),
+        "expected child node authority context, got: {}",
         error.msg
     );
 }
@@ -1112,14 +1101,14 @@ fn child_infrastructure_error_propagates_through_hir_handoff() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn inherited_wrapper_handoff_injects_through_branch_boundaries() {
+fn inherited_wrapper_handoff_preserves_conditional_body() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let (parent_id, context) = {
         let mut store_ref = store.borrow_mut();
         let empty_context = TemplateViewContext::default();
-        let wrapper_template_id = build_branch_wrapper_template(&mut store_ref);
+        let wrapper_template_id = build_conditional_wrapper_template(&mut store_ref);
         build_parent_with_inherited_wrapper(
             &mut store_ref,
             wrapper_template_id,
@@ -1129,22 +1118,98 @@ fn inherited_wrapper_handoff_injects_through_branch_boundaries() {
     };
 
     let body = materialize_parent_handoff(store, parent_id, &mut strings, context);
-    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::BranchChain {
-        branches,
-        fallback,
+    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Conditional {
+        selector,
+        body,
         ..
     }) = body
     else {
-        panic!("expected branch-chain wrapper handoff, got {:?}", body);
+        panic!("expected conditional handoff, got {:?}", body);
     };
 
-    assert!(fallback.is_none());
-    assert_eq!(branches.len(), 2);
     assert!(matches!(
-        branches[0].body,
-        OwnedRuntimeTemplateNode::Slot { .. }
+        selector.as_ref(),
+        TemplateBranchSelector::Bool(expression)
+            if matches!(&expression.kind, ExpressionKind::Bool(true))
     ));
-    assert_owned_text_node(&branches[1].body, "child");
+    let OwnedRuntimeTemplateNode::Sequence { children, .. } = body.as_ref() else {
+        panic!("expected conditional body sequence, got {body:?}");
+    };
+    assert_eq!(children.len(), 2);
+    assert!(
+        matches!(&children[0], OwnedRuntimeTemplateNode::Slot { .. }),
+        "the leading default slot should remain unfilled"
+    );
+    assert_owned_text_node(&children[1], "child");
+}
+
+#[test]
+fn conditional_handoff_materializes_the_effective_selector_overlay() {
+    let mut store = TemplateIrStore::new();
+    let mut strings = StringTable::new();
+    let (template_id, selector_site_id) = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let body = builder.push_text_node(
+            strings.intern("conditional body"),
+            "conditional body".len(),
+            TemplateSegmentOrigin::Body,
+            None,
+        );
+        let conditional = builder.push_conditional_node(
+            TemplateBranchSelector::Bool(Expression::bool(true, None, ValueMode::ImmutableOwned)),
+            body,
+            None,
+        );
+        let selector_site_id = match &builder
+            .store
+            .get_node(conditional)
+            .expect("conditional node should exist")
+            .kind
+        {
+            TemplateIrNodeKind::Conditional {
+                selector_site_id, ..
+            } => *selector_site_id,
+            other => panic!("expected conditional TIR node, got {other:?}"),
+        };
+        let template_id = builder.finish_template(
+            conditional,
+            Style::default(),
+            TemplateType::StringFunction,
+            TemplateIrSummary::empty(),
+            None,
+        );
+        (template_id, selector_site_id)
+    };
+    let context = expression_overlay_context(
+        &mut store,
+        vec![(
+            selector_site_id,
+            Expression::bool(false, None, ValueMode::ImmutableOwned),
+        )],
+    );
+
+    let body = materialize_parent_handoff_result(
+        Rc::new(RefCell::new(store)),
+        template_id,
+        &mut strings,
+        context,
+    )
+    .expect("conditional selector overlay should materialize");
+
+    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Conditional {
+        selector,
+        body,
+        ..
+    }) = body
+    else {
+        panic!("expected one conditional runtime node, got {body:?}");
+    };
+    assert!(matches!(
+        selector.as_ref(),
+        TemplateBranchSelector::Bool(expression)
+            if matches!(&expression.kind, ExpressionKind::Bool(false))
+    ));
+    assert_owned_text_node(body.as_ref(), "conditional body");
 }
 
 #[test]
@@ -1617,6 +1682,81 @@ fn runtime_site_template(
 }
 
 #[test]
+fn runtime_slot_handoff_preserves_root_conditional_wrapper() {
+    let mut store = TemplateIrStore::new();
+    let mut strings = StringTable::new();
+    let slot_render_root = text_node_id(&mut store, &mut strings, "slot-render");
+    let slot_plan = store.push_slot_plan(TemplateSlotPlan {
+        contribution_sources: Vec::new(),
+        slot_sites: vec![TemplateSlotSitePlan {
+            site: RuntimeSlotSiteId(0),
+            key: SlotKey::Default,
+            render_root: slot_render_root,
+            span: None,
+        }],
+        span: None,
+    });
+    let template_id = runtime_site_template(&mut store, slot_plan, RuntimeSlotSiteId(0));
+
+    let wrapper_template_id = build_slot_wrapper_template(
+        &mut store,
+        &mut strings,
+        "conditional-before",
+        "conditional-after",
+    );
+    let wrapper_set = store.push_or_reuse_wrapper_set(vec![TemplateWrapperReference::new(
+        wrapper_template_id,
+        TemplateTirPhase::Finalized,
+        TemplateViewContext::default(),
+    )]);
+    store
+        .set_conditional_child_wrapper_set(template_id, wrapper_set)
+        .expect("conditional wrapper set should attach");
+
+    let view = view_for(&store, template_id, TemplateViewContext::default());
+    let prepared = prepared_runtime(&view);
+
+    assert!(
+        owned_runtime_slot_handoff_for_prepared_view(&prepared, view, &strings, None)
+            .expect("direct slot handoff should succeed")
+            .is_none(),
+        "direct slot handoff cannot carry the root's conditional wrapper"
+    );
+
+    let view = view_for(&store, template_id, TemplateViewContext::default());
+    let handoff = owned_runtime_template_handoff_for_prepared_view(&prepared, view, &strings, None)
+        .expect("generic handoff should preserve the conditional wrapper");
+    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::ConditionalWrapper {
+        child,
+        wrapper,
+        ..
+    }) = handoff.body
+    else {
+        panic!("expected one conditional wrapper around the slot application");
+    };
+
+    let OwnedRuntimeTemplateNode::ChildTemplate { template, .. } = child.as_ref() else {
+        panic!("conditional wrapper should retain the slot application as its child");
+    };
+    let OwnedRuntimeTemplateBody::RuntimeSlotApplication(application) = &template.body else {
+        panic!("conditional wrapper child should preserve the runtime slot application");
+    };
+    assert_eq!(application.slot_sites.len(), 1);
+    assert_owned_text_node(&application.slot_sites[0].render_root, "slot-render");
+
+    let OwnedRuntimeTemplateNode::Sequence { children, .. } = wrapper.as_ref() else {
+        panic!("expected the conditional wrapper template's sequence, got {wrapper:?}");
+    };
+    assert_eq!(children.len(), 3);
+    assert_owned_text_node(&children[0], "conditional-before");
+    assert!(
+        matches!(children[1], OwnedRuntimeTemplateNode::AggregateOutput),
+        "the wrapper's default slot should be the aggregate-output splice"
+    );
+    assert_owned_text_node(&children[2], "conditional-after");
+}
+
+#[test]
 fn handoff_rejects_runtime_slot_site_from_a_different_plan() {
     let mut store = TemplateIrStore::new();
     let mut strings = StringTable::new();
@@ -1728,7 +1868,11 @@ fn handoff_rejects_mismatched_loop_header_shape() {
 
     let error =
         handoff_for_view(view, &strings).expect_err("loop header shape mismatch must fail closed");
-    assert!(error.msg.contains("loop header shape mismatch"));
+    assert!(
+        error
+            .msg
+            .contains("loop header shape does not match its expression sites")
+    );
 }
 
 /// Exact-view child cycles must fail before owned-handoff recursion.
@@ -1761,8 +1905,5 @@ fn handoff_rejects_exact_view_child_cycle() {
 
     let error = handoff_for_view(view, &StringTable::new())
         .expect_err("exact-view child cycles must fail before handoff recursion");
-    assert_eq!(
-        error.error_type,
-        crate::compiler_frontend::compiler_errors::ErrorType::Compiler
-    );
+    assert_eq!(error.error_type, ErrorType::Compiler);
 }

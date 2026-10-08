@@ -10,7 +10,9 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
-use crate::compiler_frontend::hir::ids::{BlockId, FieldId, LocalId, RegionId, StructId};
+use crate::compiler_frontend::hir::ids::{
+    BlockId, FieldId, FunctionId, LocalId, RegionId, StructId,
+};
 use crate::compiler_frontend::source::SourceSpan;
 
 use rustc_hash::FxHashSet;
@@ -37,7 +39,7 @@ impl<'a> HirValidator<'a> {
         struct_id: StructId,
         anchor: Option<HirLocation>,
     ) -> Result<(), CompilerError> {
-        if self.struct_ids.contains(&struct_id) {
+        if self.struct_types.contains_key(&struct_id) {
             return Ok(());
         }
 
@@ -66,6 +68,94 @@ impl<'a> HirValidator<'a> {
         }
 
         Err(self.error_with_hir(format!("Unknown HIR local id {local_id:?}"), anchor))
+    }
+
+    pub(super) fn require_local_in_function(
+        &self,
+        local_id: LocalId,
+        function_id: FunctionId,
+        anchor: Option<HirLocation>,
+    ) -> Result<(), CompilerError> {
+        self.require_local_id(local_id, anchor)?;
+        let Some(local_block) = self.local_block_by_id.get(&local_id).copied() else {
+            return Err(self.error_with_hir(
+                format!("Local {local_id:?} has no owning HIR block"),
+                anchor,
+            ));
+        };
+        let Some(local_owner) = self.block_owner_by_id.get(&local_block).copied() else {
+            return Err(self.error_with_hir(
+                format!("Local {local_id:?} belongs to a block without a function owner"),
+                anchor,
+            ));
+        };
+        if local_owner != function_id {
+            return Err(self.error_with_hir(
+                format!(
+                    "Local {local_id:?} belongs to function {local_owner:?}, not {function_id:?}"
+                ),
+                anchor,
+            ));
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn require_local_in_block(
+        &self,
+        local_id: LocalId,
+        block_id: BlockId,
+        anchor: Option<HirLocation>,
+    ) -> Result<(), CompilerError> {
+        self.require_local_id(local_id, anchor)?;
+        if self.local_block_by_id.get(&local_id) == Some(&block_id) {
+            return Ok(());
+        }
+
+        Err(self.error_with_hir(
+            format!(
+                "CFG edge destination {local_id:?} is not a local owned by target block {block_id}"
+            ),
+            anchor,
+        ))
+    }
+
+    pub(super) fn require_local_not_parameter_definition(
+        &self,
+        local_id: LocalId,
+        anchor: Option<HirLocation>,
+    ) -> Result<(), CompilerError> {
+        if self.parameter_local_ids.contains(&local_id) {
+            return Err(self.error_with_hir(
+                format!("ABI parameter local {local_id:?} cannot be an HIR definition destination"),
+                anchor,
+            ));
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn require_local_for_anchor(
+        &self,
+        local_id: LocalId,
+        anchor: Option<HirLocation>,
+    ) -> Result<(), CompilerError> {
+        let block_id = match anchor {
+            Some(HirLocation::Block(block_id) | HirLocation::Terminator(block_id)) => {
+                Some(block_id)
+            }
+            Some(HirLocation::Statement(statement_id)) => {
+                self.statement_block_by_id.get(&statement_id).copied()
+            }
+            _ => None,
+        };
+        let function_id =
+            block_id.and_then(|block_id| self.block_owner_by_id.get(&block_id).copied());
+        if let Some(function_id) = function_id {
+            return self.require_local_in_function(local_id, function_id, anchor);
+        }
+
+        self.require_local_id(local_id, anchor)
     }
 
     pub(super) fn require_region_id(

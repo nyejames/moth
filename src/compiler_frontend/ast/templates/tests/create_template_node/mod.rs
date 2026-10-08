@@ -162,7 +162,6 @@ fn new_constant_context_with_style_directives(
             scope.to_owned(),
             Rc::new(TopLevelDeclarationTable::new(vec![], path_fork)),
             Arc::new(ExternalPackageRegistry::default()),
-            vec![],
             0,
         ),
         &scope,
@@ -219,9 +218,6 @@ fn fold_template_with_fold_context(
             panic!("structural emission reached a text-only test helper")
         }
         TemplateEmission::NoOutput => Ok(fold_context.string_table.intern("")),
-        TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
-            panic!("test template fold signal escaped its loop")
-        }
     }
 }
 
@@ -286,7 +282,6 @@ fn runtime_template_context_with_style_directives(
             scope.to_owned(),
             Rc::new(TopLevelDeclarationTable::new(vec![declaration], path_fork)),
             Arc::new(ExternalPackageRegistry::default()),
-            vec![],
             0,
         ),
         scope,
@@ -323,7 +318,6 @@ fn constant_template_context_with_style_directives(
                 path_fork,
             )),
             Arc::new(ExternalPackageRegistry::default()),
-            vec![],
             0,
         ),
         scope,

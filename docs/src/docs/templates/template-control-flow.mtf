@@ -15,33 +15,41 @@ the control-flow suffix.
 
 ### Template `if`
 
-Template `if` supports:
-
-- `Bool` conditions
-- option-present capture with `is |name|`
-- standalone `else if` branches
-- one optional standalone `else`
+A template `if` conditionally includes one body. Its selector is either a `Bool`
+condition or an option-present capture. The captured value is scoped to the
+body.
 
 [codeblock, $code("moth"):
+    [if show:
+        Visible
+    ]
+
     [if maybe_name is |name|:
         Hello [name]
-    [else if use_fallback]
-        Hello fallback
-    [else]
-        Hello guest
     ]
 ]
 
-The selected branch is evaluated lazily at runtime.
+Runtime templates evaluate only the selected body. A false condition or absent
+option produces structural no-output. Template control flow has no `else` or
+`else if` form, and template loops have no `break` or `continue` controls.
 
-Full pattern-match arm chains are not template-head syntax.
+For richer decisions in `.moth` code, choose a value with ordinary
+value-producing `if` and then interpolate it:
 
-Use an ordinary statement or value-producing full match when pattern arms are
-needed.
+[codeblock, $code("moth"):
+    maybe_name String? = none
+    name = if maybe_name is |present_name| then present_name else "guest"
+    greeting = [: Hello, [name]]
+]
+
+This value-producing form belongs at supported receiving sites such as a
+declaration; it is not an expression inside template interpolation. A `.mtf`
+body remains const-required and cannot call runtime functions as a general
+replacement.
 
 ### Template loops
 
-Template loops use the ordinary loop-header families:
+Template loops repeat their body using the ordinary loop-header families:
 
 - conditional loops
 - collection loops
@@ -58,66 +66,28 @@ Template loops use the ordinary loop-header families:
 ]
 
 Collection and range loops may bind the current value and optional zero-based
-index.
-
-Iterations concatenate directly. There is no implicit separator.
-
-Range and collection sources are evaluated once before iteration.
-
-A conditional loop checks its condition before every iteration.
-
-### Structural loop control
-
-Two standalone structural controls target the nearest active template loop.
-
-They are signals rather than rendered strings.
-
-[codeblock, $code("moth"):
-    [loop items |item|:
-        [if item.skip:
-            [continue]
-        ]
-
-        [item]
-
-        [if item.done:
-            [break]
-        ]
-    ]
-]
-
-Output produced before a control signal is preserved.
-
-An iteration with no output before `break` or `continue` does not count as
-emitted output.
+index. Their source or bounds are evaluated once before iteration. Conditional
+loop conditions are checked before each iteration. Iterations concatenate
+directly without separators.
 
 ### Wrappers and no-output
 
-A wrapper in the owning loop head wraps the complete aggregate once.
+A wrapper in the owning loop head wraps the complete aggregate once. Place a
+per-iteration wrapper inside the loop body.
 
-Place a per-iteration wrapper inside the loop body.
-
-These forms produce structural no-output:
-
-- a false `if` with no `else`
-- a false conditional loop
-- a zero-iteration collection or range loop
-
-Shared head wrappers and parent `$children(...)` wrappers are skipped when
-there is structural no-output.
-
-A selected empty branch is still selected, so its own head wrapper may render
-an empty wrapper.
+A false or absent conditional, a false conditional loop and a zero-iteration
+collection or range loop produce structural no-output. Shared head wrappers and
+parent `$children(...)` wrappers are skipped in those cases. A selected body
+with no content is still selected, so its own head wrapper may render an empty
+wrapper. A runtime expression that produces an empty `String` still produces
+output.
 
 ### Fallible work and slots
 
 Postfix `!` inside selected runtime template content propagates from the
-enclosing function.
+enclosing function. Catch blocks are not template expressions. Runtime slot
+applications remain valid inside a conditional body or loop body after normal
+slot routing.
 
-Catch blocks are not template expressions.
-
-Runtime slot applications remain valid inside template control flow after
-normal slot routing.
-
-Compile-time template control flow and iteration limits are specified by
-@../constants/#const-templates (Const templates).
+Compile-time template control flow, inactive-body validation and iteration
+limits are specified by @../constants/#const-templates (Const templates).

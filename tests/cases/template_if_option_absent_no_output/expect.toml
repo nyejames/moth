@@ -1,0 +1,11 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["template_if_option_absent_no_output", "<ul></ul>"]
+rendered_output_not_contains = [
+  "option-wrapper",
+  "option-child-wrapper",
+  "Hello ",
+  "inactive option body evaluated",
+  "caught inactive option body",
+]

@@ -266,33 +266,17 @@ fn accumulate_nodes(
                 summary.record_insert_contribution();
             }
 
-            TemplateIrNodeKind::BranchChain {
-                branches, fallback, ..
-            } => {
+            TemplateIrNodeKind::Conditional { body, .. } => {
                 summary.record_control_flow();
-
-                for branch in branches {
-                    accumulate_nodes(
-                        store,
-                        std::slice::from_ref(&branch.body),
-                        child_depth(depth)?,
-                        summary,
-                        visiting_nodes,
-                        visiting_templates,
-                        completed_templates,
-                    )?;
-                }
-                if let Some(fallback_id) = fallback {
-                    accumulate_nodes(
-                        store,
-                        std::slice::from_ref(fallback_id),
-                        child_depth(depth)?,
-                        summary,
-                        visiting_nodes,
-                        visiting_templates,
-                        completed_templates,
-                    )?;
-                }
+                accumulate_nodes(
+                    store,
+                    std::slice::from_ref(body),
+                    child_depth(depth)?,
+                    summary,
+                    visiting_nodes,
+                    visiting_templates,
+                    completed_templates,
+                )?;
             }
 
             TemplateIrNodeKind::Loop {
@@ -322,10 +306,6 @@ fn accumulate_nodes(
                         completed_templates,
                     )?;
                 }
-            }
-
-            TemplateIrNodeKind::LoopControl { .. } => {
-                summary.record_control_flow();
             }
 
             TemplateIrNodeKind::RuntimeSlotSite { .. } => {

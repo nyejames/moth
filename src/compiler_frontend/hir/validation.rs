@@ -19,10 +19,11 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::ids::{
-    BlockId, FieldId, FunctionId, LocalId, RegionId, StructId,
+    BlockId, FieldId, FunctionId, HirNodeId, LocalId, RegionId, StructId,
 };
 use crate::compiler_frontend::hir::module::HirModule;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::cell::Cell;
 
 pub(crate) fn validate_hir_module(
     module: &HirModule,
@@ -39,14 +40,18 @@ struct HirValidator<'a> {
     block_ids: FxHashSet<BlockId>,
     block_index_by_id: FxHashMap<BlockId, usize>,
     block_owner_by_id: FxHashMap<BlockId, FunctionId>,
+    statement_block_by_id: FxHashMap<HirNodeId, BlockId>,
     function_ids: FxHashSet<FunctionId>,
-    struct_ids: FxHashSet<StructId>,
+    struct_types: FxHashMap<StructId, TypeId>,
     field_ids: FxHashSet<FieldId>,
     region_ids: FxHashSet<RegionId>,
+    parameter_local_ids: FxHashSet<LocalId>,
 
     local_types: FxHashMap<LocalId, TypeId>,
+    local_block_by_id: FxHashMap<LocalId, BlockId>,
     field_types: FxHashMap<FieldId, TypeId>,
     field_owner: FxHashMap<FieldId, StructId>,
+    active_expression_rows: Vec<Cell<bool>>,
 }
 
 impl<'a> HirValidator<'a> {
@@ -55,19 +60,24 @@ impl<'a> HirValidator<'a> {
     // -------------------------
 
     fn new(module: &'a HirModule, type_environment: &'a TypeEnvironment) -> Self {
+        let expression_count = module.expressions.expression_count();
         Self {
             module,
             type_environment,
             block_ids: FxHashSet::default(),
             block_index_by_id: FxHashMap::default(),
             block_owner_by_id: FxHashMap::default(),
+            statement_block_by_id: FxHashMap::default(),
             function_ids: FxHashSet::default(),
-            struct_ids: FxHashSet::default(),
+            struct_types: FxHashMap::default(),
             field_ids: FxHashSet::default(),
             region_ids: FxHashSet::default(),
+            parameter_local_ids: FxHashSet::default(),
             local_types: FxHashMap::default(),
+            local_block_by_id: FxHashMap::default(),
             field_types: FxHashMap::default(),
             field_owner: FxHashMap::default(),
+            active_expression_rows: vec![Cell::new(false); expression_count],
         }
     }
 

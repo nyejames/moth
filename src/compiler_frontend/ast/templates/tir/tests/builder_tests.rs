@@ -1,6 +1,4 @@
-use super::super::node::{
-    TemplateIr, TemplateIrBranch, TemplateIrNodeKind, TemplateLoopHeaderExpressionSites,
-};
+use super::super::node::{TemplateIr, TemplateIrNodeKind, TemplateLoopHeaderExpressionSites};
 use super::super::store::TemplateIrStore;
 use super::super::summary::TemplateIrSummary;
 use super::builder::TemplateIrBuilder;
@@ -53,14 +51,19 @@ fn dynamic_expression_site_id(
     }
 }
 
-fn branch_selector_site_id(store: &TemplateIrStore, node_id: TemplateIrNodeId) -> ExpressionSiteId {
+fn conditional_selector_site_id(
+    store: &TemplateIrStore,
+    node_id: TemplateIrNodeId,
+) -> ExpressionSiteId {
     match &store
         .get_node(node_id)
-        .expect("branch-chain node should exist")
+        .expect("conditional node should exist")
         .kind
     {
-        TemplateIrNodeKind::BranchChain { branches, .. } => branches[0].selector_site_id,
-        other => panic!("expected BranchChain node, got {other:?}"),
+        TemplateIrNodeKind::Conditional {
+            selector_site_id, ..
+        } => *selector_site_id,
+        other => panic!("expected Conditional node, got {other:?}"),
     }
 }
 
@@ -600,7 +603,7 @@ fn derived_root_preserves_existing_occurrence_and_site_ids() {
 /// continue from existing counter values, covering all five ID families.
 ///
 /// WHAT: builds a first round of slot, child-template, dynamic-expression,
-/// branch-selector, and loop-header nodes, then builds a second round and
+/// conditional-selector, and loop-header nodes, then builds a second round and
 /// asserts the new IDs are exactly one past the first-round values.
 /// WHY: the per-store counters must be monotonic: a derived root or
 /// re-pushed template must never cause the counter to reset or re-issue an
@@ -617,12 +620,12 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
         slot_occ_first,
         child_occ_first,
         expr_site_first,
-        branch_site_first,
+        conditional_site_first,
         loop_conditional_site_first,
         slot_occ_second,
         child_occ_second,
         expr_site_second,
-        branch_site_second,
+        conditional_site_second,
         range_start_second,
         range_end_second,
         range_step_second,
@@ -658,23 +661,21 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
             None,
         );
 
-        let branch_body_a = builder.push_text_node(
+        let conditional_body_a = builder.push_text_node(
             string_table.intern("ba"),
             2,
             TemplateSegmentOrigin::Body,
             None,
         );
-        let branch_first = TemplateIrBranch::new(
+        let conditional_first = builder.push_conditional_node(
             TemplateBranchSelector::Bool(Expression::bool(
                 true,
                 None,
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             )),
-            branch_body_a,
+            conditional_body_a,
             None,
-            builder.store.next_expression_site_id(),
         );
-        let chain_first = builder.push_branch_chain_node(vec![branch_first], None, None, None);
 
         let loop_body_a = builder.push_text_node(
             string_table.intern("la"),
@@ -724,23 +725,21 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
             None,
         );
 
-        let branch_body_b = builder.push_text_node(
+        let conditional_body_b = builder.push_text_node(
             string_table.intern("bb"),
             2,
             TemplateSegmentOrigin::Body,
             None,
         );
-        let branch_second = TemplateIrBranch::new(
+        let conditional_second = builder.push_conditional_node(
             TemplateBranchSelector::Bool(Expression::bool(
                 false,
                 None,
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             )),
-            branch_body_b,
+            conditional_body_b,
             None,
-            builder.store.next_expression_site_id(),
         );
-        let chain_second = builder.push_branch_chain_node(vec![branch_second], None, None, None);
 
         let loop_body_b = builder.push_text_node(
             string_table.intern("lb"),
@@ -785,12 +784,12 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
             slot_occurrence_id(&store, slot_first),
             child_template_occurrence_id(&store, child_first),
             dynamic_expression_site_id(&store, expr_first),
-            branch_selector_site_id(&store, chain_first),
+            conditional_selector_site_id(&store, conditional_first),
             conditional_loop_site_id(&store, loop_first),
             slot_occurrence_id(&store, slot_second),
             child_template_occurrence_id(&store, child_second),
             dynamic_expression_site_id(&store, expr_second),
-            branch_selector_site_id(&store, chain_second),
+            conditional_selector_site_id(&store, conditional_second),
             range_start_second,
             range_end_second,
             range_step_second,
@@ -801,28 +800,28 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
     assert_eq!(slot_occ_first, SlotOccurrenceId::new(0));
     assert_eq!(child_occ_first, ChildTemplateOccurrenceId::new(0));
     assert_eq!(expr_site_first, ExpressionSiteId::new(0));
-    assert_eq!(branch_site_first, ExpressionSiteId::new(1));
+    assert_eq!(conditional_site_first, ExpressionSiteId::new(1));
     assert_eq!(loop_conditional_site_first, ExpressionSiteId::new(2));
 
     // Round 2 IDs continue from the round-1 counters: no reset, no re-issue.
     assert_eq!(slot_occ_second, SlotOccurrenceId::new(1));
     assert_eq!(child_occ_second, ChildTemplateOccurrenceId::new(1));
     assert_eq!(expr_site_second, ExpressionSiteId::new(3));
-    assert_eq!(branch_site_second, ExpressionSiteId::new(4));
+    assert_eq!(conditional_site_second, ExpressionSiteId::new(4));
     assert_eq!(range_start_second, ExpressionSiteId::new(5));
     assert_eq!(range_end_second, ExpressionSiteId::new(6));
     assert_eq!(range_step_second, Some(ExpressionSiteId::new(7)));
 }
 
 // -------------------------
-//  Branch selector and loop-header expression-site IDs
+//  Conditional selector and loop-header expression-site IDs
 // -------------------------
 
 #[test]
-fn branch_selector_site_ids_assigned_in_document_order() {
+fn conditional_selector_site_ids_assigned_in_document_order() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
-    let (branch_a_site, branch_b_site) = {
+    let (conditional_a_site, conditional_b_site) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
 
         let body_a = builder.push_text_node(
@@ -838,7 +837,7 @@ fn branch_selector_site_ids_assigned_in_document_order() {
             None,
         );
 
-        let branch_a = TemplateIrBranch::new(
+        let conditional_a = builder.push_conditional_node(
             TemplateBranchSelector::Bool(Expression::bool(
                 true,
                 None,
@@ -846,9 +845,8 @@ fn branch_selector_site_ids_assigned_in_document_order() {
             )),
             body_a,
             None,
-            builder.store.next_expression_site_id(),
         );
-        let branch_b = TemplateIrBranch::new(
+        let conditional_b = builder.push_conditional_node(
             TemplateBranchSelector::Bool(Expression::bool(
                 false,
                 None,
@@ -856,21 +854,16 @@ fn branch_selector_site_ids_assigned_in_document_order() {
             )),
             body_b,
             None,
-            builder.store.next_expression_site_id(),
         );
 
-        let chain_id = builder.push_branch_chain_node(vec![branch_a, branch_b], None, None, None);
-
-        let chain = store.get_node(chain_id).expect("chain node");
-        let branches = match &chain.kind {
-            TemplateIrNodeKind::BranchChain { branches, .. } => branches,
-            other => panic!("expected BranchChain, got {other:?}"),
-        };
-        (branches[0].selector_site_id, branches[1].selector_site_id)
+        (
+            conditional_selector_site_id(&store, conditional_a),
+            conditional_selector_site_id(&store, conditional_b),
+        )
     };
 
-    assert_eq!(branch_a_site, ExpressionSiteId::new(0));
-    assert_eq!(branch_b_site, ExpressionSiteId::new(1));
+    assert_eq!(conditional_a_site, ExpressionSiteId::new(0));
+    assert_eq!(conditional_b_site, ExpressionSiteId::new(1));
 }
 
 #[test]
@@ -1079,7 +1072,7 @@ fn expression_sites_share_one_document_order_counter() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
 
-    let (expr_site, branch_site, range_start, range_end, range_step) = {
+    let (expr_site, conditional_site, range_start, range_end, range_step) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
 
         // First: a dynamic expression splice (site 0).
@@ -1093,24 +1086,22 @@ fn expression_sites_share_one_document_order_counter() {
             None,
         );
 
-        // Second: a branch chain with one branch selector (site 1).
-        let branch_body = builder.push_text_node(
+        // Second: a conditional selector (site 1).
+        let conditional_body = builder.push_text_node(
             string_table.intern("branch"),
             6,
             TemplateSegmentOrigin::Body,
             None,
         );
-        let branch = TemplateIrBranch::new(
+        let conditional_node = builder.push_conditional_node(
             TemplateBranchSelector::Bool(Expression::bool(
                 true,
                 None,
                 crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
             )),
-            branch_body,
+            conditional_body,
             None,
-            builder.store.next_expression_site_id(),
         );
-        let chain_node = builder.push_branch_chain_node(vec![branch], None, None, None);
 
         // Third: a range loop with start (site 2), end (site 3), step (site 4).
         let loop_body = builder.push_text_node(
@@ -1155,10 +1146,7 @@ fn expression_sites_share_one_document_order_counter() {
             other => panic!("expected DynamicExpression, got {other:?}"),
         };
 
-        let branch_site = match &store.get_node(chain_node).expect("chain").kind {
-            TemplateIrNodeKind::BranchChain { branches, .. } => branches[0].selector_site_id,
-            other => panic!("expected BranchChain, got {other:?}"),
-        };
+        let conditional_site = conditional_selector_site_id(&store, conditional_node);
 
         let (range_start, range_end, range_step) =
             match &store.get_node(loop_node).expect("loop").kind {
@@ -1171,12 +1159,18 @@ fn expression_sites_share_one_document_order_counter() {
                 other => panic!("expected Loop node, got {other:?}"),
             };
 
-        (expr_site, branch_site, range_start, range_end, range_step)
+        (
+            expr_site,
+            conditional_site,
+            range_start,
+            range_end,
+            range_step,
+        )
     };
 
     // All sites share one document-order counter.
     assert_eq!(expr_site, ExpressionSiteId::new(0));
-    assert_eq!(branch_site, ExpressionSiteId::new(1));
+    assert_eq!(conditional_site, ExpressionSiteId::new(1));
     assert_eq!(range_start, ExpressionSiteId::new(2));
     assert_eq!(range_end, ExpressionSiteId::new(3));
     assert_eq!(range_step, Some(ExpressionSiteId::new(4)));

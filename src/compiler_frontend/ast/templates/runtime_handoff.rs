@@ -12,7 +12,7 @@
 
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateBranchSelector, TemplateElseMarker, TemplateLoopControlKind, TemplateLoopHeader,
+    TemplateBranchSelector, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::template_slots::{
     RuntimeSlotContributionSourceId, RuntimeSlotSiteId,
@@ -43,12 +43,9 @@ pub struct OwnedRuntimeTemplateHandoff {
 
 /// Runtime template body kind.
 ///
-/// WHAT: distinguishes ordinary render trees from nested runtime slot
-/// applications.
-/// WHY: current HIR lowering gives runtime slot applications precedence over
-/// linear/control-flow rendering. Keeping that distinction in the handoff lets
-/// the later lowering slice preserve the same dispatch rule without looking
-/// back at structural template data.
+/// WHAT: distinguishes ordinary render trees from runtime slot applications.
+/// WHY: HIR sends render bodies and slot application bodies through their
+/// respective lowering paths without consulting structural template data.
 #[derive(Clone, Debug)]
 pub(crate) enum OwnedRuntimeTemplateBody {
     Render(OwnedRuntimeTemplateNode),
@@ -108,12 +105,10 @@ pub(crate) enum OwnedRuntimeTemplateNode {
         span: Option<SourceSpan>,
     },
 
-    BranchChain {
-        branches: Vec<OwnedRuntimeTemplateBranch>,
-        fallback: Option<Box<OwnedRuntimeTemplateNode>>,
-        #[allow(dead_code)] // Retained for deferred source-aware handoff diagnostics.
-        else_marker: Option<TemplateElseMarker>,
-        #[allow(dead_code)] // Retained for deferred source-aware handoff diagnostics.
+    /// Runtime `if` with one effective selector and one lazily evaluated body.
+    Conditional {
+        selector: Box<TemplateBranchSelector>,
+        body: Box<OwnedRuntimeTemplateNode>,
         span: Option<SourceSpan>,
     },
 
@@ -126,11 +121,6 @@ pub(crate) enum OwnedRuntimeTemplateNode {
     },
 
     AggregateOutput,
-
-    LoopControl {
-        kind: TemplateLoopControlKind,
-        span: Option<SourceSpan>,
-    },
 
     RuntimeSlotSite {
         site: RuntimeSlotSiteId,
@@ -158,13 +148,6 @@ pub(crate) enum OwnedRuntimeTemplateNode {
         #[allow(dead_code)] // Retained for deferred source-aware handoff diagnostics.
         span: Option<SourceSpan>,
     },
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct OwnedRuntimeTemplateBranch {
-    pub(crate) selector: TemplateBranchSelector,
-    pub(crate) body: OwnedRuntimeTemplateNode,
-    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Owned source-accumulator plan for one runtime slot contribution.
@@ -259,16 +242,8 @@ pub(crate) fn walk_owned_runtime_template_node<E>(
             walk_owned_runtime_template_node(wrapper, callback)?;
         }
 
-        OwnedRuntimeTemplateNode::BranchChain {
-            branches, fallback, ..
-        } => {
-            for branch in branches {
-                walk_owned_runtime_template_node(&branch.body, callback)?;
-            }
-
-            if let Some(fallback) = fallback {
-                walk_owned_runtime_template_node(fallback, callback)?;
-            }
+        OwnedRuntimeTemplateNode::Conditional { body, .. } => {
+            walk_owned_runtime_template_node(body, callback)?;
         }
 
         OwnedRuntimeTemplateNode::Loop {
@@ -286,7 +261,6 @@ pub(crate) fn walk_owned_runtime_template_node<E>(
         OwnedRuntimeTemplateNode::Text { .. }
         | OwnedRuntimeTemplateNode::DynamicExpression { .. }
         | OwnedRuntimeTemplateNode::AggregateOutput
-        | OwnedRuntimeTemplateNode::LoopControl { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => {}
@@ -361,16 +335,8 @@ pub(crate) fn walk_owned_runtime_template_node_mut<E>(
             walk_owned_runtime_template_node_mut(wrapper, callback)?;
         }
 
-        OwnedRuntimeTemplateNode::BranchChain {
-            branches, fallback, ..
-        } => {
-            for branch in branches {
-                walk_owned_runtime_template_node_mut(&mut branch.body, callback)?;
-            }
-
-            if let Some(fallback) = fallback {
-                walk_owned_runtime_template_node_mut(fallback, callback)?;
-            }
+        OwnedRuntimeTemplateNode::Conditional { body, .. } => {
+            walk_owned_runtime_template_node_mut(body, callback)?;
         }
 
         OwnedRuntimeTemplateNode::Loop {
@@ -388,7 +354,6 @@ pub(crate) fn walk_owned_runtime_template_node_mut<E>(
         OwnedRuntimeTemplateNode::Text { .. }
         | OwnedRuntimeTemplateNode::DynamicExpression { .. }
         | OwnedRuntimeTemplateNode::AggregateOutput
-        | OwnedRuntimeTemplateNode::LoopControl { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => {}

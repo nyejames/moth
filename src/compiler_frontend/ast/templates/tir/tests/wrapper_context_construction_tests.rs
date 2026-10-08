@@ -9,7 +9,6 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
 };
 use crate::compiler_frontend::ast::templates::tir::TemplateIrBuilder;
 use crate::compiler_frontend::ast::templates::tir::ids::TemplateIrId;
-use crate::compiler_frontend::ast::templates::tir::node::TemplateIrBranch;
 use crate::compiler_frontend::ast::templates::tir::overlays::{
     TemplateViewContext, TirExpressionOverlayId, TirWrapperApplicationMode,
 };
@@ -52,13 +51,11 @@ fn text_template(
 fn control_flow_template(store: &mut TemplateIrStore, strings: &mut StringTable) -> TemplateIrId {
     let mut builder = TemplateIrBuilder::new(store);
     let body = builder.push_text_node(strings.intern("body"), 4, TemplateSegmentOrigin::Body, None);
-    let branch = TemplateIrBranch::new(
+    let root = builder.push_conditional_node(
         TemplateBranchSelector::Bool(Expression::bool(false, None, ValueMode::ImmutableOwned)),
         body,
         None,
-        builder.store.next_expression_site_id(),
     );
-    let root = builder.push_branch_chain_node(vec![branch], None, None, None);
     builder.finish_template(
         root,
         Style::default(),
@@ -104,7 +101,7 @@ fn wrapper_template(
     )
 }
 
-fn parent_with_branch_body_child(
+fn parent_with_conditional_body_child(
     store: &mut TemplateIrStore,
     child: TemplateIrId,
     context: TemplateViewContext,
@@ -115,13 +112,11 @@ fn parent_with_branch_body_child(
         None,
     );
     let body = builder.push_sequence_node(vec![child_node], None);
-    let branch = TemplateIrBranch::new(
+    let root = builder.push_conditional_node(
         TemplateBranchSelector::Bool(Expression::bool(true, None, ValueMode::ImmutableOwned)),
         body,
         None,
-        builder.store.next_expression_site_id(),
     );
-    let root = builder.push_branch_chain_node(vec![branch], None, None, None);
     builder.finish_template(
         root,
         Style::default(),
@@ -267,20 +262,20 @@ fn control_flow_child_uses_if_child_emits_wrapper_mode() {
 }
 
 #[test]
-fn overlay_records_direct_child_inside_branch_body() {
+fn overlay_records_direct_child_inside_conditional_body() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let empty = TemplateViewContext::default();
     let (parent, wrapper) = {
         let mut store = store.borrow_mut();
         let child = text_template(&mut store, &mut strings, "child", Style::default());
-        let parent = parent_with_branch_body_child(&mut store, child, empty);
+        let parent = parent_with_conditional_body_child(&mut store, child, empty);
         (parent, wrapper_template(&mut store, &mut strings))
     };
     let mut parent_reference = reference(parent, empty);
 
     attach_wrapper_context_overlay(&mut parent_reference, &[wrapper], &store)
-        .expect("branch-body child should receive an inherited context");
+        .expect("conditional-body child should receive an inherited context");
 
     let store = store.borrow();
     let overlay = store

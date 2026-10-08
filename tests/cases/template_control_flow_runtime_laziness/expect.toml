@@ -1,5 +1,9 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["template_control_flow_runtime_laziness", "selected lazy branch"]
-rendered_output_not_contains = ["caught inactive branch", "inactive branch evaluated"]
+rendered_output_contains = ["template_control_flow_runtime_laziness"]
+rendered_output_contains_exactly_once = ["selected lazy branch"]
+rendered_output_not_contains = [
+  "caught inactive branch",
+  "inactive branch evaluated",
+]

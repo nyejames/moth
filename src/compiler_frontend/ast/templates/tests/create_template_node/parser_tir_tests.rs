@@ -9,7 +9,6 @@ use crate::compiler_frontend::ast::templates::template::{
 };
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::templates::template_control_flow::TemplateControlFlowValidationMode;
-use crate::compiler_frontend::ast::templates::template_control_flow::TemplateLoopControlKind;
 use crate::compiler_frontend::ast::templates::template_head_parser::{
     TemplateHeadParseRequest, parse_template_head,
 };
@@ -204,7 +203,7 @@ fn parser_tir_records_suppressed_child_template_brackets_as_literal_text() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let (template, store) = parse_template(
-        "[$doc:\n[: child]\n]",
+        "[$doc:\n[: child [else] [break] [continue]]\n]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -213,7 +212,7 @@ fn parser_tir_records_suppressed_child_template_brackets_as_literal_text() {
 
     assert_eq!(
         parser_tir_texts(&template, &store, &string_table),
-        vec!["<p>[: child]</p>"],
+        vec!["<p>[: child [else] [break] [continue]]</p>"],
         "post-render parser TIR must reflect formatted output, with suppressed brackets preserved as literal text"
     );
 }
@@ -314,7 +313,7 @@ fn parser_tir_root_kind<'store>(
 /// control-flow child.
 ///
 /// WHAT: after render-unit preparation, refreshed control-flow templates
-///       finalize with the `BranchChain` or `Loop` node as the direct root.
+///       finalize with the `Conditional` or `Loop` node as the direct root.
 ///       Templates that still carry a prefix or were not refreshed keep a
 ///       `Sequence`-wrapped root. This helper abstracts over both shapes so
 ///       tests can assert on the control-flow node without knowing which
@@ -324,9 +323,7 @@ fn parser_tir_control_flow_root_kind<'store>(
     store: &'store TemplateIrStore,
 ) -> &'store TemplateIrNodeKind {
     match parser_tir_root_kind(template, store) {
-        kind @ (TemplateIrNodeKind::BranchChain { .. }
-        | TemplateIrNodeKind::Loop { .. }
-        | TemplateIrNodeKind::LoopControl { .. }) => kind,
+        kind @ (TemplateIrNodeKind::Conditional { .. } | TemplateIrNodeKind::Loop { .. }) => kind,
         TemplateIrNodeKind::Sequence { children } => {
             assert_eq!(
                 children.len(),
@@ -373,50 +370,7 @@ fn tir_subtree_contains_aggregate_output(
 }
 
 #[test]
-fn parser_tir_records_if_else_if_else_branch_chain() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template(
-        "[if true:\nfirst\n[else if false]\nsecond\n[else]\nthird\n]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let store = store.borrow();
-
-    let parent_template = store
-        .get_template(template.tir_reference.root)
-        .expect("parent parser TIR template should exist");
-    assert!(parent_template.summary.has_control_flow);
-
-    let branch_chain = match parser_tir_control_flow_root_kind(&template, &store) {
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => (branches, fallback),
-        other => panic!("expected parser TIR BranchChain node, found {other:?}"),
-    };
-
-    let (branches, fallback) = branch_chain;
-    assert_eq!(branches.len(), 2);
-    assert!(fallback.is_some());
-
-    let fallback_body = fallback
-        .as_ref()
-        .copied()
-        .expect("branch-chain fallback body should exist");
-
-    let first_branch_text = body_text(branches[0].body, &store, &string_table);
-    let second_branch_text = body_text(branches[1].body, &store, &string_table);
-    let fallback_text = body_text(fallback_body, &store, &string_table);
-
-    assert_eq!(first_branch_text, "first");
-    assert_eq!(second_branch_text, "second");
-    assert_eq!(fallback_text, "third");
-}
-
-#[test]
-fn template_tir_records_child_template_in_branch_body() {
+fn template_tir_records_child_template_in_conditional_body() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -428,18 +382,12 @@ fn template_tir_records_child_template_in_branch_body() {
     );
     let store = store.borrow();
 
-    let branch_chain = match parser_tir_control_flow_root_kind(&template, &store) {
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => (branches, fallback),
-        other => panic!("expected parser TIR BranchChain node, found {other:?}"),
+    let body = match parser_tir_control_flow_root_kind(&template, &store) {
+        TemplateIrNodeKind::Conditional { body, .. } => *body,
+        other => panic!("expected parser TIR Conditional node, found {other:?}"),
     };
 
-    let (branches, fallback) = branch_chain;
-    assert_eq!(branches.len(), 1);
-    assert!(fallback.is_none());
-
-    let body_children = sequence_child_ids(branches[0].body, &store);
+    let body_children = sequence_child_ids(body, &store);
     assert_eq!(body_children.len(), 3);
     assert!(matches!(
         store.get_node(body_children[0]).map(|n| &n.kind),
@@ -455,16 +403,9 @@ fn template_tir_records_child_template_in_branch_body() {
     ));
 }
 
-/// Finds the `BranchChain` node among the parser root children, returning its
-/// branches and fallback. Needed when a shared head prefix precedes the
-/// control-flow node so the root has more than one child.
-fn branch_chain_from_root(
-    template: &Template,
-    store: &TemplateIrStore,
-) -> (
-    Vec<crate::compiler_frontend::ast::templates::tir::TemplateIrBranch>,
-    Option<TemplateIrNodeId>,
-) {
+/// Finds the conditional body after render-unit preparation moves a shared
+/// head prefix into it.
+fn conditional_body_from_root(template: &Template, store: &TemplateIrStore) -> TemplateIrNodeId {
     let template_id = template.tir_reference.root;
     let template_ir = store
         .get_template(template_id)
@@ -474,37 +415,34 @@ fn branch_chain_from_root(
         .expect("parser TIR root should exist");
 
     // After render-unit preparation, refreshed control-flow templates finalize
-    // with the BranchChain as the direct root — whether or not a head prefix was
-    // present. A Sequence-wrapped root only appears for multi-child or unrefreshed
-    // control-flow templates.
-    let branch_chain_node_id = match &root.kind {
-        TemplateIrNodeKind::BranchChain { .. } => template_ir.root,
+    // with the Conditional as the direct root. A Sequence-wrapped root remains
+    // possible when the template has other root children.
+    let conditional_node_id = match &root.kind {
+        TemplateIrNodeKind::Conditional { .. } => template_ir.root,
         TemplateIrNodeKind::Sequence { children } => children
             .iter()
             .copied()
             .find(|id| {
                 store
                     .get_node(*id)
-                    .is_some_and(|node| matches!(node.kind, TemplateIrNodeKind::BranchChain { .. }))
+                    .is_some_and(|node| matches!(node.kind, TemplateIrNodeKind::Conditional { .. }))
             })
-            .expect("parser root should contain a BranchChain node"),
-        other => panic!("expected parser TIR BranchChain or Sequence root, found {other:?}"),
+            .expect("parser root should contain a Conditional node"),
+        other => panic!("expected parser TIR Conditional or Sequence root, found {other:?}"),
     };
 
     match &store
-        .get_node(branch_chain_node_id)
-        .expect("BranchChain node should exist")
+        .get_node(conditional_node_id)
+        .expect("Conditional node should exist")
         .kind
     {
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => (branches.clone(), *fallback),
-        other => panic!("expected BranchChain node, found {other:?}"),
+        TemplateIrNodeKind::Conditional { body, .. } => *body,
+        other => panic!("expected Conditional node, found {other:?}"),
     }
 }
 
 #[test]
-fn branch_body_tir_root_derives_shared_head_prefix_from_parser_tir() {
+fn conditional_body_tir_root_derives_shared_head_prefix_from_parser_tir() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -516,101 +454,27 @@ fn branch_body_tir_root_derives_shared_head_prefix_from_parser_tir() {
     );
     let store = store.borrow();
 
-    let (branches, fallback) = branch_chain_from_root(&template, &store);
-    assert_eq!(branches.len(), 1);
-    assert!(fallback.is_none());
+    let body = conditional_body_from_root(&template, &store);
 
-    // The branch body root should carry the shared head prefix plus the body
+    // The conditional body root should carry the shared head prefix plus the body
     // text, proving the shared prefix still applies through the TIR-derived
     // body root.
-    let body_children = sequence_child_ids(branches[0].body, &store);
-    let branch_body_text = body_children
+    let body_children = sequence_child_ids(body, &store);
+    let conditional_body_text = body_children
         .iter()
         .map(|child_id| parser_tir_text(*child_id, &store, &string_table))
         .collect::<Vec<_>>()
         .join("");
-    assert_eq!(branch_body_text, "prefixbody");
+    assert_eq!(conditional_body_text, "prefixbody");
 
     // The head-prefix portion of the body root should retain the parser-emitted
     // TIR node. The owner root is now
-    // the BranchChain itself, so the prefix lives only inside the selected
-    // branch bodies.
+    // the Conditional itself, so the prefix lives only inside its selected
+    // body.
     assert_eq!(
         parser_tir_text(body_children[0], &store, &string_table),
         "prefix",
-        "branch body root should start with the shared head-prefix text"
-    );
-}
-
-#[test]
-fn fallback_body_tir_root_derives_shared_head_prefix_from_parser_tir() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template(
-        "[\"prefix\", if false:\nbranch\n[else]\nfallback\n]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let store = store.borrow();
-
-    let (branches, fallback) = branch_chain_from_root(&template, &store);
-    assert_eq!(branches.len(), 1);
-    let fallback_body = fallback.expect("branch chain should have a fallback body");
-
-    // The fallback body root should carry the shared head prefix plus the
-    // fallback body text, proving the shared prefix applies to the fallback
-    // through the TIR-derived body root.
-    let fallback_children = sequence_child_ids(fallback_body, &store);
-    let fallback_body_text = fallback_children
-        .iter()
-        .map(|child_id| parser_tir_text(*child_id, &store, &string_table))
-        .collect::<Vec<_>>()
-        .join("");
-    assert_eq!(fallback_body_text, "prefixfallback");
-
-    // The head-prefix portion of the fallback body root should retain the
-    // parser-emitted TIR node. The owner root is now the BranchChain itself, so
-    // the prefix lives only inside the branch/fallback bodies.
-    assert_eq!(
-        parser_tir_text(fallback_children[0], &store, &string_table),
-        "prefix",
-        "fallback body root should start with the shared head-prefix text"
-    );
-}
-
-#[test]
-fn parser_tir_trims_loop_control_boundary_whitespace() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template(
-        "[loop true:\n    [continue]\n    visible\n]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let store = store.borrow();
-
-    let loop_node = match parser_tir_control_flow_root_kind(&template, &store) {
-        TemplateIrNodeKind::Loop { body, .. } => body,
-        other => panic!("expected parser TIR Loop node, found {other:?}"),
-    };
-
-    let body_children = sequence_child_ids(*loop_node, &store);
-    assert!(matches!(
-        store
-            .get_node(body_children[0])
-            .expect("loop body child should exist")
-            .kind,
-        TemplateIrNodeKind::LoopControl {
-            kind: TemplateLoopControlKind::Continue,
-        }
-    ));
-    assert_eq!(
-        parser_tir_text(body_children[1], &store, &string_table),
-        "visible"
+        "conditional body root should start with the shared head-prefix text"
     );
 }
 
@@ -696,76 +560,6 @@ fn template_tir_records_child_template_in_loop_body() {
         store.get_node(body_children[2]).map(|n| &n.kind),
         Some(TemplateIrNodeKind::Text { .. })
     ));
-}
-
-#[test]
-fn parser_tir_records_loop_control_markers_inside_loop_body() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template(
-        "[loop true:\n    before\n    [break]\n    after\n]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let store = store.borrow();
-
-    let loop_node = match parser_tir_control_flow_root_kind(&template, &store) {
-        TemplateIrNodeKind::Loop { body, .. } => body,
-        other => panic!("expected parser TIR Loop node, found {other:?}"),
-    };
-
-    let body_children = sequence_child_ids(*loop_node, &store);
-    let control_kinds: Vec<TemplateLoopControlKind> = body_children
-        .iter()
-        .filter_map(|child_id| {
-            let node = store
-                .get_node(*child_id)
-                .expect("loop body child should exist");
-            match &node.kind {
-                TemplateIrNodeKind::LoopControl { kind } => Some(*kind),
-                _ => None,
-            }
-        })
-        .collect();
-
-    assert_eq!(control_kinds, vec![TemplateLoopControlKind::Break]);
-}
-
-#[test]
-fn parser_tir_records_continue_marker_inside_loop_body() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template(
-        "[loop true:\n    before\n    [continue]\n    after\n]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let store = store.borrow();
-
-    let loop_node = match parser_tir_control_flow_root_kind(&template, &store) {
-        TemplateIrNodeKind::Loop { body, .. } => body,
-        other => panic!("expected parser TIR Loop node, found {other:?}"),
-    };
-
-    let body_children = sequence_child_ids(*loop_node, &store);
-    let control_kinds: Vec<TemplateLoopControlKind> = body_children
-        .iter()
-        .filter_map(|child_id| {
-            let node = store
-                .get_node(*child_id)
-                .expect("loop body child should exist");
-            match &node.kind {
-                TemplateIrNodeKind::LoopControl { kind } => Some(*kind),
-                _ => None,
-            }
-        })
-        .collect();
-
-    assert_eq!(control_kinds, vec![TemplateLoopControlKind::Continue]);
 }
 
 /// Returns the text content of a body root by reading its sequence text nodes.
@@ -2010,7 +1804,7 @@ fn no_formatter_child_wrapper_reaches_formatted_phase_through_tir() {
 }
 
 #[test]
-fn formatted_tir_reference_installs_formatted_control_flow_branch_body() {
+fn formatted_tir_reference_installs_formatted_conditional_body() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -2031,98 +1825,15 @@ fn formatted_tir_reference_installs_formatted_control_flow_branch_body() {
         "owner parser TIR must record control-flow presence"
     );
 
-    let branch_chain = match parser_tir_control_flow_root_kind(&template, &store) {
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => (branches, fallback),
-        other => panic!("expected parser TIR BranchChain node, found {other:?}"),
+    let conditional_body = match parser_tir_control_flow_root_kind(&template, &store) {
+        TemplateIrNodeKind::Conditional { body, .. } => *body,
+        other => panic!("expected parser TIR Conditional node, found {other:?}"),
     };
 
-    let (branches, fallback) = branch_chain;
-    assert_eq!(branches.len(), 1);
-    assert!(fallback.is_none());
-
-    let branch_body_text = body_text(branches[0].body, &store, &string_table);
+    let conditional_body_text = body_text(conditional_body, &store, &string_table);
     assert_eq!(
-        branch_body_text, "<p> body</p>",
-        "render-unit preparation should install finalized formatter output into the branch body node"
-    );
-}
-
-#[test]
-fn formatted_tir_reference_installs_formatted_branch_and_fallback_bodies() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let (template, store) = parse_template(
-        "[$md, if false:\nbody\n[else]\nfallback\n]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let store = store.borrow();
-
-    let parent_template = store
-        .get_template(template.tir_reference.root)
-        .expect("parent parser TIR template should exist");
-    assert!(parent_template.summary.has_control_flow);
-
-    let branch_chain = match parser_tir_control_flow_root_kind(&template, &store) {
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => (branches, fallback),
-        other => panic!("expected parser TIR BranchChain node, found {other:?}"),
-    };
-
-    let (branches, fallback) = branch_chain;
-    assert_eq!(branches.len(), 1);
-    let fallback_body = fallback
-        .as_ref()
-        .copied()
-        .expect("fallback body should exist");
-
-    assert_eq!(
-        body_text(branches[0].body, &store, &string_table),
-        "<p>body</p>"
-    );
-    assert_eq!(
-        body_text(fallback_body, &store, &string_table),
-        "<p>fallback</p>"
-    );
-
-    let branch_span = branches[0]
-        .span
-        .expect("prepared branch should retain an authored source span");
-    assert_eq!(branch_span.source(), SourceId::COMPILATION_ROOT);
-    assert!(
-        branch_span
-            .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT))
-            .end()
-            > branch_span
-                .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT))
-                .start(),
-        "prepared branch span should cover authored bytes"
-    );
-    let branch_body_span = store
-        .get_node(branches[0].body)
-        .expect("prepared branch body root should exist")
-        .span
-        .expect("prepared branch body root should retain an authored source span");
-    assert_eq!(branch_body_span.source(), SourceId::COMPILATION_ROOT);
-    let fallback_span = store
-        .get_node(fallback_body)
-        .expect("prepared fallback body root should exist")
-        .span
-        .expect("prepared fallback body root should retain an authored source span");
-    assert_eq!(fallback_span.source(), SourceId::COMPILATION_ROOT);
-    assert!(
-        fallback_span
-            .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT))
-            .end()
-            > fallback_span
-                .resolve_with(span_builder.resolver_for(SourceId::COMPILATION_ROOT))
-                .start(),
-        "prepared fallback body span should cover authored bytes"
+        conditional_body_text, "<p> body</p>",
+        "render-unit preparation should install finalized formatter output into the conditional body node"
     );
 }
 
@@ -2188,7 +1899,7 @@ fn formatted_tir_reference_installs_formatted_loop_body() {
 
 #[test]
 fn no_formatter_control_flow_owner_reaches_formatted_phase() {
-    // No-formatter branch/fallback/loop bodies run through the same TIR formatter
+    // No-formatter conditional and loop bodies run through the same TIR formatter
     // adapter used by explicit-formatter bodies (default-whitespace normalization
     // / `$raw` preservation). Their owning TIR references should reach the
     // owning `Formatted` phase while preserving normalized body output.
@@ -2196,50 +1907,24 @@ fn no_formatter_control_flow_owner_reaches_formatted_phase() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
 
-    let (branch_template, store) = parse_template(
+    let (conditional_template, store) = parse_template(
         "[if true: body]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
     );
     let store = store.borrow();
-    let branch_chain = match parser_tir_control_flow_root_kind(&branch_template, &store) {
-        TemplateIrNodeKind::BranchChain { branches, .. } => branches,
-        other => panic!("expected parser TIR BranchChain node, found {other:?}"),
+    let conditional_body = match parser_tir_control_flow_root_kind(&conditional_template, &store) {
+        TemplateIrNodeKind::Conditional { body, .. } => body,
+        other => panic!("expected parser TIR Conditional node, found {other:?}"),
     };
-    assert_eq!(branch_chain.len(), 1);
     assert_eq!(
-        body_text(branch_chain[0].body, &store, &string_table),
+        body_text(*conditional_body, &store, &string_table),
         " body",
-        "no-formatter branch body should preserve normalized output"
+        "no-formatter conditional body should preserve normalized output"
     );
     assert_eq!(
-        branch_template.tir_reference.phase,
-        TemplateTirPhase::Formatted,
-    );
-
-    let (fallback_template, store) = parse_template(
-        "[if false:\nbranch\n[else]\nfallback\n]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let store = store.borrow();
-    let (branches, fallback) = branch_chain_from_root(&fallback_template, &store);
-    assert_eq!(branches.len(), 1);
-    let fallback_body = fallback.expect("branch chain should have a fallback body");
-    assert_eq!(
-        body_text(branches[0].body, &store, &string_table),
-        "branch",
-        "no-formatter branch body should preserve normalized output"
-    );
-    assert_eq!(
-        body_text(fallback_body, &store, &string_table),
-        "fallback",
-        "no-formatter fallback body should preserve normalized output"
-    );
-    assert_eq!(
-        fallback_template.tir_reference.phase,
+        conditional_template.tir_reference.phase,
         TemplateTirPhase::Formatted,
     );
 
@@ -2271,14 +1956,14 @@ fn no_formatter_control_flow_owner_reaches_formatted_phase() {
         &mut path_fork,
     );
     let store = store.borrow();
-    let raw_branch_chain = match parser_tir_control_flow_root_kind(&raw_template, &store) {
-        TemplateIrNodeKind::BranchChain { branches, .. } => branches,
-        other => panic!("expected parser TIR BranchChain node, found {other:?}"),
+    let raw_conditional_body = match parser_tir_control_flow_root_kind(&raw_template, &store) {
+        TemplateIrNodeKind::Conditional { body, .. } => body,
+        other => panic!("expected parser TIR Conditional node, found {other:?}"),
     };
     assert_eq!(
-        body_text(raw_branch_chain[0].body, &store, &string_table),
+        body_text(*raw_conditional_body, &store, &string_table),
         "\n    raw\n",
-        "$raw branch body should preserve authored whitespace"
+        "$raw conditional body should preserve authored whitespace"
     );
     assert_eq!(
         raw_template.tir_reference.phase,
@@ -2438,7 +2123,6 @@ fn parser_records_template_valued_head_as_structural_child_before_body_parse() {
         parent_source_path,
         Rc::new(TopLevelDeclarationTable::new(vec![declaration], &path_fork)),
         Arc::new(ExternalPackageRegistry::default()),
-        vec![],
         0,
     )
     .with_template_ir_store(Rc::clone(&shared_store));
@@ -2558,7 +2242,6 @@ fn parser_tir_records_template_valued_head_reference_as_child_template() {
         parent_source_path,
         Rc::new(TopLevelDeclarationTable::new(vec![declaration], &path_fork)),
         Arc::new(ExternalPackageRegistry::default()),
-        vec![],
         0,
     )
     .with_template_ir_store(Rc::clone(&shared_store));
@@ -2673,7 +2356,7 @@ fn doc_comment_with_formatter_records_comment_kind() {
 // -------------------------
 
 #[test]
-fn no_prefix_if_finalizes_with_direct_branch_chain_root() {
+fn no_prefix_if_finalizes_with_direct_conditional_root() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -2685,14 +2368,14 @@ fn no_prefix_if_finalizes_with_direct_branch_chain_root() {
     );
     let store = store.borrow();
 
-    // After render-unit preparation refreshes every branch body, the owner
-    // root is the BranchChain directly — not a Sequence wrapping it.
+    // After render-unit preparation refreshes the conditional body, the owner
+    // root is the Conditional directly, not a Sequence wrapping it.
     assert!(
         matches!(
             parser_tir_root_kind(&template, &store),
-            TemplateIrNodeKind::BranchChain { .. }
+            TemplateIrNodeKind::Conditional { .. }
         ),
-        "no-prefix if should finalize with a direct BranchChain root"
+        "no-prefix if should finalize with a direct Conditional root"
     );
 }
 

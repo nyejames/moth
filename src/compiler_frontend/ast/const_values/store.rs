@@ -761,14 +761,14 @@ impl ConstValueStore {
     }
 
     /// Map one value tree through the common recursive visitor.
-    pub(crate) fn fold_value<T>(
+    pub(crate) fn fold_value<T, E>(
         &self,
         id: ConstValueId,
-        visitor: &mut impl FnMut(
-            &ConstValueMetadata,
-            ConstValueVisit<'_, T>,
-        ) -> Result<T, CompilerError>,
-    ) -> Result<T, CompilerError> {
+        visitor: &mut impl FnMut(&ConstValueMetadata, ConstValueVisit<'_, T>) -> Result<T, E>,
+    ) -> Result<T, E>
+    where
+        E: From<CompilerError>,
+    {
         let value = self.value(id).ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "ConstValueStore value id {:?} is outside the module value graph.",
@@ -819,7 +819,7 @@ impl ConstValueStore {
                             value: self.fold_value(field.value, visitor)?,
                         })
                     })
-                    .collect::<Result<Vec<_>, CompilerError>>()?;
+                    .collect::<Result<Vec<_>, E>>()?;
                 visitor(&value.metadata, ConstValueVisit::Record(mapped))
             }
             ConstValuePayload::Choice {
@@ -836,7 +836,7 @@ impl ConstValueStore {
                             value: self.fold_value(field.value, visitor)?,
                         })
                     })
-                    .collect::<Result<Vec<_>, CompilerError>>()?;
+                    .collect::<Result<Vec<_>, E>>()?;
                 visitor(
                     &value.metadata,
                     ConstValueVisit::Choice {

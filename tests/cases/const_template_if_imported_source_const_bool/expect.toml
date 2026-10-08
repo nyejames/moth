@@ -5,5 +5,5 @@ warnings = "forbid"
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["Imported source const hidden"]
-must_not_contain = ["Imported source const visible"]
+must_contain = ["Imported source const visible"]
+must_not_contain = ["Imported source const hidden"]

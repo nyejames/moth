@@ -1,0 +1,33 @@
+@fixed_scalars.js identity_u32, load_u32, identity_f32, load_f32, overflow_f32, identity_int, identity_uint, identity_float
+
+is_max_u32 |value U32| -> Bool:
+    return value is 4294967295
+;
+
+is_tenth_f32 |value F32| -> Bool:
+    expected F32 = 0.1
+    return value is expected
+;
+
+zero U32 = identity_u32(0)
+maximum U32 = identity_u32(4294967295)
+loaded U32 = load_u32() catch:
+    then 0
+;
+fraction F32 = identity_f32(0.1)
+rounded F32 = load_f32() catch:
+    then 0.0
+;
+boundary_code ~U32 = 0
+recovered F32 = overflow_f32() catch |boundary_error|:
+    boundary_code = boundary_error.code
+    then 0.0
+;
+maximum_matches = is_max_u32(maximum)
+loaded_matches = is_max_u32(loaded)
+fraction_matches = is_tenth_f32(fraction)
+rounded_matches = is_tenth_f32(rounded)
+native_int Int = identity_int(17)
+native_uint Uint = identity_uint(18)
+native_float Float = identity_float(1.5)
+[:fixed scalar zero=[zero] maximum=[maximum_matches] loaded=[loaded_matches] f32=[fraction_matches]/[rounded_matches] overflow=[boundary_code] native=[native_int]/[native_uint]/[native_float]]

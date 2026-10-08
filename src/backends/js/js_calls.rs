@@ -8,8 +8,8 @@ use crate::backends::js::JsEmitter;
 use crate::backends::js::value_use::JsValueUse;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalJsLowering};
-use crate::compiler_frontend::hir::expressions::HirExpression;
-use crate::compiler_frontend::hir::ids::LocalId;
+use crate::compiler_frontend::hir::expression_store::HirValueRange;
+use crate::compiler_frontend::hir::statements::HirLocalDestination;
 
 /// Result of lowering a call target for the JS backend.
 ///
@@ -114,18 +114,20 @@ impl<'hir> JsEmitter<'hir> {
     pub(crate) fn emit_call_statement(
         &mut self,
         target: &CallTarget,
-        args: &[HirExpression],
-        result: &Option<LocalId>,
+        args: HirValueRange,
+        result: &Option<HirLocalDestination>,
     ) -> Result<(), CompilerError> {
         let lowered_target = self.lower_call_target(target)?;
+        let hir = self.hir;
+        let args = hir.expressions.values(args);
 
         let args = if matches!(target, CallTarget::External(_)) {
             args.iter()
-                .map(|arg| self.lower_expression_for_use(arg, JsValueUse::HostCallArgument))
+                .map(|arg| self.lower_expression_for_use(*arg, JsValueUse::HostCallArgument))
                 .collect::<Result<Vec<_>, _>>()?
         } else {
             args.iter()
-                .map(|arg| self.lower_expression_for_use(arg, JsValueUse::MothCallArgument))
+                .map(|arg| self.lower_expression_for_use(*arg, JsValueUse::MothCallArgument))
                 .collect::<Result<Vec<_>, _>>()?
         };
 
@@ -138,9 +140,8 @@ impl<'hir> JsEmitter<'hir> {
             }
         };
 
-        if let Some(result_local) = result {
-            let result_name = self.local_name(*result_local)?;
-            self.emit_line(&format!("__moth_assign_value({result_name}, {call});"));
+        if let Some(result) = result {
+            self.emit_value_destination(*result, &call)?;
         } else {
             self.emit_line(&format!("{call};"));
         }

@@ -6,13 +6,13 @@
 //!      both sides, breaking lazy boolean semantics and causing invalid borrow access.
 
 use crate::compiler_frontend::ast::expressions::expression::Operator;
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
-use crate::compiler_frontend::hir::ids::BlockId;
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
+use crate::compiler_frontend::hir::terminators::{HirJumpArgument, HirTerminator};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
 
@@ -47,7 +47,7 @@ impl<'a> HirBuilder<'a> {
         op: &Operator,
         right: &RuntimeRpnTree,
         source_span: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let lowered_left = self.lower_runtime_tree_value_to_current_block(left, source_span)?;
 
         let condition_block = self.current_block_id_or_error(source_span)?;
@@ -81,12 +81,14 @@ impl<'a> HirBuilder<'a> {
         self.emit_short_circuit_rhs_branch(
             rhs_block,
             merge_block,
+            result_local,
             right,
             source_span,
             cfg_spec.rhs_edge_label,
         )?;
         self.emit_short_circuit_constant_branch(
             (short_block, merge_block),
+            result_local,
             cfg_spec.short_value,
             bool_ty,
             source_span,
@@ -95,7 +97,7 @@ impl<'a> HirBuilder<'a> {
 
         self.set_current_block(merge_block, source_span)?;
         let merge_region = self.current_region_or_error(source_span)?;
-        let value = self.make_local_load_expression(result_local, bool_ty, &None, merge_region);
+        let value = self.make_local_load_expression(result_local, bool_ty, &None, merge_region)?;
 
         Ok(LoweredExpression {
             prelude: vec![],
@@ -107,7 +109,7 @@ impl<'a> HirBuilder<'a> {
         &self,
         op: &Operator,
         source_span: &Option<SourceSpan>,
-    ) -> Result<ShortCircuitCfgSpec, CompilerError> {
+    ) -> Result<ShortCircuitCfgSpec, HirConstructionFailure> {
         match op {
             Operator::And => Ok(ShortCircuitCfgSpec {
                 evaluate_rhs_on_true: true,
@@ -143,10 +145,11 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         rhs_block: BlockId,
         merge_block: BlockId,
+        result_local: LocalId,
         rhs: &RuntimeRpnTree,
         source_span: &Option<SourceSpan>,
         edge_label: &str,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         self.set_current_block(rhs_block, source_span)?;
 
         let lowered_rhs = self.lower_runtime_tree_value_to_current_block(rhs, source_span)?;
@@ -158,7 +161,10 @@ impl<'a> HirBuilder<'a> {
             self.emit_jump_with_args(
                 rhs_tail,
                 merge_block,
-                vec![merge_arg_local],
+                vec![HirJumpArgument {
+                    source: merge_arg_local,
+                    destination: result_local,
+                }],
                 source_span,
                 edge_label,
             )?;
@@ -170,11 +176,12 @@ impl<'a> HirBuilder<'a> {
     fn emit_short_circuit_constant_branch(
         &mut self,
         branch_blocks: (BlockId, BlockId),
+        result_local: LocalId,
         short_value: bool,
         bool_ty: TypeId,
         source_span: &Option<SourceSpan>,
         edge_label: &str,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let (short_block, merge_block) = branch_blocks;
         self.set_current_block(short_block, source_span)?;
         let short_region = self.current_region_or_error(source_span)?;
@@ -184,13 +191,16 @@ impl<'a> HirBuilder<'a> {
             bool_ty,
             ValueKind::Const,
             short_region,
-        );
+        )?;
         let merge_arg_local = self
             .materialize_short_circuit_jump_argument_local(short_value_expression, source_span)?;
         self.emit_jump_with_args(
             short_block,
             merge_block,
-            vec![merge_arg_local],
+            vec![HirJumpArgument {
+                source: merge_arg_local,
+                destination: result_local,
+            }],
             source_span,
             edge_label,
         )

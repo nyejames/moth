@@ -48,7 +48,7 @@ pub(crate) use diagnostic_payload::{
     CommonSyntaxMistakeReason, CompileTimeEvaluationErrorReason, CssTemplateWarning,
     DeferredFeatureReason, DependencyClauseKind, DiagnosticCompoundAssignmentOperator,
     DiagnosticOperator, DiagnosticPayload, DiagnosticPlace, GenericApplicationErrorReason,
-    GenericInferenceSubject, HtmlTemplateWarning, ImportPublicSurfaceType,
+    GenericInferenceSubject, HirCapacityResource, HtmlTemplateWarning, ImportPublicSurfaceType,
     IncompatibleChoiceComparisonReason, InvalidAssignmentTargetReason, InvalidBuiltinCallReason,
     InvalidCallShapeReason, InvalidCastReason, InvalidChoiceVariantReason,
     InvalidCollectionTypeReason, InvalidCompileTimePathReason, InvalidConfigReason,

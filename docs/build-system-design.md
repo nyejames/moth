@@ -544,7 +544,7 @@ A module without `$page` emits no independent page, but its reachable declaratio
 
 The canonical entry-config and HTML-routing references own document defaults and public metadata shape. A present page title overrides the route/project fallback and receives the initial builder prefix/postfix. Absent fields use documented defaults and `none` differs from a permitted present empty String. Escape title text and attribute values in their output contexts. Insert authored folded `head` as HTML without escaping it or flattening meaningful whitespace. These rules do not form a generic schema merge system.
 
-Runtime `io.set_title` requires an advertised browser document-title capability. It changes live title text without reapplying initial prefix/postfix, changing routes, mutating folded metadata or rewriting static outputs. A non-browser JavaScript host receives the same explicit capability rejection as another unsupported target, never a silent no-op.
+Runtime `io.set_title` sets the title of the current user-facing host surface and requires an advertised title capability. HTML-JS advertises it and realises it as the live document title. The call changes live title text without reapplying initial prefix/postfix, changing routes, mutating folded metadata or rewriting static outputs. A JavaScript host that doesn't advertise the capability receives the same explicit capability rejection as another unsupported target, never a silent no-op.
 
 ### Mixed-target planning and validation
 

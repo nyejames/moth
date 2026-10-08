@@ -232,7 +232,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                         string_table,
                     )
                 })?;
-            self.validate_no_unresolved_executable_types(&emitted.ast, &const_values, string_table)
+            self.validate_no_unresolved_executable_types(&emitted.ast, &const_values)
                 .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
 
             // The candidate owns its exact annotated TIR contexts. Normalize those active views,
@@ -245,12 +245,8 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                         string_table,
                     )
                 })?;
-            self.validate_no_unresolved_executable_types(
-                static_candidate.ast(),
-                &const_values,
-                string_table,
-            )
-            .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+            self.validate_no_unresolved_executable_types(static_candidate.ast(), &const_values)
+                .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
         } else {
             // The common runtime-only path retains the existing single normalization owner. The
             // unchanged projection is discarded without allocating normalization overlays.
@@ -262,7 +258,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                         string_table,
                     )
                 })?;
-            self.validate_no_unresolved_executable_types(&emitted.ast, &const_values, string_table)
+            self.validate_no_unresolved_executable_types(&emitted.ast, &const_values)
                 .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
         }
 

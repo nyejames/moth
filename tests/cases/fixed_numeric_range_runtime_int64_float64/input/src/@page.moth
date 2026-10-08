@@ -7,7 +7,7 @@ i8u16_last_index ~= 0
 loop start_i8 to & end_u16 by step_u16 |value, index|:
     i8u16_sum = i8u16_sum + value
     i8u16_count = i8u16_count + 1
-    i8u16_last_index = index
+    i8u16_last_index = copy index
 ;
 
 start_i32 I32 = 2147483646
@@ -19,7 +19,7 @@ mixed_last_index ~= 0
 loop start_i32 to & end_u32 by step_u32 |value, index|:
     mixed_sum = mixed_sum + value
     mixed_count = mixed_count + 1
-    mixed_last_index = index
+    mixed_last_index = copy index
 ;
 
 above_i64 U64 = 9223372036854775808
@@ -32,14 +32,14 @@ saw_u64_max ~= false
 high_u64_last_index ~= 0
 loop above_i64 to & above_i64 by u64_one |value, index|:
     high_u64_count = high_u64_count + 1
-    high_u64_last_index = index
+    high_u64_last_index = copy index
     if value is above_i64:
         saw_u64_above_i64 = true
     ;
 ;
 loop near_max_u64 to & max_u64 by u64_one |value, index|:
     high_u64_count = high_u64_count + 1
-    high_u64_last_index = index
+    high_u64_last_index = copy index
     if value is max_u64:
         saw_u64_max = true
     ;
@@ -52,8 +52,8 @@ desc_u64_last ~U64 = 9
 desc_u64_last_index ~= 0
 loop desc_start_u64 to & desc_end_u64 by u64_one |value, index|:
     desc_u64_count = desc_u64_count + 1
-    desc_u64_last = value
-    desc_u64_last_index = index
+    desc_u64_last = copy value
+    desc_u64_last_index = copy index
 ;
 
 signed_min I64 = -9223372036854775808
@@ -63,7 +63,7 @@ cross_count ~= 0
 cross_last ~I64 = 0
 loop signed_min to & signed_max by cross_step |value|:
     cross_count = cross_count + 1
-    cross_last = value
+    cross_last = copy value
 ;
 
 max_near I64 = 9223372036854775806
@@ -76,7 +76,7 @@ loop signed_min to & signed_min by i64_one |value|:
 ;
 loop max_near to & signed_max by i64_one |value|:
     max_endpoint_count = max_endpoint_count + 1
-    max_endpoint_last = value
+    max_endpoint_last = copy value
 ;
 
 half_start F16 = 0.5
@@ -151,7 +151,7 @@ u8_max_count ~= 0
 u8_max_last ~U32 = 0
 loop u8_max_start to & u8_max_end by u8_max_step |value|:
     u8_max_count = u8_max_count + 1
-    u8_max_last = value
+    u8_max_last = copy value
 ;
 
 u8_zero_start U8 = 1
@@ -161,7 +161,7 @@ u8_zero_count ~= 0
 u8_zero_last ~U32 = 9
 loop u8_zero_start to & u8_zero_end by u8_zero_step |value|:
     u8_zero_count = u8_zero_count + 1
-    u8_zero_last = value
+    u8_zero_last = copy value
 ;
 
 assert(i8u16_sum is 0)

@@ -26,7 +26,7 @@ use crate::compiler_frontend::ast::templates::tir::ids::{
     ChildTemplateOccurrenceId, ExpressionSiteId, SlotOccurrenceId, TemplateIrId,
     TemplateWrapperSetId,
 };
-use crate::compiler_frontend::ast::templates::tir::node::{TemplateIrBranch, TemplateIrNodeKind};
+use crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind;
 use crate::compiler_frontend::ast::templates::tir::overlays::{
     TemplateViewContext, TirExpressionOverlay, TirExpressionOverlayId, TirSlotResolution,
     TirSlotResolutionOverlay, TirWrapperApplicationMode, TirWrapperContext,
@@ -196,9 +196,9 @@ fn build_expression_wrapper_template_with_expression(
     (template_id, site_id)
 }
 
-/// Builds a branch template whose single branch has a false selector and no
-/// fallback, so the template structurally emits no output.
-fn build_false_no_else_branch_template(
+/// Builds a conditional whose false selector makes its body structurally emit
+/// no output.
+fn build_false_conditional_no_output_template(
     store: &mut TemplateIrStore,
     string_table: &mut StringTable,
 ) -> TemplateIrId {
@@ -206,13 +206,11 @@ fn build_false_no_else_branch_template(
     let mut builder = TemplateIrBuilder::new(store);
     let body_node =
         builder.push_text_node(body_text, "hidden".len(), TemplateSegmentOrigin::Body, None);
-    let branch = TemplateIrBranch::new(
+    let root = builder.push_conditional_node(
         TemplateBranchSelector::Bool(bool_expression(false)),
         body_node,
         None,
-        builder.store.next_expression_site_id(),
     );
-    let root = builder.push_branch_chain_node(vec![branch], None, None, None);
     builder.finish_template(
         root,
         Style::default(),
@@ -758,7 +756,7 @@ fn prepared_fold_fixture_result(
         ))
         .into());
     }
-    if let TemplatePreparationOutcome::Helper(_) = preparation.outcome {
+    if let TemplatePreparationOutcome::SlotInsertHelper = preparation.outcome {
         return Err(CompilerError::compiler_error(
             "supported wrapper fixture unexpectedly produced a helper.",
         )
@@ -783,11 +781,7 @@ fn handoff_fixture_result(
         facts: TemplatePreparationFacts {
             is_const_evaluable_shape: false,
             has_unresolved_slot_occurrences: false,
-            has_resolved_slot_sources: false,
             has_escaped_insert_helpers: false,
-            wrapper_foldable: false,
-            has_runtime_slot_plan: false,
-            has_runtime_slot_sites: false,
             final_value_kind: TemplateConstValueKind::NonConst,
         },
         outcome: TemplatePreparationOutcome::Runtime(RuntimeTemplateReason::RuntimeExpression),
@@ -1081,13 +1075,13 @@ fn prepared_fold_applies_if_child_emits_only_when_the_child_emits_output() {
             skip_parent_child_wrappers: false,
             application_mode: TirWrapperApplicationMode::IfChildEmits,
         },
-        build_false_no_else_branch_template,
+        build_false_conditional_no_output_template,
     );
     let silent_emission = fold_fixture(&silent_fixture, &mut string_table);
     assert_eq!(
         silent_emission,
         TemplateEmission::NoOutput,
-        "false no-else child should not render inherited wrappers"
+        "false conditional child should not render inherited wrappers"
     );
 }
 
@@ -1328,7 +1322,8 @@ fn preparation_falls_back_for_runtime_non_injected_slot_source() {
     assert_eq!(
         match preparation.outcome {
             TemplatePreparationOutcome::Runtime(reason) => Some(reason),
-            TemplatePreparationOutcome::Foldable | TemplatePreparationOutcome::Helper(_) => None,
+            TemplatePreparationOutcome::Foldable | TemplatePreparationOutcome::SlotInsertHelper =>
+                None,
         },
         Some(RuntimeTemplateReason::InheritedWrapperApplication),
         "a runtime source in a non-injected wrapper slot must stay on the handoff path"

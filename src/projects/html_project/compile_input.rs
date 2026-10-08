@@ -1,11 +1,11 @@
 //! Shared compile-time inputs for HTML module builder paths.
 //!
-//! WHAT: groups the HIR/analysis data that both the JS-only and HTML+Wasm builder paths need.
-//! WHY: both paths share one module-level input, keeping those facts synchronised as fields evolve.
+//! WHAT: groups module data shared by the JS-only and HTML+Wasm builder paths.
+//! WHY: common facts stay aligned while backend-specific facts are carried only to their consumer.
 
 use crate::build_system::BuildProfile;
 use crate::build_system::build::ProjectEntry;
-use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::analysis::borrow_checker::BorrowFacts;
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -30,7 +30,7 @@ pub(crate) struct HtmlModuleCompileInput<'a> {
     pub type_environment: &'a TypeEnvironment,
     pub const_fragments: &'a [ResolvedConstFragment],
     pub page_metadata_plan: &'a HtmlPageMetadataPlan,
-    pub borrow_analysis: &'a BorrowCheckReport,
+    pub borrow_facts: &'a BorrowFacts,
     /// Conservative bounded-integer proof facts paired with `hir_module`'s executable.
     ///
     /// WHY: the table is computed per executable inside the compiler service and published with

@@ -15,13 +15,11 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotPlaceholder, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateElseMarker, TemplateLoopControlKind, TemplateLoopHeader,
+    TemplateBranchSelector, TemplateLoopHeader,
 };
-use crate::compiler_frontend::ast::templates::tir::ids::{
-    ExpressionSiteId, TemplateIrId, TemplateIrNodeId,
-};
+use crate::compiler_frontend::ast::templates::tir::ids::{TemplateIrId, TemplateIrNodeId};
 use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIr, TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind,
+    TemplateIr, TemplateIrNode, TemplateIrNodeKind,
 };
 use crate::compiler_frontend::ast::templates::tir::overlays::TemplateViewContext;
 use crate::compiler_frontend::ast::templates::tir::refs::{
@@ -32,7 +30,7 @@ use crate::compiler_frontend::ast::templates::tir::summary::summarize_existing_r
 use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::StringId;
 
 /// Parser-local owner for in-progress TIR emission.
 pub(crate) struct TemplateConstructionContext {
@@ -72,10 +70,6 @@ impl TemplateConstructionContext {
     /// Parser-recorded control-flow owner, if this template recorded one.
     pub(crate) fn control_flow_node_id(&self) -> Option<TemplateIrNodeId> {
         self.control_flow_node_id
-    }
-
-    pub(crate) fn next_expression_site_id(&self) -> ExpressionSiteId {
-        self.store.borrow_mut().next_expression_site_id()
     }
 
     // -------------------------
@@ -220,20 +214,20 @@ impl TemplateConstructionContext {
     //  Recording — control flow
     // -------------------------
 
-    pub(crate) fn record_branch_chain(
+    pub(crate) fn record_conditional(
         &mut self,
-        branches: Vec<TemplateIrBranch>,
-        fallback: Option<TemplateIrNodeId>,
-        else_marker: Option<TemplateElseMarker>,
+        selector: TemplateBranchSelector,
+        body: TemplateIrNodeId,
         span: Option<SourceSpan>,
     ) {
         let node_id = {
             let mut store = self.store.borrow_mut();
+            let selector_site_id = store.next_expression_site_id();
             store.push_node(TemplateIrNode::new(
-                TemplateIrNodeKind::BranchChain {
-                    branches,
-                    fallback,
-                    else_marker,
+                TemplateIrNodeKind::Conditional {
+                    selector: Box::new(selector),
+                    selector_site_id,
+                    body,
                 },
                 span,
             ))
@@ -265,22 +259,6 @@ impl TemplateConstructionContext {
         self.record_control_flow_node(node_id);
     }
 
-    pub(crate) fn record_loop_control(
-        &mut self,
-        kind: TemplateLoopControlKind,
-        span: Option<SourceSpan>,
-    ) {
-        let node_id = {
-            let mut store = self.store.borrow_mut();
-            store.push_node(TemplateIrNode::new(
-                TemplateIrNodeKind::LoopControl { kind },
-                span,
-            ))
-        };
-
-        self.children.push(node_id);
-    }
-
     fn record_control_flow_node(&mut self, node_id: TemplateIrNodeId) {
         self.children.push(node_id);
         if self.control_flow_node_id.is_none() {
@@ -291,40 +269,6 @@ impl TemplateConstructionContext {
     fn note_head_origin(&mut self, origin: TemplateSegmentOrigin) {
         if origin == TemplateSegmentOrigin::Head {
             self.head_node_count += 1;
-        }
-    }
-
-    // -------------------------
-    //  Whitespace trimming
-    // -------------------------
-
-    pub(crate) fn trim_leading_whitespace(&mut self, string_table: &StringTable) {
-        let store = self.store.borrow();
-        let first_meaningful_index = self
-            .children
-            .iter()
-            .position(|child_id| !node_is_whitespace_only_text(*child_id, &store, string_table))
-            .unwrap_or(self.children.len());
-
-        if first_meaningful_index == 0 {
-            return;
-        }
-
-        drop(store);
-        self.children.drain(0..first_meaningful_index);
-    }
-
-    pub(crate) fn trim_trailing_whitespace(&mut self, string_table: &StringTable) {
-        let store = self.store.borrow();
-
-        while self
-            .children
-            .last()
-            .is_some_and(|child_id| node_is_whitespace_only_text(*child_id, &store, string_table))
-        {
-            if self.children.pop().is_none() {
-                break;
-            }
         }
     }
 
@@ -351,16 +295,16 @@ impl TemplateConstructionContext {
         let mut store = store.borrow_mut();
 
         // Render-unit preparation moves a control-flow template's shared head
-        // prefix into branch bodies or the loop aggregate wrapper. The owner
-        // root must not retain those prefix nodes as ordinary siblings, or
-        // skipped branches and zero-iteration loops still render the wrapper
+        // prefix into its conditional body or loop aggregate wrapper. The
+        // owner root must not retain those prefix nodes as ordinary siblings, or
+        // unselected conditionals and zero-iteration loops still render the wrapper
         // shell.
         let root_children: Vec<TemplateIrNodeId> = if control_flow_node_id.is_some() {
             let first_control_flow_index = children.iter().position(|&child_id| {
                 store.get_node(child_id).is_some_and(|node| {
                     matches!(
                         node.kind,
-                        TemplateIrNodeKind::BranchChain { .. } | TemplateIrNodeKind::Loop { .. }
+                        TemplateIrNodeKind::Conditional { .. } | TemplateIrNodeKind::Loop { .. }
                     )
                 })
             });
@@ -383,7 +327,7 @@ impl TemplateConstructionContext {
                 if store.get_node(*child_id).is_some_and(|node| {
                     matches!(
                         node.kind,
-                        TemplateIrNodeKind::BranchChain { .. } | TemplateIrNodeKind::Loop { .. }
+                        TemplateIrNodeKind::Conditional { .. } | TemplateIrNodeKind::Loop { .. }
                     )
                 }) =>
             {
@@ -408,19 +352,4 @@ impl TemplateConstructionContext {
             context: TemplateViewContext::default(),
         })
     }
-}
-
-fn node_is_whitespace_only_text(
-    node_id: TemplateIrNodeId,
-    store: &TemplateIrStore,
-    string_table: &StringTable,
-) -> bool {
-    let Some(node) = store.get_node(node_id) else {
-        return false;
-    };
-    let TemplateIrNodeKind::Text { text, .. } = &node.kind else {
-        return false;
-    };
-
-    string_table.resolve(*text).trim().is_empty()
 }

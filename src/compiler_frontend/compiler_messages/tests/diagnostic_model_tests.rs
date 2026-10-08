@@ -4,8 +4,8 @@ use super::{
     DeferredFeatureDiagnosticKind, DeferredFeatureReason, DependencyClauseKind, DiagnosticBag,
     DiagnosticCategory, DiagnosticKind, DiagnosticLabel, DiagnosticLabelMessage,
     DiagnosticOperator, DiagnosticPayload, DiagnosticPlace, DiagnosticSeverity, DiagnosticToken,
-    GenericApplicationErrorReason, ImportDiagnosticKind, ImportPublicSurfaceType,
-    IncompatibleChoiceComparisonReason, InfrastructureDiagnosticKind,
+    GenericApplicationErrorReason, HirCapacityResource, ImportDiagnosticKind,
+    ImportPublicSurfaceType, IncompatibleChoiceComparisonReason, InfrastructureDiagnosticKind,
     InvalidAssignmentTargetReason, InvalidCallShapeReason, InvalidCastReason,
     InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidConfigReason,
     InvalidDependencyClauseReason, InvalidExpressionReason, InvalidFallibleHandlingReason,
@@ -110,6 +110,11 @@ fn descriptor_codes_are_stable_and_non_empty() {
             DiagnosticSeverity::Error,
         ),
         (
+            DiagnosticKind::Syntax(SyntaxDiagnosticKind::CompilerCapacityExceeded),
+            "MOTH-SYNTAX-0037",
+            DiagnosticSeverity::Error,
+        ),
+        (
             DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
             "MOTH-RULE-0001",
             DiagnosticSeverity::Error,
@@ -158,6 +163,37 @@ fn descriptor_codes_are_stable_and_non_empty() {
         assert!(!descriptor.title.is_empty());
         assert!(!kind.code().is_empty());
     }
+}
+
+#[test]
+fn compiler_capacity_diagnostic_keeps_the_triggering_span_and_resource() {
+    let source = SourceId::from_index(1);
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let primary_span = Some(exact_span(source, 3, 4, &mut span_builder));
+    let diagnostic = CompilerDiagnostic::compiler_capacity_exceeded(
+        HirCapacityResource::ExpressionRows,
+        primary_span,
+    );
+
+    assert_eq!(
+        diagnostic.kind,
+        DiagnosticKind::Syntax(SyntaxDiagnosticKind::CompilerCapacityExceeded)
+    );
+    assert_eq!(diagnostic.primary_span, primary_span);
+    assert_eq!(
+        diagnostic.payload,
+        DiagnosticPayload::CompilerCapacityExceeded {
+            resource: HirCapacityResource::ExpressionRows,
+        }
+    );
+
+    let string_table = StringTable::new();
+    let terse = terse::format_terse_diagnostic_with_context(
+        &diagnostic,
+        DiagnosticRenderContext::new(&string_table),
+    );
+    assert!(terse.contains("MOTH-SYNTAX-0037"));
+    assert!(terse.contains("HIR expression rows"));
 }
 
 #[test]
@@ -4035,6 +4071,7 @@ impl SyntaxDiagnosticKind {
             Self::CommonSyntaxMistake,
             Self::UnescapedImplicitTemplateClose,
             Self::SourceSpanCapacity,
+            Self::CompilerCapacityExceeded,
             Self::InvalidStringEscape,
         ]
         .into_iter()

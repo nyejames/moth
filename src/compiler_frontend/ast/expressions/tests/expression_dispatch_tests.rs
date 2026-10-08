@@ -56,7 +56,6 @@ fn test_scope(string_table: &mut StringTable) -> (PathId, ScopeContext, PathInte
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
     (scope, context, path_fork)
@@ -292,7 +291,6 @@ fn hash_from_tokenized_source_rejected() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
 
@@ -374,7 +372,6 @@ fn constant_identifier_uses_module_store_tir() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     )
     .with_template_ir_store(Rc::clone(&store));

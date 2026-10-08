@@ -2,9 +2,8 @@
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::template_control_flow::TemplateLoopControlKind;
 use crate::compiler_frontend::ast::templates::template_folding::{
-    TemplateEmission, TemplateFoldResult, TirFoldContext, template_emission_from_output_and_signal,
+    TemplateEmission, TemplateFoldResult, TirFoldContext,
 };
 use crate::compiler_frontend::ast::templates::tir::collect_tir_slot_schema;
 use crate::compiler_frontend::ast::templates::tir::ids::{TemplateIrId, TemplateIrNodeId};
@@ -32,8 +31,8 @@ use super::reducer::{
 /// WHAT: resolves the effective `TirWrapperContext` for `occurrence_id` and folds
 ///       any inherited wrapper templates around the already-folded child emission.
 ///       `$fresh` suppression is honored by treating a suppressed context as empty,
-///       and no-output/signal emissions pass through unchanged so skipped branches
-///       and zero-iteration loops do not receive wrappers.
+///       and structural no-output passes through so skipped branches and zero-iteration
+///       loops do not receive wrappers.
 /// WHY: wrapper-context overlays replace the structural mutation of
 ///      `conditional_child_wrapper_set`. Applying them at the child occurrence
 ///      boundary lets the same structural child template be shared under different
@@ -88,7 +87,7 @@ pub(super) fn append_template_result_to_buffer(
     result: TemplateFoldResult,
     output_state: &mut FoldOutputState,
     fold_context: &mut TirFoldContext<'_>,
-) -> Result<Option<TemplateLoopControlKind>, TemplateError> {
+) -> Result<(), TemplateError> {
     let TemplateFoldResult {
         emission,
         projection_pieces,
@@ -96,34 +95,14 @@ pub(super) fn append_template_result_to_buffer(
     } = result;
 
     match emission {
-        TemplateEmission::NoOutput => Ok(None),
+        TemplateEmission::NoOutput => Ok(()),
         TemplateEmission::Output(output) => {
             if output_state.projection_pieces.is_some() {
                 output_state.append_pieces(projection_pieces.as_deref())?;
             }
             output_state.append_emission_value(&output, fold_context.string_table);
             output_state.emitted_output = true;
-            Ok(None)
-        }
-        TemplateEmission::Break(output) => {
-            if let Some(output) = output {
-                if output_state.projection_pieces.is_some() {
-                    output_state.append_pieces(projection_pieces.as_deref())?;
-                }
-                output_state.append_emission_value(&output, fold_context.string_table);
-                output_state.emitted_output = true;
-            }
-            Ok(Some(TemplateLoopControlKind::Break))
-        }
-        TemplateEmission::Continue(output) => {
-            if let Some(output) = output {
-                if output_state.projection_pieces.is_some() {
-                    output_state.append_pieces(projection_pieces.as_deref())?;
-                }
-                output_state.append_emission_value(&output, fold_context.string_table);
-                output_state.emitted_output = true;
-            }
-            Ok(Some(TemplateLoopControlKind::Continue))
+            Ok(())
         }
     }
 }
@@ -134,8 +113,8 @@ pub(super) fn append_template_result_to_buffer(
 /// WHAT: folds each inherited wrapper template around the already-folded child
 ///       `ConstStringValue`, injecting the child output at the slot that the fill
 ///       content would route to (or appending it after slot-less wrapper
-///       content). No-output and empty-signal cases pass through unchanged so
-///       skipped branches or zero-iteration loops do not receive wrappers.
+///       content). Structural no-output passes through so skipped branches or
+///       zero-iteration loops do not receive output-conditioned wrappers.
 ///
 /// WHY: the folded child remains an owned output value while wrapper structure
 ///      is read from the immutable TIR store. Slot injection therefore needs no
@@ -150,7 +129,7 @@ pub(super) fn fold_conditional_child_wrappers_around_emission(
     fold_context: &mut TirFoldContext<'_>,
     fold_input: &FoldTraversalInput<'_, '_>,
 ) -> Result<TemplateFoldResult, TemplateError> {
-    let (output, signal_kind) = match emission {
+    let output = match emission {
         TemplateEmission::NoOutput => {
             if matches!(application_mode, TirWrapperApplicationMode::IfChildEmits)
                 || wrapper_references.is_empty()
@@ -162,53 +141,14 @@ pub(super) fn fold_conditional_child_wrappers_around_emission(
                 ));
             }
 
-            (
-                ConstStringValue::Text(fold_context.string_table.intern("")),
-                None,
-            )
+            ConstStringValue::Text(fold_context.string_table.intern(""))
         }
-        TemplateEmission::Output(output) => (output, None),
-        TemplateEmission::Break(Some(output)) => (output, Some(TemplateLoopControlKind::Break)),
-        TemplateEmission::Continue(Some(output)) => {
-            (output, Some(TemplateLoopControlKind::Continue))
-        }
-        TemplateEmission::Break(None) => {
-            if matches!(application_mode, TirWrapperApplicationMode::IfChildEmits)
-                || wrapper_references.is_empty()
-            {
-                return Ok(TemplateFoldResult::with_projection(
-                    TemplateEmission::Break(None),
-                    provenance,
-                    projection_pieces,
-                ));
-            }
-
-            (
-                ConstStringValue::Text(fold_context.string_table.intern("")),
-                Some(TemplateLoopControlKind::Break),
-            )
-        }
-        TemplateEmission::Continue(None) => {
-            if matches!(application_mode, TirWrapperApplicationMode::IfChildEmits)
-                || wrapper_references.is_empty()
-            {
-                return Ok(TemplateFoldResult::with_projection(
-                    TemplateEmission::Continue(None),
-                    provenance,
-                    projection_pieces,
-                ));
-            }
-
-            (
-                ConstStringValue::Text(fold_context.string_table.intern("")),
-                Some(TemplateLoopControlKind::Continue),
-            )
-        }
+        TemplateEmission::Output(output) => output,
     };
 
     if wrapper_references.is_empty() {
         return Ok(TemplateFoldResult::with_projection(
-            template_emission_from_output_and_signal(output, signal_kind),
+            TemplateEmission::Output(output),
             provenance,
             projection_pieces,
         ));
@@ -241,12 +181,8 @@ pub(super) fn fold_conditional_child_wrappers_around_emission(
             projection_pieces,
         } = wrapper_result;
         current_output = match emission {
-            TemplateEmission::Output(output)
-            | TemplateEmission::Break(Some(output))
-            | TemplateEmission::Continue(Some(output)) => output,
-            TemplateEmission::NoOutput
-            | TemplateEmission::Break(None)
-            | TemplateEmission::Continue(None) => {
+            TemplateEmission::Output(output) => output,
+            TemplateEmission::NoOutput => {
                 return Ok(TemplateFoldResult::with_projection(
                     emission,
                     provenance,
@@ -259,7 +195,7 @@ pub(super) fn fold_conditional_child_wrappers_around_emission(
     }
 
     Ok(TemplateFoldResult::with_projection(
-        template_emission_from_output_and_signal(current_output, signal_kind),
+        TemplateEmission::Output(current_output),
         current_provenance,
         current_projection,
     ))
@@ -420,7 +356,7 @@ pub(super) fn fold_tir_aggregate_wrapper(
     output_state: &mut FoldOutputState,
     fold_context: &mut TirFoldContext<'_>,
     fold_input: &FoldTraversalInput<'_, '_>,
-) -> Result<Option<TemplateLoopControlKind>, TemplateError> {
+) -> Result<(), TemplateError> {
     let store = fold_input.view.store();
     let aggregate_output_len =
         const_string_value_text_len(aggregate_output, fold_context.string_table);
@@ -437,7 +373,7 @@ pub(super) fn fold_tir_aggregate_wrapper(
         wrapper_state.enable_projection();
     }
 
-    let signal = fold_tir_node_into_buffer(
+    fold_tir_node_into_buffer(
         wrapper_node_id,
         &mut wrapper_state,
         fold_context,
@@ -448,17 +384,10 @@ pub(super) fn fold_tir_aggregate_wrapper(
         },
     )?;
 
-    if signal.is_some() {
-        return Err(CompilerError::compiler_error(
-            "Loop-control signal reached aggregate wrapper folding; aggregate wrappers should not contain loop control.",
-        )
-        .into());
-    }
-
     output_state.provenance.merge(&wrapper_state.provenance);
 
     if !wrapper_state.emitted_output {
-        return Ok(None);
+        return Ok(());
     }
 
     let actual_len = wrapper_state.output_buffer.len();
@@ -473,7 +402,7 @@ pub(super) fn fold_tir_aggregate_wrapper(
     output_state.append_emission_value(&wrapper_output, fold_context.string_table);
     output_state.emitted_output = true;
 
-    Ok(None)
+    Ok(())
 }
 
 /// Estimates rendered bytes without pretending structural anchors have text output.

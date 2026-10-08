@@ -15,11 +15,11 @@ use crate::compiler_frontend::analysis::borrow_checker::transfer::{
 };
 use crate::compiler_frontend::analysis::borrow_checker::types::{
     BorrowCheckReport, BorrowCheckStats, BorrowDropSite, BorrowDropSiteKind, FunctionBorrowSummary,
-    LocalMode,
+    LocalMode, ValueBorrowFact,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::utils::try_for_each_terminator_target;
@@ -27,7 +27,7 @@ use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::collections::VecDeque;
+use std::collections::{VecDeque, hash_map::Entry};
 
 pub(super) struct BorrowChecker<'a> {
     pub(super) module: &'a HirModule,
@@ -128,11 +128,17 @@ impl<'a> BorrowChecker<'a> {
             imported_call_summaries: &self.module.imported_call_summaries,
             module_private_call_summaries: &self.module.module_private_call_summaries,
             generated_call_summaries: &self.module.generated_call_summaries,
+            expressions: &self.module.expressions,
             diagnostics: BorrowDiagnostics::new(self.module, self.path_fork, self.string_table),
         };
 
         let mut in_states: FxHashMap<BlockId, BorrowState> = FxHashMap::default();
         let mut out_states: FxHashMap<BlockId, BorrowState> = FxHashMap::default();
+        // HIR expression rows are immutable and may be shared across blocks. Keep only the
+        // latest facts for each block during fixed-point iteration, then merge those surviving
+        // snapshots after the state has stabilized.
+        let mut final_value_facts_by_block: FxHashMap<BlockId, Vec<(HirValueId, ValueBorrowFact)>> =
+            FxHashMap::default();
 
         // Entry state starts as UNINIT, with parameters immediately initialized.
         let mut initial_state = BorrowState::new_uninitialized(layout.local_count());
@@ -196,6 +202,7 @@ impl<'a> BorrowChecker<'a> {
             self.merge_block_stats(&mut report.stats, &block_stats);
             summary.mutable_call_sites += block_stats.mutable_call_sites;
 
+            #[cfg(any(test, feature = "show_borrow_checker"))]
             for (statement_id, snapshot) in block_stats.statement_entry_states {
                 report
                     .analysis
@@ -211,9 +218,7 @@ impl<'a> BorrowChecker<'a> {
                     .terminator_facts
                     .insert(terminator_block, fact);
             }
-            for (value_id, fact) in block_stats.value_facts {
-                report.analysis.value_facts.insert(value_id, fact);
-            }
+            final_value_facts_by_block.insert(block_id, block_stats.value_facts);
             let changed_out = match out_states.get(&block_id) {
                 Some(existing) => existing != &output_state,
                 None => true,
@@ -265,7 +270,27 @@ impl<'a> BorrowChecker<'a> {
             out_states.insert(block_id, output_state);
         }
 
-        // Persist snapshots for debug tooling and downstream analyses.
+        // A row may be observed under different final states in different blocks or functions.
+        // Merge only the last transfer result for each reachable block; merging during worklist
+        // visits would retain transient facts from earlier iterations.
+        // A single context already has sorted roots: the layout sorts LocalIds before the root
+        // bitset is projected back to IDs. Only shared rows need the sorting merge.
+        for block_id in &reachable_blocks {
+            if let Some(value_facts) = final_value_facts_by_block.remove(block_id) {
+                for (value_id, fact) in value_facts {
+                    match report.analysis.value_facts.entry(value_id) {
+                        Entry::Occupied(mut existing) => existing.get_mut().merge(fact),
+                        Entry::Vacant(vacant) => {
+                            vacant.insert(fact);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Borrow-state snapshots support developer presentation only; downstream analyses use
+        // the immutable semantic facts and fixed-point states above.
+        #[cfg(any(test, feature = "show_borrow_checker"))]
         for block_id in &reachable_blocks {
             if let Some(state) = in_states.get(block_id) {
                 report
@@ -475,7 +500,7 @@ impl<'a> BorrowChecker<'a> {
         total.conflicts_checked += block.conflicts_checked;
     }
 
-    fn apply_jump_argument_transfer(
+    pub(super) fn apply_jump_argument_transfer(
         &self,
         function_id: FunctionId,
         layout: &FunctionLayout,
@@ -491,46 +516,59 @@ impl<'a> BorrowChecker<'a> {
             return Ok(());
         }
 
-        let successor_block = self.block_by_id_or_error(successor, function_id)?;
-        if args.len() > successor_block.locals.len() {
-            return Err(self.diagnostics.internal_error(
-                format!(
-                    "Borrow checker saw jump edge into block '{}' with {} argument(s), but the block declares only {} local(s)",
-                    successor,
-                    args.len(),
-                    successor_block.locals.len()
-                ),
-                self.diagnostics.function_error_span(function_id),
-            ));
-        }
-
-        let source_states = args
+        let destination_states = args
             .iter()
-            .map(|source_local| {
-                let Some(source_index) = layout.index_of(*source_local) else {
+            .map(|argument| {
+                let Some(source_index) = layout.index_of(argument.source) else {
                     return Err(self.diagnostics.internal_error(
                         format!(
                             "Borrow checker could not map jump argument local '{}' into function state layout",
-                            self.diagnostics.local_name(*source_local)
+                            self.diagnostics.local_name(argument.source)
                         ),
                         self.diagnostics.function_error_span(function_id),
                     ));
                 };
 
-                Ok(successor_input.local_state(source_index).clone())
+                let source_state = successor_input.local_state(source_index);
+                let destination_state = if source_state.mode.is_definitely_uninit() {
+                    LocalState::uninit(layout.local_count())
+                } else {
+                    // Jump arguments enter the destination's binding slot. Preserve the source
+                    // value's effective allocation provenance, including a plain source slot's
+                    // own root, without turning the destination into a write-through alias view.
+                    LocalState::slot_with_value_roots(
+                        successor_input.effective_roots(source_index),
+                        source_state.direct_alias_roots.clone(),
+                    )
+                };
+
+                Ok(destination_state)
             })
             .collect::<Result<Vec<_>, BorrowCheckError>>()?;
 
-        let destination_indices = successor_block
-            .locals
+        let successor_block = self.block_by_id_or_error(successor, function_id)?;
+        let destination_indices = args
             .iter()
-            .take(args.len())
-            .map(|local| {
-                let Some(destination_index) = layout.index_of(local.id) else {
+            .map(|argument| {
+                if !successor_block
+                    .locals
+                    .iter()
+                    .any(|local| local.id == argument.destination)
+                {
                     return Err(self.diagnostics.internal_error(
                         format!(
-                            "Borrow checker could not map jump target local '{}' into function state layout",
-                            self.diagnostics.local_name(local.id)
+                            "Borrow checker saw jump edge into block '{}' defining local '{}' that the block does not own",
+                            successor,
+                            self.diagnostics.local_name(argument.destination)
+                        ),
+                        self.diagnostics.function_error_span(function_id),
+                    ));
+                }
+                let Some(destination_index) = layout.index_of(argument.destination) else {
+                    return Err(self.diagnostics.internal_error(
+                        format!(
+                            "Borrow checker could not map jump destination local '{}' into function state layout",
+                            self.diagnostics.local_name(argument.destination)
                         ),
                         self.diagnostics.function_error_span(function_id),
                     ));
@@ -540,29 +578,10 @@ impl<'a> BorrowChecker<'a> {
             })
             .collect::<Result<Vec<_>, BorrowCheckError>>()?;
 
-        let local_count = layout.local_count();
-        for (source_state, destination_index) in source_states.into_iter().zip(destination_indices)
+        for (destination_state, destination_index) in
+            destination_states.into_iter().zip(destination_indices)
         {
-            let destination_state = successor_input.local_state(destination_index).clone();
-            let destination_is_alias_only = destination_state.mode.contains(LocalMode::ALIAS)
-                && !destination_state.mode.contains(LocalMode::SLOT);
-
-            let next_state = if source_state.mode.is_definitely_uninit() {
-                LocalState::uninit(local_count)
-            } else if destination_is_alias_only {
-                destination_state
-            } else if source_state.has_value_aliases() {
-                // Jump arguments enter the destination's binding slot. Preserve the source
-                // value's allocation provenance without turning the destination into a
-                // write-through alias view.
-                LocalState::slot_with_value_roots(
-                    source_state.value_roots.clone(),
-                    source_state.direct_alias_roots.clone(),
-                )
-            } else {
-                LocalState::slot(local_count)
-            };
-            successor_input.update_local_state(destination_index, next_state);
+            successor_input.update_local_state(destination_index, destination_state);
         }
 
         Ok(())

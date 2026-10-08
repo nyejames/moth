@@ -3,8 +3,10 @@
 //! This module owns the dense local indexing and abstract state representation used by the
 //! forward transfer engine.
 
+use crate::compiler_frontend::analysis::borrow_checker::types::LocalMode;
+#[cfg(any(test, feature = "show_borrow_checker"))]
 use crate::compiler_frontend::analysis::borrow_checker::types::{
-    BorrowStateSnapshot, LocalBorrowSnapshot, LocalMode,
+    BorrowStateSnapshot, LocalBorrowSnapshot,
 };
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, LocalId};
 use rustc_hash::FxHashMap;
@@ -300,6 +302,7 @@ impl BorrowState {
         }
     }
 
+    #[cfg(any(test, feature = "show_borrow_checker"))]
     pub(super) fn to_snapshot(&self, local_ids: &[LocalId]) -> BorrowStateSnapshot {
         let mut locals = Vec::with_capacity(self.locals.len());
 

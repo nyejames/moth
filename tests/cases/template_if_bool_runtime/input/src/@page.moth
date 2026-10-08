@@ -1,10 +1,11 @@
-show_details = true
+render |show_details Bool| -> String:
+    return [if show_details:
+        selected runtime branch
+    ]
+;
 
 [:
     template_if_bool_runtime
-    [if show_details:
-        selected runtime branch
-    [else]
-        inactive runtime branch
-    ]
+    [render(true)]
+    [render(false)]
 ]

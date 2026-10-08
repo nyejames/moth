@@ -1,0 +1,10 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-BORROW-0007"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-BORROW-0007"
+reason = "invalid_mutable_access.immutable_place"
+path = "input/@page.moth"
+line = 6

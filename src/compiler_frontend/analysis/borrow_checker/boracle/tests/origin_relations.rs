@@ -13,8 +13,8 @@ use super::super::{
     OriginUnknownEvidence, PrecisionLossReason,
 };
 use crate::compiler_frontend::analysis::borrow_checker::problem::{
-    AccessKind, AggregateField, Binding, BindingId, BlockId, BorrowProblem, BorrowProblemParts,
-    Call, CallArgument, CallEffect, CallId, CallResult, CallResultProvenance,
+    AccessKind, AggregateField, Binding, BindingDestination, BindingId, BlockId, BorrowProblem,
+    BorrowProblemParts, Call, CallArgument, CallEffect, CallId, CallResult, CallResultProvenance,
     CallResultUnknownReason, CfgBlock, Event, EventId, EventKind, EventSource, Loan, LoanId,
     OriginKind, Place, PlaceId, PlaceOverlap, PointId, ProgramPoint, ProjectionElem, Use, UseId,
     UseKind, ValueOrigin, ValueOriginId,
@@ -657,7 +657,7 @@ fn sibling_fields_problem() -> BorrowProblem {
                 EventId::new(0),
                 PointId::new(1),
                 EventKind::Fresh {
-                    destination: PlaceId::new(0),
+                    destination: BindingDestination::Define(PlaceId::new(0)),
                     origin: ValueOriginId::new(0),
                 },
                 EventSource::none(),
@@ -666,7 +666,7 @@ fn sibling_fields_problem() -> BorrowProblem {
                 EventId::new(1),
                 PointId::new(2),
                 EventKind::Fresh {
-                    destination: PlaceId::new(4),
+                    destination: BindingDestination::Define(PlaceId::new(4)),
                     origin: ValueOriginId::new(2),
                 },
                 EventSource::none(),
@@ -675,7 +675,7 @@ fn sibling_fields_problem() -> BorrowProblem {
                 EventId::new(2),
                 PointId::new(3),
                 EventKind::Aggregate {
-                    destination: PlaceId::new(1),
+                    destination: BindingDestination::Define(PlaceId::new(1)),
                     origin: ValueOriginId::new(1),
                     fields: vec![
                         AggregateField {
@@ -789,7 +789,7 @@ fn boundary_reason_problem() -> BorrowProblem {
                     call: CallId::new(0),
                     arguments: Vec::new().into_boxed_slice(),
                     result: Some(CallResult {
-                        place: PlaceId::new(1),
+                        destination: BindingDestination::Define(PlaceId::new(1)),
                         origin: ValueOriginId::new(1),
                     }),
                 }),
@@ -802,7 +802,7 @@ fn boundary_reason_problem() -> BorrowProblem {
                     call: CallId::new(1),
                     arguments: Vec::new().into_boxed_slice(),
                     result: Some(CallResult {
-                        place: PlaceId::new(2),
+                        destination: BindingDestination::Define(PlaceId::new(2)),
                         origin: ValueOriginId::new(2),
                     }),
                 }),
@@ -815,7 +815,7 @@ fn boundary_reason_problem() -> BorrowProblem {
                     call: CallId::new(2),
                     arguments: Vec::new().into_boxed_slice(),
                     result: Some(CallResult {
-                        place: PlaceId::new(3),
+                        destination: BindingDestination::Define(PlaceId::new(3)),
                         origin: ValueOriginId::new(3),
                     }),
                 }),
@@ -880,7 +880,7 @@ fn unknown_provenance_problem() -> BorrowProblem {
                 EventId::new(0),
                 PointId::new(1),
                 EventKind::Fresh {
-                    destination: PlaceId::new(0),
+                    destination: BindingDestination::Define(PlaceId::new(0)),
                     origin: ValueOriginId::new(0),
                 },
                 EventSource::none(),
@@ -911,7 +911,7 @@ fn unknown_provenance_problem() -> BorrowProblem {
                     }]
                     .into_boxed_slice(),
                     result: Some(CallResult {
-                        place: PlaceId::new(0),
+                        destination: BindingDestination::Define(PlaceId::new(0)),
                         origin: ValueOriginId::new(2),
                     }),
                 }),
@@ -956,6 +956,7 @@ fn unknown_loan_witness_problem() -> BorrowProblem {
                 BindingId::new(0),
                 vec![ProjectionElem::FixedIndex(0)],
             ),
+            Place::new(PlaceId::new(2), BindingId::new(0), Vec::new()),
         ],
         origins: vec![
             ValueOrigin::fresh(ValueOriginId::new(0)),
@@ -992,7 +993,7 @@ fn unknown_loan_witness_problem() -> BorrowProblem {
                 EventId::new(0),
                 PointId::new(1),
                 EventKind::Fresh {
-                    destination: PlaceId::new(0),
+                    destination: BindingDestination::Define(PlaceId::new(2)),
                     origin: ValueOriginId::new(0),
                 },
                 EventSource::none(),
@@ -1009,7 +1010,7 @@ fn unknown_loan_witness_problem() -> BorrowProblem {
                 EventId::new(2),
                 PointId::new(3),
                 EventKind::Fresh {
-                    destination: PlaceId::new(1),
+                    destination: BindingDestination::Update(PlaceId::new(1)),
                     origin: ValueOriginId::new(0),
                 },
                 EventSource::none(),
@@ -1094,7 +1095,7 @@ fn write_through_witness_problem() -> BorrowProblem {
                 EventId::new(0),
                 PointId::new(1),
                 EventKind::Fresh {
-                    destination: PlaceId::new(1),
+                    destination: BindingDestination::Define(PlaceId::new(1)),
                     origin: ValueOriginId::new(0),
                 },
                 EventSource::none(),
@@ -1103,7 +1104,7 @@ fn write_through_witness_problem() -> BorrowProblem {
                 EventId::new(1),
                 PointId::new(2),
                 EventKind::Fresh {
-                    destination: PlaceId::new(2),
+                    destination: BindingDestination::Define(PlaceId::new(2)),
                     origin: ValueOriginId::new(1),
                 },
                 EventSource::none(),
@@ -1113,7 +1114,7 @@ fn write_through_witness_problem() -> BorrowProblem {
                 PointId::new(3),
                 EventKind::AliasFromPlace {
                     source: PlaceId::new(1),
-                    destination: PlaceId::new(0),
+                    destination: BindingDestination::Define(PlaceId::new(0)),
                 },
                 EventSource::none(),
             ),
@@ -1122,7 +1123,7 @@ fn write_through_witness_problem() -> BorrowProblem {
                 PointId::new(4),
                 EventKind::AliasFromPlace {
                     source: PlaceId::new(2),
-                    destination: PlaceId::new(0),
+                    destination: BindingDestination::Update(PlaceId::new(0)),
                 },
                 EventSource::none(),
             ),
@@ -1193,7 +1194,7 @@ fn join_origin_problem() -> BorrowProblem {
                 EventId::new(0),
                 PointId::new(1),
                 EventKind::Fresh {
-                    destination: PlaceId::new(0),
+                    destination: BindingDestination::Define(PlaceId::new(0)),
                     origin: ValueOriginId::new(0),
                 },
                 EventSource::none(),
@@ -1203,7 +1204,7 @@ fn join_origin_problem() -> BorrowProblem {
                 PointId::new(2),
                 EventKind::Alias {
                     source: PlaceId::new(0),
-                    destination: PlaceId::new(1),
+                    destination: BindingDestination::Define(PlaceId::new(1)),
                     origins: vec![ValueOriginId::new(3)].into_boxed_slice(),
                 },
                 EventSource::none(),
@@ -1275,7 +1276,7 @@ fn projection_missing_source_state_problem() -> BorrowProblem {
                 PointId::new(1),
                 EventKind::Projection {
                     source: PlaceId::new(0),
-                    destination: PlaceId::new(1),
+                    destination: BindingDestination::Define(PlaceId::new(1)),
                     origin: ValueOriginId::new(1),
                 },
                 EventSource::none(),
@@ -1337,7 +1338,7 @@ fn copy_missing_source_state_problem() -> BorrowProblem {
                 PointId::new(1),
                 EventKind::Copy {
                     source: PlaceId::new(0),
-                    destination: PlaceId::new(1),
+                    destination: BindingDestination::Define(PlaceId::new(1)),
                     origin: ValueOriginId::new(1),
                 },
                 EventSource::none(),
@@ -1391,7 +1392,7 @@ fn aggregate_missing_field_source_state_problem() -> BorrowProblem {
                 EventId::new(0),
                 PointId::new(1),
                 EventKind::Fresh {
-                    destination: PlaceId::new(0),
+                    destination: BindingDestination::Define(PlaceId::new(0)),
                     origin: ValueOriginId::new(0),
                 },
                 EventSource::none(),
@@ -1400,7 +1401,7 @@ fn aggregate_missing_field_source_state_problem() -> BorrowProblem {
                 EventId::new(1),
                 PointId::new(2),
                 EventKind::Aggregate {
-                    destination: PlaceId::new(1),
+                    destination: BindingDestination::Define(PlaceId::new(1)),
                     origin: ValueOriginId::new(1),
                     fields: vec![
                         AggregateField {

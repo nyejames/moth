@@ -241,33 +241,14 @@ fn collect_from_node(
             visiting_templates,
         ),
 
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => {
-            for branch in branches {
-                collect_from_node(
-                    store,
-                    branch.body,
-                    schema,
-                    placeholders,
-                    visiting_nodes,
-                    visiting_templates,
-                )?;
-            }
-
-            if let Some(fallback_id) = fallback {
-                collect_from_node(
-                    store,
-                    *fallback_id,
-                    schema,
-                    placeholders,
-                    visiting_nodes,
-                    visiting_templates,
-                )?;
-            }
-
-            Ok(())
-        }
+        TemplateIrNodeKind::Conditional { body, .. } => collect_from_node(
+            store,
+            *body,
+            schema,
+            placeholders,
+            visiting_nodes,
+            visiting_templates,
+        ),
 
         TemplateIrNodeKind::Loop {
             body,
@@ -301,7 +282,6 @@ fn collect_from_node(
         | TemplateIrNodeKind::DynamicExpression { .. }
         | TemplateIrNodeKind::InsertContribution { .. }
         | TemplateIrNodeKind::AggregateOutput
-        | TemplateIrNodeKind::LoopControl { .. }
         | TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(()),
     };

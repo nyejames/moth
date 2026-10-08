@@ -9,6 +9,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::hir::functions::HirFunctionOrigin;
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId};
+use crate::compiler_frontend::hir::terminators::{HirJumpArgument, HirTerminator};
 use crate::compiler_frontend::hir::utils::terminator_targets;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
@@ -284,6 +285,49 @@ impl<'a> HirValidator<'a> {
                     ),
                     Some(HirLocation::Block(record.handler.block)),
                 ));
+            }
+        }
+
+        self.validate_incoming_edge_destinations()?;
+
+        Ok(())
+    }
+
+    fn validate_incoming_edge_destinations(&self) -> Result<(), CompilerError> {
+        // The existing HIR edge contract names destinations on Jump edges. All other
+        // terminators transfer zero local values, so every predecessor of a block must agree
+        // on the same destination set regardless of edge kind or argument ordering.
+        let mut incoming_by_target: FxHashMap<BlockId, (BlockId, &[HirJumpArgument])> =
+            FxHashMap::default();
+
+        for source in &self.module.blocks {
+            let arguments = match &source.terminator {
+                HirTerminator::Jump { args, .. } => args.as_slice(),
+                _ => &[],
+            };
+
+            for target in terminator_targets(&source.terminator) {
+                if let Some((first_source, first_arguments)) = incoming_by_target.get(&target) {
+                    // Destination uniqueness is checked on each Jump. Compare the borrowed
+                    // pairs without allocating another destination collection for every edge.
+                    let same_destinations = first_arguments.len() == arguments.len()
+                        && arguments.iter().all(|argument| {
+                            first_arguments
+                                .iter()
+                                .any(|first| first.destination == argument.destination)
+                        });
+                    if !same_destinations {
+                        return Err(self.error_with_hir(
+                            format!(
+                                "Incoming CFG edges to block {target} disagree on explicit destination set or arity: blocks {first_source} and {}",
+                                source.id
+                            ),
+                            Some(HirLocation::Block(source.id)),
+                        ));
+                    }
+                } else {
+                    incoming_by_target.insert(target, (source.id, arguments));
+                }
             }
         }
 

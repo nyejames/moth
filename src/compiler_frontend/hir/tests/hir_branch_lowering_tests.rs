@@ -17,11 +17,10 @@ use crate::compiler_frontend::ast::statements::value_production::{
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::CallTarget;
-use crate::compiler_frontend::hir::expressions::HirExpressionKind;
+use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -57,22 +56,22 @@ fn blocks_with_user_function_call(module: &HirModule, function_id: FunctionId) -
         .collect()
 }
 
-fn value_block_result_assignment(
+fn value_block_result_definition(
     module: &HirModule,
     block_id: BlockId,
-) -> (LocalId, HirExpressionKind, BlockId) {
+) -> (LocalId, HirExpression, BlockId) {
     let block = &module.blocks[block_id.0 as usize];
     let (result_local, value_kind) = block
         .statements
         .iter()
         .find_map(|statement| match &statement.kind {
-            HirStatementKind::Assign {
-                target: HirPlace::Local(local),
+            HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(local),
                 value,
-            } => Some((*local, value.kind.clone())),
+            } => Some((*local, module.expressions.expression(*value).clone())),
             _ => None,
         })
-        .expect("value-block branch should assign a hidden result local");
+        .expect("value-block branch should define a hidden result local");
 
     let merge_block = match block.terminator {
         HirTerminator::Jump { target, .. } => target,
@@ -303,14 +302,27 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
     let rhs_jump_args = super::assert_block_has_jump_args(&module, rhs_branch_block.id, 1);
     let short_jump_args = super::assert_block_has_jump_args(&module, short_branch_block.id, 1);
 
-    super::assert_block_assigns_local(&module, rhs_branch_block.id, rhs_jump_args[0]);
-    super::assert_block_assigns_local(&module, short_branch_block.id, short_jump_args[0]);
+    super::assert_block_writes_local(&module, rhs_branch_block.id, rhs_jump_args[0].source);
+    super::assert_block_writes_local(&module, short_branch_block.id, short_jump_args[0].source);
 
     let merge_block = &module.blocks[rhs_merge_target.0 as usize];
     assert!(
         !merge_block.locals.is_empty(),
         "merge block should declare a destination local for branch arguments"
     );
+    assert!(
+        merge_block
+            .locals
+            .iter()
+            .any(|local| local.id == rhs_jump_args[0].destination)
+    );
+    assert!(
+        merge_block
+            .locals
+            .iter()
+            .any(|local| local.id == short_jump_args[0].destination)
+    );
+    assert_eq!(rhs_jump_args[0].destination, short_jump_args[0].destination);
 }
 
 #[test]
@@ -419,18 +431,31 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
     let rhs_jump_args = super::assert_block_has_jump_args(&module, rhs_branch_block.id, 1);
     let short_jump_args = super::assert_block_has_jump_args(&module, short_branch_block.id, 1);
 
-    super::assert_block_assigns_local(&module, rhs_branch_block.id, rhs_jump_args[0]);
-    super::assert_block_assigns_local(&module, short_branch_block.id, short_jump_args[0]);
+    super::assert_block_writes_local(&module, rhs_branch_block.id, rhs_jump_args[0].source);
+    super::assert_block_writes_local(&module, short_branch_block.id, short_jump_args[0].source);
 
     let merge_block = &module.blocks[rhs_merge_target.0 as usize];
     assert!(
         !merge_block.locals.is_empty(),
         "merge block should declare a destination local for branch arguments"
     );
+    assert!(
+        merge_block
+            .locals
+            .iter()
+            .any(|local| local.id == rhs_jump_args[0].destination)
+    );
+    assert!(
+        merge_block
+            .locals
+            .iter()
+            .any(|local| local.id == short_jump_args[0].destination)
+    );
+    assert_eq!(rhs_jump_args[0].destination, short_jump_args[0].destination);
 }
 
 #[test]
-fn short_circuit_place_rhs_materializes_copy_before_merge_assignment() {
+fn short_circuit_place_rhs_materializes_value_load_before_edge_transfer() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) =
@@ -519,24 +544,37 @@ fn short_circuit_place_rhs_materializes_copy_before_merge_assignment() {
     };
 
     let rhs_branch_block = &module.blocks[rhs_block.0 as usize];
-    let rhs_jump_arg_local = match &rhs_branch_block.terminator {
+    let rhs_local = start_entry_block
+        .locals
+        .iter()
+        .find(|local| {
+            module
+                .side_table
+                .resolve_local_name(local.id, &path_fork, &string_table)
+                == Some("rhs")
+        })
+        .expect("rhs source local should be registered")
+        .id;
+    let rhs_jump_arg = match &rhs_branch_block.terminator {
         HirTerminator::Jump { args, .. } if args.len() == 1 => args[0],
         _ => panic!("rhs short-circuit branch should jump with one merge argument"),
     };
-    let rhs_jump_arg_assignment =
-        super::assert_block_assigns_local(&module, rhs_branch_block.id, rhs_jump_arg_local);
+    let rhs_jump_arg_write =
+        super::assert_block_writes_local(&module, rhs_branch_block.id, rhs_jump_arg.source);
 
     assert!(
         matches!(
-            rhs_jump_arg_assignment.kind,
-            HirExpressionKind::Copy(HirPlace::Local(_))
+            &rhs_jump_arg_write.kind,
+            HirExpressionKind::Load(place)
+                if place.root == rhs_local && super::is_local_place(place)
         ),
-        "rhs place loads should be materialized as Copy before jump-argument assignment"
+        "rhs place loads should produce a value-form Load before the edge transfer"
     );
+    assert_eq!(rhs_jump_arg_write.value_kind, ValueKind::RValue);
 }
 
 #[test]
-fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
+fn value_if_then_place_materializes_value_load_before_result_definition() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) =
@@ -647,9 +685,24 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
     };
 
     let (then_result_local, then_value_kind, then_merge) =
-        value_block_result_assignment(&module, then_block);
+        value_block_result_definition(&module, then_block);
     let (else_result_local, else_value_kind, else_merge) =
-        value_block_result_assignment(&module, else_block);
+        value_block_result_definition(&module, else_block);
+    let authored_local = |name| {
+        module.blocks[start_function.entry.0 as usize]
+            .locals
+            .iter()
+            .find(|local| {
+                module
+                    .side_table
+                    .resolve_local_name(local.id, &path_fork, &string_table)
+                    == Some(name)
+            })
+            .expect("authored branch input local should be registered")
+            .id
+    };
+    let left_local = authored_local("left");
+    let right_local = authored_local("right");
 
     assert_eq!(
         then_result_local, else_result_local,
@@ -660,13 +713,15 @@ fn value_if_then_place_materializes_copy_before_hidden_result_assignment() {
         "both branches should rejoin at the shared value-if merge block"
     );
     assert!(
-        matches!(then_value_kind, HirExpressionKind::Copy(HirPlace::Local(_))),
-        "then name should be copied before assigning the hidden result local"
+        matches!(&then_value_kind.kind, HirExpressionKind::Load(place) if place.root == left_local && super::is_local_place(place)),
+        "then name should be loaded as a value before defining the hidden result local"
     );
     assert!(
-        matches!(else_value_kind, HirExpressionKind::Copy(HirPlace::Local(_))),
-        "else name should be copied before assigning the hidden result local"
+        matches!(&else_value_kind.kind, HirExpressionKind::Load(place) if place.root == right_local && super::is_local_place(place)),
+        "else name should be loaded as a value before defining the hidden result local"
     );
+    assert_eq!(then_value_kind.value_kind, ValueKind::RValue);
+    assert_eq!(else_value_kind.value_kind, ValueKind::RValue);
 }
 
 #[test]

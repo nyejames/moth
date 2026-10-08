@@ -71,11 +71,11 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    ExpressionSiteId, RuntimeTemplateReason, TemplateHelperKind, TemplateIrStore,
-    TemplatePreparation, TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase,
-    TemplateTirReference, TirView, collect_effective_tir_expression_overlay_payloads,
-    finalized_tir_view_for_template, owned_runtime_slot_handoff_for_prepared_view,
-    owned_runtime_template_handoff_for_prepared_view, replace_expression_overlay_entries,
+    ExpressionSiteId, RuntimeTemplateReason, TemplateIrStore, TemplatePreparation,
+    TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase, TemplateTirReference,
+    TirView, collect_effective_tir_expression_overlay_payloads, finalized_tir_view_for_template,
+    owned_runtime_slot_handoff_for_prepared_view, owned_runtime_template_handoff_for_prepared_view,
+    replace_expression_overlay_entries,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
@@ -1164,10 +1164,8 @@ fn discard_inactive_assertion_messages_in_owned_runtime_node(
             discard_inactive_assertion_messages_in_expression(expression)?;
         }
 
-        OwnedRuntimeTemplateNode::BranchChain { branches, .. } => {
-            for branch in branches {
-                discard_inactive_assertion_messages_in_branch_selector(&mut branch.selector)?;
-            }
+        OwnedRuntimeTemplateNode::Conditional { selector, .. } => {
+            discard_inactive_assertion_messages_in_branch_selector(selector)?;
         }
 
         OwnedRuntimeTemplateNode::Loop { header, .. } => {
@@ -1179,7 +1177,6 @@ fn discard_inactive_assertion_messages_in_owned_runtime_node(
         | OwnedRuntimeTemplateNode::ChildTemplate { .. }
         | OwnedRuntimeTemplateNode::ConditionalWrapper { .. }
         | OwnedRuntimeTemplateNode::AggregateOutput
-        | OwnedRuntimeTemplateNode::LoopControl { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => {}
@@ -1439,14 +1436,12 @@ fn normalize_expression_templates_with_context(
                     Some(NormalizedTemplateExpression::Folded(folded, provenance))
                 }
 
-                FinalizedTemplateValue::Runtime(prepared) => {
-                    materialize_runtime_template_handoff_for_hir(template, context, &prepared)?
-                }
+                FinalizedTemplateValue::Runtime(prepared) => Some(
+                    materialize_runtime_template_handoff_for_hir(template, context, &prepared)?,
+                ),
 
-                FinalizedTemplateValue::Helper(kind) => {
-                    if helper_artifact_policy == HelperArtifactPolicy::RejectFinalHelperValue
-                        && matches!(kind, TemplateHelperKind::SlotInsert)
-                    {
+                FinalizedTemplateValue::SlotInsertHelper => {
+                    if helper_artifact_policy == HelperArtifactPolicy::RejectFinalHelperValue {
                         return Err(CompilerDiagnostic::invalid_template_structure(
                             InvalidTemplateStructureReason::HelperOutsideWrapperSlot,
                             template.span,
@@ -1632,15 +1627,6 @@ fn normalize_template_for_hir(
     template: &mut Template,
     context: &mut TemplateNormalizationContext<'_>,
 ) -> Result<(), TemplateNormalizationError> {
-    normalize_expression_overlays_for_template_reference(template, context)?;
-
-    Ok(())
-}
-
-fn normalize_expression_overlays_for_template_reference(
-    template: &mut Template,
-    context: &mut TemplateNormalizationContext<'_>,
-) -> Result<(), TemplateNormalizationError> {
     // Keep normalized payloads in the shared view context consumed
     // by the finalized effective view and runtime handoff materializer. This
     // preserves shared TIR nodes while covering dynamic expressions, selectors,
@@ -1711,7 +1697,7 @@ fn materialize_runtime_template_handoff_for_hir(
     template: &Template,
     context: &mut TemplateNormalizationContext<'_>,
     prepared: &TemplatePreparation,
-) -> Result<Option<NormalizedTemplateExpression>, TemplateNormalizationError> {
+) -> Result<NormalizedTemplateExpression, TemplateNormalizationError> {
     let store_handle = Rc::clone(&context.template_ir_store);
     let store = store_handle.borrow();
     let view = finalized_tir_view_for_template(template, &store)?;
@@ -1739,9 +1725,9 @@ fn materialize_runtime_template_handoff_for_hir(
         module_resources.as_deref(),
     )? {
         increment_ast_counter(AstCounter::RuntimeTemplateHandoffsMaterialized);
-        return Ok(Some(NormalizedTemplateExpression::RuntimeSlotApplication(
+        return Ok(NormalizedTemplateExpression::RuntimeSlotApplication(
             handoff,
-        )));
+        ));
     }
 
     let handoff = owned_runtime_template_handoff_for_prepared_view(
@@ -1752,7 +1738,7 @@ fn materialize_runtime_template_handoff_for_hir(
     )?;
 
     increment_ast_counter(AstCounter::RuntimeTemplateHandoffsMaterialized);
-    Ok(Some(NormalizedTemplateExpression::RuntimeTemplate(handoff)))
+    Ok(NormalizedTemplateExpression::RuntimeTemplate(handoff))
 }
 
 fn normalize_runtime_slot_handoff_for_hir(
@@ -1785,11 +1771,10 @@ fn normalize_owned_runtime_template_node_for_hir(
         OwnedRuntimeTemplateNode::Sequence { .. }
         | OwnedRuntimeTemplateNode::ChildTemplate { .. }
         | OwnedRuntimeTemplateNode::ConditionalWrapper { .. }
-        | OwnedRuntimeTemplateNode::BranchChain { .. }
+        | OwnedRuntimeTemplateNode::Conditional { .. }
         | OwnedRuntimeTemplateNode::Loop { .. }
         | OwnedRuntimeTemplateNode::Text { .. }
         | OwnedRuntimeTemplateNode::AggregateOutput
-        | OwnedRuntimeTemplateNode::LoopControl { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => {}

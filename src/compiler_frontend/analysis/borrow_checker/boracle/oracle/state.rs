@@ -8,8 +8,8 @@
 use super::OracleLimitReason;
 use crate::compiler_frontend::analysis::borrow_checker::problem::LoanId;
 use crate::compiler_frontend::analysis::borrow_checker::problem::{
-    AccessKind, BindingId, BlockId, BorrowProblem, CallId, EventId, PlaceId, PlaceOverlap,
-    ProjectionElem,
+    AccessKind, BindingDestination, BindingId, BlockId, BorrowProblem, CallId, EventId, PlaceId,
+    PlaceOverlap, ProjectionElem,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use std::collections::{BTreeMap, BTreeSet};
@@ -58,10 +58,12 @@ pub(crate) enum DefinitionTransition {
         target: RuntimeAccessTarget,
         retired_capabilities: Box<[RuntimeCapabilityId]>,
     },
-    /// The alias row covers shared and exclusive destinations identically: both write through
-    /// to the referent, keep the alias state and allocate nothing. The reference solver never
-    /// checks a definition against a loan, and its alias arm tests one unqualified
-    /// `BindingMode::Alias`, so there is no conflict row and no access-kind split here.
+    ReplacedAlias {
+        target: RuntimeAccessTarget,
+        retired_capabilities: Box<[RuntimeCapabilityId]>,
+    },
+    /// Only an explicit update of an alias-backed binding writes through to the referent. It
+    /// keeps the alias state and allocates nothing; its paired access remains conflict-checked.
     WriteThroughAlias { target: RuntimeAccessTarget },
 }
 
@@ -70,6 +72,7 @@ impl DefinitionTransition {
         match self {
             Self::Installed { target, .. }
             | Self::ReplacedSlot { target, .. }
+            | Self::ReplacedAlias { target, .. }
             | Self::WriteThroughAlias { target } => target,
         }
     }
@@ -358,11 +361,11 @@ impl OracleState {
 
     /// Applies the concrete role of one definition-producing event.
     ///
-    /// `role` describes the destination as it was BEFORE the paired defining access, so the
-    /// access must not have installed anything. The destination's pre-definition state alone
-    /// decides the row: only an uninitialised destination uses the event category to choose
-    /// between an alias and a slot, and an established slot stays slot-backed while every alias
-    /// row writes through and retires nothing. The two non-write-through rows retire every
+    /// `role` describes the destination value selected by the writer. A Define always replaces
+    /// the previous binding role, while an Update to an existing alias writes through. A direct
+    /// place value installs an alias when its binding role is replaced, including replacement of
+    /// an established slot. Every installation/replacement retires overlapping holders; only an
+    /// Update write-through retires nothing. The two non-write-through rows retire every
     /// capability held by a place that structurally overlaps the destination, because the
     /// reference's `holder_kills` keys the kill on structural overlap, not on holder identity
     /// (`loans.rs:790-805`), so a bare rebind of a root must also end a capability held by a
@@ -378,80 +381,76 @@ impl OracleState {
     pub(crate) fn apply_definition_transition(
         &mut self,
         problem: &BorrowProblem,
-        destination: PlaceId,
+        place_index: &PlaceIndex,
+        destination: BindingDestination,
         event_kind: DefinitionEventKind,
         role: DefinitionRole,
         event_index: usize,
     ) -> Result<DefinitionTransition, CompilerError> {
+        let place = destination.place();
         // A pending call result is confirmed only by the builder's defining write, which
         // follows the `CallEffect` immediately. Any definition event that retires or replaces
         // the result place while the confirmation is still pending therefore cannot be builder
         // output, and consuming the entry here would leave the confirmation bound to a
         // generation the oracle no longer associates with the place. That is malformed
         // normalized input, not a role the transition may silently drop.
-        if self.pending_call_results.contains_key(&destination) {
+        if self.pending_call_results.contains_key(&place) {
             return Err(CompilerError::compiler_error(format!(
                 "Boracle oracle received a definition event for place {:?} whose pending call \
                  result has not been confirmed",
-                destination
+                place
             )));
         }
-        let current = self.state(destination)?;
-        match current {
-            RuntimePlaceState::Unavailable => {
-                let installs_alias = matches!(
-                    event_kind,
-                    DefinitionEventKind::DirectAlias | DefinitionEventKind::MutableParameter
-                );
-                let (installed_state, target) = if installs_alias {
-                    let DefinitionRole::Alias { target, access } = role else {
-                        return Err(CompilerError::compiler_error(
-                            "Boracle definition alias role did not provide an alias target",
-                        ));
-                    };
-                    let installed_state = RuntimePlaceState::Alias {
-                        target: target.node,
-                        path: target.path.clone(),
-                        access,
-                    };
-                    (installed_state, target)
-                } else {
-                    let target = role.slot_target();
-                    (
-                        RuntimePlaceState::Slot {
-                            current: target.node,
-                        },
-                        target,
-                    )
-                };
-                let retired_capabilities =
-                    self.retire_overlapping_holders(problem, destination, event_index)?;
-                self.set_state(destination, installed_state);
-                Ok(DefinitionTransition::Installed {
-                    target,
-                    retired_capabilities,
-                })
-            }
-            RuntimePlaceState::Slot { .. } => {
-                let target = role.slot_target();
-                let retired_capabilities =
-                    self.retire_overlapping_holders(problem, destination, event_index)?;
-                self.set_state(
-                    destination,
-                    RuntimePlaceState::Slot {
-                        current: target.node,
-                    },
-                );
-                Ok(DefinitionTransition::ReplacedSlot {
-                    target,
-                    retired_capabilities,
-                })
-            }
-            RuntimePlaceState::Alias { target, path, .. } => {
-                Ok(DefinitionTransition::WriteThroughAlias {
-                    target: RuntimeAccessTarget { node: target, path },
-                })
-            }
+        if let Some(target) = self.write_through_target(problem, place_index, destination)? {
+            return Ok(DefinitionTransition::WriteThroughAlias { target });
+        }
+
+        let current = self.state(place)?;
+        let was_unavailable = matches!(current, RuntimePlaceState::Unavailable);
+        let installs_alias = matches!(
+            event_kind,
+            DefinitionEventKind::DirectAlias | DefinitionEventKind::MutableParameter
+        );
+        let (installed_state, target) = if installs_alias {
+            let DefinitionRole::Alias { target, access } = role else {
+                return Err(CompilerError::compiler_error(
+                    "Boracle definition alias role did not provide an alias target",
+                ));
+            };
+            (
+                RuntimePlaceState::Alias {
+                    target: target.node,
+                    path: target.path.clone(),
+                    access,
+                },
+                target,
+            )
+        } else {
+            let target = role.slot_target();
+            (
+                RuntimePlaceState::Slot {
+                    current: target.node,
+                },
+                target,
+            )
+        };
+        let retired_capabilities = self.retire_overlapping_holders(problem, place, event_index)?;
+        self.set_state(place, installed_state);
+        if was_unavailable {
+            Ok(DefinitionTransition::Installed {
+                target,
+                retired_capabilities,
+            })
+        } else if installs_alias {
+            Ok(DefinitionTransition::ReplacedAlias {
+                target,
+                retired_capabilities,
+            })
+        } else {
+            Ok(DefinitionTransition::ReplacedSlot {
+                target,
+                retired_capabilities,
+            })
         }
     }
 
@@ -462,6 +461,44 @@ impl OracleState {
         place_id: PlaceId,
         max_dynamic_generations: usize,
     ) -> Result<Result<Option<ResolvedPlace>, OracleLimitReason>, CompilerError> {
+        let Some(mut resolved) = self.resolve_place_state(problem, place_index, place_id)? else {
+            return Ok(Ok(None));
+        };
+        match self.descend(&mut resolved.target, max_dynamic_generations) {
+            Ok(()) => Ok(Ok(Some(resolved))),
+            Err(reason) => Ok(Err(reason)),
+        }
+    }
+
+    /// Determines Update-through before a writer allocates or consumes an incoming value.
+    /// A projected destination inherits its nearest available prefix's binding role. This
+    /// lookup preserves the residual path without materialising aggregate children.
+    pub(crate) fn write_through_target(
+        &self,
+        problem: &BorrowProblem,
+        place_index: &PlaceIndex,
+        destination: BindingDestination,
+    ) -> Result<Option<RuntimeAccessTarget>, CompilerError> {
+        if destination.defines() {
+            return Ok(None);
+        }
+        let Some(resolved) = self.resolve_place_state(problem, place_index, destination.place())?
+        else {
+            return Ok(None);
+        };
+        if matches!(resolved.state, RuntimePlaceState::Alias { .. }) {
+            Ok(Some(resolved.target))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn resolve_place_state(
+        &self,
+        problem: &BorrowProblem,
+        place_index: &PlaceIndex,
+        place_id: PlaceId,
+    ) -> Result<Option<ResolvedPlace>, CompilerError> {
         let place = problem.places().get(place_id.index()).ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "Boracle oracle cannot locate place {:?}",
@@ -485,7 +522,7 @@ impl OracleState {
                 continue;
             }
             let suffix = place.projections[prefix_length..].to_vec();
-            let mut target = match &state {
+            let target = match &state {
                 RuntimePlaceState::Slot { current } => RuntimeAccessTarget {
                     node: *current,
                     path: suffix.into_boxed_slice(),
@@ -504,17 +541,13 @@ impl OracleState {
                 }
                 RuntimePlaceState::Unavailable => continue,
             };
-            match self.descend(&mut target, max_dynamic_generations) {
-                Ok(()) => {}
-                Err(reason) => return Ok(Err(reason)),
-            }
-            return Ok(Ok(Some(ResolvedPlace {
+            return Ok(Some(ResolvedPlace {
                 candidate,
                 state,
                 target,
-            })));
+            }));
         }
-        Ok(Ok(None))
+        Ok(None)
     }
 
     pub(crate) fn resolve_target(

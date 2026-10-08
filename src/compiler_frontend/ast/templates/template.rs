@@ -91,12 +91,6 @@ pub enum TemplateConstValueKind {
     /// Fully resolved final string value. Safe to materialize as a string slice before HIR.
     RenderableString,
 
-    /// Structural `break` / `continue` signal inside a template loop body.
-    ///
-    /// It is compile-time foldable only when the enclosing loop consumes it; it
-    /// must never be treated as a standalone renderable string.
-    LoopControlSignal,
-
     /// A template that wraps other content, such as unresolved slot placeholders.
     /// This is not automatically a backend-facing constant string in runtime paths.
     WrapperTemplate,

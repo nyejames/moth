@@ -10,24 +10,27 @@
 //! ## Diagnostic boundary
 //!
 //! `CompilerError` / `return_hir_transformation_error!` in this module means an internal
-//! HIR transformation or lowering invariant failure only. Normal user-facing source failures
-//! must be emitted as `CompilerDiagnostic` from AST or earlier stages.
+//! HIR transformation or lowering invariant failure only. The typed construction lane also
+//! carries source diagnostics when authored input exceeds compact HIR store capacity; other
+//! source failures are emitted by AST or earlier stages.
 
+use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::AstImportedFunctionContract;
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::const_facts::HirConstFacts;
+#[cfg(test)]
+use crate::compiler_frontend::hir::expression_store::HirExpressionStoreTestLimits;
+use crate::compiler_frontend::hir::expression_store::{HirConstructionFailure, HirExpressionStore};
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOriginLookup};
 use crate::compiler_frontend::hir::hir_side_table::HirSideTable;
 use crate::compiler_frontend::hir::ids::{
-    BlockId, ChoiceId, FieldId, FunctionId, HirConstId, HirNodeId, HirValueId, LocalId, RegionId,
-    StructId,
+    BlockId, ChoiceId, FieldId, FunctionId, HirConstId, HirNodeId, LocalId, RegionId, StructId,
 };
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::regions::HirRegion;
@@ -58,6 +61,7 @@ pub(in crate::compiler_frontend) fn lower_module(
     path_fork: &mut PathInternerFork,
     function_origin_lookup: HirFunctionOriginLookup,
     module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
+    capacity_estimate: FrontendArenaCapacityEstimate,
 ) -> Result<HirLoweringResult, CompilerMessages> {
     let type_environment = ast.type_environment.clone();
     let mut ctx = HirBuilder::new(
@@ -65,6 +69,7 @@ pub(in crate::compiler_frontend) fn lower_module(
         path_fork,
         type_environment,
         function_origin_lookup,
+        capacity_estimate,
     );
 
     ctx.set_module_resources(module_resources);
@@ -106,13 +111,6 @@ pub struct HirBuilder<'a> {
     //       result boundary.
     pub(super) extracted_metadata: HirLoweringMetadata,
 
-    // === AST warnings kept for error context only ===
-    // WHAT: the AST's own warnings, held privately so failed lowering can render them alongside
-    //       the failing HIR transformation error. Successful-module warnings are not duplicated
-    //       here: frontend orchestration already owns the merged preparation + AST warning
-    //       vector and remains the single successful-module warning source.
-    ast_warnings: Vec<CompilerDiagnostic>,
-
     // === For variable name resolution ===
     pub(super) string_table: &'a mut StringTable,
     /// Module-local path identity table used to resolve all `PathId` names.
@@ -121,7 +119,6 @@ pub struct HirBuilder<'a> {
     next_block_id: u32,
     next_local_id: u32,
     next_node_id: u32,
-    next_value_id: u32,
     next_region_id: u32,
     next_function_id: u32,
     next_struct_id: u32,
@@ -186,8 +183,6 @@ pub struct HirBuilder<'a> {
     pub(super) function_index_by_id: FxHashMap<FunctionId, usize>,
     pub(super) region_index_by_id: FxHashMap<RegionId, usize>,
     pub(super) local_index_by_id: FxHashMap<LocalId, (usize, usize)>,
-    pub(super) struct_index_by_id: FxHashMap<StructId, usize>,
-    pub(super) field_index_by_id: FxHashMap<FieldId, (usize, usize)>,
 
     // === Current Function State ===
     current_function: Option<FunctionId>,
@@ -276,12 +271,17 @@ impl<'a> HirBuilder<'a> {
         path_fork: &'a mut PathInternerFork,
         type_environment: TypeEnvironment,
         function_origin_lookup: HirFunctionOriginLookup,
+        capacity_estimate: FrontendArenaCapacityEstimate,
     ) -> HirBuilder<'a> {
+        let mut module = HirModule::new();
+        module.expressions = HirExpressionStore::with_capacity(
+            capacity_estimate.hir_expressions,
+            capacity_estimate.expression_items,
+        );
         HirBuilder {
-            module: HirModule::new(),
+            module,
 
             extracted_metadata: HirLoweringMetadata::default(),
-            ast_warnings: Vec::new(),
 
             string_table,
             path_fork,
@@ -291,7 +291,6 @@ impl<'a> HirBuilder<'a> {
             next_block_id: 0,
             next_local_id: 0,
             next_node_id: 0,
-            next_value_id: 0,
             next_region_id: 0,
             next_function_id: 0,
             next_struct_id: 0,
@@ -320,8 +319,6 @@ impl<'a> HirBuilder<'a> {
             function_index_by_id: FxHashMap::default(),
             region_index_by_id: FxHashMap::default(),
             local_index_by_id: FxHashMap::default(),
-            struct_index_by_id: FxHashMap::default(),
-            field_index_by_id: FxHashMap::default(),
 
             current_function: None,
             current_block: None,
@@ -334,13 +331,24 @@ impl<'a> HirBuilder<'a> {
         }
     }
 
-    fn lower_error_messages(&self, error: CompilerError) -> CompilerMessages {
-        CompilerMessages::from_error_with_warnings(
-            error,
-            self.ast_warnings.clone(),
-            self.string_table,
-        )
-        .with_type_context_for_all_diagnostics(self.type_environment.clone())
+    #[cfg(test)]
+    pub(crate) fn set_expression_store_test_limits(
+        &mut self,
+        limits: HirExpressionStoreTestLimits,
+    ) {
+        self.module.expressions = HirExpressionStore::with_test_limits(limits);
+    }
+
+    fn lower_error_messages(&self, error: impl Into<HirConstructionFailure>) -> CompilerMessages {
+        let messages = match error.into() {
+            HirConstructionFailure::Diagnosed(diagnostic) => {
+                CompilerMessages::from_diagnostic_ref(diagnostic, self.string_table)
+            }
+            HirConstructionFailure::Infrastructure(error) => {
+                CompilerMessages::from_error_ref(error, self.string_table)
+            }
+        };
+        messages.with_type_context_for_all_diagnostics(self.type_environment.clone())
     }
 
     /// Installs the shared module resource table captured by the lowering entry point.
@@ -386,8 +394,8 @@ impl<'a> HirBuilder<'a> {
     pub(in crate::compiler_frontend::hir) fn with_active_value_block_target<T>(
         &mut self,
         target: ValueBlockTarget,
-        emit: impl FnOnce(&mut HirBuilder<'_>) -> Result<T, CompilerError>,
-    ) -> Result<T, CompilerError> {
+        emit: impl FnOnce(&mut HirBuilder<'_>) -> Result<T, HirConstructionFailure>,
+    ) -> Result<T, HirConstructionFailure> {
         let previous_target = self.active_value_block_target.replace(target);
 
         let result = emit(self);
@@ -400,8 +408,8 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn with_active_catch_handler<T>(
         &mut self,
         target: CatchHandlerTarget,
-        emit: impl FnOnce(&mut HirBuilder<'_>) -> Result<T, CompilerError>,
-    ) -> Result<T, CompilerError> {
+        emit: impl FnOnce(&mut HirBuilder<'_>) -> Result<T, HirConstructionFailure>,
+    ) -> Result<T, HirConstructionFailure> {
         let previous_handler = self.active_catch_handler.replace(target);
         let result = emit(self);
         self.active_catch_handler = previous_handler;
@@ -417,9 +425,6 @@ impl<'a> HirBuilder<'a> {
     pub fn build_hir_module(mut self, mut ast: Ast) -> Result<HirLoweringResult, CompilerMessages> {
         self.module_const_values = std::mem::take(&mut ast.const_values);
 
-        // Keep the AST warnings privately for error-context rendering only. They are not exposed
-        // on the successful lowering result; frontend orchestration owns the merged warning vector.
-        self.ast_warnings = ast.warnings.to_owned();
         self.module.const_facts = HirConstFacts::from(&ast.const_facts);
         self.imported_functions_by_name = ast.imported_functions_by_local_path.clone();
         self.imported_fallible_carriers_by_origin = self
@@ -530,7 +535,6 @@ impl<'a> HirBuilder<'a> {
             return Err(self.lower_error_messages(error));
         }
 
-        let warnings = self.ast_warnings.clone();
         let string_table = &*self.string_table;
         self.module.side_table = self.side_table;
         // Scalar calls recorded under catch handlers keep their handler routes for the lane
@@ -543,10 +547,8 @@ impl<'a> HirBuilder<'a> {
         //    compiler metadata (documentation fragments) is validated separately at the module
         //    compilation boundary.
         if let Err(error) = validate_hir_module(&self.module, &self.type_environment) {
-            return Err(
-                CompilerMessages::from_error_with_warnings(error, warnings, string_table)
-                    .with_type_context_for_all_diagnostics(self.type_environment.clone()),
-            );
+            return Err(CompilerMessages::from_error_ref(error, string_table)
+                .with_type_context_for_all_diagnostics(self.type_environment.clone()));
         }
 
         record_hir_counters(&self.module);
@@ -559,7 +561,7 @@ impl<'a> HirBuilder<'a> {
     }
 
     /// Processes a single AST node and generates corresponding HIR.
-    fn process_ast_node(&mut self, node: &AstNode) -> Result<(), CompilerError> {
+    fn process_ast_node(&mut self, node: &AstNode) -> Result<(), HirConstructionFailure> {
         self.lower_top_level_node(node)
     }
 
@@ -572,7 +574,6 @@ impl<'a> HirBuilder<'a> {
     allocate_id!(allocate_region_id, next_region_id, RegionId);
     allocate_id!(allocate_local_id, next_local_id, LocalId);
     allocate_id!(allocate_node_id, next_node_id, HirNodeId);
-    allocate_id!(allocate_value_id, next_value_id, HirValueId);
     allocate_id!(allocate_struct_id, next_struct_id, StructId);
     allocate_id!(allocate_field_id, next_field_id, FieldId);
     allocate_id!(allocate_const_id, next_const_id, HirConstId);
@@ -622,14 +623,6 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         hir_struct: crate::compiler_frontend::hir::structs::HirStruct,
     ) {
-        let struct_index = self.module.structs.len();
-        self.struct_index_by_id.insert(hir_struct.id, struct_index);
-
-        for (field_index, field) in hir_struct.fields.iter().enumerate() {
-            self.field_index_by_id
-                .insert(field.id, (struct_index, field_index));
-        }
-
         self.module.structs.push(hir_struct);
     }
 
@@ -665,22 +658,6 @@ impl<'a> HirBuilder<'a> {
         };
 
         Ok(self.module.blocks[block_index].locals[local_index].ty)
-    }
-
-    pub(super) fn field_type_id_or_error(
-        &self,
-        field_id: FieldId,
-        location: &Option<SourceSpan>,
-    ) -> Result<TypeId, CompilerError> {
-        let Some((struct_index, field_index)) = self.field_index_by_id.get(&field_id).copied()
-        else {
-            return_hir_transformation_error!(
-                format!("Field {:?} is not registered in HIR structs", field_id),
-                *location
-            );
-        };
-
-        Ok(self.module.structs[struct_index].fields[field_index].ty)
     }
 
     pub(super) fn block_index_or_error(
@@ -778,8 +755,8 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn with_temporary_local_bindings<T>(
         &mut self,
         bindings: impl IntoIterator<Item = (PathId, LocalId)>,
-        f: impl FnOnce(&mut Self) -> Result<T, CompilerError>,
-    ) -> Result<T, CompilerError> {
+        f: impl FnOnce(&mut Self) -> Result<T, HirConstructionFailure>,
+    ) -> Result<T, HirConstructionFailure> {
         let mut previous_bindings = Vec::new();
         for (path, local_id) in bindings {
             let previous = self.locals_by_name.insert(path, local_id);

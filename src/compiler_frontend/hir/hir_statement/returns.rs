@@ -4,7 +4,7 @@
 //! WHY: return coercion/alias handling is distinct from branch and loop CFG construction.
 
 use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -17,7 +17,7 @@ impl<'a> HirBuilder<'a> {
         values: &[Expression],
         span_ref: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let function_id = self.current_function_id_or_error(span_ref)?;
 
         let handled_direct_propagation = values.len() == 1
@@ -47,7 +47,7 @@ impl<'a> HirBuilder<'a> {
             .type_environment
             .fallible_carrier_slots(function_return_type)
         {
-            if return_value.ty != ok {
+            if self.module.expressions.expression(return_value).ty != ok {
                 return_hir_transformation_error!(
                     "Lowered success return does not match function result ok type",
                     self.hir_error_location(span_ref)
@@ -75,7 +75,7 @@ impl<'a> HirBuilder<'a> {
         value: &Expression,
         span_ref: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let function_id = self.current_function_id_or_error(span_ref)?;
         let function_return_type = self
             .function_by_id_or_error(function_id, span_ref)?
@@ -95,24 +95,27 @@ impl<'a> HirBuilder<'a> {
 
         let lowered_value = self.lower_expression_value_to_current_block(value)?;
 
-        let lowered_error = match lowered_value.kind {
-            HirExpressionKind::Load(place) => {
-                // The copy preserves the incoming expression span; generated values stay spanless.
-                let span = lowered_value.span;
-                let ty = lowered_value.ty;
-                let region = lowered_value.region;
-                self.make_expression(
-                    &span,
-                    HirExpressionKind::Copy(place),
-                    ty,
-                    ValueKind::RValue,
-                    region,
-                )
+        let loaded_place = {
+            let row = self.module.expressions.expression(lowered_value);
+            match &row.kind {
+                HirExpressionKind::Load(place) => Some((*place, row.span, row.ty, row.region)),
+                _ => None,
             }
-            _ => lowered_value,
+        };
+        let lowered_error = if let Some((place, span, ty, region)) = loaded_place {
+            // The copy preserves the incoming expression span; generated values stay spanless.
+            self.make_expression(
+                &span,
+                HirExpressionKind::Copy(place),
+                ty,
+                ValueKind::RValue,
+                region,
+            )?
+        } else {
+            lowered_value
         };
 
-        if lowered_error.ty != err {
+        if self.module.expressions.expression(lowered_error).ty != err {
             return_hir_transformation_error!(
                 "Lowered error return does not match function result error type",
                 self.hir_error_location(span_ref)

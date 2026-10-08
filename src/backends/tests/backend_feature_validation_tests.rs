@@ -27,6 +27,7 @@ use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
+use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirValueRange};
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
 };
@@ -38,11 +39,14 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
+use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::reachability::{
     ReachableFloatStatementKind, collect_module_function_link_facts,
     collect_reachability_from_function_link_facts,
 };
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
+};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -266,7 +270,13 @@ fn wasm_feature_validation_matches_explicit_numeric_cast_cases() {
     ];
 
     for (profile, source, target, expected_rejection) in cases {
-        let module = module_returning_cast_expression(numeric_cast_expression(0, source, target));
+        let mut expressions = test_expression_store();
+        let value = numeric_cast_expression(&mut expressions, source, target);
+        let module = module_returning_cast_expression(
+            expressions,
+            value,
+            bounded_numeric_scalar_type_id(target),
+        );
         let reachability = test_reachability(&module);
         let result = validate_hir_backend_feature_support(
             BackendFeatureValidationInput {
@@ -459,6 +469,209 @@ fn wasm_mutable_parameter_gate_preserves_existing_type_reason_precedence() {
 }
 
 #[test]
+fn wasm_mutable_local_alias_gate_rejects_selected_place_definitions() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let alias_span = test_source_span(71);
+    let later_update_span = test_source_span(75);
+    let module = mutable_local_write_module(
+        true,
+        true,
+        None,
+        vec![
+            (
+                HirWriteTarget::DefineLocal(LocalId(2)),
+                ValueKind::Place,
+                Some(alias_span),
+            ),
+            (
+                HirWriteTarget::AssignPlace(HirPlace::local(LocalId(2))),
+                ValueKind::RValue,
+                Some(later_update_span),
+            ),
+        ],
+    );
+
+    let diagnostic = wasm_feature_validation_diagnostic(
+        &module,
+        &type_environment,
+        &mut string_table,
+        "Wasm must reject a selected mutable local defined from a place",
+    );
+
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::MutableLocalBindingAliases,
+    );
+    assert_eq!(diagnostic.primary_span, Some(alias_span));
+}
+
+#[test]
+fn wasm_mutable_local_alias_gate_rejects_place_backed_slot_updates() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let initial_span = test_source_span(73);
+    let update_span = test_source_span(77);
+    let module = mutable_local_write_module(
+        true,
+        true,
+        Some(initial_span),
+        vec![
+            (
+                HirWriteTarget::DefineLocal(LocalId(2)),
+                ValueKind::Const,
+                Some(initial_span),
+            ),
+            (
+                HirWriteTarget::AssignPlace(HirPlace::local(LocalId(2))),
+                ValueKind::Place,
+                Some(update_span),
+            ),
+        ],
+    );
+
+    let diagnostic = wasm_feature_validation_diagnostic(
+        &module,
+        &type_environment,
+        &mut string_table,
+        "Wasm must reject a mutable local update from a place",
+    );
+
+    assert_unsupported_feature(
+        &diagnostic,
+        &mut string_table,
+        UnsupportedBackendFeatureReason::MutableLocalBindingAliases,
+    );
+    assert_eq!(diagnostic.primary_span, Some(update_span));
+}
+
+#[test]
+fn wasm_mutable_local_alias_gate_allows_direct_unprojected_self_updates() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let initial_span = test_source_span(79);
+    let update_span = test_source_span(80);
+    let module = mutable_local_write_module(
+        true,
+        true,
+        Some(initial_span),
+        vec![
+            (
+                HirWriteTarget::DefineLocal(LocalId(1)),
+                ValueKind::Const,
+                Some(initial_span),
+            ),
+            (
+                HirWriteTarget::AssignPlace(HirPlace::local(LocalId(1))),
+                ValueKind::Place,
+                Some(update_span),
+            ),
+        ],
+    );
+    let reachability = test_reachability(&module);
+
+    let result = validate_hir_backend_feature_support(
+        BackendFeatureValidationInput {
+            hir: &module,
+            reachability: &reachability,
+            target: BackendTarget::Wasm,
+            type_environment: Some(&type_environment),
+            numeric_profile: NumericProfile::STANDARD,
+        },
+        &mut string_table,
+    );
+
+    assert!(
+        result.is_ok(),
+        "a direct self-update preserves the existing mutable scalar binding"
+    );
+}
+
+#[test]
+fn wasm_mutable_local_alias_gate_ignores_dormant_alias_definitions() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let span = test_source_span(81);
+    let module = mutable_local_write_module(
+        false,
+        true,
+        Some(span),
+        vec![(
+            HirWriteTarget::DefineLocal(LocalId(2)),
+            ValueKind::Place,
+            Some(span),
+        )],
+    );
+    let reachability = test_reachability(&module);
+
+    let result = validate_hir_backend_feature_support(
+        BackendFeatureValidationInput {
+            hir: &module,
+            reachability: &reachability,
+            target: BackendTarget::Wasm,
+            type_environment: Some(&type_environment),
+            numeric_profile: NumericProfile::STANDARD,
+        },
+        &mut string_table,
+    );
+
+    assert!(result.is_ok(), "an unselected helper must not reject Wasm");
+}
+
+#[test]
+fn wasm_mutable_local_alias_gate_allows_value_writes_and_immutable_place_aliases() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let span = test_source_span(85);
+    let mutable_value_writes = mutable_local_write_module(
+        true,
+        true,
+        Some(span),
+        vec![
+            (
+                HirWriteTarget::DefineLocal(LocalId(2)),
+                ValueKind::RValue,
+                Some(span),
+            ),
+            (
+                HirWriteTarget::AssignPlace(HirPlace::local(LocalId(2))),
+                ValueKind::Const,
+                Some(span),
+            ),
+        ],
+    );
+    let immutable_place_definition = mutable_local_write_module(
+        true,
+        false,
+        Some(span),
+        vec![(
+            HirWriteTarget::DefineLocal(LocalId(2)),
+            ValueKind::Place,
+            Some(span),
+        )],
+    );
+
+    for module in [mutable_value_writes, immutable_place_definition] {
+        let reachability = test_reachability(&module);
+        let result = validate_hir_backend_feature_support(
+            BackendFeatureValidationInput {
+                hir: &module,
+                reachability: &reachability,
+                target: BackendTarget::Wasm,
+                type_environment: Some(&type_environment),
+                numeric_profile: NumericProfile::STANDARD,
+            },
+            &mut string_table,
+        );
+        assert!(
+            result.is_ok(),
+            "supported local writes must remain accepted"
+        );
+    }
+}
+
+#[test]
 fn wasm_feature_validation_allows_numeric_text_casts_and_keeps_other_text_casts_gated() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
@@ -471,17 +684,19 @@ fn wasm_feature_validation_allows_numeric_text_casts_and_keeps_other_text_casts_
         NumericScalar::Fixed(FixedScalar::F32),
         NumericScalar::Fixed(FixedScalar::F64),
     ] {
-        let module = module_returning_cast_expression(HirExpression {
-            id: HirValueId(0),
-            kind: HirExpressionKind::Cast {
-                source: Box::new(bounded_numeric_scalar_expression(1, domain)),
+        let mut expressions = test_expression_store();
+        let source = bounded_numeric_scalar_expression(&mut expressions, domain);
+        let value = append_test_expression(
+            &mut expressions,
+            HirExpressionKind::Cast {
+                source,
                 policy: BuiltinCastPolicyId::NumericToString(domain),
             },
-            ty: builtin_type_ids::STRING,
-            value_kind: ValueKind::RValue,
-            region: RegionId(0),
-            span: None,
-        });
+            builtin_type_ids::STRING,
+            ValueKind::RValue,
+            None,
+        );
+        let module = module_returning_cast_expression(expressions, value, builtin_type_ids::STRING);
         let reachability = test_reachability(&module);
         let result = validate_hir_backend_feature_support(
             BackendFeatureValidationInput {
@@ -498,29 +713,32 @@ fn wasm_feature_validation_allows_numeric_text_casts_and_keeps_other_text_casts_
             "Wasm should allow NumericToString casts for {domain:?}"
         );
     }
-    for (policy, source, target) in [
+    for (policy, numeric_source, target) in [
         (
             BuiltinCastPolicyId::NumericToString(NumericScalar::Float),
-            bounded_numeric_scalar_expression(1, NumericScalar::Float),
+            true,
             builtin_type_ids::STRING,
         ),
         (
             BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
-            typed_expression(1, builtin_type_ids::STRING, None),
+            false,
             builtin_type_ids::INT,
         ),
     ] {
-        let module = module_returning_cast_expression(HirExpression {
-            id: HirValueId(0),
-            kind: HirExpressionKind::Cast {
-                source: Box::new(source),
-                policy,
-            },
-            ty: target,
-            value_kind: ValueKind::RValue,
-            region: RegionId(0),
-            span: None,
-        });
+        let mut expressions = test_expression_store();
+        let source = if numeric_source {
+            bounded_numeric_scalar_expression(&mut expressions, NumericScalar::Float)
+        } else {
+            typed_expression(&mut expressions, builtin_type_ids::STRING, None)
+        };
+        let value = append_test_expression(
+            &mut expressions,
+            HirExpressionKind::Cast { source, policy },
+            target,
+            ValueKind::RValue,
+            None,
+        );
+        let module = module_returning_cast_expression(expressions, value, target);
         let diagnostic = wasm_feature_validation_diagnostic(
             &module,
             &type_environment,
@@ -551,17 +769,17 @@ fn wasm_feature_validation_allows_byte_u8_expression_casts() {
             BuiltinCastPolicyId::U8ToByte,
         ),
     ] {
-        let module = module_returning_cast_expression(HirExpression {
-            id: HirValueId(0),
-            kind: HirExpressionKind::Cast {
-                source: Box::new(fixed_scalar_expression(1, source_scalar)),
-                policy,
-            },
-            ty: builtin_type_ids::fixed_scalar(target_scalar),
-            value_kind: ValueKind::RValue,
-            region: RegionId(0),
-            span: None,
-        });
+        let mut expressions = test_expression_store();
+        let source = fixed_scalar_expression(&mut expressions, source_scalar);
+        let target = builtin_type_ids::fixed_scalar(target_scalar);
+        let value = append_test_expression(
+            &mut expressions,
+            HirExpressionKind::Cast { source, policy },
+            target,
+            ValueKind::RValue,
+            None,
+        );
+        let module = module_returning_cast_expression(expressions, value, target);
         let reachability = test_reachability(&module);
         let result = validate_hir_backend_feature_support(
             BackendFeatureValidationInput {
@@ -585,6 +803,8 @@ fn wasm_feature_validation_allows_byte_u8_expression_casts() {
 fn wasm_feature_validation_rejects_statement_casts() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
+    let mut expressions = test_expression_store();
+    let source = bounded_numeric_scalar_expression(&mut expressions, NumericScalar::Int);
     let statement = HirStatement {
         id: HirNodeId(10),
         kind: HirStatementKind::CastOp {
@@ -592,26 +812,20 @@ fn wasm_feature_validation_rejects_statement_casts() {
                 source: NumericScalar::Int,
                 target: NumericScalar::Float,
             },
-            source: HirExpression {
-                id: HirValueId(11),
-                kind: HirExpressionKind::Int(1),
-                ty: builtin_type_ids::INT,
-                value_kind: ValueKind::Const,
-                region: RegionId(0),
-                span: None,
-            },
+            source,
             result: None,
         },
         span: None,
     };
-    let module = hir_module(
+    let module = hir_module_with_expressions(
         FunctionId(0),
         vec![function(FunctionId(0), BlockId(0))],
         vec![block(
             BlockId(0),
             vec![statement],
-            HirTerminator::Return(unit_expression(0)),
+            HirTerminator::Return(unit_expression()),
         )],
+        expressions,
     );
     let diagnostic = wasm_feature_validation_diagnostic(
         &module,
@@ -625,6 +839,8 @@ fn wasm_feature_validation_rejects_statement_casts() {
         &mut string_table,
         UnsupportedBackendFeatureReason::RuntimeCasts,
     );
+    let mut expressions = test_expression_store();
+    let source = bounded_numeric_scalar_expression(&mut expressions, NumericScalar::Uint);
     let statement = HirStatement {
         id: HirNodeId(14),
         kind: HirStatementKind::CastOp {
@@ -632,19 +848,20 @@ fn wasm_feature_validation_rejects_statement_casts() {
                 source: NumericScalar::Uint,
                 target: NumericScalar::Float,
             },
-            source: bounded_numeric_scalar_expression(15, NumericScalar::Uint),
+            source,
             result: None,
         },
         span: None,
     };
-    let module = hir_module(
+    let module = hir_module_with_expressions(
         FunctionId(0),
         vec![function(FunctionId(0), BlockId(0))],
         vec![block(
             BlockId(0),
             vec![statement],
-            HirTerminator::Return(unit_expression(0)),
+            HirTerminator::Return(unit_expression()),
         )],
+        expressions,
     );
     let diagnostic = wasm_feature_validation_diagnostic(
         &module,
@@ -657,23 +874,27 @@ fn wasm_feature_validation_rejects_statement_casts() {
         &mut string_table,
         UnsupportedBackendFeatureReason::RuntimeCasts,
     );
+    let mut expressions = test_expression_store();
+    let source =
+        bounded_numeric_scalar_expression(&mut expressions, NumericScalar::Fixed(FixedScalar::I8));
     let statement = HirStatement {
         id: HirNodeId(12),
         kind: HirStatementKind::CastOp {
             policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Fixed(FixedScalar::I8)),
-            source: bounded_numeric_scalar_expression(13, NumericScalar::Fixed(FixedScalar::I8)),
+            source,
             result: None,
         },
         span: None,
     };
-    let module = hir_module(
+    let module = hir_module_with_expressions(
         FunctionId(0),
         vec![function(FunctionId(0), BlockId(0))],
         vec![block(
             BlockId(0),
             vec![statement],
-            HirTerminator::Return(unit_expression(0)),
+            HirTerminator::Return(unit_expression()),
         )],
+        expressions,
     );
     let diagnostic = wasm_feature_validation_diagnostic(
         &module,
@@ -693,19 +914,23 @@ fn wasm_feature_validation_allows_reachable_trap_format_float_under_each_profile
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
     for float_precision in [FloatPrecision::Bits32, FloatPrecision::Bits64] {
-        let module = hir_module(
+        let mut expressions = test_expression_store();
+        let statement = float_statement(
+            &mut expressions,
+            10,
+            ReachableFloatStatementKind::FormatFloat,
+            NumericFailureMode::Trap,
+            None,
+        );
+        let module = hir_module_with_expressions(
             FunctionId(0),
             vec![function(FunctionId(0), BlockId(0))],
             vec![block(
                 BlockId(0),
-                vec![float_statement(
-                    10,
-                    ReachableFloatStatementKind::FormatFloat,
-                    NumericFailureMode::Trap,
-                    None,
-                )],
-                HirTerminator::Return(unit_expression(0)),
+                vec![statement],
+                HirTerminator::Return(unit_expression()),
             )],
+            expressions,
         );
         let reachability = test_reachability(&module);
         let result = validate_hir_backend_feature_support(
@@ -734,19 +959,23 @@ fn wasm_feature_validation_rejects_reachable_return_error_format_float() {
     let span = test_source_span(13);
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
-    let module = hir_module(
+    let mut expressions = test_expression_store();
+    let statement = float_statement(
+        &mut expressions,
+        10,
+        ReachableFloatStatementKind::FormatFloat,
+        NumericFailureMode::ReturnError,
+        Some(span),
+    );
+    let module = hir_module_with_expressions(
         FunctionId(0),
         vec![function(FunctionId(0), BlockId(0))],
         vec![block(
             BlockId(0),
-            vec![float_statement(
-                10,
-                ReachableFloatStatementKind::FormatFloat,
-                NumericFailureMode::ReturnError,
-                Some(span),
-            )],
-            HirTerminator::Return(unit_expression(0)),
+            vec![statement],
+            HirTerminator::Return(unit_expression()),
         )],
+        expressions,
     );
 
     let diagnostic = wasm_feature_validation_diagnostic(
@@ -768,19 +997,23 @@ fn wasm_feature_validation_rejects_reachable_return_error_format_float() {
 fn wasm_feature_validation_allows_reachable_trap_validate_float() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
-    let module = hir_module(
+    let mut expressions = test_expression_store();
+    let statement = float_statement(
+        &mut expressions,
+        10,
+        ReachableFloatStatementKind::ValidateFloat,
+        NumericFailureMode::Trap,
+        None,
+    );
+    let module = hir_module_with_expressions(
         FunctionId(0),
         vec![function(FunctionId(0), BlockId(0))],
         vec![block(
             BlockId(0),
-            vec![float_statement(
-                10,
-                ReachableFloatStatementKind::ValidateFloat,
-                NumericFailureMode::Trap,
-                None,
-            )],
-            HirTerminator::Return(unit_expression(0)),
+            vec![statement],
+            HirTerminator::Return(unit_expression()),
         )],
+        expressions,
     );
     let reachability = test_reachability(&module);
     let result = validate_hir_backend_feature_support(
@@ -805,19 +1038,23 @@ fn wasm_feature_validation_rejects_reachable_return_error_validate_float() {
     let span = test_source_span(13);
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
-    let module = hir_module(
+    let mut expressions = test_expression_store();
+    let statement = float_statement(
+        &mut expressions,
+        10,
+        ReachableFloatStatementKind::ValidateFloat,
+        NumericFailureMode::ReturnError,
+        Some(span),
+    );
+    let module = hir_module_with_expressions(
         FunctionId(0),
         vec![function(FunctionId(0), BlockId(0))],
         vec![block(
             BlockId(0),
-            vec![float_statement(
-                10,
-                ReachableFloatStatementKind::ValidateFloat,
-                NumericFailureMode::ReturnError,
-                Some(span),
-            )],
-            HirTerminator::Return(unit_expression(0)),
+            vec![statement],
+            HirTerminator::Return(unit_expression()),
         )],
+        expressions,
     );
 
     let diagnostic = wasm_feature_validation_diagnostic(
@@ -840,21 +1077,25 @@ fn wasm_feature_validation_allows_reachable_trap_integer_numeric_op() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
     for domain in [NumericScalar::Int, NumericScalar::Uint] {
-        let module = hir_module(
+        let mut expressions = test_expression_store();
+        let statement = numeric_op_statement(
+            &mut expressions,
+            10,
+            HirNumericOp {
+                operator: NumericOperator::Add,
+                domain,
+            },
+            None,
+        );
+        let module = hir_module_with_expressions(
             FunctionId(0),
             vec![function(FunctionId(0), BlockId(0))],
             vec![block(
                 BlockId(0),
-                vec![numeric_op_statement(
-                    10,
-                    HirNumericOp {
-                        operator: NumericOperator::Add,
-                        domain,
-                    },
-                    None,
-                )],
-                HirTerminator::Return(unit_expression(0)),
+                vec![statement],
+                HirTerminator::Return(unit_expression()),
             )],
+            expressions,
         );
         let reachability = test_reachability(&module);
         let result = validate_hir_backend_feature_support(
@@ -884,22 +1125,26 @@ fn wasm_recoverable_gate_fires_for_proven_safe_uint_operation() {
 
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
-    let module = hir_module(
+    let mut expressions = test_expression_store();
+    let statement = numeric_op_statement_with_failure(
+        &mut expressions,
+        10,
+        HirNumericOp {
+            operator: NumericOperator::Add,
+            domain: NumericScalar::Uint,
+        },
+        None,
+        NumericFailureMode::ReturnError,
+    );
+    let module = hir_module_with_expressions(
         FunctionId(0),
         vec![function(FunctionId(0), BlockId(0))],
         vec![block(
             BlockId(0),
-            vec![numeric_op_statement_with_failure(
-                10,
-                HirNumericOp {
-                    operator: NumericOperator::Add,
-                    domain: NumericScalar::Uint,
-                },
-                None,
-                NumericFailureMode::ReturnError,
-            )],
-            HirTerminator::Return(unit_expression(0)),
+            vec![statement],
+            HirTerminator::Return(unit_expression()),
         )],
+        expressions,
     );
     let proofs = analyse_numeric_proofs(&module, &type_environment, NumericProfile::STANDARD);
     assert!(
@@ -932,23 +1177,27 @@ fn wasm_feature_validation_rejects_reachable_return_error_numeric_ops() {
         NumericScalar::Fixed(FixedScalar::F64),
     ];
 
-    for (index, domain) in domains.into_iter().enumerate() {
-        let module = hir_module(
+    for domain in domains {
+        let mut expressions = test_expression_store();
+        let statement = numeric_op_statement_with_failure(
+            &mut expressions,
+            10,
+            HirNumericOp {
+                operator: NumericOperator::Add,
+                domain,
+            },
+            None,
+            NumericFailureMode::ReturnError,
+        );
+        let module = hir_module_with_expressions(
             FunctionId(0),
             vec![function(FunctionId(0), BlockId(0))],
             vec![block(
                 BlockId(0),
-                vec![numeric_op_statement_with_failure(
-                    10,
-                    HirNumericOp {
-                        operator: NumericOperator::Add,
-                        domain,
-                    },
-                    None,
-                    NumericFailureMode::ReturnError,
-                )],
-                HirTerminator::Return(unit_expression(index as u32)),
+                vec![statement],
+                HirTerminator::Return(unit_expression()),
             )],
+            expressions,
         );
 
         let diagnostic = wasm_feature_validation_diagnostic(
@@ -994,18 +1243,22 @@ fn wasm_feature_validation_allows_trap_float_operations_without_f16() {
     for profile in profiles {
         for domain in domains {
             for operator in operators {
-                let module = hir_module(
+                let mut expressions = test_expression_store();
+                let statement = numeric_op_statement(
+                    &mut expressions,
+                    10,
+                    HirNumericOp { operator, domain },
+                    None,
+                );
+                let module = hir_module_with_expressions(
                     FunctionId(0),
                     vec![function(FunctionId(0), BlockId(0))],
                     vec![block(
                         BlockId(0),
-                        vec![numeric_op_statement(
-                            10,
-                            HirNumericOp { operator, domain },
-                            None,
-                        )],
-                        HirTerminator::Return(unit_expression(0)),
+                        vec![statement],
+                        HirTerminator::Return(unit_expression()),
                     )],
+                    expressions,
                 );
                 let reachability = test_reachability(&module);
                 let result = validate_hir_backend_feature_support(
@@ -1032,21 +1285,25 @@ fn wasm_feature_validation_allows_trap_float_operations_without_f16() {
 fn wasm_feature_validation_keeps_f16_numeric_operations_gated() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
-    let module = hir_module(
+    let mut expressions = test_expression_store();
+    let statement = numeric_op_statement(
+        &mut expressions,
+        10,
+        HirNumericOp {
+            operator: NumericOperator::Add,
+            domain: NumericScalar::Fixed(FixedScalar::F16),
+        },
+        None,
+    );
+    let module = hir_module_with_expressions(
         FunctionId(0),
         vec![function(FunctionId(0), BlockId(0))],
         vec![block(
             BlockId(0),
-            vec![numeric_op_statement(
-                10,
-                HirNumericOp {
-                    operator: NumericOperator::Add,
-                    domain: NumericScalar::Fixed(FixedScalar::F16),
-                },
-                None,
-            )],
-            HirTerminator::Return(unit_expression(0)),
+            vec![statement],
+            HirTerminator::Return(unit_expression()),
         )],
+        expressions,
     );
 
     let diagnostic = wasm_feature_validation_diagnostic(
@@ -1061,22 +1318,26 @@ fn wasm_feature_validation_keeps_f16_numeric_operations_gated() {
         UnsupportedBackendFeatureReason::CheckedNumericOperations,
     );
 
-    let recoverable = hir_module(
+    let mut expressions = test_expression_store();
+    let statement = numeric_op_statement_with_failure(
+        &mut expressions,
+        10,
+        HirNumericOp {
+            operator: NumericOperator::Add,
+            domain: NumericScalar::Fixed(FixedScalar::F16),
+        },
+        None,
+        NumericFailureMode::ReturnError,
+    );
+    let recoverable = hir_module_with_expressions(
         FunctionId(0),
         vec![function(FunctionId(0), BlockId(0))],
         vec![block(
             BlockId(0),
-            vec![numeric_op_statement_with_failure(
-                10,
-                HirNumericOp {
-                    operator: NumericOperator::Add,
-                    domain: NumericScalar::Fixed(FixedScalar::F16),
-                },
-                None,
-                NumericFailureMode::ReturnError,
-            )],
-            HirTerminator::Return(unit_expression(0)),
+            vec![statement],
+            HirTerminator::Return(unit_expression()),
         )],
+        expressions,
     );
     let recoverable_diagnostic = wasm_feature_validation_diagnostic(
         &recoverable,
@@ -1095,21 +1356,25 @@ fn wasm_feature_validation_keeps_f16_numeric_operations_gated() {
 fn wasm_feature_validation_rejects_integer_division_on_float_domains() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
-    let module = hir_module(
+    let mut expressions = test_expression_store();
+    let statement = numeric_op_statement(
+        &mut expressions,
+        10,
+        HirNumericOp {
+            operator: NumericOperator::IntegerDivide,
+            domain: NumericScalar::Fixed(FixedScalar::F32),
+        },
+        None,
+    );
+    let module = hir_module_with_expressions(
         FunctionId(0),
         vec![function(FunctionId(0), BlockId(0))],
         vec![block(
             BlockId(0),
-            vec![numeric_op_statement(
-                10,
-                HirNumericOp {
-                    operator: NumericOperator::IntegerDivide,
-                    domain: NumericScalar::Fixed(FixedScalar::F32),
-                },
-                None,
-            )],
-            HirTerminator::Return(unit_expression(0)),
+            vec![statement],
+            HirTerminator::Return(unit_expression()),
         )],
+        expressions,
     );
 
     let diagnostic = wasm_feature_validation_diagnostic(
@@ -1130,24 +1395,23 @@ fn wasm_feature_validation_ignores_unreachable_checked_numeric_ops() {
     let span = None;
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
-    let module = hir_module(
+    let mut expressions = test_expression_store();
+    let statement = numeric_op_statement(&mut expressions, 10, int_mul_op(), span);
+    let module = hir_module_with_expressions(
         FunctionId(0),
         vec![
             function(FunctionId(0), BlockId(0)),
             function(FunctionId(1), BlockId(1)),
         ],
         vec![
-            block(
-                BlockId(0),
-                vec![],
-                HirTerminator::Return(unit_expression(0)),
-            ),
+            block(BlockId(0), vec![], HirTerminator::Return(unit_expression())),
             block(
                 BlockId(1),
-                vec![numeric_op_statement(10, int_mul_op(), span)],
-                HirTerminator::Return(unit_expression(1)),
+                vec![statement],
+                HirTerminator::Return(unit_expression()),
             ),
         ],
+        expressions,
     );
 
     let reachability = test_reachability(&module);
@@ -1173,29 +1437,29 @@ fn wasm_feature_validation_ignores_unreachable_float_statements() {
     let span = None;
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();
-    let module = hir_module(
+    let mut expressions = test_expression_store();
+    let statement = float_statement(
+        &mut expressions,
+        10,
+        ReachableFloatStatementKind::FormatFloat,
+        NumericFailureMode::Trap,
+        span,
+    );
+    let module = hir_module_with_expressions(
         FunctionId(0),
         vec![
             function(FunctionId(0), BlockId(0)),
             function(FunctionId(1), BlockId(1)),
         ],
         vec![
-            block(
-                BlockId(0),
-                vec![],
-                HirTerminator::Return(unit_expression(0)),
-            ),
+            block(BlockId(0), vec![], HirTerminator::Return(unit_expression())),
             block(
                 BlockId(1),
-                vec![float_statement(
-                    10,
-                    ReachableFloatStatementKind::FormatFloat,
-                    NumericFailureMode::Trap,
-                    span,
-                )],
-                HirTerminator::Return(unit_expression(1)),
+                vec![statement],
+                HirTerminator::Return(unit_expression()),
             ),
         ],
+        expressions,
     );
 
     let reachability = test_reachability(&module);
@@ -1230,14 +1494,13 @@ fn wasm_feature_validation_rejects_reachable_generic_values_with_or_without_span
     ));
 
     for span in [spanful, None] {
-        let module = hir_module(
+        let mut expressions = test_expression_store();
+        let value = typed_expression(&mut expressions, generic_type, span);
+        let module = hir_module_with_expressions(
             FunctionId(0),
             vec![function(FunctionId(0), BlockId(0))],
-            vec![block(
-                BlockId(0),
-                vec![],
-                HirTerminator::Return(typed_expression(0, generic_type, span)),
-            )],
+            vec![block(BlockId(0), vec![], HirTerminator::Return(value))],
+            expressions,
         );
         let diagnostic = wasm_feature_validation_diagnostic(
             &module,
@@ -1266,24 +1529,19 @@ fn wasm_feature_validation_ignores_unreachable_generic_runtime_values() {
         NominalTypeId(0),
         vec![builtin_type_ids::STRING].into_boxed_slice(),
     );
-    let module = hir_module(
+    let mut expressions = test_expression_store();
+    let unreachable_value = typed_expression(&mut expressions, generic_type, None);
+    let module = hir_module_with_expressions(
         FunctionId(0),
         vec![
             function(FunctionId(0), BlockId(0)),
             function(FunctionId(1), BlockId(1)),
         ],
         vec![
-            block(
-                BlockId(0),
-                vec![],
-                HirTerminator::Return(unit_expression(0)),
-            ),
-            block(
-                BlockId(1),
-                vec![],
-                HirTerminator::Return(typed_expression(1, generic_type, None)),
-            ),
+            block(BlockId(0), vec![], HirTerminator::Return(unit_expression())),
+            block(BlockId(1), vec![], HirTerminator::Return(unreachable_value)),
         ],
+        expressions,
     );
 
     let reachability = test_reachability(&module);
@@ -1373,7 +1631,11 @@ fn wasm_feature_validation_rejects_fallible_control_flow_with_authored_span_and_
     let carrier_type =
         type_environment.intern_fallible_carrier(builtin_type_ids::STRING, custom_error_type);
     let authored_span = test_source_span(13);
-    let mut branch_module = hir_module(
+    let mut expressions = test_expression_store();
+    let branch_result = typed_expression(&mut expressions, carrier_type, None);
+    let success_value = typed_expression(&mut expressions, builtin_type_ids::STRING, None);
+    let error_value = typed_expression(&mut expressions, custom_error_type, None);
+    let mut branch_module = hir_module_with_expressions(
         FunctionId(0),
         vec![function(FunctionId(0), BlockId(0))],
         vec![
@@ -1381,7 +1643,7 @@ fn wasm_feature_validation_rejects_fallible_control_flow_with_authored_span_and_
                 BlockId(0),
                 vec![],
                 HirTerminator::FallibleBranch {
-                    result: typed_expression(0, carrier_type, None),
+                    result: branch_result,
                     success_block: BlockId(1),
                     error_block: BlockId(2),
                 },
@@ -1389,14 +1651,11 @@ fn wasm_feature_validation_rejects_fallible_control_flow_with_authored_span_and_
             block(
                 BlockId(1),
                 vec![],
-                HirTerminator::ReturnSuccess(typed_expression(1, builtin_type_ids::STRING, None)),
+                HirTerminator::ReturnSuccess(success_value),
             ),
-            block(
-                BlockId(2),
-                vec![],
-                HirTerminator::ReturnError(typed_expression(2, custom_error_type, None)),
-            ),
+            block(BlockId(2), vec![], HirTerminator::ReturnError(error_value)),
         ],
+        expressions,
     );
     branch_module
         .side_table
@@ -1431,14 +1690,18 @@ fn wasm_feature_validation_rejects_fallible_control_flow_with_authored_span_and_
         "JS validation should continue to allow reachable fallible control flow"
     );
 
-    for terminator in [
-        HirTerminator::ReturnSuccess(unit_expression(3)),
-        HirTerminator::ReturnError(typed_expression(4, custom_error_type, None)),
-    ] {
-        let mut module = hir_module(
+    for is_error in [false, true] {
+        let mut expressions = test_expression_store();
+        let terminator = if is_error {
+            HirTerminator::ReturnError(typed_expression(&mut expressions, custom_error_type, None))
+        } else {
+            HirTerminator::ReturnSuccess(unit_expression())
+        };
+        let mut module = hir_module_with_expressions(
             FunctionId(0),
             vec![function(FunctionId(0), BlockId(0))],
             vec![block(BlockId(0), vec![], terminator)],
+            expressions,
         );
         module
             .side_table
@@ -1466,7 +1729,11 @@ fn wasm_feature_validation_keeps_spanless_fallible_sites_and_ignores_unreachable
     let carrier_type =
         type_environment.intern_fallible_carrier(builtin_type_ids::STRING, error_type);
     let unreachable_span = test_source_span(21);
-    let mut module = hir_module(
+    let mut expressions = test_expression_store();
+    let unreachable_result = typed_expression(&mut expressions, carrier_type, None);
+    let unreachable_success = typed_expression(&mut expressions, builtin_type_ids::STRING, None);
+    let unreachable_error = typed_expression(&mut expressions, error_type, None);
+    let mut module = hir_module_with_expressions(
         FunctionId(0),
         vec![
             function(FunctionId(0), BlockId(0)),
@@ -1476,13 +1743,13 @@ fn wasm_feature_validation_keeps_spanless_fallible_sites_and_ignores_unreachable
             block(
                 BlockId(0),
                 vec![],
-                HirTerminator::ReturnSuccess(unit_expression(0)),
+                HirTerminator::ReturnSuccess(unit_expression()),
             ),
             block(
                 BlockId(1),
                 vec![],
                 HirTerminator::FallibleBranch {
-                    result: typed_expression(1, carrier_type, None),
+                    result: unreachable_result,
                     success_block: BlockId(2),
                     error_block: BlockId(3),
                 },
@@ -1490,14 +1757,15 @@ fn wasm_feature_validation_keeps_spanless_fallible_sites_and_ignores_unreachable
             block(
                 BlockId(2),
                 vec![],
-                HirTerminator::ReturnSuccess(typed_expression(2, builtin_type_ids::STRING, None)),
+                HirTerminator::ReturnSuccess(unreachable_success),
             ),
             block(
                 BlockId(3),
                 vec![],
-                HirTerminator::ReturnError(typed_expression(3, error_type, None)),
+                HirTerminator::ReturnError(unreachable_error),
             ),
         ],
+        expressions,
     );
     module
         .side_table
@@ -1519,24 +1787,24 @@ fn wasm_feature_validation_keeps_spanless_fallible_sites_and_ignores_unreachable
         "an unreachable authored terminator must not supply provenance for synthetic HIR"
     );
 
-    let mut unreachable_only_module = hir_module(
+    let mut expressions = test_expression_store();
+    let unreachable_error_value =
+        typed_expression(&mut expressions, error_type, Some(unreachable_span));
+    let mut unreachable_only_module = hir_module_with_expressions(
         FunctionId(0),
         vec![
             function(FunctionId(0), BlockId(0)),
             function_with_signature(FunctionId(1), BlockId(1), vec![], error_type),
         ],
         vec![
-            block(
-                BlockId(0),
-                vec![],
-                HirTerminator::Return(unit_expression(0)),
-            ),
+            block(BlockId(0), vec![], HirTerminator::Return(unit_expression())),
             block(
                 BlockId(1),
                 vec![],
-                HirTerminator::ReturnError(typed_expression(1, error_type, Some(unreachable_span))),
+                HirTerminator::ReturnError(unreachable_error_value),
             ),
         ],
+        expressions,
     );
     unreachable_only_module
         .side_table
@@ -1565,7 +1833,16 @@ fn wasm_feature_validation_preserves_numeric_and_cast_precedence_over_fallible_f
     let error_type = register_test_builtin_error_type(&mut type_environment);
     let numeric_result_type =
         type_environment.intern_fallible_carrier(builtin_type_ids::INT, error_type);
-    let numeric_module = hir_module(
+    let mut expressions = test_expression_store();
+    let numeric_statement = numeric_op_statement_with_failure(
+        &mut expressions,
+        10,
+        int_add_op(),
+        None,
+        NumericFailureMode::ReturnError,
+    );
+    let numeric_error_value = typed_expression(&mut expressions, error_type, None);
+    let numeric_module = hir_module_with_expressions(
         FunctionId(0),
         vec![function_with_signature(
             FunctionId(0),
@@ -1582,14 +1859,10 @@ fn wasm_feature_validation_preserves_numeric_and_cast_precedence_over_fallible_f
                 region: RegionId(0),
                 span: None,
             }],
-            vec![numeric_op_statement_with_failure(
-                10,
-                int_add_op(),
-                None,
-                NumericFailureMode::ReturnError,
-            )],
-            HirTerminator::ReturnError(typed_expression(0, error_type, None)),
+            vec![numeric_statement],
+            HirTerminator::ReturnError(numeric_error_value),
         )],
+        expressions,
     );
     let numeric_diagnostic = wasm_feature_validation_diagnostic(
         &numeric_module,
@@ -1605,7 +1878,10 @@ fn wasm_feature_validation_preserves_numeric_and_cast_precedence_over_fallible_f
 
     let cast_result_type =
         type_environment.intern_fallible_carrier(builtin_type_ids::INT, error_type);
-    let fallible_cast_module = hir_module(
+    let mut expressions = test_expression_store();
+    let cast_value =
+        numeric_cast_expression(&mut expressions, NumericScalar::Float, NumericScalar::Int);
+    let fallible_cast_module = hir_module_with_expressions(
         FunctionId(0),
         vec![function_with_signature(
             FunctionId(0),
@@ -1616,12 +1892,9 @@ fn wasm_feature_validation_preserves_numeric_and_cast_precedence_over_fallible_f
         vec![block(
             BlockId(0),
             vec![],
-            HirTerminator::ReturnSuccess(numeric_cast_expression(
-                0,
-                NumericScalar::Float,
-                NumericScalar::Int,
-            )),
+            HirTerminator::ReturnSuccess(cast_value),
         )],
+        expressions,
     );
     let cast_diagnostic = wasm_feature_validation_diagnostic(
         &fallible_cast_module,
@@ -1765,7 +2038,7 @@ fn backend_feature_validation_prefers_authored_number_declaration_over_spanless_
                 span: None,
             }],
             vec![],
-            HirTerminator::Return(unit_expression(0)),
+            HirTerminator::Return(unit_expression()),
         )],
     );
     module
@@ -1797,18 +2070,16 @@ fn backend_feature_validation_ignores_number_values_in_unselected_helpers() {
     let mut type_environment = TypeEnvironment::new();
     let number_type = type_environment
         .intern_number(NumberScale::new(256).expect("the maximum test Number scale is valid"));
-    let module = hir_module(
+    let mut expressions = test_expression_store();
+    let unreachable_value = typed_expression(&mut expressions, number_type, None);
+    let module = hir_module_with_expressions(
         FunctionId(0),
         vec![
             function(FunctionId(0), BlockId(0)),
             function_with_signature(FunctionId(1), BlockId(1), vec![LocalId(0)], number_type),
         ],
         vec![
-            block(
-                BlockId(0),
-                vec![],
-                HirTerminator::Return(unit_expression(0)),
-            ),
+            block(BlockId(0), vec![], HirTerminator::Return(unit_expression())),
             block_with_locals(
                 BlockId(1),
                 vec![HirLocal {
@@ -1819,9 +2090,10 @@ fn backend_feature_validation_ignores_number_values_in_unselected_helpers() {
                     span: None,
                 }],
                 vec![],
-                HirTerminator::Return(typed_expression(1, number_type, None)),
+                HirTerminator::Return(unreachable_value),
             ),
         ],
+        expressions,
     );
     let reachability = test_reachability(&module);
 
@@ -1979,7 +2251,7 @@ fn backend_feature_validation_rejects_fixed_width_return_type_without_an_express
         vec![block(
             BlockId(0),
             vec![],
-            HirTerminator::Return(unit_expression(0)),
+            HirTerminator::Return(unit_expression()),
         )],
     );
 
@@ -2013,20 +2285,22 @@ fn backend_feature_validation_prefers_authored_occurrence_over_synthetic_local_f
     let authored_span = SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start());
 
     for expected_span in [Some(authored_span), None] {
+        let mut expressions = test_expression_store();
         let success_value = match expected_span {
-            Some(span) => HirExpression {
-                id: HirValueId(1),
-                kind: HirExpressionKind::FallibleUnwrapSuccess {
-                    result: Box::new(typed_expression(2, carrier_type, Some(span))),
-                },
-                ty: unsupported_type,
-                value_kind: ValueKind::RValue,
-                region: RegionId(0),
-                span: None,
-            },
-            None => unit_expression(1),
+            Some(span) => {
+                let carrier = typed_expression(&mut expressions, carrier_type, Some(span));
+                append_test_expression(
+                    &mut expressions,
+                    HirExpressionKind::FallibleUnwrapSuccess { result: carrier },
+                    unsupported_type,
+                    ValueKind::RValue,
+                    None,
+                )
+            }
+            None => unit_expression(),
         };
-        let module = hir_module(
+        let branch_result = typed_expression(&mut expressions, carrier_type, None);
+        let module = hir_module_with_expressions(
             FunctionId(0),
             vec![function(FunctionId(0), BlockId(0))],
             vec![
@@ -2041,18 +2315,15 @@ fn backend_feature_validation_prefers_authored_occurrence_over_synthetic_local_f
                     }],
                     vec![],
                     HirTerminator::FallibleBranch {
-                        result: typed_expression(0, carrier_type, None),
+                        result: branch_result,
                         success_block: BlockId(1),
                         error_block: BlockId(2),
                     },
                 ),
                 block(BlockId(1), vec![], HirTerminator::Return(success_value)),
-                block(
-                    BlockId(2),
-                    vec![],
-                    HirTerminator::Return(unit_expression(3)),
-                ),
+                block(BlockId(2), vec![], HirTerminator::Return(unit_expression())),
             ],
+            expressions,
         );
 
         let diagnostic = feature_validation_diagnostic(
@@ -2096,7 +2367,7 @@ fn backend_feature_validation_prefers_authored_function_span_over_synthetic_loca
                 span: None,
             }],
             vec![],
-            HirTerminator::Return(unit_expression(0)),
+            HirTerminator::Return(unit_expression()),
         )],
     );
     module.side_table.map_function(Some(span), &function);
@@ -2162,11 +2433,7 @@ fn backend_feature_validation_ignores_unreachable_fixed_width_scalars() {
             function_with_signature(FunctionId(1), BlockId(1), vec![LocalId(0)], values),
         ],
         vec![
-            block(
-                BlockId(0),
-                vec![],
-                HirTerminator::Return(unit_expression(0)),
-            ),
+            block(BlockId(0), vec![], HirTerminator::Return(unit_expression())),
             block_with_locals(
                 BlockId(1),
                 vec![HirLocal {
@@ -2177,7 +2444,7 @@ fn backend_feature_validation_ignores_unreachable_fixed_width_scalars() {
                     span: None,
                 }],
                 vec![],
-                HirTerminator::Return(unit_expression(1)),
+                HirTerminator::Return(unit_expression()),
             ),
         ],
     );
@@ -2300,30 +2567,30 @@ fn wasm_feature_validation_ignores_unreachable_runtime_assertion_messages() {
     let mut string_table = StringTable::new();
     let mut type_environment = TypeEnvironment::new();
     let option_string = type_environment.intern_option(builtin_type_ids::STRING);
-    let module = hir_module(
+    let mut expressions = test_expression_store();
+    let unreachable_message = assertion_message_expression(
+        &mut expressions,
+        option_string,
+        HirAssertionMessageEvaluation::Runtime,
+    );
+    let module = hir_module_with_expressions(
         FunctionId(0),
         vec![
             function(FunctionId(0), BlockId(0)),
             function(FunctionId(1), BlockId(1)),
         ],
         vec![
-            block(
-                BlockId(0),
-                vec![],
-                HirTerminator::Return(unit_expression(0)),
-            ),
+            block(BlockId(0), vec![], HirTerminator::Return(unit_expression())),
             block(
                 BlockId(1),
                 vec![],
                 HirTerminator::AssertFailure {
-                    message: assertion_message_expression(
-                        option_string,
-                        HirAssertionMessageEvaluation::Runtime,
-                    ),
+                    message: unreachable_message,
                     message_evaluation: HirAssertionMessageEvaluation::Runtime,
                 },
             ),
         ],
+        expressions,
     );
 
     let reachability = test_reachability(&module);
@@ -2445,62 +2712,72 @@ fn assertion_message_module(
     option_string: crate::compiler_frontend::datatypes::ids::TypeId,
     evaluation: HirAssertionMessageEvaluation,
 ) -> HirModule {
-    hir_module(
+    let mut expressions = test_expression_store();
+    let message = assertion_message_expression(&mut expressions, option_string, evaluation);
+    hir_module_with_expressions(
         FunctionId(0),
         vec![function(FunctionId(0), BlockId(0))],
         vec![block(
             BlockId(0),
             vec![],
             HirTerminator::AssertFailure {
-                message: assertion_message_expression(option_string, evaluation),
+                message,
                 message_evaluation: evaluation,
             },
         )],
+        expressions,
     )
 }
 
 fn assertion_message_expression(
+    expressions: &mut HirExpressionStore,
     option_string: crate::compiler_frontend::datatypes::ids::TypeId,
     evaluation: HirAssertionMessageEvaluation,
-) -> HirExpression {
+) -> HirValueId {
     match evaluation {
-        HirAssertionMessageEvaluation::Default => HirExpression {
-            id: HirValueId(10),
-            kind: HirExpressionKind::VariantConstruct {
-                carrier: HirVariantCarrier::Option,
-                variant_index: 0,
-                fields: vec![],
-            },
-            ty: option_string,
-            value_kind: ValueKind::Const,
-            region: RegionId(0),
-            span: None,
-        },
-        HirAssertionMessageEvaluation::Folded | HirAssertionMessageEvaluation::Runtime => {
-            let value = HirExpression {
-                id: HirValueId(11),
-                kind: HirExpressionKind::StringLiteral("folded".to_owned()),
-                ty: builtin_type_ids::STRING,
-                value_kind: if matches!(evaluation, HirAssertionMessageEvaluation::Folded) {
-                    ValueKind::Const
-                } else {
-                    ValueKind::RValue
+        HirAssertionMessageEvaluation::Default => {
+            let fields = expressions
+                .append_variant_fields(&[], None)
+                .expect("empty option fields should fit the backend fixture store");
+            append_test_expression(
+                expressions,
+                HirExpressionKind::VariantConstruct {
+                    carrier: HirVariantCarrier::Option,
+                    variant_index: 0,
+                    fields,
                 },
-                region: RegionId(0),
-                span: None,
+                option_string,
+                ValueKind::Const,
+                None,
+            )
+        }
+        HirAssertionMessageEvaluation::Folded | HirAssertionMessageEvaluation::Runtime => {
+            let value_kind = if matches!(evaluation, HirAssertionMessageEvaluation::Folded) {
+                ValueKind::Const
+            } else {
+                ValueKind::RValue
             };
-            HirExpression {
-                id: HirValueId(12),
-                kind: HirExpressionKind::VariantConstruct {
+            let value = append_test_expression(
+                expressions,
+                HirExpressionKind::StringLiteral("folded".to_owned()),
+                builtin_type_ids::STRING,
+                value_kind,
+                None,
+            );
+            let fields = expressions
+                .append_variant_fields(&[HirVariantField { name: None, value }], None)
+                .expect("one option field should fit the backend fixture store");
+            append_test_expression(
+                expressions,
+                HirExpressionKind::VariantConstruct {
                     carrier: HirVariantCarrier::Option,
                     variant_index: 1,
-                    fields: vec![HirVariantField { name: None, value }],
+                    fields,
                 },
-                ty: option_string,
-                value_kind: ValueKind::RValue,
-                region: RegionId(0),
-                span: None,
-            }
+                option_string,
+                ValueKind::RValue,
+                None,
+            )
         }
     }
 }
@@ -2510,7 +2787,18 @@ fn hir_module(
     functions: Vec<HirFunction>,
     blocks: Vec<HirBlock>,
 ) -> HirModule {
+    hir_module_with_expressions(start_function, functions, blocks, test_expression_store())
+}
+
+fn hir_module_with_expressions(
+    start_function: FunctionId,
+    functions: Vec<HirFunction>,
+    blocks: Vec<HirBlock>,
+    mut expressions: HirExpressionStore,
+) -> HirModule {
+    expressions.freeze();
     let mut module = HirModule::new();
+    module.expressions = expressions;
     module.start_function = Some(start_function);
     module.functions = functions;
     module.blocks = blocks;
@@ -2547,13 +2835,18 @@ fn mutable_parameter_module(
     helper_reachable: bool,
     include_mutable_local: bool,
 ) -> HirModule {
+    let mut expressions = test_expression_store();
     let mut start_statements = Vec::new();
     if helper_reachable {
+        let argument = typed_expression(&mut expressions, parameter_type, None);
+        let args = expressions
+            .append_values(&[argument], None)
+            .expect("one backend fixture argument should fit its HIR store");
         start_statements.push(HirStatement {
             id: HirNodeId(10),
             kind: HirStatementKind::Call {
                 target: CallTarget::Local(FunctionId(1)),
-                args: vec![typed_expression(11, parameter_type, None)],
+                args,
                 result: None,
             },
             span: None,
@@ -2577,7 +2870,7 @@ fn mutable_parameter_module(
         });
     }
 
-    hir_module(
+    hir_module_with_expressions(
         FunctionId(0),
         vec![
             function(FunctionId(0), BlockId(0)),
@@ -2592,15 +2885,102 @@ fn mutable_parameter_module(
             block(
                 BlockId(0),
                 start_statements,
-                HirTerminator::Return(unit_expression(0)),
+                HirTerminator::Return(unit_expression()),
             ),
             block_with_locals(
                 BlockId(1),
                 helper_locals,
                 vec![],
-                HirTerminator::Return(unit_expression(2)),
+                HirTerminator::Return(unit_expression()),
             ),
         ],
+        expressions,
+    )
+}
+
+fn mutable_local_write_module(
+    helper_reachable: bool,
+    destination_mutable: bool,
+    destination_span: Option<SourceSpan>,
+    writes: Vec<(HirWriteTarget, ValueKind, Option<SourceSpan>)>,
+) -> HirModule {
+    let mut expressions = test_expression_store();
+    let mut start_statements = Vec::new();
+    if helper_reachable {
+        start_statements.push(HirStatement {
+            id: HirNodeId(10),
+            kind: HirStatementKind::Call {
+                target: CallTarget::Local(FunctionId(1)),
+                args: HirValueRange::empty(),
+                result: None,
+            },
+            span: None,
+        });
+    }
+
+    let helper_statements = writes
+        .into_iter()
+        .enumerate()
+        .map(|(index, (target, value_kind, span))| {
+            let expression_kind = match value_kind {
+                ValueKind::Place | ValueKind::RValue => {
+                    HirExpressionKind::Load(HirPlace::local(LocalId(1)))
+                }
+                ValueKind::Const => HirExpressionKind::Int(2),
+            };
+            let value = append_test_expression(
+                &mut expressions,
+                expression_kind,
+                builtin_type_ids::INT,
+                value_kind,
+                span,
+            );
+
+            HirStatement {
+                id: HirNodeId(
+                    20 + u32::try_from(index).expect("backend write fixture fits HIR node IDs"),
+                ),
+                kind: HirStatementKind::Write { target, value },
+                span,
+            }
+        })
+        .collect();
+
+    hir_module_with_expressions(
+        FunctionId(0),
+        vec![
+            function(FunctionId(0), BlockId(0)),
+            function_with_signature(FunctionId(1), BlockId(1), vec![], builtin_type_ids::NONE),
+        ],
+        vec![
+            block(
+                BlockId(0),
+                start_statements,
+                HirTerminator::Return(unit_expression()),
+            ),
+            block_with_locals(
+                BlockId(1),
+                vec![
+                    HirLocal {
+                        id: LocalId(1),
+                        ty: builtin_type_ids::INT,
+                        mutable: true,
+                        region: RegionId(0),
+                        span: None,
+                    },
+                    HirLocal {
+                        id: LocalId(2),
+                        ty: builtin_type_ids::INT,
+                        mutable: destination_mutable,
+                        region: RegionId(0),
+                        span: destination_span,
+                    },
+                ],
+                helper_statements,
+                HirTerminator::Return(unit_expression()),
+            ),
+        ],
+        expressions,
     )
 }
 
@@ -2623,23 +3003,29 @@ fn block_with_locals(
     }
 }
 
-fn numeric_op_statement(id: u32, op: HirNumericOp, span: Option<SourceSpan>) -> HirStatement {
-    numeric_op_statement_with_failure(id, op, span, NumericFailureMode::Trap)
+fn numeric_op_statement(
+    expressions: &mut HirExpressionStore,
+    id: u32,
+    op: HirNumericOp,
+    span: Option<SourceSpan>,
+) -> HirStatement {
+    numeric_op_statement_with_failure(expressions, id, op, span, NumericFailureMode::Trap)
 }
 
 fn numeric_op_statement_with_failure(
+    expressions: &mut HirExpressionStore,
     id: u32,
     op: HirNumericOp,
     span: Option<SourceSpan>,
     failure_mode: NumericFailureMode,
 ) -> HirStatement {
-    let left = bounded_numeric_scalar_expression(id + 100, op.domain);
+    let left = bounded_numeric_scalar_expression(expressions, op.domain);
     let operands = if op.operator.is_unary() {
         HirNumericOperands::Unary { operand: left }
     } else {
         HirNumericOperands::Binary {
             left,
-            right: bounded_numeric_scalar_expression(id + 101, op.domain),
+            right: bounded_numeric_scalar_expression(expressions, op.domain),
         }
     };
 
@@ -2649,13 +3035,16 @@ fn numeric_op_statement_with_failure(
             op,
             failure_mode,
             operands,
-            result: LocalId(9000),
+            result: HirLocalDestination::Define(LocalId(9000)),
         },
         span,
     }
 }
 
-fn bounded_numeric_scalar_expression(id: u32, domain: NumericScalar) -> HirExpression {
+fn bounded_numeric_scalar_expression(
+    expressions: &mut HirExpressionStore,
+    domain: NumericScalar,
+) -> HirValueId {
     let (kind, ty) = match domain {
         NumericScalar::Int => (HirExpressionKind::Int(1), builtin_type_ids::INT),
         NumericScalar::Uint => (HirExpressionKind::Uint(1), builtin_type_ids::UINT),
@@ -2669,35 +3058,28 @@ fn bounded_numeric_scalar_expression(id: u32, domain: NumericScalar) -> HirExpre
         ),
     };
 
-    HirExpression {
-        id: HirValueId(id),
-        kind,
-        ty,
-        value_kind: ValueKind::Const,
-        region: RegionId(0),
-        span: None,
-    }
+    append_test_expression(expressions, kind, ty, ValueKind::Const, None)
 }
 
 fn numeric_cast_expression(
-    id: u32,
+    expressions: &mut HirExpressionStore,
     source_domain: NumericScalar,
     target_domain: NumericScalar,
-) -> HirExpression {
-    HirExpression {
-        id: HirValueId(id),
-        kind: HirExpressionKind::Cast {
-            source: Box::new(bounded_numeric_scalar_expression(id + 1, source_domain)),
+) -> HirValueId {
+    let source = bounded_numeric_scalar_expression(expressions, source_domain);
+    append_test_expression(
+        expressions,
+        HirExpressionKind::Cast {
+            source,
             policy: BuiltinCastPolicyId::NumericConversion {
                 source: source_domain,
                 target: target_domain,
             },
         },
-        ty: bounded_numeric_scalar_type_id(target_domain),
-        value_kind: ValueKind::RValue,
-        region: RegionId(0),
-        span: None,
-    }
+        bounded_numeric_scalar_type_id(target_domain),
+        ValueKind::RValue,
+        None,
+    )
 }
 
 fn bounded_numeric_scalar_type_id(domain: NumericScalar) -> TypeId {
@@ -2712,15 +3094,17 @@ fn bounded_numeric_scalar_type_id(domain: NumericScalar) -> TypeId {
     }
 }
 
-fn fixed_scalar_expression(id: u32, scalar: FixedScalar) -> HirExpression {
-    HirExpression {
-        id: HirValueId(id),
-        kind: HirExpressionKind::FixedScalar(fixed_scalar_value(scalar)),
-        ty: builtin_type_ids::fixed_scalar(scalar),
-        value_kind: ValueKind::Const,
-        region: RegionId(0),
-        span: None,
-    }
+fn fixed_scalar_expression(
+    expressions: &mut HirExpressionStore,
+    scalar: FixedScalar,
+) -> HirValueId {
+    append_test_expression(
+        expressions,
+        HirExpressionKind::FixedScalar(fixed_scalar_value(scalar)),
+        builtin_type_ids::fixed_scalar(scalar),
+        ValueKind::Const,
+        None,
+    )
 }
 
 fn fixed_scalar_value(scalar: FixedScalar) -> FixedScalarValue {
@@ -2757,19 +3141,19 @@ fn int_mul_op() -> HirNumericOp {
 }
 
 fn float_statement(
+    expressions: &mut HirExpressionStore,
     id: u32,
     kind: ReachableFloatStatementKind,
     failure_mode: NumericFailureMode,
     span: Option<SourceSpan>,
 ) -> HirStatement {
-    let source = HirExpression {
-        id: HirValueId(id + 100),
-        kind: HirExpressionKind::Float(1.5),
-        ty: builtin_type_ids::FLOAT,
-        value_kind: ValueKind::Const,
-        region: RegionId(0),
-        span: None,
-    };
+    let source = append_test_expression(
+        expressions,
+        HirExpressionKind::Float(1.5),
+        builtin_type_ids::FLOAT,
+        ValueKind::Const,
+        None,
+    );
     let result = LocalId(9000);
 
     HirStatement {
@@ -2778,12 +3162,12 @@ fn float_statement(
             ReachableFloatStatementKind::FormatFloat => HirStatementKind::FormatFloat {
                 source,
                 failure_mode,
-                result,
+                result: HirLocalDestination::Define(result),
             },
             ReachableFloatStatementKind::ValidateFloat => HirStatementKind::ValidateFloat {
                 source,
                 failure_mode,
-                result,
+                result: HirLocalDestination::Define(result),
             },
         },
         span,
@@ -2791,27 +3175,31 @@ fn float_statement(
 }
 
 /// Builds a value expression carrying the semantic type a gate has to classify.
-fn typed_expression(id: u32, ty: TypeId, span: Option<SourceSpan>) -> HirExpression {
-    HirExpression {
-        id: HirValueId(id),
-        kind: HirExpressionKind::TupleConstruct { elements: vec![] },
+fn typed_expression(
+    expressions: &mut HirExpressionStore,
+    ty: TypeId,
+    span: Option<SourceSpan>,
+) -> HirValueId {
+    append_test_expression(
+        expressions,
+        HirExpressionKind::TupleConstruct {
+            elements: HirValueRange::empty(),
+        },
         ty,
-        value_kind: ValueKind::RValue,
-        region: RegionId(0),
+        ValueKind::RValue,
         span,
-    }
+    )
 }
 
 /// Builds a module whose reachable start function returns one expression of `ty`.
 fn module_returning_expression(ty: TypeId, span: Option<SourceSpan>) -> HirModule {
-    hir_module(
+    let mut expressions = test_expression_store();
+    let value = typed_expression(&mut expressions, ty, span);
+    hir_module_with_expressions(
         FunctionId(0),
         vec![function(FunctionId(0), BlockId(0))],
-        vec![block(
-            BlockId(0),
-            vec![],
-            HirTerminator::Return(typed_expression(0, ty, span)),
-        )],
+        vec![block(BlockId(0), vec![], HirTerminator::Return(value))],
+        expressions,
     )
 }
 
@@ -2852,9 +3240,12 @@ fn test_source_span(start: u32) -> SourceSpan {
     SourceSpan::new(SourceId::COMPILATION_ROOT, local_span)
 }
 
-fn module_returning_cast_expression(expression: HirExpression) -> HirModule {
-    let return_type = expression.ty;
-    hir_module(
+fn module_returning_cast_expression(
+    expressions: HirExpressionStore,
+    expression: HirValueId,
+    return_type: TypeId,
+) -> HirModule {
+    hir_module_with_expressions(
         FunctionId(0),
         vec![function_with_signature(
             FunctionId(0),
@@ -2863,16 +3254,43 @@ fn module_returning_cast_expression(expression: HirExpression) -> HirModule {
             return_type,
         )],
         vec![block(BlockId(0), vec![], HirTerminator::Return(expression))],
+        expressions,
     )
 }
 
-fn unit_expression(id: u32) -> HirExpression {
-    HirExpression {
-        id: HirValueId(id),
-        kind: HirExpressionKind::TupleConstruct { elements: vec![] },
-        ty: builtin_type_ids::NONE,
-        value_kind: ValueKind::RValue,
-        region: RegionId(0),
-        span: None,
-    }
+fn append_test_expression(
+    expressions: &mut HirExpressionStore,
+    kind: HirExpressionKind,
+    ty: TypeId,
+    value_kind: ValueKind,
+    span: Option<SourceSpan>,
+) -> HirValueId {
+    expressions
+        .append_expression(HirExpression {
+            kind,
+            ty,
+            value_kind,
+            region: RegionId(0),
+            span,
+        })
+        .expect("bounded backend fixture expressions should fit their HIR store")
+}
+
+fn test_expression_store() -> HirExpressionStore {
+    let mut expressions = HirExpressionStore::default();
+    let unit = append_test_expression(
+        &mut expressions,
+        HirExpressionKind::TupleConstruct {
+            elements: HirValueRange::empty(),
+        },
+        builtin_type_ids::NONE,
+        ValueKind::RValue,
+        None,
+    );
+    assert_eq!(unit, HirValueId(0));
+    expressions
+}
+
+fn unit_expression() -> HirValueId {
+    HirValueId(0)
 }

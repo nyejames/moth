@@ -1,7 +1,5 @@
 use super::super::ids::{TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId};
-use super::super::node::{
-    TemplateIr, TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind, TirSlotPlaceholder,
-};
+use super::super::node::{TemplateIr, TemplateIrNode, TemplateIrNodeKind, TirSlotPlaceholder};
 use super::super::overlays::{
     TemplateViewContext, TirSlotResolution, TirSlotResolutionOverlay, TirWrapperContext,
     TirWrapperContextOverlay,
@@ -753,18 +751,21 @@ fn derived_publication_preserves_source_metadata() {
 }
 
 #[test]
-fn branch_construction_requires_an_allocated_selector_site() {
+fn conditional_construction_allocates_one_selector_site_and_stores_its_body() {
     let mut store = TemplateIrStore::new();
     let body = empty_sequence(&mut store);
-    let site = store.next_expression_site_id();
-    let branch = TemplateIrBranch::new(bool_selector(), body, None, site);
-    assert_eq!(branch.selector_site_id, site);
 
     let mut builder = TemplateIrBuilder::new(&mut store);
-    let node = builder.push_branch_chain_node(vec![branch], None, None, None);
-    let TemplateIrNodeKind::BranchChain { branches, .. } = &store.get_node(node).unwrap().kind
+    let node = builder.push_conditional_node(bool_selector(), body, None);
+    let next_site_id = builder.store.next_expression_site_id();
+    let TemplateIrNodeKind::Conditional {
+        selector_site_id,
+        body: stored_body,
+        ..
+    } = &builder.store.get_node(node).unwrap().kind
     else {
-        panic!("expected a branch chain");
+        panic!("expected a conditional");
     };
-    assert_eq!(branches[0].selector_site_id, site);
+    assert_ne!(*selector_site_id, next_site_id);
+    assert_eq!(*stored_body, body);
 }

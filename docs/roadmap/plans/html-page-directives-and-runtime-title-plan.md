@@ -195,13 +195,13 @@ $page(title = "Initial title")
 io.set_title("Loaded")
 ```
 
-The call changes the live document title to its supplied text. It does not reapply the initial document's title prefix/postfix, alter the route, mutate `$page` metadata or rewrite the static output file.
+The call sets the title of the current user-facing host surface to its supplied text. HTML-JS realises that as the live document title. It does not reapply the initial document's title prefix/postfix, alter the route, mutate `$page` metadata or rewrite the static output file.
 
-Give the call a stable external function identity and an explicit browser document-title capability requirement in per-function link facts. HTML-JS advertises the capability. Emit the helper only for reachable calls on a supported host. Convert Moth Strings through the canonical content path, not JavaScript's incidental object stringification.
+Give the call a stable external function identity and an explicit title-capability requirement in per-function link facts. HTML-JS advertises the capability and realises it through the browser document title. Emit the helper only for reachable calls on a supported host. Convert Moth Strings through the canonical content path, not JavaScript's incidental object stringification.
 
-A JavaScript backend is not automatically a browser. Reachable calls on standalone/embedded JavaScript hosts without the capability are rejected before lowering. Existing whole-module HTML-Wasm remains unsupported for this call and rejects it through the same target-contract family. The later mixed backend can retain the call in a JavaScript-owned function under its ordinary affinity rules, but this plan does not implement that partitioner or a Wasm title bridge.
+A JavaScript backend doesn't automatically supply the title capability. Reachable calls on standalone/embedded JavaScript hosts that don't advertise it are rejected before lowering. Existing whole-module HTML-Wasm remains unsupported for this call and rejects it through the same target-contract family. The later mixed backend can retain the call in a JavaScript-owned function under its ordinary affinity rules, but this plan does not implement that partitioner or a Wasm title bridge.
 
-Unreachable calls and calls removed by normal static specialisation create no target requirement. Their frontend source still receives normal validation. A host that advertises the capability but lacks the promised document facility has violated its host contract. There is no silent runtime no-op or fallback on unsupported hosts.
+Unreachable calls and calls removed by normal static specialisation create no target requirement. Their frontend source still receives normal validation. A host that advertises the capability but can't actually set its surface title has violated its host contract. There is no silent runtime no-op or fallback on unsupported hosts.
 
 `io.get_title`, reactive title binding, runtime metadata mutation beyond title and automatic title updates are outside this work.
 

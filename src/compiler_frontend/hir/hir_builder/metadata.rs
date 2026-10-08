@@ -19,6 +19,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureContributor, HirBuiltinFailureSource,
     HirDeferredCustomCatchCheck, HirFunctionFailureFacts,
@@ -145,7 +146,7 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn project_function_failure_facts(
         &mut self,
         ast: &Ast,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let builtin_error_type =
             self.type_environment
                 .type_id_for_canonical_identity(&CanonicalTypeIdentity::Builtin(
@@ -199,7 +200,7 @@ impl<'a> HirBuilder<'a> {
     fn project_failure_contributors(
         &self,
         pending: Vec<ImplicitFailureContributor>,
-    ) -> Result<Vec<HirBuiltinFailureContributor>, CompilerError> {
+    ) -> Result<Vec<HirBuiltinFailureContributor>, HirConstructionFailure> {
         let mut contributors = Vec::with_capacity(pending.len());
         for contributor in pending {
             let source = match contributor.source {

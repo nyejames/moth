@@ -1,0 +1,17 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+artifacts_must_not_exist = ["_moth/js/graphics.js"]
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain_exactly_once = ["<p>web_graphics_empty_package_resolves</p>"]
+must_not_contain = [
+    "_moth/js/graphics.js",
+    "_moth/js/glue/module-",
+    "_moth/js/runtime/moth-runtime",
+    "<script type=\"importmap\">",
+]

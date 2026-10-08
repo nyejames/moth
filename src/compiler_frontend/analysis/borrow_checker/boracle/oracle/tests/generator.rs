@@ -201,7 +201,7 @@ fn boracle_generated_seed_digits_select_independent_choices() {
     let copy_destination = |problem: &BorrowProblem| {
         problem.events().iter().find_map(|event| {
             if let EventKind::Copy { destination, .. } = &event.kind {
-                Some(*destination)
+                Some(destination.place())
             } else {
                 None
             }

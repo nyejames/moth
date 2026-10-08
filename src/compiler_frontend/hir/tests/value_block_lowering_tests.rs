@@ -16,11 +16,10 @@ use crate::compiler_frontend::ast::statements::value_production::{
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::hir::expressions::HirExpressionKind;
+use crate::compiler_frontend::hir::expressions::HirExpression;
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -33,23 +32,23 @@ use crate::compiler_frontend::hir::hir_builder::{
     assert_no_placeholder_terminators, build_ast_with_registered_types, lower_ast,
 };
 
-/// Extracts the result-local assignment and merge target from a value-block arm block.
-fn value_block_result_assignment(
+/// Extracts the result-local definition and merge target from a value-block arm block.
+fn value_block_result_definition(
     module: &HirModule,
     block_id: BlockId,
-) -> (LocalId, HirExpressionKind, BlockId) {
+) -> (LocalId, HirExpression, BlockId) {
     let block = &module.blocks[block_id.0 as usize];
     let (result_local, value_kind) = block
         .statements
         .iter()
         .find_map(|statement| match &statement.kind {
-            HirStatementKind::Assign {
-                target: HirPlace::Local(local),
+            HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(local),
                 value,
-            } => Some((*local, value.kind.clone())),
+            } => Some((*local, module.expressions.expression(*value).clone())),
             _ => None,
         })
-        .expect("value-block branch should assign a hidden result local");
+        .expect("value-block branch should define a hidden result local");
 
     super::assert_block_has_jump_args(module, block_id, 0);
     let HirTerminator::Jump { target, .. } = block.terminator else {
@@ -161,9 +160,9 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
     let second_arm_block_id = match_terminator[1].body;
     let default_arm_block_id = match_terminator[2].body;
 
-    let (result_local_1, _, merge_1) = value_block_result_assignment(&module, first_arm_block_id);
-    let (result_local_2, _, merge_2) = value_block_result_assignment(&module, second_arm_block_id);
-    let (result_local_3, _, merge_3) = value_block_result_assignment(&module, default_arm_block_id);
+    let (result_local_1, _, merge_1) = value_block_result_definition(&module, first_arm_block_id);
+    let (result_local_2, _, merge_2) = value_block_result_definition(&module, second_arm_block_id);
+    let (result_local_3, _, merge_3) = value_block_result_definition(&module, default_arm_block_id);
 
     assert_eq!(
         result_local_1, result_local_2,

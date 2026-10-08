@@ -1,0 +1,8 @@
+-- Reassigning a scalar binding from its own place keeps the existing value.
+identity_update || -> I32:
+    value ~I32 = 7
+    value = value
+    return value
+;
+
+[: mutable local self update result=[identity_update()]]

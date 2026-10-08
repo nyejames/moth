@@ -206,6 +206,11 @@ fn syntax_descriptor(kind: SyntaxDiagnosticKind) -> DiagnosticDescriptor {
             "Source span capacity exceeded",
             DiagnosticSeverity::Error,
         ),
+        SyntaxDiagnosticKind::CompilerCapacityExceeded => DiagnosticDescriptor::new(
+            "MOTH-SYNTAX-0037",
+            "Compiler capacity exceeded",
+            DiagnosticSeverity::Error,
+        ),
         _ => unreachable!("reasoned syntax descriptors come from the central registry"),
     }
 }

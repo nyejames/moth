@@ -901,10 +901,15 @@ impl HeaderKind {
                 rebind_parsed_type_ref_source_identity(target, file_id);
             }
 
-            // Initializer references retain the exact source-qualified span captured by their
-            // owning token stream. They may point at a donor source, so finalising this header
-            // must not reconstruct their span from the header's file identity.
-            HeaderKind::ConstTemplate { .. } | HeaderKind::StartFunction => {}
+            HeaderKind::ConstTemplate {
+                condition_references,
+            } => {
+                for reference in condition_references {
+                    rebind_source_span(&mut reference.span, file_id);
+                }
+            }
+
+            HeaderKind::StartFunction => {}
 
             HeaderKind::Trait { declaration } => {
                 rebind_trait_declaration_source_identity(
@@ -1096,8 +1101,15 @@ fn rebind_declaration_source_identity(
         .initializer_range
         .map(|range| range.rebind_source(file_id));
     rebind_parsed_type_ref_source_identity(&mut declaration.type_annotation, file_id);
-    // Initializer references retain their captured source-qualified spans. In particular, a
-    // generated or materialised initializer may own a different source than its containing header.
+    if let Some(qualifier) = &mut declaration.config_qualifier {
+        rebind_source_span(&mut qualifier.qualifier_span, file_id);
+        rebind_parsed_type_ref_source_identity(&mut qualifier.type_annotation, file_id);
+    }
+    // Initializer references are scanned from this declaration's source-owned initializer tokens;
+    // preserve each local range while moving it into the finalized source identity.
+    for reference in &mut declaration.initializer_references {
+        rebind_source_span(&mut reference.span, file_id);
+    }
     Ok(())
 }
 
@@ -1167,6 +1179,9 @@ impl Header {
             provisional_source_file,
             path_fork,
         )?;
+        for reference in &mut self.capacity_references {
+            rebind_source_span(&mut reference.span, file_id);
+        }
 
         let mut rebound_hints = HashSet::with_capacity(self.local_ordering_hints.len());
         for hint in self.local_ordering_hints.drain() {
@@ -2297,6 +2312,10 @@ fn validate_declaration_syntax(
 ) -> Result<(), CompilerError> {
     validate_source_span(declaration.span, file_id, "declaration shell")?;
     validate_parsed_type_ref(&declaration.type_annotation, file_id)?;
+    if let Some(qualifier) = &declaration.config_qualifier {
+        validate_source_span(qualifier.qualifier_span, file_id, "config qualifier")?;
+        validate_parsed_type_ref(&qualifier.type_annotation, file_id)?;
+    }
     validate_source_range(
         declaration.initializer_range,
         source_tokens,

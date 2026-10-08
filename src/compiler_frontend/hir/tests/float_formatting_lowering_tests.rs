@@ -66,7 +66,7 @@ fn find_format_float_statements(
                 ..
             } => {
                 let result_type = builder
-                    .local_type_id_or_error(*result, &statement.span)
+                    .local_type_id_or_error(result.local(), &statement.span)
                     .ok();
                 result_type.map(|ty| (*failure_mode, ty))
             }
@@ -96,12 +96,12 @@ fn has_plain_float_to_string_cast(builder: &HirBuilder<'_>) -> bool {
             .iter()
             .flat_map(|block| &block.statements)
             .filter_map(|statement| match &statement.kind {
-                HirStatementKind::Assign { value, .. } => Some(value),
+                HirStatementKind::Write { value, .. } => Some(*value),
                 _ => None,
             })
             .any(|value| {
                 matches!(
-                    &value.kind,
+                    &builder.module.expressions.expression(value).kind,
                     HirExpressionKind::Cast {
                         policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Float),
                         ..
@@ -226,7 +226,10 @@ fn cast_float_to_string_lowers_to_format_float_statement() {
         .lower_expression(&expr)
         .expect("Float -> String cast lowering should succeed");
 
-    assert_eq!(lowered.value.ty, builtin_type_ids::STRING);
+    assert_eq!(
+        builder.module.expressions.expression(lowered.value).ty,
+        builtin_type_ids::STRING
+    );
     assert!(
         !has_plain_float_to_string_cast(&builder),
         "Float -> String cast must not lower to a plain Cast expression or CastOp statement"
@@ -321,7 +324,7 @@ fn cast_float_to_string_return_error_in_builtin_error_function() {
     );
     assert!(
         matches!(
-            lowered.value.kind,
+            &builder.module.expressions.expression(lowered.value).kind,
             HirExpressionKind::FallibleUnwrapSuccess { .. }
         ),
         "recoverable Float formatting should continue with an unwrapped success value"
@@ -433,10 +436,13 @@ fn cast_float_to_string_optional_wrap_lowers_to_format_float() {
         .lower_expression(&expr)
         .expect("optional Float -> String cast lowering should succeed");
 
-    assert_eq!(lowered.value.ty, optional_string_type);
+    assert_eq!(
+        builder.module.expressions.expression(lowered.value).ty,
+        optional_string_type
+    );
 
     let is_option_some = matches!(
-        &lowered.value.kind,
+        &builder.module.expressions.expression(lowered.value).kind,
         HirExpressionKind::VariantConstruct {
             carrier: crate::compiler_frontend::hir::expressions::HirVariantCarrier::Option,
             ..

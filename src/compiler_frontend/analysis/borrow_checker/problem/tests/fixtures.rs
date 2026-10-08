@@ -1,6 +1,6 @@
 //! Small deterministic problem constructors used only by the Phase 2 tests.
 
-use super::super::{Binding, BindingId, BlockId, EventId};
+use super::super::{Binding, BindingDestination, BindingId, BlockId, EventId};
 use super::super::{
     BorrowProblemParts, CfgBlock, CfgEdge, Event, EventKind, EventSource, OriginKind, Place,
     PlaceId, PointId, ProgramPoint, ProjectionElem, RebindValue, TerminatorEventKind, Use, UseId,
@@ -103,12 +103,12 @@ pub(crate) fn copy() -> BorrowProblemParts {
         }],
         vec![
             EventKind::Fresh {
-                destination: PlaceId::new(0),
+                destination: BindingDestination::Define(PlaceId::new(0)),
                 origin: ValueOriginId::new(0),
             },
             EventKind::Copy {
                 source: PlaceId::new(0),
-                destination: PlaceId::new(1),
+                destination: BindingDestination::Define(PlaceId::new(1)),
                 origin: ValueOriginId::new(1),
             },
             EventKind::Access {
@@ -134,16 +134,16 @@ pub(crate) fn old_alias_after_rebind() -> BorrowProblemParts {
         }],
         vec![
             EventKind::Fresh {
-                destination: PlaceId::new(0),
+                destination: BindingDestination::Define(PlaceId::new(0)),
                 origin: ValueOriginId::new(0),
             },
             EventKind::Alias {
                 source: PlaceId::new(0),
-                destination: PlaceId::new(1),
+                destination: BindingDestination::Define(PlaceId::new(1)),
                 origins: vec![ValueOriginId::new(0)].into_boxed_slice(),
             },
             EventKind::Rebind {
-                destination: PlaceId::new(0),
+                destination: BindingDestination::Define(PlaceId::new(0)),
                 value: RebindValue::Fresh(ValueOriginId::new(1)),
             },
             EventKind::Access {
@@ -174,7 +174,7 @@ pub(crate) fn branch_join() -> BorrowProblemParts {
             EventId::new(0),
             PointId::new(1),
             EventKind::Fresh {
-                destination: PlaceId::new(0),
+                destination: BindingDestination::Define(PlaceId::new(0)),
                 origin: ValueOriginId::new(0),
             },
             EventSource::none(),
@@ -183,7 +183,7 @@ pub(crate) fn branch_join() -> BorrowProblemParts {
             EventId::new(1),
             PointId::new(4),
             EventKind::Rebind {
-                destination: PlaceId::new(0),
+                destination: BindingDestination::Define(PlaceId::new(0)),
                 value: RebindValue::Fresh(ValueOriginId::new(1)),
             },
             EventSource::none(),
@@ -192,7 +192,7 @@ pub(crate) fn branch_join() -> BorrowProblemParts {
             EventId::new(2),
             PointId::new(7),
             EventKind::Rebind {
-                destination: PlaceId::new(0),
+                destination: BindingDestination::Define(PlaceId::new(0)),
                 value: RebindValue::Fresh(ValueOriginId::new(2)),
             },
             EventSource::none(),
@@ -202,7 +202,7 @@ pub(crate) fn branch_join() -> BorrowProblemParts {
             PointId::new(10),
             EventKind::Alias {
                 source: PlaceId::new(0),
-                destination: PlaceId::new(1),
+                destination: BindingDestination::Define(PlaceId::new(1)),
                 origins: vec![ValueOriginId::new(3)].into_boxed_slice(),
             },
             EventSource::none(),
@@ -223,6 +223,7 @@ pub(crate) fn branch_join() -> BorrowProblemParts {
             EventKind::Terminator {
                 kind: TerminatorEventKind::Jump {
                     target: BlockId::new(3),
+                    arguments: Box::new([]),
                 },
             },
             EventSource::none(),
@@ -233,6 +234,7 @@ pub(crate) fn branch_join() -> BorrowProblemParts {
             EventKind::Terminator {
                 kind: TerminatorEventKind::Jump {
                     target: BlockId::new(3),
+                    arguments: Box::new([]),
                 },
             },
             EventSource::none(),
@@ -323,7 +325,7 @@ pub(crate) fn loop_with_rebind() -> BorrowProblemParts {
             EventId::new(0),
             PointId::new(1),
             EventKind::Fresh {
-                destination: PlaceId::new(0),
+                destination: BindingDestination::Define(PlaceId::new(0)),
                 origin: ValueOriginId::new(0),
             },
             EventSource::none(),
@@ -332,7 +334,7 @@ pub(crate) fn loop_with_rebind() -> BorrowProblemParts {
             EventId::new(1),
             PointId::new(4),
             EventKind::Rebind {
-                destination: PlaceId::new(0),
+                destination: BindingDestination::Define(PlaceId::new(0)),
                 value: RebindValue::Fresh(ValueOriginId::new(1)),
             },
             EventSource::none(),
@@ -343,6 +345,7 @@ pub(crate) fn loop_with_rebind() -> BorrowProblemParts {
             EventKind::Terminator {
                 kind: TerminatorEventKind::Jump {
                     target: BlockId::new(1),
+                    arguments: Box::new([]),
                 },
             },
             EventSource::none(),
@@ -507,7 +510,7 @@ pub(crate) fn field_accesses() -> BorrowProblemParts {
         ],
         vec![
             EventKind::Fresh {
-                destination: PlaceId::new(0),
+                destination: BindingDestination::Define(PlaceId::new(0)),
                 origin: ValueOriginId::new(0),
             },
             EventKind::Access {

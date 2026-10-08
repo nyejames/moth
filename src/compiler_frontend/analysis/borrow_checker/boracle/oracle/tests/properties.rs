@@ -28,9 +28,9 @@
 use super::super::generator::{GENERATED_SHAPE_COUNT, generated_problem};
 use super::super::{OracleBounds, OracleOutcome, execute_bounded};
 use crate::compiler_frontend::analysis::borrow_checker::problem::{
-    AccessKind, BlockId, BorrowProblem, BorrowProblemParts, CfgBlock, CfgEdge, Event, EventId,
-    EventKind, EventSource, Loan, OriginKind, PlaceId, PointId, ProgramPoint, RebindValue,
-    TerminatorEventKind, Use, UseId, UseKind, ValueOriginId,
+    AccessKind, BindingDestination, BlockId, BorrowProblem, BorrowProblemParts, CfgBlock, CfgEdge,
+    Event, EventId, EventKind, EventSource, Loan, OriginKind, PlaceId, PointId, ProgramPoint,
+    RebindValue, TerminatorEventKind, Use, UseId, UseKind, ValueOriginId,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 
@@ -787,7 +787,7 @@ fn add_alias_conflict_probe(
             | EventKind::ExclusiveAliasFromPlace {
                 source,
                 destination,
-            } => *source == PlaceId::new(0) && *destination == PlaceId::new(5),
+            } => *source == PlaceId::new(0) && destination.place() == PlaceId::new(5),
             _ => false,
         };
         is_alias
@@ -855,6 +855,7 @@ fn unreferenced_probe_destination(problem: &BorrowProblem) -> Option<PlaceId> {
     problem
         .places()
         .iter()
+        .filter(|place| place.projections.is_empty())
         .map(|place| place.id)
         .find(|candidate| {
             problem
@@ -868,7 +869,7 @@ fn event_references_place(problem: &BorrowProblem, event: &Event, candidate: Pla
     match &event.kind {
         EventKind::Fresh { destination, .. }
         | EventKind::Copy { destination, .. }
-        | EventKind::Projection { destination, .. } => *destination == candidate,
+        | EventKind::Projection { destination, .. } => destination.place() == candidate,
         EventKind::Alias {
             source,
             destination,
@@ -886,16 +887,18 @@ fn event_references_place(problem: &BorrowProblem, event: &Event, candidate: Pla
         | EventKind::ExclusiveAliasFromPlace {
             source,
             destination,
-        } => *source == candidate || *destination == candidate,
+        } => *source == candidate || destination.place() == candidate,
         EventKind::Rebind { destination, value } => {
-            *destination == candidate
+            destination.place() == candidate
                 || matches!(value, RebindValue::AliasFromPlace(source) if *source == candidate)
         }
         EventKind::Aggregate {
             destination,
             fields,
             ..
-        } => *destination == candidate || fields.iter().any(|field| field.source == candidate),
+        } => {
+            destination.place() == candidate || fields.iter().any(|field| field.source == candidate)
+        }
         EventKind::ScopeExit { bindings } => problem
             .places()
             .iter()
@@ -909,7 +912,7 @@ fn event_references_place(problem: &BorrowProblem, event: &Event, candidate: Pla
                 .any(|argument| argument.place == candidate)
                 || effect
                     .result
-                    .is_some_and(|result| result.place == candidate)
+                    .is_some_and(|result| result.destination.place() == candidate)
         }
         EventKind::Access { use_id } => problem
             .uses()
@@ -969,7 +972,7 @@ fn add_fresh_rebinding_probe(
         BlockId::new(0),
         EventKind::AliasFromPlace {
             source: PlaceId::new(0),
-            destination: probe_destination,
+            destination: BindingDestination::Define(probe_destination),
         },
     );
     let (_, owner_write_event) = append_access(
@@ -1057,7 +1060,7 @@ fn add_final_capability_use(
         block_zero.id,
         EventKind::AliasFromPlace {
             source: PlaceId::new(0),
-            destination: probe_destination,
+            destination: BindingDestination::Define(probe_destination),
         },
     );
     let (_, final_use_event) = append_access(
@@ -1447,7 +1450,7 @@ fn renumber_branch_blocks(problem: &BorrowProblem) -> Result<Option<BorrowProble
             continue;
         };
         match kind {
-            TerminatorEventKind::Jump { target }
+            TerminatorEventKind::Jump { target, .. }
             | TerminatorEventKind::Break { target }
             | TerminatorEventKind::Continue { target } => {
                 *target = remap_block(*target);

@@ -31,9 +31,10 @@ use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, PublicFoldedValue,
 };
 use crate::compiler_frontend::hir::blocks::HirBlock;
+use crate::compiler_frontend::hir::expression_store::HirValueRange;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId, RegionId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::reachability::collect_module_function_link_facts;
 use crate::compiler_frontend::hir::regions::HirRegion;
@@ -151,48 +152,51 @@ fn synthetic_module(
                 id: HirNodeId((index * 100 + statement_index + 1) as u32),
                 kind: HirStatementKind::Call {
                     target,
-                    args: Vec::new(),
+                    args: HirValueRange::empty(),
                     result: None,
                 },
                 span: None,
             });
         }
         if let Some(resource_id) = resource_id {
-            statements.push(HirStatement {
-                id: HirNodeId((index * 100 + calls.len() + 1) as u32),
-                kind: HirStatementKind::Expr(HirExpression {
-                    id: HirValueId((index * 100 + calls.len() + 1) as u32),
-                    kind: HirExpressionKind::StructuralString {
-                        pieces: vec![
-                            crate::compiler_frontend::ast::const_values::store::ConstStringPiece::Resource(
-                                *resource_id,
-                            ),
-                        ],
-                    },
+            let pieces = hir.expressions.append_string_pieces(&[
+                crate::compiler_frontend::ast::const_values::store::ConstStringPiece::Resource(*resource_id),
+            ], None).expect("fixture string pieces fit");
+            let value = hir
+                .expressions
+                .append_expression(HirExpression {
+                    kind: HirExpressionKind::StructuralString { pieces },
                     ty: crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE,
                     value_kind: ValueKind::RValue,
                     region: RegionId(0),
                     span: None,
-                }),
+                })
+                .expect("fixture expression fits");
+            statements.push(HirStatement {
+                id: HirNodeId((index * 100 + calls.len() + 1) as u32),
+                kind: HirStatementKind::Expr(value),
                 span: None,
             });
         }
 
-        hir.blocks.push(HirBlock {
-            id: block_id,
-            region: RegionId(0),
-            locals: Vec::new(),
-            statements,
-            terminator: HirTerminator::Return(HirExpression {
-                id: HirValueId((index * 100 + 99) as u32),
+        let return_value = hir
+            .expressions
+            .append_expression(HirExpression {
                 kind: HirExpressionKind::TupleConstruct {
-                    elements: Vec::new(),
+                    elements: HirValueRange::empty(),
                 },
                 ty: crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE,
                 value_kind: ValueKind::Const,
                 region: RegionId(0),
                 span: None,
-            }),
+            })
+            .expect("fixture expression fits");
+        hir.blocks.push(HirBlock {
+            id: block_id,
+            region: RegionId(0),
+            locals: Vec::new(),
+            statements,
+            terminator: HirTerminator::Return(return_value),
         });
         hir.functions.push(HirFunction {
             id: function_id,
@@ -211,6 +215,7 @@ fn synthetic_module(
         hir.function_ids_by_origin
             .insert(origin.clone(), function_id);
     }
+    hir.expressions.freeze();
     hir.start_function = start_function;
     hir.function_provenance = hir
         .functions

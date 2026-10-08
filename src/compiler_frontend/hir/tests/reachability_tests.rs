@@ -11,6 +11,8 @@ use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirBlock;
+use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirValueRange};
+use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, HirMapOp};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
@@ -20,12 +22,10 @@ use crate::compiler_frontend::hir::reachability::{
     HirReachability, ReachableFloatStatementKind, ReachableMapUseKind,
     collect_module_function_link_facts, collect_reachability_from_function_link_facts,
 };
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
-use crate::compiler_frontend::hir::{
-    expressions::HirExpression, expressions::HirExpressionKind, expressions::HirMapEntry,
-    expressions::HirMapOp,
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatement, HirStatementKind,
 };
+use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::hir::{expressions::ValueKind, ids::LocalId};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::resource_identity::{
@@ -769,7 +769,8 @@ fn reachability_records_ordered_resource_and_site_root_uses_per_owner() {
     let first_location = call_site_span(40, 2);
     let second_location = call_site_span(41, 4);
     let unreachable_location = call_site_span(50, 6);
-    let module = hir_module(
+    let mut expressions = test_expression_store();
+    let module = hir_module_with_expressions(
         FunctionId(0),
         vec![
             function(FunctionId(0), BlockId(0)),
@@ -780,6 +781,7 @@ fn reachability_records_ordered_resource_and_site_root_uses_per_owner() {
                 BlockId(0),
                 vec![
                     structural_string_statement(
+                        &mut expressions,
                         10,
                         vec![
                             ConstStringPiece::Resource(resource_id),
@@ -788,6 +790,7 @@ fn reachability_records_ordered_resource_and_site_root_uses_per_owner() {
                         first_location,
                     ),
                     structural_string_statement(
+                        &mut expressions,
                         11,
                         vec![ConstStringPiece::Resource(resource_id)],
                         second_location,
@@ -798,6 +801,7 @@ fn reachability_records_ordered_resource_and_site_root_uses_per_owner() {
             block(
                 BlockId(1),
                 vec![structural_string_statement(
+                    &mut expressions,
                     12,
                     vec![ConstStringPiece::Resource(resource_id)],
                     unreachable_location,
@@ -805,6 +809,7 @@ fn reachability_records_ordered_resource_and_site_root_uses_per_owner() {
                 HirTerminator::Return(unit_expression(1)),
             ),
         ],
+        expressions,
     );
 
     let reachability = collect_test_reachability(
@@ -861,13 +866,15 @@ fn reachability_records_ordered_resource_and_site_root_uses_across_blocks() {
     let nested_branch_location = call_site_span(41, 4);
     let sibling_branch_location = call_site_span(42, 6);
     let after_branch_location = call_site_span(43, 8);
-    let module = hir_module(
+    let mut expressions = test_expression_store();
+    let module = hir_module_with_expressions(
         FunctionId(0),
         vec![function(FunctionId(0), BlockId(0))],
         vec![
             block(
                 BlockId(0),
                 vec![structural_string_statement(
+                    &mut expressions,
                     10,
                     vec![
                         ConstStringPiece::Resource(resource_id),
@@ -885,6 +892,7 @@ fn reachability_records_ordered_resource_and_site_root_uses_across_blocks() {
             block(
                 BlockId(1),
                 vec![structural_string_statement(
+                    &mut expressions,
                     11,
                     vec![
                         ConstStringPiece::Resource(resource_id),
@@ -900,6 +908,7 @@ fn reachability_records_ordered_resource_and_site_root_uses_across_blocks() {
             block(
                 BlockId(2),
                 vec![structural_string_statement(
+                    &mut expressions,
                     12,
                     vec![
                         ConstStringPiece::Resource(resource_id),
@@ -916,6 +925,7 @@ fn reachability_records_ordered_resource_and_site_root_uses_across_blocks() {
             block(
                 BlockId(4),
                 vec![structural_string_statement(
+                    &mut expressions,
                     13,
                     vec![
                         ConstStringPiece::Resource(resource_id),
@@ -927,6 +937,7 @@ fn reachability_records_ordered_resource_and_site_root_uses_across_blocks() {
                 HirTerminator::Return(unit_expression(4)),
             ),
         ],
+        expressions,
     );
 
     let reachability = collect_test_reachability(
@@ -1037,7 +1048,18 @@ fn hir_module(
     functions: Vec<HirFunction>,
     blocks: Vec<HirBlock>,
 ) -> HirModule {
+    hir_module_with_expressions(start_function, functions, blocks, test_expression_store())
+}
+
+fn hir_module_with_expressions(
+    start_function: FunctionId,
+    functions: Vec<HirFunction>,
+    blocks: Vec<HirBlock>,
+    expressions: HirExpressionStore,
+) -> HirModule {
     let mut module = HirModule::new();
+    module.expressions = expressions;
+    module.expressions.freeze();
     module.start_function = Some(start_function);
     module.functions = functions;
     module.blocks = blocks;
@@ -1047,6 +1069,82 @@ fn hir_module(
         .map(|function| (function.id, SyntheticInterfaceProvenance::empty()))
         .collect();
     module
+}
+
+fn test_expression_store() -> HirExpressionStore {
+    let mut expressions = HirExpressionStore::default();
+    let empty_values = expressions
+        .append_values(&[], None)
+        .expect("empty tuple values should append");
+    expressions
+        .append_expression(HirExpression {
+            kind: HirExpressionKind::TupleConstruct {
+                elements: empty_values,
+            },
+            ty: builtin_type_ids::NONE,
+            value_kind: ValueKind::RValue,
+            region: RegionId(0),
+            span: None,
+        })
+        .expect("unit expression should append");
+    expressions
+        .append_expression(HirExpression {
+            kind: HirExpressionKind::Bool(true),
+            ty: builtin_type_ids::BOOL,
+            value_kind: ValueKind::Const,
+            region: RegionId(0),
+            span: None,
+        })
+        .expect("bool expression should append");
+    expressions
+        .append_expression(HirExpression {
+            kind: HirExpressionKind::Int(1),
+            ty: builtin_type_ids::INT,
+            value_kind: ValueKind::Const,
+            region: RegionId(0),
+            span: None,
+        })
+        .expect("int expression should append");
+    expressions
+        .append_expression(HirExpression {
+            kind: HirExpressionKind::Float(1.5),
+            ty: builtin_type_ids::FLOAT,
+            value_kind: ValueKind::Const,
+            region: RegionId(0),
+            span: None,
+        })
+        .expect("float expression should append");
+    expressions
+        .append_expression(HirExpression {
+            kind: HirExpressionKind::Cast {
+                source: HirValueId(2),
+                policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Int),
+            },
+            ty: builtin_type_ids::STRING,
+            value_kind: ValueKind::RValue,
+            region: RegionId(0),
+            span: None,
+        })
+        .expect("cast expression should append");
+    let map_entries = expressions
+        .append_map_entries(
+            &[crate::compiler_frontend::hir::expressions::HirMapEntry {
+                key: HirValueId(2),
+                value: HirValueId(2),
+            }],
+            None,
+        )
+        .expect("map entry should append");
+    expressions
+        .append_expression(HirExpression {
+            kind: HirExpressionKind::MapLiteral(map_entries),
+            ty: builtin_type_ids::INT,
+            value_kind: ValueKind::RValue,
+            region: RegionId(0),
+            span: None,
+        })
+        .expect("map literal should append");
+    expressions
 }
 
 fn collect_test_reachability(
@@ -1085,20 +1183,28 @@ fn match_arm(body: BlockId) -> HirMatchArm {
 }
 
 fn structural_string_statement(
+    expressions: &mut HirExpressionStore,
     id: u32,
     pieces: Vec<ConstStringPiece>,
     span: Option<SourceSpan>,
 ) -> HirStatement {
-    HirStatement {
-        id: HirNodeId(id),
-        kind: HirStatementKind::Expr(HirExpression {
-            id: HirValueId(id),
-            kind: HirExpressionKind::StructuralString { pieces },
+    let piece_range = expressions
+        .append_string_pieces(&pieces, span)
+        .expect("structural-string pieces should append");
+    let expression_id = expressions
+        .append_expression(HirExpression {
+            kind: HirExpressionKind::StructuralString {
+                pieces: piece_range,
+            },
             ty: builtin_type_ids::STRING,
             value_kind: ValueKind::RValue,
             region: RegionId(0),
             span,
-        }),
+        })
+        .expect("structural-string expression should append");
+    HirStatement {
+        id: HirNodeId(id),
+        kind: HirStatementKind::Expr(expression_id),
         span,
     }
 }
@@ -1111,8 +1217,8 @@ fn call_statement_at(id: u32, target: CallTarget, span: Option<SourceSpan>) -> H
         id: HirNodeId(id),
         kind: HirStatementKind::Call {
             target,
-            args: vec![],
-            result: None::<LocalId>,
+            args: HirValueRange::empty(),
+            result: None::<HirLocalDestination>,
         },
         span,
     }
@@ -1123,56 +1229,28 @@ fn map_statement_at(id: u32, op: HirMapOp, span: Option<SourceSpan>) -> HirState
         id: HirNodeId(id),
         kind: HirStatementKind::MapOp {
             op,
-            receiver: int_expression(id + 100),
-            args: vec![int_expression(id + 200)],
-            result: None::<LocalId>,
+            receiver: int_expression(2),
+            args: HirValueRange::empty(),
+            result: None::<HirLocalDestination>,
         },
         span,
     }
 }
 
-fn unit_expression(id: u32) -> HirExpression {
-    HirExpression {
-        id: HirValueId(id),
-        kind: HirExpressionKind::TupleConstruct { elements: vec![] },
-        ty: builtin_type_ids::NONE,
-        value_kind: ValueKind::RValue,
-        region: RegionId(0),
-        span: None,
-    }
+fn unit_expression(_id: u32) -> HirValueId {
+    HirValueId(0)
 }
 
-fn bool_expression(id: u32) -> HirExpression {
-    HirExpression {
-        id: HirValueId(id),
-        kind: HirExpressionKind::Bool(true),
-        ty: builtin_type_ids::BOOL,
-        value_kind: ValueKind::Const,
-        region: RegionId(0),
-        span: None,
-    }
+fn bool_expression(_id: u32) -> HirValueId {
+    HirValueId(1)
 }
 
-fn int_expression(id: u32) -> HirExpression {
-    HirExpression {
-        id: HirValueId(id),
-        kind: HirExpressionKind::Int(1),
-        ty: builtin_type_ids::INT,
-        value_kind: ValueKind::Const,
-        region: RegionId(0),
-        span: None,
-    }
+fn int_expression(_id: u32) -> HirValueId {
+    HirValueId(2)
 }
 
-fn float_expression(id: u32) -> HirExpression {
-    HirExpression {
-        id: HirValueId(id),
-        kind: HirExpressionKind::Float(1.5),
-        ty: builtin_type_ids::FLOAT,
-        value_kind: ValueKind::Const,
-        region: RegionId(0),
-        span: None,
-    }
+fn float_expression(_id: u32) -> HirValueId {
+    HirValueId(3)
 }
 
 fn float_statement(
@@ -1181,7 +1259,7 @@ fn float_statement(
     span: Option<SourceSpan>,
 ) -> HirStatement {
     let failure_mode = NumericFailureMode::Trap;
-    let source = float_expression(id + 100);
+    let source = float_expression(id);
     let result = LocalId(9000);
 
     HirStatement {
@@ -1190,30 +1268,20 @@ fn float_statement(
             ReachableFloatStatementKind::FormatFloat => HirStatementKind::FormatFloat {
                 source,
                 failure_mode,
-                result,
+                result: HirLocalDestination::Define(result),
             },
             ReachableFloatStatementKind::ValidateFloat => HirStatementKind::ValidateFloat {
                 source,
                 failure_mode,
-                result,
+                result: HirLocalDestination::Define(result),
             },
         },
         span,
     }
 }
 
-fn cast_expression(id: u32) -> HirExpression {
-    HirExpression {
-        id: HirValueId(id),
-        kind: HirExpressionKind::Cast {
-            source: Box::new(int_expression(id + 1)),
-            policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Int),
-        },
-        ty: builtin_type_ids::STRING,
-        value_kind: ValueKind::RValue,
-        region: RegionId(0),
-        span: None,
-    }
+fn cast_expression(_id: u32) -> HirValueId {
+    HirValueId(4)
 }
 
 #[test]
@@ -1312,18 +1380,8 @@ fn reachability_records_reachable_float_statements_only() {
     );
 }
 
-fn map_literal_expression(id: u32) -> HirExpression {
-    HirExpression {
-        id: HirValueId(id),
-        kind: HirExpressionKind::MapLiteral(vec![HirMapEntry {
-            key: int_expression(id + 1),
-            value: int_expression(id + 2),
-        }]),
-        ty: builtin_type_ids::INT,
-        value_kind: ValueKind::RValue,
-        region: RegionId(0),
-        span: None,
-    }
+fn map_literal_expression(_id: u32) -> HirValueId {
+    HirValueId(5)
 }
 
 fn assert_reachability(

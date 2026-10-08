@@ -6,12 +6,11 @@ use crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use std::collections::HashSet;
 
-/// Identifies which body inside a control-flow TIR node should receive a
-/// prepared simple TIR root.
+/// Identifies the body inside a control-flow TIR node that receives a
+/// prepared TIR root.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ControlFlowBodyKind {
-    Branch { index: usize },
-    Fallback,
+    ConditionalBody,
     LoopBody,
 }
 
@@ -71,7 +70,7 @@ impl TemplateIrStore {
         };
 
         match &node.kind {
-            TemplateIrNodeKind::BranchChain { .. } | TemplateIrNodeKind::Loop { .. } => {
+            TemplateIrNodeKind::Conditional { .. } | TemplateIrNodeKind::Loop { .. } => {
                 Ok(Some(node_id))
             }
 
@@ -132,25 +131,10 @@ impl TemplateIrStore {
 
         match (&mut control_flow_node.kind, body_kind) {
             (
-                TemplateIrNodeKind::BranchChain { branches, .. },
-                ControlFlowBodyKind::Branch { index },
+                TemplateIrNodeKind::Conditional { body, .. },
+                ControlFlowBodyKind::ConditionalBody,
             ) => {
-                let Some(branch) = branches.get_mut(index) else {
-                    return Err(CompilerError::compiler_error(format!(
-                        "Control-flow body replacement could not find branch {index} on node {control_flow_node_id}."
-                    )));
-                };
-                branch.body = new_body_root;
-                Ok(())
-            }
-
-            (TemplateIrNodeKind::BranchChain { fallback, .. }, ControlFlowBodyKind::Fallback) => {
-                let Some(fallback_body) = fallback.as_mut() else {
-                    return Err(CompilerError::compiler_error(format!(
-                        "Control-flow body replacement could not find a fallback on node {control_flow_node_id}."
-                    )));
-                };
-                *fallback_body = new_body_root;
+                *body = new_body_root;
                 Ok(())
             }
 

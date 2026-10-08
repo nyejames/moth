@@ -1516,13 +1516,13 @@ macro_rules! return_hir_transformation_error {
                 $value.into(),
             );
         )*
-        return Err(error)
+        return Err(error.into())
     };
     ($msg:expr, $source_span:expr) => {
         return Err($crate::compiler_frontend::compiler_errors::CompilerError::new(
             $msg,
             $source_span,
             $crate::compiler_frontend::compiler_errors::ErrorType::HirTransformation,
-        ))
+        ).into())
     };
 }

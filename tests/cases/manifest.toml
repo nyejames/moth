@@ -4227,6 +4227,27 @@ contract = "language.bindings.live_shared_alias_blocks_mutable_rebinding"
 role = "primary"
 
 [[case]]
+id = "mutable_update_alias_live_shared_holder_rejected"
+path = "mutable_update_alias_live_shared_holder_rejected"
+tags = ["integration", "borrows", "diagnostics"]
+contract = "language.bindings.live_shared_alias_blocks_mutable_rebinding"
+role = "boundary"
+
+[[case]]
+id = "mutable_update_alias_immutable_referent_rejected"
+path = "mutable_update_alias_immutable_referent_rejected"
+tags = ["integration", "borrows", "diagnostics"]
+contract = "language.bindings.mutable_update_alias_immutable_referent_rejected"
+role = "primary"
+
+[[case]]
+id = "mutable_slot_self_assignment"
+path = "mutable_slot_self_assignment"
+tags = ["integration", "borrows"]
+contract = "language.bindings.mutable_slot_self_assignment"
+role = "primary"
+
+[[case]]
 id = "map_get_alias_blocks_set_when_used_after_mutation"
 path = "map_get_alias_blocks_set_when_used_after_mutation"
 tags = ["integration", "borrows", "diagnostics", "hashmaps"]
@@ -4378,6 +4399,13 @@ id = "loop_collection_iteration"
 path = "loop_collection_iteration"
 tags = ["integration", "control-flow", "collections"]
 contract = "language.loops.collection_iteration_acceptance"
+role = "primary"
+
+[[case]]
+id = "loop_body_bindings_rebind_each_iteration"
+path = "loop_body_bindings_rebind_each_iteration"
+tags = ["integration", "control-flow", "collections", "borrows"]
+contract = "language.loops.body_bindings_rebind_each_iteration"
 role = "primary"
 
 [[case]]
@@ -4708,6 +4736,20 @@ path = "multiple_print_statements"
 tags = ["integration", "language"]
 contract = "language.strings.io_line_basic_acceptance"
 role = "boundary"
+
+[[case]]
+id = "mutable_local_alias_wasm_rejected"
+path = "mutable_local_alias_wasm_rejected"
+tags = ["integration", "wasm-backend", "mutability"]
+contract = "backend.html_wasm.mutable_local_binding_aliases_rejected"
+role = "backend"
+
+[[case]]
+id = "mutable_local_self_update_wasm_supported"
+path = "mutable_local_self_update_wasm_supported"
+tags = ["integration", "wasm-backend", "mutability"]
+contract = "backend.html_wasm.mutable_local_self_update_preserves_scalar"
+role = "backend"
 
 [[case]]
 id = "mutable_marker_on_assignment_target_rejected"
@@ -5151,6 +5193,20 @@ contract = "language.results.catch_handler_binding_conflict_rejected"
 role = "primary"
 
 [[case]]
+id = "catch_handler_binding_scoped_to_handler"
+path = "catch_handler_binding_scoped_to_handler"
+tags = ["integration", "results"]
+contract = "language.results.catch_handler_binding_scoped_to_handler"
+role = "primary"
+
+[[case]]
+id = "catch_handler_nested_binding_reuse_rejected"
+path = "catch_handler_nested_binding_reuse_rejected"
+tags = ["integration", "results", "diagnostics"]
+contract = "language.results.catch_handler_binding_conflict_rejected"
+role = "boundary"
+
+[[case]]
 id = "explicit_propagation_catch_conflict_rejected"
 path = "explicit_propagation_catch_conflict_rejected"
 tags = ["integration", "results", "diagnostics"]
@@ -5551,17 +5607,17 @@ contract = "language.templates.children_wrapper_on_control_flow_body"
 role = "primary"
 
 [[case]]
-id = "template_runtime_branch_fallback_wrapped_output"
-path = "template_runtime_branch_fallback_wrapped_output"
+id = "template_runtime_if_branch_wrapped_output"
+path = "template_runtime_if_branch_wrapped_output"
 tags = ["integration","templates"]
-contract = "language.templates.runtime_branch_fallback_wrapped_output"
+contract = "language.templates.runtime_if_branch_wrapped_output"
 role = "primary"
 
 [[case]]
-id = "template_runtime_false_no_else_wrapper_skip"
-path = "template_runtime_false_no_else_wrapper_skip"
+id = "template_runtime_false_wrapper_skip"
+path = "template_runtime_false_wrapper_skip"
 tags = ["integration","templates"]
-contract = "language.templates.runtime_false_no_else_wrapper_skip"
+contract = "language.templates.runtime_false_wrapper_skip"
 role = "primary"
 
 [[case]]
@@ -5576,20 +5632,6 @@ id = "template_control_flow_markdown_branch_isolation"
 path = "template_control_flow_markdown_branch_isolation"
 tags = ["integration","templates"]
 contract = "language.templates.markdown_branch_isolation"
-role = "primary"
-
-[[case]]
-id = "template_control_flow_literal_body_else_rejected"
-path = "template_control_flow_literal_body_else_rejected"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.literal_body_else_rejected"
-role = "primary"
-
-[[case]]
-id = "template_control_flow_literal_body_else_if_rejected"
-path = "template_control_flow_literal_body_else_if_rejected"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.literal_body_else_if_rejected"
 role = "primary"
 
 [[case]]
@@ -5661,13 +5703,6 @@ path = "template_conditional_loop_runtime_zero_iterations"
 tags = ["integration","templates"]
 contract = "language.templates.loop_zero_iterations_skips_wrapper"
 role = "boundary"
-
-[[case]]
-id = "template_runtime_loop_aggregate_wrapper_regression"
-path = "template_runtime_loop_aggregate_wrapper_regression"
-tags = ["integration","templates"]
-contract = "language.templates.runtime_loop_aggregate_wrapper"
-role = "primary"
 
 [[case]]
 id = "template_runtime_loop_children_wrapper_regression"
@@ -5873,104 +5908,6 @@ contract = "language.templates.docs_examples_runtime_coverage"
 role = "primary"
 
 [[case]]
-id = "template_else_body_orphan"
-path = "template_else_body_orphan"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.else_body_orphan_rejected"
-role = "primary"
-
-[[case]]
-id = "template_else_duplicate"
-path = "template_else_duplicate"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.else_duplicate_rejected"
-role = "primary"
-
-[[case]]
-id = "template_else_if_after_else"
-path = "template_else_if_after_else"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.else_if_after_else_rejected"
-role = "primary"
-
-[[case]]
-id = "template_else_if_inline_not_standalone"
-path = "template_else_if_inline_not_standalone"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.else_if_inline_not_standalone_rejected"
-role = "primary"
-
-[[case]]
-id = "template_else_if_inside_loop_without_nested_if"
-path = "template_else_if_inside_loop_without_nested_if"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.else_if_inside_loop_without_nested_if_rejected"
-role = "primary"
-
-[[case]]
-id = "template_else_if_malformed"
-path = "template_else_if_malformed"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.else_if_malformed_rejected"
-role = "primary"
-
-[[case]]
-id = "template_else_if_missing_condition"
-path = "template_else_if_missing_condition"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.else_if_missing_condition_rejected"
-role = "primary"
-
-[[case]]
-id = "template_else_if_orphan"
-path = "template_else_if_orphan"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.else_if_orphan_rejected"
-role = "primary"
-
-[[case]]
-id = "template_else_if_option_present_capture"
-path = "template_else_if_option_present_capture"
-tags = ["integration","templates","options"]
-contract = "language.templates.else_if_option_present_capture"
-role = "primary"
-
-[[case]]
-id = "template_else_if_runtime_chain"
-path = "template_else_if_runtime_chain"
-tags = ["integration","templates","results"]
-contract = "language.templates.else_if_runtime_chain"
-role = "primary"
-
-[[case]]
-id = "template_else_inline_not_standalone"
-path = "template_else_inline_not_standalone"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.else_inline_not_standalone_rejected"
-role = "primary"
-
-[[case]]
-id = "template_else_inside_loop_without_nested_if"
-path = "template_else_inside_loop_without_nested_if"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.else_inside_loop_without_nested_if_rejected"
-role = "primary"
-
-[[case]]
-id = "template_else_malformed_with_body"
-path = "template_else_malformed_with_body"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.else_malformed_with_body_rejected"
-role = "primary"
-
-[[case]]
-id = "template_else_orphan"
-path = "template_else_orphan"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.else_orphan_rejected"
-role = "primary"
-
-[[case]]
 id = "template_escaped_insert_helper_standalone_failure"
 path = "template_escaped_insert_helper_standalone_failure"
 tags = ["integration","templates","diagnostics"]
@@ -6048,17 +5985,38 @@ contract = "language.templates.imported_style_wrapper_nested_helpers"
 role = "primary"
 
 [[case]]
-id = "template_if_bool_compile_time_false_else"
-path = "template_if_bool_compile_time_false_else"
+id = "template_if_bool_compile_time_false_no_output"
+path = "template_if_bool_compile_time_false_no_output"
 tags = ["integration","templates"]
-contract = "language.templates.const_if_bool_false_else_acceptance"
+contract = "language.templates.const_if_bool_false_no_output"
 role = "primary"
 
 [[case]]
-id = "const_template_else_if_branch_chain"
-path = "const_template_else_if_branch_chain"
-tags = ["integration","templates"]
-contract = "language.templates.const_else_if_branch_chain_acceptance"
+id = "template_body_else_rejected"
+path = "template_body_else_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.body_else_rejected"
+role = "primary"
+
+[[case]]
+id = "template_body_else_if_rejected"
+path = "template_body_else_if_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.body_else_rejected"
+role = "boundary"
+
+[[case]]
+id = "template_body_break_rejected"
+path = "template_body_break_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.body_break_rejected"
+role = "primary"
+
+[[case]]
+id = "template_body_continue_rejected"
+path = "template_body_continue_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.body_continue_rejected"
 role = "primary"
 
 [[case]]
@@ -6083,13 +6041,6 @@ contract = "language.templates.if_match_style_unsupported_rejected"
 role = "primary"
 
 [[case]]
-id = "template_else_if_match_style_unsupported"
-path = "template_else_if_match_style_unsupported"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.else_if_match_style_unsupported_rejected"
-role = "primary"
-
-[[case]]
 id = "template_case_identifier_success"
 path = "template_case_identifier_success"
 tags = ["integration","templates"]
@@ -6104,17 +6055,10 @@ contract = "language.templates.if_missing_condition_rejected"
 role = "primary"
 
 [[case]]
-id = "template_if_nested_else_binding"
-path = "template_if_nested_else_binding"
-tags = ["integration","templates"]
-contract = "language.templates.if_nested_else_binding"
-role = "primary"
-
-[[case]]
-id = "template_if_option_capture_not_visible_in_else"
-path = "template_if_option_capture_not_visible_in_else"
-tags = ["integration","templates"]
-contract = "language.templates.if_option_capture_not_visible_in_else"
+id = "template_if_option_capture_not_visible_outside_body"
+path = "template_if_option_capture_not_visible_outside_body"
+tags = ["integration","templates","options","diagnostics"]
+contract = "language.templates.if_option_capture_not_visible_outside_body"
 role = "primary"
 
 [[case]]
@@ -6129,6 +6073,13 @@ id = "template_if_option_present_capture"
 path = "template_if_option_present_capture"
 tags = ["integration","templates","options"]
 contract = "language.templates.if_option_present_capture"
+role = "primary"
+
+[[case]]
+id = "template_if_option_absent_no_output"
+path = "template_if_option_absent_no_output"
+tags = ["integration","templates","options","results"]
+contract = "language.templates.if_option_absent_no_output"
 role = "primary"
 
 [[case]]
@@ -6153,20 +6104,6 @@ contract = "language.templates.loop_binding_shadows_visible_name_rejected"
 role = "primary"
 
 [[case]]
-id = "template_loop_break_before_output_runtime"
-path = "template_loop_break_before_output_runtime"
-tags = ["integration","templates"]
-contract = "language.templates.loop_control_before_output_skips_wrapper"
-role = "primary"
-
-[[case]]
-id = "template_loop_break_outside_rejected"
-path = "template_loop_break_outside_rejected"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.loop_control_outside_loop_rejected"
-role = "primary"
-
-[[case]]
 id = "template_loop_collection_compile_time"
 path = "template_loop_collection_compile_time"
 tags = ["integration","templates"]
@@ -6179,34 +6116,6 @@ path = "template_loop_collection_runtime"
 tags = ["integration","templates"]
 contract = "language.templates.runtime_loop_collection_acceptance"
 role = "primary"
-
-[[case]]
-id = "template_loop_const_break"
-path = "template_loop_const_break"
-tags = ["integration","templates"]
-contract = "language.templates.const_loop_break_acceptance"
-role = "primary"
-
-[[case]]
-id = "template_loop_const_continue"
-path = "template_loop_const_continue"
-tags = ["integration","templates"]
-contract = "language.templates.const_loop_continue_acceptance"
-role = "primary"
-
-[[case]]
-id = "template_loop_continue_before_output_runtime"
-path = "template_loop_continue_before_output_runtime"
-tags = ["integration","templates"]
-contract = "language.templates.loop_control_before_output_skips_wrapper"
-role = "boundary"
-
-[[case]]
-id = "template_loop_continue_outside_rejected"
-path = "template_loop_continue_outside_rejected"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.loop_control_outside_loop_rejected"
-role = "boundary"
 
 [[case]]
 id = "template_loop_empty_skips_wrapper"
@@ -6223,67 +6132,11 @@ contract = "language.templates.loop_head_wraps_aggregate_once"
 role = "primary"
 
 [[case]]
-id = "template_loop_literal_body_break_rejected"
-path = "template_loop_literal_body_break_rejected"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.literal_body_loop_break_rejected"
-role = "primary"
-
-[[case]]
-id = "template_loop_malformed_break_rejected"
-path = "template_loop_malformed_break_rejected"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.loop_control_with_body_rejected"
-role = "primary"
-
-[[case]]
-id = "template_loop_malformed_continue_rejected"
-path = "template_loop_malformed_continue_rejected"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.loop_control_with_body_rejected"
-role = "boundary"
-
-[[case]]
 id = "template_loop_missing_header"
 path = "template_loop_missing_header"
 tags = ["integration","templates","diagnostics"]
 contract = "language.templates.loop_missing_header_rejected"
 role = "primary"
-
-[[case]]
-id = "template_loop_nearest_nested_runtime"
-path = "template_loop_nearest_nested_runtime"
-tags = ["integration","templates"]
-contract = "language.templates.loop_nearest_nested_runtime"
-role = "primary"
-
-[[case]]
-id = "template_loop_nested_if_break_runtime"
-path = "template_loop_nested_if_break_runtime"
-tags = ["integration","templates"]
-contract = "language.templates.loop_nested_if_control_flow"
-role = "primary"
-
-[[case]]
-id = "template_loop_nested_if_continue_runtime"
-path = "template_loop_nested_if_continue_runtime"
-tags = ["integration","templates"]
-contract = "language.templates.loop_nested_if_control_flow"
-role = "boundary"
-
-[[case]]
-id = "template_loop_output_then_break_runtime"
-path = "template_loop_output_then_break_runtime"
-tags = ["integration","templates"]
-contract = "language.templates.loop_output_then_control_flow"
-role = "primary"
-
-[[case]]
-id = "template_loop_output_then_continue_runtime"
-path = "template_loop_output_then_continue_runtime"
-tags = ["integration","templates"]
-contract = "language.templates.loop_output_then_control_flow"
-role = "boundary"
 
 [[case]]
 id = "template_loop_per_iteration_wrapper_inside_body"
@@ -6363,20 +6216,6 @@ contract = "language.templates.runtime_loop_slot_application"
 role = "primary"
 
 [[case]]
-id = "template_runtime_slot_in_branch_and_loop"
-path = "template_runtime_slot_in_branch_and_loop"
-tags = ["integration","templates"]
-contract = "language.templates.runtime_slot_in_branch_and_loop"
-role = "primary"
-
-[[case]]
-id = "template_runtime_slot_break_inside_loop"
-path = "template_runtime_slot_break_inside_loop"
-tags = ["integration","templates"]
-contract = "language.templates.runtime_slot_control_flow_inside_loop"
-role = "primary"
-
-[[case]]
 id = "template_runtime_slot_children_fresh_control_flow"
 path = "template_runtime_slot_children_fresh_control_flow"
 tags = ["integration","templates"]
@@ -6398,13 +6237,6 @@ contract = "language.templates.runtime_wrapper_slot_inside_loop"
 role = "primary"
 
 [[case]]
-id = "template_runtime_wrapper_slot_inside_fallback"
-path = "template_runtime_wrapper_slot_inside_fallback"
-tags = ["integration","templates"]
-contract = "language.templates.runtime_wrapper_slot_inside_fallback"
-role = "primary"
-
-[[case]]
 id = "template_runtime_wrapper_slot_inside_loop_aggregate"
 path = "template_runtime_wrapper_slot_inside_loop_aggregate"
 tags = ["integration","templates"]
@@ -6423,27 +6255,6 @@ id = "template_missing_standalone_slot_renders_empty"
 path = "template_missing_standalone_slot_renders_empty"
 tags = ["integration","templates"]
 contract = "language.templates.missing_standalone_slot_renders_empty"
-role = "primary"
-
-[[case]]
-id = "template_runtime_slot_continue_inside_loop"
-path = "template_runtime_slot_continue_inside_loop"
-tags = ["integration","templates"]
-contract = "language.templates.runtime_slot_control_flow_inside_loop"
-role = "boundary"
-
-[[case]]
-id = "template_runtime_slot_loop_control_outside_loop_rejected"
-path = "template_runtime_slot_loop_control_outside_loop_rejected"
-tags = ["integration","templates","diagnostics"]
-contract = "language.templates.loop_control_outside_loop_rejected"
-role = "boundary"
-
-[[case]]
-id = "template_runtime_slot_output_then_continue_inside_loop"
-path = "template_runtime_slot_output_then_continue_inside_loop"
-tags = ["integration","templates"]
-contract = "language.templates.runtime_slot_output_then_continue_inside_loop"
 role = "primary"
 
 [[case]]
@@ -10914,6 +10725,20 @@ contract = "backend.html_wasm.external_js_function_unsupported"
 role = "backend"
 
 [[case]]
+id = "web_graphics_empty_package_resolves"
+path = "web_graphics_empty_package_resolves"
+tags = ["integration", "external-imports", "web-graphics", "positive", "js-backend"]
+contract = "language.dependencies.web_graphics_empty_package_resolves"
+role = "primary"
+
+[[case]]
+id = "web_graphics_missing_symbol_rejected"
+path = "web_graphics_missing_symbol_rejected"
+tags = ["integration", "external-imports", "web-graphics", "diagnostics"]
+contract = "language.dependencies.web_graphics_missing_symbol_rejected"
+role = "primary"
+
+[[case]]
 id = "html_wasm_unused_html_canvas_constant"
 path = "html_wasm_unused_html_canvas_constant"
 tags = ["integration", "external-imports", "web-canvas", "html-wasm", "reachability"]
@@ -11164,6 +10989,48 @@ path = "value_if_block_nested_produce_and_return"
 tags = ["integration", "language", "value-blocks", "if", "regression"]
 contract = "language.expressions.value_if_mixed_produce_terminate_acceptance"
 role = "primary"
+
+[[case]]
+id = "value_block_inferred_local_receiver_ownership"
+path = "value_block_inferred_local_receiver_ownership"
+tags = ["integration", "language", "value-blocks", "declaration", "regression"]
+contract = "language.expressions.value_block_inferred_local_receiver_ownership"
+role = "primary"
+
+[[case]]
+id = "value_block_inferred_local_branch_mismatch_rejected"
+path = "value_block_inferred_local_branch_mismatch_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "declaration", "regression"]
+contract = "language.expressions.value_if_type_mismatch_rejected"
+role = "boundary"
+
+[[case]]
+id = "value_block_inferred_local_function_arity_rejected"
+path = "value_block_inferred_local_function_arity_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "declaration", "regression"]
+contract = "language.expressions.value_block_inferred_local_single_value_rejected"
+role = "primary"
+
+[[case]]
+id = "value_block_local_invalid_function_return_rejected"
+path = "value_block_local_invalid_function_return_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "return", "regression"]
+contract = "language.functions.return_value_type_mismatch_rejected"
+role = "boundary"
+
+[[case]]
+id = "value_block_inferred_local_cast_target_rejected"
+path = "value_block_inferred_local_cast_target_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "cast", "regression"]
+contract = "language.casts.missing_builtin_target_rejected"
+role = "boundary"
+
+[[case]]
+id = "value_block_inferred_local_generic_evidence_rejected"
+path = "value_block_inferred_local_generic_evidence_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "generics", "regression"]
+contract = "language.generics.ambiguous_inference_rejected"
+role = "boundary"
 
 [[case]]
 id = "value_if_return_inline"
@@ -12455,11 +12322,11 @@ contract = "language.numeric.nonfinite_float_literal_rejected"
 role = "primary"
 
 [[case]]
-id = "core_io_console_print_success"
-path = "core_io_console_print_success"
+id = "core_io_console_print_line_records"
+path = "core_io_console_print_line_records"
 tags = ["integration", "core_io", "console"]
-contract = "backend.html.console_print_helper_emission"
-role = "backend"
+contract = "language.core_io.console_print_line_records"
+role = "primary"
 
 [[case]]
 id = "core_io_console_debug_success"
@@ -12532,18 +12399,11 @@ contract = "language.external.optional_type_identity_acceptance"
 role = "primary"
 
 [[case]]
-id = "core_io_input_new_success"
-path = "core_io_input_new_success"
-tags = ["integration", "core_io", "input"]
-contract = "backend.html.input_new_helper_emission"
-role = "backend"
-
-[[case]]
-id = "core_io_input_update_close_success"
-path = "core_io_input_update_close_success"
-tags = ["integration", "core_io", "input"]
-contract = "backend.html.input_update_close_helper_emission"
-role = "backend"
+id = "core_io_input_new_unsupported_host"
+path = "core_io_input_new_unsupported_host"
+tags = ["integration", "core_io", "input", "errors"]
+contract = "language.core_io.input_new_unsupported_host_error"
+role = "primary"
 
 [[case]]
 id = "core_io_input_reads_success"
@@ -14839,3 +14699,66 @@ path = "function_parameter_reassignment_rejected"
 tags = ["integration", "language", "functions", "diagnostics"]
 contract = "language.functions.shared_parameter_reassignment_rejected"
 role = "primary"
+
+[[case]]
+id = "external_fixed_scalars_int32_float64"
+path = "external_fixed_scalars_int32_float64"
+tags = ["integration", "numeric", "external", "runtime", "fixed-scalars"]
+contract = "backend.html.external_fixed_scalar_annotations"
+role = "primary"
+
+[[case]]
+id = "external_fixed_scalars_int64_float64"
+path = "external_fixed_scalars_int64_float64"
+tags = ["integration", "numeric", "external", "runtime", "fixed-scalars", "int64", "release"]
+contract = "backend.html.external_fixed_scalar_annotations"
+role = "backend"
+
+[[case]]
+id = "external_fixed_scalars_int32_float32"
+path = "external_fixed_scalars_int32_float32"
+tags = ["integration", "numeric", "external", "runtime", "fixed-scalars", "float32", "release"]
+contract = "backend.html.external_fixed_scalar_annotations"
+role = "backend"
+
+[[case]]
+id = "external_fixed_scalars_int64_float32"
+path = "external_fixed_scalars_int64_float32"
+tags = ["integration", "numeric", "external", "runtime", "fixed-scalars", "int64", "float32"]
+contract = "backend.html.external_fixed_scalar_annotations"
+role = "backend"
+
+[[case]]
+id = "external_const_u32_values"
+path = "external_const_u32_values"
+tags = ["integration", "numeric", "external", "runtime", "fixed-consts"]
+contract = "backend.html.external_fixed_u32_constant_values"
+role = "primary"
+
+[[case]]
+id = "external_const_u32_inequality_initializer_rejected"
+path = "external_const_u32_inequality_initializer_rejected"
+tags = ["integration", "numeric", "external", "fixed-consts", "diagnostics"]
+contract = "language.dependencies.external_const_u32_initializer_rejected"
+role = "primary"
+
+[[case]]
+id = "external_const_u32_int64"
+path = "external_const_u32_int64"
+tags = ["integration", "numeric", "external", "runtime", "fixed-consts", "int64", "release"]
+contract = "backend.html.external_fixed_u32_constant_values"
+role = "backend"
+
+[[case]]
+id = "external_const_u32_mixed_emission"
+path = "external_const_u32_mixed_emission"
+tags = ["integration", "numeric", "external", "runtime", "fixed-consts", "reachability"]
+contract = "backend.html.external_fixed_u32_constant_mixed_emission"
+role = "boundary"
+
+[[case]]
+id = "external_const_u32_static_emission"
+path = "external_const_u32_static_emission"
+tags = ["integration", "numeric", "external", "runtime", "fixed-consts", "reachability"]
+contract = "backend.html.external_fixed_u32_constant_static_emission"
+role = "boundary"

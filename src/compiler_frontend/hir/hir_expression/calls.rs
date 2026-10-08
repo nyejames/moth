@@ -17,15 +17,17 @@ use crate::compiler_frontend::ast::expressions::call_argument::{
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
+};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::return_hir_transformation_error;
@@ -47,7 +49,7 @@ impl<'a> HirBuilder<'a> {
         args: &[CallArgument],
         _result_type_ids: &[FrontendTypeId],
         span: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let mut lowered_args = Vec::with_capacity(args.len());
 
         for (arg_index, argument) in args.iter().enumerate() {
@@ -60,13 +62,17 @@ impl<'a> HirBuilder<'a> {
 
         let float_type = self.lower_type_id(self.type_environment.builtins().float, span)?;
         let result_local = self.allocate_temp_local(float_type, None)?;
+        let args = self
+            .module
+            .expressions
+            .append_values(&lowered_args, *span)?;
 
         let call_statement = HirStatement {
             id: self.allocate_node_id(),
             kind: HirStatementKind::Call {
                 target: CallTarget::External(id),
-                args: lowered_args,
-                result: Some(result_local),
+                args,
+                result: Some(HirLocalDestination::Define(result_local)),
             },
             span: *span,
         };
@@ -75,7 +81,8 @@ impl<'a> HirBuilder<'a> {
 
         let region = self.current_region_or_error(span)?;
         let no_span = None;
-        let raw_value = self.make_local_load_expression(result_local, float_type, &no_span, region);
+        let raw_value =
+            self.make_local_load_expression(result_local, float_type, &no_span, region)?;
         let validated_value = self.emit_validated_float_value(raw_value, span)?;
 
         Ok(LoweredExpression {
@@ -90,7 +97,7 @@ impl<'a> HirBuilder<'a> {
         args: &[CallArgument],
         result_type_ids: &[FrontendTypeId],
         span: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let target = self.resolve_call_target_or_error(method_path, span)?;
         let mut full_args = Vec::with_capacity(args.len() + 1);
         full_args.push(Self::shared_call_argument(receiver.clone(), span));
@@ -105,7 +112,7 @@ impl<'a> HirBuilder<'a> {
         args: &[CallArgument],
         result_type_ids: &[FrontendTypeId],
         span: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let receiver_argument = if op.requires_mutable_receiver() {
             Self::mutable_call_argument(receiver.clone(), span)
         } else {
@@ -140,7 +147,7 @@ impl<'a> HirBuilder<'a> {
         args: &[CallArgument],
         result_type_ids: &[FrontendTypeId],
         span: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let mut prelude = Vec::new();
         let hir_op = hir_map_op_from_builtin(op);
         if receiver_requires_mutable != hir_op.requires_mutable_receiver() {
@@ -175,13 +182,17 @@ impl<'a> HirBuilder<'a> {
             Some(self.allocate_temp_local(result_type, None)?)
         };
 
+        let args = self
+            .module
+            .expressions
+            .append_values(&lowered_args, *span)?;
         let statement = HirStatement {
             id: statement_id,
             kind: HirStatementKind::MapOp {
                 op: hir_op,
                 receiver: lowered_receiver,
-                args: lowered_args,
-                result,
+                args,
+                result: result.map(HirLocalDestination::Define),
             },
             span: *span,
         };
@@ -193,16 +204,16 @@ impl<'a> HirBuilder<'a> {
         let value = if let Some(result_local) = result {
             self.make_expression(
                 &no_span,
-                HirExpressionKind::Load(HirPlace::Local(result_local)),
+                HirExpressionKind::Load(HirPlace::local(result_local)),
                 result_type,
                 ValueKind::RValue,
                 region,
-            )
+            )?
         } else {
-            self.unit_expression(&no_span, region)
+            self.unit_expression(&no_span, region)?
         };
 
-        self.log_call_result_binding(span, result, &value);
+        self.log_call_result_binding(span, result, value);
 
         Ok(LoweredExpression { prelude, value })
     }
@@ -216,7 +227,7 @@ impl<'a> HirBuilder<'a> {
         args: &[CallArgument],
         result_type_ids: &[FrontendTypeId],
         span: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let mut prelude = Vec::new();
         let mut lowered_args = Vec::with_capacity(args.len());
 
@@ -269,11 +280,15 @@ impl<'a> HirBuilder<'a> {
         let is_external = matches!(target, CallTarget::External(_));
 
         if no_return {
+            let args = self
+                .module
+                .expressions
+                .append_values(&lowered_args, *span)?;
             let statement = HirStatement {
                 id: statement_id,
                 kind: HirStatementKind::Call {
                     target,
-                    args: lowered_args,
+                    args,
                     result: None,
                 },
                 span: *span,
@@ -286,20 +301,24 @@ impl<'a> HirBuilder<'a> {
             }
             prelude.push(statement);
 
-            let value = self.unit_expression(&no_span, region);
-            self.log_call_result_binding(span, None, &value);
+            let value = self.unit_expression(&no_span, region)?;
+            self.log_call_result_binding(span, None, value);
             return Ok(LoweredExpression { prelude, value });
         }
 
         let call_result_type = self.lower_call_result_type(result_type_ids, span)?;
         let temp_local = self.allocate_temp_local(call_result_type, None)?;
+        let args = self
+            .module
+            .expressions
+            .append_values(&lowered_args, *span)?;
 
         let statement = HirStatement {
             id: statement_id,
             kind: HirStatementKind::Call {
                 target,
-                args: lowered_args,
-                result: Some(temp_local),
+                args,
+                result: Some(HirLocalDestination::Define(temp_local)),
             },
             span: *span,
         };
@@ -314,13 +333,13 @@ impl<'a> HirBuilder<'a> {
 
         let value = self.make_expression(
             &no_span,
-            HirExpressionKind::Load(HirPlace::Local(temp_local)),
+            HirExpressionKind::Load(HirPlace::local(temp_local)),
             call_result_type,
             ValueKind::RValue,
             region,
-        );
+        )?;
 
-        self.log_call_result_binding(span, Some(temp_local), &value);
+        self.log_call_result_binding(span, Some(temp_local), value);
 
         Ok(LoweredExpression { prelude, value })
     }
@@ -329,7 +348,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         result_type_ids: &[FrontendTypeId],
         span: &Option<SourceSpan>,
-    ) -> Result<TypeId, CompilerError> {
+    ) -> Result<TypeId, HirConstructionFailure> {
         if result_type_ids.is_empty() {
             return Ok(self.type_environment.builtins().none);
         }
@@ -360,7 +379,7 @@ impl<'a> HirBuilder<'a> {
         argument: &CallArgument,
         call_span: &Option<SourceSpan>,
         argument_index: usize,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let lowered_value = if self.expression_needs_current_block_lowering(&argument.value) {
             LoweredExpression {
                 prelude: vec![],
@@ -376,7 +395,7 @@ impl<'a> HirBuilder<'a> {
 
         let mut prelude = lowered_value.prelude;
         let value = lowered_value.value;
-        let value_type = value.ty;
+        let value_type = self.module.expressions.expression(value).ty;
         let temp_local = self.allocate_fresh_mutable_call_arg_local(
             value_type,
             None,
@@ -384,27 +403,27 @@ impl<'a> HirBuilder<'a> {
             argument_index,
         )?;
 
-        let assign_statement = HirStatement {
+        let write_statement = HirStatement {
             id: self.allocate_node_id(),
-            kind: HirStatementKind::Assign {
-                target: HirPlace::Local(temp_local),
+            kind: HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(temp_local),
                 value,
             },
             span: None,
         };
         self.side_table
-            .map_statement(argument.span, &assign_statement);
-        prelude.push(assign_statement);
+            .map_statement(argument.span, &write_statement);
+        prelude.push(write_statement);
 
         let region = self.current_region_or_error(&argument.span)?;
         let no_span = None;
         let value = self.make_expression(
             &no_span,
-            HirExpressionKind::Load(HirPlace::Local(temp_local)),
+            HirExpressionKind::Load(HirPlace::local(temp_local)),
             value_type,
             ValueKind::RValue,
             region,
-        );
+        )?;
 
         Ok(LoweredExpression { prelude, value })
     }
@@ -413,7 +432,7 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         prelude: &mut Vec<HirStatement>,
         span: &Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         for statement in prelude.drain(..) {
             self.emit_statement_to_current_block(statement, span)?;
         }

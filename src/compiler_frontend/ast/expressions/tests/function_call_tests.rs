@@ -93,7 +93,6 @@ fn parse_args_with_receiving_context(
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
 
@@ -149,7 +148,6 @@ fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Ve
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
 
@@ -242,7 +240,6 @@ fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
 
@@ -515,7 +512,6 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
             &PathInternerFork::empty(),
         )),
         Arc::new(ExternalPackageRegistry::new()),
-        vec![],
         0,
     );
 

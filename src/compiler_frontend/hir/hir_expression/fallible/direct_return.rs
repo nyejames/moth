@@ -5,7 +5,7 @@
 //! edges instead of hiding the error path inside an expression helper.
 
 use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -22,7 +22,7 @@ impl<'a> HirBuilder<'a> {
         value: &Expression,
         value_span: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
-    ) -> Result<bool, CompilerError> {
+    ) -> Result<bool, HirConstructionFailure> {
         let Some(result_carrier) = self.emit_result_propagation_carrier_to_current_block(value)?
         else {
             return Ok(false);
@@ -38,7 +38,7 @@ impl<'a> HirBuilder<'a> {
         result_carrier: EmittedFallibleCarrier,
         span: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let current_function_id = self.current_function_id_or_error(span)?;
         let current_return_type = self
             .function_by_id_or_error(current_function_id, span)?
@@ -87,16 +87,16 @@ impl<'a> HirBuilder<'a> {
             result_carrier.carrier_type,
             &None,
             success_region,
-        );
+        )?;
         let mut success_payload = self.make_expression(
             &None,
             HirExpressionKind::FallibleUnwrapSuccess {
-                result: Box::new(success_result),
+                result: success_result,
             },
             result_carrier.ok_type,
             ValueKind::RValue,
             success_region,
-        );
+        )?;
         if result_carrier.validate_float_success {
             success_payload = self.emit_validated_float_value(success_payload, span)?;
         }
@@ -115,6 +115,6 @@ impl<'a> HirBuilder<'a> {
             authored_span,
         )?;
 
-        self.set_current_block(branch.success_block, span)
+        Ok(self.set_current_block(branch.success_block, span)?)
     }
 }

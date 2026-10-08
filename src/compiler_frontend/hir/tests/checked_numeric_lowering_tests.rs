@@ -16,16 +16,16 @@ use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use crate::compiler_frontend::hir::expression_store::{HirConstructionFailure, HirExpressionStore};
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::hir_builder::{register_local, setup_builder};
-use crate::compiler_frontend::hir::ids::{FunctionId, LocalId};
+use crate::compiler_frontend::hir::ids::{FunctionId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::operators::HirBinOp;
-use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::{HirTerminator, RuntimeFailureCause};
 use crate::compiler_frontend::hir::tests::symbol;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -85,12 +85,19 @@ fn find_single_numeric_op_with_operands(
         })
 }
 
+#[derive(Debug)]
+struct LoweredNumericFixture {
+    expressions: HirExpressionStore,
+    value: HirValueId,
+    numeric_op: Option<(HirNumericOp, HirNumericOperands)>,
+}
+
 fn lower_binary_with_types(
     op: Operator,
     left_type: crate::compiler_frontend::datatypes::ids::TypeId,
     right_type: crate::compiler_frontend::datatypes::ids::TypeId,
     result_type: crate::compiler_frontend::datatypes::ids::TypeId,
-) -> (HirExpression, Option<(HirNumericOp, HirNumericOperands)>) {
+) -> LoweredNumericFixture {
     try_lower_binary_with_types(op, left_type, right_type, result_type)
         .expect("typed binary operator lowering should succeed")
 }
@@ -100,10 +107,7 @@ fn try_lower_binary_with_types(
     left_type: crate::compiler_frontend::datatypes::ids::TypeId,
     right_type: crate::compiler_frontend::datatypes::ids::TypeId,
     result_type: crate::compiler_frontend::datatypes::ids::TypeId,
-) -> Result<
-    (HirExpression, Option<(HirNumericOp, HirNumericOperands)>),
-    crate::compiler_frontend::compiler_errors::CompilerError,
-> {
+) -> Result<LoweredNumericFixture, HirConstructionFailure> {
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let loc = None;
@@ -129,16 +133,18 @@ fn try_lower_binary_with_types(
     register_local(&mut builder, right_name, LocalId(11), right_type, loc);
     let lowered = builder.lower_expression(&expression)?;
 
-    Ok((
-        lowered.value,
-        find_single_numeric_op_with_operands(&builder),
-    ))
+    let numeric_op = find_single_numeric_op_with_operands(&builder);
+    Ok(LoweredNumericFixture {
+        expressions: builder.module.expressions,
+        value: lowered.value,
+        numeric_op,
+    })
 }
 
 fn lower_negation_with_type(
     operand_type: crate::compiler_frontend::datatypes::ids::TypeId,
     result_type: crate::compiler_frontend::datatypes::ids::TypeId,
-) -> (HirExpression, HirNumericOp, HirNumericOperands) {
+) -> LoweredNumericFixture {
     try_lower_negation_with_type(operand_type, result_type)
         .expect("typed negation lowering should succeed")
 }
@@ -146,10 +152,7 @@ fn lower_negation_with_type(
 fn try_lower_negation_with_type(
     operand_type: crate::compiler_frontend::datatypes::ids::TypeId,
     result_type: crate::compiler_frontend::datatypes::ids::TypeId,
-) -> Result<
-    (HirExpression, HirNumericOp, HirNumericOperands),
-    crate::compiler_frontend::compiler_errors::CompilerError,
-> {
+) -> Result<LoweredNumericFixture, HirConstructionFailure> {
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let loc = None;
@@ -176,17 +179,29 @@ fn try_lower_negation_with_type(
     let (op, operands) = find_single_numeric_op_with_operands(&builder)
         .expect("numeric negation should emit one NumericOp");
 
-    Ok((lowered.value, op, operands))
+    Ok(LoweredNumericFixture {
+        expressions: builder.module.expressions,
+        value: lowered.value,
+        numeric_op: Some((op, operands)),
+    })
 }
 
-fn numeric_conversion(expression: &HirExpression) -> Option<(NumericScalar, NumericScalar)> {
-    match &expression.kind {
+fn numeric_conversion(
+    expressions: &HirExpressionStore,
+    value: HirValueId,
+) -> Option<(NumericScalar, NumericScalar)> {
+    match &expressions.expression(value).kind {
         HirExpressionKind::Cast {
             policy: BuiltinCastPolicyId::NumericConversion { source, target },
             ..
         } => Some((*source, *target)),
         _ => None,
     }
+}
+
+fn expression_row<'a>(builder: &'a HirBuilder<'_>, value: HirValueId) -> &'a HirExpression {
+    let row: &'a HirExpression = builder.module.expressions.expression(value);
+    row
 }
 
 fn set_current_function_return_type(
@@ -203,7 +218,7 @@ fn lower_u8_compound_add_assignment(
     builder: &mut HirBuilder<'_>,
     target_name: PathId,
     right_name: PathId,
-) -> Result<(), crate::compiler_frontend::compiler_errors::CompilerError> {
+) -> Result<(), HirConstructionFailure> {
     let u8_type = fixed_type(FixedScalar::U8);
     let u32_type = fixed_type(FixedScalar::U32);
     let source = runtime_expr(
@@ -302,10 +317,10 @@ fn compound_assignment_store_value<'a>(
             block.statements.iter().any(|statement| {
                 matches!(
                     &statement.kind,
-                    HirStatementKind::Assign {
-                        target: HirPlace::Local(local),
+                    HirStatementKind::Write {
+                        target: HirWriteTarget::AssignPlace(target),
                         ..
-                    } if *local == target_local
+                    } if target.root == target_local && super::is_local_place(target)
                 )
             })
         })
@@ -322,13 +337,15 @@ fn compound_assignment_store_value<'a>(
         .statements
         .iter()
         .find_map(|statement| match &statement.kind {
-            HirStatementKind::Assign {
-                target: HirPlace::Local(local),
+            HirStatementKind::Write {
+                target: HirWriteTarget::AssignPlace(target),
                 value,
-            } if *local == target_local => Some(value),
+            } if target.root == target_local && super::is_local_place(target) => {
+                Some(builder.module.expressions.expression(*value))
+            }
             _ => None,
         })
-        .expect("success continuation should assign the compound result")
+        .expect("success continuation should update the compound target")
 }
 
 #[test]
@@ -378,7 +395,11 @@ fn compound_u8_store_conversion_traps_before_writing_target() {
         matches!(
             &stored_value.kind,
             HirExpressionKind::FallibleUnwrapSuccess { result }
-                if matches!(result.kind, HirExpressionKind::Load(HirPlace::Local(local)) if local == carrier)
+                if matches!(
+                    &builder.module.expressions.expression(*result).kind,
+                    HirExpressionKind::Load(place)
+                        if place.root == carrier && super::is_local_place(place)
+                )
         ),
         "the store must consume the successful conversion payload"
     );
@@ -551,11 +572,14 @@ fn checked_int_addition_lowers_to_int_add_numeric_op() {
         .expect("int addition lowering should succeed");
 
     assert!(lowered.prelude.is_empty());
-    assert_eq!(lowered.value.ty, builtin_type_ids::INT);
+    assert_eq!(
+        expression_row(&builder, lowered.value).ty,
+        builtin_type_ids::INT
+    );
     assert!(
         matches!(
-            lowered.value.kind,
-            HirExpressionKind::Load(HirPlace::Local(_))
+            &expression_row(&builder, lowered.value).kind,
+            HirExpressionKind::Load(place) if super::is_local_place(place)
         ),
         "checked addition should return a load of the NumericOp result"
     );
@@ -622,7 +646,10 @@ fn checked_regular_division_lowers_to_float_div_numeric_op() {
         .lower_expression(&expr)
         .expect("regular division lowering should succeed");
 
-    assert_eq!(lowered.value.ty, builtin_type_ids::FLOAT);
+    assert_eq!(
+        expression_row(&builder, lowered.value).ty,
+        builtin_type_ids::FLOAT
+    );
 
     let (op, _) = find_single_numeric_op(&builder).expect("expected a NumericOp");
     assert!(
@@ -645,7 +672,7 @@ fn checked_regular_division_lowers_to_float_div_numeric_op() {
         panic!("Float divide should be binary");
     };
     assert!(matches!(
-        left.kind,
+        &builder.module.expressions.expression(left).kind,
         HirExpressionKind::Cast {
             policy: BuiltinCastPolicyId::NumericConversion {
                 source: NumericScalar::Int,
@@ -655,7 +682,7 @@ fn checked_regular_division_lowers_to_float_div_numeric_op() {
         }
     ));
     assert!(matches!(
-        right.kind,
+        &builder.module.expressions.expression(right).kind,
         HirExpressionKind::Cast {
             policy: BuiltinCastPolicyId::NumericConversion {
                 source: NumericScalar::Int,
@@ -707,7 +734,7 @@ fn mixed_int_float_addition_converts_int_operand() {
         panic!("Float add should be binary");
     };
     assert!(matches!(
-        left.kind,
+        &builder.module.expressions.expression(left).kind,
         HirExpressionKind::Cast {
             policy: BuiltinCastPolicyId::NumericConversion {
                 source: NumericScalar::Int,
@@ -716,7 +743,10 @@ fn mixed_int_float_addition_converts_int_operand() {
             ..
         }
     ));
-    assert!(matches!(right.kind, HirExpressionKind::Float(_)));
+    assert!(matches!(
+        &builder.module.expressions.expression(right).kind,
+        HirExpressionKind::Float(_)
+    ));
 }
 
 #[test]
@@ -755,7 +785,10 @@ fn unary_int_negation_lowers_to_int_neg_numeric_op() {
         .lower_expression(&expr)
         .expect("unary negation lowering should succeed");
 
-    assert_eq!(lowered.value.ty, builtin_type_ids::INT);
+    assert_eq!(
+        expression_row(&builder, lowered.value).ty,
+        builtin_type_ids::INT
+    );
 
     let (op, _) = find_single_numeric_op(&builder).expect("expected a NumericOp");
     assert!(
@@ -801,7 +834,7 @@ fn numeric_failure_mode_is_return_error_for_builtin_error_function() {
     );
     assert!(
         matches!(
-            lowered.value.kind,
+            expression_row(&builder, lowered.value).kind,
             HirExpressionKind::FallibleUnwrapSuccess { .. }
         ),
         "recoverable numeric lowering should continue with an unwrapped success value"
@@ -893,10 +926,12 @@ fn numeric_failure_mode_is_trap_for_non_fallible_function() {
 fn fixed_u8_addition_promotes_both_operands_to_u32() {
     let u8_type = fixed_type(FixedScalar::U8);
     let u32_type = fixed_type(FixedScalar::U32);
-    let (value, numeric_op) = lower_binary_with_types(Operator::Add, u8_type, u8_type, u32_type);
+    let fixture = lower_binary_with_types(Operator::Add, u8_type, u8_type, u32_type);
 
-    assert_eq!(value.ty, u32_type);
-    let (op, operands) = numeric_op.expect("fixed addition should emit a NumericOp");
+    assert_eq!(fixture.expressions.expression(fixture.value).ty, u32_type);
+    let (op, operands) = fixture
+        .numeric_op
+        .expect("fixed addition should emit a NumericOp");
     assert_eq!(
         op,
         HirNumericOp {
@@ -911,20 +946,28 @@ fn fixed_u8_addition_promotes_both_operands_to_u32() {
         NumericScalar::Fixed(FixedScalar::U8),
         NumericScalar::Fixed(FixedScalar::U32),
     ));
-    assert_eq!(left.ty, u32_type);
-    assert_eq!(right.ty, u32_type);
-    assert_eq!(numeric_conversion(&left), expected_conversion);
-    assert_eq!(numeric_conversion(&right), expected_conversion);
+    assert_eq!(fixture.expressions.expression(left).ty, u32_type);
+    assert_eq!(fixture.expressions.expression(right).ty, u32_type);
+    assert_eq!(
+        numeric_conversion(&fixture.expressions, left),
+        expected_conversion
+    );
+    assert_eq!(
+        numeric_conversion(&fixture.expressions, right),
+        expected_conversion
+    );
 }
 
 #[test]
 fn fixed_i32_i64_addition_promotes_only_the_left_operand() {
     let i32_type = fixed_type(FixedScalar::I32);
     let i64_type = fixed_type(FixedScalar::I64);
-    let (value, numeric_op) = lower_binary_with_types(Operator::Add, i32_type, i64_type, i64_type);
+    let fixture = lower_binary_with_types(Operator::Add, i32_type, i64_type, i64_type);
 
-    assert_eq!(value.ty, i64_type);
-    let (op, operands) = numeric_op.expect("fixed addition should emit a NumericOp");
+    assert_eq!(fixture.expressions.expression(fixture.value).ty, i64_type);
+    let (op, operands) = fixture
+        .numeric_op
+        .expect("fixed addition should emit a NumericOp");
     assert_eq!(
         op,
         HirNumericOp {
@@ -936,25 +979,27 @@ fn fixed_i32_i64_addition_promotes_only_the_left_operand() {
         panic!("fixed addition should have binary operands");
     };
     assert_eq!(
-        numeric_conversion(&left),
+        numeric_conversion(&fixture.expressions, left),
         Some((
             NumericScalar::Fixed(FixedScalar::I32),
             NumericScalar::Fixed(FixedScalar::I64),
         ))
     );
-    assert_eq!(left.ty, i64_type);
-    assert_eq!(right.ty, i64_type);
-    assert!(numeric_conversion(&right).is_none());
+    assert_eq!(fixture.expressions.expression(left).ty, i64_type);
+    assert_eq!(fixture.expressions.expression(right).ty, i64_type);
+    assert!(numeric_conversion(&fixture.expressions, right).is_none());
 }
 
 #[test]
 fn fixed_u8_division_converts_both_operands_to_f64() {
     let u8_type = fixed_type(FixedScalar::U8);
     let f64_type = fixed_type(FixedScalar::F64);
-    let (value, numeric_op) = lower_binary_with_types(Operator::Divide, u8_type, u8_type, f64_type);
+    let fixture = lower_binary_with_types(Operator::Divide, u8_type, u8_type, f64_type);
 
-    assert_eq!(value.ty, f64_type);
-    let (op, operands) = numeric_op.expect("fixed division should emit a NumericOp");
+    assert_eq!(fixture.expressions.expression(fixture.value).ty, f64_type);
+    let (op, operands) = fixture
+        .numeric_op
+        .expect("fixed division should emit a NumericOp");
     assert_eq!(
         op,
         HirNumericOp {
@@ -969,21 +1014,28 @@ fn fixed_u8_division_converts_both_operands_to_f64() {
         NumericScalar::Fixed(FixedScalar::U8),
         NumericScalar::Fixed(FixedScalar::F64),
     ));
-    assert_eq!(left.ty, f64_type);
-    assert_eq!(right.ty, f64_type);
-    assert_eq!(numeric_conversion(&left), expected_conversion);
-    assert_eq!(numeric_conversion(&right), expected_conversion);
+    assert_eq!(fixture.expressions.expression(left).ty, f64_type);
+    assert_eq!(fixture.expressions.expression(right).ty, f64_type);
+    assert_eq!(
+        numeric_conversion(&fixture.expressions, left),
+        expected_conversion
+    );
+    assert_eq!(
+        numeric_conversion(&fixture.expressions, right),
+        expected_conversion
+    );
 }
 
 #[test]
 fn fixed_f16_f32_multiplication_promotes_only_the_left_operand() {
     let f16_type = fixed_type(FixedScalar::F16);
     let f32_type = fixed_type(FixedScalar::F32);
-    let (value, numeric_op) =
-        lower_binary_with_types(Operator::Multiply, f16_type, f32_type, f32_type);
+    let fixture = lower_binary_with_types(Operator::Multiply, f16_type, f32_type, f32_type);
 
-    assert_eq!(value.ty, f32_type);
-    let (op, operands) = numeric_op.expect("fixed multiplication should emit a NumericOp");
+    assert_eq!(fixture.expressions.expression(fixture.value).ty, f32_type);
+    let (op, operands) = fixture
+        .numeric_op
+        .expect("fixed multiplication should emit a NumericOp");
     assert_eq!(
         op,
         HirNumericOp {
@@ -995,24 +1047,27 @@ fn fixed_f16_f32_multiplication_promotes_only_the_left_operand() {
         panic!("fixed multiplication should have binary operands");
     };
     assert_eq!(
-        numeric_conversion(&left),
+        numeric_conversion(&fixture.expressions, left),
         Some((
             NumericScalar::Fixed(FixedScalar::F16),
             NumericScalar::Fixed(FixedScalar::F32),
         ))
     );
-    assert_eq!(left.ty, f32_type);
-    assert_eq!(right.ty, f32_type);
-    assert!(numeric_conversion(&right).is_none());
+    assert_eq!(fixture.expressions.expression(left).ty, f32_type);
+    assert_eq!(fixture.expressions.expression(right).ty, f32_type);
+    assert!(numeric_conversion(&fixture.expressions, right).is_none());
 }
 
 #[test]
 fn fixed_i8_negation_promotes_operand_to_i32() {
     let i8_type = fixed_type(FixedScalar::I8);
     let i32_type = fixed_type(FixedScalar::I32);
-    let (value, op, operands) = lower_negation_with_type(i8_type, i32_type);
+    let fixture = lower_negation_with_type(i8_type, i32_type);
 
-    assert_eq!(value.ty, i32_type);
+    assert_eq!(fixture.expressions.expression(fixture.value).ty, i32_type);
+    let (op, operands) = fixture
+        .numeric_op
+        .expect("negation should emit a NumericOp");
     assert_eq!(
         op,
         HirNumericOp {
@@ -1024,21 +1079,24 @@ fn fixed_i8_negation_promotes_operand_to_i32() {
         panic!("negation should have a unary operand");
     };
     assert_eq!(
-        numeric_conversion(&operand),
+        numeric_conversion(&fixture.expressions, operand),
         Some((
             NumericScalar::Fixed(FixedScalar::I8),
             NumericScalar::Fixed(FixedScalar::I32),
         ))
     );
-    assert_eq!(operand.ty, i32_type);
+    assert_eq!(fixture.expressions.expression(operand).ty, i32_type);
 }
 
 #[test]
 fn fixed_f64_negation_keeps_its_operand_domain() {
     let f64_type = fixed_type(FixedScalar::F64);
-    let (value, op, operands) = lower_negation_with_type(f64_type, f64_type);
+    let fixture = lower_negation_with_type(f64_type, f64_type);
 
-    assert_eq!(value.ty, f64_type);
+    assert_eq!(fixture.expressions.expression(fixture.value).ty, f64_type);
+    let (op, operands) = fixture
+        .numeric_op
+        .expect("negation should emit a NumericOp");
     assert_eq!(
         op,
         HirNumericOp {
@@ -1049,15 +1107,15 @@ fn fixed_f64_negation_keeps_its_operand_domain() {
     let HirNumericOperands::Unary { operand } = operands else {
         panic!("negation should have a unary operand");
     };
-    assert_eq!(operand.ty, f64_type);
-    assert!(numeric_conversion(&operand).is_none());
+    assert_eq!(fixture.expressions.expression(operand).ty, f64_type);
+    assert!(numeric_conversion(&fixture.expressions, operand).is_none());
 }
 
 #[test]
 fn fixed_integer_comparison_keeps_mixed_operand_types() {
     let i64_type = fixed_type(FixedScalar::I64);
     let u64_type = fixed_type(FixedScalar::U64);
-    let (value, numeric_op) = lower_binary_with_types(
+    let fixture = lower_binary_with_types(
         Operator::LessThan,
         i64_type,
         u64_type,
@@ -1065,73 +1123,80 @@ fn fixed_integer_comparison_keeps_mixed_operand_types() {
     );
 
     assert!(
-        numeric_op.is_none(),
+        fixture.numeric_op.is_none(),
         "comparisons should not emit NumericOp"
     );
-    let HirExpressionKind::BinOp { op, left, right } = &value.kind else {
+    let HirExpressionKind::BinOp { op, left, right } =
+        &fixture.expressions.expression(fixture.value).kind
+    else {
         panic!("fixed integer comparison should remain a plain BinOp");
     };
     assert_eq!(*op, HirBinOp::Lt);
-    assert_eq!(left.ty, i64_type);
-    assert_eq!(right.ty, u64_type);
-    assert!(numeric_conversion(left).is_none());
-    assert!(numeric_conversion(right).is_none());
+    assert_eq!(fixture.expressions.expression(*left).ty, i64_type);
+    assert_eq!(fixture.expressions.expression(*right).ty, u64_type);
+    assert!(numeric_conversion(&fixture.expressions, *left).is_none());
+    assert!(numeric_conversion(&fixture.expressions, *right).is_none());
 }
 
 #[test]
 fn mixed_int_float_comparison_converts_int_operand_to_float() {
     let float_type = builtin_type_ids::FLOAT;
 
-    let (int_on_left, numeric_op) = lower_binary_with_types(
+    let int_on_left = lower_binary_with_types(
         Operator::LessThan,
         builtin_type_ids::INT,
         float_type,
         builtin_type_ids::BOOL,
     );
-    assert!(numeric_op.is_none());
+    assert!(int_on_left.numeric_op.is_none());
     let HirExpressionKind::BinOp {
         op: HirBinOp::Lt,
         left,
         right,
-    } = int_on_left.kind
+    } = &int_on_left.expressions.expression(int_on_left.value).kind
     else {
         panic!("mixed Int/Float comparison should remain a BinOp");
     };
     assert_eq!(
-        numeric_conversion(&left),
+        numeric_conversion(&int_on_left.expressions, *left),
         Some((NumericScalar::Int, NumericScalar::Float))
     );
-    assert_eq!(left.ty, float_type);
-    assert!(numeric_conversion(&right).is_none());
+    assert_eq!(int_on_left.expressions.expression(*left).ty, float_type);
+    assert!(numeric_conversion(&int_on_left.expressions, *right).is_none());
 
-    let (int_on_right, numeric_op) = lower_binary_with_types(
+    let int_on_right = lower_binary_with_types(
         Operator::GreaterThan,
         float_type,
         builtin_type_ids::INT,
         builtin_type_ids::BOOL,
     );
-    assert!(numeric_op.is_none());
-    let HirExpressionKind::BinOp { left, right, .. } = int_on_right.kind else {
+    assert!(int_on_right.numeric_op.is_none());
+    let HirExpressionKind::BinOp { left, right, .. } =
+        &int_on_right.expressions.expression(int_on_right.value).kind
+    else {
         panic!("mixed Float/Int comparison should remain a BinOp");
     };
-    assert!(numeric_conversion(&left).is_none());
+    assert!(numeric_conversion(&int_on_right.expressions, *left).is_none());
     assert_eq!(
-        numeric_conversion(&right),
+        numeric_conversion(&int_on_right.expressions, *right),
         Some((NumericScalar::Int, NumericScalar::Float))
     );
-    assert_eq!(right.ty, float_type);
+    assert_eq!(int_on_right.expressions.expression(*right).ty, float_type);
 }
 
 #[test]
 fn unsupported_arithmetic_pair_is_an_internal_lowering_error() {
     let u8_type = fixed_type(FixedScalar::U8);
-    let error = try_lower_binary_with_types(
+    let failure = try_lower_binary_with_types(
         Operator::Add,
         builtin_type_ids::INT,
         u8_type,
         builtin_type_ids::INT,
     )
     .expect_err("unsupported arithmetic must not fall back to plain BinOp");
+    let HirConstructionFailure::Infrastructure(error) = failure else {
+        panic!("unsupported arithmetic should be an infrastructure failure");
+    };
 
     assert_eq!(
         error.error_type,
@@ -1142,8 +1207,11 @@ fn unsupported_arithmetic_pair_is_an_internal_lowering_error() {
 #[test]
 fn unsupported_numeric_negation_is_an_internal_lowering_error() {
     let u32_type = fixed_type(FixedScalar::U32);
-    let error = try_lower_negation_with_type(u32_type, u32_type)
+    let failure = try_lower_negation_with_type(u32_type, u32_type)
         .expect_err("unsupported unsigned negation must not fall back to plain UnaryOp");
+    let HirConstructionFailure::Infrastructure(error) = failure else {
+        panic!("unsupported unsigned negation should be an infrastructure failure");
+    };
 
     assert_eq!(
         error.error_type,
@@ -1203,7 +1271,7 @@ fn fixed_u32_addition_uses_return_error_failure_mode() {
         "fixed-width numeric failures in builtin Error! functions should use ReturnError"
     );
     assert!(matches!(
-        lowered.value.kind,
+        expression_row(&builder, lowered.value).kind,
         HirExpressionKind::FallibleUnwrapSuccess { .. }
     ));
     assert!(
@@ -1263,21 +1331,21 @@ fn number_arithmetic_converts_mixed_integer_operands_to_the_number_scale() {
             domain: NumericScalar::Number(scale),
         }
     );
-    assert_eq!(lowered.value.ty, number_type);
+    assert_eq!(expression_row(&builder, lowered.value).ty, number_type);
 
     let HirNumericOperands::Binary { left, right } = operands else {
         panic!("Dec addition must have two operands");
     };
-    assert_eq!(left.ty, number_type);
+    assert_eq!(builder.module.expressions.expression(left).ty, number_type);
     assert_eq!(
-        numeric_conversion(&left),
+        numeric_conversion(&builder.module.expressions, left),
         Some((
             NumericScalar::Fixed(FixedScalar::U64),
             NumericScalar::Number(scale)
         ))
     );
-    assert_eq!(right.ty, number_type);
-    assert!(numeric_conversion(&right).is_none());
+    assert_eq!(builder.module.expressions.expression(right).ty, number_type);
+    assert!(numeric_conversion(&builder.module.expressions, right).is_none());
 }
 
 #[test]
@@ -1327,15 +1395,15 @@ fn number_power_keeps_its_exponent_in_profile_int() {
             domain: NumericScalar::Number(scale),
         }
     );
-    assert_eq!(lowered.value.ty, number_type);
+    assert_eq!(expression_row(&builder, lowered.value).ty, number_type);
 
     let HirNumericOperands::Binary { left, right } = operands else {
         panic!("Dec power must have two operands");
     };
-    assert_eq!(left.ty, number_type);
-    assert!(numeric_conversion(&left).is_none());
-    assert_eq!(right.ty, int_type);
-    assert!(numeric_conversion(&right).is_none());
+    assert_eq!(builder.module.expressions.expression(left).ty, number_type);
+    assert!(numeric_conversion(&builder.module.expressions, left).is_none());
+    assert_eq!(builder.module.expressions.expression(right).ty, int_type);
+    assert!(numeric_conversion(&builder.module.expressions, right).is_none());
 }
 
 #[test]
@@ -1374,14 +1442,19 @@ fn mixed_number_comparisons_convert_the_integer_side_to_the_number_scale() {
     let lowered = builder
         .lower_expression(&number_on_left)
         .expect("Dec and fixed integer comparison should lower");
-    let HirExpressionKind::BinOp { left, right, .. } = lowered.value.kind else {
+    let HirExpressionKind::BinOp { left, right, .. } =
+        &expression_row(&builder, lowered.value).kind
+    else {
         panic!("Dec comparison should remain a plain BinOp");
     };
-    assert_eq!(left.ty, number_type);
-    assert!(numeric_conversion(&left).is_none());
-    assert_eq!(right.ty, number_type);
+    assert_eq!(builder.module.expressions.expression(*left).ty, number_type);
+    assert!(numeric_conversion(&builder.module.expressions, *left).is_none());
     assert_eq!(
-        numeric_conversion(&right),
+        builder.module.expressions.expression(*right).ty,
+        number_type
+    );
+    assert_eq!(
+        numeric_conversion(&builder.module.expressions, *right),
         Some((
             NumericScalar::Fixed(FixedScalar::U64),
             NumericScalar::Number(scale)
@@ -1411,17 +1484,22 @@ fn mixed_number_comparisons_convert_the_integer_side_to_the_number_scale() {
     let lowered = builder
         .lower_expression(&integer_on_left)
         .expect("reversed Dec and fixed integer comparison should lower");
-    let HirExpressionKind::BinOp { left, right, .. } = lowered.value.kind else {
+    let HirExpressionKind::BinOp { left, right, .. } =
+        &expression_row(&builder, lowered.value).kind
+    else {
         panic!("Dec comparison should remain a plain BinOp");
     };
-    assert_eq!(left.ty, number_type);
+    assert_eq!(builder.module.expressions.expression(*left).ty, number_type);
     assert_eq!(
-        numeric_conversion(&left),
+        numeric_conversion(&builder.module.expressions, *left),
         Some((
             NumericScalar::Fixed(FixedScalar::U64),
             NumericScalar::Number(scale)
         ))
     );
-    assert_eq!(right.ty, number_type);
-    assert!(numeric_conversion(&right).is_none());
+    assert_eq!(
+        builder.module.expressions.expression(*right).ty,
+        number_type
+    );
+    assert!(numeric_conversion(&builder.module.expressions, *right).is_none());
 }

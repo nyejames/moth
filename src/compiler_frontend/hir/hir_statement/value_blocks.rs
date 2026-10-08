@@ -10,14 +10,14 @@ use crate::compiler_frontend::ast::statements::value_production::{
     ProducedValues,
     types::{ValueIfBlock, ValueLexicalScope, ValueMatchBlock},
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::{HirBuilder, ValueBlockTarget};
 use crate::compiler_frontend::hir::hir_expression::LoweredExpression;
-use crate::compiler_frontend::hir::ids::{LocalId, RegionId};
+use crate::compiler_frontend::hir::ids::{HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::places::HirPlace;
-use crate::compiler_frontend::hir::statements::HirStatementKind;
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
@@ -27,7 +27,7 @@ impl<'a> HirBuilder<'a> {
     //  ThenValue lowering
     // -------------------------
 
-    /// Lowers a `ThenValue` statement by assigning produced expressions to the active
+    /// Lowers a `ThenValue` statement by defining produced expressions in the active
     /// value-block result locals and jumping to the merge block.
     ///
     /// WHAT: intercepts `then` inside value-producing control flow and wires it to the
@@ -39,7 +39,7 @@ impl<'a> HirBuilder<'a> {
         produced_values: &ProducedValues,
         span: &Option<SourceSpan>,
         statement_span: Option<SourceSpan>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), HirConstructionFailure> {
         let maybe_target = self.active_value_block_target.clone();
         if let Some(target) = maybe_target {
             if produced_values.expressions.len() != target.result_locals.len() {
@@ -59,14 +59,14 @@ impl<'a> HirBuilder<'a> {
                 .zip(target.result_locals.iter())
             {
                 let value = self.lower_expression_value_to_current_block(expr)?;
-                let value = self.materialize_value_block_result(value);
-                // Authored `then` production: each result assignment carries the
+                let value = self.materialize_value_block_result(value)?;
+                // Authored `then` production: each result definition carries the
                 // produced expression's span, falling back to the statement span
                 // when the expression is identity-free. The trailing jump to the
                 // merge block below is generated CFG and stays spanless.
                 self.emit_statement_kind_with_span(
-                    HirStatementKind::Assign {
-                        target: HirPlace::Local(*result_local),
+                    HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(*result_local),
                         value,
                     },
                     span,
@@ -92,31 +92,31 @@ impl<'a> HirBuilder<'a> {
         }
     }
 
-    /// Convert produced `then` places into plain values before assigning result locals.
+    /// Convert produced places into values before defining result locals.
     ///
-    /// WHAT: value blocks produce values for closed receivers, not alias views. A `then name`
-    /// branch should therefore materialize the current value of `name` into the hidden result
-    /// local rather than making that result local borrow `name`.
-    /// WHY: preserving branch-local aliases makes value-match merges path-dependent (`then name`
-    /// aliases while `else "guest"` owns), which is both surprising at the language level and
-    /// invalid for the borrow checker join model.
-    fn materialize_value_block_result(&mut self, value: HirExpression) -> HirExpression {
-        // The copy preserves the incoming expression span; generated values stay spanless.
-        let span = value.span;
-        match value.kind {
-            HirExpressionKind::Load(place) => {
-                let mut copied = self.make_expression(
-                    &span,
-                    HirExpressionKind::Copy(place),
-                    value.ty,
-                    ValueKind::RValue,
-                    value.region,
-                );
-                copied.span = span;
-                copied
-            }
-            _ => value,
-        }
+    /// WHAT: a `Place` row names a binding cell, while the value-block result is a newly produced
+    ///       value that may retain the same allocation provenance.
+    /// WHY: the merge local must not become an alias of the source binding merely because the
+    ///      produced value was read from that place.
+    fn materialize_value_block_result(
+        &mut self,
+        value: HirValueId,
+    ) -> Result<HirValueId, HirConstructionFailure> {
+        let (place, span, ty, region) = {
+            let row = self.module.expressions.expression(value);
+            let (HirExpressionKind::Load(place), ValueKind::Place) = (&row.kind, row.value_kind)
+            else {
+                return Ok(value);
+            };
+            (*place, row.span, row.ty, row.region)
+        };
+        self.make_expression(
+            &span,
+            HirExpressionKind::Load(place),
+            ty,
+            ValueKind::RValue,
+            region,
+        )
     }
 
     // -------------------------
@@ -125,14 +125,14 @@ impl<'a> HirBuilder<'a> {
 
     /// Allocates one hidden result local per expected value-block slot.
     ///
-    /// WHAT: creates temporaries that every producing branch will assign to.
+    /// WHAT: creates temporaries that every producing branch will define.
     /// WHY: single-result blocks use one local; multi-result blocks use N locals that
     ///      are later folded into an internal `TupleConstruct`.
     fn allocate_value_block_result_locals(
         &mut self,
         result_type_ids: &[TypeId],
         span: &Option<SourceSpan>,
-    ) -> Result<Vec<LocalId>, CompilerError> {
+    ) -> Result<Vec<LocalId>, HirConstructionFailure> {
         let mut result_locals = Vec::with_capacity(result_type_ids.len());
         for type_id in result_type_ids {
             let lowered_ty = self.lower_type_id(*type_id, span)?;
@@ -158,7 +158,7 @@ impl<'a> HirBuilder<'a> {
         value_if: &ValueIfBlock,
         span: &Option<SourceSpan>,
         _result_type_id: TypeId,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         if matches!(value_if.condition.kind, ExpressionKind::Bool(_)) {
             return_hir_transformation_error!(
                 "Stage 4 passed a statically decided value-producing Bool `if` to HIR",
@@ -246,7 +246,7 @@ impl<'a> HirBuilder<'a> {
         value_lexical_scope: &ValueLexicalScope,
         span: &Option<SourceSpan>,
         _result_type_id: TypeId,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let entry_block = self.current_block_id_or_error(span)?;
         let parent_region = self.current_region_or_error(span)?;
         let body_region = self.create_child_region(parent_region);
@@ -300,7 +300,7 @@ impl<'a> HirBuilder<'a> {
         value_match: &ValueMatchBlock,
         span: &Option<SourceSpan>,
         _result_type_id: TypeId,
-    ) -> Result<LoweredExpression, CompilerError> {
+    ) -> Result<LoweredExpression, HirConstructionFailure> {
         let parent_region = self.current_region_or_error(span)?;
 
         let result_locals =
@@ -357,16 +357,16 @@ impl<'a> HirBuilder<'a> {
         result_type_ids: &[TypeId],
         span: &Option<SourceSpan>,
         parent_region: RegionId,
-    ) -> Result<HirExpression, CompilerError> {
+    ) -> Result<HirValueId, HirConstructionFailure> {
         if result_locals.len() == 1 {
             let result_ty = self.lower_type_id(result_type_ids[0], span)?;
-            return Ok(self.make_expression(
+            return self.make_expression(
                 span,
-                HirExpressionKind::Load(HirPlace::Local(result_locals[0])),
+                HirExpressionKind::Load(HirPlace::local(result_locals[0])),
                 result_ty,
                 ValueKind::RValue,
                 parent_region,
-            ));
+            );
         }
 
         let mut elements = Vec::with_capacity(result_locals.len());
@@ -374,16 +374,17 @@ impl<'a> HirBuilder<'a> {
         for (local, ast_type_id) in result_locals.iter().zip(result_type_ids.iter()) {
             let ty = self.lower_type_id(*ast_type_id, span)?;
             field_types.push(ty);
-            let element = self.make_local_load_expression(*local, ty, span, parent_region);
+            let element = self.make_local_load_expression(*local, ty, span, parent_region)?;
             elements.push(element);
         }
         let tuple_type = self.type_environment.intern_tuple(field_types);
-        Ok(self.make_expression(
+        let elements = self.module.expressions.append_values(&elements, *span)?;
+        self.make_expression(
             span,
             HirExpressionKind::TupleConstruct { elements },
             tuple_type,
             ValueKind::RValue,
             parent_region,
-        ))
+        )
     }
 }

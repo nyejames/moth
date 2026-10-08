@@ -6,17 +6,17 @@
 
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{Style, TemplateType};
-use crate::compiler_frontend::ast::templates::tir::contribution_shape::{
-    ContributionShape, classify_tir_contribution_node,
-};
+use crate::compiler_frontend::ast::templates::tir::contribution_shape::classify_tir_contribution_node;
 use crate::compiler_frontend::ast::templates::tir::node::TirSlotPlaceholder;
 use crate::compiler_frontend::ast::templates::tir::overlays::TemplateViewContext;
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReference;
 use crate::compiler_frontend::ast::templates::tir::summary::summarize_existing_root;
 use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
+use crate::compiler_frontend::ast::templates::tir::wrapper_sets::merge_wrapper_sets;
 use crate::compiler_frontend::ast::templates::tir::{
-    DerivedCount, DerivedTemplateMetadata, TemplateIr, TemplateIrBranch, TemplateIrId,
-    TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore, TemplateWrapperSetId,
+    DerivedCount, DerivedTemplateMetadata, TemplateIr, TemplateIrId, TemplateIrNode,
+    TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore, TemplateWrapperSetId,
+    conditional_wrapper_set_for_control_flow, tir_node_is_control_flow_root,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -47,7 +47,7 @@ pub(crate) fn expand_tir_slot_placeholders_into(
 /// WHAT: dispatches on `TemplateIrNodeKind`, replacing `Slot` nodes with a
 ///       `Sequence` containing the routed contribution node IDs, and recursing
 ///       into structures that can contain further slot placeholders.
-/// WHY: wrapper templates may declare slots inside sequences, branches, loops,
+/// WHY: wrapper templates may declare slots inside sequences, conditionals, loops,
 ///      or nested child templates, so a single root walk must reach every
 ///      reachable slot and rebuild only the parts of the tree that changed.
 fn expand_tir_slot_placeholders_from_node(
@@ -110,21 +110,21 @@ fn expand_tir_slot_placeholders_from_node(
         TemplateIrNodeKind::Slot { placeholder } => {
             let contribution_nodes = routed_contributions.nodes_for_slot(&placeholder.key);
 
-            // Apply the `$children(..)` wrapper sets carried on the placeholder,
-            // Only child-template contributions receive external wrappers; text and
-            // dynamic expressions pass through unchanged. Control-flow
-            // contributions (branches and loops) must not be externally wrapped
-            // because a skipped branch or empty loop would still render the
-            // wrapper. Instead, the wrapper set is attached as a conditional
-            // child-wrapper set so folding can skip it when the control flow
-            // emits no output.
+            // Only child-template contributions receive ordinary external
+            // wrappers. Control-flow contributions carry the same applicable
+            // wrapper set as conditional metadata so skipped work emits no
+            // wrapper.
             let mut wrapped_nodes = Vec::with_capacity(contribution_nodes.len());
             for node_id in contribution_nodes {
                 let current_node_id = if tir_node_is_control_flow_root(store, *node_id)? {
                     let shape = classify_tir_contribution_node(store, *node_id)?;
-                    if let Some(wrapper_set_id) =
-                        conditional_wrapper_set_for_control_flow(store, placeholder, &shape)?
-                    {
+                    if let Some(wrapper_set_id) = conditional_wrapper_set_for_control_flow(
+                        store,
+                        placeholder.child_wrapper_set,
+                        placeholder.applied_child_wrapper_set,
+                        placeholder.skip_parent_child_wrappers,
+                        shape,
+                    )? {
                         attach_conditional_wrapper_set(store, *node_id, wrapper_set_id)?
                     } else {
                         *node_id
@@ -192,63 +192,27 @@ fn expand_tir_slot_placeholders_from_node(
             )))
         }
 
-        TemplateIrNodeKind::BranchChain {
-            branches,
-            fallback,
-            else_marker,
+        TemplateIrNodeKind::Conditional {
+            selector,
+            selector_site_id,
+            body,
         } => {
-            let mut expanded_branches = Vec::with_capacity(branches.len());
-            let mut any_branch_changed = false;
+            let expanded_body_id = expand_tir_slot_placeholders_from_node(
+                store,
+                *body,
+                routed_contributions,
+                string_table,
+            )?;
 
-            for branch in branches {
-                let expanded_body_id = expand_tir_slot_placeholders_from_node(
-                    store,
-                    branch.body,
-                    routed_contributions,
-                    string_table,
-                )?;
-
-                if expanded_body_id != branch.body {
-                    any_branch_changed = true;
-                    expanded_branches.push(TemplateIrBranch::new(
-                        branch.selector.to_owned(),
-                        expanded_body_id,
-                        branch.span,
-                        branch.selector_site_id,
-                    ));
-                } else {
-                    expanded_branches.push(branch.to_owned());
-                }
-            }
-
-            let expanded_fallback = match fallback {
-                Some(fallback_id) => {
-                    let expanded_fallback_id = expand_tir_slot_placeholders_from_node(
-                        store,
-                        *fallback_id,
-                        routed_contributions,
-                        string_table,
-                    )?;
-
-                    if expanded_fallback_id != *fallback_id {
-                        any_branch_changed = true;
-                    }
-
-                    Some(expanded_fallback_id)
-                }
-
-                None => None,
-            };
-
-            if !any_branch_changed {
+            if expanded_body_id == *body {
                 return Ok(node_id);
             }
 
             Ok(store.push_node(TemplateIrNode::new(
-                TemplateIrNodeKind::BranchChain {
-                    branches: expanded_branches,
-                    fallback: expanded_fallback,
-                    else_marker: else_marker.to_owned(),
+                TemplateIrNodeKind::Conditional {
+                    selector: selector.to_owned(),
+                    selector_site_id: *selector_site_id,
+                    body: expanded_body_id,
                 },
                 node.span,
             )))
@@ -309,10 +273,9 @@ fn expand_tir_slot_placeholders_from_node(
         TemplateIrNodeKind::DynamicExpression { .. } => Ok(node_id),
         TemplateIrNodeKind::InsertContribution { .. } => Ok(node_id),
 
-        // Aggregate-output markers, loop-control signals, and runtime slot
-        // sites are leaves that do not carry slot placeholders.
+        // Aggregate-output markers and runtime slot sites are leaves that do
+        // not carry slot placeholders.
         TemplateIrNodeKind::AggregateOutput => Ok(node_id),
-        TemplateIrNodeKind::LoopControl { .. } => Ok(node_id),
         TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(node_id),
     }
@@ -378,102 +341,17 @@ fn apply_tir_wrapper_sets_to_contribution(
     Ok(current_node_id)
 }
 
-/// Returns true when a TIR node is a control-flow root (a branch chain or loop,
-/// or a child-template reference to a template whose root is control flow).
-///
-/// WHAT: answers whether this contribution's output depends on a branch or
-///       loop being selected/active.
-/// WHY: control-flow contributions must receive parent `$children(..)` wrappers
-///      conditionally so skipped branches and zero-iteration loops do not
-///      render empty wrappers.
-fn tir_node_is_control_flow_root(
-    store: &TemplateIrStore,
-    node_id: TemplateIrNodeId,
-) -> SlotSchemaResult<bool> {
-    let node = store.get_node(node_id).ok_or_else(|| {
-        internal_compiler_error(
-            "TIR slot expansion: contribution node ID was not present in the store while checking control flow.",
-        )
-    })?;
-
-    let is_control_flow_root = match &node.kind {
-        TemplateIrNodeKind::BranchChain { .. } | TemplateIrNodeKind::Loop { .. } => true,
-        TemplateIrNodeKind::ChildTemplate { reference, .. } => {
-            let template_id = reference.root;
-            let template = store.get_template(template_id).ok_or_else(|| {
-                internal_compiler_error(
-                    "TIR slot expansion: module-local child template ID was not present in the TIR store while checking control flow.",
-                )
-            })?;
-
-            store
-                .control_flow_node_id_in_subtree(template.root)?
-                .is_some()
-        }
-        _ => false,
-    };
-
-    Ok(is_control_flow_root)
-}
-
-/// Builds a single wrapper set containing the wrappers that should be applied
-/// conditionally around a control-flow contribution.
-///
-/// WHAT: combines the placeholder's inherited child wrappers and applied
-///       `$children(..)` wrappers, dropping each set when the corresponding
-///       skip flag is set.
-/// WHY: control-flow contributions receive all applicable wrappers as a
-///      conditional set, so they are applied only when the control flow emits
-///      output.
-fn conditional_wrapper_set_for_control_flow(
-    store: &mut TemplateIrStore,
-    placeholder: &TirSlotPlaceholder,
-    shape: &ContributionShape,
-) -> SlotSchemaResult<Option<TemplateWrapperSetId>> {
-    let mut combined = Vec::new();
-
-    if let Some(wrapper_set_id) = placeholder.child_wrapper_set {
-        let wrapper_set = store.get_wrapper_set(wrapper_set_id).ok_or_else(|| {
-            internal_compiler_error(
-                "TIR slot expansion: conditional child wrapper set ID was not present in the store.",
-            )
-        })?;
-
-        if !shape.skips_parent_child_wrappers() {
-            combined.extend(wrapper_set.wrappers.iter().copied());
-        }
-    }
-
-    if let Some(wrapper_set_id) = placeholder.applied_child_wrapper_set {
-        let wrapper_set = store.get_wrapper_set(wrapper_set_id).ok_or_else(|| {
-            internal_compiler_error(
-                "TIR slot expansion: conditional applied wrapper set ID was not present in the store.",
-            )
-        })?;
-
-        if !placeholder.skip_parent_child_wrappers {
-            combined.extend(wrapper_set.wrappers.iter().copied());
-        }
-    }
-
-    if combined.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(store.push_or_reuse_wrapper_set(combined)))
-    }
-}
-
 /// Attaches a conditional `$children(..)` wrapper set to a control-flow node.
 ///
 /// WHAT: for a `ChildTemplate` reference to a control-flow template, copies the
 ///       template, merges the wrapper set into its existing
 ///       `conditional_child_wrapper_set`, and returns a new `ChildTemplate`
-///       reference to the copy. For a direct `BranchChain` or `Loop` node,
-///       creates a new `TemplateIr` whose root is that node, sets the wrapper
-///       set, and returns a `ChildTemplate` reference to the new template.
-/// WHY: conditional wrappers must be stored on the control-flow template so
-///      folding can skip them when the branch/loop emits no output.
-fn attach_conditional_wrapper_set(
+///       reference to the copy. For a direct `Conditional`, `Loop` or runtime
+///       slot contribution marker, creates a new `TemplateIr` rooted at that
+///       node, sets the wrapper set, and returns a `ChildTemplate` reference.
+/// WHY: storing wrappers on the contribution template lets folding or runtime
+///      handoff apply them only when the contribution emits output.
+pub(crate) fn attach_conditional_wrapper_set(
     store: &mut TemplateIrStore,
     node_id: TemplateIrNodeId,
     wrapper_set_id: TemplateWrapperSetId,
@@ -514,7 +392,9 @@ fn attach_conditional_wrapper_set(
             (new_reference, node.span.to_owned())
         }
 
-        TemplateIrNodeKind::BranchChain { .. } | TemplateIrNodeKind::Loop { .. } => {
+        TemplateIrNodeKind::Conditional { .. }
+        | TemplateIrNodeKind::Loop { .. }
+        | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => {
             let wrapper_count = required_wrapper_set_count(store, wrapper_set_id)?;
             let mut summary = summarize_existing_root(store, node_id)?;
             summary.wrapper_count = wrapper_count;
@@ -547,39 +427,6 @@ fn attach_conditional_wrapper_set(
         },
         span,
     )))
-}
-
-/// Merges an existing wrapper set with a new wrapper set.
-///
-/// WHAT: appends the new wrappers after the existing wrappers, preserving the
-///       innermost-to-outermost storage order both sets already use.
-/// WHY: a control-flow template may already carry conditional wrappers from an
-///      enclosing context; this merges them without changing the established
-///      nesting order.
-fn merge_wrapper_sets(
-    store: &mut TemplateIrStore,
-    existing: Option<TemplateWrapperSetId>,
-    additional: TemplateWrapperSetId,
-) -> SlotSchemaResult<TemplateWrapperSetId> {
-    let mut combined = Vec::new();
-
-    if let Some(existing_id) = existing {
-        let existing_set = store.get_wrapper_set(existing_id).ok_or_else(|| {
-            internal_compiler_error(
-                "TIR slot expansion: existing conditional wrapper set ID was not present in the store.",
-            )
-        })?;
-        combined.extend(existing_set.wrappers.iter().copied());
-    }
-
-    let additional_set = store.get_wrapper_set(additional).ok_or_else(|| {
-        internal_compiler_error(
-            "TIR slot expansion: additional conditional wrapper set ID was not present in the store.",
-        )
-    })?;
-    combined.extend(additional_set.wrappers.iter().copied());
-
-    Ok(store.push_or_reuse_wrapper_set(combined))
 }
 
 /// Returns the wrapper count for a required wrapper-set authority.
