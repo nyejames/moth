@@ -10,18 +10,21 @@ use crate::compiler_frontend::ast::templates::OwnedRuntimeSlotSite;
 use crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotContributionSourceId;
 use crate::compiler_frontend::hir::ids::LocalId;
 
-/// Accumulator and emitted state owned by one runtime slot contribution source.
+/// Accumulator and optional emitted state owned by one runtime slot contribution source.
+///
+/// A missing emitted flag means the owned render root is already proven to produce output.
 #[derive(Clone, Copy)]
 pub(super) struct RuntimeSlotSourceLocals {
     pub(super) accumulator: LocalId,
-    pub(super) emitted_output: LocalId,
+    pub(super) emitted_output: Option<LocalId>,
 }
 
 /// Source locals available while HIR lowers a runtime slot application wrapper.
 ///
-/// WHAT: pairs each AST source ID with its accumulator and structural emitted flag.
+/// WHAT: pairs each AST source ID with its accumulator and any required structural emitted flag.
 /// WHY: repeated slot sites replay source bytes and propagate structural emission
-/// separately without re-lowering authored contribution expressions.
+/// separately without re-lowering authored contribution expressions. Guaranteed-output sources
+/// need no per-source flag.
 pub(super) struct RuntimeSlotSourceAccumulatorContext {
     locals_by_source: Vec<RuntimeSlotSourceLocals>,
 }

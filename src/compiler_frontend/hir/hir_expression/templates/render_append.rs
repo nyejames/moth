@@ -713,11 +713,15 @@ impl<'a> HirBuilder<'a> {
         )?;
 
         // Structural emission gates parent flags, not replay of the source buffer.
-        if append_context.emitted_output().is_some() {
+        let Some(parent_emitted_output) = append_context.emitted_output() else {
+            return Ok(RuntimeTemplateEmission::Output);
+        };
+
+        if let Some(source_emitted_output) = source_locals.emitted_output {
             self.append_runtime_template_aggregate_when_emitted(
                 RuntimeTemplateAggregateAppend {
                     aggregate: source_locals.accumulator,
-                    emitted_output: source_locals.emitted_output,
+                    emitted_output: source_emitted_output,
                     append_context,
                 },
                 span_ref,
@@ -729,11 +733,13 @@ impl<'a> HirBuilder<'a> {
                     )
                 },
             )?;
-
-            Ok(RuntimeTemplateEmission::NoOutput)
         } else {
-            Ok(RuntimeTemplateEmission::Output)
+            // A source without a local tracker was proven to produce output, so
+            // propagate that fact directly to the active parent tracker.
+            self.mark_runtime_template_output_emitted(parent_emitted_output, span_ref)?;
         }
+
+        Ok(RuntimeTemplateEmission::NoOutput)
     }
 
     fn append_output_conditioned_runtime_wrapper(
