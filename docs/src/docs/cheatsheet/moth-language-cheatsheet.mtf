@@ -1200,7 +1200,11 @@ Annotated JavaScript files expose typed free functions:
     ;
 ]
 
-Annotations name Moth functions independently of JS exports. Signatures use positional typed parameters and either zero/one success result with an optional final `Error!`, or the whole `-> !` contract. Numeric signatures accept `Int`, `Uint` and `Float` alongside the other supported types: `Uint32` crosses as a `Number` integer, while `Uint64` crosses as a `BigInt` inside Moth JavaScript and through the safe-`Number` foreign bridge only. Declare opaque types with `@moth.opaque` before use. This surface rejects JS constants, receiver methods, callbacks, async, options, collections, generics and multiple success results.
+Annotations name Moth functions independently of JS exports. Signatures use positional typed parameters and zero or one success result with an optional final `Error!`. Numeric slots accept profile-selected `Int`, `Uint` and `Float` plus fixed `U32` and `F32`. `U32` uses the full unsigned 32-bit `Number` range. `F32` parameters need exact finite binary32 values and results round once, preserve signed zero and reject non-finite values. `Uint32` crosses as a `Number` integer, while `Uint64` uses `BigInt` inside Moth JavaScript and the safe-`Number` foreign bridge.
+
+Declare same-file opaque types with `@moth.opaque` before use. `@moth.const name U32` annotates one exported unsigned decimal literal without running JavaScript. Constant-only dependencies emit no JS asset or authored runtime imports.
+
+Receiver methods, callbacks, async, options, collections, generics, multiple success results, shared-type imports, nested annotation paths and borrowed views remain unavailable.
 
 Foreign code cannot retain Moth-storage references. Opaque handles represent foreign identities with declared resource lifecycles. WIT provides a value-only foreign Wasm boundary, separate from native Moth imports.
 
