@@ -11,7 +11,10 @@ use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirProjection};
+use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::ids::{FieldId, LocalId, RegionId};
+use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatementKind, HirWriteTarget,
 };
@@ -28,6 +31,56 @@ use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tests::type_id_fixture_support::multi_bind_target;
+
+#[test]
+fn direct_self_update_predicate_requires_the_same_unprojected_place_load() {
+    let local = LocalId(1);
+    let target = HirWriteTarget::AssignPlace(HirPlace::local(local));
+    let direct_place_read = HirExpression {
+        kind: HirExpressionKind::Load(HirPlace::local(local)),
+        ty: builtin_type_ids::INT,
+        value_kind: ValueKind::Place,
+        region: RegionId(0),
+        span: None,
+    };
+
+    assert!(target.is_direct_self_update_of(&direct_place_read));
+    assert!(!HirWriteTarget::DefineLocal(local).is_direct_self_update_of(&direct_place_read));
+
+    let different_local_read = HirExpression {
+        kind: HirExpressionKind::Load(HirPlace::local(LocalId(2))),
+        ..direct_place_read.clone()
+    };
+    assert!(!target.is_direct_self_update_of(&different_local_read));
+
+    let rvalue_load = HirExpression {
+        value_kind: ValueKind::RValue,
+        ..direct_place_read.clone()
+    };
+    assert!(!target.is_direct_self_update_of(&rvalue_load));
+
+    let mut expressions = HirExpressionStore::default();
+    let projection_range = expressions
+        .append_projections(&[HirProjection::Field(FieldId(0))], None)
+        .expect("test projection should fit the HIR side store");
+    let projected_place = HirPlace {
+        root: local,
+        projections: projection_range,
+    };
+
+    assert!(
+        !HirWriteTarget::AssignPlace(projected_place).is_direct_self_update_of(&direct_place_read),
+        "a projected destination is not a direct self-update"
+    );
+    let projected_source_read = HirExpression {
+        kind: HirExpressionKind::Load(projected_place),
+        ..direct_place_read
+    };
+    assert!(
+        !target.is_direct_self_update_of(&projected_source_read),
+        "a projected source is not a direct self-update"
+    );
+}
 
 /// The authored (non-generated) local names a block owns, in declaration order.
 ///

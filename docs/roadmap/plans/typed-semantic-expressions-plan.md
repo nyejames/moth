@@ -4,8 +4,8 @@
 
 ```text
 STATUS: active, design direction approved
-CURRENT_SLICE: Phase 3 - synchronized checkpoint and main preparation
-BLOCKERS: reverse package synchronization is blocked by overlapping unfinished work in packages-and-bugfixes; native history and final main-bound validation remain pending
+CURRENT_SLICE: Phase 3 - review corrections and package synchronization
+BLOCKERS: packages-and-bugfixes has unfinished external-binding changes; final integrated costs, native history and main-bound validation remain pending
 NEXT_ACTION: obtain a safe committed package checkpoint, finish both-way synchronization, record accepted measurements, validate the main-bound tree, squash onto main, then pause before Phase 4
 ```
 

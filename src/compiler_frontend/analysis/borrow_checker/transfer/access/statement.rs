@@ -517,6 +517,19 @@ fn transfer_call_arguments_and_result(
             result.is_some(),
             &return_alias,
         );
+        if matches!(
+            arg.effect,
+            ArgEffect::MayConsumeShared | ArgEffect::MayConsumeMutable
+        ) && !matches!(
+            effect,
+            ArgEffect::MayConsumeShared | ArgEffect::MayConsumeMutable
+        ) {
+            input.value_fact_buffer.record_optional_transfer(
+                arg.argument,
+                OptionalTransferStatus::Borrow,
+                &arg_roots[arg_index],
+            );
+        }
         if matches!(arg.effect, ArgEffect::MayConsumeShared)
             && matches!(effect, ArgEffect::SharedBorrow)
         {
@@ -937,33 +950,34 @@ fn transfer_call_result_alias(
 
     if matches!(destination, HirLocalDestination::Update(_)) {
         let previous_state = input.state.local_state(local_index).clone();
+        require_initialized_update_target(
+            input.layout,
+            input.state,
+            local_index,
+            &input.context.diagnostics,
+            input.location,
+        )?;
+
+        let mut check = AccessCheckContext {
+            context: input.context,
+            layout: input.layout,
+            state: input.state,
+            block_id: input.block_id,
+            tracker: input.tracker,
+            location: input.location,
+            span: input.location,
+            stats: input.stats,
+            actor_index_hint: Some(local_index),
+            current_order: input.current_order,
+        };
+        let _ = check_local_update_access(
+            &mut check,
+            local_index,
+            &previous_state,
+            new_local_state.value_roots.is_empty(),
+        )?;
+
         if previous_state.mode.contains(LocalMode::ALIAS) {
-            // Only value roots are possible write-through targets. A mixed state also
-            // contains the destination's own slot root, which is replaced on its slot path.
-            if !previous_state.value_roots.is_empty() {
-                let mut check = AccessCheckContext {
-                    context: input.context,
-                    layout: input.layout,
-                    state: input.state,
-                    block_id: input.block_id,
-                    tracker: input.tracker,
-                    location: input.location,
-                    span: input.location,
-                    stats: input.stats,
-                    actor_index_hint: Some(local_index),
-                    current_order: input.current_order,
-                };
-                check_mutable_access(
-                    &mut check,
-                    &previous_state.value_roots,
-                    MutableAccessPolicy {
-                        allow_prior_shared: true,
-                        require_root_mutable: true,
-                        strict_move_exclusivity: false,
-                        check_alias_exclusivity: true,
-                    },
-                )?;
-            }
             if previous_state.is_alias_only() {
                 return Ok(());
             }

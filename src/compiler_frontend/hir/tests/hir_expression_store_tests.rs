@@ -541,7 +541,136 @@ fn places_keep_flat_root_outward_field_and_index_order() {
         ]
     );
     assert_eq!(extended_place.root, LocalId(9));
-    assert_eq!(store.projections(place.projections).len(), 2);
+    assert_eq!(
+        store.projections(place.projections),
+        &[
+            HirProjection::Field(FieldId(2)),
+            HirProjection::Index(index)
+        ]
+    );
+}
+
+#[test]
+fn branched_place_prefixes_survive_store_growth_and_extension() {
+    let mut store = HirExpressionStore::default();
+    let index = store
+        .append_expression(row(HirExpressionKind::Int(2)))
+        .expect("index expression should fit");
+    let prefix = HirPlace::local(LocalId(9))
+        .with_field(FieldId(2), &mut store, None)
+        .expect("first field projection should fit");
+
+    for offset in 0..32 {
+        HirPlace::local(LocalId(100 + offset))
+            .with_field(FieldId(offset), &mut store, None)
+            .expect("unrelated place should grow the projection store");
+    }
+    assert!(store.measurements().projections.growth_events > 0);
+
+    let extended = prefix
+        .with_index(index, &mut store, None)
+        .expect("branched prefix should survive store growth");
+    let tail_prefix = HirPlace::local(LocalId(20))
+        .with_field(FieldId(3), &mut store, None)
+        .expect("new path should append at the store tail");
+    let tail_extended = tail_prefix
+        .with_field(FieldId(5), &mut store, None)
+        .expect("tail-contiguous extension should fit");
+    let sibling = HirPlace::local(LocalId(10))
+        .with_field(FieldId(8), &mut store, None)
+        .expect("sibling path should fit");
+    let branch = prefix
+        .with_field(FieldId(4), &mut store, None)
+        .expect("branched extension should copy its prefix");
+
+    assert_eq!(
+        store.projections(prefix.projections),
+        &[HirProjection::Field(FieldId(2))]
+    );
+    assert_eq!(
+        store.projections(extended.projections),
+        &[
+            HirProjection::Field(FieldId(2)),
+            HirProjection::Index(index)
+        ]
+    );
+    assert_eq!(
+        store.projections(tail_prefix.projections),
+        &[HirProjection::Field(FieldId(3))]
+    );
+    assert_eq!(
+        store.projections(tail_extended.projections),
+        &[
+            HirProjection::Field(FieldId(3)),
+            HirProjection::Field(FieldId(5))
+        ]
+    );
+    assert_eq!(
+        store.projections(sibling.projections),
+        &[HirProjection::Field(FieldId(8))]
+    );
+    assert_eq!(
+        store.projections(branch.projections),
+        &[
+            HirProjection::Field(FieldId(2)),
+            HirProjection::Field(FieldId(4))
+        ]
+    );
+}
+
+#[test]
+fn tail_place_extension_checks_capacity_before_appending() {
+    let span = nonempty_test_span();
+    let mut store = HirExpressionStore::with_test_limits(HirExpressionStoreTestLimits {
+        projections: 1,
+        ..HirExpressionStoreTestLimits::default()
+    });
+    let prefix = HirPlace::local(LocalId(9))
+        .with_field(FieldId(2), &mut store, None)
+        .expect("first projection should fit");
+    let before_rejected_append = store.measurements();
+
+    assert_capacity_diagnostic(
+        prefix.with_field(FieldId(4), &mut store, Some(span)),
+        HirCapacityResource::PlaceProjections,
+        span,
+    );
+
+    assert_eq!(store.measurements(), before_rejected_append);
+    assert_eq!(
+        store.projections(prefix.projections),
+        &[HirProjection::Field(FieldId(2))]
+    );
+}
+
+#[test]
+fn linear_place_chains_retain_only_their_current_projections() {
+    for depth in [1usize, 8, 64, 256] {
+        let mut store = HirExpressionStore::default();
+        let mut place = HirPlace::local(LocalId(9));
+        let mut prefixes = Vec::with_capacity(depth);
+
+        for field in 0..depth {
+            place = place
+                .with_field(FieldId(field as u32), &mut store, None)
+                .expect("place projection should fit");
+            prefixes.push(place.projections);
+        }
+
+        for (length, prefix) in prefixes.into_iter().enumerate() {
+            let expected: Vec<_> = (0..=length)
+                .map(|field| HirProjection::Field(FieldId(field as u32)))
+                .collect();
+            assert_eq!(store.projections(prefix), expected);
+        }
+
+        store.freeze();
+        let projections = store.measurements().projections;
+        assert_eq!(projections.len, depth);
+        assert_eq!(projections.retained_capacity, depth);
+        let frozen_bytes = projections.retained_capacity * std::mem::size_of::<HirProjection>();
+        assert_eq!(frozen_bytes, depth * std::mem::size_of::<HirProjection>());
+    }
 }
 
 #[test]

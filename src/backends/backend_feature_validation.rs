@@ -876,6 +876,12 @@ fn validate_wasm_mutable_local_aliases(
     string_table: &mut StringTable,
 ) -> Result<(), BackendFeatureValidationError> {
     let mut spanless_alias = false;
+    let blocks_by_id = hir
+        .blocks
+        .iter()
+        .enumerate()
+        .map(|(order, block)| (block.id, (order, block)))
+        .collect::<FxHashMap<_, _>>();
 
     for function in &hir.functions {
         if !selection.contains_function(function.id) {
@@ -890,21 +896,29 @@ fn validate_wasm_mutable_local_aliases(
                 )),
             )));
         };
-        let selected_blocks = selected_block_ids.iter().copied().collect::<FxHashSet<_>>();
-        let mutable_locals = hir
-            .blocks
+        let mut selected_blocks = Vec::with_capacity(selected_block_ids.len());
+        for block_id in selected_block_ids {
+            let Some((order, block)) = blocks_by_id.get(block_id).copied() else {
+                return Err(BackendFeatureValidationError::Infrastructure(Box::new(
+                    CompilerError::compiler_error(format!(
+                        "Backend feature validation selected unknown block {block_id:?} for function {:?}",
+                        function.id,
+                    )),
+                )));
+            };
+            selected_blocks.push((order, block));
+        }
+        // Keep the module's established block order so the first source diagnostic stays stable.
+        selected_blocks.sort_unstable_by_key(|(order, _)| *order);
+
+        let mutable_locals = selected_blocks
             .iter()
-            .filter(|block| selected_blocks.contains(&block.id))
-            .flat_map(|block| &block.locals)
+            .flat_map(|(_, block)| block.locals.iter())
             .filter(|local| local.mutable)
             .map(|local| local.id)
             .collect::<FxHashSet<_>>();
 
-        for block in &hir.blocks {
-            if !selected_blocks.contains(&block.id) {
-                continue;
-            }
-
+        for (_, block) in &selected_blocks {
             for statement in &block.statements {
                 let HirStatementKind::Write {
                     target: write_target,
@@ -925,7 +939,10 @@ fn validate_wasm_mutable_local_aliases(
                 };
 
                 let expression = hir.expressions.expression(*value);
-                if !mutable_locals.contains(&local) || expression.value_kind != ValueKind::Place {
+                if !mutable_locals.contains(&local)
+                    || expression.value_kind != ValueKind::Place
+                    || (*write_target).is_direct_self_update_of(expression)
+                {
                     continue;
                 }
 

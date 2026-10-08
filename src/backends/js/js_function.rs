@@ -260,8 +260,8 @@ impl<'hir> JsEmitter<'hir> {
 
         emitted_blocks.insert(block_id);
 
-        let block = self.block_by_id(block_id)?.clone();
-        self.emit_block_statements(&block)?;
+        let block = self.block_by_id(block_id)?;
+        self.emit_block_statements(block)?;
 
         match &block.terminator {
             HirTerminator::Jump { target, args } => {
@@ -448,8 +448,8 @@ impl<'hir> JsEmitter<'hir> {
 
         emitted_blocks.insert(block_id);
 
-        let block = self.block_by_id(block_id)?.clone();
-        self.emit_block_statements(&block)?;
+        let block = self.block_by_id(block_id)?;
+        self.emit_block_statements(block)?;
 
         match &block.terminator {
             HirTerminator::Jump { target, args } => {

@@ -547,6 +547,48 @@ fn wasm_mutable_local_alias_gate_rejects_place_backed_slot_updates() {
 }
 
 #[test]
+fn wasm_mutable_local_alias_gate_allows_direct_unprojected_self_updates() {
+    let mut string_table = StringTable::new();
+    let type_environment = TypeEnvironment::new();
+    let initial_span = test_source_span(79);
+    let update_span = test_source_span(80);
+    let module = mutable_local_write_module(
+        true,
+        true,
+        Some(initial_span),
+        vec![
+            (
+                HirWriteTarget::DefineLocal(LocalId(1)),
+                ValueKind::Const,
+                Some(initial_span),
+            ),
+            (
+                HirWriteTarget::AssignPlace(HirPlace::local(LocalId(1))),
+                ValueKind::Place,
+                Some(update_span),
+            ),
+        ],
+    );
+    let reachability = test_reachability(&module);
+
+    let result = validate_hir_backend_feature_support(
+        BackendFeatureValidationInput {
+            hir: &module,
+            reachability: &reachability,
+            target: BackendTarget::Wasm,
+            type_environment: Some(&type_environment),
+            numeric_profile: NumericProfile::STANDARD,
+        },
+        &mut string_table,
+    );
+
+    assert!(
+        result.is_ok(),
+        "a direct self-update preserves the existing mutable scalar binding"
+    );
+}
+
+#[test]
 fn wasm_mutable_local_alias_gate_ignores_dormant_alias_definitions() {
     let mut string_table = StringTable::new();
     let type_environment = TypeEnvironment::new();

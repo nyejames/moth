@@ -183,8 +183,6 @@ pub struct HirBuilder<'a> {
     pub(super) function_index_by_id: FxHashMap<FunctionId, usize>,
     pub(super) region_index_by_id: FxHashMap<RegionId, usize>,
     pub(super) local_index_by_id: FxHashMap<LocalId, (usize, usize)>,
-    pub(super) struct_index_by_id: FxHashMap<StructId, usize>,
-    pub(super) field_index_by_id: FxHashMap<FieldId, (usize, usize)>,
 
     // === Current Function State ===
     current_function: Option<FunctionId>,
@@ -321,8 +319,6 @@ impl<'a> HirBuilder<'a> {
             function_index_by_id: FxHashMap::default(),
             region_index_by_id: FxHashMap::default(),
             local_index_by_id: FxHashMap::default(),
-            struct_index_by_id: FxHashMap::default(),
-            field_index_by_id: FxHashMap::default(),
 
             current_function: None,
             current_block: None,
@@ -627,14 +623,6 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         hir_struct: crate::compiler_frontend::hir::structs::HirStruct,
     ) {
-        let struct_index = self.module.structs.len();
-        self.struct_index_by_id.insert(hir_struct.id, struct_index);
-
-        for (field_index, field) in hir_struct.fields.iter().enumerate() {
-            self.field_index_by_id
-                .insert(field.id, (struct_index, field_index));
-        }
-
         self.module.structs.push(hir_struct);
     }
 
@@ -670,22 +658,6 @@ impl<'a> HirBuilder<'a> {
         };
 
         Ok(self.module.blocks[block_index].locals[local_index].ty)
-    }
-
-    pub(super) fn field_type_id_or_error(
-        &self,
-        field_id: FieldId,
-        location: &Option<SourceSpan>,
-    ) -> Result<TypeId, CompilerError> {
-        let Some((struct_index, field_index)) = self.field_index_by_id.get(&field_id).copied()
-        else {
-            return_hir_transformation_error!(
-                format!("Field {:?} is not registered in HIR structs", field_id),
-                *location
-            );
-        };
-
-        Ok(self.module.structs[struct_index].fields[field_index].ty)
     }
 
     pub(super) fn block_index_or_error(

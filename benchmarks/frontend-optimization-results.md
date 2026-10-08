@@ -5132,19 +5132,97 @@ measure dynamic call-chain high-water usage or stack headroom
 (`phase3/after-hardening-native-frame-snapshot.json` and
 `phase3/after-hardening-native-frames.log`).
 
+### Review corrections and projection construction evidence (2026-10-08)
+
+The review of `51423958f` identified conservative transfer-proof publication,
+update preconditions and the Wasm self-update gate as required hardening. The
+correction keeps neutral accumulation within one use and separately merges
+completed observations of a shared HIR row. Ordinary and dedicated updates
+require an initialised mutable binding before their normal access checks.
+A direct unprojected self-update preserves its binding relationship on both
+supported backends. JS block clones, the duplicate test-only place lowerer and
+the newly unused HIR field/type lookup state were removed.
+
+Projection construction reuses a prefix already at the side store's tail and
+copies a prefix only when another path separates it from the append position.
+Field lowering consumes its resolved base type rather than walking the full
+place prefix again. Deterministic owner tests cover earlier prefixes, branching,
+store growth, rejected appends and exact frozen retention.
+
+The focused comparison uses the saved `51423958f` source and a verified copy of
+the review candidate. Both compile the same ignored measurement function against
+production `HirPlace::with_field`, with matching Rust 1.99.0 compiler, profile,
+features, configuration and empty Rust flags. Five alternating invocation pairs
+cover depths 1 to 256. Each invocation reports the median of seven samples of
+64 constructed and dropped chains per depth. The test profile is unoptimised.
+Frozen bytes below are logical projection storage measured separately from the
+timing, which excludes freezing, allocator metadata and RSS.
+
+| Depth | Entries before → after | Frozen bytes before → after | Median construction/drop ns before → after |
+|---|---|---|---|
+| 1 | 1 → 1 | 8 → 8 | 290 → 253 |
+| 2 | 3 → 2 | 24 → 16 | 427 → 364 |
+| 4 | 10 → 4 | 80 → 32 | 794 → 526 |
+| 8 | 36 → 8 | 288 → 64 | 1,431 → 952 |
+| 16 | 136 → 16 | 1,088 → 128 | 2,625 → 1,684 |
+| 32 | 528 → 32 | 4,224 → 256 | 4,815 → 3,074 |
+| 64 | 2,080 → 64 | 16,640 → 512 | 9,384 → 5,825 |
+| 128 | 8,256 → 128 | 66,048 → 1,024 | 18,766 → 11,625 |
+| 256 | 32,896 → 256 | 263,168 → 2,048 | 39,510 → 22,096 |
+
+Depths 64 and 256 improve in all five timing pairs, with median paired deltas
+of **-3,568 ns** and **-17,432 ns**. Across the series, 44 of 45 paired deltas
+are negative. One depth-1 pair is positive. These are isolated construction
+costs, not whole-compiler throughput results. An independent audit verified the
+source and binary hashes, effective build fingerprints, identical instrumentation
+and every raw row and summary. No timing test is retained in the live tree.
+
+Accepted local evidence is under
+`tmp/typed-semantic-expressions/phase3/review-projection-matched-five-pairs/`,
+with `review-projection-build-configuration.json`,
+`review-projection-corrected-candidate-provenance.json` and
+`measure-review-projections-matched.py` beside it. Earlier captures remain
+marked invalid or superseded after detecting a candidate-copy error and a
+compiler-fingerprint mismatch. Only the matched capture above is accepted.
+
+The review candidate passed `just validate`: 5,940 main-crate unit tests,
+854 xtask tests, the other workspace suites, all 2,415 integration checks,
+source and first-party dependency audits and the docs check. Focused HIR,
+backend and borrow runs passed 319, 299 and 161 tests respectively. The paired
+self-update and genuine-alias rejection cases each passed both backends.
+`just boracle` passed its Clippy check, 44 borrow-problem tests, five last-use
+tests and 257 Boracle tests including the bounded operational oracle.
+`just boracle-campaign` also passed its all-target Clippy check and the generated
+differential campaign.
+
+The stable non-recording native frontend check ran all 42 cases. Its stored-history
+comparison covers only 25 cases, with 17 changed workloads excluded. The stable
+CLI check ran all 40 cases and compared 38, excluding two changed workloads.
+Both comparisons are mixed and do not replace the final matched Phase 3 cohort.
+The accepted command logs are `review-corrections-bench-frontend-check-stable.log`
+and `review-corrections-bench-check-stable.log` under the local Phase 3 directory.
+An earlier CLI run rejected a tracked progress edit during measurement and is
+excluded. The subsequent read-only `just bench-report` completed successfully.
+The earlier `ce4dc8831` whole-compiler measurements remain evidence for that
+tree. Final integrated timing, native history and main readiness remain open.
+
 ### Current status
 
 Independent performance, storage, static-output and allocator-correction audits
-accept the bounded evidence on `ce4dc8831` with the qualifications above.
-This does not establish main readiness. The measured root contains all nine committed
-package fixes through `dcfb170cc`. Reverse synchronization into
-`packages-and-bugfixes` remains blocked by unfinished borrow-test edits among
-11 changed files in that checkout. Git refused the fast-forward, and other
-processes remain attached to the checkout. Its pending work has been preserved.
+accepted the bounded evidence on `ce4dc8831` with the qualifications above.
+The subsequent review corrections have clean source audits and passing routine
+and Boracle checks, with independently verified projection-construction evidence.
+These checkpoints do not establish main readiness.
 
-The Phase 3 checkpoint and 3M closeout remain open pending synchronization,
-accepted native history and final main-bound validation. No main-branch full
-validation result, native benchmark-history entry, squash or pause checkpoint
-has been recorded. Phase 4 waits for the user's explicit resumption after the
-separate template-control-flow removal. Record a fresh post-removal baseline
-before resuming its implementation.
+The root contains the nine committed package fixes through `dcfb170cc`.
+The package branch also has committed U32/F32 binding work at `6a8486849` and
+unfinished external-constant changes. These later changes have not yet been
+integrated here. Reverse synchronization waits for that checkout's stable
+committed boundary. Its local work remains preserved.
+
+The Phase 3 checkpoint and 3M closeout remain open pending package integration,
+synchronization, final matched whole-compiler timing, accepted native history
+and main-bound validation. No final main-branch full validation result, native
+benchmark-history entry, squash or pause checkpoint has been recorded. Phase 4
+waits for the user's explicit resumption after the separate template-control-flow
+removal. Record a fresh post-removal baseline before resuming its implementation.

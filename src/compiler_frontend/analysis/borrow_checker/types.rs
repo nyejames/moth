@@ -138,7 +138,9 @@ impl ValueBorrowFact {
         self.roots.extend(other.roots);
         self.roots.sort_unstable_by_key(|local| local.0);
         self.roots.dedup_by_key(|local| local.0);
-        self.optional_transfer = self.optional_transfer.merge(other.optional_transfer);
+        self.optional_transfer = self
+            .optional_transfer
+            .merge_completed_use(other.optional_transfer);
     }
 }
 
@@ -151,6 +153,19 @@ pub(crate) enum OptionalTransferStatus {
 }
 
 impl OptionalTransferStatus {
+    /// Merge observations from distinct completed uses of one shared HIR value row.
+    ///
+    /// A missing transfer attempt is neutral only while collecting one use. Once a use is
+    /// complete, `NotAttempted` means that this observed context supplied no transfer proof.
+    pub(crate) fn merge_completed_use(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::NotAttempted, Self::NotAttempted) => Self::NotAttempted,
+            (Self::Transfer, Self::Transfer) => Self::Transfer,
+            _ => Self::Borrow,
+        }
+    }
+
+    /// Accumulate pieces of evidence for one use; an empty accumulator stays neutral.
     pub(crate) fn merge(self, other: Self) -> Self {
         match (self, other) {
             (Self::NotAttempted, status) | (status, Self::NotAttempted) => status,

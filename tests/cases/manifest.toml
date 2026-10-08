@@ -4745,6 +4745,13 @@ contract = "backend.html_wasm.mutable_local_binding_aliases_rejected"
 role = "backend"
 
 [[case]]
+id = "mutable_local_self_update_wasm_supported"
+path = "mutable_local_self_update_wasm_supported"
+tags = ["integration", "wasm-backend", "mutability"]
+contract = "backend.html_wasm.mutable_local_self_update_preserves_scalar"
+role = "backend"
+
+[[case]]
 id = "mutable_marker_on_assignment_target_rejected"
 path = "mutable_marker_on_assignment_target_rejected"
 tags = ["integration", "language", "diagnostics", "mutability"]

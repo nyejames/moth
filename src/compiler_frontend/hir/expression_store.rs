@@ -618,7 +618,11 @@ impl HirExpressionStore {
         Ok(range)
     }
 
-    /// Copy a root-outward place path and append one checked projection.
+    /// Reuse an append-contiguous place prefix or copy a branched prefix before extending it.
+    ///
+    /// Field chains are lowered one projection at a time. Reusing a tail range keeps that common
+    /// path linear while preserving every earlier range; a prefix followed by another branch
+    /// still needs an isolated copy.
     pub(crate) fn extend_projections(
         &mut self,
         prefix: HirProjectionRange,
@@ -644,21 +648,36 @@ impl HirExpressionStore {
                 span,
             ));
         };
+        let current_length = self.projection_slice().len();
+        let reuses_tail = !prefix.is_empty() && prefix_end as usize == current_length;
+        let appended_length = if prefix.is_empty() || reuses_tail {
+            1
+        } else {
+            append_length
+        };
         let resource = HirCapacityResource::PlaceProjections;
-        let range = self.checked_side_range(
-            self.projection_slice().len(),
-            append_length,
+        let appended_range = self.checked_side_range(
+            current_length,
+            appended_length,
             resource,
             span,
             self.test_limit(resource),
         )?;
+        let range = if reuses_tail {
+            let Some(length) = prefix.length.checked_add(1) else {
+                return Err(Self::capacity_failure(resource, span));
+            };
+            HirProjectionRange::from_checked_parts(prefix.start, length)
+        } else {
+            appended_range
+        };
 
         let building = self.building_mut(span)?;
         #[cfg(any(test, feature = "benchmark_counters"))]
         let old_capacity = building.projections.capacity();
         building
             .projections
-            .try_reserve(append_length)
+            .try_reserve(appended_length)
             .map_err(|error| {
                 Self::infrastructure_failure(
                     format!("could not reserve HIR place projections: {error}"),
@@ -669,9 +688,11 @@ impl HirExpressionStore {
         if building.projections.capacity() > old_capacity {
             building.accounting.growths[6] += 1;
         }
-        building
-            .projections
-            .extend_from_within(prefix.start as usize..prefix_end as usize);
+        if !prefix.is_empty() && !reuses_tail {
+            building
+                .projections
+                .extend_from_within(prefix.start as usize..prefix_end as usize);
+        }
         building.projections.push(projection);
         Ok(range)
     }

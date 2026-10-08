@@ -820,7 +820,7 @@ impl<'hir> JsEmitter<'hir> {
 
         for block_id in reachable_blocks {
             let block = match self.block_by_id(*block_id) {
-                Ok(block) => block.clone(),
+                Ok(block) => block,
                 Err(error) => {
                     self.indent -= 2;
                     return Err(error);
@@ -830,7 +830,7 @@ impl<'hir> JsEmitter<'hir> {
             self.emit_line(&format!("case {}: {{", block.id.0));
             self.indent += 1;
 
-            if let Err(error) = self.emit_block_statements(&block) {
+            if let Err(error) = self.emit_block_statements(block) {
                 self.indent -= 3;
                 return Err(error);
             }

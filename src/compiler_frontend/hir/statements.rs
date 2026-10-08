@@ -16,7 +16,9 @@ use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expression_store::HirValueRange;
-use crate::compiler_frontend::hir::expressions::HirMapOp;
+use crate::compiler_frontend::hir::expressions::{
+    HirExpression, HirExpressionKind, HirMapOp, ValueKind,
+};
 use crate::compiler_frontend::hir::ids::{HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
@@ -58,6 +60,27 @@ impl HirLocalDestination {
 pub enum HirWriteTarget {
     DefineLocal(LocalId),
     AssignPlace(HirPlace),
+}
+
+impl HirWriteTarget {
+    /// Whether this update reads the same unprojected binding it writes.
+    ///
+    /// A direct self-update preserves the binding's existing relationship. Definitions,
+    /// projected writes and reads from another binding keep their ordinary write semantics.
+    pub(crate) fn is_direct_self_update_of(self, value: &HirExpression) -> bool {
+        let Self::AssignPlace(destination) = self else {
+            return false;
+        };
+        if !destination.projections.is_empty() || value.value_kind != ValueKind::Place {
+            return false;
+        }
+
+        matches!(
+            &value.kind,
+            HirExpressionKind::Load(source)
+                if source.root == destination.root && source.projections.is_empty()
+        )
+    }
 }
 
 #[derive(Debug, Clone)]

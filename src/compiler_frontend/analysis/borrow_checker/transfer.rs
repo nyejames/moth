@@ -35,6 +35,10 @@ use access::{
 };
 use facts::ValueFactBuffer;
 
+#[cfg(test)]
+#[path = "transfer/tests/value_fact_buffer_tests.rs"]
+mod value_fact_buffer_tests;
+
 pub(super) struct BorrowTransferContext<'a> {
     // WHAT: shared lookup/diagnostic tables for one function transfer pass.
     // WHY: avoids repeated module scans while statements/terminators are analyzed.
@@ -94,6 +98,7 @@ pub(super) fn transfer_block(
             &mut stats,
             &mut value_fact_buffer,
         )?;
+        value_fact_buffer.finish_use();
         stats.statements_analyzed += 1;
     }
 
@@ -147,6 +152,7 @@ pub(super) fn transfer_block(
         _ => {}
     }
 
+    value_fact_buffer.finish_use();
     stats.value_facts = value_fact_buffer.into_serialized(layout);
     Ok(stats)
 }

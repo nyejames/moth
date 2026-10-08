@@ -16,6 +16,7 @@ use crate::compiler_frontend::analysis::borrow_checker::types::{
     LocalMode, OptionalTransferStatus, StatementBorrowFact, TerminatorBorrowFact,
     ValueAccessClassification,
 };
+use crate::compiler_frontend::compiler_messages::InvalidMutableAccessReason;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirProjection};
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
@@ -24,7 +25,7 @@ use crate::compiler_frontend::hir::ids::{BlockId, HirValueId};
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{
-    HirLocalDestination, HirStatement, HirStatementKind,
+    HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
 };
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
@@ -38,6 +39,73 @@ use conflicts::{check_mutable_access, check_shared_access, probe_mutable_access}
 use move_decision::{MoveDecision, classify_move_decision};
 pub(super) use statement::transfer_statement;
 pub(super) use terminator::transfer_terminator;
+
+fn require_initialized_update_target(
+    layout: &FunctionLayout,
+    state: &BorrowState,
+    local_index: usize,
+    diagnostics: &BorrowDiagnostics<'_>,
+    span: Option<SourceSpan>,
+) -> Result<(), BorrowCheckError> {
+    if state
+        .local_state(local_index)
+        .mode
+        .contains(LocalMode::UNINIT)
+    {
+        return Err(diagnostics.use_of_uninitialized_local(
+            diagnostics.local_place(layout.local_ids[local_index]),
+            span,
+        ));
+    }
+
+    if !layout.local_mutable[local_index] {
+        return Err(diagnostics.invalid_mutable_access(
+            diagnostics.local_place(layout.local_ids[local_index]),
+            InvalidMutableAccessReason::ImmutablePlace,
+            None,
+            None,
+            span,
+        ));
+    }
+
+    Ok(())
+}
+
+fn check_local_update_access(
+    check: &mut AccessCheckContext<'_, '_>,
+    local_index: usize,
+    local_state: &LocalState,
+    rhs_is_fresh: bool,
+) -> Result<RootSet, BorrowCheckError> {
+    // Slot writes replace the binding, alias writes target their referents, and a joined state
+    // must check both possibilities. Both source assignments and dedicated call results use this
+    // rule so neither operation can bypass update mutability checks.
+    let replaces_definite_slot = rhs_is_fresh
+        && local_state.mode.contains(LocalMode::SLOT)
+        && !local_state.mode.contains(LocalMode::ALIAS);
+    let mut write_roots = RootSet::empty(check.layout.local_count());
+    if local_state.mode.contains(LocalMode::SLOT) {
+        write_roots.insert(local_index);
+    }
+    if local_state.mode.contains(LocalMode::ALIAS) && local_state.has_value_aliases() {
+        write_roots.union_with(&local_state.value_roots);
+    }
+
+    if !write_roots.is_empty() {
+        check_mutable_access(
+            check,
+            &write_roots,
+            MutableAccessPolicy {
+                allow_prior_shared: true,
+                require_root_mutable: true,
+                strict_move_exclusivity: false,
+                check_alias_exclusivity: !replaces_definite_slot,
+            },
+        )?;
+    }
+
+    Ok(write_roots)
+}
 
 // WHAT: These helper contexts split statement transfer into two concerns:
 // shared-read collection and access-conflict validation.
@@ -166,17 +234,26 @@ fn transfer_assign_target(
     // resulting expression is still an RValue. Binding role belongs to this incoming value.
     let rhs_is_place = value_expression.value_kind == ValueKind::Place;
     let is_direct_self_update = !is_definition
-        && rhs_is_place
-        && target.projections.is_empty()
-        && matches!(
-            &value_expression.kind,
-            HirExpressionKind::Load(source_place)
-                if source_place.root == target.root
-                    && transfer_context
-                        .expressions
-                        .projections(source_place.projections)
-                        .is_empty()
-        );
+        && HirWriteTarget::AssignPlace(*target).is_direct_self_update_of(value_expression);
+
+    if !is_definition {
+        let Some(local_index) = layout.index_of(target.root) else {
+            return Err(transfer_context.diagnostics.internal_error(
+                format!(
+                    "Assignment target local '{}' is not in the active function layout",
+                    transfer_context.diagnostics.local_name(target.root)
+                ),
+                location,
+            ));
+        };
+        require_initialized_update_target(
+            layout,
+            state,
+            local_index,
+            &transfer_context.diagnostics,
+            span.or(location),
+        )?;
+    }
 
     match target.projections.is_empty() {
         true => {
@@ -238,7 +315,7 @@ fn transfer_assign_target(
                 }
             }
 
-            if local_state.mode.is_definitely_uninit() || is_definition {
+            if is_definition {
                 match rhs_roots {
                     Some(rhs_roots) => {
                         let target_is_mutable = layout.local_mutable[local_index];
@@ -299,24 +376,7 @@ fn transfer_assign_target(
                 return Ok(());
             }
 
-            // A fresh RHS replaces an existing slot value. Only a definite slot can take that
-            // path without also writing through an alias possibility in a joined state.
             let rhs_is_fresh = rhs_roots.as_ref().is_none_or(RootSet::is_empty);
-            let replaces_definite_slot = rhs_is_fresh
-                && local_state.mode.contains(LocalMode::SLOT)
-                && !local_state.mode.contains(LocalMode::ALIAS);
-
-            let mut write_roots = RootSet::empty(layout.local_count());
-            if local_state.mode.contains(LocalMode::SLOT) {
-                write_roots.insert(local_index);
-            }
-            // An alias-only binding writes through to its current allocation. A slot-backed
-            // binding instead replaces its cell, so its previous value roots must not block the
-            // rebind even when the new RHS aliases a different existing allocation.
-            if local_state.mode.contains(LocalMode::ALIAS) && local_state.has_value_aliases() {
-                write_roots.union_with(&local_state.value_roots);
-            }
-
             let mut check = AccessCheckContext {
                 context: transfer_context,
                 layout,
@@ -329,16 +389,8 @@ fn transfer_assign_target(
                 actor_index_hint: Some(local_index),
                 current_order,
             };
-            check_mutable_access(
-                &mut check,
-                &write_roots,
-                MutableAccessPolicy {
-                    allow_prior_shared: true,
-                    require_root_mutable: true,
-                    strict_move_exclusivity: false,
-                    check_alias_exclusivity: !replaces_definite_slot,
-                },
-            )?;
+            let write_roots =
+                check_local_update_access(&mut check, local_index, &local_state, rhs_is_fresh)?;
 
             if is_direct_self_update {
                 // The ordinary write check above covers this place. Rebinding it to itself adds

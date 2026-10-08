@@ -306,6 +306,11 @@ fn shared_expression_row_merges_branch_roots_in_either_successor_order() {
         expected_roots.sort_unstable_by_key(|local| local.0);
         assert_eq!(fact.roots, expected_roots);
         assert_eq!(fact.classification, ValueAccessClassification::SharedRead);
+        assert_eq!(
+            fact.optional_transfer,
+            OptionalTransferStatus::NotAttempted,
+            "the same actual HIR row is observed in both final branch contexts"
+        );
     }
 }
 
@@ -1461,6 +1466,77 @@ sentinel = 0"#;
 }
 
 #[test]
+fn earlier_nonconsuming_read_of_a_shared_row_downgrades_later_transfer() {
+    let source = r#"scores ~{String = String} = {}
+key ~= "key"
+value ~= "hello"
+~scores.set(key, value) catch:
+;
+sentinel = 0"#;
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let (block_id, set_index, shared_argument) = hir
+        .blocks
+        .iter()
+        .find_map(|block| {
+            block
+                .statements
+                .iter()
+                .enumerate()
+                .find_map(|(index, statement)| match &statement.kind {
+                    HirStatementKind::MapOp {
+                        op: HirMapOp::Set,
+                        args,
+                        ..
+                    } => Some((
+                        block.id,
+                        index,
+                        *hir.expressions
+                            .values(*args)
+                            .get(1)
+                            .expect("set should have a value argument"),
+                    )),
+                    _ => None,
+                })
+        })
+        .expect("the fixture should contain a map set");
+    let next_statement_id = hir
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .map(|statement| statement.id.0)
+        .max()
+        .unwrap_or(0)
+        .checked_add(1)
+        .expect("HIR statement IDs should have room for the injected read");
+    let shared_read = HirStatement {
+        id: HirNodeId(next_statement_id),
+        kind: HirStatementKind::Expr(shared_argument),
+        span: None,
+    };
+    hir.side_table.map_statement(None, &shared_read);
+    hir.blocks
+        .iter_mut()
+        .find(|block| block.id == block_id)
+        .expect("the set block should remain present")
+        .statements
+        .insert(set_index, shared_read);
+
+    let registry = default_external_package_registry(&mut string_table);
+    let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+        .expect("the earlier shared read should not invalidate the later set");
+    let fact = report
+        .analysis
+        .value_fact(shared_argument)
+        .expect("the reused value row should retain one merged fact");
+    assert_eq!(
+        fact.optional_transfer,
+        OptionalTransferStatus::Borrow,
+        "an earlier ordinary use and later transfer candidate share one HIR row"
+    );
+}
+
+#[test]
 fn map_set_later_use_keeps_mutable_inputs_borrowed() {
     // WHAT: `set` MayConsumeShared on later-use key and value inputs borrows rather than moving.
     // WHY: last-use classification must not unconditionally move; the root stays live so
@@ -1619,6 +1695,27 @@ sentinel = 0
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("a retained aliased result should borrow its final-use argument");
 
+    let argument = hir
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .find_map(|statement| match &statement.kind {
+            HirStatementKind::Call { args, result, .. } if result.is_some() && args.len() == 1 => {
+                hir.expressions.values(*args).first().copied()
+            }
+            _ => None,
+        })
+        .expect("the alias call should have one actual argument row");
+    assert_eq!(
+        report
+            .analysis
+            .value_fact(argument)
+            .expect("the actual argument row should have a value fact")
+            .optional_transfer,
+        OptionalTransferStatus::Borrow,
+        "retained-result protection must record the downgraded row as a borrow"
+    );
+
     let value_local = find_local_by_name(&hir, &path_fork, &string_table, "value")
         .expect("should locate the aliased argument local");
     let result_local = find_local_by_name(&hir, &path_fork, &string_table, "result")
@@ -1662,6 +1759,517 @@ sentinel = 0
         "retained alias result should retain the named argument root, got {:?}",
         result_snapshot.alias_roots
     );
+}
+
+#[test]
+fn retained_result_and_transfer_calls_share_one_actual_row_in_either_statement_order() {
+    for retained_call_first in [false, true] {
+        let calls = if retained_call_first {
+            "retained = retain(value)\ninspect(value)\n"
+        } else {
+            "inspect(value)\nretained = retain(value)\n"
+        };
+        let source = format!(
+            "retain |input String| -> String:\nreturn input\n;\n\
+             inspect |input String|:\n;\n\
+             value ~= \"hello\"\n{calls}sentinel = 0\n"
+        );
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(&source);
+        let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);
+        let retained_call = calls_with_result_presence(&hir, true)
+            .into_iter()
+            .next()
+            .expect("the retaining call should produce a result");
+        let transfer_call = calls_with_result_presence(&hir, false)
+            .into_iter()
+            .next()
+            .expect("inspect should be the transfer candidate");
+        assert_eq!(
+            retained_call.0, transfer_call.0,
+            "both use statements should lower into one HIR block"
+        );
+        let shared_row = *transfer_call.2.first().expect("inspect has one argument");
+        assert_ne!(
+            shared_row,
+            *retained_call.2.first().expect("retain has one argument")
+        );
+        replace_call_arguments(&mut hir, retained_call.1, &[shared_row]);
+
+        let mut transfer_only_hir = hir.clone();
+        let retained_local = find_local_by_name(&hir, &path_fork, &string_table, "retained")
+            .expect("the source binds the retained alias result");
+        for block in &mut transfer_only_hir.blocks {
+            block.statements.retain(|statement| {
+                statement.id != retained_call.1
+                    && !matches!(
+                        &statement.kind,
+                        HirStatementKind::Write {
+                            target: HirWriteTarget::DefineLocal(local),
+                            ..
+                        } if *local == retained_local
+                    )
+            });
+        }
+
+        let registry = default_external_package_registry(&mut string_table);
+        let transfer_only =
+            run_borrow_checker(&transfer_only_hir, &registry, &path_fork, &string_table)
+                .expect("the isolated inspect call should remain legal");
+        assert_eq!(
+            transfer_only
+                .analysis
+                .value_fact(shared_row)
+                .expect("the shared row remains the actual inspect argument")
+                .optional_transfer,
+            OptionalTransferStatus::Transfer,
+            "the transfer statement should provide real transfer evidence in isolation"
+        );
+
+        let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+            .expect("the shared row should remain borrow-safe with a retained result");
+        assert_eq!(
+            report
+                .analysis
+                .value_fact(shared_row)
+                .expect("both actual call statements share this row")
+                .optional_transfer,
+            OptionalTransferStatus::Borrow,
+            "the retained-result borrow observation must conservatively combine with the transfer use"
+        );
+    }
+}
+
+#[test]
+fn sibling_root_and_transfer_calls_share_one_actual_row_in_both_argument_positions() {
+    for sibling_call_first in [false, true] {
+        for argument_layout in 0..3 {
+            let calls = if sibling_call_first {
+                "pair(value, value)\ninspect(value)\n"
+            } else {
+                "inspect(value)\npair(value, value)\n"
+            };
+            let source = format!(
+                "pair |first String, second String|:\n;\n\
+                 inspect |input String|:\n;\n\
+                 value ~= \"hello\"\n{calls}sentinel = 0\n"
+            );
+            let (ast, mut path_fork, mut string_table) = parse_single_file_ast(&source);
+            let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);
+            let inspect_call = calls_with_argument_count(&hir, 1)
+                .into_iter()
+                .next()
+                .expect("inspect should have one actual argument row");
+            let pair_call = calls_with_argument_count(&hir, 2)
+                .into_iter()
+                .next()
+                .expect("pair should have two sibling argument rows");
+            assert_eq!(inspect_call.0, pair_call.0);
+            let shared_row = inspect_call.2[0];
+            assert!(!pair_call.2.contains(&shared_row));
+            assert_ne!(pair_call.2[0], pair_call.2[1]);
+            let pair_roots = pair_call
+                .2
+                .iter()
+                .map(|row| match &hir.expressions.expression(*row).kind {
+                    HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => place.root,
+                    _ => panic!("pair arguments should be loads from the shared local"),
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(pair_roots[0], pair_roots[1]);
+            let other_sibling_row = pair_call.2[0];
+            let ordered_rows = match argument_layout {
+                0 => [shared_row, other_sibling_row],
+                1 => [other_sibling_row, shared_row],
+                _ => [shared_row, shared_row],
+            };
+            replace_call_arguments(&mut hir, pair_call.1, &ordered_rows);
+            assert_eq!(
+                calls_with_argument_count(&hir, 2)[0].2,
+                ordered_rows,
+                "the call must retain the intended actual shared HIR rows"
+            );
+
+            let mut transfer_only_hir = hir.clone();
+            for block in &mut transfer_only_hir.blocks {
+                block
+                    .statements
+                    .retain(|statement| statement.id != pair_call.1);
+            }
+            let registry = default_external_package_registry(&mut string_table);
+            let transfer_only =
+                run_borrow_checker(&transfer_only_hir, &registry, &path_fork, &string_table)
+                    .expect("the isolated inspect call should remain legal");
+            assert_eq!(
+                transfer_only
+                    .analysis
+                    .value_fact(shared_row)
+                    .expect("the shared row is the actual inspect argument")
+                    .optional_transfer,
+                OptionalTransferStatus::Transfer
+            );
+
+            let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+                .expect("a sibling-root call should downgrade without rejecting the source");
+            assert_eq!(
+                report
+                    .analysis
+                    .value_fact(shared_row)
+                    .expect("inspect and pair share this actual HIR row")
+                    .optional_transfer,
+                OptionalTransferStatus::Borrow,
+                "sibling-root protection must downgrade the row in either position and when repeated"
+            );
+        }
+    }
+}
+
+#[test]
+fn retained_result_and_transfer_observations_merge_across_final_cfg_contexts() {
+    let source = r#"retain |input String| -> String:
+return input
+;
+inspect |input String|:
+;
+caller |flag Bool|:
+value ~= "hello"
+if flag:
+    retained = retain(value)
+else
+    inspect(value)
+;
+sentinel = 0
+;"#;
+
+    for reverse_successor_visit in [false, true] {
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+        let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);
+        let retained_call = calls_with_result_presence(&hir, true)
+            .into_iter()
+            .next()
+            .expect("the retained-result branch should contain the alias call");
+        let transfer_call = calls_with_result_presence(&hir, false)
+            .into_iter()
+            .next()
+            .expect("the other branch should contain the inspect call");
+        assert_ne!(retained_call.0, transfer_call.0);
+        let shared_row = *transfer_call.2.first().expect("inspect has one argument");
+        replace_call_arguments(&mut hir, retained_call.1, &[shared_row]);
+        assert_eq!(
+            calls_with_result_presence(&hir, true)[0].2,
+            vec![shared_row],
+            "the retained call must use the exact HIR value row consumed by inspect"
+        );
+        if reverse_successor_visit {
+            reverse_if_successors_for_blocks(&mut hir, retained_call.0, transfer_call.0);
+        }
+
+        let registry = default_external_package_registry(&mut string_table);
+        let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+            .expect("mutually exclusive final call contexts should remain legal");
+        assert_eq!(
+            report
+                .analysis
+                .value_fact(shared_row)
+                .expect("both final CFG contexts share this actual row")
+                .optional_transfer,
+            OptionalTransferStatus::Borrow,
+            "a retained-result context must downgrade transfer in either successor visit order"
+        );
+    }
+}
+
+#[test]
+fn actual_cfg_rows_preserve_all_transfer_and_ignore_absent_contexts() {
+    let both_branches_transfer = r#"inspect |input String|:
+;
+caller |flag Bool|:
+value ~= "hello"
+if flag:
+    inspect(value)
+else
+    inspect(value)
+;
+sentinel = 0
+;"#;
+    for reverse_successor_visit in [false, true] {
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(both_branches_transfer);
+        let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);
+        let calls = calls_with_result_presence(&hir, false);
+        assert_eq!(
+            calls.len(),
+            2,
+            "both branches should have an actual call row"
+        );
+        assert_ne!(calls[0].0, calls[1].0);
+        let shared_row = *calls[0].2.first().expect("inspect has one argument");
+        replace_call_arguments(&mut hir, calls[1].1, &[shared_row]);
+        if reverse_successor_visit {
+            reverse_if_successors_for_blocks(&mut hir, calls[0].0, calls[1].0);
+        }
+
+        let registry = default_external_package_registry(&mut string_table);
+        let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+            .expect("both transfer branches should remain legal");
+        assert_eq!(
+            report
+                .analysis
+                .value_fact(shared_row)
+                .expect("both final branch observations share one actual row")
+                .optional_transfer,
+            OptionalTransferStatus::Transfer,
+            "all present CFG observations prove transfer in either successor visit order"
+        );
+    }
+
+    let one_branch_transfer = r#"inspect |input String|:
+;
+caller |flag Bool|:
+value ~= "hello"
+if flag:
+    inspect(value)
+else
+    unused ~= "unused"
+;
+sentinel = 0
+;"#;
+    for reverse_successor_visit in [false, true] {
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(one_branch_transfer);
+        let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);
+        let transfer_call = calls_with_result_presence(&hir, false)
+            .into_iter()
+            .next()
+            .expect("one branch should contain an actual transfer call");
+        if reverse_successor_visit {
+            let absent_branch = opposite_if_successor(&hir, transfer_call.0);
+            reverse_if_successors_for_blocks(&mut hir, transfer_call.0, absent_branch);
+        }
+
+        let shared_row = *transfer_call.2.first().expect("inspect has one argument");
+        let registry = default_external_package_registry(&mut string_table);
+        let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+            .expect("an absent value row in the other branch is legal");
+        assert_eq!(
+            report
+                .analysis
+                .value_fact(shared_row)
+                .expect("the one observed transfer row should remain present")
+                .optional_transfer,
+            OptionalTransferStatus::Transfer,
+            "a CFG context with no row is absent and must not downgrade the observed transfer"
+        );
+    }
+}
+
+#[test]
+fn actual_cfg_transfer_and_ordinary_definition_merge_conservatively() {
+    let source = r#"inspect |input String|:
+;
+caller |flag Bool|:
+value ~= "hello"
+if flag:
+    inspect(value)
+else
+    ordinary = value
+;
+sentinel = 0
+;"#;
+
+    for reverse_successor_visit in [false, true] {
+        let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+        let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);
+        let transfer_call = calls_with_result_presence(&hir, false)
+            .into_iter()
+            .next()
+            .expect("the transfer branch should contain one inspect call");
+        let ordinary_local = find_local_by_name(&hir, &path_fork, &string_table, "ordinary")
+            .expect("the other branch should define an ordinary local");
+        let (ordinary_block, ordinary_statement_id, ordinary_row) = hir
+            .blocks
+            .iter()
+            .find_map(|block| {
+                block.statements.iter().find_map(|statement| {
+                    let HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(local),
+                        value,
+                    } = &statement.kind
+                    else {
+                        return None;
+                    };
+                    (*local == ordinary_local).then_some((block.id, statement.id, *value))
+                })
+            })
+            .expect("the fixture should contain the ordinary local definition");
+        assert_ne!(transfer_call.0, ordinary_block);
+        let shared_row = *transfer_call
+            .2
+            .first()
+            .expect("inspect should have one actual argument row");
+        assert_ne!(shared_row, ordinary_row);
+
+        let definition = hir
+            .blocks
+            .iter_mut()
+            .find(|block| block.id == ordinary_block)
+            .and_then(|block| {
+                block
+                    .statements
+                    .iter_mut()
+                    .find(|statement| statement.id == ordinary_statement_id)
+            })
+            .expect("the ordinary definition should remain present");
+        let HirStatementKind::Write { value, .. } = &mut definition.kind else {
+            unreachable!("the selected statement is a definition")
+        };
+        *value = shared_row;
+
+        if reverse_successor_visit {
+            reverse_if_successors_for_blocks(&mut hir, transfer_call.0, ordinary_block);
+        }
+
+        let registry = default_external_package_registry(&mut string_table);
+        let mut transfer_only_hir = hir.clone();
+        for block in &mut transfer_only_hir.blocks {
+            block
+                .statements
+                .retain(|statement| statement.id != ordinary_statement_id);
+        }
+        let transfer_only =
+            run_borrow_checker(&transfer_only_hir, &registry, &path_fork, &string_table)
+                .expect("the actual inspect call alone should remain legal");
+        assert_eq!(
+            transfer_only
+                .analysis
+                .value_fact(shared_row)
+                .expect("the shared row remains the actual inspect argument")
+                .optional_transfer,
+            OptionalTransferStatus::Transfer,
+            "the transfer context should prove transfer when the ordinary use is absent"
+        );
+
+        let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+            .expect("both mutually exclusive final contexts should remain legal");
+        assert_eq!(
+            report
+                .analysis
+                .value_fact(shared_row)
+                .expect("the call and definition share one actual HIR row")
+                .optional_transfer,
+            OptionalTransferStatus::Borrow,
+            "the observed ordinary definition must downgrade transfer in either CFG order"
+        );
+    }
+}
+
+fn calls_with_result_presence(
+    hir: &HirModule,
+    has_result: bool,
+) -> Vec<(BlockId, HirNodeId, Vec<HirValueId>)> {
+    hir.blocks
+        .iter()
+        .flat_map(|block| {
+            block.statements.iter().filter_map(move |statement| {
+                let HirStatementKind::Call { args, result, .. } = &statement.kind else {
+                    return None;
+                };
+                (result.is_some() == has_result).then(|| {
+                    (
+                        block.id,
+                        statement.id,
+                        hir.expressions.values(*args).to_vec(),
+                    )
+                })
+            })
+        })
+        .collect()
+}
+
+fn calls_with_argument_count(
+    hir: &HirModule,
+    argument_count: usize,
+) -> Vec<(BlockId, HirNodeId, Vec<HirValueId>)> {
+    hir.blocks
+        .iter()
+        .flat_map(|block| {
+            block.statements.iter().filter_map(move |statement| {
+                let HirStatementKind::Call { args, .. } = &statement.kind else {
+                    return None;
+                };
+                (args.len() == argument_count).then(|| {
+                    (
+                        block.id,
+                        statement.id,
+                        hir.expressions.values(*args).to_vec(),
+                    )
+                })
+            })
+        })
+        .collect()
+}
+
+fn replace_call_arguments(hir: &mut HirModule, statement_id: HirNodeId, rows: &[HirValueId]) {
+    let args = hir
+        .expressions
+        .append_values(rows, None)
+        .expect("the replacement call argument range should fit the HIR store");
+    let call = hir
+        .blocks
+        .iter_mut()
+        .flat_map(|block| &mut block.statements)
+        .find(|statement| statement.id == statement_id)
+        .expect("the selected call statement should remain in HIR");
+    let HirStatementKind::Call {
+        args: call_args, ..
+    } = &mut call.kind
+    else {
+        unreachable!("the selected statement is a call");
+    };
+    *call_args = args;
+}
+
+fn reverse_if_successors_for_blocks(hir: &mut HirModule, first: BlockId, second: BlockId) {
+    let branch = hir
+        .blocks
+        .iter_mut()
+        .find(|block| {
+            matches!(
+                &block.terminator,
+                HirTerminator::If {
+                    then_block,
+                    else_block,
+                    ..
+                } if [*then_block, *else_block].contains(&first)
+                    && [*then_block, *else_block].contains(&second)
+            )
+        })
+        .expect("the fixture should have an if whose successors are the selected call blocks");
+    let HirTerminator::If {
+        then_block,
+        else_block,
+        ..
+    } = &mut branch.terminator
+    else {
+        unreachable!("the selected block terminates with an if");
+    };
+    std::mem::swap(then_block, else_block);
+}
+
+fn opposite_if_successor(hir: &HirModule, selected: BlockId) -> BlockId {
+    hir.blocks
+        .iter()
+        .find_map(|block| match &block.terminator {
+            HirTerminator::If {
+                then_block,
+                else_block,
+                ..
+            } if *then_block == selected => Some(*else_block),
+            HirTerminator::If {
+                then_block,
+                else_block,
+                ..
+            } if *else_block == selected => Some(*then_block),
+            _ => None,
+        })
+        .expect("the transfer call should be on one side of the fixture if")
 }
 
 #[test]

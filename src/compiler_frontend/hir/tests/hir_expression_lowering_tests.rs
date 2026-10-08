@@ -17,6 +17,9 @@ use crate::compiler_frontend::ast::expressions::expression::{
 use crate::compiler_frontend::ast::expressions::expression_kind::{
     MapLiteralEntry, ResolvedCastExpression,
 };
+use crate::compiler_frontend::ast::expressions::expression_rpn::{
+    PlaceExpression, PlaceExpressionKind,
+};
 use crate::compiler_frontend::ast::expressions::expression_types::{
     CastHandling, ResolvedCastEvidence,
 };
@@ -37,6 +40,7 @@ use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{
     BuiltinTypeDefinition, ChoiceTypeDefinition, ConstructedTypeDefinition, TypeDefinition,
 };
@@ -2989,25 +2993,27 @@ fn field_access_uses_base_struct_identity_not_global_leaf_lookup() {
         span,
     );
 
-    let base_expression = reference_expr_with_type_id(
-        local_name,
-        local_struct_type_id,
+    let base_place = PlaceExpression {
+        kind: PlaceExpressionKind::Local(local_name),
+        type_id: local_struct_type_id,
+        diagnostic_type: DataType::Inferred,
+        value_mode: ValueMode::ImmutableReference,
         span,
-        ValueMode::ImmutableReference,
-    );
-
-    let field_access = field_access_node(
-        base_expression,
-        field_leaf,
-        builtin_type_ids::INT,
-        ConstRecordState::RuntimeValue,
-        ValueMode::ImmutableReference,
+    };
+    let field_access = PlaceExpression {
+        kind: PlaceExpressionKind::Field {
+            base: Box::new(base_place),
+            field: field_leaf,
+        },
+        type_id: int_type,
+        diagnostic_type: DataType::Inferred,
+        value_mode: ValueMode::ImmutableReference,
         span,
-    );
+    };
 
     let (_prelude, place) = builder
-        .lower_ast_node_to_place(&field_access)
-        .expect("field access should lower via base struct identity");
+        .lower_place_expression_to_hir_place(&field_access)
+        .expect("field place should lower via its resolved base type");
 
     assert_eq!(place.root, LocalId(30));
     assert_eq!(
