@@ -1,0 +1,9 @@
+runtime || -> Int:
+    return 1
+;
+
+#[if false:
+    [loop 0 to runtime() |i|:
+        [i]
+    ]
+:]

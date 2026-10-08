@@ -1,0 +1,6 @@
+#[loop 0 to 3 |outer|:
+    [loop 0 to outer |inner|:
+        ([outer], [inner])
+    ]
+]
+#[:literal-items=[loop 0 to 2 |outer|:[loop {outer} |item|:[item]]];]

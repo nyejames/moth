@@ -1099,8 +1099,12 @@ fn pure_direct_dynamic_formatter_template_records_formatted_tir_phase() {
 
     let has_control_flow = {
         let store = context.template_ir_store.borrow();
+        let template_root = store
+            .get_template(template.tir_reference.root)
+            .expect("template should exist in the store")
+            .root;
         store
-            .control_flow_node_id_for_template(template.tir_reference.root)
+            .control_flow_node_id_in_subtree(template_root)
             .expect("control-flow lookup")
             .is_some()
     };

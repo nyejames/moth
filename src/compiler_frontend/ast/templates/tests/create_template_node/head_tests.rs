@@ -912,9 +912,12 @@ fn assert_invalid_template_structure(
 
 fn expect_conditional_node(template: &Template, context: &ScopeContext) -> TemplateIrNodeId {
     let store = context.template_ir_store.borrow();
-    let template_id = template.tir_reference.root;
+    let template_root = store
+        .get_template(template.tir_reference.root)
+        .expect("template should exist in the store")
+        .root;
     let control_flow_node_id = store
-        .control_flow_node_id_for_template(template_id)
+        .control_flow_node_id_in_subtree(template_root)
         .expect("control-flow lookup")
         .expect("template should contain a control-flow node");
     let node = store
@@ -929,9 +932,12 @@ fn expect_conditional_node(template: &Template, context: &ScopeContext) -> Templ
 
 fn expect_loop_node(template: &Template, context: &ScopeContext) -> TemplateIrNodeId {
     let store = context.template_ir_store.borrow();
-    let template_id = template.tir_reference.root;
+    let template_root = store
+        .get_template(template.tir_reference.root)
+        .expect("template should exist in the store")
+        .root;
     let control_flow_node_id = store
-        .control_flow_node_id_for_template(template_id)
+        .control_flow_node_id_in_subtree(template_root)
         .expect("control-flow lookup")
         .expect("template should contain a control-flow node");
     let node = store

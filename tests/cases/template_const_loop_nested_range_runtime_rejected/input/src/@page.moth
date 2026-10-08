@@ -1,0 +1,11 @@
+render || -> String:
+    limit = 2
+    value #= [loop 0 to 3 |outer|:
+        [loop 0 to limit |inner|:
+            ([outer], [inner])
+        ]
+    ]
+    return value
+;
+
+#[:ok]

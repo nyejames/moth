@@ -5901,6 +5901,76 @@ contract = "language.templates.const_loop_runtime_source_rejected"
 role = "primary"
 
 [[case]]
+id = "template_const_loop_dependent_range"
+path = "template_const_loop_dependent_range"
+tags = ["integration","templates"]
+contract = "language.templates.const_loop_dependent_range_acceptance"
+role = "primary"
+
+[[case]]
+id = "template_const_loop_nested_collections"
+path = "template_const_loop_nested_collections"
+tags = ["integration","templates"]
+contract = "language.templates.const_loop_nested_collections_acceptance"
+role = "primary"
+
+[[case]]
+id = "template_const_loop_option_bound_capture"
+path = "template_const_loop_option_bound_capture"
+tags = ["integration","templates","options"]
+contract = "language.templates.const_loop_option_bound_capture_acceptance"
+role = "primary"
+
+[[case]]
+id = "template_const_loop_option_collection_capture"
+path = "template_const_loop_option_collection_capture"
+tags = ["integration","templates","options"]
+contract = "language.templates.const_loop_option_collection_capture_acceptance"
+role = "primary"
+
+[[case]]
+id = "template_const_loop_option_absent_empty"
+path = "template_const_loop_option_absent_empty"
+tags = ["integration","templates","options"]
+contract = "language.templates.const_loop_option_absent_empty_acceptance"
+role = "primary"
+
+[[case]]
+id = "template_const_loop_nested_range_runtime_rejected"
+path = "template_const_loop_nested_range_runtime_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.const_loop_nested_range_runtime_rejected"
+role = "primary"
+
+[[case]]
+id = "template_const_loop_nested_collection_runtime_rejected"
+path = "template_const_loop_nested_collection_runtime_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.const_loop_nested_collection_runtime_rejected"
+role = "primary"
+
+[[case]]
+id = "template_const_loop_binding_scope_preserved"
+path = "template_const_loop_binding_scope_preserved"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.const_loop_binding_scope_preserved"
+role = "primary"
+
+[[case]]
+id = "template_const_loop_inactive_runtime_inner_rejected"
+path = "template_const_loop_inactive_runtime_inner_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.const_loop_inactive_runtime_inner_rejected"
+role = "primary"
+
+[[case]]
+id = "template_conditional_loop_inherited_binding_runtime"
+path = "template_conditional_loop_inherited_binding_runtime"
+tags = ["integration", "templates"]
+contract = "language.templates.conditional_loop_inherited_binding_runtime"
+role = "primary"
+
+[[case]]
 id = "template_docs_examples_runtime_coverage"
 path = "template_docs_examples_runtime_coverage"
 tags = ["integration","templates","docs"]

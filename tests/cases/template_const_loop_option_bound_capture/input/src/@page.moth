@@ -1,0 +1,7 @@
+limit #Int? = 2
+
+#[if limit is |captured|:
+    [loop 0 to captured |i|:
+        bound-[i];
+    ]
+:]
