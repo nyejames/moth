@@ -32,7 +32,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 ///
 /// WHAT: traverses template structure below `template_id`, including runtime
 ///       slot-plan roots owned by that template, records dynamic-expression
-///       payloads, branch selectors and loop-header expressions keyed by their
+///       payloads, conditional selectors and loop-header expressions keyed by their
 ///       `ExpressionSiteId`.
 /// WHY: focused walker tests compare raw structural coverage with the effective
 ///      production collector without exposing collector internals.
@@ -390,23 +390,18 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
                 Ok(())
             }
 
-            TemplateIrNodeKind::BranchChain {
-                branches, fallback, ..
+            TemplateIrNodeKind::Conditional {
+                selector,
+                selector_site_id,
+                body,
             } => {
-                for branch in branches {
-                    let (expression, precedence) = self.effective_expression(
-                        store,
-                        branch.selector_site_id,
-                        branch.condition_expression(),
-                    )?;
-                    self.record_payload(branch.selector_site_id, expression, precedence);
-                    self.collect_node(store, branch.body)?;
-                }
-
-                if let Some(fallback) = fallback {
-                    self.collect_node(store, *fallback)?;
-                }
-
+                let (expression, precedence) = self.effective_expression(
+                    store,
+                    *selector_site_id,
+                    selector.condition_expression(),
+                )?;
+                self.record_payload(*selector_site_id, expression, precedence);
+                self.collect_node(store, *body)?;
                 Ok(())
             }
 

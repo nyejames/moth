@@ -9,11 +9,11 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateElseMarker, TemplateLoopHeader,
+    TemplateBranchSelector, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::tir::ids::{TemplateIrId, TemplateIrNodeId};
 use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIr, TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind, TirSlotPlaceholder,
+    TemplateIr, TemplateIrNode, TemplateIrNodeKind, TirSlotPlaceholder,
 };
 use crate::compiler_frontend::ast::templates::tir::overlays::TemplateViewContext;
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReference;
@@ -138,18 +138,18 @@ impl<'store> TemplateIrBuilder<'store> {
         ))
     }
 
-    pub(crate) fn push_branch_chain_node(
+    pub(crate) fn push_conditional_node(
         &mut self,
-        branches: Vec<TemplateIrBranch>,
-        fallback: Option<TemplateIrNodeId>,
-        else_marker: Option<TemplateElseMarker>,
+        selector: TemplateBranchSelector,
+        body: TemplateIrNodeId,
         span: Option<SourceSpan>,
     ) -> TemplateIrNodeId {
+        let selector_site_id = self.store.next_expression_site_id();
         self.store.push_node(TemplateIrNode::new(
-            TemplateIrNodeKind::BranchChain {
-                branches,
-                fallback,
-                else_marker,
+            TemplateIrNodeKind::Conditional {
+                selector: Box::new(selector),
+                selector_site_id,
+                body,
             },
             span,
         ))

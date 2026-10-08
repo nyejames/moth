@@ -29,9 +29,7 @@ use crate::compiler_frontend::ast::templates::tir::TemplateIrBuilder;
 use crate::compiler_frontend::ast::templates::tir::fold::{
     fold_prepared_const_template_pattern, fold_prepared_template,
 };
-use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind,
-};
+use crate::compiler_frontend::ast::templates::tir::node::{TemplateIrNode, TemplateIrNodeKind};
 use crate::compiler_frontend::ast::templates::tir::overlays::TemplateViewContext;
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReference;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
@@ -422,25 +420,20 @@ fn const_template_projection_preserves_nested_child_slot_order() -> Result<(), T
 }
 
 #[test]
-fn const_template_projection_preserves_selected_branch_and_fallback_slots()
--> Result<(), TemplateError> {
+fn const_template_projection_preserves_selected_conditional_slot() -> Result<(), TemplateError> {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let location = None;
 
-    let build_branch_template = |store: &mut TemplateIrStore, selected: bool| {
+    let build_conditional_template = |store: &mut TemplateIrStore| {
         let mut builder = TemplateIrBuilder::new(store);
         let selected_slot = builder.push_slot_node(SlotKey::Default, location);
-        let fallback_slot = builder.push_slot_node(SlotKey::Default, location);
-        let branch = TemplateIrBranch::new(
-            TemplateBranchSelector::Bool(bool_expression(selected)),
+        let root = builder.push_conditional_node(
+            TemplateBranchSelector::Bool(bool_expression(true)),
             selected_slot,
-            None,
-            builder.store.next_expression_site_id(),
+            location,
         );
-        let root =
-            builder.push_branch_chain_node(vec![branch], Some(fallback_slot), None, location);
         let template_id = builder.finish_template(
             root,
             Style::default(),
@@ -456,32 +449,14 @@ fn const_template_projection_preserves_selected_branch_and_fallback_slots()
             TemplateIrNodeKind::Slot { placeholder } => placeholder.occurrence_id,
             other => panic!("expected selected slot, got {other:?}"),
         };
-        let fallback_occurrence = match &store
-            .get_node(fallback_slot)
-            .expect("fallback slot exists")
-            .kind
-        {
-            TemplateIrNodeKind::Slot { placeholder } => placeholder.occurrence_id,
-            other => panic!("expected fallback slot, got {other:?}"),
-        };
-        (template_id, selected_occurrence, fallback_occurrence)
+        (template_id, selected_occurrence)
     };
 
-    let (selected_template, selected_occurrence, selected_fallback) =
-        build_branch_template(&mut store, true);
+    let (selected_template, selected_occurrence) = build_conditional_template(&mut store);
     assert_eq!(
         project_pattern_for_template(&store, selected_template, &mut string_table)?,
         vec![FoldedConstTemplatePiece::Slot(selected_occurrence)]
     );
-    assert_ne!(selected_occurrence, selected_fallback);
-
-    let (fallback_template, _selected_occurrence, fallback_occurrence) =
-        build_branch_template(&mut store, false);
-    assert_eq!(
-        project_pattern_for_template(&store, fallback_template, &mut string_table)?,
-        vec![FoldedConstTemplatePiece::Slot(fallback_occurrence)]
-    );
-
     Ok(())
 }
 
@@ -679,16 +654,14 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
     let mut store = TemplateIrStore::new();
     let location = None;
 
-    let false_branch_template = {
+    let false_conditional_template = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let hidden_slot = builder.push_slot_node(SlotKey::Default, location);
-        let branch = TemplateIrBranch::new(
+        let root = builder.push_conditional_node(
             TemplateBranchSelector::Bool(bool_expression(false)),
             hidden_slot,
-            None,
-            builder.store.next_expression_site_id(),
+            location,
         );
-        let root = builder.push_branch_chain_node(vec![branch], None, None, location);
         builder.finish_template(
             root,
             Style::default(),
@@ -698,7 +671,8 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
         )
     };
     assert!(
-        project_pattern_for_template(&store, false_branch_template, &mut string_table,)?.is_empty()
+        project_pattern_for_template(&store, false_conditional_template, &mut string_table,)?
+            .is_empty()
     );
 
     let zero_iteration_template = {
@@ -734,24 +708,22 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
 }
 
 // -------------------------
-//  Branch/fallback bodies
+//  Conditional bodies
 // -------------------------
 
 #[test]
-fn final_view_fold_branch_selects_body() {
+fn final_view_fold_true_conditional_selects_body() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
         let yes_text = string_table.intern("yes");
         let yes_node = builder.push_text_node(yes_text, 3, TemplateSegmentOrigin::Body, None);
-        let branch = TemplateIrBranch::new(
+        let root = builder.push_conditional_node(
             TemplateBranchSelector::Bool(bool_expression(true)),
             yes_node,
             None,
-            builder.store.next_expression_site_id(),
         );
-        let root = builder.push_branch_chain_node(vec![branch], None, None, None);
 
         builder.finish_template(
             root,
@@ -768,25 +740,23 @@ fn final_view_fold_branch_selects_body() {
     assert_eq!(
         emission_to_string(emission, &string_table),
         "yes",
-        "true branch body should be selected through the final view"
+        "true conditional body should be selected through the final view"
     );
 }
 
 #[test]
-fn final_view_fold_false_branch_no_else_is_no_output() {
+fn final_view_fold_false_conditional_is_no_output() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
         let yes_text = string_table.intern("yes");
         let yes_node = builder.push_text_node(yes_text, 3, TemplateSegmentOrigin::Body, None);
-        let branch = TemplateIrBranch::new(
+        let root = builder.push_conditional_node(
             TemplateBranchSelector::Bool(bool_expression(false)),
             yes_node,
             None,
-            builder.store.next_expression_site_id(),
         );
-        let root = builder.push_branch_chain_node(vec![branch], None, None, None);
 
         builder.finish_template(
             root,
@@ -803,44 +773,7 @@ fn final_view_fold_false_branch_no_else_is_no_output() {
     assert_eq!(
         emission,
         TemplateEmission::NoOutput,
-        "false branch with no else should produce structural no-output"
-    );
-}
-
-#[test]
-fn final_view_fold_false_branch_selects_fallback() {
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
-        let mut builder = TemplateIrBuilder::new(store);
-        let yes_text = string_table.intern("yes");
-        let no_text = string_table.intern("no");
-        let yes_node = builder.push_text_node(yes_text, 3, TemplateSegmentOrigin::Body, None);
-        let fallback_node = builder.push_text_node(no_text, 2, TemplateSegmentOrigin::Body, None);
-        let branch = TemplateIrBranch::new(
-            TemplateBranchSelector::Bool(bool_expression(false)),
-            yes_node,
-            None,
-            builder.store.next_expression_site_id(),
-        );
-        let root = builder.push_branch_chain_node(vec![branch], Some(fallback_node), None, None);
-
-        builder.finish_template(
-            root,
-            Style::default(),
-            TemplateType::String,
-            TemplateIrSummary::empty(),
-            None,
-        )
-    });
-
-    let emission = fold_final_view_fixture(&fixture, &mut string_table, TemplateTirPhase::Composed)
-        .expect("final view fold should succeed");
-
-    assert_eq!(
-        emission_to_string(emission, &string_table),
-        "no",
-        "fallback body should be selected when all branches are false"
+        "false conditional should produce structural no-output"
     );
 }
 

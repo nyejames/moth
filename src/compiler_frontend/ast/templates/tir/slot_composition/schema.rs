@@ -14,8 +14,8 @@ use crate::compiler_frontend::ast::templates::tir::summary::summarize_existing_r
 use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 use crate::compiler_frontend::ast::templates::tir::wrapper_sets::merge_wrapper_sets;
 use crate::compiler_frontend::ast::templates::tir::{
-    DerivedCount, DerivedTemplateMetadata, TemplateIr, TemplateIrBranch, TemplateIrId,
-    TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore, TemplateWrapperSetId,
+    DerivedCount, DerivedTemplateMetadata, TemplateIr, TemplateIrId, TemplateIrNode,
+    TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore, TemplateWrapperSetId,
     conditional_wrapper_set_for_control_flow, tir_node_is_control_flow_root,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -47,7 +47,7 @@ pub(crate) fn expand_tir_slot_placeholders_into(
 /// WHAT: dispatches on `TemplateIrNodeKind`, replacing `Slot` nodes with a
 ///       `Sequence` containing the routed contribution node IDs, and recursing
 ///       into structures that can contain further slot placeholders.
-/// WHY: wrapper templates may declare slots inside sequences, branches, loops,
+/// WHY: wrapper templates may declare slots inside sequences, conditionals, loops,
 ///      or nested child templates, so a single root walk must reach every
 ///      reachable slot and rebuild only the parts of the tree that changed.
 fn expand_tir_slot_placeholders_from_node(
@@ -192,63 +192,27 @@ fn expand_tir_slot_placeholders_from_node(
             )))
         }
 
-        TemplateIrNodeKind::BranchChain {
-            branches,
-            fallback,
-            else_marker,
+        TemplateIrNodeKind::Conditional {
+            selector,
+            selector_site_id,
+            body,
         } => {
-            let mut expanded_branches = Vec::with_capacity(branches.len());
-            let mut any_branch_changed = false;
+            let expanded_body_id = expand_tir_slot_placeholders_from_node(
+                store,
+                *body,
+                routed_contributions,
+                string_table,
+            )?;
 
-            for branch in branches {
-                let expanded_body_id = expand_tir_slot_placeholders_from_node(
-                    store,
-                    branch.body,
-                    routed_contributions,
-                    string_table,
-                )?;
-
-                if expanded_body_id != branch.body {
-                    any_branch_changed = true;
-                    expanded_branches.push(TemplateIrBranch::new(
-                        branch.selector.to_owned(),
-                        expanded_body_id,
-                        branch.span,
-                        branch.selector_site_id,
-                    ));
-                } else {
-                    expanded_branches.push(branch.to_owned());
-                }
-            }
-
-            let expanded_fallback = match fallback {
-                Some(fallback_id) => {
-                    let expanded_fallback_id = expand_tir_slot_placeholders_from_node(
-                        store,
-                        *fallback_id,
-                        routed_contributions,
-                        string_table,
-                    )?;
-
-                    if expanded_fallback_id != *fallback_id {
-                        any_branch_changed = true;
-                    }
-
-                    Some(expanded_fallback_id)
-                }
-
-                None => None,
-            };
-
-            if !any_branch_changed {
+            if expanded_body_id == *body {
                 return Ok(node_id);
             }
 
             Ok(store.push_node(TemplateIrNode::new(
-                TemplateIrNodeKind::BranchChain {
-                    branches: expanded_branches,
-                    fallback: expanded_fallback,
-                    else_marker: else_marker.to_owned(),
+                TemplateIrNodeKind::Conditional {
+                    selector: selector.to_owned(),
+                    selector_site_id: *selector_site_id,
+                    body: expanded_body_id,
                 },
                 node.span,
             )))
@@ -382,7 +346,7 @@ fn apply_tir_wrapper_sets_to_contribution(
 /// WHAT: for a `ChildTemplate` reference to a control-flow template, copies the
 ///       template, merges the wrapper set into its existing
 ///       `conditional_child_wrapper_set`, and returns a new `ChildTemplate`
-///       reference to the copy. For a direct `BranchChain`, `Loop` or runtime
+///       reference to the copy. For a direct `Conditional`, `Loop` or runtime
 ///       slot contribution marker, creates a new `TemplateIr` rooted at that
 ///       node, sets the wrapper set, and returns a `ChildTemplate` reference.
 /// WHY: storing wrappers on the contribution template lets folding or runtime
@@ -428,7 +392,7 @@ pub(crate) fn attach_conditional_wrapper_set(
             (new_reference, node.span.to_owned())
         }
 
-        TemplateIrNodeKind::BranchChain { .. }
+        TemplateIrNodeKind::Conditional { .. }
         | TemplateIrNodeKind::Loop { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => {
             let wrapper_count = required_wrapper_set_count(store, wrapper_set_id)?;

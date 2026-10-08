@@ -23,10 +23,10 @@ use crate::compiler_frontend::ast::templates::template_head_parser::{
 use crate::compiler_frontend::ast::templates::tir::TirExpressionOverlayId;
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReference;
 use crate::compiler_frontend::ast::templates::tir::{
-    ExpressionSiteId, SlotOccurrenceId, TemplateConstructionContext, TemplateIrBranch,
-    TemplateIrBuilder, TemplateIrId, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
-    TemplateIrSummary, TemplateLoopHeaderExpressionSites, TemplateTirPhase, TemplateTirReference,
-    TemplateViewContext, TirExpressionOverlay, TirSlotResolution, TirSlotResolutionOverlay,
+    ExpressionSiteId, SlotOccurrenceId, TemplateConstructionContext, TemplateIrBuilder,
+    TemplateIrId, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore, TemplateIrSummary,
+    TemplateLoopHeaderExpressionSites, TemplateTirPhase, TemplateTirReference, TemplateViewContext,
+    TirExpressionOverlay, TirSlotResolution, TirSlotResolutionOverlay,
 };
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::ast::templates::tir::{
@@ -169,16 +169,8 @@ fn imported_const_template_context(
         .with_file_visibility(Arc::new(file_visibility))
 }
 
-/// Builds a const-required option-capture template fixture directly as a
-/// module-local TIR branch-chain root in the context's module store.
-///
-/// WHAT: constructs the branch body (text "Hello " plus the capture reference)
-///       and fallback body (text "Guest") as TIR nodes, wraps them in a
-///       `BranchChain` node, finishes the template record, and returns a
-///       `Template` whose `tir_reference` points at that root.
-/// WHY: manual fixtures no longer need detached content or its TIR materializer.
-///      Validation and folding already consume the authoritative
-///      branch-chain root through the module-store `TirView`.
+/// Builds the store-backed option-capture fixture with a conditional body that
+/// emits the greeting and captured string.
 fn const_required_option_capture_template_with_direct_tir(
     scrutinee: Expression,
     capture_name: StringId,
@@ -199,8 +191,6 @@ fn const_required_option_capture_template_with_direct_tir(
     );
 
     let hello_id = string_table.intern("Hello ");
-    let guest_id = string_table.intern("Guest");
-
     let store_handle = context.template_ir_store();
 
     let template_id = {
@@ -214,11 +204,7 @@ fn const_required_option_capture_template_with_direct_tir(
             TemplateSegmentOrigin::Body,
             span,
         );
-        let branch_body = builder.push_sequence_node(vec![hello_node, capture_node], span);
-
-        let guest_node =
-            builder.push_text_node(guest_id, "Guest".len(), TemplateSegmentOrigin::Body, span);
-        let fallback_body = builder.push_sequence_node(vec![guest_node], span);
+        let conditional_body = builder.push_sequence_node(vec![hello_node, capture_node], span);
 
         let selector = TemplateBranchSelector::OptionPresentCapture {
             scrutinee,
@@ -230,19 +216,12 @@ fn const_required_option_capture_template_with_direct_tir(
                 binding_span: None,
             }),
         };
-        let branch = TemplateIrBranch::new(
-            selector,
-            branch_body,
-            span,
-            builder.store.next_expression_site_id(),
-        );
-        let branch_chain_root =
-            builder.push_branch_chain_node(vec![branch], Some(fallback_body), None, span);
+        let conditional_root = builder.push_conditional_node(selector, conditional_body, span);
 
         let summary = TemplateIrSummary {
-            estimated_output_bytes: "Hello ".len() + "Guest".len(),
-            text_node_count: 2,
-            text_byte_count: "Hello ".len() + "Guest".len(),
+            estimated_output_bytes: "Hello ".len(),
+            text_node_count: 1,
+            text_byte_count: "Hello ".len(),
             dynamic_expression_count: 1,
             max_depth: 2,
             has_control_flow: true,
@@ -250,7 +229,7 @@ fn const_required_option_capture_template_with_direct_tir(
         };
 
         builder.finish_template(
-            branch_chain_root,
+            conditional_root,
             Style::default(),
             TemplateType::String,
             summary,
@@ -610,49 +589,47 @@ fn assert_internal_template_error_contains(error: TemplateError, expected_messag
     );
 }
 
-fn find_first_branch_selector_site_id(
+fn find_first_conditional_selector_site_id(
     template: &Template,
     store: &TemplateIrStore,
 ) -> Option<ExpressionSiteId> {
     let reference = &template.tir_reference;
     let template_ir = store.get_template(reference.root)?;
-    find_branch_selector_site_id_in_subtree(store, template_ir.root)
+    find_conditional_selector_site_id_in_subtree(store, template_ir.root)
 }
 
-fn find_branch_selector_site_id_in_subtree(
+fn find_conditional_selector_site_id_in_subtree(
     store: &TemplateIrStore,
     node_id: TemplateIrNodeId,
 ) -> Option<ExpressionSiteId> {
     let node = store.get_node(node_id)?;
     match &node.kind {
-        TemplateIrNodeKind::BranchChain { branches, .. } => {
-            branches.first().map(|branch| branch.selector_site_id)
-        }
+        TemplateIrNodeKind::Conditional {
+            selector_site_id, ..
+        } => Some(*selector_site_id),
         TemplateIrNodeKind::Sequence { children } => children
             .iter()
-            .find_map(|child| find_branch_selector_site_id_in_subtree(store, *child)),
+            .find_map(|child| find_conditional_selector_site_id_in_subtree(store, *child)),
         _ => None,
     }
 }
 
-fn find_first_branch_span(template: &Template, store: &TemplateIrStore) -> Option<SourceSpan> {
+fn find_first_conditional_span(template: &Template, store: &TemplateIrStore) -> Option<SourceSpan> {
     let reference = &template.tir_reference;
     let template_ir = store.get_template(reference.root)?;
-    find_branch_span_in_subtree(store, template_ir.root)
+    find_conditional_span_in_subtree(store, template_ir.root)
 }
 
-fn find_branch_span_in_subtree(
+fn find_conditional_span_in_subtree(
     store: &TemplateIrStore,
     node_id: TemplateIrNodeId,
 ) -> Option<SourceSpan> {
     let node = store.get_node(node_id)?;
     match &node.kind {
-        TemplateIrNodeKind::BranchChain { branches, .. } => {
-            branches.first().and_then(|branch| branch.span)
-        }
+        TemplateIrNodeKind::Conditional { .. } => node.span,
         TemplateIrNodeKind::Sequence { children } => children
             .iter()
-            .find_map(|child| find_branch_span_in_subtree(store, *child)),
+            .find_map(|child| find_conditional_span_in_subtree(store, *child)),
         _ => None,
     }
 }
@@ -728,14 +705,9 @@ fn find_slot_occurrence_id_in_subtree(
         TemplateIrNodeKind::Sequence { children } => children
             .iter()
             .find_map(|child| find_slot_occurrence_id_in_subtree(store, *child)),
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => branches
-            .iter()
-            .find_map(|branch| find_slot_occurrence_id_in_subtree(store, branch.body))
-            .or_else(|| {
-                fallback.and_then(|fallback| find_slot_occurrence_id_in_subtree(store, fallback))
-            }),
+        TemplateIrNodeKind::Conditional { body, .. } => {
+            find_slot_occurrence_id_in_subtree(store, *body)
+        }
         TemplateIrNodeKind::Loop {
             body,
             aggregate_wrapper,
@@ -828,15 +800,8 @@ fn collect_static_tir_fragments(
             }
         }
 
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => {
-            for branch in branches {
-                collect_static_tir_fragments(branch.body, store, string_table, output);
-            }
-            if let Some(fallback) = fallback {
-                collect_static_tir_fragments(*fallback, store, string_table, output);
-            }
+        TemplateIrNodeKind::Conditional { body, .. } => {
+            collect_static_tir_fragments(*body, store, string_table, output);
         }
 
         TemplateIrNodeKind::Loop {
@@ -887,14 +852,7 @@ fn tir_subtree_contains_slot(
             .get_template(*template)
             .is_some_and(|template| tir_subtree_contains_slot(template.root, store)),
 
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => {
-            branches
-                .iter()
-                .any(|branch| tir_subtree_contains_slot(branch.body, store))
-                || fallback.is_some_and(|fallback| tir_subtree_contains_slot(fallback, store))
-        }
+        TemplateIrNodeKind::Conditional { body, .. } => tir_subtree_contains_slot(*body, store),
 
         TemplateIrNodeKind::Loop {
             body,
@@ -952,7 +910,7 @@ fn assert_invalid_template_structure(
     }
 }
 
-fn expect_branch_chain_node(template: &Template, context: &ScopeContext) -> TemplateIrNodeId {
+fn expect_conditional_node(template: &Template, context: &ScopeContext) -> TemplateIrNodeId {
     let store = context.template_ir_store.borrow();
     let template_id = template.tir_reference.root;
     let control_flow_node_id = store
@@ -963,8 +921,8 @@ fn expect_branch_chain_node(template: &Template, context: &ScopeContext) -> Temp
         .get_node(control_flow_node_id)
         .expect("control-flow node should exist in the store");
     assert!(
-        matches!(node.kind, TemplateIrNodeKind::BranchChain { .. }),
-        "expected BranchChain control-flow node"
+        matches!(node.kind, TemplateIrNodeKind::Conditional { .. }),
+        "expected Conditional control-flow node"
     );
     control_flow_node_id
 }
@@ -986,29 +944,18 @@ fn expect_loop_node(template: &Template, context: &ScopeContext) -> TemplateIrNo
     control_flow_node_id
 }
 
-fn first_branch_body_node(
-    branch_chain_node: TemplateIrNodeId,
-    context: &ScopeContext,
-) -> TemplateIrNodeId {
-    branch_body_node(branch_chain_node, 0, context)
-}
-
-fn branch_body_node(
-    branch_chain_node: TemplateIrNodeId,
-    index: usize,
+fn conditional_body_node(
+    conditional_node: TemplateIrNodeId,
     context: &ScopeContext,
 ) -> TemplateIrNodeId {
     let store = context.template_ir_store.borrow();
     let node = store
-        .get_node(branch_chain_node)
-        .expect("branch chain node should exist");
-    let TemplateIrNodeKind::BranchChain { branches, .. } = &node.kind else {
-        panic!("expected BranchChain node");
+        .get_node(conditional_node)
+        .expect("conditional node should exist");
+    let TemplateIrNodeKind::Conditional { body, .. } = &node.kind else {
+        panic!("expected Conditional node");
     };
-    branches
-        .get(index)
-        .unwrap_or_else(|| panic!("branch chain should contain branch {index}"))
-        .body
+    *body
 }
 
 fn loop_body_node(loop_node: TemplateIrNodeId, context: &ScopeContext) -> TemplateIrNodeId {
@@ -1039,13 +986,13 @@ fn loop_aggregate_wrapper_node(
 }
 
 /// Returns true when the TIR subtree rooted at `node_id` contains a
-/// `BranchChain` or `Loop` node (i.e. a control-flow child template).
+/// `Conditional` or `Loop` node (i.e. a control-flow child template).
 fn tir_subtree_contains_control_flow(node_id: TemplateIrNodeId, store: &TemplateIrStore) -> bool {
     let Some(node) = store.get_node(node_id) else {
         return false;
     };
     match &node.kind {
-        TemplateIrNodeKind::BranchChain { .. } | TemplateIrNodeKind::Loop { .. } => true,
+        TemplateIrNodeKind::Conditional { .. } | TemplateIrNodeKind::Loop { .. } => true,
         TemplateIrNodeKind::Sequence { children } => children
             .iter()
             .any(|child| tir_subtree_contains_control_flow(*child, store)),

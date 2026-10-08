@@ -15,13 +15,11 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotPlaceholder, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateElseMarker, TemplateLoopHeader,
+    TemplateBranchSelector, TemplateLoopHeader,
 };
-use crate::compiler_frontend::ast::templates::tir::ids::{
-    ExpressionSiteId, TemplateIrId, TemplateIrNodeId,
-};
+use crate::compiler_frontend::ast::templates::tir::ids::{TemplateIrId, TemplateIrNodeId};
 use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIr, TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind,
+    TemplateIr, TemplateIrNode, TemplateIrNodeKind,
 };
 use crate::compiler_frontend::ast::templates::tir::overlays::TemplateViewContext;
 use crate::compiler_frontend::ast::templates::tir::refs::{
@@ -72,10 +70,6 @@ impl TemplateConstructionContext {
     /// Parser-recorded control-flow owner, if this template recorded one.
     pub(crate) fn control_flow_node_id(&self) -> Option<TemplateIrNodeId> {
         self.control_flow_node_id
-    }
-
-    pub(crate) fn next_expression_site_id(&self) -> ExpressionSiteId {
-        self.store.borrow_mut().next_expression_site_id()
     }
 
     // -------------------------
@@ -220,20 +214,20 @@ impl TemplateConstructionContext {
     //  Recording — control flow
     // -------------------------
 
-    pub(crate) fn record_branch_chain(
+    pub(crate) fn record_conditional(
         &mut self,
-        branches: Vec<TemplateIrBranch>,
-        fallback: Option<TemplateIrNodeId>,
-        else_marker: Option<TemplateElseMarker>,
+        selector: TemplateBranchSelector,
+        body: TemplateIrNodeId,
         span: Option<SourceSpan>,
     ) {
         let node_id = {
             let mut store = self.store.borrow_mut();
+            let selector_site_id = store.next_expression_site_id();
             store.push_node(TemplateIrNode::new(
-                TemplateIrNodeKind::BranchChain {
-                    branches,
-                    fallback,
-                    else_marker,
+                TemplateIrNodeKind::Conditional {
+                    selector: Box::new(selector),
+                    selector_site_id,
+                    body,
                 },
                 span,
             ))
@@ -301,16 +295,16 @@ impl TemplateConstructionContext {
         let mut store = store.borrow_mut();
 
         // Render-unit preparation moves a control-flow template's shared head
-        // prefix into branch bodies or the loop aggregate wrapper. The owner
-        // root must not retain those prefix nodes as ordinary siblings, or
-        // skipped branches and zero-iteration loops still render the wrapper
+        // prefix into its conditional body or loop aggregate wrapper. The
+        // owner root must not retain those prefix nodes as ordinary siblings, or
+        // unselected conditionals and zero-iteration loops still render the wrapper
         // shell.
         let root_children: Vec<TemplateIrNodeId> = if control_flow_node_id.is_some() {
             let first_control_flow_index = children.iter().position(|&child_id| {
                 store.get_node(child_id).is_some_and(|node| {
                     matches!(
                         node.kind,
-                        TemplateIrNodeKind::BranchChain { .. } | TemplateIrNodeKind::Loop { .. }
+                        TemplateIrNodeKind::Conditional { .. } | TemplateIrNodeKind::Loop { .. }
                     )
                 })
             });
@@ -333,7 +327,7 @@ impl TemplateConstructionContext {
                 if store.get_node(*child_id).is_some_and(|node| {
                     matches!(
                         node.kind,
-                        TemplateIrNodeKind::BranchChain { .. } | TemplateIrNodeKind::Loop { .. }
+                        TemplateIrNodeKind::Conditional { .. } | TemplateIrNodeKind::Loop { .. }
                     )
                 }) =>
             {

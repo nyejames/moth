@@ -14,7 +14,7 @@ use crate::compiler_frontend::ast::templates::tir::ids::{
     TemplateSlotPlanId,
 };
 use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind, TemplateLoopHeaderExpressionSites,
+    TemplateIrNode, TemplateIrNodeKind, TemplateLoopHeaderExpressionSites,
 };
 use crate::compiler_frontend::ast::templates::tir::slot_plan::convert_runtime_slot_site;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
@@ -252,54 +252,31 @@ fn copy_tir_node_with_active_slot_plan(
             Ok(node_id)
         }
 
-        TemplateIrNodeKind::BranchChain {
-            branches,
-            fallback,
-            else_marker,
+        TemplateIrNodeKind::Conditional {
+            selector,
+            selector_site_id,
+            body,
         } => {
             copy_state.record_control_flow();
             copy_state.enter_depth();
-            let new_branches = branches
-                .into_iter()
-                .map(|branch| -> Result<TemplateIrBranch, TemplateError> {
-                    let new_body = copy_tir_node_with_active_slot_plan(
-                        branch.body,
-                        active_slot_plan,
-                        store,
-                        copy_state,
-                        identity_remap,
-                    )?;
-
-                    let copied_selector_site_id = remap_expression_site_id(store);
-                    identity_remap
-                        .expression_sites
-                        .insert(branch.selector_site_id, copied_selector_site_id);
-                    Ok(TemplateIrBranch::new(
-                        branch.selector,
-                        new_body,
-                        branch.span,
-                        copied_selector_site_id,
-                    ))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let new_fallback = fallback
-                .map(|fallback_id| {
-                    copy_tir_node_with_active_slot_plan(
-                        fallback_id,
-                        active_slot_plan,
-                        store,
-                        copy_state,
-                        identity_remap,
-                    )
-                })
-                .transpose()?;
+            let new_body = copy_tir_node_with_active_slot_plan(
+                body,
+                active_slot_plan,
+                store,
+                copy_state,
+                identity_remap,
+            )?;
+            let copied_selector_site_id = remap_expression_site_id(store);
+            identity_remap
+                .expression_sites
+                .insert(selector_site_id, copied_selector_site_id);
             copy_state.exit_depth();
 
             let node_id = store.push_node(TemplateIrNode::new(
-                TemplateIrNodeKind::BranchChain {
-                    branches: new_branches,
-                    fallback: new_fallback,
-                    else_marker,
+                TemplateIrNodeKind::Conditional {
+                    selector,
+                    selector_site_id: copied_selector_site_id,
+                    body: new_body,
                 },
                 span,
             ));

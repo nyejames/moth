@@ -28,9 +28,7 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
 };
 use crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotContributionSourceId;
 use crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotSiteId;
-use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIr, TemplateIrBranch, TemplateIrNode,
-};
+use crate::compiler_frontend::ast::templates::tir::node::{TemplateIr, TemplateIrNode};
 use crate::compiler_frontend::ast::templates::tir::refs::{
     TemplateTirChildReference, TemplateTirReference, TemplateWrapperReference,
 };
@@ -227,25 +225,23 @@ fn preparation_classifies_slot_insert_helpers() {
 }
 
 #[test]
-fn preparation_mode_controls_const_required_branch_validation() {
-    let build_branch = |builder: &mut TemplateIrBuilder<'_>, table: &mut StringTable| {
+fn preparation_mode_controls_const_required_conditional_validation() {
+    let build_conditional = |builder: &mut TemplateIrBuilder<'_>, table: &mut StringTable| {
         let body_text = table.intern("body");
         let body = builder.push_text_node(body_text, 4, TemplateSegmentOrigin::Body, None);
-        let branch = TemplateIrBranch::new(
+        builder.push_conditional_node(
             TemplateBranchSelector::Bool(runtime_expression(table)),
             body,
             None,
-            builder.store.next_expression_site_id(),
-        );
-        builder.push_branch_chain_node(vec![branch], None, None, None)
+        )
     };
 
     let (value, _) = prepare_root(
         TemplateType::StringFunction,
-        build_branch,
+        build_conditional,
         TemplatePreparationMode::Value,
     )
-    .expect("Value mode should preserve lazy branch runtime semantics");
+    .expect("Value mode should preserve lazy conditional runtime semantics");
     assert!(matches!(
         value.outcome,
         TemplatePreparationOutcome::Runtime(_)
@@ -253,12 +249,12 @@ fn preparation_mode_controls_const_required_branch_validation() {
 
     let const_required = prepare_root(
         TemplateType::StringFunction,
-        build_branch,
+        build_conditional,
         TemplatePreparationMode::ConstRequired,
     )
-    .expect_err("ConstRequired mode should retain the branch diagnostic");
+    .expect_err("ConstRequired mode should retain the conditional diagnostic");
     let TemplateError::Diagnostic(diagnostic) = const_required else {
-        panic!("ConstRequired branch rejection should remain a source diagnostic");
+        panic!("ConstRequired conditional rejection should remain a source diagnostic");
     };
     assert!(matches!(
         diagnostic.payload,
@@ -790,13 +786,6 @@ fn runtime_contribution_constness_propagates_option_capture_bindings() {
             None,
         );
         let body = builder.push_sequence_node(vec![body_expression], None);
-        let fallback_text = builder.push_text_node(
-            string_table.intern("fallback"),
-            "fallback".len(),
-            TemplateSegmentOrigin::Body,
-            None,
-        );
-        let fallback = builder.push_sequence_node(vec![fallback_text], None);
         let selector = TemplateBranchSelector::OptionPresentCapture {
             scrutinee,
             pattern: Box::new(MatchPattern::OptionPresentCapture {
@@ -807,13 +796,7 @@ fn runtime_contribution_constness_propagates_option_capture_bindings() {
                 binding_span: None,
             }),
         };
-        let branch = TemplateIrBranch::new(
-            selector,
-            body,
-            None,
-            builder.store.next_expression_site_id(),
-        );
-        builder.push_branch_chain_node(vec![branch], Some(fallback), None, None)
+        builder.push_conditional_node(selector, body, None)
     };
 
     assert!(
@@ -823,7 +806,7 @@ fn runtime_contribution_constness_propagates_option_capture_bindings() {
             &string_table,
         )
         .expect("constness query should preserve store authority"),
-        "a const option capture must make its branch binding available to the body"
+        "a const option capture must make its binding available to the conditional body"
     );
 }
 

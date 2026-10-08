@@ -4,7 +4,7 @@
 //! TIR reference for linear templates. Linear templates format directly from
 //! a TIR view, making TIR formatting the sole production authority.
 //!
-//! WHY: Normal templates, template `if` branches, and template `loop` bodies
+//! WHY: Normal templates, template `if` bodies, and template `loop` bodies
 //! all need the same composition and formatting rules. Keeping the render-unit
 //! shaping here prevents control-flow support from growing a parallel template
 //! pipeline.
@@ -15,7 +15,7 @@ use crate::compiler_frontend::ast::templates::template::Style;
 use crate::compiler_frontend::ast::templates::tir::{
     ControlFlowBodyKind, DerivedTemplateMetadata, TemplateConstructionContext, TemplateIrNodeId,
     TemplateIrNodeKind, TemplateTirPhase, TemplateTirReference,
-    build_branch_body_candidate_root_from_tir_nodes, compose_tir_head_chain_from_root,
+    build_conditional_body_candidate_root_from_tir_nodes, compose_tir_head_chain_from_root,
     format_tir_body_root, head_prefix_tir_nodes, prepare_loop_aggregate_wrapper,
     run_tir_formatter_with_warnings, sequence_children,
 };
@@ -74,12 +74,11 @@ struct TirBodyRootInput<'a> {
     root_children: &'a [TemplateIrNodeId],
     style: &'a Style,
     body_root: TemplateIrNodeId,
-    body_kind: ControlFlowBodyKind,
     control_flow_node_id: TemplateIrNodeId,
 }
 
-/// Prepares a branch/fallback body TIR root from parser-emitted head-prefix
-/// nodes plus the parsed body root.
+/// Prepares a conditional body TIR root from parser-emitted head-prefix nodes
+/// plus the parsed body root.
 ///
 /// WHAT: reuses the owning template's parser-emitted head-prefix TIR nodes,
 ///       formats the parsed body root, builds a candidate root node combining
@@ -92,7 +91,7 @@ struct TirBodyRootInput<'a> {
 ///      onto the owning TIR control-flow node; a missing store/root or
 ///      impossible replacement is an internal `CompilerError`, not a silent
 ///      fallback.
-fn prepare_branch_body_tir_root(
+fn prepare_conditional_body_tir_root(
     input: TirBodyRootInput<'_>,
     context: &ScopeContext,
     string_table: &mut StringTable,
@@ -101,7 +100,6 @@ fn prepare_branch_body_tir_root(
         root_children,
         style,
         body_root,
-        body_kind,
         control_flow_node_id,
     } = input;
 
@@ -128,7 +126,7 @@ fn prepare_branch_body_tir_root(
 
     // Build a candidate root node combining the head-prefix nodes with the body
     // children, then compose so head-chain wrappers apply to the body.
-    let candidate_root = build_branch_body_candidate_root_from_tir_nodes(
+    let candidate_root = build_conditional_body_candidate_root_from_tir_nodes(
         &head_prefix_nodes,
         &body_children,
         &mut store,
@@ -137,11 +135,15 @@ fn prepare_branch_body_tir_root(
         compose_tir_head_chain_from_root(&mut store, candidate_root, string_table, true)?;
 
     store
-        .replace_control_flow_body(control_flow_node_id, body_kind, composed_root)
+        .replace_control_flow_body(
+            control_flow_node_id,
+            ControlFlowBodyKind::ConditionalBody,
+            composed_root,
+        )
         .map_err(TemplateError::from)
 }
 
-/// Shared inputs for preparing one branch, fallback or loop body.
+/// Shared inputs for preparing one conditional or loop body.
 struct ControlFlowBodyPreparationContext<'a> {
     construction_context: &'a TemplateConstructionContext,
     style: &'a Style,
@@ -149,21 +151,19 @@ struct ControlFlowBodyPreparationContext<'a> {
     string_table: &'a mut StringTable,
 }
 
-/// Prepares one branch or fallback body.
+/// Prepares the conditional body.
 ///
 /// WHAT: reads the parsed body root node ID from the owning TIR control-flow
 ///       node, derives the prepared TIR root from parser-emitted head-prefix
 ///       nodes plus that body root, formats it via the TIR-native formatter,
 ///       then applies head-chain composition. The prepared root is installed
 ///       directly onto the TIR control-flow node.
-/// WHY: branch and fallback bodies share the same head-prefix + body shape, so
-///      one preparation owner keeps TIR formatting and root installation in
-///      sync without duplicating the flow per arm.
-fn prepare_branch_or_fallback_body(
+/// WHY: the conditional body includes its head wrapper, while loop bodies defer
+///      that wrapper to aggregate preparation.
+fn prepare_conditional_body(
     ctx: ControlFlowBodyPreparationContext<'_>,
     control_flow_node_id: TemplateIrNodeId,
     body_root: TemplateIrNodeId,
-    body_kind: ControlFlowBodyKind,
 ) -> Result<(), TemplateError> {
     let ControlFlowBodyPreparationContext {
         construction_context,
@@ -176,12 +176,11 @@ fn prepare_branch_or_fallback_body(
     // the TIR-derived path can reuse module-local head-prefix nodes.
     let root_children = construction_context.root_children().to_vec();
 
-    prepare_branch_body_tir_root(
+    prepare_conditional_body_tir_root(
         TirBodyRootInput {
             root_children: &root_children,
             style,
             body_root,
-            body_kind,
             control_flow_node_id,
         },
         context,
@@ -254,10 +253,10 @@ fn prepare_loop_body(
 
 /// Applies composition and formatting to a structured control-flow template.
 ///
-/// For `if`, each branch is a complete TIR render unit that includes the shared
-/// head prefix. For `loop`, the per-iteration body is finalized independently
-/// and the parser-emitted head prefix becomes an aggregate-wrapper TIR subtree,
-/// so later folding and lowering apply it once around the aggregate.
+/// For `if`, the conditional body is a complete TIR render unit that includes
+/// the shared head prefix. For `loop`, the per-iteration body is finalized
+/// independently and the parser-emitted head prefix becomes an aggregate-wrapper
+/// TIR subtree, so later folding and lowering apply it once around the aggregate.
 ///
 /// After each body is formatted, this installs the prepared body root directly
 /// onto the owning parser TIR control-flow node. The control-flow node and its
@@ -280,7 +279,7 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_
     } = request;
 
     // Locate the owning TIR control-flow node through the construction context.
-    // The body parser already constructed the BranchChain/Loop node and its
+    // The body parser already constructed the Conditional/Loop node and its
     // body node IDs in the TIR store; render-unit preparation reads and
     // updates them directly.
     let control_flow_node_id = construction_context.control_flow_node_id().ok_or_else(|| {
@@ -289,10 +288,10 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_
         )
     })?;
 
-    // Extract only the body node IDs needed for preparation. The RefCell
+    // Extract the body kind and ID before preparation. The RefCell
     // borrow must end before the mutable store operations below, so the
     // IDs are copied rather than holding a borrowed reference to the kind.
-    let (branch_bodies, fallback_body, loop_body) = {
+    let (body_kind, body_root) = {
         let store = context.template_ir_store.borrow();
         let node = store.get_node(control_flow_node_id).ok_or_else(|| {
             CompilerError::compiler_error(
@@ -300,100 +299,43 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_
             )
         })?;
         match &node.kind {
-            TemplateIrNodeKind::BranchChain {
-                branches, fallback, ..
-            } => {
-                let bodies: Vec<_> = branches.iter().map(|b| b.body).collect();
-                (Some(bodies), *fallback, None)
+            TemplateIrNodeKind::Conditional { body, .. } => {
+                (ControlFlowBodyKind::ConditionalBody, *body)
             }
-            TemplateIrNodeKind::Loop { body, .. } => (None, None, Some(*body)),
-            _ => (None, None, None),
+            TemplateIrNodeKind::Loop { body, .. } => (ControlFlowBodyKind::LoopBody, *body),
+            _ => {
+                return Err(CompilerError::compiler_error(
+                    "Control-flow node was neither a Conditional nor a Loop during render-unit preparation.",
+                )
+                .into());
+            }
         }
     };
 
-    match (branch_bodies, fallback_body, loop_body) {
-        (Some(branch_bodies), fallback, _) => {
-            prepare_branch_chain_render_units(
-                control_flow_node_id,
-                &branch_bodies,
-                fallback,
+    match body_kind {
+        ControlFlowBodyKind::ConditionalBody => {
+            prepare_conditional_body(
                 ControlFlowBodyPreparationContext {
                     construction_context,
                     style,
                     context,
                     string_table,
                 },
+                control_flow_node_id,
+                body_root,
             )?;
         }
 
-        (_, _, Some(body)) => {
+        ControlFlowBodyKind::LoopBody => {
             prepare_loop_render_units(
                 control_flow_node_id,
-                body,
+                body_root,
                 construction_context,
                 style,
                 context,
                 string_table,
             )?;
         }
-
-        _ => {
-            return Err(CompilerError::compiler_error(
-                "Control-flow node was neither a BranchChain nor a Loop during render-unit preparation.",
-            )
-            .into());
-        }
-    }
-
-    Ok(())
-}
-
-/// Prepares every branch and fallback body in a branch chain.
-///
-/// WHAT: reads branch and fallback body node IDs from the TIR `BranchChain`
-///       node, prepares each body, and installs the prepared root directly onto
-///       the TIR node. Body node IDs are read before preparation starts so the
-///       store can be mutated during each body's format/compose/install cycle
-///       without holding a borrow across the mutable phase.
-fn prepare_branch_chain_render_units(
-    control_flow_node_id: TemplateIrNodeId,
-    branch_bodies: &[TemplateIrNodeId],
-    fallback: Option<TemplateIrNodeId>,
-    ctx: ControlFlowBodyPreparationContext<'_>,
-) -> Result<(), TemplateError> {
-    let ControlFlowBodyPreparationContext {
-        construction_context,
-        style,
-        context,
-        string_table,
-    } = ctx;
-
-    for (index, &body) in branch_bodies.iter().enumerate() {
-        prepare_branch_or_fallback_body(
-            ControlFlowBodyPreparationContext {
-                construction_context,
-                style,
-                context,
-                string_table: &mut *string_table,
-            },
-            control_flow_node_id,
-            body,
-            ControlFlowBodyKind::Branch { index },
-        )?;
-    }
-
-    if let Some(fallback_body) = fallback {
-        prepare_branch_or_fallback_body(
-            ControlFlowBodyPreparationContext {
-                construction_context,
-                style,
-                context,
-                string_table: &mut *string_table,
-            },
-            control_flow_node_id,
-            fallback_body,
-            ControlFlowBodyKind::Fallback,
-        )?;
     }
 
     Ok(())
@@ -414,7 +356,7 @@ fn prepare_loop_render_units(
     string_table: &mut StringTable,
 ) -> Result<(), TemplateError> {
     // Prepare the loop body with the same format-once + TIR pattern used
-    // by branch/fallback bodies. Loop bodies skip the shared head prefix
+    // by the conditional body. Loop bodies skip the shared head prefix
     // because the owning head wraps the aggregate output once, not each
     // iteration.
     prepare_loop_body(

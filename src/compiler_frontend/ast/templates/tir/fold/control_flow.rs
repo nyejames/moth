@@ -18,15 +18,14 @@ use crate::compiler_frontend::ast::templates::template_folding::{
     fold_bool_condition_with_provenance, fold_conditional_loop_const_condition,
     resolve_fold_bindings_in_expression, selected_option_capture_payload_with_provenance,
 };
-use crate::compiler_frontend::ast::templates::tir::ids::TemplateIrNodeId;
-use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIrBranch, TemplateLoopHeaderExpressionSites,
-};
+use crate::compiler_frontend::ast::templates::tir::ids::{ExpressionSiteId, TemplateIrNodeId};
+use crate::compiler_frontend::ast::templates::tir::node::TemplateLoopHeaderExpressionSites;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 
 use super::estimate::{
@@ -247,9 +246,15 @@ fn fold_source_constant_rpn(
     Ok(Some(folded))
 }
 
-pub(super) fn fold_tir_branch_chain_with_insertion(
-    branches: &[TemplateIrBranch],
-    fallback: Option<TemplateIrNodeId>,
+#[allow(
+    clippy::too_many_arguments,
+    reason = "The selector, site, body, span and fold owners are independent inputs at this TIR boundary."
+)]
+pub(super) fn fold_tir_conditional_with_insertion(
+    selector: &TemplateBranchSelector,
+    selector_site_id: ExpressionSiteId,
+    body_id: TemplateIrNodeId,
+    node_span: Option<SourceSpan>,
     output_state: &mut FoldOutputState,
     fold_context: &mut TirFoldContext<'_>,
     fold_input: &FoldTraversalInput<'_, '_>,
@@ -257,93 +262,57 @@ pub(super) fn fold_tir_branch_chain_with_insertion(
 ) -> Result<Option<TemplateLoopControlKind>, TemplateError> {
     if insertion.is_aggregate() {
         return Err(CompilerError::compiler_error(
-            "TIR fold: malformed aggregate wrapper subtree contains a branch chain.",
+            "TIR fold: malformed aggregate wrapper subtree contains a conditional.",
         )
         .into());
     }
 
-    for branch in branches {
-        let effective_expression = fold_input
-            .effective_expression_for_site(branch.selector_site_id)?
-            .unwrap_or_else(|| branch.condition_expression());
+    let effective_expression = fold_input
+        .effective_expression_for_site(selector_site_id)?
+        .unwrap_or_else(|| selector.condition_expression());
 
-        let selected = match &branch.selector {
-            TemplateBranchSelector::Bool(_) => {
-                let (selected, condition_provenance) = fold_bool_condition_with_provenance(
-                    effective_expression,
-                    branch.span,
+    match selector {
+        TemplateBranchSelector::Bool(_) => {
+            let (selected, condition_provenance) =
+                fold_bool_condition_with_provenance(effective_expression, node_span, fold_context)?;
+            output_state.provenance.merge(&condition_provenance);
+
+            if selected {
+                fold_tir_node_into_buffer(
+                    body_id,
+                    output_state,
                     fold_context,
-                )?;
-                output_state.provenance.merge(&condition_provenance);
-                selected
+                    fold_input,
+                    insertion,
+                )
+            } else {
+                Ok(None)
             }
-            TemplateBranchSelector::OptionPresentCapture { pattern, .. } => {
-                let (payload, capture_provenance) =
-                    selected_option_capture_payload_with_provenance(
-                        effective_expression,
-                        pattern,
-                        fold_input.view.store(),
-                        fold_context,
-                    )?;
-                output_state.provenance.merge(&capture_provenance);
-                if let Some(payload) = payload {
-                    return fold_tir_branch_with_insertion(
-                        branch,
-                        [payload],
-                        output_state,
-                        fold_context,
-                        fold_input,
-                        insertion,
-                    );
-                }
+        }
+        TemplateBranchSelector::OptionPresentCapture { pattern, .. } => {
+            let (payload, capture_provenance) = selected_option_capture_payload_with_provenance(
+                effective_expression,
+                pattern,
+                fold_input.view.store(),
+                fold_context,
+            )?;
+            output_state.provenance.merge(&capture_provenance);
+            let Some(payload) = payload else {
+                return Ok(None);
+            };
 
-                false
-            }
-        };
-
-        if selected {
-            return fold_tir_node_into_buffer(
-                branch.body,
+            let previous_bindings_len = fold_context.push_bindings([payload]);
+            let result = fold_tir_node_into_buffer(
+                body_id,
                 output_state,
                 fold_context,
                 fold_input,
                 insertion,
             );
+            fold_context.restore_bindings(previous_bindings_len);
+            result
         }
     }
-
-    let Some(fallback_id) = fallback else {
-        return Ok(None);
-    };
-
-    fold_tir_node_into_buffer(
-        fallback_id,
-        output_state,
-        fold_context,
-        fold_input,
-        insertion,
-    )
-}
-
-fn fold_tir_branch_with_insertion<const N: usize>(
-    branch: &TemplateIrBranch,
-    bindings: [TemplateFoldBinding; N],
-    output_state: &mut FoldOutputState,
-    fold_context: &mut TirFoldContext<'_>,
-    fold_input: &FoldTraversalInput<'_, '_>,
-    insertion: FoldInsertion<'_>,
-) -> Result<Option<TemplateLoopControlKind>, TemplateError> {
-    let previous_bindings_len = fold_context.push_bindings(bindings);
-    let result = fold_tir_node_into_buffer(
-        branch.body,
-        output_state,
-        fold_context,
-        fold_input,
-        insertion,
-    );
-    fold_context.restore_bindings(previous_bindings_len);
-
-    result
 }
 
 /// Folds a TIR loop node, including its aggregate wrapper.

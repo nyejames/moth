@@ -72,7 +72,7 @@ enum RuntimeControlFlowArtifact {
 /// Validates every reachable runtime control-flow body through a module-store
 /// `TirView`.
 ///
-/// WHAT: walks the view's structural tree, checking `BranchChain` and `Loop`
+/// WHAT: walks the view's structural tree, checking `Conditional` and `Loop`
 ///       bodies for escaped `$insert(...)` contributions. Receiver `$slot`
 ///       markers may remain until a later wrapper or parent routes them.
 ///       Nested child-template traversal descends through module-store child
@@ -102,9 +102,9 @@ fn validate_runtime_tir_view_control_flow_slot_artifacts(
 
 /// Validates every reachable runtime control-flow body in a module-store view.
 ///
-/// WHAT: walks the structural tree from `node_ref`. For each `BranchChain` and
-///       `Loop` body, checks for unresolved slots and escaped `$insert(...)`
-///       contributions. Recurses through `Sequence`, control-flow bodies,
+/// WHAT: walks the structural tree from `node_ref`. For each `Conditional` and
+///       `Loop` body, checks for escaped `$insert(...)` contributions. Recurses
+///       through `Sequence`, control-flow bodies,
 ///       aggregate wrappers and nested child views. Missing effective-node
 ///       authority propagates as an internal error.
 fn validate_runtime_tir_view_node(
@@ -114,22 +114,12 @@ fn validate_runtime_tir_view_node(
 ) -> Result<(), TemplateError> {
     let node = view.effective_node(node_ref)?;
     match &node.kind {
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => {
-            let branches = branches.clone();
-            let fallback = *fallback;
+        TemplateIrNodeKind::Conditional { body, .. } => {
+            let body = *body;
             let node_span = node.span;
 
-            for branch in branches {
-                validate_runtime_tir_view_control_flow_body(view, branch.body, branch.span)?;
-                validate_runtime_tir_view_node(view, branch.body, visiting)?;
-            }
-
-            if let Some(fallback_id) = fallback {
-                validate_runtime_tir_view_control_flow_body(view, fallback_id, node_span)?;
-                validate_runtime_tir_view_node(view, fallback_id, visiting)?;
-            }
+            validate_runtime_tir_view_control_flow_body(view, body, node_span)?;
+            validate_runtime_tir_view_node(view, body, visiting)?;
         }
 
         TemplateIrNodeKind::Loop {
@@ -256,25 +246,8 @@ fn tir_view_subtree_contains_runtime_artifact(
             Ok(false)
         }
 
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => {
-            let bodies: Vec<_> = branches.iter().map(|branch| branch.body).collect();
-            let fallback = *fallback;
-
-            for body in bodies {
-                if tir_view_subtree_contains_runtime_artifact(view, body, artifact, visiting)? {
-                    return Ok(true);
-                }
-            }
-
-            if let Some(fallback) = fallback
-                && tir_view_subtree_contains_runtime_artifact(view, fallback, artifact, visiting)?
-            {
-                return Ok(true);
-            }
-
-            Ok(false)
+        TemplateIrNodeKind::Conditional { body, .. } => {
+            tir_view_subtree_contains_runtime_artifact(view, *body, artifact, visiting)
         }
 
         TemplateIrNodeKind::Loop {

@@ -5,7 +5,7 @@
 //! wrapper sets and `$fresh` suppression for child-template occurrences on a
 //! template's authoritative structural root. Wrapper-context overlays are the
 //! sole owner of direct-child inherited wrappers, including children inside
-//! branch and loop bodies.
+//! conditional and loop bodies.
 //!
 //! WHY: wrapper sets and wrapper-context overlays both describe how
 //! `$children(..)` wrappers apply to child-template boundaries. Keeping set
@@ -299,7 +299,7 @@ struct PendingWrapperContext {
 /// Recursively collects wrapper contexts for child-template occurrences in the
 /// structural tree rooted at `node_id`.
 ///
-/// WHAT: traverses `Sequence`, `BranchChain`, and `Loop` structural nodes to
+/// WHAT: traverses `Sequence`, `Conditional`, and `Loop` structural nodes to
 ///       find `ChildTemplate` occurrences. For each occurrence, resolves the
 ///       child template's metadata directly from the module store and records
 ///       `$fresh` suppression or inherited wrapper-set context.
@@ -354,15 +354,8 @@ fn collect_wrapper_contexts(
                 collect_wrapper_contexts(store, *child_id, inherited_wrapper_refs, contexts)?;
             }
         }
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => {
-            for branch in branches {
-                collect_wrapper_contexts(store, branch.body, inherited_wrapper_refs, contexts)?;
-            }
-            if let Some(fallback_id) = fallback {
-                collect_wrapper_contexts(store, *fallback_id, inherited_wrapper_refs, contexts)?;
-            }
+        TemplateIrNodeKind::Conditional { body, .. } => {
+            collect_wrapper_contexts(store, *body, inherited_wrapper_refs, contexts)?;
         }
         TemplateIrNodeKind::Loop {
             body,

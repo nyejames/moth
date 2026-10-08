@@ -7,7 +7,7 @@
 //!      inspect the same expression-bearing TIR nodes; centralizing the walks in
 //!      TIR keeps the traversal authoritative and removes near-duplicate local
 //!      helpers from AST finalization. The `TirView` walk reads effective
-//!      expression overlays for dynamic-expression splices, branch selectors
+//!      expression overlays for dynamic-expression splices, conditional selectors
 //!      and loop headers, and recurses into child-template and
 //!      insert-contribution views through one shared visited set. The
 //!      nested-expression walker additionally recurses into `ExpressionKind`
@@ -28,12 +28,12 @@ use crate::compiler_frontend::ast::templates::tir::{TemplateIrNodeId, TemplateTi
 use crate::compiler_frontend::compiler_errors::CompilerError;
 
 /// Walks every expression payload reachable from `view`, reading effective
-/// expression overlays for dynamic-expression nodes, branch selectors, and
+/// expression overlays for dynamic-expression nodes, conditional selectors, and
 /// loop headers.
 ///
 /// WHAT: recursively traverses the structural root of `view` and its
 ///       module-local child-template and insert-contribution descendants.
-///       Dynamic-expression splices, branch selectors and loop-header
+///       Dynamic-expression splices, conditional selectors and loop-header
 ///       expressions prefer the override expression provided by each effective
 ///       view, falling back to the stored structural expression. Insert
 ///       contributions recurse through a child `TirView` that inherits the
@@ -235,29 +235,16 @@ fn walk_tir_view_expression_payload_node(
             }
         }
 
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
+        TemplateIrNodeKind::Conditional {
+            selector,
+            selector_site_id,
+            body,
         } => {
-            for branch in branches {
-                let expression = view
-                    .effective_expression_for_site(branch.selector_site_id)?
-                    .unwrap_or(branch.condition_expression());
-                visitor(expression)?;
-                walk_tir_view_expression_payload_node(
-                    view,
-                    branch.body,
-                    visitor,
-                    visited_templates,
-                )?;
-            }
-            if let Some(fallback_id) = fallback {
-                walk_tir_view_expression_payload_node(
-                    view,
-                    *fallback_id,
-                    visitor,
-                    visited_templates,
-                )?;
-            }
+            let expression = view
+                .effective_expression_for_site(*selector_site_id)?
+                .unwrap_or(selector.condition_expression());
+            visitor(expression)?;
+            walk_tir_view_expression_payload_node(view, *body, visitor, visited_templates)?;
         }
 
         TemplateIrNodeKind::Loop {
@@ -342,7 +329,7 @@ fn walk_tir_view_expression_payload_node(
 ///       falling back to the stored structural expression. A mismatched shape is
 ///       reported as an internal invariant error.
 /// WHY: loop-header sites share the same `ExpressionSiteId` key space as
-///      dynamic-expression and branch-selector sites; resolving them through the
+///      dynamic-expression and conditional-selector sites; resolving them through the
 ///      view keeps overlay resolution in one place.
 fn visit_loop_header_effective_expressions(
     view: &TirView<'_>,

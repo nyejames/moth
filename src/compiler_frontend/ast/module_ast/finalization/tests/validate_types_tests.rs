@@ -20,9 +20,9 @@ use crate::compiler_frontend::ast::templates::template_slots::{
     RuntimeSlotContributionSourceId, RuntimeSlotSiteId,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    ExpressionSiteId, TemplateIr, TemplateIrBranch, TemplateIrBuilder, TemplateIrNode,
-    TemplateIrStore, TemplateIrSummary, TemplateLoopHeaderExpressionSites, TemplateTirPhase,
-    TemplateTirReference, TemplateViewContext, TirExpressionOverlay,
+    ExpressionSiteId, TemplateIr, TemplateIrBuilder, TemplateIrNode, TemplateIrStore,
+    TemplateIrSummary, TemplateLoopHeaderExpressionSites, TemplateTirPhase, TemplateTirReference,
+    TemplateViewContext, TirExpressionOverlay,
 };
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotContributionSource, OwnedRuntimeSlotSite,
@@ -108,7 +108,6 @@ fn owned_runtime_branch_selector_type_ids_are_validated_before_inactive_elision(
                 span: None,
             }],
             fallback: None,
-            else_marker: None,
             span: None,
         });
     }
@@ -158,7 +157,6 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
                         span: None,
                     }],
                     fallback: None,
-                    else_marker: None,
                     span: None,
                 },
                 renders_wrapper_unconditionally: false,
@@ -223,7 +221,6 @@ fn static_true_assertion_owned_handoff_is_validated_before_message_elision() {
             span: None,
         }],
         fallback: None,
-        else_marker: None,
         span: None,
     });
     let node = AstNode {
@@ -652,7 +649,7 @@ fn pending_group_is_a_final_validation_invariant() {
 }
 
 #[test]
-fn finalized_tir_view_branch_selector_payload_validates_effective_overlay_span() {
+fn finalized_tir_view_conditional_selector_payload_validates_effective_overlay_span() {
     let type_environment = TypeEnvironment::new();
     let mut store = TemplateIrStore::new();
 
@@ -664,31 +661,29 @@ fn finalized_tir_view_branch_selector_payload_validates_effective_overlay_span()
 
     let (template_id, selector_site_id) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let branch_body = builder.push_sequence_node(Vec::new(), None);
-        let branch = TemplateIrBranch::new(
+        let body = builder.push_sequence_node(Vec::new(), None);
+        let conditional_node_id = builder.push_conditional_node(
             TemplateBranchSelector::Bool(structural_selector),
-            branch_body,
+            body,
             structural_span,
-            builder.store.next_expression_site_id(),
         );
-        let branch_chain_node_id = builder.push_branch_chain_node(vec![branch], None, None, None);
         let template_id = builder.finish_template(
-            branch_chain_node_id,
+            conditional_node_id,
             Style::default(),
             TemplateType::StringFunction,
             TemplateIrSummary::default(),
             None,
         );
         let selector_site_id = match &store
-            .get_node(branch_chain_node_id)
-            .expect("branch chain node should exist")
+            .get_node(conditional_node_id)
+            .expect("conditional node should exist")
             .kind
         {
-            crate::compiler_frontend::ast::templates::tir::TemplateIrNodeKind::BranchChain {
-                branches,
+            crate::compiler_frontend::ast::templates::tir::TemplateIrNodeKind::Conditional {
+                selector_site_id,
                 ..
-            } => branches[0].selector_site_id,
-            other => panic!("expected branch chain node, got {other:?}"),
+            } => *selector_site_id,
+            other => panic!("expected conditional node, got {other:?}"),
         };
         (template_id, selector_site_id)
     };

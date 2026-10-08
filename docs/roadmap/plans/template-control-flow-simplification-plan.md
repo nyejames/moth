@@ -12,9 +12,9 @@
 
 ```text
 STATUS: active, language simplification approved
-CURRENT_SLICE: Phase 2 - remove body sentinels and simplify parser state
-BLOCKERS: none for this slice; package synchronization remains pending the parallel branch
-NEXT_ACTION: accept the parser checkpoint and synchronize committed package fixes before direct conditional TIR
+CURRENT_SLICE: Phase 3 accepted; Phase 4 next
+BLOCKERS: none; committed package fixes synchronized both ways at the parser checkpoint
+NEXT_ACTION: remove template loop-control signal propagation from folding
 ```
 
 ## Goal
@@ -903,6 +903,16 @@ rg -n \
 ```
 
 Every result must be removed or explicitly justified as unrelated text. Do not leave stale comments.
+
+Phase 3's TIR branch vectors, fallback storage and marker metadata are removed. Runtime `BranchChain` remains only in the Phase 5 handoff owner and its tests. `TemplateLoopControlKind` remains only for the Phase 4 fold-signal channel; there is no TIR loop-control node or producer. These two downstream deletions retain their explicit phase boundaries.
+
+- [x] One selector, stable expression site and body per conditional.
+- [x] Construction owns selector-site allocation and enclosing-node spans.
+- [x] Render-unit preparation retains conditional head and loop aggregate semantics.
+- [x] Structural consumers retain exact views, site remapping, slots and wrappers.
+- [x] Preparation and folding preserve const validation, capture scope and provenance.
+- [x] Focused tests and template integration checks pass.
+- [x] Independent construction, structural-consumer and folding audits accepted.
 
 Commit:
 

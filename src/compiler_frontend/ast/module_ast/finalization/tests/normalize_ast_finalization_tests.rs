@@ -412,10 +412,10 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
 }
 
 #[test]
-fn finalization_normalizes_branch_selector_payloads_into_expression_overlay() {
+fn finalization_normalizes_conditional_selector_payloads_into_expression_overlay() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let normalized_text = string_table.intern("normalized branch selector payload");
+    let normalized_text = string_table.intern("normalized conditional selector payload");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
@@ -424,36 +424,35 @@ fn finalization_normalizes_branch_selector_payloads_into_expression_overlay() {
         registered_text_template(normalized_text, context, &template_ir_store, &string_table),
         ValueMode::ImmutableOwned,
     );
-    let (template_id, branch_chain_node_id, selector_site_id) = {
+    let (template_id, conditional_node_id, selector_site_id) = {
         let mut store = template_ir_store.borrow_mut();
-        let branch_body = store.push_node(TemplateIrNode::new(
-            TemplateIrNodeKind::Sequence { children: vec![] },
-            None,
-        ));
-        let selector_site_id = store.next_expression_site_id();
-        let branch = TemplateIrBranch::new(
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let body = builder.push_sequence_node(Vec::new(), None);
+        let conditional_node_id = builder.push_conditional_node(
             TemplateBranchSelector::Bool(selector_expression),
-            branch_body,
+            body,
             None,
-            selector_site_id,
         );
-        let branch_chain_node_id = store.push_node(TemplateIrNode::new(
-            TemplateIrNodeKind::BranchChain {
-                branches: vec![branch],
-                fallback: None,
-                else_marker: None,
-            },
-            None,
-        ));
-        let template_id = store.push_template(TemplateIr::new(
-            branch_chain_node_id,
+        let selector_site_id = match &builder
+            .store
+            .get_node(conditional_node_id)
+            .expect("conditional node should exist")
+            .kind
+        {
+            TemplateIrNodeKind::Conditional {
+                selector_site_id, ..
+            } => *selector_site_id,
+            other => panic!("expected conditional node, got {other:?}"),
+        };
+        let template_id = builder.finish_template(
+            conditional_node_id,
             Style::default(),
             TemplateType::StringFunction,
             TemplateIrSummary::default(),
             None,
-        ));
+        );
 
-        (template_id, branch_chain_node_id, selector_site_id)
+        (template_id, conditional_node_id, selector_site_id)
     };
 
     let mut template = template_with_reference(
@@ -474,7 +473,7 @@ fn finalization_normalizes_branch_selector_payloads_into_expression_overlay() {
     };
 
     normalize_template_for_hir(&mut template, &mut context)
-        .expect("template normalization should install the branch selector overlay");
+        .expect("template normalization should install the conditional selector overlay");
 
     let reference = &template.tir_reference;
     assert_ne!(
@@ -501,7 +500,7 @@ fn finalization_normalizes_branch_selector_payloads_into_expression_overlay() {
     let expression_by_site = view
         .effective_expression_for_site(selector_site_id)
         .expect("site lookup should be valid")
-        .expect("normalized branch selector should be visible by site");
+        .expect("normalized conditional selector should be visible by site");
     assert!(
         matches!(expression_by_site.kind, ExpressionKind::StringSlice(text) if text == normalized_text)
     );
@@ -509,17 +508,17 @@ fn finalization_normalizes_branch_selector_payloads_into_expression_overlay() {
     let structural_selector_is_unchanged = {
         let store = template_ir_store.borrow();
         let node = store
-            .get_node(branch_chain_node_id)
-            .expect("branch chain node should remain in the structural store");
+            .get_node(conditional_node_id)
+            .expect("conditional node should remain in the structural store");
         matches!(
             &node.kind,
-            TemplateIrNodeKind::BranchChain { branches, .. }
-                if matches!(branches[0].condition_expression().kind, ExpressionKind::Template(_))
+            TemplateIrNodeKind::Conditional { selector, .. }
+                if matches!(selector.condition_expression().kind, ExpressionKind::Template(_))
         )
     };
     assert!(
         structural_selector_is_unchanged,
-        "Phase 10 branch-selector normalization should layer the normalized payload through an overlay"
+        "Phase 10 conditional-selector normalization should layer the normalized payload through an overlay"
     );
 }
 
@@ -741,7 +740,7 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let dynamic_text = string_table.intern("root-overlay-dynamic");
-    let branch_text = string_table.intern("root-overlay-branch");
+    let conditional_body_text = string_table.intern("root-overlay-body");
     let loop_text = string_table.intern("root-overlay-loop");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -749,7 +748,7 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
 
     let (root_template_id, dynamic_site_id, selector_site_id, loop_site_id) = {
         let mut store = template_ir_store.borrow_mut();
-        let (leaf_template_id, dynamic_node, branch_node, loop_node) = {
+        let (leaf_template_id, dynamic_node, conditional_node, loop_node) = {
             let mut builder = TemplateIrBuilder::new(&mut store);
 
             let dynamic_node = builder.push_dynamic_expression_node(
@@ -766,31 +765,24 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
                 TemplateSegmentOrigin::Body,
                 None,
             );
-            let branch_text_node = builder.push_text_node(
-                branch_text,
-                "root-overlay-branch".len(),
+            let conditional_body_text_node = builder.push_text_node(
+                conditional_body_text,
+                "root-overlay-body".len(),
                 TemplateSegmentOrigin::Body,
                 None,
             );
-            let nested_selector_site = builder.store.next_expression_site_id();
-            let branch_node = builder.push_branch_chain_node(
-                vec![TemplateIrBranch::new(
-                    TemplateBranchSelector::Bool(Expression::reference_with_type_id(
-                        path_fork
-                            .try_intern_portable_path("nested_selector", &mut string_table)
-                            .expect("test path fits"),
-                        DataType::Bool,
-                        builtin_type_ids::BOOL,
-                        None,
-                        ValueMode::ImmutableReference,
-                        ConstRecordState::RuntimeValue,
-                    )),
-                    branch_text_node,
+            let conditional_node = builder.push_conditional_node(
+                TemplateBranchSelector::Bool(Expression::reference_with_type_id(
+                    path_fork
+                        .try_intern_portable_path("nested_selector", &mut string_table)
+                        .expect("test path fits"),
+                    DataType::Bool,
+                    builtin_type_ids::BOOL,
                     None,
-                    nested_selector_site,
-                )],
-                None,
-                None,
+                    ValueMode::ImmutableReference,
+                    ConstRecordState::RuntimeValue,
+                )),
+                conditional_body_text_node,
                 None,
             );
             let loop_text_node = builder.push_text_node(
@@ -817,7 +809,7 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
                 None,
             );
             let leaf_root =
-                builder.push_sequence_node(vec![dynamic_node, branch_node, loop_node], None);
+                builder.push_sequence_node(vec![dynamic_node, conditional_node, loop_node], None);
             let leaf_template_id = builder.finish_template(
                 leaf_root,
                 Style::default(),
@@ -825,7 +817,7 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
                 TemplateIrSummary::default(),
                 None,
             );
-            (leaf_template_id, dynamic_node, branch_node, loop_node)
+            (leaf_template_id, dynamic_node, conditional_node, loop_node)
         };
 
         let dynamic_site_id = match &store
@@ -837,12 +829,13 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
             _ => panic!("expected a dynamic-expression node"),
         };
         let (selector_site_id, loop_site_id) = match &store
-            .get_node(branch_node)
-            .expect("branch node should exist")
+            .get_node(conditional_node)
+            .expect("conditional node should exist")
             .kind
         {
-            TemplateIrNodeKind::BranchChain { branches, .. } => {
-                let selector_site_id = branches[0].selector_site_id;
+            TemplateIrNodeKind::Conditional {
+                selector_site_id, ..
+            } => {
                 let loop_site_id = match &store
                     .get_node(loop_node)
                     .expect("loop node should exist")
@@ -854,9 +847,9 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
                     } => *condition,
                     _ => panic!("expected a conditional loop node"),
                 };
-                (selector_site_id, loop_site_id)
+                (*selector_site_id, loop_site_id)
             }
-            _ => panic!("expected a branch-chain node"),
+            _ => panic!("expected a conditional node"),
         };
 
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -940,8 +933,8 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
 
     assert_eq!(
         string_table.resolve(folded),
-        "root-overlay-dynamicroot-overlay-branch",
-        "dynamic, branch-selector, and loop-header overlays must all reach the nested leaf"
+        "root-overlay-dynamicroot-overlay-body",
+        "dynamic, conditional-selector, and loop-header overlays must all reach the nested leaf"
     );
 }
 

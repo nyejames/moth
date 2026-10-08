@@ -21,8 +21,8 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateLoopBodyParseInput,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateConstructionContext, TemplateIrBranch, TemplateIrNodeId, TemplatePreparationMode,
-    TemplateTirPhase, TemplateWrapperReference,
+    TemplateConstructionContext, TemplateIrNodeId, TemplatePreparationMode, TemplateTirPhase,
+    TemplateWrapperReference,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -352,18 +352,7 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
             build_state.kind.clone(),
             body_construction_context,
         )?;
-        let selector_site_id = construction_context.next_expression_site_id();
-        construction_context.record_branch_chain(
-            vec![TemplateIrBranch::new(
-                input.selector,
-                body_node_id,
-                conditional_span,
-                selector_site_id,
-            )],
-            None,
-            None,
-            conditional_span,
-        );
+        construction_context.record_conditional(input.selector, body_node_id, conditional_span);
 
         Ok(())
     }

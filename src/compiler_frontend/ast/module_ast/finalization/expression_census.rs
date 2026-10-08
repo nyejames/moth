@@ -566,21 +566,13 @@ impl Census<'_> {
                         pending.push((view.clone(), *child));
                     }
                 }
-                TemplateIrNodeKind::BranchChain {
-                    branches, fallback, ..
-                } => {
-                    record_list(branches, ListKind::TirBranches);
-                    for branch in branches {
-                        if let TemplateBranchSelector::OptionPresentCapture { pattern, .. } =
-                            &branch.selector
-                        {
-                            self.drain(Item::Pattern(pattern), partition);
-                        }
-                        pending.push((view.clone(), branch.body));
+                TemplateIrNodeKind::Conditional { selector, body, .. } => {
+                    if let TemplateBranchSelector::OptionPresentCapture { pattern, .. } =
+                        selector.as_ref()
+                    {
+                        self.drain(Item::Pattern(pattern), partition);
                     }
-                    if let Some(fallback) = fallback {
-                        pending.push((view.clone(), *fallback));
-                    }
+                    pending.push((view.clone(), *body));
                 }
                 TemplateIrNodeKind::Loop {
                     header,
@@ -823,7 +815,6 @@ enum ListKind {
     HandoffSites,
     OwnedStructuralPieces,
     TirChildIds,
-    TirBranches,
 }
 
 // Length/capacity units are elements of the named family, never mixed bytes.
@@ -918,16 +909,6 @@ fn record_list<T>(values: &Vec<T>, kind: ListKind) {
             AstCounter::CensusTirChildIdsEmpty,
             AstCounter::CensusTirChildIdsSingle,
             AstCounter::CensusTirChildIdsMultiple,
-        ],
-        ListKind::TirBranches => [
-            AstCounter::CensusTirBranchesLists,
-            AstCounter::CensusTirBranchesLengthSum,
-            AstCounter::CensusTirBranchesLengthMax,
-            AstCounter::CensusTirBranchesCapacitySum,
-            AstCounter::CensusTirBranchesCapacityMax,
-            AstCounter::CensusTirBranchesEmpty,
-            AstCounter::CensusTirBranchesSingle,
-            AstCounter::CensusTirBranchesMultiple,
         ],
         ListKind::CallArgs => [
             AstCounter::CensusCallArgsLists,

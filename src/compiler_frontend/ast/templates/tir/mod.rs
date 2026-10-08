@@ -113,9 +113,7 @@ pub(crate) use expression_sites::{
 
 #[cfg(test)]
 pub(crate) use node::TemplateLoopHeaderExpressionSites;
-pub(crate) use node::{
-    TemplateIr, TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind, TirSlotPlaceholder,
-};
+pub(crate) use node::{TemplateIr, TemplateIrNode, TemplateIrNodeKind, TirSlotPlaceholder};
 #[cfg(test)]
 pub(crate) use store::MalformedTirStore;
 pub(crate) use store::{
@@ -181,8 +179,9 @@ pub(crate) use preparation::{
 pub(crate) use formatter_view::format_tir_template;
 
 pub(in crate::compiler_frontend::ast::templates) use render_unit::{
-    build_branch_body_candidate_root_from_tir_nodes, format_tir_body_root, head_prefix_tir_nodes,
-    prepare_loop_aggregate_wrapper, run_tir_formatter_with_warnings, sequence_children,
+    build_conditional_body_candidate_root_from_tir_nodes, format_tir_body_root,
+    head_prefix_tir_nodes, prepare_loop_aggregate_wrapper, run_tir_formatter_with_warnings,
+    sequence_children,
 };
 
 pub(crate) use slot_plan::{

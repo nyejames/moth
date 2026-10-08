@@ -243,29 +243,8 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
             child_converted
         }
 
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => {
-            let mut any_converted = false;
-            for branch in branches {
-                any_converted |= convert_tir_tree_to_active_slot_plan(
-                    branch.body,
-                    slot_plan_id,
-                    slot_sites,
-                    store,
-                    copy_state,
-                )?;
-            }
-            if let Some(fallback_id) = fallback {
-                any_converted |= convert_tir_tree_to_active_slot_plan(
-                    fallback_id,
-                    slot_plan_id,
-                    slot_sites,
-                    store,
-                    copy_state,
-                )?;
-            }
-            any_converted
+        TemplateIrNodeKind::Conditional { body, .. } => {
+            convert_tir_tree_to_active_slot_plan(body, slot_plan_id, slot_sites, store, copy_state)?
         }
 
         TemplateIrNodeKind::Loop {

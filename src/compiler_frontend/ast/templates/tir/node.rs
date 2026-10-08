@@ -30,7 +30,7 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateBranchSelector, TemplateElseMarker, TemplateLoopHeader,
+    TemplateBranchSelector, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::template_slots::{
     RuntimeSlotContributionSourceId, RuntimeSlotSiteId,
@@ -154,9 +154,8 @@ impl TemplateIrNode {
 ///
 /// ## Design notes
 ///
-/// - `Vec` fields in `Sequence` and `BranchChain` may be replaced with typed
-///   ranges into store-owned side vectors in later phases if clone pressure
-///   becomes measurable.
+/// - `Sequence` may use a typed range into a store-owned side vector if clone
+///   pressure becomes measurable.
 /// - `DynamicExpression` boxes the AST `Expression` to keep enum size reasonable.
 ///   TIR does not own expression resolution; it holds the AST-produced value.
 #[derive(Clone, Debug)]
@@ -220,24 +219,16 @@ pub(crate) enum TemplateIrNodeKind {
     /// Content contributed by an `$insert("name")` directive.
     InsertContribution { template: TemplateIrId },
 
-    /// Conditional branch chain (`if` / `else if` / `else`).
-    BranchChain {
-        /// Branches evaluated in source order until one selector matches.
-        branches: Vec<TemplateIrBranch>,
+    /// One conditional selector and its selected body.
+    Conditional {
+        /// Boxed so its expression payload does not widen every TIR node.
+        selector: Box<TemplateBranchSelector>,
 
-        /// Optional trailing `else` body executed when no branch matches.
-        fallback: Option<TemplateIrNodeId>,
+        /// Stable site key for the selector's effective expression.
+        selector_site_id: ExpressionSiteId,
 
-        /// Authored provenance of the `[else]` marker that introduced the
-        /// fallback body.
-        ///
-        /// WHAT: records the exact source span of the `[else]` sentinel as
-        ///       separate fallback metadata. `None` when the chain has no
-        ///       fallback or was created by a compiler composition step.
-        /// WHY: the marker is authored metadata independent of the fallback
-        ///      body and of the enclosing `if` opening, so neither body nor
-        ///      chain spans may substitute for it.
-        else_marker: Option<TemplateElseMarker>,
+        /// Body evaluated when the selector matches.
+        body: TemplateIrNodeId,
     },
 
     /// Loop with a body node and optional aggregate wrapper.
@@ -261,7 +252,7 @@ pub(crate) enum TemplateIrNodeKind {
         /// WHY: stable site keys let later overlay phases address each
         /// loop-header expression deterministically without relying on
         /// traversal order. The IDs share the same document-order counter
-        /// as `DynamicExpression` and branch-selector site IDs.
+        /// as `DynamicExpression` and conditional-selector site IDs.
         header_sites: TemplateLoopHeaderExpressionSites,
 
         /// Body node executed once for each loop iteration.
@@ -409,70 +400,4 @@ pub(crate) enum TemplateLoopHeaderExpressionSites {
 
     /// `for (item in iterable)` loop: one expression site for the iterable.
     Collection { iterable: ExpressionSiteId },
-}
-
-// -------------------------
-//  TIR Branch
-// -------------------------
-
-/// One conditional branch within a `BranchChain` node.
-///
-/// WHAT: pairs a branch selector with the body node that executes when
-/// the selector condition is satisfied.
-/// WHY: keeping branches as (selector, body) pairs matches the AST shape and
-/// avoids encoding branch logic into the node kind itself. Storing the full
-/// `TemplateBranchSelector` (rather than just the extracted expression) lets
-/// the TIR fold path handle bool conditions and option-capture scrutinees
-/// uniformly.
-#[derive(Clone, Debug)]
-pub(crate) struct TemplateIrBranch {
-    /// Selector that determines when this branch is active.
-    ///
-    /// Stores the full `TemplateBranchSelector` from the AST so the fold path
-    /// can distinguish bool conditions from option-capture scrutinees.
-    pub(crate) selector: TemplateBranchSelector,
-
-    /// Body node to execute when the selector condition is satisfied.
-    pub(crate) body: TemplateIrNodeId,
-
-    /// Exact source span for diagnostics.
-    pub(crate) span: Option<SourceSpan>,
-    /// Document-order expression-site ID for the branch selector expression.
-    ///
-    /// WHAT: a per-store counter assigns this ID so expression overlays can
-    /// address the branch selector's effective expression deterministically.
-    /// WHY: stable site keys let later overlay phases map effective branch
-    /// selectors without relying on traversal order or node-vector positions.
-    /// The ID shares the same document-order counter as `DynamicExpression`
-    /// site IDs and loop-header expression sites.
-    pub(crate) selector_site_id: ExpressionSiteId,
-}
-
-impl TemplateIrBranch {
-    pub(crate) fn new(
-        selector: TemplateBranchSelector,
-        body: TemplateIrNodeId,
-        span: Option<SourceSpan>,
-        selector_site_id: ExpressionSiteId,
-    ) -> Self {
-        Self {
-            selector,
-            body,
-            span,
-            selector_site_id,
-        }
-    }
-
-    /// Returns the condition expression for this branch.
-    ///
-    /// WHAT: for `Bool` selectors, returns the bool expression directly.
-    /// For `OptionPresentCapture` selectors, returns the scrutinee expression.
-    /// WHY: validation and fold passes that only need the condition expression
-    /// can call this helper without repeating the selector match at every site.
-    pub(crate) fn condition_expression(&self) -> &Expression {
-        match &self.selector {
-            TemplateBranchSelector::Bool(expression) => expression,
-            TemplateBranchSelector::OptionPresentCapture { scrutinee, .. } => scrutinee,
-        }
-    }
 }

@@ -19,9 +19,9 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
     TemplateTirChildReference, TemplateWrapperReference,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    ExpressionSiteId, TemplateIr, TemplateIrBranch, TemplateIrBuilder, TemplateIrId,
-    TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore, TemplateIrSummary,
-    TemplateSlotPlan, TemplateSlotPlanId, TemplateTirPhase, TemplateViewContext, TirCopyState,
+    ExpressionSiteId, TemplateIr, TemplateIrBuilder, TemplateIrId, TemplateIrNode,
+    TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore, TemplateIrSummary, TemplateSlotPlan,
+    TemplateSlotPlanId, TemplateTirPhase, TemplateViewContext, TirCopyState,
     TirSlotResolutionOverlay, TirView, TirWrapperApplicationMode, TirWrapperContext,
     TirWrapperContextOverlay, push_runtime_slot_contribution_source,
 };
@@ -137,14 +137,8 @@ fn node_contains_contribution(
         TemplateIrNodeKind::Sequence { children } => children
             .iter()
             .any(|child| node_contains_contribution(*child, store, plan)),
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => {
-            branches
-                .iter()
-                .any(|branch| node_contains_contribution(branch.body, store, plan))
-                || fallback
-                    .is_some_and(|fallback| node_contains_contribution(fallback, store, plan))
+        TemplateIrNodeKind::Conditional { body, .. } => {
+            node_contains_contribution(*body, store, plan)
         }
         TemplateIrNodeKind::Loop {
             body,
@@ -450,20 +444,13 @@ fn repeated_wrapper_applications_preserve_versioned_expression_site_ids() {
     let mut store = TemplateIrStore::new();
     let mut builder = TemplateIrBuilder::new(&mut store);
     let slot_node = builder.push_slot_node(SlotKey::Default, None);
-    let selector_site = builder.store.next_expression_site_id();
-    let branch_root = builder.push_branch_chain_node(
-        vec![TemplateIrBranch::new(
-            TemplateBranchSelector::Bool(bool_expression(true)),
-            slot_node,
-            None,
-            selector_site,
-        )],
-        None,
-        None,
+    let conditional_root = builder.push_conditional_node(
+        TemplateBranchSelector::Bool(bool_expression(true)),
+        slot_node,
         None,
     );
     let wrapper_id = builder.finish_template(
-        branch_root,
+        conditional_root,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary {
@@ -473,9 +460,15 @@ fn repeated_wrapper_applications_preserve_versioned_expression_site_ids() {
         },
         None,
     );
-    let source_selector = match &store.get_node(branch_root).expect("branch root").kind {
-        TemplateIrNodeKind::BranchChain { branches, .. } => branches[0].selector_site_id,
-        other => panic!("expected branch chain, got {other:?}"),
+    let source_selector = match &store
+        .get_node(conditional_root)
+        .expect("conditional root")
+        .kind
+    {
+        TemplateIrNodeKind::Conditional {
+            selector_site_id, ..
+        } => *selector_site_id,
+        other => panic!("expected conditional, got {other:?}"),
     };
     let wrapper_ref = TemplateWrapperReference::new(
         wrapper_id,
@@ -500,13 +493,13 @@ fn repeated_wrapper_applications_preserve_versioned_expression_site_ids() {
         .apply_wrapper_reference(wrapper_ref, second_fill)
         .expect("second wrapper application should succeed");
 
-    let first_selector = copied_branch_selector_site(&store, first);
-    let second_selector = copied_branch_selector_site(&store, second);
+    let first_selector = copied_conditional_selector_site(&store, first);
+    let second_selector = copied_conditional_selector_site(&store, second);
     assert_eq!(first_selector, source_selector);
     assert_eq!(second_selector, source_selector);
 }
 
-fn copied_branch_selector_site(
+fn copied_conditional_selector_site(
     store: &TemplateIrStore,
     fill_root: TemplateIrNodeId,
 ) -> ExpressionSiteId {
@@ -516,30 +509,24 @@ fn copied_branch_selector_site(
         .expect("derived wrapper root")
         .kind
     {
-        TemplateIrNodeKind::BranchChain { branches, .. } => branches[0].selector_site_id,
-        other => panic!("expected injected branch chain, got {other:?}"),
+        TemplateIrNodeKind::Conditional {
+            selector_site_id, ..
+        } => *selector_site_id,
+        other => panic!("expected injected conditional, got {other:?}"),
     }
 }
 
 #[test]
-fn wrapper_fill_injects_through_branch_fallback_loop_and_child() {
+fn wrapper_fill_injects_through_conditional_loop_and_child() {
     let mut store = TemplateIrStore::new();
     let plan = push_slot_plan(&mut store);
     let fill_root = contribution_fill(&mut store, plan);
 
     let mut builder = TemplateIrBuilder::new(&mut store);
-    let then_slot = builder.push_slot_node(SlotKey::Default, None);
-    let fallback_slot = builder.push_slot_node(SlotKey::Default, None);
-    let selector_site = builder.store.next_expression_site_id();
-    let branch_root = builder.push_branch_chain_node(
-        vec![TemplateIrBranch::new(
-            TemplateBranchSelector::Bool(bool_expression(true)),
-            then_slot,
-            None,
-            selector_site,
-        )],
-        Some(fallback_slot),
-        None,
+    let conditional_slot = builder.push_slot_node(SlotKey::Default, None);
+    let conditional_root = builder.push_conditional_node(
+        TemplateBranchSelector::Bool(bool_expression(true)),
+        conditional_slot,
         None,
     );
     let loop_slot = builder.push_slot_node(SlotKey::Default, None);
@@ -573,14 +560,14 @@ fn wrapper_fill_injects_through_branch_fallback_loop_and_child() {
     );
 
     let mut copy_state = TirCopyState::new();
-    let injected_branch = inject_runtime_slot_fill(
-        branch_root,
+    let injected_conditional = inject_runtime_slot_fill(
+        conditional_root,
         fill_root,
         &SlotKey::Default,
         &mut store,
         &mut copy_state,
     )
-    .expect("branch and fallback slots should accept fill")
+    .expect("conditional body slot should accept fill")
     .root;
     let injected_loop = inject_runtime_slot_fill(
         loop_root,
@@ -601,7 +588,11 @@ fn wrapper_fill_injects_through_branch_fallback_loop_and_child() {
     .expect("nested child-template slot should accept fill")
     .root;
 
-    assert!(node_contains_contribution(injected_branch, &store, plan));
+    assert!(node_contains_contribution(
+        injected_conditional,
+        &store,
+        plan
+    ));
     assert!(node_contains_contribution(injected_loop, &store, plan));
     assert!(node_contains_contribution(injected_child, &store, plan));
     match &store.get_node(injected_child).expect("child node").kind {
@@ -609,18 +600,15 @@ fn wrapper_fill_injects_through_branch_fallback_loop_and_child() {
         other => panic!("nested child injection must keep a ChildTemplate boundary, got {other:?}"),
     }
 
-    match &store.get_node(injected_branch).expect("branch").kind {
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => {
-            assert!(node_contains_contribution(branches[0].body, &store, plan));
-            assert!(node_contains_contribution(
-                fallback.expect("fallback"),
-                &store,
-                plan
-            ));
+    match &store
+        .get_node(injected_conditional)
+        .expect("conditional")
+        .kind
+    {
+        TemplateIrNodeKind::Conditional { body, .. } => {
+            assert!(node_contains_contribution(*body, &store, plan));
         }
-        other => panic!("expected branch chain, got {other:?}"),
+        other => panic!("expected conditional, got {other:?}"),
     }
     match &store.get_node(injected_loop).expect("loop").kind {
         TemplateIrNodeKind::Loop {

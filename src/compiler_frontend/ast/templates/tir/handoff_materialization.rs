@@ -321,7 +321,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
     /// optional inherited child injected at matching slot placeholders.
     ///
     /// WHAT: keeps ordinary node materialization and wrapper fill injection on
-    ///       the same structural traversal, including branches, loops and
+    ///       the same structural traversal, including conditionals, loops and
     ///       module-local child-template roots.
     /// WHY: wrapper target selection is layout-owned, so the handoff walker must
     ///      be able to replace every structural shape that schema discovery can
@@ -414,46 +414,26 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 }
             }
 
-            TemplateIrNodeKind::BranchChain {
-                branches,
-                fallback,
-                else_marker,
+            TemplateIrNodeKind::Conditional {
+                selector,
+                selector_site_id,
+                body,
             } => {
-                let mut owned_branches = Vec::with_capacity(branches.len());
-                for branch in branches {
-                    let body = self.materialize_node_with_injection(
+                let body =
+                    self.materialize_node_with_injection(view, *body, active_slot_plan, injection)?;
+                let branch = OwnedRuntimeTemplateBranch {
+                    selector: self.effective_branch_selector(
                         view,
-                        branch.body,
-                        active_slot_plan,
-                        injection,
-                    )?;
-
-                    owned_branches.push(OwnedRuntimeTemplateBranch {
-                        selector: self.effective_branch_selector(
-                            view,
-                            &branch.selector,
-                            branch.selector_site_id,
-                        )?,
-                        body,
-                        span: branch.span,
-                    });
-                }
-
-                let fallback = if let Some(fallback_id) = fallback {
-                    Some(Box::new(self.materialize_node_with_injection(
-                        view,
-                        *fallback_id,
-                        active_slot_plan,
-                        injection,
-                    )?))
-                } else {
-                    None
+                        selector.as_ref(),
+                        *selector_site_id,
+                    )?,
+                    body,
+                    span: node.span,
                 };
 
                 Ok(OwnedRuntimeTemplateNode::BranchChain {
-                    branches: owned_branches,
-                    fallback,
-                    else_marker: else_marker.clone(),
+                    branches: vec![branch],
+                    fallback: None,
                     span: node.span,
                 })
             }

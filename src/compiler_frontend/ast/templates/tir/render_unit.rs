@@ -1,6 +1,6 @@
 //! TIR render-unit construction helpers.
 //!
-//! WHAT: owns TIR aggregate-wrapper candidate root construction, branch/fallback
+//! WHAT: owns TIR aggregate-wrapper candidate root construction, conditional
 //! body candidate root construction and body-root formatting.
 //!
 //! WHY: localizes the link between AST aggregate placeholders and TIR-native
@@ -63,22 +63,22 @@ pub(in crate::compiler_frontend::ast::templates) fn build_aggregate_wrapper_cand
     )))
 }
 
-/// Builds a branch/fallback body-root candidate node for head-chain composition.
+/// Builds a conditional body-root candidate node for head-chain composition.
 ///
 /// WHAT: reuses the owning template's parser-emitted head-prefix TIR nodes
 ///       and appends the already-materialized body-only children as the body
 ///       fill. Returns the root sequence node ID directly.
-/// WHY: branch and fallback bodies carry the shared head prefix plus their own
+/// WHY: a conditional body carries the shared head prefix plus its own
 ///      body content. Composing from the root node avoids a scratch
 ///      `TemplateIr` that would remain in the durable store without a
 ///      referencing identity.
-pub(in crate::compiler_frontend::ast::templates) fn build_branch_body_candidate_root_from_tir_nodes(
+pub(in crate::compiler_frontend::ast::templates) fn build_conditional_body_candidate_root_from_tir_nodes(
     head_prefix_nodes: &[TemplateIrNodeId],
     body_children: &[TemplateIrNodeId],
     store: &mut TemplateIrStore,
 ) -> Result<TemplateIrNodeId, TemplateError> {
     let mut children = Vec::with_capacity(head_prefix_nodes.len() + body_children.len());
-    let root_span = branch_body_candidate_span(store, head_prefix_nodes, body_children)
+    let root_span = conditional_body_candidate_span(store, head_prefix_nodes, body_children)
         .map_err(TemplateError::from)?;
 
     // Reuse each parser-emitted head-prefix node directly. Parser template
@@ -114,11 +114,11 @@ fn head_prefix_node_span(
     }
 }
 
-/// Returns the source span for a branch/fallback body candidate root.
+/// Returns the source span for a conditional body candidate root.
 ///
 /// The first shared head-prefix node is preferred; otherwise the first prepared
 /// body child supplies the retained provenance.
-fn branch_body_candidate_span(
+fn conditional_body_candidate_span(
     store: &TemplateIrStore,
     head_prefix_nodes: &[TemplateIrNodeId],
     body_children: &[TemplateIrNodeId],
@@ -134,7 +134,7 @@ fn branch_body_candidate_span(
             .map(|node| node.span)
             .ok_or_else(|| {
                 CompilerError::compiler_error(format!(
-                    "TIR branch body candidate: selected node {} was missing from the store.",
+                    "TIR conditional body candidate: selected node {} was missing from the store.",
                     node_id
                 ))
             }),
@@ -249,7 +249,7 @@ pub(in crate::compiler_frontend::ast::templates) fn format_tir_body_root(
 /// when the node is missing or not a sequence.
 ///
 /// WHAT: extracts the flat child list so it can be appended after head-prefix
-///       nodes in a branch/fallback body candidate.
+///       nodes in a conditional body candidate.
 /// WHY: parser-emitted body roots are sealed under a `Sequence` node; flattening
 ///      that wrapper keeps the body nodes at the same level as the head-prefix
 ///      nodes so head-chain composition can partition them correctly.
@@ -310,10 +310,10 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_loop_aggregate_wrapp
 /// root children.
 ///
 /// WHAT: returns all root children before the first control-flow node (`Loop`
-///       or `BranchChain`). These are the same TIR nodes the parser
+///       or `Conditional`). These are the same TIR nodes the parser
 ///       materialized from the shared head-prefix atoms, so reusing them
 ///       avoids rebuilding TIR from content.
-/// WHY: loop aggregate wrappers and branch/fallback body roots both wrap the
+/// WHY: loop aggregate wrappers and conditional body roots both wrap the
 ///      shared head prefix around their respective body output. The
 ///      head-prefix nodes are structurally everything before the control-flow
 ///      node in the owning template's root sequence, so one extractor serves
@@ -332,7 +332,7 @@ pub(in crate::compiler_frontend::ast::templates) fn head_prefix_tir_nodes(
         })?;
         if matches!(
             node.kind,
-            TemplateIrNodeKind::Loop { .. } | TemplateIrNodeKind::BranchChain { .. }
+            TemplateIrNodeKind::Loop { .. } | TemplateIrNodeKind::Conditional { .. }
         ) {
             break;
         }

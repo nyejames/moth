@@ -143,7 +143,6 @@ fn runtime_template_bool_if_expression(
             span,
         }],
         fallback,
-        else_marker: None,
         span,
     };
 
@@ -189,7 +188,6 @@ fn runtime_template_option_capture_expression(
             span,
         }],
         fallback,
-        else_marker: None,
         span,
     };
 

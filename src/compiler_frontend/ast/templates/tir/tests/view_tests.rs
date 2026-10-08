@@ -1218,27 +1218,21 @@ fn bool_expression_with_span(span: SourceSpan) -> Expression {
     }
 }
 
-/// Builds a template whose root is a `BranchChain` with one branch whose
-/// selector is a `Bool` expression, plus a fallback body.
-fn build_template_with_branch_chain(
+/// Builds a template whose root is a conditional with a `Bool` selector.
+fn build_template_with_conditional(
     store: &mut super::super::store::TemplateIrStore,
-    branch_span: SourceSpan,
+    conditional_span: SourceSpan,
 ) -> (TemplateIrId, ExpressionSiteId) {
     use crate::compiler_frontend::ast::templates::template_control_flow::TemplateBranchSelector;
 
     let mut builder = TemplateIrBuilder::new(store);
 
-    let branch_body = builder.push_sequence_node(vec![], None);
-    let fallback_body = builder.push_sequence_node(vec![], None);
-
-    let branch = super::super::node::TemplateIrBranch::new(
-        TemplateBranchSelector::Bool(bool_expression_with_span(branch_span)),
-        branch_body,
-        Some(branch_span),
-        builder.store.next_expression_site_id(),
+    let conditional_body = builder.push_sequence_node(vec![], None);
+    let root = builder.push_conditional_node(
+        TemplateBranchSelector::Bool(bool_expression_with_span(conditional_span)),
+        conditional_body,
+        Some(conditional_span),
     );
-
-    let root = builder.push_branch_chain_node(vec![branch], Some(fallback_body), None, None);
     let template_id = builder.finish_template(
         root,
         Style::default(),
@@ -1248,12 +1242,12 @@ fn build_template_with_branch_chain(
     );
 
     let site_id = {
-        let node = store
-            .get_node(root)
-            .expect("branch chain node should exist");
+        let node = store.get_node(root).expect("conditional node should exist");
         match &node.kind {
-            TemplateIrNodeKind::BranchChain { branches, .. } => branches[0].selector_site_id,
-            _ => panic!("expected BranchChain node"),
+            TemplateIrNodeKind::Conditional {
+                selector_site_id, ..
+            } => *selector_site_id,
+            _ => panic!("expected Conditional node"),
         }
     };
 
@@ -1389,18 +1383,18 @@ fn source_span_for_expression_site_resolves_each_node_kind_and_missing() {
         "missing expression site should return Ok(None)"
     );
 
-    // BranchChain selector site: span recovered from the branch node.
-    let (branch_template_id, branch_site_id) =
-        build_template_with_branch_chain(&mut store, span_at(15, 23));
-    let branch_view = TirView::new(
+    // Conditional selector site: span recovered from the conditional node.
+    let (conditional_template_id, conditional_site_id) =
+        build_template_with_conditional(&mut store, span_at(15, 23));
+    let conditional_view = TirView::new(
         &store,
-        branch_template_id,
+        conditional_template_id,
         TemplateTirPhase::Parsed,
         TemplateViewContext::default(),
     )
     .expect("view should construct");
     assert_span(
-        branch_view.source_span_for_expression_site(branch_site_id),
+        conditional_view.source_span_for_expression_site(conditional_site_id),
         15,
         23,
     );

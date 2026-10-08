@@ -19,8 +19,8 @@ use crate::compiler_frontend::ast::templates::tir::ids::{
     ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId,
 };
 use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIr, TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind,
-    TemplateLoopHeaderExpressionSites, TirSlotPlaceholder,
+    TemplateIr, TemplateIrNode, TemplateIrNodeKind, TemplateLoopHeaderExpressionSites,
+    TirSlotPlaceholder,
 };
 use crate::compiler_frontend::ast::templates::tir::overlays::{
     TemplateViewContext, TirExpressionOverlay, TirSlotResolution, TirSlotResolutionOverlay,
@@ -265,25 +265,16 @@ fn assert_owned_text_node(node: &OwnedRuntimeTemplateNode, expected: &str) {
 //  Wrapper template builders
 // ---------------------------------------------------------------------------
 
-fn build_branch_wrapper_template(store: &mut TemplateIrStore) -> TemplateIrId {
+fn build_conditional_wrapper_template(store: &mut TemplateIrStore) -> TemplateIrId {
     let mut builder = TemplateIrBuilder::new(store);
     let default_slot = builder.push_slot_node(SlotKey::Default, None);
     let positional_slot = builder.push_slot_node(SlotKey::Positional(2), None);
-    let branches = vec![
-        TemplateIrBranch::new(
-            TemplateBranchSelector::Bool(Expression::bool(true, None, ValueMode::ImmutableOwned)),
-            default_slot,
-            None,
-            builder.store.next_expression_site_id(),
-        ),
-        TemplateIrBranch::new(
-            TemplateBranchSelector::Bool(Expression::bool(false, None, ValueMode::ImmutableOwned)),
-            positional_slot,
-            None,
-            builder.store.next_expression_site_id(),
-        ),
-    ];
-    let root = builder.push_branch_chain_node(branches, None, None, None);
+    let body = builder.push_sequence_node(vec![default_slot, positional_slot], None);
+    let root = builder.push_conditional_node(
+        TemplateBranchSelector::Bool(Expression::bool(true, None, ValueMode::ImmutableOwned)),
+        body,
+        None,
+    );
     builder.finish_template(
         root,
         Style::default(),
@@ -1112,14 +1103,14 @@ fn child_infrastructure_error_propagates_through_hir_handoff() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn inherited_wrapper_handoff_injects_through_branch_boundaries() {
+fn inherited_wrapper_handoff_preserves_conditional_body() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let (parent_id, context) = {
         let mut store_ref = store.borrow_mut();
         let empty_context = TemplateViewContext::default();
-        let wrapper_template_id = build_branch_wrapper_template(&mut store_ref);
+        let wrapper_template_id = build_conditional_wrapper_template(&mut store_ref);
         build_parent_with_inherited_wrapper(
             &mut store_ref,
             wrapper_template_id,
@@ -1130,21 +1121,25 @@ fn inherited_wrapper_handoff_injects_through_branch_boundaries() {
 
     let body = materialize_parent_handoff(store, parent_id, &mut strings, context);
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::BranchChain {
-        branches,
-        fallback,
-        ..
+        branches, ..
     }) = body
     else {
-        panic!("expected branch-chain wrapper handoff, got {:?}", body);
+        panic!("expected conditional branch-chain handoff, got {:?}", body);
     };
 
-    assert!(fallback.is_none());
-    assert_eq!(branches.len(), 2);
-    assert!(matches!(
-        branches[0].body,
-        OwnedRuntimeTemplateNode::Slot { .. }
-    ));
-    assert_owned_text_node(&branches[1].body, "child");
+    assert_eq!(branches.len(), 1);
+    let OwnedRuntimeTemplateNode::Sequence { children, .. } = &branches[0].body else {
+        panic!(
+            "expected conditional body sequence, got {:?}",
+            branches[0].body
+        );
+    };
+    assert_eq!(children.len(), 2);
+    assert!(
+        matches!(&children[0], OwnedRuntimeTemplateNode::Slot { .. }),
+        "the leading default slot should remain unfilled"
+    );
+    assert_owned_text_node(&children[1], "child");
 }
 
 #[test]

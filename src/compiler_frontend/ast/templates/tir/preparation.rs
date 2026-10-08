@@ -577,72 +577,48 @@ impl PreparationWalk<'_> {
                     );
                     Ok(facts)
                 }
-                TemplateIrNodeKind::BranchChain {
-                    branches, fallback, ..
+                TemplateIrNodeKind::Conditional {
+                    selector,
+                    selector_site_id,
+                    body,
                 } => {
                     let mut facts = PreparationFacts::const_value();
-                    for branch in branches {
-                        let branch_selector = effective_branch_selector_for_view(
+                    let effective_selector =
+                        effective_branch_selector_for_view(view, selector, *selector_site_id)?;
+                    let (body_binding_paths, selector_const, selector_facts) = self
+                        .const_required_branch_selector(
                             view,
-                            &branch.selector,
-                            branch.selector_site_id,
+                            &effective_selector,
+                            node.span,
+                            loop_binding_paths,
+                            role,
                         )?;
-                        let (branch_binding_paths, selector_const, selector_facts) = self
-                            .const_required_branch_selector(
-                                view,
-                                &branch_selector,
-                                node.span,
-                                loop_binding_paths,
-                                role,
-                            )?;
-                        facts.merge(selector_facts);
-                        if !selector_const {
-                            facts.const_evaluable = false;
-                            self.record_role_runtime(
-                                &mut facts,
-                                role,
-                                RuntimeTemplateReason::RuntimeExpression,
-                            );
-                        }
-                        let branch_facts =
-                            self.walk_node(branch.body, view, &branch_binding_paths, role)?;
-                        if !branch_facts.const_evaluable {
-                            self.record_role_runtime(
-                                &mut facts,
-                                role,
-                                RuntimeTemplateReason::RuntimeExpression,
-                            );
-                            if matches!(self.mode, TemplatePreparationMode::ConstRequired) {
-                                self.record_const_diagnostic(
-                                    CompilerDiagnostic::invalid_template_structure(
-                                        InvalidTemplateStructureReason::TemplateIfBranchNotConst,
-                                        node.span,
-                                    ),
-                                );
-                            }
-                        }
-                        facts.merge(branch_facts);
+                    facts.merge(selector_facts);
+                    if !selector_const {
+                        facts.const_evaluable = false;
+                        self.record_role_runtime(
+                            &mut facts,
+                            role,
+                            RuntimeTemplateReason::RuntimeExpression,
+                        );
                     }
-                    if let Some(fallback) = fallback {
-                        let fallback_facts =
-                            self.walk_node(*fallback, view, loop_binding_paths, role)?;
-                        if !fallback_facts.const_evaluable {
-                            self.record_role_runtime(
-                                &mut facts,
-                                role,
-                                RuntimeTemplateReason::RuntimeExpression,
+                    let body_facts = self.walk_node(*body, view, &body_binding_paths, role)?;
+                    if !body_facts.const_evaluable {
+                        self.record_role_runtime(
+                            &mut facts,
+                            role,
+                            RuntimeTemplateReason::RuntimeExpression,
+                        );
+                        if matches!(self.mode, TemplatePreparationMode::ConstRequired) {
+                            self.record_const_diagnostic(
+                                CompilerDiagnostic::invalid_template_structure(
+                                    InvalidTemplateStructureReason::TemplateIfBranchNotConst,
+                                    node.span,
+                                ),
                             );
-                            if matches!(self.mode, TemplatePreparationMode::ConstRequired) {
-                                self.record_const_diagnostic(
-                                    CompilerDiagnostic::invalid_template_structure(
-                                        InvalidTemplateStructureReason::TemplateIfBranchNotConst,
-                                        node.span,
-                                    ),
-                                );
-                            }
                         }
-                        facts.merge(fallback_facts);
                     }
+                    facts.merge(body_facts);
                     Ok(facts)
                 }
                 TemplateIrNodeKind::Loop {
@@ -962,7 +938,7 @@ impl PreparationWalk<'_> {
         &mut self,
         view: &TirView<'_>,
         selector: &TemplateBranchSelector,
-        fallback_span: Option<SourceSpan>,
+        node_span: Option<SourceSpan>,
         loop_binding_paths: &[PathId],
         role: &PreparationTraversalRole,
     ) -> Result<(Vec<PathId>, bool, PreparationFacts), TemplateError> {
@@ -979,7 +955,7 @@ impl PreparationWalk<'_> {
                 } else {
                     Err(CompilerDiagnostic::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateIfConditionNotConst,
-                        condition.span.or(fallback_span),
+                        condition.span.or(node_span),
                     ))
                 }
             }
@@ -1009,7 +985,7 @@ impl PreparationWalk<'_> {
                 } else {
                     Err(CompilerDiagnostic::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateOptionCaptureConstDeferred,
-                        scrutinee.span.or(fallback_span),
+                        scrutinee.span.or(node_span),
                     ))
                 }
             }

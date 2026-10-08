@@ -80,7 +80,7 @@ pub(crate) fn classify_tir_contribution_node(
 
 /// Returns whether a contribution root makes output conditional on template control flow.
 ///
-/// Direct branch and loop roots are conditional. A child-template reference is
+/// Direct conditional and loop roots are conditional. A child-template reference is
 /// conditional when its owned subtree contains control flow. Other contribution
 /// shapes retain their ordinary wrapper behavior.
 pub(crate) fn tir_node_is_control_flow_root(
@@ -94,7 +94,7 @@ pub(crate) fn tir_node_is_control_flow_root(
     })?;
 
     match &node.kind {
-        TemplateIrNodeKind::BranchChain { .. } | TemplateIrNodeKind::Loop { .. } => Ok(true),
+        TemplateIrNodeKind::Conditional { .. } | TemplateIrNodeKind::Loop { .. } => Ok(true),
         TemplateIrNodeKind::ChildTemplate { reference, .. } => {
             let template = store.get_template(reference.root).ok_or_else(|| {
                 CompilerError::compiler_error(

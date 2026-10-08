@@ -20,7 +20,7 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
 };
 use crate::compiler_frontend::ast::templates::tir::render_unit::{
     build_aggregate_wrapper_candidate_root_from_tir_nodes,
-    build_branch_body_candidate_root_from_tir_nodes,
+    build_conditional_body_candidate_root_from_tir_nodes,
 };
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::summary::TemplateIrSummary;
@@ -197,14 +197,14 @@ fn wrapper_candidates_reuse_parser_structural_child_template() {
         TemplateIrNodeKind::AggregateOutput
     ));
 
-    let branch_root = build_branch_body_candidate_root_from_tir_nodes(
+    let conditional_root = build_conditional_body_candidate_root_from_tir_nodes(
         &[parser_child_node],
         &[body_node],
         &mut store,
     )
-    .expect("branch candidate should reuse parser structural child");
-    let branch_children = candidate_root_children(&store, branch_root);
-    assert_eq!(branch_children, vec![parser_child_node, body_node]);
+    .expect("conditional body candidate should reuse parser structural child");
+    let conditional_children = candidate_root_children(&store, conditional_root);
+    assert_eq!(conditional_children, vec![parser_child_node, body_node]);
 }
 
 #[test]

@@ -121,7 +121,6 @@ fn owned_runtime_handoff_checks_dynamic_selectors_and_loop_headers() {
                 span: None,
             }],
             fallback: None,
-            else_marker: None,
             span: None,
         }),
         span: None,

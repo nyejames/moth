@@ -4,9 +4,7 @@
 //! routing buckets, placeholder expansion and composed child identity.
 
 use super::super::ids::{TemplateIrId, TemplateIrNodeId, TemplateWrapperSetId};
-use super::super::node::{
-    TemplateIr, TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind, TirSlotPlaceholder,
-};
+use super::super::node::{TemplateIr, TemplateIrNode, TemplateIrNodeKind, TirSlotPlaceholder};
 use super::super::overlays::{
     TemplateViewContext, TirExpressionOverlay, TirSlotResolutionOverlay, TirWrapperContextOverlay,
 };
@@ -515,23 +513,21 @@ fn schema_from_nested_child_template_containing_slot() {
 }
 
 #[test]
-fn schema_from_branch_chain_containing_slot() {
+fn schema_from_conditional_containing_slot() {
     let mut string_table = StringTable::new();
     let name_id = string_table.intern("branch_slot");
 
     let mut store = TemplateIrStore::new();
     let mut builder = TemplateIrBuilder::new(&mut store);
 
-    let branch_body_slot = builder.push_slot_node(SlotKey::Named(name_id), None);
-    let branch = TemplateIrBranch::new(
+    let conditional_body_slot = builder.push_slot_node(SlotKey::Named(name_id), None);
+    let conditional = builder.push_conditional_node(
         TemplateBranchSelector::Bool(bool_expression(true)),
-        branch_body_slot,
+        conditional_body_slot,
         None,
-        builder.store.next_expression_site_id(),
     );
-    let branch_chain = builder.push_branch_chain_node(vec![branch], None, None, None);
     let template_id = builder.finish_template(
-        branch_chain,
+        conditional,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
@@ -582,27 +578,18 @@ fn schema_from_loop_containing_slot() {
 }
 
 #[test]
-fn loose_fill_target_prefers_later_positional_slot_across_branches() {
+fn loose_fill_target_prefers_positional_slot_after_default_in_conditional_body() {
     let mut store = TemplateIrStore::new();
     let mut builder = TemplateIrBuilder::new(&mut store);
 
     let default_slot = builder.push_slot_node(SlotKey::Default, None);
     let positional_slot = builder.push_slot_node(SlotKey::Positional(2), None);
-    let branches = vec![
-        TemplateIrBranch::new(
-            TemplateBranchSelector::Bool(bool_expression(true)),
-            default_slot,
-            None,
-            builder.store.next_expression_site_id(),
-        ),
-        TemplateIrBranch::new(
-            TemplateBranchSelector::Bool(bool_expression(false)),
-            positional_slot,
-            None,
-            builder.store.next_expression_site_id(),
-        ),
-    ];
-    let root = builder.push_branch_chain_node(branches, None, None, None);
+    let body = builder.push_sequence_node(vec![default_slot, positional_slot], None);
+    let root = builder.push_conditional_node(
+        TemplateBranchSelector::Bool(bool_expression(true)),
+        body,
+        None,
+    );
     let template_id = builder.finish_template(
         root,
         Style::default(),
@@ -622,7 +609,7 @@ fn loose_fill_target_prefers_later_positional_slot_across_branches() {
     assert_eq!(
         schema.loose_fill_target_key(),
         Some(SlotKey::Positional(2)),
-        "positional loose fill should win even when default appears first in branch order"
+        "positional loose fill should win even when default appears first in the body"
     );
 }
 
@@ -1575,7 +1562,7 @@ fn expansion_missing_conditional_wrapper_set_produces_internal_error() {
             None,
         )
     };
-    let branch_node = {
+    let conditional_node = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let body = builder.push_text_node(
             string_table.intern("branch"),
@@ -1583,16 +1570,14 @@ fn expansion_missing_conditional_wrapper_set_produces_internal_error() {
             TemplateSegmentOrigin::Body,
             None,
         );
-        let branch = TemplateIrBranch::new(
+        builder.push_conditional_node(
             TemplateBranchSelector::Bool(bool_expression(true)),
             body,
             None,
-            builder.store.next_expression_site_id(),
-        );
-        builder.push_branch_chain_node(vec![branch], None, None, None)
+        )
     };
     let routed = TirSlotContributions {
-        default_nodes: vec![branch_node],
+        default_nodes: vec![conditional_node],
         ..TirSlotContributions::default()
     };
 
@@ -1968,7 +1953,7 @@ fn slotless_wrapper_application_preserves_complete_reference_identity() {
 }
 
 #[test]
-fn branch_chain_with_slots_in_body_is_expanded() {
+fn conditional_with_slot_in_body_is_expanded() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
 
@@ -1980,17 +1965,14 @@ fn branch_chain_with_slots_in_body_is_expanded() {
         None,
     ));
 
-    let branch = TemplateIrBranch::new(
+    let mut builder = TemplateIrBuilder::new(&mut store);
+    let conditional = builder.push_conditional_node(
         TemplateBranchSelector::Bool(bool_expression(true)),
         body_slot,
         None,
-        store.next_expression_site_id(),
     );
-
-    let mut builder = TemplateIrBuilder::new(&mut store);
-    let branch_chain = builder.push_branch_chain_node(vec![branch], None, None, None);
     let wrapper = builder.finish_template(
-        branch_chain,
+        conditional,
         Style::default(),
         TemplateType::String,
         TemplateIrSummary::default(),
@@ -2007,27 +1989,27 @@ fn branch_chain_with_slots_in_body_is_expanded() {
     let expanded_root = expand_tir_slot_placeholders(&mut store, wrapper, &routed, &string_table)
         .expect("expansion should succeed");
 
-    let expanded_branch_chain = match &store
+    let expanded_conditional_body = match &store
         .get_node(expanded_root)
         .expect("root should exist")
         .kind
     {
-        TemplateIrNodeKind::BranchChain { branches, .. } => {
-            assert_eq!(branches.len(), 1);
-            &branches[0]
-        }
-        other => panic!("expected BranchChain root, found {other:?}"),
+        TemplateIrNodeKind::Conditional { body, .. } => *body,
+        other => panic!("expected Conditional root, found {other:?}"),
     };
 
-    let branch_body_children = root_child_kinds_for_node(expanded_branch_chain.body, &store);
-    assert_eq!(branch_body_children.len(), 1);
+    let conditional_body_children = root_child_kinds_for_node(expanded_conditional_body, &store);
+    assert_eq!(conditional_body_children.len(), 1);
     assert!(
-        matches!(branch_body_children[0], TemplateIrNodeKind::Text { .. }),
-        "branch body slot should be spliced into the body sequence"
+        matches!(
+            conditional_body_children[0],
+            TemplateIrNodeKind::Text { .. }
+        ),
+        "conditional body slot should be spliced into the body sequence"
     );
     assert_eq!(
         text_node_text(
-            root_child_node_ids_for_node(expanded_branch_chain.body, &store)[0],
+            root_child_node_ids_for_node(expanded_conditional_body, &store)[0],
             &store,
             &string_table
         ),

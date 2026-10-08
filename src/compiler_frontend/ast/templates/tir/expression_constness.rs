@@ -349,40 +349,19 @@ fn tir_tree_is_const_evaluable_standalone_value(
             visiting_templates.remove(template_id);
             result
         }
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => {
-            for branch in branches {
-                let Some(bindings) = selector_is_const(
-                    &branch.selector,
-                    &[],
-                    store,
-                    string_table,
-                    visiting_templates,
-                )?
-                else {
-                    return Ok(false);
-                };
-                if !tir_tree_is_const_evaluable_value(
-                    store,
-                    branch.body,
-                    &bindings,
-                    string_table,
-                    visiting_templates,
-                )? {
-                    return Ok(false);
-                }
-            }
-            if let Some(fallback) = fallback {
-                return tir_tree_is_const_evaluable_value(
-                    store,
-                    *fallback,
-                    &[],
-                    string_table,
-                    visiting_templates,
-                );
-            }
-            Ok(true)
+        TemplateIrNodeKind::Conditional { selector, body, .. } => {
+            let Some(bindings) =
+                selector_is_const(selector, &[], store, string_table, visiting_templates)?
+            else {
+                return Ok(false);
+            };
+            tir_tree_is_const_evaluable_value(
+                store,
+                *body,
+                &bindings,
+                string_table,
+                visiting_templates,
+            )
         }
         TemplateIrNodeKind::Loop {
             header,
@@ -498,40 +477,24 @@ fn tir_tree_is_const_evaluable_value(
             visiting_templates.remove(template_id);
             result
         }
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => {
-            for branch in branches {
-                let Some(bindings) = selector_is_const(
-                    &branch.selector,
-                    loop_binding_paths,
-                    store,
-                    string_table,
-                    visiting_templates,
-                )?
-                else {
-                    return Ok(false);
-                };
-                if !tir_tree_is_const_evaluable_value(
-                    store,
-                    branch.body,
-                    &bindings,
-                    string_table,
-                    visiting_templates,
-                )? {
-                    return Ok(false);
-                }
-            }
-            if let Some(fallback) = fallback {
-                return tir_tree_is_const_evaluable_value(
-                    store,
-                    *fallback,
-                    loop_binding_paths,
-                    string_table,
-                    visiting_templates,
-                );
-            }
-            Ok(true)
+        TemplateIrNodeKind::Conditional { selector, body, .. } => {
+            let Some(bindings) = selector_is_const(
+                selector,
+                loop_binding_paths,
+                store,
+                string_table,
+                visiting_templates,
+            )?
+            else {
+                return Ok(false);
+            };
+            tir_tree_is_const_evaluable_value(
+                store,
+                *body,
+                &bindings,
+                string_table,
+                visiting_templates,
+            )
         }
         TemplateIrNodeKind::Loop {
             header,

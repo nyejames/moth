@@ -1,7 +1,7 @@
 //! Copied TIR subtree identity tests.
 //!
 //! Protects the invariant that an independent subtree copy remaps every
-//! expression-bearing site: dynamic expressions, branch selectors and loop
+//! expression-bearing site: dynamic expressions, conditional selectors and loop
 //! headers. Overlay authority must not alias the source tree.
 
 use super::super::copy_state::TirCopyState;
@@ -22,7 +22,6 @@ use crate::compiler_frontend::ast::templates::template::{
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
 };
-use crate::compiler_frontend::ast::templates::tir::node::TemplateIrBranch;
 use crate::compiler_frontend::ast::templates::tir::view::{TemplateTirPhase, TirView};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -43,23 +42,16 @@ fn text_node(
 }
 
 #[test]
-fn copied_branch_and_loop_expression_sites_are_independent() {
+fn copied_conditional_and_loop_expression_sites_are_independent() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
 
-    let branch_body = text_node(&mut store, &mut string_table, "branch");
+    let conditional_body = text_node(&mut store, &mut string_table, "conditional");
     let loop_body = text_node(&mut store, &mut string_table, "loop");
     let mut builder = TemplateIrBuilder::new(&mut store);
-    let selector_site = builder.store.next_expression_site_id();
-    let branch_root = builder.push_branch_chain_node(
-        vec![TemplateIrBranch::new(
-            TemplateBranchSelector::Bool(bool_expression(true)),
-            branch_body,
-            None,
-            selector_site,
-        )],
-        None,
-        None,
+    let conditional_root = builder.push_conditional_node(
+        TemplateBranchSelector::Bool(bool_expression(true)),
+        conditional_body,
         None,
     );
     let loop_root = builder.push_loop_node(
@@ -70,7 +62,7 @@ fn copied_branch_and_loop_expression_sites_are_independent() {
         None,
         None,
     );
-    let source_root = builder.push_sequence_node(vec![branch_root, loop_root], None);
+    let source_root = builder.push_sequence_node(vec![conditional_root, loop_root], None);
     let _template = builder.finish_template(
         source_root,
         Style::default(),
@@ -80,12 +72,14 @@ fn copied_branch_and_loop_expression_sites_are_independent() {
     );
 
     let source_selector = match &store
-        .get_node(branch_root)
-        .expect("source branch should exist")
+        .get_node(conditional_root)
+        .expect("source conditional should exist")
         .kind
     {
-        TemplateIrNodeKind::BranchChain { branches, .. } => branches[0].selector_site_id,
-        other => panic!("expected BranchChain, found {other:?}"),
+        TemplateIrNodeKind::Conditional {
+            selector_site_id, ..
+        } => *selector_site_id,
+        other => panic!("expected Conditional, found {other:?}"),
     };
     let source_header_sites = match &store
         .get_node(loop_root)
@@ -113,11 +107,13 @@ fn copied_branch_and_loop_expression_sites_are_independent() {
 
     let copied_selector = match &store
         .get_node(copied_children[0])
-        .expect("copied branch should exist")
+        .expect("copied conditional should exist")
         .kind
     {
-        TemplateIrNodeKind::BranchChain { branches, .. } => branches[0].selector_site_id,
-        other => panic!("expected copied BranchChain, found {other:?}"),
+        TemplateIrNodeKind::Conditional {
+            selector_site_id, ..
+        } => *selector_site_id,
+        other => panic!("expected copied Conditional, found {other:?}"),
     };
     let copied_header_sites = match &store
         .get_node(copied_children[1])
@@ -130,7 +126,7 @@ fn copied_branch_and_loop_expression_sites_are_independent() {
 
     assert_ne!(
         copied_selector, source_selector,
-        "copied branch selector site must not alias the source site"
+        "copied conditional selector site must not alias the source site"
     );
     assert_ne!(
         copied_header_sites, source_header_sites,

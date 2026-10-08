@@ -43,7 +43,7 @@ use crate::compiler_frontend::paths::module_resources::ResourceId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::type_coercion::string::fold_expression_kind_to_string;
 
-use super::control_flow::{fold_tir_branch_chain_with_insertion, fold_tir_loop};
+use super::control_flow::{fold_tir_conditional_with_insertion, fold_tir_loop};
 use super::estimate::{
     record_tir_fold_output_estimate_miss, record_tir_fold_output_intern,
     reserve_tir_fold_output_buffer,
@@ -786,16 +786,20 @@ pub(super) fn fold_tir_node_into_buffer(
         )
         .into()),
 
-        TemplateIrNodeKind::BranchChain { branches, fallback, .. } => {
-            fold_tir_branch_chain_with_insertion(
-                branches,
-            *fallback,
+        TemplateIrNodeKind::Conditional {
+            selector,
+            selector_site_id,
+            body,
+        } => fold_tir_conditional_with_insertion(
+            selector,
+            *selector_site_id,
+            *body,
+            node.span,
             output_state,
             fold_context,
             fold_input,
             insertion,
-            )
-        }
+        ),
 
         TemplateIrNodeKind::Loop {
             header,

@@ -12,7 +12,7 @@
 
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateBranchSelector, TemplateElseMarker, TemplateLoopHeader,
+    TemplateBranchSelector, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::template_slots::{
     RuntimeSlotContributionSourceId, RuntimeSlotSiteId,
@@ -111,8 +111,6 @@ pub(crate) enum OwnedRuntimeTemplateNode {
     BranchChain {
         branches: Vec<OwnedRuntimeTemplateBranch>,
         fallback: Option<Box<OwnedRuntimeTemplateNode>>,
-        #[allow(dead_code)] // Retained for deferred source-aware handoff diagnostics.
-        else_marker: Option<TemplateElseMarker>,
         #[allow(dead_code)] // Retained for deferred source-aware handoff diagnostics.
         span: Option<SourceSpan>,
     },

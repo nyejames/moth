@@ -11,33 +11,26 @@ fn runtime_template_handoff_from_expression(expression: Expression) -> OwnedRunt
 }
 
 #[test]
-fn branch_tir_root_normalizes_into_owned_runtime_handoff() {
+fn conditional_tir_root_normalizes_into_owned_runtime_handoff() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let location = None;
-    let branch_text = string_table.intern("branch body");
-    let fallback_text = string_table.intern("fallback body");
+    let body_text = string_table.intern("conditional body");
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
     let template_id = {
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let branch_body = builder.push_text_node(
-            branch_text,
-            "branch body".len(),
+        let body = builder.push_text_node(
+            body_text,
+            "conditional body".len(),
             TemplateSegmentOrigin::Body,
             location,
         );
-        let fallback_body = builder.push_text_node(
-            fallback_text,
-            "fallback body".len(),
-            TemplateSegmentOrigin::Body,
-            location,
-        );
-        let branch = TemplateIrBranch::new(
+        let root = builder.push_conditional_node(
             TemplateBranchSelector::Bool(Expression::reference_with_type_id(
                 path_fork
-                    .try_intern_portable_path("show_branch", &mut string_table)
+                    .try_intern_portable_path("show_conditional", &mut string_table)
                     .expect("test path fits"),
                 DataType::Bool,
                 builtin_type_ids::BOOL,
@@ -45,12 +38,9 @@ fn branch_tir_root_normalizes_into_owned_runtime_handoff() {
                 ValueMode::ImmutableReference,
                 ConstRecordState::RuntimeValue,
             )),
-            branch_body,
+            body,
             location,
-            builder.store.next_expression_site_id(),
         );
-        let root =
-            builder.push_branch_chain_node(vec![branch], Some(fallback_body), None, location);
         builder.finish_template(
             root,
             Style::default(),
@@ -79,22 +69,16 @@ fn branch_tir_root_normalizes_into_owned_runtime_handoff() {
     };
 
     normalize_expression_templates(&mut expression, &mut context)
-        .expect("branch TIR root should normalize through the finalized effective view");
+        .expect("conditional TIR root should normalize through the finalized effective view");
 
     let handoff = runtime_template_handoff_from_expression(expression);
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::BranchChain {
-        branches,
-        fallback,
-        ..
+        branches, ..
     }) = handoff.body
     else {
-        panic!("expected a branch-chain runtime handoff");
+        panic!("expected a runtime conditional handoff");
     };
     assert_eq!(branches.len(), 1);
-    assert!(
-        fallback.is_some(),
-        "the fallback must remain owned by the handoff"
-    );
 }
 
 #[test]
@@ -379,7 +363,7 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
             TemplateSegmentOrigin::Body,
             location,
         );
-        let branch = TemplateIrBranch::new(
+        let unselected_conditional = builder.push_conditional_node(
             TemplateBranchSelector::Bool(Expression::bool(
                 false,
                 location,
@@ -387,10 +371,18 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
             )),
             unselected_node,
             location,
-            builder.store.next_expression_site_id(),
         );
-        let root =
-            builder.push_branch_chain_node(vec![branch], Some(selected_node), None, location);
+        let selected_conditional = builder.push_conditional_node(
+            TemplateBranchSelector::Bool(Expression::bool(
+                true,
+                location,
+                ValueMode::ImmutableOwned,
+            )),
+            selected_node,
+            location,
+        );
+        let root = builder
+            .push_sequence_node(vec![unselected_conditional, selected_conditional], location);
         let template_id = builder.finish_template(
             root,
             Style::default(),

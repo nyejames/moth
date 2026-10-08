@@ -74,7 +74,7 @@ pub(super) fn estimate_tir_node_output_bytes(
         TemplateIrNodeKind::ChildTemplate { .. }
         | TemplateIrNodeKind::DynamicExpression { .. } => Ok(0),
         TemplateIrNodeKind::Slot { .. } => Ok(0),
-        TemplateIrNodeKind::BranchChain { .. }
+        TemplateIrNodeKind::Conditional { .. }
         | TemplateIrNodeKind::Loop { .. }
         | TemplateIrNodeKind::InsertContribution { .. } => match mode {
             FoldEstimateMode::Structural => Ok(0),

@@ -23,7 +23,7 @@ use crate::compiler_frontend::ast::templates::tir::ids::{
     ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId,
 };
 use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIr, TemplateIrBranch, TemplateIrNode, TemplateIrNodeKind,
+    TemplateIr, TemplateIrNode, TemplateIrNodeKind,
 };
 use crate::compiler_frontend::ast::templates::tir::overlays::{
     TemplateViewContext, TirExpressionOverlay, TirExpressionOverlayId, TirSlotResolution,
@@ -106,33 +106,33 @@ fn fold_prepared_view(
     Ok(emission)
 }
 
-fn build_branch_template(
+fn build_conditional_template(
     store: &mut TemplateIrStore,
     string_table: &mut StringTable,
     selector: TemplateBranchSelector,
-    branch_text: &str,
-    fallback_text: &str,
-) -> (TemplateIrId, ExpressionSiteId, StringId, StringId) {
+    body_text: &str,
+) -> (TemplateIrId, ExpressionSiteId, StringId) {
     let mut builder = TemplateIrBuilder::new(store);
-    let branch_text_id = string_table.intern(branch_text);
-    let branch_text_node = builder.push_text_node(
-        branch_text_id,
-        branch_text.len(),
+    let body_text_id = string_table.intern(body_text);
+    let body_text_node = builder.push_text_node(
+        body_text_id,
+        body_text.len(),
         TemplateSegmentOrigin::Body,
         None,
     );
-    let branch_body = builder.push_sequence_node(vec![branch_text_node], None);
-    let fallback_text_id = string_table.intern(fallback_text);
-    let fallback_text_node = builder.push_text_node(
-        fallback_text_id,
-        fallback_text.len(),
-        TemplateSegmentOrigin::Body,
-        None,
-    );
-    let fallback = builder.push_sequence_node(vec![fallback_text_node], None);
-    let selector_site_id = builder.store.next_expression_site_id();
-    let branch = TemplateIrBranch::new(selector, branch_body, None, selector_site_id);
-    let root = builder.push_branch_chain_node(vec![branch], Some(fallback), None, None);
+    let body = builder.push_sequence_node(vec![body_text_node], None);
+    let root = builder.push_conditional_node(selector, body, None);
+    let selector_site_id = match &builder
+        .store
+        .get_node(root)
+        .expect("conditional node should exist")
+        .kind
+    {
+        TemplateIrNodeKind::Conditional {
+            selector_site_id, ..
+        } => *selector_site_id,
+        other => panic!("expected conditional node, got {other:?}"),
+    };
     let template_id = builder.finish_template(
         root,
         Style::default(),
@@ -140,12 +140,7 @@ fn build_branch_template(
         TemplateIrSummary::default(),
         None,
     );
-    (
-        template_id,
-        selector_site_id,
-        branch_text_id,
-        fallback_text_id,
-    )
+    (template_id, selector_site_id, body_text_id)
 }
 
 #[test]
@@ -364,16 +359,15 @@ fn fold_view_slot_overlay_resolves_filled_and_missing_to_empty() {
 }
 
 #[test]
-fn fold_view_branch_selectors_use_overlay_or_structural_expression() {
+fn fold_view_conditional_selectors_use_overlay_or_structural_expression() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
 
-    let (bool_template, bool_site, bool_branch_text, bool_fallback_text) = build_branch_template(
+    let (bool_template, bool_site, bool_body_text) = build_conditional_template(
         &mut store,
         &mut string_table,
         TemplateBranchSelector::Bool(Expression::bool(false, None, ValueMode::ImmutableOwned)),
-        "bool-branch",
-        "bool-fallback",
+        "bool-body",
     );
 
     let mut type_environment = TypeEnvironment::new();
@@ -400,17 +394,15 @@ fn fold_view_branch_selectors_use_overlay_or_structural_expression() {
         value: Box::new(Expression::int(7, None, ValueMode::ImmutableOwned)),
         to_type: option_some.type_id,
     };
-    let (option_template, option_site, option_branch_text, option_fallback_text) =
-        build_branch_template(
-            &mut store,
-            &mut string_table,
-            TemplateBranchSelector::OptionPresentCapture {
-                scrutinee: option_none,
-                pattern: Box::new(option_pattern),
-            },
-            "option-branch",
-            "option-fallback",
-        );
+    let (option_template, option_site, option_body_text) = build_conditional_template(
+        &mut store,
+        &mut string_table,
+        TemplateBranchSelector::OptionPresentCapture {
+            scrutinee: option_none,
+            pattern: Box::new(option_pattern),
+        },
+        "option-body",
+    );
 
     let bool_overlay_id = store
         .allocate_expression_overlay(TirExpressionOverlay {
@@ -467,22 +459,22 @@ fn fold_view_branch_selectors_use_overlay_or_structural_expression() {
     assert_eq!(
         fold_prepared_view(&bool_structural_view, &mut fold_context)
             .expect("structural bool selector should fold"),
-        TemplateEmission::Output(ConstStringValue::Text(bool_fallback_text)),
+        TemplateEmission::NoOutput,
     );
     assert_eq!(
         fold_prepared_view(&bool_overlay_view, &mut fold_context)
             .expect("overlay bool selector should fold"),
-        TemplateEmission::Output(ConstStringValue::Text(bool_branch_text)),
+        TemplateEmission::Output(ConstStringValue::Text(bool_body_text)),
     );
     assert_eq!(
         fold_prepared_view(&option_structural_view, &mut fold_context)
             .expect("structural option selector should fold"),
-        TemplateEmission::Output(ConstStringValue::Text(option_fallback_text)),
+        TemplateEmission::NoOutput,
     );
     assert_eq!(
         fold_prepared_view(&option_overlay_view, &mut fold_context)
             .expect("overlay option selector should fold"),
-        TemplateEmission::Output(ConstStringValue::Text(option_branch_text)),
+        TemplateEmission::Output(ConstStringValue::Text(option_body_text)),
     );
 }
 
@@ -573,36 +565,21 @@ fn fold_prepared_template_rejects_parsed_phase() {
 }
 
 #[test]
-fn prepared_fold_rejects_missing_node_in_untaken_branch() {
+fn prepared_fold_rejects_missing_body_in_false_conditional() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
-    let body = store.push_node(TemplateIrNode::new(
-        TemplateIrNodeKind::Text {
-            text: string_table.intern("taken"),
-            byte_len: 5,
-            origin: TemplateSegmentOrigin::Body,
-        },
-        None,
-    ));
-    let branch = TemplateIrBranch::new(
-        TemplateBranchSelector::Bool(Expression::bool(false, None, ValueMode::ImmutableOwned)),
-        body,
-        None,
-        store.next_expression_site_id(),
-    );
     let missing_body = TemplateIrNodeId::new(999);
-    let untaken_branch = TemplateIrBranch::new(
-        TemplateBranchSelector::Bool(Expression::bool(true, None, ValueMode::ImmutableOwned)),
-        missing_body,
-        None,
-        store.next_expression_site_id(),
-    );
+    let selector_site_id = store.next_expression_site_id();
     let root = store.push_node(TemplateIrNode::new(
-        TemplateIrNodeKind::BranchChain {
-            branches: vec![branch, untaken_branch],
-            fallback: None,
-            else_marker: None,
+        TemplateIrNodeKind::Conditional {
+            selector: Box::new(TemplateBranchSelector::Bool(Expression::bool(
+                false,
+                None,
+                ValueMode::ImmutableOwned,
+            ))),
+            selector_site_id,
+            body: missing_body,
         },
         None,
     ));
@@ -619,7 +596,7 @@ fn prepared_fold_rejects_missing_node_in_untaken_branch() {
     let mut context = fold_context(&mut string_table);
 
     let error = fold_prepared_view(&view, &mut context)
-        .expect_err("a missing node in an untaken branch must still be rejected");
+        .expect_err("a missing body must be rejected even when the selector is false");
 
     assert!(
         format!("{error:?}").contains("node"),
