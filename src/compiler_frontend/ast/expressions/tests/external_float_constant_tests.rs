@@ -17,7 +17,7 @@ use crate::compiler_frontend::external_packages::{
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 
 fn numeric_profile(float_precision: FloatPrecision) -> NumericProfile {
@@ -128,91 +128,48 @@ fn core_math_constant_projects_native_float_at_profile_precision() {
     assert_eq!(value, f64::from(std::f32::consts::PI));
 }
 
+/// Fixed constants project their exact materialised value and keep the declared scalar under any
+/// profile. `U32` above `i32::MAX` proves the value never passes through a signed or native carrier.
 #[test]
-fn abi_numeric_constants_keep_fixed_i32_and_f64_identities() {
+fn fixed_scalar_constants_keep_declared_identity_and_exact_value() {
     let mut string_table = StringTable::new();
-    let int_name = string_table.intern("ABI_INT");
-    let int_definition = ExternalConstantDef {
-        name: "ABI_INT".to_owned(),
-        data_type: ExternalAbiType::I32.into(),
-        value: ExternalConstantValue::Int(i32::MIN),
-    };
-    let int_expression = project_external_constant(
-        &int_definition,
-        int_name,
-        None,
-        numeric_profile(FloatPrecision::Bits32),
-        ValueMode::ImmutableOwned,
-        &mut string_table,
-    )
-    .expect("I32 ABI constant should project");
-    assert_eq!(
-        int_expression.type_id,
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-    );
-    let ExpressionKind::FixedScalar(int_value) = int_expression.kind else {
-        panic!("ABI I32 constant should remain a fixed I32 expression");
-    };
-    assert_eq!(int_value.as_i64(), Some(i64::from(i32::MIN)));
+    let fixed_values = [
+        FixedScalarValue::signed(FixedScalar::I32, i64::from(i32::MIN))
+            .expect("I32 minimum is in range"),
+        FixedScalarValue::unsigned(FixedScalar::U32, u64::from(u32::MAX))
+            .expect("U32 maximum is in range"),
+        FixedScalarValue::binary_float(FixedScalar::F32, -0.0).expect("F32 negative zero is exact"),
+        FixedScalarValue::binary_float(FixedScalar::F64, std::f64::consts::PI)
+            .expect("PI is an exact binary64 value"),
+    ];
 
-    let float_name = string_table.intern("ABI_FLOAT");
-    let float_definition = ExternalConstantDef {
-        name: "ABI_FLOAT".to_owned(),
-        data_type: ExternalAbiType::F64.into(),
-        value: ExternalConstantValue::Float(std::f64::consts::PI),
-    };
-    let float_expression = project_external_constant(
-        &float_definition,
-        float_name,
-        None,
-        numeric_profile(FloatPrecision::Bits32),
-        ValueMode::ImmutableOwned,
-        &mut string_table,
-    )
-    .expect("F64 ABI constant should project");
-    assert_eq!(
-        float_expression.type_id,
-        builtin_type_ids::fixed_scalar(FixedScalar::F64),
-    );
-    let ExpressionKind::FixedScalar(float_value) = float_expression.kind else {
-        panic!("ABI F64 constant should remain a fixed F64 expression");
-    };
-    assert_eq!(float_value.as_f64(), Some(std::f64::consts::PI));
-}
+    for value in fixed_values {
+        let scalar = value.scalar();
+        let constant_name = string_table.intern(scalar.name());
+        let definition = ExternalConstantDef {
+            name: scalar.name().to_owned(),
+            data_type: ExternalAbiType::Fixed(scalar).into(),
+            value: ExternalConstantValue::Fixed(value),
+        };
+        let projected = project_external_constant(
+            &definition,
+            constant_name,
+            None,
+            numeric_profile(FloatPrecision::Bits32),
+            ValueMode::ImmutableOwned,
+            &mut string_table,
+        )
+        .expect("a fixed constant always projects");
 
-#[test]
-fn abi_f64_constant_rejects_nonfinite_values() {
-    let mut string_table = StringTable::new();
-    let constant_name = string_table.intern("ABI_NONFINITE");
-    let definition = ExternalConstantDef {
-        name: "ABI_NONFINITE".to_owned(),
-        data_type: ExternalAbiType::F64.into(),
-        value: ExternalConstantValue::Float(f64::INFINITY),
-    };
-
-    let error = project_external_constant(
-        &definition,
-        constant_name,
-        None,
-        numeric_profile(FloatPrecision::Bits64),
-        ValueMode::ImmutableOwned,
-        &mut string_table,
-    )
-    .expect_err("non-finite ABI F64 constants are not representable");
-    let DiagnosticPayload::CompileTimeEvaluationError {
-        reason,
-        operation,
-        numeric_profile: selected_profile,
-    } = error.payload
-    else {
-        panic!("non-finite ABI F64 should report the compile-time evaluation lane");
-    };
-    assert_eq!(reason, CompileTimeEvaluationErrorReason::FloatOverflow);
-    assert_eq!(operation, Some(constant_name));
-    assert_eq!(
-        selected_profile,
-        Some(numeric_profile(FloatPrecision::Bits64))
-    );
+        assert_eq!(projected.type_id, builtin_type_ids::fixed_scalar(scalar));
+        let ExpressionKind::FixedScalar(projected_value) = projected.kind else {
+            panic!(
+                "{} constant should remain a fixed scalar expression",
+                scalar.name()
+            );
+        };
+        assert_eq!(projected_value, value);
+    }
 }
 
 #[test]

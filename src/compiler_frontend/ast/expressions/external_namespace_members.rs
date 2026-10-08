@@ -27,7 +27,6 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 use moth_lexical::numeric::profile::NumericProfile;
 
@@ -220,8 +219,8 @@ pub(super) fn parse_external_namespace_constant_member(
 
 /// Projects an external constant using its semantic signature type.
 ///
-/// WHAT: keeps foreign I32/F64 values fixed-width while native Moth Int/Uint/Float
-///       values use their profile-selected literal constructors.
+/// WHAT: fixed foreign scalars project their already materialised exact value, while native Moth
+///       Int/Uint/Float values use their profile-selected literal constructors.
 /// WHY: constants share the same ABI-versus-language distinction as external function slots.
 pub(super) fn project_external_constant(
     constant_definition: &ExternalConstantDef,
@@ -241,18 +240,10 @@ pub(super) fn project_external_constant(
                 value_mode,
             )
         }
-        (ExternalSignatureType::Abi(ExternalAbiType::F64), ExternalConstantValue::Float(value)) => {
-            let value =
-                FixedScalarValue::binary_float(FixedScalar::F64, value).ok_or_else(|| {
-                    CompilerDiagnostic::compile_time_evaluation_error(
-                        CompileTimeEvaluationErrorReason::FloatOverflow,
-                        Some(constant_name),
-                        span,
-                        Some(numeric_profile),
-                    )
-                })?;
-            Ok(Expression::fixed_scalar(value, span, value_mode))
-        }
+        (
+            ExternalSignatureType::Abi(ExternalAbiType::Fixed(_)),
+            ExternalConstantValue::Fixed(value),
+        ) => Ok(Expression::fixed_scalar(value, span, value_mode)),
         (ExternalSignatureType::NativeInt, ExternalConstantValue::Int(value)) => {
             Ok(Expression::int(i64::from(value), span, value_mode))
         }
@@ -270,11 +261,6 @@ pub(super) fn project_external_constant(
                 ));
             }
             Ok(Expression::uint(value, span, value_mode))
-        }
-        (ExternalSignatureType::Abi(ExternalAbiType::I32), ExternalConstantValue::Int(value)) => {
-            let value = FixedScalarValue::signed(FixedScalar::I32, i64::from(value))
-                .expect("an I32 constant payload always fits the I32 scalar");
-            Ok(Expression::fixed_scalar(value, span, value_mode))
         }
         (
             ExternalSignatureType::Abi(ExternalAbiType::Utf8Str),

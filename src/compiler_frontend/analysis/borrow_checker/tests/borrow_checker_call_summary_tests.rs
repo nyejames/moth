@@ -56,6 +56,7 @@ use crate::compiler_frontend::tests::external_package_support::{
 use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::sync::Arc;
@@ -1169,10 +1170,12 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
             name: "imprecise_external".to_owned(),
             parameters: vec![],
             returns: vec![
-                ExternalReturnSlot::fresh(RegistryAbiType::I32),
-                ExternalReturnSlot::fresh(RegistryAbiType::I32),
+                ExternalReturnSlot::fresh(RegistryAbiType::Fixed(FixedScalar::I32)),
+                ExternalReturnSlot::fresh(RegistryAbiType::Fixed(FixedScalar::I32)),
             ],
-            error_return_type: Some(ExternalSignatureType::Abi(RegistryAbiType::I32)),
+            error_return_type: Some(ExternalSignatureType::Abi(RegistryAbiType::Fixed(
+                FixedScalar::I32,
+            ))),
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("fallible external fixture registration should succeed");

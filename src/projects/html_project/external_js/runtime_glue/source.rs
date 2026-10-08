@@ -6,15 +6,18 @@
 //!      to Moth's internal conventions.
 
 use crate::backends::js::{
-    builtin_error_code_js_field_name, builtin_error_message_js_field_name,
+    JsNumericCarrier, builtin_error_code_js_field_name, builtin_error_message_js_field_name,
     external_module_export_glue_function_name,
 };
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalPackageId, ExternalSignatureType,
 };
 use crate::projects::html_project::external_js::runtime_glue::exports::ReferencedExport;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::precision::BinaryFloatPrecision;
 use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -180,8 +183,66 @@ enum ReturnAdapter {
     NativeUint32,
     NativeUint64,
     NativeFloat32,
-    AbiI32,
-    AbiF64,
+    Fixed(FixedScalarAdapter),
+}
+
+/// How one fixed foreign scalar crosses the HTML-JS boundary.
+///
+/// WHAT: derived from the JS backend's carrier for that scalar. Exact-Number integers check
+///       their own inclusive range, and binary floats round once at their precision and must
+///       stay finite.
+/// WHY: the backend's `JsNumericCarrier` already owns each scalar's runtime representation, so
+///      the glue validates against that one fact instead of a private width table. Fixed
+///      scalars never follow the selected `Int` or `Float` profile.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FixedScalarAdapter {
+    ExactInteger {
+        scalar: FixedScalar,
+        minimum: i128,
+        maximum: i128,
+    },
+    BinaryFloat {
+        scalar: FixedScalar,
+        precision: BinaryFloatPrecision,
+    },
+}
+
+impl FixedScalarAdapter {
+    /// Selects an adapter for the delivered fixed foreign subset.
+    ///
+    /// Carrier availability alone does not authorise another binding form. Other fixed scalars
+    /// remain unsupported even when the JS backend can represent them internally.
+    fn for_scalar(scalar: FixedScalar, numeric_profile: NumericProfile) -> Option<Self> {
+        if !matches!(
+            scalar,
+            FixedScalar::I32 | FixedScalar::U32 | FixedScalar::F32 | FixedScalar::F64
+        ) {
+            return None;
+        }
+
+        match JsNumericCarrier::for_scalar(NumericScalar::Fixed(scalar), numeric_profile)? {
+            JsNumericCarrier::ExactInteger { min, max } => Some(Self::ExactInteger {
+                scalar,
+                minimum: min,
+                maximum: max,
+            }),
+            JsNumericCarrier::BinaryFloat {
+                precision:
+                    precision @ (BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64),
+            } => Some(Self::BinaryFloat { scalar, precision }),
+            JsNumericCarrier::BinaryFloat { .. }
+            | JsNumericCarrier::BigInteger { .. }
+            | JsNumericCarrier::ScaledInteger { .. } => None,
+        }
+    }
+
+    /// Rounds a JavaScript Number to this float precision. Binary64 Numbers are already exact.
+    fn rounded_float_source(precision: BinaryFloatPrecision, value: &str) -> String {
+        match precision {
+            BinaryFloatPrecision::Binary32 => format!("Math.fround({value})"),
+            _ => value.to_owned(),
+        }
+    }
 }
 
 struct PreparedCallArguments {
@@ -204,6 +265,18 @@ fn validate_supported_signature(
         return Err(CompilerError::compiler_error(format!(
             "HTML JS glue cannot adapt optional numeric signature metadata for external function '{wrapper_name}'."
         )));
+    }
+
+    // Fixed scalars must have an exact adapter before any adapter is selected below.
+    for signature_type in parameter_types.iter().chain(return_types) {
+        if let ExternalSignatureType::Abi(ExternalAbiType::Fixed(scalar)) = signature_type
+            && FixedScalarAdapter::for_scalar(*scalar, numeric_profile).is_none()
+        {
+            return Err(CompilerError::compiler_error(format!(
+                "HTML JS glue has no JavaScript Number adapter for fixed {} in external function '{wrapper_name}'.",
+                scalar.name()
+            )));
+        }
     }
 
     if return_types.len() > 1
@@ -234,7 +307,7 @@ fn is_numeric_signature_type(signature_type: &ExternalSignatureType) -> bool {
         ExternalSignatureType::NativeInt
             | ExternalSignatureType::NativeUint
             | ExternalSignatureType::NativeFloat
-            | ExternalSignatureType::Abi(ExternalAbiType::I32 | ExternalAbiType::F64)
+            | ExternalSignatureType::Abi(ExternalAbiType::Fixed(_))
     )
 }
 
@@ -270,8 +343,10 @@ fn return_adapter_for_type(
         {
             ReturnAdapter::NativeFloat32
         }
-        ExternalSignatureType::Abi(ExternalAbiType::I32) => ReturnAdapter::AbiI32,
-        ExternalSignatureType::Abi(ExternalAbiType::F64) => ReturnAdapter::AbiF64,
+        ExternalSignatureType::Abi(ExternalAbiType::Fixed(scalar)) => ReturnAdapter::Fixed(
+            FixedScalarAdapter::for_scalar(*scalar, numeric_profile)
+                .expect("validate_supported_signature rejects fixed scalars without an adapter"),
+        ),
         _ => ReturnAdapter::Identity,
     }
 }
@@ -328,15 +403,25 @@ fn prepare_call_arguments(
             write!(&mut arguments, "__moth_arg{index}_number")
                 .expect("writing generated wrapper arguments into a String cannot fail");
         } else {
-            if matches!(
-                parameter_type,
-                ExternalSignatureType::Abi(ExternalAbiType::I32)
-            ) {
-                writeln!(
-                    &mut prelude,
-                    "    if (typeof arg{index} !== \"number\" || !Number.isInteger(arg{index}) || arg{index} < -2147483648 || arg{index} > 2147483647) {{\n        throw new RangeError(\"External I32 parameter is outside signed 32-bit range\");\n    }}"
-                )
-                .expect("writing generated wrapper checks into a String cannot fail");
+            if let ExternalSignatureType::Abi(ExternalAbiType::Fixed(scalar)) = parameter_type {
+                match scalar {
+                    FixedScalar::I32 => {
+                        writeln!(
+                            &mut prelude,
+                            "    if (typeof arg{index} !== \"number\" || !Number.isInteger(arg{index}) || arg{index} < -2147483648 || arg{index} > 2147483647) {{\n        throw new RangeError(\"External I32 parameter is outside signed 32-bit range\");\n    }}"
+                        )
+                        .expect("writing generated wrapper checks into a String cannot fail");
+                    }
+                    // Existing F64 parameters keep their pass-through policy.
+                    FixedScalar::F64 => {}
+                    _ => {
+                        let adapter = FixedScalarAdapter::for_scalar(*scalar, numeric_profile)
+                            .expect(
+                                "validate_supported_signature rejects unsupported fixed scalars",
+                            );
+                        prelude.push_str(&fixed_parameter_check(adapter, index));
+                    }
+                }
             }
             if matches!(parameter_type, ExternalSignatureType::NativeUint)
                 && numeric_profile.int_width == IntWidth::Bits32
@@ -389,31 +474,41 @@ fn adapted_return_body(
                 "{indent}const {raw_value} = {value_expression};\n{indent}const {adapted_value} = typeof {raw_value} === \"number\" ? Math.fround({raw_value}) : Number.NaN;\n{indent}return {returned_value};"
             )
         }
-        // Native Int32, native Uint32 and fixed I32 share one value-gate shape, not a
-        // semantic identity. Integer zero must be canonical before a later float
+        // Native Int32, native Uint32 and exact-Number fixed integers share one value-gate shape,
+        // not a semantic identity. Integer zero must be canonical before a later float
         // conversion can observe its sign. Only the bounds and the message differ:
-        // the unsigned gate rejects negatives where the signed gates admit them.
-        ReturnAdapter::NativeInt32 | ReturnAdapter::NativeUint32 | ReturnAdapter::AbiI32 => {
-            let (boundary_message, minimum, maximum): (&str, i64, i64) = match adapter {
+        // the unsigned gates reject negatives where the signed gates admit them.
+        ReturnAdapter::NativeInt32
+        | ReturnAdapter::NativeUint32
+        | ReturnAdapter::Fixed(FixedScalarAdapter::ExactInteger { .. }) => {
+            let (boundary_message, minimum, maximum): (&str, i128, i128) = match adapter {
                 ReturnAdapter::NativeUint32 => (
                     "External native Uint32 result is not an integer within the unsigned 32-bit range",
                     0,
                     4294967295,
                 ),
-                ReturnAdapter::NativeInt32 => (
+                ReturnAdapter::Fixed(FixedScalarAdapter::ExactInteger {
+                    scalar,
+                    minimum,
+                    maximum,
+                }) => (
+                    if scalar == FixedScalar::I32 {
+                        "External I32 result is outside signed 32-bit range"
+                    } else {
+                        "External U32 result is not an integer within the unsigned 32-bit range"
+                    },
+                    minimum,
+                    maximum,
+                ),
+                _ => (
                     "External native Int32 result is not an integer within the signed 32-bit range",
                     -2147483648,
                     2147483647,
                 ),
-                _ => (
-                    "External I32 result is outside signed 32-bit range",
-                    -2147483648,
-                    2147483647,
-                ),
             };
-            let returned_value = success_value("__moth_external_canonical_i32");
+            let returned_value = success_value("__moth_external_canonical_integer");
             format!(
-                "{indent}const __moth_external_i32 = {value_expression};\n{indent}if (typeof __moth_external_i32 !== \"number\" || !Number.isInteger(__moth_external_i32) || __moth_external_i32 < {minimum} || __moth_external_i32 > {maximum}) {{\n{indent}    throw new RangeError(\"{boundary_message}\");\n{indent}}}\n{indent}const __moth_external_canonical_i32 = __moth_external_i32 === 0 ? 0 : __moth_external_i32;\n{indent}return {returned_value};"
+                "{indent}const __moth_external_integer = {value_expression};\n{indent}if (typeof __moth_external_integer !== \"number\" || !Number.isInteger(__moth_external_integer) || __moth_external_integer < {minimum} || __moth_external_integer > {maximum}) {{\n{indent}    throw new RangeError(\"{boundary_message}\");\n{indent}}}\n{indent}const __moth_external_canonical_integer = __moth_external_integer === 0 ? 0 : __moth_external_integer;\n{indent}return {returned_value};"
             )
         }
         // Int64 and Uint64 share one safe-Number bridge gate: check bounds before
@@ -440,8 +535,14 @@ fn adapted_return_body(
                 "{indent}const __moth_external_number = {value_expression};\n{indent}if (typeof __moth_external_number !== \"number\" || !Number.isSafeInteger(__moth_external_number) || __moth_external_number < {minimum} || __moth_external_number > {maximum}) {{\n{indent}    throw new RangeError(\"{boundary_message}\");\n{indent}}}\n{indent}const __moth_external_integer = BigInt(__moth_external_number);\n{indent}return {returned_value};"
             )
         }
-        ReturnAdapter::AbiF64 => {
-            let value = "__moth_external_f64";
+        // Fixed binary floats round once at their own precision, independent of the Float
+        // profile, and keep signed zero. A non-Number or a value that rounds outside the finite
+        // range is the shared Float boundary failure: code 304 in a fallible wrapper, a thrown
+        // RangeError otherwise.
+        ReturnAdapter::Fixed(FixedScalarAdapter::BinaryFloat { precision, .. }) => {
+            let raw_value = "__moth_external_fixed_float_raw";
+            let value = "__moth_external_fixed_float";
+            let rounded_value = FixedScalarAdapter::rounded_float_source(precision, raw_value);
             let returned_value = success_value(value);
             let invalid_value = if fallible {
                 let error = float_boundary_error_source(release_build);
@@ -453,7 +554,34 @@ fn adapted_return_body(
                 )
             };
             format!(
-                "{indent}const {value} = {value_expression};\n{indent}if (!Number.isFinite({value})) {{\n{invalid_value}\n{indent}}}\n{indent}return {returned_value};"
+                "{indent}const {raw_value} = {value_expression};\n{indent}const {value} = typeof {raw_value} === \"number\" ? {rounded_value} : Number.NaN;\n{indent}if (!Number.isFinite({value})) {{\n{invalid_value}\n{indent}}}\n{indent}return {returned_value};"
+            )
+        }
+    }
+}
+
+/// Validates a new `U32` or `F32` argument before the foreign call observes it.
+///
+/// Moth already produces valid fixed values. Direct wrapper misuse must not coerce a foreign
+/// carrier: `U32` canonicalises integer zero and `F32` must be exact while preserving signed zero.
+fn fixed_parameter_check(adapter: FixedScalarAdapter, index: usize) -> String {
+    let argument = format!("arg{index}");
+    match adapter {
+        FixedScalarAdapter::ExactInteger {
+            scalar,
+            minimum,
+            maximum,
+        } => {
+            let name = scalar.name();
+            format!(
+                "    if (typeof {argument} !== \"number\" || !Number.isInteger({argument}) || {argument} < {minimum} || {argument} > {maximum}) {{\n        throw new RangeError(\"External {name} parameter is not an integer within the {name} range\");\n    }}\n    {argument} = {argument} === 0 ? 0 : {argument};\n"
+            )
+        }
+        FixedScalarAdapter::BinaryFloat { scalar, precision } => {
+            let name = scalar.name();
+            let rounded = FixedScalarAdapter::rounded_float_source(precision, &argument);
+            format!(
+                "    if (typeof {argument} !== \"number\" || !Number.isFinite({argument}) || {rounded} !== {argument}) {{\n        throw new RangeError(\"External {name} parameter is not a finite {name} value\");\n    }}\n"
             )
         }
     }

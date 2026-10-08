@@ -14895,3 +14895,31 @@ path = "function_parameter_reassignment_rejected"
 tags = ["integration", "language", "functions", "diagnostics"]
 contract = "language.functions.shared_parameter_reassignment_rejected"
 role = "primary"
+
+[[case]]
+id = "external_fixed_scalars_int32_float64"
+path = "external_fixed_scalars_int32_float64"
+tags = ["integration", "numeric", "external", "runtime", "fixed-scalars"]
+contract = "backend.html.external_fixed_scalar_annotations"
+role = "primary"
+
+[[case]]
+id = "external_fixed_scalars_int64_float64"
+path = "external_fixed_scalars_int64_float64"
+tags = ["integration", "numeric", "external", "runtime", "fixed-scalars", "int64", "release"]
+contract = "backend.html.external_fixed_scalar_annotations"
+role = "backend"
+
+[[case]]
+id = "external_fixed_scalars_int32_float32"
+path = "external_fixed_scalars_int32_float32"
+tags = ["integration", "numeric", "external", "runtime", "fixed-scalars", "float32", "release"]
+contract = "backend.html.external_fixed_scalar_annotations"
+role = "backend"
+
+[[case]]
+id = "external_fixed_scalars_int64_float32"
+path = "external_fixed_scalars_int64_float32"
+tags = ["integration", "numeric", "external", "runtime", "fixed-scalars", "int64", "float32"]
+contract = "backend.html.external_fixed_scalar_annotations"
+role = "backend"

@@ -229,6 +229,67 @@ export function identityUint(value) {
 }
 
 #[test]
+fn fixed_u32_and_f32_signatures_parse_parameters_and_both_result_lanes() {
+    for scalar in ["U32", "F32"] {
+        for error_slot in ["", ", Error!"] {
+            let source = format!(
+                "/** @moth.sig identity |value {scalar}| -> {scalar}{error_slot} */\nexport function identity(value) {{ return value; }}"
+            );
+            let parsed = parse(&source);
+            assert_no_diagnostics(&parsed);
+            let function = &parsed.free_functions[0];
+            assert_eq!(function.signature.parameters[0].type_name, scalar);
+            assert_eq!(function.signature.returns[0].type_name, scalar);
+            assert_eq!(function.signature.has_error_return, !error_slot.is_empty());
+        }
+    }
+}
+
+#[test]
+fn other_fixed_scalar_annotations_remain_outside_the_signature_subset() {
+    for scalar in [
+        "I8", "I16", "I32", "I64", "U8", "U16", "U64", "F16", "F64", "Byte",
+    ] {
+        let source = format!(
+            "/** @moth.sig identity |value {scalar}| -> {scalar} */\nexport function identity(value) {{ return value; }}"
+        );
+        let parsed = parse(&source);
+        assert_diagnostic_kinds(
+            &parsed,
+            &[
+                JsDiagnosticKind::UnknownExternalType,
+                JsDiagnosticKind::UnknownExternalType,
+            ],
+        );
+    }
+}
+
+#[test]
+fn fixed_scalar_annotations_do_not_admit_dotted_or_collection_types() {
+    for signature in [
+        "|value F32.extra| -> F32",
+        "|| -> F32.extra",
+        "|value {U32}| -> U32",
+    ] {
+        let source = format!(
+            "/** @moth.sig identity {signature} */\nexport function identity{} {{ return 0; }}",
+            if signature.starts_with("||") {
+                "()"
+            } else {
+                "(value)"
+            }
+        );
+        let parsed = parse(&source);
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.kind == JsDiagnosticKind::UnsupportedTypeSyntax })
+        );
+    }
+}
+
+#[test]
 fn const_export_must_be_arrow_function() {
     let source = r#"
 /**

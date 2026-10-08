@@ -15,6 +15,7 @@ use crate::compiler_frontend::external_packages::{
 use crate::projects::html_project::external_js::parser::parsed_js_module::{
     ParsedJsFunction, ParsedJsModule, ParsedSignature,
 };
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::collections::HashMap;
 
 /// Result of registering a parsed JS module in the external package registry.
@@ -195,6 +196,12 @@ fn parsed_type_to_signature_type(
         "Int" => Ok(ExternalSignatureType::NativeInt),
         "Uint" => Ok(ExternalSignatureType::NativeUint),
         "Float" => Ok(ExternalSignatureType::NativeFloat),
+        "U32" => Ok(ExternalSignatureType::Abi(ExternalAbiType::Fixed(
+            FixedScalar::U32,
+        ))),
+        "F32" => Ok(ExternalSignatureType::Abi(ExternalAbiType::Fixed(
+            FixedScalar::F32,
+        ))),
         "Bool" => Ok(ExternalSignatureType::Abi(ExternalAbiType::Bool)),
         "String" => Ok(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
         "Char" => Ok(ExternalSignatureType::Abi(ExternalAbiType::Char)),
@@ -212,27 +219,5 @@ fn parsed_type_to_signature_type(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn js_numeric_annotations_remain_native_moth_signatures() {
-        let opaque_types = HashMap::new();
-
-        assert_eq!(
-            parsed_type_to_signature_type("Int", &opaque_types)
-                .expect("Int annotation should resolve"),
-            ExternalSignatureType::NativeInt,
-        );
-        assert_eq!(
-            parsed_type_to_signature_type("Uint", &opaque_types)
-                .expect("Uint annotation should resolve"),
-            ExternalSignatureType::NativeUint,
-        );
-        assert_eq!(
-            parsed_type_to_signature_type("Float", &opaque_types)
-                .expect("Float annotation should resolve"),
-            ExternalSignatureType::NativeFloat,
-        );
-    }
-}
+#[path = "tests/package_registration_tests.rs"]
+mod tests;

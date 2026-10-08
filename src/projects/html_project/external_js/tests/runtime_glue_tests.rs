@@ -20,6 +20,7 @@ use crate::projects::html_project::external_js::runtime_module_registry::{
 use crate::projects::html_project::tests::test_support::{
     create_test_module, js_runtime_asset_import,
 };
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -788,8 +789,12 @@ fn fixed_i32_glue_checks_bounds_and_other_signatures_preserve_js_values() {
     let i32_wrapper = generate_infallible_wrapper(
         "wrapI32",
         "rawI32",
-        &[ExternalSignatureType::Abi(ExternalAbiType::I32)],
-        &[ExternalSignatureType::Abi(ExternalAbiType::I32)],
+        &[ExternalSignatureType::Abi(ExternalAbiType::Fixed(
+            FixedScalar::I32,
+        ))],
+        &[ExternalSignatureType::Abi(ExternalAbiType::Fixed(
+            FixedScalar::I32,
+        ))],
         NumericProfile::STANDARD,
     )
     .expect("fixed I32 wrapper generation should succeed");
@@ -797,7 +802,7 @@ fn fixed_i32_glue_checks_bounds_and_other_signatures_preserve_js_values() {
         "wrapMixed",
         "rawMixed",
         &[
-            ExternalSignatureType::Abi(ExternalAbiType::F64),
+            ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::F64)),
             ExternalSignatureType::Abi(ExternalAbiType::Bool),
             ExternalSignatureType::Abi(ExternalAbiType::Utf8Str),
             ExternalSignatureType::Abi(ExternalAbiType::Char),
@@ -995,7 +1000,9 @@ fn fallible_fixed_f64_nonfinite_result_uses_profiled_moth_error() {
             false,
             profile,
             &[],
-            &[ExternalSignatureType::Abi(ExternalAbiType::F64)],
+            &[ExternalSignatureType::Abi(ExternalAbiType::Fixed(
+                FixedScalar::F64,
+            ))],
         )
         .expect("fallible F64 wrapper generation should succeed");
         let infallible_wrapper_name = format!("wrapInfallibleF64{suffix}");
@@ -1004,7 +1011,9 @@ fn fallible_fixed_f64_nonfinite_result_uses_profiled_moth_error() {
             &infallible_wrapper_name,
             &infallible_export_name,
             &[],
-            &[ExternalSignatureType::Abi(ExternalAbiType::F64)],
+            &[ExternalSignatureType::Abi(ExternalAbiType::Fixed(
+                FixedScalar::F64,
+            ))],
             profile,
         )
         .expect("infallible F64 wrapper generation should succeed");
@@ -1164,19 +1173,19 @@ fn native_and_fixed_integer_results_validate_before_moth_observation() {
         ),
         (
             "FixedI32",
-            ExternalSignatureType::Abi(ExternalAbiType::I32),
+            ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)),
             standard_profile,
             WrapperLane::Infallible,
         ),
         (
             "FixedI32",
-            ExternalSignatureType::Abi(ExternalAbiType::I32),
+            ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)),
             standard_profile,
             WrapperLane::DebugFallible,
         ),
         (
             "FixedI32",
-            ExternalSignatureType::Abi(ExternalAbiType::I32),
+            ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)),
             standard_profile,
             WrapperLane::ReleaseFallible,
         ),
@@ -1558,7 +1567,9 @@ fn create_registry_with_export(
             ExternalFunctionDef {
                 name: name.to_owned(),
                 parameters: Vec::new(),
-                returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::I32)],
+                returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::Fixed(
+                    FixedScalar::I32,
+                ))],
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
                     js: Some(ExternalJsLowering::ExternalModuleExport {
@@ -1570,4 +1581,209 @@ fn create_registry_with_export(
         )
         .unwrap();
     (registry, function_id, package_id)
+}
+
+/// Fixed boundaries use the same Number carriers in all four native profiles. Execute real
+/// wrappers, including success getters, rather than pinning their generated implementation.
+#[test]
+fn fixed_u32_and_f32_boundaries_are_profile_independent_on_every_wrapper_lane() {
+    let mut script = String::from(
+        r#"import assert from "node:assert/strict";
+function assertFixedBoundary(wrapper, state, isFloat, fallible, codeField, boundaryCode) {
+    const maxFloat = (2 - 2 ** -23) * 2 ** 127;
+    const minFloat = 2 ** -149;
+    const overflowMidpoint = 2 ** 128 - 2 ** 103;
+    const validParameters = isFloat
+        ? [0, -0, 1.5, Math.fround(0.1), minFloat, -minFloat, maxFloat, -maxFloat]
+        : [0, -0, 17, 2147483648, 4294967295];
+    function callOnce(input) {
+        const calls = state.calls;
+        const reads = state.reads;
+        let result;
+        try {
+            result = wrapper(input);
+        } finally {
+            assert.equal(state.calls, calls + 1, "foreign export evaluated once");
+            assert.equal(state.reads, reads + (fallible ? 1 : 0), "success snapshot read once");
+        }
+        if (fallible) {
+            assert.equal(result.tag, "ok");
+            return result.value;
+        }
+        return result;
+    }
+    state.mode = "echo";
+    for (const input of validParameters) {
+        const value = callOnce(input);
+        const expected = !isFloat && input === 0 ? 0 : input;
+        assert.equal(Object.is(state.received, expected), true);
+        assert.equal(Object.is(value, expected), true);
+        assert.equal(typeof value, "number");
+    }
+    const hostileCarrier = { valueOf() { throw new Error("must not coerce"); } };
+    const wrongCarriers = ["1", 1n, null, undefined, true, hostileCarrier];
+    const invalidParameters = isFloat
+        ? [0.1, 2 ** -150, overflowMidpoint, -overflowMidpoint, NaN, Infinity, -Infinity, ...wrongCarriers]
+        : [-1, 1.5, 4294967296, NaN, Infinity, -Infinity, ...wrongCarriers];
+    for (const invalid of invalidParameters) {
+        const calls = state.calls;
+        assert.throws(() => wrapper(invalid), RangeError);
+        assert.equal(state.calls, calls, "invalid argument rejected before foreign invocation");
+    }
+    state.mode = "value";
+    const validResults = isFloat
+        ? [
+            [1.5, 1.5],
+            [0.1, Math.fround(0.1)],
+            [1 + 2 ** -24, 1],
+            [1 + 3 * 2 ** -24, 1 + 2 ** -22],
+            [-0, -0],
+            [minFloat, minFloat],
+            [2 ** -150, 0],
+            [-(2 ** -150), -0],
+            [3 * 2 ** -150, 2 * minFloat],
+            [maxFloat, maxFloat],
+            [overflowMidpoint - 2 ** 75, maxFloat],
+            [-overflowMidpoint + 2 ** 75, -maxFloat],
+        ]
+        : [[0, 0], [-0, 0], [2147483648, 2147483648], [4294967295, 4294967295]];
+    for (const [raw, expected] of validResults) {
+        state.value = raw;
+        assert.equal(Object.is(callOnce(1), expected), true);
+    }
+    const invalidResults = isFloat
+        ? [overflowMidpoint, -overflowMidpoint, 3.5e38, -3.5e38, NaN, Infinity, -Infinity, ...wrongCarriers]
+        : [-1, 1.5, 4294967296, NaN, Infinity, -Infinity, ...wrongCarriers];
+    for (const invalid of invalidResults) {
+        state.value = invalid;
+        const calls = state.calls;
+        const reads = state.reads;
+        if (isFloat && fallible) {
+            const result = wrapper(1);
+            assert.equal(result.tag, "err");
+            assert.equal(result.value[codeField], boundaryCode);
+            assert.equal(typeof result.value[codeField], "number");
+        } else {
+            assert.throws(() => wrapper(1), RangeError);
+        }
+        assert.equal(state.calls, calls + 1);
+        assert.equal(state.reads, reads + (fallible ? 1 : 0));
+    }
+    if (fallible) {
+        state.mode = "error";
+        const foreignError = wrapper(1);
+        assert.equal(foreignError.tag, "err");
+        assert.equal(foreignError.value[codeField], 4294967295);
+        state.mode = "throw";
+        const foreignThrow = wrapper(1);
+        assert.equal(foreignThrow.tag, "err");
+        assert.equal(foreignThrow.value[codeField], 0);
+    }
+}
+"#,
+    );
+    for int_width in [IntWidth::Bits32, IntWidth::Bits64] {
+        for float_precision in [FloatPrecision::Bits32, FloatPrecision::Bits64] {
+            let profile = NumericProfile {
+                int_width,
+                float_precision,
+            };
+            for scalar in [FixedScalar::U32, FixedScalar::F32] {
+                let signature = ExternalSignatureType::Abi(ExternalAbiType::Fixed(scalar));
+                for (lane_index, release_build) in
+                    [None, Some(false), Some(true)].into_iter().enumerate()
+                {
+                    let suffix = format!(
+                        "{}{:?}{:?}{lane_index}",
+                        scalar.name(),
+                        int_width,
+                        float_precision
+                    );
+                    let wrapper_name = format!("wrap{suffix}");
+                    let raw_name = format!("raw{suffix}");
+                    let generated = if let Some(release_build) = release_build {
+                        generate_fallible_wrapper(
+                            &wrapper_name,
+                            &raw_name,
+                            release_build,
+                            profile,
+                            std::slice::from_ref(&signature),
+                            std::slice::from_ref(&signature),
+                        )
+                    } else {
+                        generate_infallible_wrapper(
+                            &wrapper_name,
+                            &raw_name,
+                            std::slice::from_ref(&signature),
+                            std::slice::from_ref(&signature),
+                            profile,
+                        )
+                    }
+                    .expect("supported fixed wrapper generates");
+                    let fallible = release_build.is_some();
+                    let code_field = crate::backends::js::builtin_error_code_js_field_name(
+                        release_build.unwrap_or(false),
+                    );
+                    let boundary_code = crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode::FloatBoundaryNonFinite.as_u32();
+                    script.push_str(&format!(r#"
+const state{suffix} = {{ mode: "echo", calls: 0, reads: 0, value: 0, received: undefined }};
+function {raw_name}(input) {{
+    const state = state{suffix};
+    state.calls += 1;
+    state.received = input;
+    if (state.mode === "throw") throw new Error("foreign exception");
+    if (state.mode === "error") return {{ ok: false, error: {{ code: 4294967295, message: "foreign error" }} }};
+    const value = state.mode === "echo" ? input : state.value;
+    return {fallible} ? {{ ok: true, get value() {{ state.reads += 1; return value; }} }} : value;
+}}
+{generated}
+assertFixedBoundary({wrapper_name}, state{suffix}, {}, {fallible}, {code_field:?}, {boundary_code});
+"#, scalar == FixedScalar::F32));
+                }
+            }
+        }
+    }
+    run_generated_node_script(&script);
+}
+
+#[test]
+fn glue_rejects_undelivered_fixed_scalars_despite_internal_carrier_support() {
+    for scalar in [
+        FixedScalar::I8,
+        FixedScalar::I16,
+        FixedScalar::I64,
+        FixedScalar::U8,
+        FixedScalar::U16,
+        FixedScalar::U64,
+        FixedScalar::F16,
+        FixedScalar::Byte,
+    ] {
+        let signature = ExternalSignatureType::Abi(ExternalAbiType::Fixed(scalar));
+        for (parameters, returns) in [
+            (std::slice::from_ref(&signature), &[][..]),
+            (&[][..], std::slice::from_ref(&signature)),
+        ] {
+            assert!(
+                generate_infallible_wrapper(
+                    "wrapUnsupported",
+                    "rawUnsupported",
+                    parameters,
+                    returns,
+                    NumericProfile::STANDARD,
+                )
+                .is_err()
+            );
+            assert!(
+                generate_fallible_wrapper(
+                    "wrapUnsupported",
+                    "rawUnsupported",
+                    false,
+                    NumericProfile::STANDARD,
+                    parameters,
+                    returns,
+                )
+                .is_err()
+            );
+        }
+    }
 }
