@@ -985,34 +985,6 @@ fn loop_aggregate_wrapper_node(
         .expect("loop should have an aggregate wrapper installed")
 }
 
-/// Returns true when the TIR subtree rooted at `node_id` contains a
-/// `Conditional` or `Loop` node (i.e. a control-flow child template).
-fn tir_subtree_contains_control_flow(node_id: TemplateIrNodeId, store: &TemplateIrStore) -> bool {
-    let Some(node) = store.get_node(node_id) else {
-        return false;
-    };
-    match &node.kind {
-        TemplateIrNodeKind::Conditional { .. } | TemplateIrNodeKind::Loop { .. } => true,
-        TemplateIrNodeKind::Sequence { children } => children
-            .iter()
-            .any(|child| tir_subtree_contains_control_flow(*child, store)),
-        TemplateIrNodeKind::ChildTemplate { reference, .. } => store
-            .get_template(reference.root)
-            .is_some_and(|child_ir| tir_subtree_contains_control_flow(child_ir.root, store)),
-        _ => false,
-    }
-}
-
-/// Returns true when the template's TIR root contains a `ChildTemplate` node
-/// whose referenced child template has control flow.
-fn tir_root_has_control_flow_child(template: &Template, store: &TemplateIrStore) -> bool {
-    let reference = &template.tir_reference;
-    let Some(tir_template) = store.get_template(reference.root) else {
-        return false;
-    };
-    tir_subtree_contains_control_flow(tir_template.root, store)
-}
-
 #[path = "template_head_tests.rs"]
 mod template_head_tests;
 

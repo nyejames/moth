@@ -62,11 +62,7 @@ pub(crate) enum TemplatePreparationMode {
 pub(crate) struct TemplatePreparationFacts {
     pub(crate) is_const_evaluable_shape: bool,
     pub(crate) has_unresolved_slot_occurrences: bool,
-    pub(crate) has_resolved_slot_sources: bool,
     pub(crate) has_escaped_insert_helpers: bool,
-    pub(crate) wrapper_foldable: bool,
-    pub(crate) has_runtime_slot_plan: bool,
-    pub(crate) has_runtime_slot_sites: bool,
     pub(crate) final_value_kind: TemplateConstValueKind,
 }
 
@@ -120,8 +116,6 @@ struct PreparationFacts {
     has_resolved_slot_sources: bool,
     has_slot_insertions: bool,
     wrapper_foldable: bool,
-    has_runtime_slot_plan: bool,
-    has_runtime_slot_sites: bool,
 }
 
 struct WrapperSetFacts {
@@ -137,8 +131,6 @@ impl Default for PreparationFacts {
             has_resolved_slot_sources: false,
             has_slot_insertions: false,
             wrapper_foldable: true,
-            has_runtime_slot_plan: false,
-            has_runtime_slot_sites: false,
         }
     }
 }
@@ -174,8 +166,6 @@ impl PreparationFacts {
         self.has_resolved_slot_sources |= other.has_resolved_slot_sources;
         self.has_slot_insertions |= other.has_slot_insertions;
         self.wrapper_foldable &= other.wrapper_foldable;
-        self.has_runtime_slot_plan |= other.has_runtime_slot_plan;
-        self.has_runtime_slot_sites |= other.has_runtime_slot_sites;
     }
 }
 
@@ -307,11 +297,7 @@ fn prepare_tir_view_in_scope(
         facts: TemplatePreparationFacts {
             is_const_evaluable_shape: facts.const_evaluable,
             has_unresolved_slot_occurrences: facts.has_unresolved_slots,
-            has_resolved_slot_sources: facts.has_resolved_slot_sources,
             has_escaped_insert_helpers: facts.has_slot_insertions,
-            wrapper_foldable: facts.wrapper_foldable,
-            has_runtime_slot_plan: facts.has_runtime_slot_plan,
-            has_runtime_slot_sites: facts.has_runtime_slot_sites,
             final_value_kind: const_value_kind,
         },
         outcome,
@@ -380,7 +366,6 @@ impl PreparationWalk<'_> {
             };
             let mut facts = self.walk_node(root, view, loop_binding_paths, &node_role)?;
             facts.merge(runtime_slot_plan_facts);
-            facts.has_runtime_slot_plan |= runtime_slot_plan.is_some();
 
             if matches!(
                 kind,
@@ -664,7 +649,6 @@ impl PreparationWalk<'_> {
                     self.validate_runtime_slot_site(*plan, *site, view, role)?;
                     let mut facts = self.walk_slot_plan(*plan, view, role)?;
                     facts.const_evaluable = false;
-                    facts.has_runtime_slot_sites = true;
                     self.record_role_runtime(
                         &mut facts,
                         role,

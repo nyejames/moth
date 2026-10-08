@@ -33,7 +33,7 @@ pub(crate) fn effective_branch_selector_for_view(
     view: &TirView<'_>,
     selector: &TemplateBranchSelector,
     site_id: ExpressionSiteId,
-) -> Result<TemplateBranchSelector, TemplateError> {
+) -> Result<TemplateBranchSelector, CompilerError> {
     let Some(expression) = view.effective_expression_for_site(site_id)? else {
         return Ok(selector.clone());
     };
@@ -53,7 +53,7 @@ pub(crate) fn effective_loop_header_for_view(
     view: &TirView<'_>,
     header: &TemplateLoopHeader,
     header_sites: TemplateLoopHeaderExpressionSites,
-) -> Result<TemplateLoopHeader, TemplateError> {
+) -> Result<TemplateLoopHeader, CompilerError> {
     Ok(match (header, header_sites) {
         (
             TemplateLoopHeader::Conditional { condition },
@@ -85,9 +85,8 @@ pub(crate) fn effective_loop_header_for_view(
                 }
                 _ => {
                     return Err(CompilerError::compiler_error(
-                        "TIR preparation: loop range header/site step shape mismatch.",
-                    )
-                    .into());
+                        "TIR range-loop header/site step shape mismatch.",
+                    ));
                 }
             }
 
@@ -109,9 +108,8 @@ pub(crate) fn effective_loop_header_for_view(
         },
         _ => {
             return Err(CompilerError::compiler_error(
-                "TIR preparation: loop header shape does not match its expression sites.",
-            )
-            .into());
+                "TIR loop header shape does not match its expression sites.",
+            ));
         }
     })
 }

@@ -143,51 +143,6 @@ fn prepare_conditional_body_tir_root(
         .map_err(TemplateError::from)
 }
 
-/// Shared inputs for preparing one conditional or loop body.
-struct ControlFlowBodyPreparationContext<'a> {
-    construction_context: &'a TemplateConstructionContext,
-    style: &'a Style,
-    context: &'a ScopeContext,
-    string_table: &'a mut StringTable,
-}
-
-/// Prepares the conditional body.
-///
-/// WHAT: reads the parsed body root node ID from the owning TIR control-flow
-///       node, derives the prepared TIR root from parser-emitted head-prefix
-///       nodes plus that body root, formats it via the TIR-native formatter,
-///       then applies head-chain composition. The prepared root is installed
-///       directly onto the TIR control-flow node.
-/// WHY: the conditional body includes its head wrapper, while loop bodies defer
-///      that wrapper to aggregate preparation.
-fn prepare_conditional_body(
-    ctx: ControlFlowBodyPreparationContext<'_>,
-    control_flow_node_id: TemplateIrNodeId,
-    body_root: TemplateIrNodeId,
-) -> Result<(), TemplateError> {
-    let ControlFlowBodyPreparationContext {
-        construction_context,
-        style,
-        context,
-        string_table,
-    } = ctx;
-
-    // Collect parser-emitted root children before the mutable store borrow so
-    // the TIR-derived path can reuse module-local head-prefix nodes.
-    let root_children = construction_context.root_children().to_vec();
-
-    prepare_conditional_body_tir_root(
-        TirBodyRootInput {
-            root_children: &root_children,
-            style,
-            body_root,
-            control_flow_node_id,
-        },
-        context,
-        string_table,
-    )
-}
-
 /// Prepares a loop body TIR root from the parsed body root.
 ///
 /// WHAT: formats the parsed TIR body root and installs the result as the loop's
@@ -223,34 +178,6 @@ fn prepare_loop_body_tir_root(
         .map_err(TemplateError::from)
 }
 
-/// Prepares a template `loop` body.
-///
-/// WHAT: reads the parsed body root node ID from the owning TIR `Loop` node and
-///       formats that root via the TIR-native formatter. Loop bodies
-///       intentionally skip head-prefix composition because the owning head
-///       wraps the aggregate output once, not each iteration.
-/// WHY: the loop body root owns its formatting natively in TIR.
-fn prepare_loop_body(
-    ctx: ControlFlowBodyPreparationContext<'_>,
-    control_flow_node_id: TemplateIrNodeId,
-    body_root: TemplateIrNodeId,
-) -> Result<(), TemplateError> {
-    let ControlFlowBodyPreparationContext {
-        style,
-        context,
-        string_table,
-        ..
-    } = ctx;
-
-    prepare_loop_body_tir_root(
-        control_flow_node_id,
-        style,
-        body_root,
-        context,
-        string_table,
-    )
-}
-
 /// Applies composition and formatting to a structured control-flow template.
 ///
 /// For `if`, the conditional body is a complete TIR render unit that includes
@@ -269,7 +196,7 @@ pub(in crate::compiler_frontend::ast::templates) struct ControlFlowRenderUnitReq
 }
 
 pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_units(
-    construction_context: &mut TemplateConstructionContext,
+    construction_context: &TemplateConstructionContext,
     request: ControlFlowRenderUnitRequest<'_>,
 ) -> Result<(), TemplateError> {
     let ControlFlowRenderUnitRequest {
@@ -314,15 +241,15 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_
 
     match body_kind {
         ControlFlowBodyKind::ConditionalBody => {
-            prepare_conditional_body(
-                ControlFlowBodyPreparationContext {
-                    construction_context,
+            prepare_conditional_body_tir_root(
+                TirBodyRootInput {
+                    root_children: construction_context.root_children(),
                     style,
-                    context,
-                    string_table,
+                    body_root,
+                    control_flow_node_id,
                 },
-                control_flow_node_id,
-                body_root,
+                context,
+                string_table,
             )?;
         }
 
@@ -350,7 +277,7 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_
 fn prepare_loop_render_units(
     control_flow_node_id: TemplateIrNodeId,
     body: TemplateIrNodeId,
-    construction_context: &mut TemplateConstructionContext,
+    construction_context: &TemplateConstructionContext,
     style: &Style,
     context: &ScopeContext,
     string_table: &mut StringTable,
@@ -359,30 +286,18 @@ fn prepare_loop_render_units(
     // by the conditional body. Loop bodies skip the shared head prefix
     // because the owning head wraps the aggregate output once, not each
     // iteration.
-    prepare_loop_body(
-        ControlFlowBodyPreparationContext {
-            construction_context,
-            style,
-            context,
-            string_table,
-        },
-        control_flow_node_id,
-        body,
-    )?;
-
-    // Collect the parser-emitted root children before the mutable store
-    // borrow so the aggregate wrapper can reuse existing module-local TIR
-    // head-prefix nodes instead of rebuilding from content atoms.
-    let root_children = construction_context.root_children().to_vec();
+    prepare_loop_body_tir_root(control_flow_node_id, style, body, context, string_table)?;
 
     let mut template_ir_store = context.template_ir_store.borrow_mut();
-    let aggregate_wrapper =
-        prepare_loop_aggregate_wrapper(&root_children, string_table, &mut template_ir_store)?;
+    let aggregate_wrapper = prepare_loop_aggregate_wrapper(
+        construction_context.root_children(),
+        string_table,
+        &mut template_ir_store,
+    )?;
 
     // Install the composed TIR aggregate-wrapper subtree onto the owning
     // `Loop` node.
-    template_ir_store
-        .replace_loop_aggregate_wrapper(control_flow_node_id, aggregate_wrapper.tir_root)?;
+    template_ir_store.replace_loop_aggregate_wrapper(control_flow_node_id, aggregate_wrapper)?;
 
     Ok(())
 }

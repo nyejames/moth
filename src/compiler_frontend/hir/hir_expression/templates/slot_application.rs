@@ -173,7 +173,7 @@ impl<'a> HirBuilder<'a> {
         span_ref: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         let append_context = RuntimeTemplateAppendContext::new(source_locals.accumulator)
-            .with_emitted_output(Some(source_locals.emitted_output));
+            .with_emitted_output(source_locals.emitted_output);
 
         self.append_owned_runtime_template_node_to_accumulator(
             &source.render_root,

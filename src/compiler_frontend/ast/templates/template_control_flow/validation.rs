@@ -64,11 +64,6 @@ fn runtime_tir_view_for_template<'a>(
     .map_err(TemplateError::from)
 }
 
-#[derive(Clone, Copy)]
-enum RuntimeControlFlowArtifact {
-    EscapedInsert,
-}
-
 /// Validates every reachable runtime control-flow body through a module-store
 /// `TirView`.
 ///
@@ -140,8 +135,7 @@ fn validate_runtime_tir_view_node(
         }
 
         TemplateIrNodeKind::Sequence { children } => {
-            let children = children.clone();
-            for child in children {
+            for &child in children {
                 validate_runtime_tir_view_node(view, child, visiting)?;
             }
         }
@@ -201,12 +195,7 @@ fn validate_runtime_tir_view_control_flow_body(
 ) -> Result<(), TemplateError> {
     let mut escaped_insert_visiting = HashSet::from([view.identity()]);
 
-    if tir_view_subtree_contains_runtime_artifact(
-        view,
-        body_root,
-        RuntimeControlFlowArtifact::EscapedInsert,
-        &mut escaped_insert_visiting,
-    )? {
+    if tir_view_subtree_contains_escaped_insert(view, body_root, &mut escaped_insert_visiting)? {
         return Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedInsert,
             span,
@@ -217,19 +206,18 @@ fn validate_runtime_tir_view_control_flow_body(
     Ok(())
 }
 
-/// Returns true when the subtree rooted at `node_ref` contains the requested
-/// runtime artifact.
+/// Returns true when the subtree rooted at `node_ref` contains an escaped
+/// `$insert(...)` helper.
 ///
-/// WHAT: walks the structural tree through the view's effective nodes. For
-///       `Slot` nodes, checks the effective slot-resolution overlay. For
-///       `ChildTemplate` and `InsertContribution` nodes, descends through
-///       module-store child views, preserving each child reference's exact
-///       root, phase and overlay identity. Missing effective-node or child-view
-///       authority propagates as an internal error.
-fn tir_view_subtree_contains_runtime_artifact(
+/// WHAT: follows structural children through the effective view. Slot
+///       placeholders remain owned by later slot routing, so their optional
+///       resolution is outside this escaped-insert query. Child-template and
+///       insert-contribution references are resolved through their exact
+///       module-store child views. Missing node or child-view authority
+///       propagates as an internal error.
+fn tir_view_subtree_contains_escaped_insert(
     view: &TirView<'_>,
     node_ref: TemplateIrNodeId,
-    artifact: RuntimeControlFlowArtifact,
     visiting: &mut HashSet<TirViewIdentity>,
 ) -> Result<bool, TemplateError> {
     let node = view.effective_node(node_ref)?;
@@ -237,9 +225,8 @@ fn tir_view_subtree_contains_runtime_artifact(
         TemplateIrNodeKind::Slot { .. } => Ok(false),
 
         TemplateIrNodeKind::Sequence { children } => {
-            let children = children.clone();
-            for child in children {
-                if tir_view_subtree_contains_runtime_artifact(view, child, artifact, visiting)? {
+            for &child in children {
+                if tir_view_subtree_contains_escaped_insert(view, child, visiting)? {
                     return Ok(true);
                 }
             }
@@ -247,7 +234,7 @@ fn tir_view_subtree_contains_runtime_artifact(
         }
 
         TemplateIrNodeKind::Conditional { body, .. } => {
-            tir_view_subtree_contains_runtime_artifact(view, *body, artifact, visiting)
+            tir_view_subtree_contains_escaped_insert(view, *body, visiting)
         }
 
         TemplateIrNodeKind::Loop {
@@ -258,12 +245,12 @@ fn tir_view_subtree_contains_runtime_artifact(
             let body = *body;
             let aggregate_wrapper = *aggregate_wrapper;
 
-            if tir_view_subtree_contains_runtime_artifact(view, body, artifact, visiting)? {
+            if tir_view_subtree_contains_escaped_insert(view, body, visiting)? {
                 return Ok(true);
             }
 
             if let Some(wrapper_id) = aggregate_wrapper
-                && tir_view_subtree_contains_runtime_artifact(view, wrapper_id, artifact, visiting)?
+                && tir_view_subtree_contains_escaped_insert(view, wrapper_id, visiting)?
             {
                 return Ok(true);
             }
@@ -273,12 +260,12 @@ fn tir_view_subtree_contains_runtime_artifact(
 
         TemplateIrNodeKind::ChildTemplate { reference, .. } => {
             let child_view = view.structural_child(*reference)?;
-            runtime_child_view_contains_artifact(child_view, artifact, visiting)
+            runtime_child_view_contains_escaped_insert(child_view, visiting)
         }
 
         TemplateIrNodeKind::InsertContribution { template } => {
             let helper_view = view.structural_helper(*template)?;
-            runtime_child_view_contains_artifact(helper_view, artifact, visiting)
+            runtime_child_view_contains_escaped_insert(helper_view, visiting)
         }
 
         TemplateIrNodeKind::Text { .. }
@@ -289,16 +276,15 @@ fn tir_view_subtree_contains_runtime_artifact(
     }
 }
 
-/// Checks a module-store child view for the requested runtime artifact.
+/// Checks a module-store child view for an escaped insert.
 ///
 /// WHAT: receives a child `TirView` from the caller's named structural
-///       transition. For `EscapedInsert`, a child template
-///       whose kind is `SlotInsert` is itself an escaped insert. The child view's
-///       subtree is then checked recursively. The cycle key prevents infinite
-///       recursion through mutually-referencing child templates.
-fn runtime_child_view_contains_artifact(
+///       transition. A child template whose kind is `SlotInsert` is itself an
+///       escaped insert. The child view's subtree is then checked recursively.
+///       The cycle key prevents infinite recursion through mutually-referencing
+///       child templates.
+fn runtime_child_view_contains_escaped_insert(
     child_view: TirView<'_>,
-    artifact: RuntimeControlFlowArtifact,
     visiting: &mut HashSet<TirViewIdentity>,
 ) -> Result<bool, TemplateError> {
     let cycle_key = child_view.identity();
@@ -306,21 +292,14 @@ fn runtime_child_view_contains_artifact(
         return Ok(false);
     }
 
-    if matches!(artifact, RuntimeControlFlowArtifact::EscapedInsert) {
-        let child_template = child_view.root_template()?;
-        if matches!(child_template.kind, TemplateType::SlotInsert(_)) {
-            visiting.remove(&cycle_key);
-            return Ok(true);
-        }
+    let child_template = child_view.root_template()?;
+    if matches!(child_template.kind, TemplateType::SlotInsert(_)) {
+        visiting.remove(&cycle_key);
+        return Ok(true);
     }
 
-    let child_root_node = child_view.root_template()?.root;
-    let result = tir_view_subtree_contains_runtime_artifact(
-        &child_view,
-        child_root_node,
-        artifact,
-        visiting,
-    );
+    let child_root_node = child_template.root;
+    let result = tir_view_subtree_contains_escaped_insert(&child_view, child_root_node, visiting);
 
     visiting.remove(&cycle_key);
     result

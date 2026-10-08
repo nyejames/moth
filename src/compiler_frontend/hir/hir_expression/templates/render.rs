@@ -1,8 +1,8 @@
-//! Linear runtime-template lowering through the inline accumulator path.
+//! Runtime-template render lowering through the inline accumulator path.
 //!
-//! WHAT: appends ordinary runtime template owned handoff nodes directly into the enclosing CFG.
-//! WHY: linear and control-flow templates must share one runtime concatenation path so future
-//!      template features do not have to preserve separate call-based semantics.
+//! WHAT: appends every AST-owned render handoff node directly into the enclosing CFG.
+//! WHY: control-flow nodes already preserve lazy evaluation while using the same string
+//!      accumulator as ordinary template content.
 
 use crate::compiler_frontend::ast::templates::OwnedRuntimeTemplateNode;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -16,10 +16,10 @@ use crate::compiler_frontend::source::SourceSpan;
 use super::append_context::RuntimeTemplateAppendContext;
 
 impl<'a> HirBuilder<'a> {
-    // WHAT: Lowers ordinary runtime templates by appending their AST-owned handoff node inline.
-    // WHY: this keeps string coercion and chunk ordering owned by `render_append` for every
-    //      runtime template shape instead of splitting linear templates into helper functions.
-    pub(super) fn lower_runtime_linear_template_expression(
+    // WHAT: Lowers a render handoff by appending its AST-owned node inline.
+    // WHY: one entry preserves the same accumulator semantics for ordinary content and lazy
+    //      conditional or loop nodes.
+    pub(super) fn lower_runtime_template_render_expression(
         &mut self,
         node: &OwnedRuntimeTemplateNode,
         span_ref: &Option<SourceSpan>,

@@ -519,7 +519,7 @@ fn preparation_validates_runtime_slot_plan_authority() {
 }
 
 #[test]
-fn preparation_publishes_runtime_plan_and_site_facts() {
+fn preparation_classifies_runtime_slot_plan_and_site_as_runtime() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -571,8 +571,6 @@ fn preparation_publishes_runtime_plan_and_site_facts() {
     let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)
         .expect("runtime-plan view should prepare");
 
-    assert!(preparation.facts.has_runtime_slot_plan);
-    assert!(preparation.facts.has_runtime_slot_sites);
     assert!(matches!(
         preparation.outcome,
         TemplatePreparationOutcome::Runtime(RuntimeTemplateReason::RuntimeSlotPlan)

@@ -91,8 +91,8 @@ impl<'a> RuntimeTemplateAppendContext<'a> {
         }
     }
 
-    pub(super) fn with_emitted_output(mut self, flag: Option<LocalId>) -> Self {
-        self.emitted_output = flag;
+    pub(super) fn with_emitted_output(mut self, emitted_output: LocalId) -> Self {
+        self.emitted_output = Some(emitted_output);
         self
     }
 

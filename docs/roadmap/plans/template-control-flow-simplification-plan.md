@@ -12,9 +12,9 @@
 
 ```text
 STATUS: active, language simplification approved
-CURRENT_SLICE: Phase 7 accepted; Phase 8 next
-BLOCKERS: none; committed package fixes synchronized both ways at the parser checkpoint
-NEXT_ACTION: investigate post-removal simplification and record matched performance evidence
+CURRENT_SLICE: Phase 8B matched performance evidence; Phase 8A cleanup accepted
+BLOCKERS: none; package branches synchronized at e697ac3d9 after Phase 7
+NEXT_ACTION: measure five matched frontend/CLI runs and retain performance history before final review
 ```
 
 ## Goal

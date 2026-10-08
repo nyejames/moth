@@ -781,11 +781,7 @@ fn handoff_fixture_result(
         facts: TemplatePreparationFacts {
             is_const_evaluable_shape: false,
             has_unresolved_slot_occurrences: false,
-            has_resolved_slot_sources: false,
             has_escaped_insert_helpers: false,
-            wrapper_foldable: false,
-            has_runtime_slot_plan: false,
-            has_runtime_slot_sites: false,
             final_value_kind: TemplateConstValueKind::NonConst,
         },
         outcome: TemplatePreparationOutcome::Runtime(RuntimeTemplateReason::RuntimeExpression),

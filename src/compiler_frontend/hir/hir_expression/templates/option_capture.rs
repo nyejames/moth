@@ -14,7 +14,7 @@ use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirVariantCarrier, OPTION_SOME_VARIANT_INDEX, ValueKind,
 };
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
-use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
+use crate::compiler_frontend::hir::ids::LocalId;
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
 use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -29,7 +29,6 @@ impl<'a> HirBuilder<'a> {
         pattern: &MatchPattern,
         span_ref: &Option<SourceSpan>,
         append_present: impl FnOnce(&mut HirBuilder<'a>) -> Result<(), HirConstructionFailure>,
-        append_absent: impl FnOnce(&mut HirBuilder<'a>) -> Result<(), HirConstructionFailure>,
     ) -> Result<(), HirConstructionFailure> {
         let MatchPattern::OptionPresentCapture {
             binding_path,
@@ -97,7 +96,6 @@ impl<'a> HirBuilder<'a> {
             span_ref,
         )?;
 
-        let mut terminated_anchor: Option<BlockId> = None;
         // The match has terminated the parent block; capture binding and present-body output
         // belong to the present arm rather than being appended after that terminator.
         self.set_current_block(present_block, span_ref)?;
@@ -122,28 +120,6 @@ impl<'a> HirBuilder<'a> {
         let present_tail_block = self.current_block_id_or_error(span_ref)?;
         let present_terminated =
             self.block_has_explicit_terminator(present_tail_block, span_ref)?;
-        if present_terminated {
-            terminated_anchor = Some(present_tail_block);
-        }
-
-        self.set_current_block(absent_block, span_ref)?;
-        append_absent(self)?;
-
-        let absent_tail_block = self.current_block_id_or_error(span_ref)?;
-        let absent_terminated = self.block_has_explicit_terminator(absent_tail_block, span_ref)?;
-        if absent_terminated && terminated_anchor.is_none() {
-            terminated_anchor = Some(absent_tail_block);
-        }
-
-        if present_terminated && absent_terminated {
-            let anchor_block = if let Some(anchor) = terminated_anchor {
-                anchor
-            } else {
-                present_block
-            };
-            self.set_current_block(anchor_block, span_ref)?;
-            return Ok(());
-        }
 
         let merge_block = self.create_block(parent_region, span_ref, "template-if-option-merge")?;
         if !present_terminated {
@@ -154,14 +130,14 @@ impl<'a> HirBuilder<'a> {
                 "template-if-option.present.merge",
             )?;
         }
-        if !absent_terminated {
-            self.emit_jump_to(
-                absent_tail_block,
-                merge_block,
-                span_ref,
-                "template-if-option.none.merge",
-            )?;
-        }
+
+        self.set_current_block(absent_block, span_ref)?;
+        self.emit_jump_to(
+            absent_block,
+            merge_block,
+            span_ref,
+            "template-if-option.none.merge",
+        )?;
 
         self.set_current_block(merge_block, span_ref)?;
         Ok(())

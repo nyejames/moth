@@ -162,6 +162,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [hir_builder](src/compiler_frontend/hir/hir_builder/), [hir_builder.rs](src/compiler_frontend/hir/hir_builder.rs): AST → HIR lowering state.
     - [expression_store.rs](src/compiler_frontend/hir/expression_store.rs): module-owned dense expression rows, typed payload ranges, checked compact capacities and construction-to-frozen ownership.
     - [hir_expression](src/compiler_frontend/hir/hir_expression/), [hir_statement](src/compiler_frontend/hir/hir_statement/): lowering implementation owners.
+        - [hir_expression/templates](src/compiler_frontend/hir/hir_expression/templates/): lowers owned runtime-template render trees and runtime slot applications through the shared accumulator path.
     - [validation](src/compiler_frontend/hir/validation/): executable-HIR internal invariant checks only; non-HIR module metadata is validated by [module_metadata.rs](src/compiler_frontend/module_metadata.rs).
     - [reachability.rs](src/compiler_frontend/hir/reachability.rs): function/block/external/map/runtime-cast feature facts.
     - [failure_facts.rs](src/compiler_frontend/hir/failure_facts.rs): immutable per-function failure facts projected once from typed AST bodies.

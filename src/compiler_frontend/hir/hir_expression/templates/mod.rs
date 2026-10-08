@@ -6,8 +6,7 @@
 //!
 //! Submodule map:
 //! - `append_context`: shared append target and runtime slot source/site context.
-//! - `linear`: ordinary owned-node appending for runtime templates without control flow.
-//! - `control_flow`: structured `if` / `loop` dispatch that mutates the enclosing CFG lazily.
+//! - `render`: lowers every owned runtime-template render tree through one accumulator path.
 //! - `render_append`: owned-node appending and string coercion shared by runtime paths.
 //! - `option_capture`: option-present template `if` capture lowering.
 //! - `aggregate`: shared aggregate wrapping after a loop or child emitted output.
@@ -15,7 +14,6 @@
 
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff,
-    OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
@@ -25,9 +23,8 @@ use super::LoweredExpression;
 
 mod aggregate;
 mod append_context;
-mod control_flow;
-mod linear;
 mod option_capture;
+mod render;
 mod render_append;
 mod slot_application;
 
@@ -47,11 +44,7 @@ impl<'a> HirBuilder<'a> {
             }
 
             OwnedRuntimeTemplateBody::Render(node) => {
-                if is_owned_runtime_template_node_control_flow(node) {
-                    self.lower_runtime_control_flow_template_expression(node, span_ref)
-                } else {
-                    self.lower_runtime_linear_template_expression(node, span_ref)
-                }
+                self.lower_runtime_template_render_expression(node, span_ref)
             }
         }
     }
@@ -68,13 +61,4 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<LoweredExpression, HirConstructionFailure> {
         self.lower_runtime_slot_application_template_expression(handoff, span_ref)
     }
-}
-
-fn is_owned_runtime_template_node_control_flow(node: &OwnedRuntimeTemplateNode) -> bool {
-    matches!(
-        node,
-        OwnedRuntimeTemplateNode::Conditional { .. }
-            | OwnedRuntimeTemplateNode::Loop { .. }
-            | OwnedRuntimeTemplateNode::ConditionalWrapper { .. }
-    )
 }

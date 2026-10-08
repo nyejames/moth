@@ -142,21 +142,6 @@ fn conditional_body_candidate_span(
 }
 
 // ------------------------------
-//  Composed aggregate-wrapper output
-// ------------------------------
-
-/// Composed aggregate-wrapper output for TIR consumption.
-pub(in crate::compiler_frontend::ast::templates) struct PreparedLoopAggregateWrapper {
-    /// TIR root of the composed aggregate-wrapper subtree.
-    ///
-    /// WHAT: carries the internal `AggregateOutput` marker at its composed
-    ///       position inside the wrapper tree.
-    /// WHY: render-unit preparation installs this authoritative root directly
-    ///      onto the owning `Loop` node for finalization and runtime handoff.
-    pub(in crate::compiler_frontend::ast::templates) tir_root: TemplateIrNodeId,
-}
-
-// ------------------------------
 //  Formatter helpers
 // ------------------------------
 
@@ -288,7 +273,7 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_loop_aggregate_wrapp
     root_children: &[TemplateIrNodeId],
     string_table: &StringTable,
     template_ir_store: &mut TemplateIrStore,
-) -> Result<PreparedLoopAggregateWrapper, TemplateError> {
+) -> Result<TemplateIrNodeId, TemplateError> {
     // Derive the head-prefix TIR nodes from the owning template's parser-emitted
     // root children. Reusing those exact nodes preserves parser identity and
     // avoids rebuilding an equivalent head structure.
@@ -301,9 +286,7 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_loop_aggregate_wrapp
     )?;
     let composed_root =
         compose_tir_head_chain_from_root(template_ir_store, aggregate_root, string_table, true)?;
-    Ok(PreparedLoopAggregateWrapper {
-        tir_root: composed_root,
-    })
+    Ok(composed_root)
 }
 
 /// Extracts the head-prefix TIR nodes from the owning template's parser-emitted

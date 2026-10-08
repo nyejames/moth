@@ -403,7 +403,7 @@ impl Template {
         let has_control_flow = construction_context.control_flow_node_id().is_some();
         if has_control_flow {
             prepare_control_flow_render_units(
-                &mut construction_context,
+                &construction_context,
                 ControlFlowRenderUnitRequest {
                     style: &style,
                     context,

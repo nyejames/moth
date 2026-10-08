@@ -691,11 +691,7 @@ fn fold_prepared_template_rejects_parsed_phase() {
         facts: TemplatePreparationFacts {
             is_const_evaluable_shape: true,
             has_unresolved_slot_occurrences: false,
-            has_resolved_slot_sources: false,
             has_escaped_insert_helpers: false,
-            wrapper_foldable: true,
-            has_runtime_slot_plan: false,
-            has_runtime_slot_sites: false,
             final_value_kind:
                 crate::compiler_frontend::ast::templates::template::TemplateConstValueKind::RenderableString,
         },

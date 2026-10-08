@@ -68,11 +68,7 @@ fn prepared_runtime(view: &TirView<'_>) -> TemplatePreparation {
         facts: TemplatePreparationFacts {
             is_const_evaluable_shape: false,
             has_unresolved_slot_occurrences: false,
-            has_resolved_slot_sources: false,
             has_escaped_insert_helpers: false,
-            wrapper_foldable: false,
-            has_runtime_slot_plan: false,
-            has_runtime_slot_sites: false,
             final_value_kind: TemplateConstValueKind::NonConst,
         },
         outcome: TemplatePreparationOutcome::Runtime(RuntimeTemplateReason::RuntimeExpression),
@@ -1716,9 +1712,7 @@ fn runtime_slot_handoff_preserves_root_conditional_wrapper() {
         .expect("conditional wrapper set should attach");
 
     let view = view_for(&store, template_id, TemplateViewContext::default());
-    let mut prepared = prepared_runtime(&view);
-    prepared.facts.has_runtime_slot_plan = true;
-    prepared.facts.has_runtime_slot_sites = true;
+    let prepared = prepared_runtime(&view);
 
     assert!(
         owned_runtime_slot_handoff_for_prepared_view(&prepared, view, &strings, None)
@@ -1872,7 +1866,11 @@ fn handoff_rejects_mismatched_loop_header_shape() {
 
     let error =
         handoff_for_view(view, &strings).expect_err("loop header shape mismatch must fail closed");
-    assert!(error.msg.contains("loop header shape mismatch"));
+    assert!(
+        error
+            .msg
+            .contains("loop header shape does not match its expression sites")
+    );
 }
 
 /// Exact-view child cycles must fail before owned-handoff recursion.

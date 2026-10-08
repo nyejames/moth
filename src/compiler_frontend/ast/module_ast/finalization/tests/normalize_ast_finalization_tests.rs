@@ -1241,8 +1241,7 @@ fn runtime_handoff_shape_uses_root_slot_plan_not_preparation_reason() {
 
     let normalized =
         super::materialize_runtime_template_handoff_for_hir(&template, &mut context, &prepared)
-            .expect("prepared runtime handoff should materialize")
-            .expect("runtime template should produce a normalized handoff");
+            .expect("prepared runtime handoff should materialize");
 
     assert!(
         matches!(

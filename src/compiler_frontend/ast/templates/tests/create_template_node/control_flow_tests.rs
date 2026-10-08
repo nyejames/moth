@@ -122,37 +122,3 @@ fn template_loop_composition_formats_body_without_repeating_shared_head_prefix()
         "prefix",
     );
 }
-
-#[test]
-fn parent_children_wrappers_attach_conditionally_to_control_flow_child() {
-    let (template, context, _unused_table) = parse_control_flow_template_after_composition(
-        "[$children([:<li>[$slot]</li>]):
-            [if true:
-                item
-            ]
-        ]",
-    );
-
-    let store = context.template_ir_store.borrow();
-    assert!(
-        tir_root_has_control_flow_child(&template, &store),
-        "TIR root should contain the control-flow child template"
-    );
-}
-
-#[test]
-fn fresh_control_flow_child_skips_parent_children_wrapper() {
-    let (template, context, _unused_table) = parse_control_flow_template_after_composition(
-        "[$children([:<li>[$slot]</li>]):
-            [$fresh, if true:
-                item
-            ]
-        ]",
-    );
-
-    let store = context.template_ir_store.borrow();
-    assert!(
-        tir_root_has_control_flow_child(&template, &store),
-        "TIR root should contain the $fresh control-flow child template"
-    );
-}

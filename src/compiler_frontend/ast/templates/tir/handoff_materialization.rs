@@ -10,16 +10,12 @@
 //! consumes directly.
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::templates::runtime_handoff::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotContributionSource, OwnedRuntimeSlotSite,
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::ast::templates::template::SlotKey;
-use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateBranchSelector, TemplateLoopHeader,
-};
 use crate::compiler_frontend::ast::templates::tir::preparation::{
     TemplatePreparation, TemplatePreparationOutcome,
 };
@@ -28,12 +24,14 @@ use crate::compiler_frontend::folded_value::{
 };
 
 use crate::compiler_frontend::ast::templates::tir::collect_tir_slot_schema;
+use crate::compiler_frontend::ast::templates::tir::expression_constness::{
+    effective_branch_selector_for_view, effective_loop_header_for_view,
+};
 use crate::compiler_frontend::ast::templates::tir::ids::{
-    ChildTemplateOccurrenceId, ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId,
-    TemplateSlotPlanId,
+    ChildTemplateOccurrenceId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId,
 };
 use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIr, TemplateIrNode, TemplateIrNodeKind, TemplateLoopHeaderExpressionSites,
+    TemplateIr, TemplateIrNode, TemplateIrNodeKind,
 };
 use crate::compiler_frontend::ast::templates::tir::overlays::{
     TirSlotResolutionKind, TirWrapperApplicationMode, TirWrapperContext,
@@ -365,8 +363,9 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 origin: _,
                 site_id,
             } => {
-                let effective_expression =
-                    self.effective_expression(view, *site_id, expression.as_ref())?;
+                let effective_expression = view
+                    .effective_expression_for_site(*site_id)?
+                    .unwrap_or(expression.as_ref());
 
                 if let ExpressionKind::StructuralString { pieces } = &effective_expression.kind {
                     let resources = self.module_resources.ok_or_else(|| {
@@ -383,7 +382,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                     Ok(OwnedRuntimeTemplateNode::Text { text })
                 } else {
                     Ok(OwnedRuntimeTemplateNode::DynamicExpression {
-                        expression: Box::new(effective_expression),
+                        expression: Box::new(effective_expression.clone()),
                         span: node.span,
                     })
                 }
@@ -419,7 +418,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 body,
             } => {
                 let selector =
-                    self.effective_branch_selector(view, selector.as_ref(), *selector_site_id)?;
+                    effective_branch_selector_for_view(view, selector.as_ref(), *selector_site_id)?;
                 let body =
                     self.materialize_node_with_injection(view, *body, active_slot_plan, injection)?;
 
@@ -452,7 +451,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 };
 
                 Ok(OwnedRuntimeTemplateNode::Loop {
-                    header: self.effective_loop_header(view, header, *header_sites)?,
+                    header: effective_loop_header_for_view(view, header, *header_sites)?,
                     body: Box::new(body_node),
                     aggregate_wrapper,
                     span: node.span,
@@ -579,29 +578,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         self.get_node(view, id)
     }
 
-    /// Resolves the effective expression for a site from the current exact view.
-    ///
-    /// WHAT: reads the complete root overlay through `TirView` and falls back
-    ///       to the structural expression when the site has no override.
-    fn effective_expression(
-        &self,
-        view: &TirView<'_>,
-        site_id: ExpressionSiteId,
-        fallback: &Expression,
-    ) -> Result<Expression, CompilerError> {
-        Ok(self
-            .effective_expression_for_site(view, site_id)?
-            .unwrap_or_else(|| fallback.clone()))
-    }
-
-    fn effective_expression_for_site(
-        &self,
-        view: &TirView<'_>,
-        site_id: ExpressionSiteId,
-    ) -> Result<Option<Expression>, CompilerError> {
-        Ok(view.effective_expression_for_site(site_id)?.cloned())
-    }
-
     /// Resolves the effective wrapper context for a child-template occurrence,
     /// preferring the override carried by the current exact view.
     ///
@@ -610,9 +586,9 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
     ///       clone of the wrapper context for `occurrence_id` if one exists.
     ///       Returns `None` when there is no view context or no wrapper-context
     ///       overlay. A missing active overlay is an internal error.
-    /// WHY: this mirrors `effective_expression_for_site` for the wrapper-context
-    ///      dimension so child-template handoff can apply inherited `$children(..)`
-    ///      wrappers and `$fresh` suppression without mutating the structural root.
+    /// WHY: wrapper context is an overlay dimension of the exact view, so child
+    ///      handoff applies inherited `$children(..)` wrappers and `$fresh`
+    ///      suppression without mutating the structural root.
     fn effective_wrapper_context_for_occurrence(
         &self,
         view: &TirView<'_>,
@@ -629,107 +605,15 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
     ///       clone of the `TirSlotResolution` for `occurrence_id` if one exists.
     ///       Returns `None` when there is no view context or no slot-resolution
     ///       overlay. A missing active overlay is an internal error.
-    /// WHY: this mirrors `effective_expression_for_site` and
-    ///      `effective_wrapper_context_for_occurrence` for the slot-resolution
-    ///      dimension so handoff materialization can render resolved slot fills
-    ///      from the final effective view instead of treating every structural
-    ///      `Slot` node as a no-output placeholder.
+    /// WHY: slot resolution is an overlay dimension of the exact view, so
+    ///      handoff materializes resolved fills from the final effective view
+    ///      instead of treating every structural `Slot` as an empty placeholder.
     fn effective_slot_resolution_for_occurrence(
         &self,
         view: &TirView<'_>,
         occurrence_id: SlotOccurrenceId,
     ) -> Result<Option<super::overlays::TirSlotResolution>, CompilerError> {
         Ok(view.effective_slot_resolution(occurrence_id)?.cloned())
-    }
-
-    fn effective_branch_selector(
-        &self,
-        view: &TirView<'_>,
-        selector: &TemplateBranchSelector,
-        site_id: ExpressionSiteId,
-    ) -> Result<TemplateBranchSelector, CompilerError> {
-        let Some(expression) = self.effective_expression_for_site(view, site_id)? else {
-            return Ok(selector.clone());
-        };
-
-        Ok(match selector {
-            TemplateBranchSelector::Bool(_) => TemplateBranchSelector::Bool(expression),
-            TemplateBranchSelector::OptionPresentCapture { pattern, .. } => {
-                TemplateBranchSelector::OptionPresentCapture {
-                    scrutinee: expression,
-                    pattern: pattern.clone(),
-                }
-            }
-        })
-    }
-
-    fn effective_loop_header(
-        &self,
-        view: &TirView<'_>,
-        header: &TemplateLoopHeader,
-        header_sites: TemplateLoopHeaderExpressionSites,
-    ) -> Result<TemplateLoopHeader, CompilerError> {
-        Ok(match (header, header_sites) {
-            (
-                TemplateLoopHeader::Conditional { condition },
-                TemplateLoopHeaderExpressionSites::Conditional { condition: site_id },
-            ) => TemplateLoopHeader::Conditional {
-                condition: Box::new(
-                    self.effective_expression_for_site(view, site_id)?
-                        .unwrap_or_else(|| condition.as_ref().clone()),
-                ),
-            },
-
-            (
-                TemplateLoopHeader::Range { bindings, range },
-                TemplateLoopHeaderExpressionSites::Range { start, end, step },
-            ) => {
-                let mut range = range.as_ref().clone();
-                if let Some(expression) = self.effective_expression_for_site(view, start)? {
-                    range.start = expression;
-                }
-                if let Some(expression) = self.effective_expression_for_site(view, end)? {
-                    range.end = expression;
-                }
-                match (&range.step, step) {
-                    (None, None) => {}
-                    (Some(_), Some(step_site_id)) => {
-                        if let Some(expression) =
-                            self.effective_expression_for_site(view, step_site_id)?
-                        {
-                            range.step = Some(expression);
-                        }
-                    }
-                    _ => {
-                        return Err(CompilerError::compiler_error(
-                            "TIR HIR handoff materialization found a loop range header/site step shape mismatch.",
-                        ));
-                    }
-                }
-
-                TemplateLoopHeader::Range {
-                    bindings: bindings.clone(),
-                    range: Box::new(range),
-                }
-            }
-
-            (
-                TemplateLoopHeader::Collection { bindings, iterable },
-                TemplateLoopHeaderExpressionSites::Collection { iterable: site_id },
-            ) => TemplateLoopHeader::Collection {
-                bindings: bindings.clone(),
-                iterable: Box::new(
-                    self.effective_expression_for_site(view, site_id)?
-                        .unwrap_or_else(|| iterable.as_ref().clone()),
-                ),
-            },
-
-            _ => {
-                return Err(CompilerError::compiler_error(
-                    "TIR HIR handoff materialization found a loop header shape mismatch.",
-                ));
-            }
-        })
     }
 
     /// Materializes a `ChildTemplate` node into an owned runtime handoff node.

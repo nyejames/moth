@@ -807,9 +807,9 @@ fn float_range_contains(current: f64, end: f64, end_kind: RangeEndKind, ascendin
 
 pub(crate) fn const_collection_items(
     iterable: &Expression,
-) -> Result<Vec<Expression>, TemplateError> {
+) -> Result<&[Expression], TemplateError> {
     match &iterable.kind {
-        ExpressionKind::Collection(items) => Ok(items.to_owned()),
+        ExpressionKind::Collection(items) => Ok(items),
         ExpressionKind::Coerced { value, .. } => const_collection_items(value),
         _ => Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::TemplateLoopSourceNotConst,
