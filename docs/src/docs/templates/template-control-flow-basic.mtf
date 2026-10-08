@@ -1,14 +1,22 @@
-A template can choose content with `if`.
+A template `if` includes its body only when a `Bool` condition is true.
 
 [codeblock, $code("moth"):
     [if signed_in:
         Welcome back
-    [else]
-        Please sign in
     ]
 ]
 
-A template can repeat content with `loop`.
+An option-present capture includes its body only when the option has a value.
+The captured value is available inside that body.
+
+[codeblock, $code("moth"):
+    [if maybe_name is |name|:
+        Hello [name]
+    ]
+]
+
+Template `if` has no `else` or `else if` form. Template loops repeat content
+with an ordinary loop header.
 
 [codeblock, $code("moth"):
     [loop names |name|:
@@ -16,14 +24,6 @@ A template can repeat content with `loop`.
     ]
 ]
 
-Two structural controls are available inside a template loop:
-
-[codeblock, $code("moth"):
-    [break]
-    [continue]
-]
-
-The first ends the loop. The second skips the rest of one iteration.
-
-Template control flow builds output lazily at runtime unless a const template
-requires it to finish during compilation.
+Template control flow has no `break` or `continue` markers. Ordinary Moth
+statements still have their own `if`, `else`, `break` and `continue` forms.
+Template bodies build lazily at runtime unless they are const-required.

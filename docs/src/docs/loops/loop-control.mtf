@@ -38,6 +38,5 @@ The next action depends on the loop form:
 - Neither statement produces a value.
 - `return` and `return!` leave the function rather than only leaving the loop.
 
-Template loops use structural template forms for loop control. Those are
-specified by the Templates documentation rather than this statement-loop
-reference.
+Template loops repeat content without `break` or `continue`. Their contract
+is specified by @../templates/#template-control-flow (Template control flow).

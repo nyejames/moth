@@ -31,6 +31,11 @@ The head may contain:
 - slot contributions
 - final `if` or `loop` control-flow suffixes
 
+The final `if` suffix conditionally includes one body for a true `Bool` or a
+present option capture. The final `loop` suffix repeats its body with an
+ordinary loop header. Template control flow excludes `else`, `else if`,
+`break` and `continue`. Use ordinary Moth code for richer decisions.
+
 The body contains authored text and nested templates.
 
 Authored `.moth` templates must close with a closing square bracket.

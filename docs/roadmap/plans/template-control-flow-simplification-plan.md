@@ -12,9 +12,9 @@
 
 ```text
 STATUS: active, language simplification approved
-CURRENT_SLICE: Phase 6 accepted; Phase 7 next
+CURRENT_SLICE: Phase 7 accepted; Phase 8 next
 BLOCKERS: none; committed package fixes synchronized both ways at the parser checkpoint
-NEXT_ACTION: align canonical template contracts, architecture and adjacent plans
+NEXT_ACTION: investigate post-removal simplification and record matched performance evidence
 ```
 
 ## Goal
@@ -1584,6 +1584,8 @@ docs: define minimal template control flow
 ```
 
 ---
+
+Phase 7 accepted: canonical template, const-template, cheatsheet, template-file limits and ordinary-loop cross-references describe the simplified surface. Compiler and teaching authorities retain exact-view and AST-local ownership with one selector/body conditional and loop structure. The six generated routes were rebuilt and inspected, new examples checked as source and links verified. Independent language and architecture/generated-output audits are clean. The current progress row, index and adjacent future plans already align and required no edits.
 
 # Phase 8 - Mandatory post-removal simplification and optimisation investigation
 

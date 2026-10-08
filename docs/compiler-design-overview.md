@@ -653,7 +653,7 @@ Recursive consumers use two explicit view transitions:
 - Structural child and wrapper transitions preserve the current complete expression overlay. Parsed references ignore their referenced slot-resolution and wrapper-context overlays. Composed or later references supply those two structural dimensions. Resolved slot sources and structural helpers retain the complete current context.
 - Nested-value transitions enter an independently owned nested `Template` through that value's complete context rather than inheriting the containing structural root's expression overlay.
 
-A composed or finalised root overlay contains effective overrides for every structural descendant reachable through children, wrappers, resolved slots, branches, fallbacks, loops and helper roots. Expression lookup uses that complete overlay followed by structural fallback.
+A conditional TIR node retains one selector and one body. A loop node retains its header and body. A composed or finalised root overlay contains effective overrides for every structurally reachable descendant, including child templates, wrappers, resolved slot sources, conditional selectors and bodies, loop headers and bodies and helper roots. Exact-view traversal reads those effective values through the complete overlay, with structural fallback when no override exists.
 
 One semantic preparation owner:
 
@@ -666,7 +666,7 @@ One semantic preparation owner:
 
 Preparation validates and classifies. It does not perform final folding or HIR handoff.
 
-Preparation has two semantic modes. `Value` permits either a folded or runtime result while preserving lazy runtime behaviour. `ConstRequired` validates every required reachable branch, loop and helper before the owning caller rejects a runtime result through the established const diagnostic.
+Preparation has two semantic modes. `Value` permits either a folded or runtime result while preserving lazy runtime behaviour. `ConstRequired` validates every required structurally reachable conditional and loop body, plus required helpers, before the owning caller rejects a runtime result through the established const diagnostic. This validation includes retained bodies whose selectors are statically false.
 
 Discovering runtime dependence does not end authority validation. Preparation still validates every required reachable TIR structure so a valid runtime classification cannot conceal malformed internal state.
 
@@ -675,7 +675,7 @@ Folding and runtime handoff consume the same exact `TirViewIdentity` accepted by
 AST finalisation:
 
 - folds fully constant templates into strings
-- preserves runtime `if` and loop bodies for lazy lowering
+- preserves runtime conditional and loop bodies for lazy lowering
 - prepares runtime slot source and site plans
 - removes helper-only artefacts
 - emits folded top-level fragment metadata

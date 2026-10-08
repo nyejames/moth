@@ -918,10 +918,6 @@ Place `if` or `loop` last in the head, after a comma when another head item prec
 [codeblock, $code("moth"):
     [card, if maybe_name is |name|:
         Hello [name]
-    [else if use_fallback]
-        Hello fallback
-    [else]
-        Hello guest
     ]
 
     [loop items |item, index|:
@@ -929,11 +925,31 @@ Place `if` or `loop` last in the head, after a comma when another head item prec
     ]
 ]
 
-Template `if` accepts `Bool` conditions or option captures, evaluates only the selected branch and supports `else if`, but no full match-arm chains. Conditional, collection and range loops concatenate output without separators. Structural `["[break]"]` and `["[continue]"]` target the nearest template loop.
+A template `if` includes one body when its `Bool` condition is true or its
+option is present. An option capture scopes its payload to that body. A false
+condition or absent option produces structural no-output. Template loops repeat
+their body using ordinary conditional, collection or range headers. Iterations
+concatenate without separators. Template control flow has no `else` or `else if`
+form, and template loops have no `break` or `continue` controls.
 
-A loop-head wrapper wraps the aggregate once. Put per-iteration wrappers in the body. Structural no-output skips wrappers, while a selected empty branch may render its wrapper. Selected runtime content can propagate `!` through its enclosing function, but cannot use `catch` blocks as expressions.
+For richer decisions in `.moth` code, select a `String` with value-producing
+`if` at a supported receiving site, then interpolate it. The form cannot appear
+directly inside interpolation. A `.mtf` body remains const-required and cannot
+call runtime functions as a general replacement.
 
-Const templates validate every branch and fold the selected work. Const range/collection loops obey `template_const_loop_iteration_limit` (default `10_000`, maximum `1_000_000`). A const conditional loop requires a compile-time `false` condition.
+A loop-head wrapper wraps the aggregate once. Put per-iteration wrappers in the
+body. Structural no-output skips shared wrappers, while a selected empty body
+may render its own head wrapper. Selected runtime content can propagate `!`
+through its enclosing function, but cannot use `catch` blocks as expressions.
+Routed slot contributions remain valid inside conditional bodies and loop
+bodies.
+
+Const templates require the condition and body to be compile-time evaluable,
+including when the body is inactive. A runtime expression in an inactive body
+is rejected. Only selected output is folded. Const range and collection loops
+obey `template_const_loop_iteration_limit` (default `10_000`, maximum
+`1_000_000`). A const conditional loop folds to no-output only for a
+compile-time `false` condition.
 
 ### Moth Markdown
 
