@@ -46,13 +46,6 @@ pub(crate) enum TemplateLoopHeader {
     },
 }
 
-/// Structural output result from appending an owned runtime-template body.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TemplateBodyEmission {
-    NoOutput,
-    Output,
-}
-
 /// Body parser mode selected by the template head.
 ///
 /// Template heads build this handoff, then body parsing consumes the selected

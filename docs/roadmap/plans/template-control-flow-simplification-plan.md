@@ -12,9 +12,9 @@
 
 ```text
 STATUS: active, language simplification approved
-CURRENT_SLICE: Phase 4 accepted; Phase 5 next
+CURRENT_SLICE: Phase 5 accepted; Phase 6 next
 BLOCKERS: none; committed package fixes synchronized both ways at the parser checkpoint
-NEXT_ACTION: replace runtime branch chains and finish HIR emission ownership
+NEXT_ACTION: remove obsolete diagnostic reasons and finish test-surface pruning
 ```
 
 ## Goal
@@ -1329,6 +1329,8 @@ refactor: simplify runtime template control flow
 ```
 
 ---
+
+Phase 5 checkpoint accepted after focused HIR, template, finalization and ordinary-control-flow validation and independent neutral-handoff, HIR/slot and test-quality reviews. Runtime conditionals carry one boxed effective selector and body with their source span. HIR owns RuntimeTemplateEmission and uses existing lazy Bool/option CFG owners. Runtime branch vectors, recursion/fallback helpers, unused branch-list census metrics and the duplicate control-flow predicate are removed. Test-target Clippy verifies removal of the audited stale lint suppression. Canonical template prose remains assigned to Phase 7.
 
 # Phase 6 - Remove obsolete diagnostics and prune the old test surface
 

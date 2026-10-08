@@ -782,16 +782,9 @@ fn debug_validate_runtime_template_node_type_ids(
             debug_validate_runtime_template_node_type_ids(wrapper, context);
         }
 
-        OwnedRuntimeTemplateNode::BranchChain {
-            branches, fallback, ..
-        } => {
-            for branch in branches {
-                debug_validate_template_branch_selector_type_ids(&branch.selector, context);
-                debug_validate_runtime_template_node_type_ids(&branch.body, context);
-            }
-            if let Some(fallback) = fallback {
-                debug_validate_runtime_template_node_type_ids(fallback, context);
-            }
+        OwnedRuntimeTemplateNode::Conditional { selector, body, .. } => {
+            debug_validate_template_branch_selector_type_ids(selector, context);
+            debug_validate_runtime_template_node_type_ids(body, context);
         }
 
         OwnedRuntimeTemplateNode::Loop {

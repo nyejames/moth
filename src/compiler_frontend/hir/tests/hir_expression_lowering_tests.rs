@@ -33,8 +33,7 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::{
-    OwnedRuntimeTemplateBody, OwnedRuntimeTemplateBranch, OwnedRuntimeTemplateHandoff,
-    OwnedRuntimeTemplateNode,
+    OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
@@ -128,21 +127,15 @@ fn text_aggregate_wrapper_node(
 fn runtime_template_bool_if_expression(
     condition: Expression,
     then_content: Vec<Expression>,
-    else_content: Option<Vec<Expression>>,
     span: Option<SourceSpan>,
     string_table: &StringTable,
 ) -> Expression {
-    let then_body = expressions_to_owned_render_node(&then_content, string_table);
-    let fallback = else_content
-        .map(|content| Box::new(expressions_to_owned_render_node(&content, string_table)));
-
-    let body = OwnedRuntimeTemplateNode::BranchChain {
-        branches: vec![OwnedRuntimeTemplateBranch {
-            selector: TemplateBranchSelector::Bool(condition),
-            body: then_body,
-            span,
-        }],
-        fallback,
+    let body = OwnedRuntimeTemplateNode::Conditional {
+        selector: Box::new(TemplateBranchSelector::Bool(condition)),
+        body: Box::new(expressions_to_owned_render_node(
+            &then_content,
+            string_table,
+        )),
         span,
     };
 
@@ -154,40 +147,30 @@ fn runtime_template_bool_if_expression(
     Expression::runtime_template_handoff(handoff, ValueMode::ImmutableOwned)
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "test fixture builder mirrors template option-capture payloads"
-)]
 fn runtime_template_option_capture_expression(
     scrutinee: Expression,
     capture_name: crate::compiler_frontend::symbols::string_interning::StringId,
     capture_path: PathId,
     inner_type_id: TypeId,
     then_content: Vec<Expression>,
-    else_content: Option<Vec<Expression>>,
     span: Option<SourceSpan>,
     string_table: &StringTable,
 ) -> Expression {
-    let then_body = expressions_to_owned_render_node(&then_content, string_table);
-    let fallback = else_content
-        .map(|content| Box::new(expressions_to_owned_render_node(&content, string_table)));
-
-    let body = OwnedRuntimeTemplateNode::BranchChain {
-        branches: vec![OwnedRuntimeTemplateBranch {
-            selector: TemplateBranchSelector::OptionPresentCapture {
-                scrutinee,
-                pattern: Box::new(MatchPattern::OptionPresentCapture {
-                    name: capture_name,
-                    binding_path: capture_path,
-                    inner_type_id,
-                    span,
-                    binding_span: span,
-                }),
-            },
-            body: then_body,
-            span,
-        }],
-        fallback,
+    let body = OwnedRuntimeTemplateNode::Conditional {
+        selector: Box::new(TemplateBranchSelector::OptionPresentCapture {
+            scrutinee,
+            pattern: Box::new(MatchPattern::OptionPresentCapture {
+                name: capture_name,
+                binding_path: capture_path,
+                inner_type_id,
+                span,
+                binding_span: span,
+            }),
+        }),
+        body: Box::new(expressions_to_owned_render_node(
+            &then_content,
+            string_table,
+        )),
         span,
     };
 
@@ -1806,7 +1789,6 @@ fn runtime_template_control_flow_bool_if_lowers_inline_without_helper_call() {
     let mut string_table = StringTable::new();
     let show_name = super::symbol("show", &mut path_fork, &mut string_table);
     let shown = string_table.intern("shown");
-    let hidden = string_table.intern("hidden");
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     register_local(
@@ -1828,18 +1810,8 @@ fn runtime_template_control_flow_bool_if_lowers_inline_without_helper_call() {
         span,
         ValueMode::ImmutableOwned,
     )];
-    let else_content = vec![Expression::string_slice(
-        hidden,
-        span,
-        ValueMode::ImmutableOwned,
-    )];
-    let expr = runtime_template_bool_if_expression(
-        condition,
-        then_content,
-        Some(else_content),
-        span,
-        builder.string_table,
-    );
+    let expr =
+        runtime_template_bool_if_expression(condition, then_content, span, builder.string_table);
 
     let lowered = builder
         .lower_expression(&expr)
@@ -1885,11 +1857,13 @@ fn runtime_template_control_flow_bool_if_lowers_inline_without_helper_call() {
         then_block,
         "shown"
     ));
-    assert!(block_assigns_string_literal(
-        &builder.module,
-        else_block,
-        "hidden"
-    ));
+    assert!(
+        else_block
+            .statements
+            .iter()
+            .all(|statement| !matches!(&statement.kind, HirStatementKind::Write { .. })),
+        "the unselected path must not append to the runtime template accumulator"
+    );
 }
 
 #[test]
@@ -1899,7 +1873,6 @@ fn runtime_template_control_flow_bool_if_branch_preserves_fallible_propagation_c
     let enclosing_name = super::symbol("__expr_test_fn", &mut path_fork, &mut string_table);
     let can_fail_name = super::symbol("can_fail", &mut path_fork, &mut string_table);
     let show_name = super::symbol("show", &mut path_fork, &mut string_table);
-    let fallback = string_table.intern("fallback");
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
 
@@ -1947,18 +1920,8 @@ fn runtime_template_control_flow_bool_if_branch_preserves_fallible_propagation_c
         span,
     );
     let then_content = vec![propagated_call];
-    let else_content = vec![Expression::string_slice(
-        fallback,
-        span,
-        ValueMode::ImmutableOwned,
-    )];
-    let expr = runtime_template_bool_if_expression(
-        condition,
-        then_content,
-        Some(else_content),
-        span,
-        builder.string_table,
-    );
+    let expr =
+        runtime_template_bool_if_expression(condition, then_content, span, builder.string_table);
 
     builder
         .lower_expression(&expr)
@@ -1997,81 +1960,6 @@ fn runtime_template_control_flow_bool_if_branch_preserves_fallible_propagation_c
 }
 
 #[test]
-fn runtime_template_control_flow_bool_if_without_else_appends_nothing_on_false_path() {
-    let mut path_fork = super::PathInternerFork::empty();
-    let mut string_table = StringTable::new();
-    let show_name = super::symbol("show", &mut path_fork, &mut string_table);
-    let shown = string_table.intern("shown");
-    let span = None;
-    let mut builder = setup_builder(&mut string_table, &mut path_fork);
-    register_local(
-        &mut builder,
-        show_name,
-        LocalId(11),
-        builtin_type_ids::BOOL,
-        span,
-    );
-
-    let condition = reference_expr_with_type_id(
-        show_name,
-        builtin_type_ids::BOOL,
-        span,
-        ValueMode::ImmutableOwned,
-    );
-    let then_content = vec![Expression::string_slice(
-        shown,
-        span,
-        ValueMode::ImmutableOwned,
-    )];
-    let expr = runtime_template_bool_if_expression(
-        condition,
-        then_content,
-        None,
-        span,
-        builder.string_table,
-    );
-
-    builder
-        .lower_expression(&expr)
-        .expect("runtime Bool template if without else should lower inline");
-    let entry_block = declared_entry_block(&builder);
-    let (then_block, else_block) = match &entry_block.terminator {
-        &HirTerminator::If {
-            then_block,
-            else_block,
-            ..
-        } => (then_block, else_block),
-        other => panic!("expected inline template if terminator, got {other:?}"),
-    };
-
-    let then_block = builder
-        .module
-        .blocks
-        .iter()
-        .find(|block| block.id == then_block)
-        .expect("then block should exist");
-    let else_block = builder
-        .module
-        .blocks
-        .iter()
-        .find(|block| block.id == else_block)
-        .expect("else block should exist");
-
-    assert!(block_assigns_string_literal(
-        &builder.module,
-        then_block,
-        "shown"
-    ));
-    assert!(
-        else_block
-            .statements
-            .iter()
-            .all(|statement| !matches!(&statement.kind, HirStatementKind::Write { .. })),
-        "false/no-else path should not append a write to the runtime template accumulator"
-    );
-}
-
-#[test]
 fn runtime_template_control_flow_bool_if_coerces_dynamic_branch_chunks() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
@@ -2093,13 +1981,8 @@ fn runtime_template_control_flow_bool_if_coerces_dynamic_branch_chunks() {
         ValueMode::ImmutableOwned,
     );
     let then_content = vec![Expression::int(5, span, ValueMode::ImmutableOwned)];
-    let expr = runtime_template_bool_if_expression(
-        condition,
-        then_content,
-        None,
-        span,
-        builder.string_table,
-    );
+    let expr =
+        runtime_template_bool_if_expression(condition, then_content, span, builder.string_table);
 
     builder
         .lower_expression(&expr)
@@ -2130,7 +2013,6 @@ fn runtime_template_control_flow_option_capture_lowers_match_and_payload_binding
     let maybe_name = super::symbol("maybe_name", &mut path_fork, &mut string_table);
     let capture_name = string_table.intern("name");
     let capture_path = super::symbol("name", &mut path_fork, &mut string_table);
-    let hidden = string_table.intern("hidden");
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let option_string = builder
@@ -2146,18 +2028,12 @@ fn runtime_template_control_flow_option_capture_lowers_match_and_payload_binding
         span,
         ValueMode::ImmutableReference,
     )];
-    let else_content = vec![Expression::string_slice(
-        hidden,
-        span,
-        ValueMode::ImmutableOwned,
-    )];
     let expr = runtime_template_option_capture_expression(
         scrutinee,
         capture_name,
         capture_path,
         builtin_type_ids::STRING,
         then_content,
-        Some(else_content),
         span,
         builder.string_table,
     );
@@ -2252,71 +2128,12 @@ fn runtime_template_control_flow_option_capture_lowers_match_and_payload_binding
         absent_block.locals.is_empty(),
         "absent branch must not bind the option capture local"
     );
-    assert!(block_assigns_string_literal(
-        &builder.module,
-        absent_block,
-        "hidden"
-    ));
-}
-
-#[test]
-fn runtime_template_control_flow_option_capture_without_else_appends_nothing_when_absent() {
-    let mut path_fork = super::PathInternerFork::empty();
-    let mut string_table = StringTable::new();
-    let maybe_name = super::symbol("maybe_name", &mut path_fork, &mut string_table);
-    let capture_name = string_table.intern("name");
-    let capture_path = super::symbol("name", &mut path_fork, &mut string_table);
-    let span = None;
-    let mut builder = setup_builder(&mut string_table, &mut path_fork);
-    let option_string = builder
-        .type_environment
-        .intern_option(builtin_type_ids::STRING);
-    register_local(&mut builder, maybe_name, LocalId(13), option_string, span);
-
-    let scrutinee =
-        reference_expr_with_type_id(maybe_name, option_string, span, ValueMode::ImmutableOwned);
-    let then_content = vec![reference_expr_with_type_id(
-        capture_path,
-        builtin_type_ids::STRING,
-        span,
-        ValueMode::ImmutableReference,
-    )];
-    let expr = runtime_template_option_capture_expression(
-        scrutinee,
-        capture_name,
-        capture_path,
-        builtin_type_ids::STRING,
-        then_content,
-        None,
-        span,
-        builder.string_table,
-    );
-
-    builder
-        .lower_expression(&expr)
-        .expect("runtime option-present template if without else should lower inline");
-    let entry_block = declared_entry_block(&builder);
-    let absent_block_id = match &entry_block.terminator {
-        HirTerminator::Match { arms, .. } => arms[1].body,
-        other => panic!("expected option-present template if match terminator, got {other:?}"),
-    };
-    let absent_block = builder
-        .module
-        .blocks
-        .iter()
-        .find(|block| block.id == absent_block_id)
-        .expect("absent block should exist");
-
     assert!(
         absent_block
             .statements
             .iter()
             .all(|statement| !matches!(&statement.kind, HirStatementKind::Write { .. })),
-        "absent/no-else branch should not append a write to the runtime template accumulator"
-    );
-    assert!(
-        absent_block.locals.is_empty(),
-        "absent branch must not bind the option capture local"
+        "the absent path must not append to the runtime template accumulator"
     );
 }
 

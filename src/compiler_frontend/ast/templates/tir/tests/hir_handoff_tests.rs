@@ -1120,19 +1120,22 @@ fn inherited_wrapper_handoff_preserves_conditional_body() {
     };
 
     let body = materialize_parent_handoff(store, parent_id, &mut strings, context);
-    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::BranchChain {
-        branches, ..
+    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Conditional {
+        selector,
+        body,
+        ..
     }) = body
     else {
-        panic!("expected conditional branch-chain handoff, got {:?}", body);
+        panic!("expected conditional handoff, got {:?}", body);
     };
 
-    assert_eq!(branches.len(), 1);
-    let OwnedRuntimeTemplateNode::Sequence { children, .. } = &branches[0].body else {
-        panic!(
-            "expected conditional body sequence, got {:?}",
-            branches[0].body
-        );
+    assert!(matches!(
+        selector.as_ref(),
+        TemplateBranchSelector::Bool(expression)
+            if matches!(&expression.kind, ExpressionKind::Bool(true))
+    ));
+    let OwnedRuntimeTemplateNode::Sequence { children, .. } = body.as_ref() else {
+        panic!("expected conditional body sequence, got {body:?}");
     };
     assert_eq!(children.len(), 2);
     assert!(
@@ -1140,6 +1143,75 @@ fn inherited_wrapper_handoff_preserves_conditional_body() {
         "the leading default slot should remain unfilled"
     );
     assert_owned_text_node(&children[1], "child");
+}
+
+#[test]
+fn conditional_handoff_materializes_the_effective_selector_overlay() {
+    let mut store = TemplateIrStore::new();
+    let mut strings = StringTable::new();
+    let (template_id, selector_site_id) = {
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let body = builder.push_text_node(
+            strings.intern("conditional body"),
+            "conditional body".len(),
+            TemplateSegmentOrigin::Body,
+            None,
+        );
+        let conditional = builder.push_conditional_node(
+            TemplateBranchSelector::Bool(Expression::bool(true, None, ValueMode::ImmutableOwned)),
+            body,
+            None,
+        );
+        let selector_site_id = match &builder
+            .store
+            .get_node(conditional)
+            .expect("conditional node should exist")
+            .kind
+        {
+            TemplateIrNodeKind::Conditional {
+                selector_site_id, ..
+            } => *selector_site_id,
+            other => panic!("expected conditional TIR node, got {other:?}"),
+        };
+        let template_id = builder.finish_template(
+            conditional,
+            Style::default(),
+            TemplateType::StringFunction,
+            TemplateIrSummary::empty(),
+            None,
+        );
+        (template_id, selector_site_id)
+    };
+    let context = expression_overlay_context(
+        &mut store,
+        vec![(
+            selector_site_id,
+            Expression::bool(false, None, ValueMode::ImmutableOwned),
+        )],
+    );
+
+    let body = materialize_parent_handoff_result(
+        Rc::new(RefCell::new(store)),
+        template_id,
+        &mut strings,
+        context,
+    )
+    .expect("conditional selector overlay should materialize");
+
+    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Conditional {
+        selector,
+        body,
+        ..
+    }) = body
+    else {
+        panic!("expected one conditional runtime node, got {body:?}");
+    };
+    assert!(matches!(
+        selector.as_ref(),
+        TemplateBranchSelector::Bool(expression)
+            if matches!(&expression.kind, ExpressionKind::Bool(false))
+    ));
+    assert_owned_text_node(body.as_ref(), "conditional body");
 }
 
 #[test]

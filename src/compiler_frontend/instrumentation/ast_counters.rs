@@ -375,14 +375,6 @@ pub(crate) enum AstCounter {
     CensusHandoffNodesEmpty,
     CensusHandoffNodesSingle,
     CensusHandoffNodesMultiple,
-    CensusHandoffBranchesLists,
-    CensusHandoffBranchesLengthSum,
-    CensusHandoffBranchesLengthMax,
-    CensusHandoffBranchesCapacitySum,
-    CensusHandoffBranchesCapacityMax,
-    CensusHandoffBranchesEmpty,
-    CensusHandoffBranchesSingle,
-    CensusHandoffBranchesMultiple,
     CensusHandoffSourcesLists,
     CensusHandoffSourcesLengthSum,
     CensusHandoffSourcesLengthMax,
@@ -844,14 +836,6 @@ mod detailed {
             AstCounter::CensusHandoffNodesEmpty,
             AstCounter::CensusHandoffNodesSingle,
             AstCounter::CensusHandoffNodesMultiple,
-            AstCounter::CensusHandoffBranchesLists,
-            AstCounter::CensusHandoffBranchesLengthSum,
-            AstCounter::CensusHandoffBranchesLengthMax,
-            AstCounter::CensusHandoffBranchesCapacitySum,
-            AstCounter::CensusHandoffBranchesCapacityMax,
-            AstCounter::CensusHandoffBranchesEmpty,
-            AstCounter::CensusHandoffBranchesSingle,
-            AstCounter::CensusHandoffBranchesMultiple,
             AstCounter::CensusHandoffSourcesLists,
             AstCounter::CensusHandoffSourcesLengthSum,
             AstCounter::CensusHandoffSourcesLengthMax,
@@ -1302,18 +1286,6 @@ mod detailed {
             AstCounter::CensusHandoffNodesEmpty => "ast_census_handoff_nodes_empty",
             AstCounter::CensusHandoffNodesSingle => "ast_census_handoff_nodes_single",
             AstCounter::CensusHandoffNodesMultiple => "ast_census_handoff_nodes_multiple",
-            AstCounter::CensusHandoffBranchesLists => "ast_census_handoff_branches_lists",
-            AstCounter::CensusHandoffBranchesLengthSum => "ast_census_handoff_branches_length_sum",
-            AstCounter::CensusHandoffBranchesLengthMax => "ast_census_handoff_branches_length_max",
-            AstCounter::CensusHandoffBranchesCapacitySum => {
-                "ast_census_handoff_branches_capacity_sum"
-            }
-            AstCounter::CensusHandoffBranchesCapacityMax => {
-                "ast_census_handoff_branches_capacity_max"
-            }
-            AstCounter::CensusHandoffBranchesEmpty => "ast_census_handoff_branches_empty",
-            AstCounter::CensusHandoffBranchesSingle => "ast_census_handoff_branches_single",
-            AstCounter::CensusHandoffBranchesMultiple => "ast_census_handoff_branches_multiple",
             AstCounter::CensusHandoffSourcesLists => "ast_census_handoff_sources_lists",
             AstCounter::CensusHandoffSourcesLengthSum => "ast_census_handoff_sources_length_sum",
             AstCounter::CensusHandoffSourcesLengthMax => "ast_census_handoff_sources_length_max",

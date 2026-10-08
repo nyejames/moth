@@ -72,13 +72,19 @@ fn conditional_tir_root_normalizes_into_owned_runtime_handoff() {
         .expect("conditional TIR root should normalize through the finalized effective view");
 
     let handoff = runtime_template_handoff_from_expression(expression);
-    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::BranchChain {
-        branches, ..
+    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Conditional {
+        selector,
+        body,
+        ..
     }) = handoff.body
     else {
         panic!("expected a runtime conditional handoff");
     };
-    assert_eq!(branches.len(), 1);
+    assert!(matches!(selector.as_ref(), TemplateBranchSelector::Bool(_)));
+    assert!(matches!(
+        body.as_ref(),
+        OwnedRuntimeTemplateNode::Text { .. }
+    ));
 }
 
 #[test]
@@ -196,15 +202,8 @@ fn collect_owned_node_string_slice_expressions(
             }
         }
 
-        OwnedRuntimeTemplateNode::BranchChain {
-            branches, fallback, ..
-        } => {
-            for branch in branches {
-                collect_owned_node_string_slice_expressions(&branch.body, string_slices);
-            }
-            if let Some(fallback) = fallback {
-                collect_owned_node_string_slice_expressions(fallback, string_slices);
-            }
+        OwnedRuntimeTemplateNode::Conditional { body, .. } => {
+            collect_owned_node_string_slice_expressions(body, string_slices);
         }
 
         OwnedRuntimeTemplateNode::Loop {
@@ -708,15 +707,8 @@ fn find_runtime_handoff_in_node(node: &OwnedRuntimeTemplateNode, found: &mut boo
                 find_runtime_handoff_in_node(child, found);
             }
         }
-        OwnedRuntimeTemplateNode::BranchChain {
-            branches, fallback, ..
-        } => {
-            for branch in branches {
-                find_runtime_handoff_in_node(&branch.body, found);
-            }
-            if let Some(fallback) = fallback {
-                find_runtime_handoff_in_node(fallback, found);
-            }
+        OwnedRuntimeTemplateNode::Conditional { body, .. } => {
+            find_runtime_handoff_in_node(body, found);
         }
         OwnedRuntimeTemplateNode::Loop {
             body,

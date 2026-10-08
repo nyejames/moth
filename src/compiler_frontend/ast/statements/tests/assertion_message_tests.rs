@@ -16,8 +16,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueIfBlock,
 };
 use crate::compiler_frontend::ast::templates::runtime_handoff::{
-    OwnedRuntimeTemplateBody, OwnedRuntimeTemplateBranch, OwnedRuntimeTemplateHandoff,
-    OwnedRuntimeTemplateNode,
+    OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::ast::templates::template::{
     Style, Template, TemplateSegmentOrigin, TemplateType,
@@ -111,16 +110,12 @@ fn owned_runtime_handoff_checks_dynamic_selectors_and_loop_headers() {
 
     let selector_span = propagated_expression(11).span;
     let selector = handoff_expression(OwnedRuntimeTemplateHandoff {
-        body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::BranchChain {
-            branches: vec![OwnedRuntimeTemplateBranch {
-                selector: TemplateBranchSelector::Bool(propagated_expression(11)),
-                body: OwnedRuntimeTemplateNode::Sequence {
-                    children: vec![],
-                    span: None,
-                },
+        body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Conditional {
+            selector: Box::new(TemplateBranchSelector::Bool(propagated_expression(11))),
+            body: Box::new(OwnedRuntimeTemplateNode::Sequence {
+                children: vec![],
                 span: None,
-            }],
-            fallback: None,
+            }),
             span: None,
         }),
         span: None,

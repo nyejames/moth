@@ -1164,10 +1164,8 @@ fn discard_inactive_assertion_messages_in_owned_runtime_node(
             discard_inactive_assertion_messages_in_expression(expression)?;
         }
 
-        OwnedRuntimeTemplateNode::BranchChain { branches, .. } => {
-            for branch in branches {
-                discard_inactive_assertion_messages_in_branch_selector(&mut branch.selector)?;
-            }
+        OwnedRuntimeTemplateNode::Conditional { selector, .. } => {
+            discard_inactive_assertion_messages_in_branch_selector(selector)?;
         }
 
         OwnedRuntimeTemplateNode::Loop { header, .. } => {
@@ -1782,7 +1780,7 @@ fn normalize_owned_runtime_template_node_for_hir(
         OwnedRuntimeTemplateNode::Sequence { .. }
         | OwnedRuntimeTemplateNode::ChildTemplate { .. }
         | OwnedRuntimeTemplateNode::ConditionalWrapper { .. }
-        | OwnedRuntimeTemplateNode::BranchChain { .. }
+        | OwnedRuntimeTemplateNode::Conditional { .. }
         | OwnedRuntimeTemplateNode::Loop { .. }
         | OwnedRuntimeTemplateNode::Text { .. }
         | OwnedRuntimeTemplateNode::AggregateOutput

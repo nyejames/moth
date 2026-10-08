@@ -26,8 +26,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotContributionSource, OwnedRuntimeSlotSite,
-    OwnedRuntimeTemplateBody, OwnedRuntimeTemplateBranch, OwnedRuntimeTemplateHandoff,
-    OwnedRuntimeTemplateNode,
+    OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::DataType;
@@ -80,7 +79,7 @@ fn validate_owned_handoff_with_orphan_type_id(node: OwnedRuntimeTemplateNode) {
 }
 
 #[test]
-fn owned_runtime_branch_selector_type_ids_are_validated_before_inactive_elision() {
+fn owned_runtime_conditional_selector_type_ids_are_validated_before_inactive_elision() {
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let selectors = vec![
@@ -98,16 +97,12 @@ fn owned_runtime_branch_selector_type_ids_are_validated_before_inactive_elision(
     ];
 
     for selector in selectors {
-        validate_owned_handoff_with_orphan_type_id(OwnedRuntimeTemplateNode::BranchChain {
-            branches: vec![OwnedRuntimeTemplateBranch {
-                selector,
-                body: OwnedRuntimeTemplateNode::Sequence {
-                    children: Vec::new(),
-                    span: None,
-                },
+        validate_owned_handoff_with_orphan_type_id(OwnedRuntimeTemplateNode::Conditional {
+            selector: Box::new(selector),
+            body: Box::new(OwnedRuntimeTemplateNode::Sequence {
+                children: Vec::new(),
                 span: None,
-            }],
-            fallback: None,
+            }),
             span: None,
         });
     }
@@ -147,16 +142,12 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
             },
             contribution_sources: vec![OwnedRuntimeSlotContributionSource {
                 source: RuntimeSlotContributionSourceId(0),
-                render_root: OwnedRuntimeTemplateNode::BranchChain {
-                    branches: vec![OwnedRuntimeTemplateBranch {
-                        selector: TemplateBranchSelector::Bool(orphan_bool_expression()),
-                        body: OwnedRuntimeTemplateNode::Sequence {
-                            children: Vec::new(),
-                            span: None,
-                        },
+                render_root: OwnedRuntimeTemplateNode::Conditional {
+                    selector: Box::new(TemplateBranchSelector::Bool(orphan_bool_expression())),
+                    body: Box::new(OwnedRuntimeTemplateNode::Sequence {
+                        children: Vec::new(),
                         span: None,
-                    }],
-                    fallback: None,
+                    }),
                     span: None,
                 },
                 renders_wrapper_unconditionally: false,
@@ -211,16 +202,12 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
 
 #[test]
 fn static_true_assertion_owned_handoff_is_validated_before_message_elision() {
-    let handoff = owned_render_handoff(OwnedRuntimeTemplateNode::BranchChain {
-        branches: vec![OwnedRuntimeTemplateBranch {
-            selector: TemplateBranchSelector::Bool(orphan_bool_expression()),
-            body: OwnedRuntimeTemplateNode::Sequence {
-                children: Vec::new(),
-                span: None,
-            },
+    let handoff = owned_render_handoff(OwnedRuntimeTemplateNode::Conditional {
+        selector: Box::new(TemplateBranchSelector::Bool(orphan_bool_expression())),
+        body: Box::new(OwnedRuntimeTemplateNode::Sequence {
+            children: Vec::new(),
             span: None,
-        }],
-        fallback: None,
+        }),
         span: None,
     });
     let node = AstNode {

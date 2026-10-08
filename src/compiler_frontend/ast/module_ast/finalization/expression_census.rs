@@ -498,20 +498,15 @@ impl Census<'_> {
             OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => {
                 self.drain(Item::Expression(expression), partition)
             }
-            OwnedRuntimeTemplateNode::BranchChain { branches, .. } => {
-                record_list(branches, ListKind::HandoffBranches);
-                for branch in branches {
-                    match &branch.selector {
-                        TemplateBranchSelector::Bool(value) => {
-                            self.drain(Item::Expression(value), partition)
-                        }
-                        TemplateBranchSelector::OptionPresentCapture { scrutinee, pattern } => {
-                            self.drain(Item::Expression(scrutinee), partition);
-                            self.drain(Item::Pattern(pattern), partition);
-                        }
-                    }
+            OwnedRuntimeTemplateNode::Conditional { selector, .. } => match selector.as_ref() {
+                TemplateBranchSelector::Bool(value) => {
+                    self.drain(Item::Expression(value), partition)
                 }
-            }
+                TemplateBranchSelector::OptionPresentCapture { scrutinee, pattern } => {
+                    self.drain(Item::Expression(scrutinee), partition);
+                    self.drain(Item::Pattern(pattern), partition);
+                }
+            },
             OwnedRuntimeTemplateNode::Loop { header, .. } => match header {
                 TemplateLoopHeader::Conditional { condition } => {
                     self.drain(Item::Expression(condition), partition)
@@ -810,7 +805,6 @@ enum ListKind {
     MultiBindTargets,
     PatternCaptures,
     HandoffNodes,
-    HandoffBranches,
     HandoffSources,
     HandoffSites,
     OwnedStructuralPieces,
@@ -859,16 +853,6 @@ fn record_list<T>(values: &Vec<T>, kind: ListKind) {
             AstCounter::CensusHandoffNodesEmpty,
             AstCounter::CensusHandoffNodesSingle,
             AstCounter::CensusHandoffNodesMultiple,
-        ],
-        ListKind::HandoffBranches => [
-            AstCounter::CensusHandoffBranchesLists,
-            AstCounter::CensusHandoffBranchesLengthSum,
-            AstCounter::CensusHandoffBranchesLengthMax,
-            AstCounter::CensusHandoffBranchesCapacitySum,
-            AstCounter::CensusHandoffBranchesCapacityMax,
-            AstCounter::CensusHandoffBranchesEmpty,
-            AstCounter::CensusHandoffBranchesSingle,
-            AstCounter::CensusHandoffBranchesMultiple,
         ],
         ListKind::HandoffSources => [
             AstCounter::CensusHandoffSourcesLists,

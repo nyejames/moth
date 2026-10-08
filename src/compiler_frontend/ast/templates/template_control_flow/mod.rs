@@ -20,8 +20,7 @@ pub(crate) use const_folding::{
     build_range_iteration_bindings, const_collection_items,
 };
 pub(crate) use types::{
-    TemplateBodyEmission, TemplateBodyParseMode, TemplateBranchSelector,
-    TemplateControlFlowValidationMode, TemplateIfBodyParseInput, TemplateLoopBodyParseInput,
-    TemplateLoopHeader,
+    TemplateBodyParseMode, TemplateBranchSelector, TemplateControlFlowValidationMode,
+    TemplateIfBodyParseInput, TemplateLoopBodyParseInput, TemplateLoopHeader,
 };
 pub(crate) use validation::validate_runtime_template_control_flow_slot_artifacts;

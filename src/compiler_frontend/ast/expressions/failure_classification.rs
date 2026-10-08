@@ -1115,16 +1115,8 @@ fn classify_owned_runtime_node(
         OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => {
             Ok(classify_expression(expression, template_ir_store, state)?)
         }
-        OwnedRuntimeTemplateNode::BranchChain { branches, .. } => {
-            let mut branch_effect = None;
-            for branch in branches {
-                branch_effect =
-                    classify_branch_selector(&branch.selector, template_ir_store, state)?;
-                if branch_effect.is_some() {
-                    break;
-                }
-            }
-            Ok(branch_effect)
+        OwnedRuntimeTemplateNode::Conditional { selector, .. } => {
+            classify_branch_selector(selector, template_ir_store, state)
         }
         OwnedRuntimeTemplateNode::Loop { header, .. } => {
             Ok(classify_loop_header(header, template_ir_store, state)?)

@@ -73,7 +73,7 @@ impl<'a> HirBuilder<'a> {
 fn is_owned_runtime_template_node_control_flow(node: &OwnedRuntimeTemplateNode) -> bool {
     matches!(
         node,
-        OwnedRuntimeTemplateNode::BranchChain { .. }
+        OwnedRuntimeTemplateNode::Conditional { .. }
             | OwnedRuntimeTemplateNode::Loop { .. }
             | OwnedRuntimeTemplateNode::ConditionalWrapper { .. }
     )

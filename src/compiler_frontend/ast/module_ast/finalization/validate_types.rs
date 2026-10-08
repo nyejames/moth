@@ -420,11 +420,8 @@ fn validate_owned_runtime_template_node(
             validate_expression(expression, context)
         }
 
-        OwnedRuntimeTemplateNode::BranchChain { branches, .. } => {
-            for branch in branches {
-                validate_template_branch_selector(&branch.selector, context)?;
-            }
-            Ok(())
+        OwnedRuntimeTemplateNode::Conditional { selector, .. } => {
+            validate_template_branch_selector(selector, context)
         }
 
         OwnedRuntimeTemplateNode::Loop { header, .. } => {

@@ -8,7 +8,6 @@
 
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
-use crate::compiler_frontend::ast::templates::template_control_flow::TemplateBodyEmission;
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotContributionSource,
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
@@ -31,6 +30,7 @@ use crate::return_hir_transformation_error;
 use super::append_context::{
     RuntimeSlotSourceAccumulatorContext, RuntimeSlotSourceLocals, RuntimeTemplateAppendContext,
 };
+use super::render_append::RuntimeTemplateEmission;
 
 struct RuntimeSlotContributionResult {
     emitted_any_contribution: LocalId,
@@ -70,7 +70,7 @@ impl<'a> HirBuilder<'a> {
         handoff: &OwnedRuntimeSlotApplicationHandoff,
         append_context: RuntimeTemplateAppendContext<'_>,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
+    ) -> Result<RuntimeTemplateEmission, HirConstructionFailure> {
         let source_accumulators =
             self.initialize_runtime_slot_source_accumulators(handoff, span_ref)?;
 
@@ -231,7 +231,7 @@ impl<'a> HirBuilder<'a> {
         append_context: RuntimeTemplateAppendContext<'_>,
         source_accumulators: &RuntimeSlotSourceAccumulatorContext,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
+    ) -> Result<RuntimeTemplateEmission, HirConstructionFailure> {
         let wrapper_context = append_context
             .with_runtime_slot_sites(source_accumulators, &handoff.slot_sites)
             .rejecting_unresolved_slots();
@@ -242,8 +242,9 @@ impl<'a> HirBuilder<'a> {
             span_ref,
         )?;
 
-        if append_context.emitted_output().is_some() && emission == TemplateBodyEmission::Output {
-            return Ok(TemplateBodyEmission::NoOutput);
+        if append_context.emitted_output().is_some() && emission == RuntimeTemplateEmission::Output
+        {
+            return Ok(RuntimeTemplateEmission::NoOutput);
         }
 
         Ok(emission)
@@ -256,7 +257,7 @@ impl<'a> HirBuilder<'a> {
         source_accumulators: &RuntimeSlotSourceAccumulatorContext,
         emitted_any_contribution: LocalId,
         span_ref: &Option<SourceSpan>,
-    ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
+    ) -> Result<RuntimeTemplateEmission, HirConstructionFailure> {
         let condition_block = self.current_block_id_or_error(span_ref)?;
         let parent_region = self.current_region_or_error(span_ref)?;
         let rendered_region = self.create_child_region(parent_region);
@@ -293,9 +294,9 @@ impl<'a> HirBuilder<'a> {
         let skipped_tail = self.current_block_id_or_error(span_ref)?;
 
         let emission = if append_context.emitted_output().is_some() {
-            TemplateBodyEmission::NoOutput
+            RuntimeTemplateEmission::NoOutput
         } else {
-            TemplateBodyEmission::Output
+            RuntimeTemplateEmission::Output
         };
 
         if rendered_terminated {
@@ -356,7 +357,7 @@ fn owned_runtime_template_node_guarantees_output(
         // after HIR evaluates its condition or iterable. Even when the body
         // shape is otherwise const-renderable, the slot wrapper must stay
         // guarded by the emitted-output flag.
-        OwnedRuntimeTemplateNode::BranchChain { .. }
+        OwnedRuntimeTemplateNode::Conditional { .. }
         | OwnedRuntimeTemplateNode::Loop { .. }
         | OwnedRuntimeTemplateNode::ConditionalWrapper { .. } => false,
 

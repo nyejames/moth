@@ -15,6 +15,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
 
 use super::append_context::RuntimeTemplateAppendContext;
+use super::is_owned_runtime_template_node_control_flow;
 
 impl<'a> HirBuilder<'a> {
     // WHAT: Lowers structured runtime template control flow directly into the enclosing CFG.
@@ -25,7 +26,7 @@ impl<'a> HirBuilder<'a> {
         node: &OwnedRuntimeTemplateNode,
         span_ref: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
-        if !is_control_flow_node(node) {
+        if !is_owned_runtime_template_node_control_flow(node) {
             return_hir_transformation_error!(
                 "Runtime control-flow template lowering was called for a non-control-flow owned node.",
                 self.hir_error_location(span_ref)
@@ -55,13 +56,4 @@ impl<'a> HirBuilder<'a> {
             value,
         })
     }
-}
-
-fn is_control_flow_node(node: &OwnedRuntimeTemplateNode) -> bool {
-    matches!(
-        node,
-        OwnedRuntimeTemplateNode::BranchChain { .. }
-            | OwnedRuntimeTemplateNode::Loop { .. }
-            | OwnedRuntimeTemplateNode::ConditionalWrapper { .. }
-    )
 }

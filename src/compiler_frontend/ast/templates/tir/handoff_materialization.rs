@@ -14,8 +14,7 @@ use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::templates::runtime_handoff::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotContributionSource, OwnedRuntimeSlotSite,
-    OwnedRuntimeTemplateBody, OwnedRuntimeTemplateBranch, OwnedRuntimeTemplateHandoff,
-    OwnedRuntimeTemplateNode,
+    OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
@@ -419,21 +418,14 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 selector_site_id,
                 body,
             } => {
+                let selector =
+                    self.effective_branch_selector(view, selector.as_ref(), *selector_site_id)?;
                 let body =
                     self.materialize_node_with_injection(view, *body, active_slot_plan, injection)?;
-                let branch = OwnedRuntimeTemplateBranch {
-                    selector: self.effective_branch_selector(
-                        view,
-                        selector.as_ref(),
-                        *selector_site_id,
-                    )?,
-                    body,
-                    span: node.span,
-                };
 
-                Ok(OwnedRuntimeTemplateNode::BranchChain {
-                    branches: vec![branch],
-                    fallback: None,
+                Ok(OwnedRuntimeTemplateNode::Conditional {
+                    selector: Box::new(selector),
+                    body: Box::new(body),
                     span: node.span,
                 })
             }
