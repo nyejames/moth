@@ -3,10 +3,10 @@
 ## Status
 
 ```text
-STATUS: active, design direction approved
-CURRENT_SLICE: Phase 3 - review corrections and package synchronization
-BLOCKERS: packages-and-bugfixes has unfinished external-binding changes; final integrated costs, native history and main-bound validation remain pending
-NEXT_ACTION: obtain a safe committed package checkpoint, finish both-way synchronization, record accepted measurements, validate the main-bound tree, squash onto main, then pause before Phase 4
+STATUS: paused for the approved template control-flow simplification, design direction approved
+CURRENT_SLICE: Phase 3 implementation and review corrections accepted; 3M closeout remains open
+BLOCKERS: template simplification is now active on this branch; packages-and-bugfixes has unfinished external-binding changes; final integrated costs, native history and main-bound validation remain pending
+NEXT_ACTION: finish template simplification, then complete safe package synchronization and 3M evidence on the integrated tree before the main squash; resume Phase 4 only at the user's request with a fresh post-removal baseline
 ```
 
 ## Purpose and authority
