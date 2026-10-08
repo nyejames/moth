@@ -12,7 +12,8 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
     loop_body_const_evaluation_bindings,
 };
 use crate::compiler_frontend::ast::templates::tir::expression_constness::{
-    classify_expression_const_evaluable_with_nested_template, effective_branch_selector_for_view,
+    classify_expression_const_evaluable_with_nested_template,
+    const_conditional_loop_condition_value, effective_branch_selector_for_view,
     effective_loop_header_for_view,
 };
 use crate::compiler_frontend::ast::templates::tir::ids::{
@@ -615,8 +616,13 @@ impl PreparationWalk<'_> {
                 } => {
                     let effective_header =
                         effective_loop_header_for_view(view, header, *header_sites)?;
-                    let mut facts =
-                        self.walk_loop_header(view, &effective_header, node.span, role)?;
+                    let mut facts = self.walk_loop_header(
+                        view,
+                        &effective_header,
+                        node.span,
+                        loop_binding_paths,
+                        role,
+                    )?;
                     let body_binding_paths =
                         loop_body_const_evaluation_bindings(&effective_header, loop_binding_paths);
                     let body_facts = self.walk_node(*body, view, &body_binding_paths, role)?;
@@ -995,12 +1001,14 @@ impl PreparationWalk<'_> {
         view: &TirView<'_>,
         header: &TemplateLoopHeader,
         loop_span: Option<SourceSpan>,
+        loop_binding_paths: &[PathId],
         role: &PreparationTraversalRole,
     ) -> Result<PreparationFacts, TemplateError> {
         let mut facts = PreparationFacts::const_value();
         let diagnostic = match header {
             TemplateLoopHeader::Conditional { condition } => {
-                let condition_facts = self.walk_expression(view, condition, &[], role)?;
+                let condition_facts =
+                    self.walk_expression(view, condition, loop_binding_paths, role)?;
                 facts.merge(condition_facts);
 
                 let mut diagnostic_condition = condition.as_ref();
@@ -1008,19 +1016,29 @@ impl PreparationWalk<'_> {
                     diagnostic_condition = value;
                 }
 
-                match &diagnostic_condition.kind {
-                    ExpressionKind::Bool(false) => None,
-                    ExpressionKind::Bool(true) => {
-                        Some(CompilerDiagnostic::invalid_template_structure(
-                            InvalidTemplateStructureReason::TemplateConditionalLoopConstTrue,
-                            condition_span_or_loop_span(diagnostic_condition, loop_span),
-                        ))
-                    }
-                    _ => Some(CompilerDiagnostic::invalid_template_structure(
+                let condition_value = const_conditional_loop_condition_value(condition);
+                let diagnostic = match condition_value {
+                    Some(false) => None,
+                    Some(true) => Some(CompilerDiagnostic::invalid_template_structure(
+                        InvalidTemplateStructureReason::TemplateConditionalLoopConstTrue,
+                        condition_span_or_loop_span(diagnostic_condition, loop_span),
+                    )),
+                    None => Some(CompilerDiagnostic::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateLoopConditionNotConst,
                         condition_span_or_loop_span(diagnostic_condition, loop_span),
                     )),
+                };
+
+                if condition_value.is_none() {
+                    facts.const_evaluable = false;
+                    self.record_role_runtime(
+                        &mut facts,
+                        role,
+                        RuntimeTemplateReason::RuntimeExpression,
+                    );
                 }
+
+                diagnostic
             }
             TemplateLoopHeader::Range { range, .. } => {
                 let mut source_constant_paths = Vec::new();
@@ -1043,18 +1061,24 @@ impl PreparationWalk<'_> {
                         );
                     }
                 }
+                let mut const_binding_paths = source_constant_paths;
+                for inherited in loop_binding_paths {
+                    if !const_binding_paths.contains(inherited) {
+                        const_binding_paths.push(*inherited);
+                    }
+                }
                 let start_facts = self.walk_expression_with_bindings(
                     view,
                     &range.start,
-                    &source_constant_paths,
-                    &[],
+                    &const_binding_paths,
+                    loop_binding_paths,
                     role,
                 )?;
                 let end_facts = self.walk_expression_with_bindings(
                     view,
                     &range.end,
-                    &source_constant_paths,
-                    &[],
+                    &const_binding_paths,
+                    loop_binding_paths,
                     role,
                 )?;
                 let mut header_const = start_facts.const_evaluable;
@@ -1065,8 +1089,8 @@ impl PreparationWalk<'_> {
                     let step_facts = self.walk_expression_with_bindings(
                         view,
                         step,
-                        &source_constant_paths,
-                        &[],
+                        &const_binding_paths,
+                        loop_binding_paths,
                         role,
                     )?;
                     header_const &= step_facts.const_evaluable;
@@ -1080,7 +1104,8 @@ impl PreparationWalk<'_> {
                 })
             }
             TemplateLoopHeader::Collection { iterable, .. } => {
-                let iterable_facts = self.walk_expression(view, iterable, &[], role)?;
+                let iterable_facts =
+                    self.walk_expression(view, iterable, loop_binding_paths, role)?;
                 let header_const = iterable_facts.const_evaluable;
                 facts.merge(iterable_facts);
                 (!header_const).then(|| {

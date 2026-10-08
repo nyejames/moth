@@ -367,7 +367,7 @@ fn tir_tree_is_const_evaluable_standalone_value(
             aggregate_wrapper,
             ..
         } => {
-            if !loop_header_is_const(header, store, string_table, visiting_templates)? {
+            if !loop_header_is_const(header, &[], store, string_table, visiting_templates)? {
                 return Ok(false);
             }
             let bindings = loop_body_const_evaluation_bindings(header, &[]);
@@ -500,7 +500,13 @@ fn tir_tree_is_const_evaluable_value(
             aggregate_wrapper,
             ..
         } => {
-            if !loop_header_is_const(header, store, string_table, visiting_templates)? {
+            if !loop_header_is_const(
+                header,
+                loop_binding_paths,
+                store,
+                string_table,
+                visiting_templates,
+            )? {
                 return Ok(false);
             }
             let bindings = loop_body_const_evaluation_bindings(header, loop_binding_paths);
@@ -606,26 +612,39 @@ fn selector_is_const(
     }
 }
 
+pub(crate) fn const_conditional_loop_condition_value(condition: &Expression) -> Option<bool> {
+    let mut condition = condition;
+    while let ExpressionKind::Coerced { value, .. } = &condition.kind {
+        condition = value;
+    }
+
+    match &condition.kind {
+        ExpressionKind::Bool(value) => Some(*value),
+        _ => None,
+    }
+}
+
 fn loop_header_is_const(
     header: &TemplateLoopHeader,
+    loop_binding_paths: &[PathId],
     store: &TemplateIrStore,
     string_table: &StringTable,
     visiting_templates: &mut HashSet<TemplateIrId>,
 ) -> Result<bool, TemplateError> {
     match header {
         TemplateLoopHeader::Conditional { condition } => {
-            expression_is_const_evaluable(condition, &[], store, string_table, visiting_templates)
+            Ok(const_conditional_loop_condition_value(condition).is_some())
         }
         TemplateLoopHeader::Range { range, .. } => {
             if !expression_is_const_evaluable(
                 &range.start,
-                &[],
+                loop_binding_paths,
                 store,
                 string_table,
                 visiting_templates,
             )? || !expression_is_const_evaluable(
                 &range.end,
-                &[],
+                loop_binding_paths,
                 store,
                 string_table,
                 visiting_templates,
@@ -635,7 +654,7 @@ fn loop_header_is_const(
             if let Some(step) = &range.step {
                 return expression_is_const_evaluable(
                     step,
-                    &[],
+                    loop_binding_paths,
                     store,
                     string_table,
                     visiting_templates,
@@ -643,8 +662,12 @@ fn loop_header_is_const(
             }
             Ok(true)
         }
-        TemplateLoopHeader::Collection { iterable, .. } => {
-            expression_is_const_evaluable(iterable, &[], store, string_table, visiting_templates)
-        }
+        TemplateLoopHeader::Collection { iterable, .. } => expression_is_const_evaluable(
+            iterable,
+            loop_binding_paths,
+            store,
+            string_table,
+            visiting_templates,
+        ),
     }
 }

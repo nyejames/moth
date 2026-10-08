@@ -1,0 +1,8 @@
+palette_items #{String} = {"red", "green"}
+palette #{String}? = palette_items
+
+#[if palette is |colors|:
+    [loop colors |color|:
+        captured-[color];
+    ]
+:]

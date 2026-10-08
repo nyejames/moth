@@ -457,11 +457,20 @@ pub(super) fn fold_tir_loop(
 
             let effective_iterable = fold_input.effective_expression_for_site(site_id)?;
             let iterable_ref = effective_iterable.unwrap_or(iterable.as_ref());
+            let resolved_iterable =
+                resolve_fold_bindings_in_expression(iterable_ref, fold_context)?;
+            let resolved_ref: &Expression = match &resolved_iterable {
+                FoldResolvedExpression::Borrowed(expression) => expression,
+                FoldResolvedExpression::Owned(expression) => expression,
+            };
             output_state
                 .provenance
                 .merge(&iterable_ref.synthetic_interface_provenance);
+            output_state
+                .provenance
+                .merge(&resolved_ref.synthetic_interface_provenance);
 
-            let items = const_collection_items(iterable_ref)?;
+            let items = const_collection_items(resolved_ref)?;
             let estimated_iterations = std::cmp::min(
                 items.len(),
                 fold_context.template_const_loop_iteration_limit,
@@ -484,12 +493,24 @@ pub(super) fn fold_tir_loop(
                     )
                     .into());
                 }
-
+                let mut resolved_item = resolve_fold_bindings_in_expression(item, fold_context)?;
+                if let FoldResolvedExpression::Owned(expression) = &mut resolved_item {
+                    expression
+                        .synthetic_interface_provenance
+                        .merge(&item.synthetic_interface_provenance);
+                }
+                let resolved_item_ref: &Expression = match &resolved_item {
+                    FoldResolvedExpression::Borrowed(expression) => expression,
+                    FoldResolvedExpression::Owned(expression) => expression,
+                };
+                output_state
+                    .provenance
+                    .merge(&resolved_item_ref.synthetic_interface_provenance);
                 let iteration_bindings = build_collection_iteration_bindings(
                     bindings,
-                    item,
+                    resolved_item_ref,
                     index,
-                    &iterable_ref.synthetic_interface_provenance,
+                    &resolved_ref.synthetic_interface_provenance,
                 );
                 fold_tir_loop_iteration(
                     body_id,

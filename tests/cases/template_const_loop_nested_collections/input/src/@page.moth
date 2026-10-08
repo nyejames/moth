@@ -1,0 +1,6 @@
+#[loop {{"red", "green"}, {}, {"blue"}} |row|:
+    [loop row |color|:
+        [color];
+    ]
+    end;
+:]

@@ -5,8 +5,8 @@
 ```text
 STATUS: paused after Phase 3; template control-flow simplification complete
 CURRENT_SLICE: Phase 3 implementation, review corrections and 3M closeout accepted
-BLOCKERS: none for this checkpoint; further implementation requires the user's explicit resumption
-NEXT_ACTION: record a fresh post-removal baseline when the user resumes, then continue Phase 4
+BLOCKERS: completion of the exact numeric migration and a fresh restart review
+NEXT_ACTION: after numeric completion, reassess owners, lifetimes, coverage and benchmarks; require explicit user resumption before further implementation
 ```
 
 ## Purpose and authority

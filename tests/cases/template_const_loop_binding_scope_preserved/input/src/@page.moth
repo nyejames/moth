@@ -1,0 +1,4 @@
+#[loop 0 to 2 |outer|:
+    [outer];
+:]
+[:escaped-loop [outer]]

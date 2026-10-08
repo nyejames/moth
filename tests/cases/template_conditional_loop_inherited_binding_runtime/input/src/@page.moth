@@ -1,0 +1,9 @@
+render_false || -> String:
+    return [loop {false} |condition|: [loop condition: text]]
+;
+
+render_true || -> String:
+    return [loop {true} |condition|: [loop condition: text]]
+;
+
+[:template_conditional_loop_inherited_binding_runtime [render_false()]]

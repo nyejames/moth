@@ -461,20 +461,8 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
             }
         }
 
-        // Control-flow children are fully TIR-owned: their body roots carry the
-        // branch/loop structure and the child template node is already recorded
-        // above through `record_parser_tir_child_template`.
-        let child_template_id = child_template.tir_reference.root;
-        let has_control_flow_root = {
-            let store = construction_context.store();
-            store
-                .control_flow_node_id_for_template(child_template_id)?
-                .is_some()
-        };
-        if has_control_flow_root {
-            return Ok(());
-        }
-
+        // The already-known child kind owns dispatch: control-flow children are
+        // ordinary child templates recorded above, so no TIR search is needed.
         match &child_kind {
             TemplateType::Comment(_) => {
                 return Ok(());
