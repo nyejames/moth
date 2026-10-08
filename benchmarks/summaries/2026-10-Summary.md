@@ -1,11 +1,11 @@
 # October 2026 Summary
 
 ## End-to-end CLI / macOS Apple Silicon (6D851D)
-Change since initial benchmark: mixed: avg +2ms; 3 faster, 3 slower; 38/40 cases; workload changed: 2 cases (docs_check, code_highlighter_stress_check)
+Change since initial benchmark: mixed: avg +1ms; 3 faster, 2 slower; 38/40 cases; workload changed: 2 cases (docs_check, code_highlighter_stress_check)
 Timing schema: 2
 Initial: all ~23ms, Core ~23ms, Docs ~201ms, Stress ~21ms, Module ~12ms, Borrow ~9ms
-Latest: all ~25ms, Core ~20ms, Docs ~214ms, Stress ~24ms, Module ~12ms, Borrow ~10ms
-Case spread latest: ~47ms
+Latest: all ~25ms, Core ~20ms, Docs ~213ms, Stress ~23ms, Module ~12ms, Borrow ~10ms
+Case spread latest: ~46ms
 
 ## Frontend phases / macOS Apple Silicon (6D851D)
 Change since initial benchmark: no measurable change: avg -2ms; 42/42 cases
@@ -86,3 +86,9 @@ Timing schema: 2
 **0ms avg**; 0 faster, 1 slower; 40/40 cases
 Avg: all ~25ms, Core ~20ms, Docs ~214ms, Stress ~24ms, Module ~12ms, Borrow ~10ms
 Stage movement: check total +9ms, frontend +8ms, boundary compile +8ms
+
+# End-to-end CLI / macOS Apple Silicon (6D851D): October 8th - 14:56
+Timing schema: 2
+**0ms avg**; 1 faster, 0 slower; 40/40 cases
+Avg: all ~25ms, Core ~20ms, Docs ~213ms, Stress ~23ms, Module ~12ms, Borrow ~10ms
+Stage movement: boundary compile -8ms, check total -8ms, frontend -7ms
