@@ -12,9 +12,9 @@
 
 ```text
 STATUS: active, language simplification approved
-CURRENT_SLICE: Phase 1 - establish retained and rejected template contracts
+CURRENT_SLICE: Phase 2 - remove body sentinels and simplify parser state
 BLOCKERS: none for this slice; package synchronization remains pending the parallel branch
-NEXT_ACTION: validate and audit the test contract, then remove the body sentinel parser
+NEXT_ACTION: accept the parser checkpoint and synchronize committed package fixes before direct conditional TIR
 ```
 
 ## Goal
@@ -729,15 +729,17 @@ Use the actual case IDs selected in Phase 1.
 
 ## Exit check
 
-- [ ] No body sentinel module remains.
-- [ ] No nested-template control context remains.
-- [ ] No branch-chain parsing loop remains.
-- [ ] No fallback parser remains.
-- [ ] No template loop-depth sentinel state remains.
-- [ ] Single-arm Boolean `if` parses.
-- [ ] Option-present capture parses with correct scope.
-- [ ] Existing loop header families parse.
-- [ ] Removed markers fail through the surviving grammar.
+Removing the sentinel producer made loop-control TIR and runtime nodes dead under the warning policy. Their nodes, helper classification, trim paths and runtime-slot flush machinery were retired in this checkpoint. The one remaining helper outcome is direct `SlotInsertHelper`. Branch-chain representation, fold-signal deletion and runtime-emission type ownership remain assigned to Phases 3, 4 and 5.
+
+- [x] No body sentinel module remains.
+- [x] No nested-template control context remains.
+- [x] No branch-chain parsing loop remains.
+- [x] No fallback parser remains.
+- [x] No template loop-depth sentinel state remains.
+- [x] Single-arm Boolean `if` parses.
+- [x] Option-present capture parses with correct scope.
+- [x] Existing loop header families parse.
+- [x] Removed markers fail through the surviving grammar.
 
 Commit:
 

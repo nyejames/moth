@@ -296,7 +296,6 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
         | TemplateIrNodeKind::DynamicExpression { .. }
         | TemplateIrNodeKind::AggregateOutput
         | TemplateIrNodeKind::InsertContribution { .. }
-        | TemplateIrNodeKind::LoopControl { .. }
         | TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => false,
     };

@@ -542,7 +542,6 @@ impl Census<'_> {
             }
             OwnedRuntimeTemplateNode::ConditionalWrapper { .. }
             | OwnedRuntimeTemplateNode::AggregateOutput
-            | OwnedRuntimeTemplateNode::LoopControl { .. }
             | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
             | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
             | OwnedRuntimeTemplateNode::Slot { .. } => {}
@@ -621,7 +620,6 @@ impl Census<'_> {
                 | TemplateIrNodeKind::Text { .. }
                 | TemplateIrNodeKind::Slot { .. }
                 | TemplateIrNodeKind::AggregateOutput
-                | TemplateIrNodeKind::LoopControl { .. }
                 | TemplateIrNodeKind::RuntimeSlotSite { .. }
                 | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => {}
             }

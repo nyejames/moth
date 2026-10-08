@@ -192,155 +192,6 @@ fn runtime_template_loop_rejects_insert_leaking_from_body() {
 }
 
 #[test]
-fn runtime_template_loop_with_continue_preserves_loop_control_signal() {
-    let (template, context, _string_table) = parse_runtime_template(
-        "[loop 0 to 2 |i|:
-            <li>before [i]</li>
-            [continue]
-            <li>after [i]</li>
-        ]",
-    );
-
-    let loop_node = expect_loop_node(&template, &context);
-    assert_eq!(
-        body_node_loop_control_signal_count(loop_body_node(loop_node, &context), &context),
-        1,
-        "loop body should contain a loop control signal",
-    );
-}
-
-#[test]
-fn runtime_template_loop_with_continue_inside_parent_parses() {
-    let (template, context, _string_table) = parse_runtime_template(
-        "[:
-            outer
-            [loop 0 to 2 |i|:
-                <li>before [i]</li>
-                [continue]
-                <li>after [i]</li>
-            ]
-        ]",
-    );
-
-    let store = context.template_ir_store.borrow();
-    assert!(
-        tir_root_has_control_flow_child(&template, &store),
-        "outer template TIR root should contain the nested loop"
-    );
-}
-
-#[test]
-fn runtime_template_loop_with_continue_as_slot_fill_parses() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let shell_file_tokens = template_tokens_from_source(
-        "[:<ul>[$slot]</ul>]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let shell_source_path = shell_file_tokens.source_path;
-    let shell_context = new_constant_context(shell_source_path, &path_fork);
-    let canonical_owner = shell_file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
-    let canonical_range = canonical_owner
-        .full_range()
-        .expect("test token stream must expose canonical source range");
-    let mut shell_tokens = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
-        .expect("test token stream must expose an AST cursor");
-    shell_tokens
-        .set_position(shell_file_tokens.opener_index)
-        .expect("test token stream position must remain in canonical range");
-    let shell_template = Template::new(
-        &mut shell_tokens,
-        shell_source_path,
-        &shell_context,
-        vec![],
-        &mut string_table,
-        &mut path_fork,
-    )
-    .expect("slot shell should parse");
-
-    let file_tokens = template_tokens_from_source(
-        "[:
-        before
-        [list_shell, loop keep_going:
-            [break]
-            <li>hidden</li>
-        ]
-        after
-    ]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let source_path = file_tokens.source_path;
-    let scope = source_path;
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
-    let canonical_range = canonical_owner
-        .full_range()
-        .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
-        .expect("test token stream must expose an AST cursor");
-    token_stream
-        .set_position(file_tokens.opener_index)
-        .expect("test token stream position must remain in canonical range");
-    let list_shell_name = string_table.intern("list_shell");
-    let keep_going_name = string_table.intern("keep_going");
-    let declaration = Declaration {
-        id: path_fork
-            .try_intern_child(scope, list_shell_name)
-            .expect("test path fits"),
-        value: Expression::template(shell_template, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
-    };
-    let condition_declaration = Declaration {
-        id: path_fork
-            .try_intern_child(scope, keep_going_name)
-            .expect("test path fits"),
-        value: Expression::new(
-            ExpressionKind::NoValue,
-            None,
-            builtin_type_ids::BOOL,
-            DataType::Bool,
-            ValueMode::ImmutableOwned,
-        ),
-        binding_span: None,
-        config_qualifier: None,
-    };
-    let context = with_test_path_context(
-        ScopeContext::new_for_tests(
-            ContextKind::Template,
-            scope.to_owned(),
-            Rc::new(TopLevelDeclarationTable::new(
-                vec![declaration, condition_declaration],
-                &path_fork,
-            )),
-            Arc::new(ExternalPackageRegistry::default()),
-            0,
-        ),
-        &scope,
-        &frontend_test_style_directives(),
-    )
-    .with_template_ir_store(shell_context.template_ir_store.clone());
-
-    Template::new(
-        &mut token_stream,
-        source_path,
-        &context,
-        vec![],
-        &mut string_table,
-        &mut path_fork,
-    )
-    .expect("slot-fill loop should parse");
-}
-
-#[test]
 fn runtime_template_if_allows_unresolved_slot_receiver() {
     let (template, context, _string_table) = parse_runtime_template_without_validation(
         "[if true:
@@ -391,39 +242,11 @@ fn const_required_template_if_folds_selected_branch() {
     let (template, context, mut string_table) = parse_const_required_template(
         "[if true:
             Visible
-        [else]
-            Hidden
         ]",
     );
 
     let folded = fold_template_in_context(&template, &context, &mut string_table);
-    let rendered = string_table.resolve(folded);
-
-    assert!(rendered.contains("Visible"));
-    assert!(!rendered.contains("Hidden"));
-}
-
-#[test]
-fn const_required_template_else_if_folds_first_selected_branch() {
-    let (template, context, mut string_table) = parse_const_required_template(
-        "[if false:
-            First
-        [else if true]
-            Second
-        [else if true]
-            Third
-        [else]
-            Fallback
-        ]",
-    );
-
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
-    let rendered = string_table.resolve(folded);
-
-    assert!(rendered.contains("Second"));
-    assert!(!rendered.contains("First"));
-    assert!(!rendered.contains("Third"));
-    assert!(!rendered.contains("Fallback"));
+    assert_eq!(string_table.resolve(folded).trim(), "Visible");
 }
 
 #[test]
@@ -434,8 +257,6 @@ fn const_required_template_if_inlines_same_file_source_const_bool() {
     let file_tokens = template_tokens_from_source(
         "[if show_banner:
         Visible
-    [else]
-        Hidden
     ]",
         &mut string_table,
         &mut span_builder,
@@ -475,10 +296,7 @@ fn const_required_template_if_inlines_same_file_source_const_bool() {
     .expect("const-required template if should inline source const bool")
     .template;
     let folded = fold_template_in_context(&template, &context, &mut string_table);
-    let rendered = string_table.resolve(folded);
-
-    assert!(rendered.contains("Visible"));
-    assert!(!rendered.contains("Hidden"));
+    assert_eq!(string_table.resolve(folded).trim(), "Visible");
 }
 
 #[test]
@@ -489,8 +307,6 @@ fn const_required_template_if_inlines_imported_source_const_bool() {
     let file_tokens = template_tokens_from_source(
         "[if show_banner:
         Visible
-    [else]
-        Hidden
     ]",
         &mut string_table,
         &mut span_builder,
@@ -535,10 +351,7 @@ fn const_required_template_if_inlines_imported_source_const_bool() {
     .expect("const-required template if should inline imported source const bool")
     .template;
     let folded = fold_template_in_context(&template, &context, &mut string_table);
-    let rendered = string_table.resolve(folded);
-
-    assert!(rendered.contains("Visible"));
-    assert!(!rendered.contains("Hidden"));
+    assert_eq!(string_table.resolve(folded).trim(), "Visible");
 }
 
 #[test]
@@ -631,25 +444,6 @@ fn const_required_template_if_false_without_else_skips_shared_head_output() {
 }
 
 #[test]
-fn const_required_template_if_inspects_inactive_branch_control_flow() {
-    let (template, context, mut string_table) = parse_const_required_template(
-        "[if true:
-            Visible
-        [else]
-            [loop 0 to 1 |i|:
-                Hidden
-            ]
-        ]",
-    );
-
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
-    let rendered = string_table.resolve(folded);
-
-    assert!(rendered.contains("Visible"));
-    assert!(!rendered.contains("Hidden"));
-}
-
-#[test]
 fn const_required_template_range_loop_folds_iteration_bindings() {
     let (template, context, mut string_table) = parse_const_required_template(
         "[loop 0 to & 3 |i, index|:
@@ -720,8 +514,6 @@ fn const_required_template_loop_allows_nested_if_condition_to_use_iteration_bind
         "[loop 0 to 3 |i|:
             [if i is 1:
                 [:T]
-            [else]
-                [i]
             ]
         ]",
     );
@@ -736,7 +528,7 @@ fn const_required_template_loop_allows_nested_if_condition_to_use_iteration_bind
 
     let folded = fold_template_in_context(&template, &context, &mut string_table);
 
-    assert_eq!(string_table.resolve(folded), "0T2");
+    assert_eq!(string_table.resolve(folded), "T");
 }
 
 #[test]
@@ -1212,20 +1004,18 @@ fn const_required_template_loop_reports_non_const_body() {
 #[test]
 fn const_required_template_if_prepares_a_foldable_view_from_body_tir_roots() {
     // Construction owns the single const preparation, so the outcome it carries is the contract.
-    // Asserting `Foldable` rather than "parsing returned Ok" proves the branch bodies were read
-    // through their module-local TIR roots and classified, not merely accepted.
+    // Asserting `Foldable` rather than "parsing returned Ok" proves the selected body was read
+    // through its module-local TIR root and classified, not merely accepted.
     let construction = const_required_construction(
         "[if true:
             Visible
-        [else]
-            Hidden
         ]",
     );
 
     assert_eq!(
         construction.preparation.outcome,
         TemplatePreparationOutcome::Foldable,
-        "a const-required branch over module-local TIR body roots should prepare as foldable"
+        "a const-required conditional over its module-local TIR body root should prepare as foldable"
     );
 }
 
@@ -1412,7 +1202,7 @@ fn const_required_template_option_capture_present_folds_then_branch() {
 }
 
 #[test]
-fn const_required_template_option_capture_absent_folds_else_branch() {
+fn const_required_template_option_capture_absent_folds_synthetic_fallback() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let context_scope = path_fork
@@ -1512,71 +1302,6 @@ fn const_required_template_option_capture_inlines_present_source_const() {
     let folded = fold_template_in_context(&template, &context, &mut string_table);
 
     assert_eq!(string_table.resolve(folded), "Hello Priya");
-}
-
-#[test]
-fn const_required_template_option_capture_inlines_absent_source_const() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens = template_tokens_from_source(
-        "[if maybe_name is |name|:
-        Hello [name]
-    [else]
-        Guest
-    ]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-    );
-    let source_path = file_tokens.source_path;
-    let maybe_name = string_table.intern("maybe_name");
-
-    let mut type_environment = TypeEnvironment::new();
-    let string_type_id = type_environment.builtins().string;
-    let absent_value = Expression::option_none_with_type_id(
-        string_type_id,
-        DataType::StringSlice,
-        &mut type_environment,
-        None,
-    );
-    let declaration = Declaration {
-        id: path_fork
-            .try_intern_child(source_path, maybe_name)
-            .expect("test path fits"),
-        value: absent_value,
-        binding_span: None,
-        config_qualifier: None,
-    };
-    let context = constant_template_context(&source_path, &[declaration], &path_fork);
-    let mut compatibility_cache = TypeCompatibilityCache::new();
-    let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
-
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
-    let canonical_range = canonical_owner
-        .full_range()
-        .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
-        .expect("test token stream must expose an AST cursor");
-    token_stream
-        .set_position(file_tokens.opener_index)
-        .expect("test token stream position must remain in canonical range");
-    let template = Template::new_const_required_with_type_interner(
-        &mut token_stream,
-        source_path,
-        &context,
-        &mut type_interner,
-        vec![],
-        &mut string_table,
-        &mut path_fork,
-    )
-    .expect("const-required option capture should inline absent source const")
-    .template;
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
-
-    assert_eq!(string_table.resolve(folded), "Guest");
 }
 
 #[test]

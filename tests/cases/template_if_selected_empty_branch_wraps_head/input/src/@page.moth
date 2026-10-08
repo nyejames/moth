@@ -1,3 +1,9 @@
 empty_shell #= [:<span class="selected-empty">[$slot]</span>]
 
 #[empty_shell, if true:]
+
+render_empty |selected Bool| -> String:
+    return [empty_shell, if selected:]
+;
+
+[:[render_empty(true)]]

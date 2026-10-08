@@ -7,4 +7,11 @@ rendered_output_contains = [
   "<strong>",
   "value runtime",
 ]
-rendered_output_not_contains = ["<strong><strong>"]
+rendered_output_contains_exactly_once = [
+  "<strong></strong>",
+  "empty-producer-calls=1",
+]
+rendered_output_not_contains = [
+  "<strong><strong>",
+  "structural-no-output",
+]

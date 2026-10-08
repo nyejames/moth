@@ -1,8 +1,19 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-
-[[backends.html.artifact_assertions]]
-path = "index.html"
-kind = "html"
-must_contain = ["template_conditional_loop_head_wraps_aggregate_once"]
+rendered_output_contains = ["template_conditional_loop_head_wraps_aggregate_once"]
+rendered_output_contains_in_order = [
+  "class=\"conditional-aggregate-loop\"",
+  "<li>iteration 1</li>",
+  "<li>iteration 2</li>",
+  "<li>iteration 3</li>",
+  "</ul>",
+  "final count 4",
+]
+rendered_output_contains_exactly_once = [
+  "class=\"conditional-aggregate-loop\"",
+  "iteration 1",
+  "iteration 2",
+  "iteration 3",
+  "final count 4",
+]

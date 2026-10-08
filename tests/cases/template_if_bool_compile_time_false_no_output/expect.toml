@@ -1,0 +1,11 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_not_contain = [
+  "const-false-wrapper",
+  "template_if_bool_compile_time_false_no_output inactive",
+]

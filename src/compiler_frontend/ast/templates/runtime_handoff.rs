@@ -12,7 +12,7 @@
 
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateBranchSelector, TemplateElseMarker, TemplateLoopControlKind, TemplateLoopHeader,
+    TemplateBranchSelector, TemplateElseMarker, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::template_slots::{
     RuntimeSlotContributionSourceId, RuntimeSlotSiteId,
@@ -126,11 +126,6 @@ pub(crate) enum OwnedRuntimeTemplateNode {
     },
 
     AggregateOutput,
-
-    LoopControl {
-        kind: TemplateLoopControlKind,
-        span: Option<SourceSpan>,
-    },
 
     RuntimeSlotSite {
         site: RuntimeSlotSiteId,
@@ -286,7 +281,6 @@ pub(crate) fn walk_owned_runtime_template_node<E>(
         OwnedRuntimeTemplateNode::Text { .. }
         | OwnedRuntimeTemplateNode::DynamicExpression { .. }
         | OwnedRuntimeTemplateNode::AggregateOutput
-        | OwnedRuntimeTemplateNode::LoopControl { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => {}
@@ -388,7 +382,6 @@ pub(crate) fn walk_owned_runtime_template_node_mut<E>(
         OwnedRuntimeTemplateNode::Text { .. }
         | OwnedRuntimeTemplateNode::DynamicExpression { .. }
         | OwnedRuntimeTemplateNode::AggregateOutput
-        | OwnedRuntimeTemplateNode::LoopControl { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => {}

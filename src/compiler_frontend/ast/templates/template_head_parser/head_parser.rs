@@ -403,17 +403,6 @@ pub fn parse_template_head(
                 return Ok(parsed_template_head(body_mode, &head_state));
             }
 
-            TokenTag::ELSE => {
-                return Err(with_current_token_span(
-                    token_stream,
-                    CompilerDiagnostic::invalid_template_structure(
-                        InvalidTemplateStructureReason::ElseInTemplateHead,
-                        current_source_span(token_stream),
-                    ),
-                )
-                .into());
-            }
-
             // Variable, template and dependency-namespace references.
             //
             // Known template references that should be inlined preserve their

@@ -10,7 +10,6 @@ use crate::compiler_frontend::ast::templates::template_body_parser::{
     NestedTemplateParseOptions, TemplateBodyEndPolicy, TemplateBodyParseRequest,
     parse_template_body,
 };
-use crate::compiler_frontend::ast::templates::template_body_sentinels::TemplateBodyControlContext;
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateControlFlowValidationMode,
@@ -306,122 +305,6 @@ fn parse_template_error(
     )
 }
 
-fn parse_runtime_template(source: &str) -> (Template, ScopeContext, StringTable) {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens =
-        template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let source_path = file_tokens.source_path;
-    let context = new_constant_context(source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
-    let canonical_range = canonical_owner
-        .full_range()
-        .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
-        .expect("test token stream must expose an AST cursor");
-    token_stream
-        .set_position(file_tokens.opener_index)
-        .expect("test token stream should start at the template opener");
-
-    let template = Template::new(
-        &mut token_stream,
-        source_path,
-        &context,
-        vec![],
-        &mut string_table,
-        &mut path_fork,
-    )
-    .expect("template source should parse");
-    (template, context, string_table)
-}
-
-fn parse_control_flow_template_after_body_parse(
-    source: &str,
-) -> (Template, ScopeContext, StringTable) {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let file_tokens =
-        template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
-    let source_path = file_tokens.source_path;
-    let context = new_constant_context(source_path, &path_fork);
-    let canonical_owner = file_tokens
-        .canonical_owner()
-        .expect("test token stream must expose canonical source tokens");
-    let canonical_range = canonical_owner
-        .full_range()
-        .expect("test token stream must expose canonical source range");
-    let mut token_stream = AstCursor::from_source_tokens(&canonical_owner, canonical_range)
-        .expect("test token stream must expose an AST cursor");
-    token_stream
-        .set_position(file_tokens.opener_index)
-        .expect("test token stream should start at the template opener");
-
-    let mut type_environment = TypeEnvironment::new();
-    let mut compatibility_cache = TypeCompatibilityCache::new();
-    let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
-
-    let mut build_state = TemplateBuildState::new();
-
-    let mut construction_context = TemplateConstructionContext::new(
-        context.template_ir_store.clone(),
-        Some(token_stream.current_span()),
-    );
-
-    let parsed_head = parse_template_head(
-        &mut token_stream,
-        TemplateHeadParseRequest {
-            context: &context,
-            type_interner: &mut type_interner,
-            build_state: &mut build_state,
-            construction_context: &mut construction_context,
-            control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
-            string_table: &mut string_table,
-            path_fork: &mut path_fork,
-        },
-    )
-    .expect("template head should parse");
-
-    parse_template_body(
-        &mut token_stream,
-        &mut build_state,
-        &mut construction_context,
-        TemplateBodyParseRequest {
-            context: &context,
-            end_policy: TemplateBodyEndPolicy::RequireClose,
-            type_interner: &mut type_interner,
-            body_mode: parsed_head.body_mode,
-            direct_child_wrappers: &[],
-            control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
-            control_context: TemplateBodyControlContext::normal(),
-            string_table: &mut string_table,
-            path_fork: &mut path_fork,
-            default_style: None,
-            source_path,
-        },
-    )
-    .expect("template body should parse");
-
-    let span = construction_context.span();
-    let tir_reference = construction_context
-        .finish(
-            build_state.style.clone(),
-            build_state.kind.clone(),
-            crate::compiler_frontend::ast::templates::tir::TemplateTirPhase::Parsed,
-        )
-        .expect("parsed template TIR is finite");
-
-    let template = Template {
-        tir_reference,
-        span,
-    };
-
-    (template, context, string_table)
-}
-
 fn parse_control_flow_template_after_composition(
     source: &str,
 ) -> (Template, ScopeContext, StringTable) {
@@ -560,7 +443,6 @@ fn parse_runtime_template_without_validation(
             body_mode: parsed_head.body_mode,
             direct_child_wrappers: &[],
             control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
-            control_context: TemplateBodyControlContext::normal(),
             string_table: &mut string_table,
             path_fork: &mut path_fork,
             default_style: None,
@@ -970,7 +852,6 @@ fn collect_static_tir_fragments(
 
         TemplateIrNodeKind::Slot { .. }
         | TemplateIrNodeKind::AggregateOutput
-        | TemplateIrNodeKind::LoopControl { .. }
         | TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => {}
     }
@@ -1028,75 +909,8 @@ fn tir_subtree_contains_slot(
         TemplateIrNodeKind::Text { .. }
         | TemplateIrNodeKind::DynamicExpression { .. }
         | TemplateIrNodeKind::AggregateOutput
-        | TemplateIrNodeKind::LoopControl { .. }
         | TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => false,
-    }
-}
-
-fn body_node_loop_control_signal_count(
-    body_node: TemplateIrNodeId,
-    context: &ScopeContext,
-) -> usize {
-    let store = context.template_ir_store.borrow();
-    count_tir_loop_control_signals(body_node, &store)
-}
-
-fn count_tir_loop_control_signals(
-    node_id: crate::compiler_frontend::ast::templates::tir::TemplateIrNodeId,
-    store: &TemplateIrStore,
-) -> usize {
-    let Some(node) = store.get_node(node_id) else {
-        return 0;
-    };
-
-    match &node.kind {
-        TemplateIrNodeKind::LoopControl { .. } => 1,
-
-        TemplateIrNodeKind::Sequence { children } => children
-            .iter()
-            .map(|child| count_tir_loop_control_signals(*child, store))
-            .sum(),
-
-        TemplateIrNodeKind::ChildTemplate { reference, .. } => {
-            store.get_template(reference.root).map_or(0, |template| {
-                count_tir_loop_control_signals(template.root, store)
-            })
-        }
-        TemplateIrNodeKind::InsertContribution { template } => {
-            store.get_template(*template).map_or(0, |template| {
-                count_tir_loop_control_signals(template.root, store)
-            })
-        }
-
-        TemplateIrNodeKind::BranchChain {
-            branches, fallback, ..
-        } => {
-            branches
-                .iter()
-                .map(|branch| count_tir_loop_control_signals(branch.body, store))
-                .sum::<usize>()
-                + fallback.map_or(0, |fallback| {
-                    count_tir_loop_control_signals(fallback, store)
-                })
-        }
-
-        TemplateIrNodeKind::Loop {
-            body,
-            aggregate_wrapper,
-            ..
-        } => {
-            count_tir_loop_control_signals(*body, store)
-                + aggregate_wrapper
-                    .map_or(0, |wrapper| count_tir_loop_control_signals(wrapper, store))
-        }
-
-        TemplateIrNodeKind::Text { .. }
-        | TemplateIrNodeKind::DynamicExpression { .. }
-        | TemplateIrNodeKind::Slot { .. }
-        | TemplateIrNodeKind::AggregateOutput
-        | TemplateIrNodeKind::RuntimeSlotSite { .. }
-        | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => 0,
     }
 }
 
@@ -1197,23 +1011,6 @@ fn branch_body_node(
         .body
 }
 
-fn fallback_body_node(
-    branch_chain_node: TemplateIrNodeId,
-    context: &ScopeContext,
-) -> TemplateIrNodeId {
-    let store = context.template_ir_store.borrow();
-    let node = store
-        .get_node(branch_chain_node)
-        .expect("branch chain node should exist");
-    let TemplateIrNodeKind::BranchChain { fallback, .. } = &node.kind else {
-        panic!("expected BranchChain node");
-    };
-    fallback
-        .as_ref()
-        .copied()
-        .expect("branch chain should contain fallback")
-}
-
 fn loop_body_node(loop_node: TemplateIrNodeId, context: &ScopeContext) -> TemplateIrNodeId {
     let store = context.template_ir_store.borrow();
     let node = store.get_node(loop_node).expect("loop node should exist");
@@ -1221,17 +1018,6 @@ fn loop_body_node(loop_node: TemplateIrNodeId, context: &ScopeContext) -> Templa
         panic!("expected Loop node");
     };
     *body
-}
-
-fn branch_count(branch_chain_node: TemplateIrNodeId, context: &ScopeContext) -> usize {
-    let store = context.template_ir_store.borrow();
-    let node = store
-        .get_node(branch_chain_node)
-        .expect("branch chain node should exist");
-    let TemplateIrNodeKind::BranchChain { branches, .. } = &node.kind else {
-        panic!("expected BranchChain node");
-    };
-    branches.len()
 }
 
 fn loop_aggregate_wrapper_node(

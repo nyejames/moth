@@ -758,7 +758,7 @@ fn prepared_fold_fixture_result(
         ))
         .into());
     }
-    if let TemplatePreparationOutcome::Helper(_) = preparation.outcome {
+    if let TemplatePreparationOutcome::SlotInsertHelper = preparation.outcome {
         return Err(CompilerError::compiler_error(
             "supported wrapper fixture unexpectedly produced a helper.",
         )
@@ -1328,7 +1328,8 @@ fn preparation_falls_back_for_runtime_non_injected_slot_source() {
     assert_eq!(
         match preparation.outcome {
             TemplatePreparationOutcome::Runtime(reason) => Some(reason),
-            TemplatePreparationOutcome::Foldable | TemplatePreparationOutcome::Helper(_) => None,
+            TemplatePreparationOutcome::Foldable | TemplatePreparationOutcome::SlotInsertHelper =>
+                None,
         },
         Some(RuntimeTemplateReason::InheritedWrapperApplication),
         "a runtime source in a non-injected wrapper slot must stay on the handoff path"

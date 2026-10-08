@@ -1,0 +1,15 @@
+list #= [$children([:<li class="branch-item">[$slot]</li>]):
+    <ul class="branch-list">[$slot]</ul>
+]
+
+render |pick_first Bool| -> String:
+    return [list:
+        ["branch-head", if pick_first:
+            first branch
+        ]
+    ]
+;
+
+[:template_runtime_if_branch_wrapped_output
+   [render(true)]
+]

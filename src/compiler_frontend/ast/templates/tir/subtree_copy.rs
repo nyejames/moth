@@ -348,16 +348,6 @@ fn copy_tir_node_with_active_slot_plan(
             Ok(node_id)
         }
 
-        TemplateIrNodeKind::LoopControl { kind } => {
-            copy_state.record_control_flow();
-
-            let node_id = store.push_node(TemplateIrNode::new(
-                TemplateIrNodeKind::LoopControl { kind },
-                span,
-            ));
-            Ok(node_id)
-        }
-
         TemplateIrNodeKind::AggregateOutput => {
             let node_id = store.push_node(TemplateIrNode::new(
                 TemplateIrNodeKind::AggregateOutput,

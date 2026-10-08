@@ -440,7 +440,6 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
             TemplateIrNodeKind::Text { .. }
             | TemplateIrNodeKind::Slot { .. }
             | TemplateIrNodeKind::AggregateOutput
-            | TemplateIrNodeKind::LoopControl { .. }
             | TemplateIrNodeKind::RuntimeSlotSite { .. }
             | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(()),
         }

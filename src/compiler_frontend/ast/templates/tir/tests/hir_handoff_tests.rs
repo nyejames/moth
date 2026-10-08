@@ -38,7 +38,7 @@ use crate::compiler_frontend::ast::templates::tir::summary::{
 use crate::compiler_frontend::ast::templates::tir::view::{TemplateTirPhase, TirView};
 use crate::compiler_frontend::ast::templates::tir::{
     RuntimeTemplateReason, TemplatePreparation, TemplatePreparationOutcome,
-    owned_runtime_template_handoff_for_prepared_view,
+    owned_runtime_slot_handoff_for_prepared_view, owned_runtime_template_handoff_for_prepared_view,
 };
 use crate::compiler_frontend::ast::templates::tir::{TemplateSlotPlan, TemplateSlotSitePlan};
 use crate::compiler_frontend::ast::templates::{
@@ -1614,6 +1614,83 @@ fn runtime_site_template(
         .attach_runtime_slot_plan(template_id, plan)
         .expect("runtime slot plan should attach");
     template_id
+}
+
+#[test]
+fn runtime_slot_handoff_preserves_root_conditional_wrapper() {
+    let mut store = TemplateIrStore::new();
+    let mut strings = StringTable::new();
+    let slot_render_root = text_node_id(&mut store, &mut strings, "slot-render");
+    let slot_plan = store.push_slot_plan(TemplateSlotPlan {
+        contribution_sources: Vec::new(),
+        slot_sites: vec![TemplateSlotSitePlan {
+            site: RuntimeSlotSiteId(0),
+            key: SlotKey::Default,
+            render_root: slot_render_root,
+            span: None,
+        }],
+        span: None,
+    });
+    let template_id = runtime_site_template(&mut store, slot_plan, RuntimeSlotSiteId(0));
+
+    let wrapper_template_id = build_slot_wrapper_template(
+        &mut store,
+        &mut strings,
+        "conditional-before",
+        "conditional-after",
+    );
+    let wrapper_set = store.push_or_reuse_wrapper_set(vec![TemplateWrapperReference::new(
+        wrapper_template_id,
+        TemplateTirPhase::Finalized,
+        TemplateViewContext::default(),
+    )]);
+    store
+        .set_conditional_child_wrapper_set(template_id, wrapper_set)
+        .expect("conditional wrapper set should attach");
+
+    let view = view_for(&store, template_id, TemplateViewContext::default());
+    let mut prepared = prepared_runtime(&view);
+    prepared.facts.has_runtime_slot_plan = true;
+    prepared.facts.has_runtime_slot_sites = true;
+
+    assert!(
+        owned_runtime_slot_handoff_for_prepared_view(&prepared, view, &strings, None)
+            .expect("direct slot handoff should succeed")
+            .is_none(),
+        "direct slot handoff cannot carry the root's conditional wrapper"
+    );
+
+    let view = view_for(&store, template_id, TemplateViewContext::default());
+    let handoff = owned_runtime_template_handoff_for_prepared_view(&prepared, view, &strings, None)
+        .expect("generic handoff should preserve the conditional wrapper");
+    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::ConditionalWrapper {
+        child,
+        wrapper,
+        ..
+    }) = handoff.body
+    else {
+        panic!("expected one conditional wrapper around the slot application");
+    };
+
+    let OwnedRuntimeTemplateNode::ChildTemplate { template, .. } = child.as_ref() else {
+        panic!("conditional wrapper should retain the slot application as its child");
+    };
+    let OwnedRuntimeTemplateBody::RuntimeSlotApplication(application) = &template.body else {
+        panic!("conditional wrapper child should preserve the runtime slot application");
+    };
+    assert_eq!(application.slot_sites.len(), 1);
+    assert_owned_text_node(&application.slot_sites[0].render_root, "slot-render");
+
+    let OwnedRuntimeTemplateNode::Sequence { children, .. } = wrapper.as_ref() else {
+        panic!("expected the conditional wrapper template's sequence, got {wrapper:?}");
+    };
+    assert_eq!(children.len(), 3);
+    assert_owned_text_node(&children[0], "conditional-before");
+    assert!(
+        matches!(children[1], OwnedRuntimeTemplateNode::AggregateOutput),
+        "the wrapper's default slot should be the aggregate-output splice"
+    );
+    assert_owned_text_node(&children[2], "conditional-after");
 }
 
 #[test]

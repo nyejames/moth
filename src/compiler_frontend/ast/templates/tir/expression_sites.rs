@@ -327,7 +327,6 @@ fn walk_tir_view_expression_payload_node(
         TemplateIrNodeKind::Text { .. }
         | TemplateIrNodeKind::Slot { .. }
         | TemplateIrNodeKind::AggregateOutput
-        | TemplateIrNodeKind::LoopControl { .. }
         | TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => {}
     }

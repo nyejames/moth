@@ -3,7 +3,7 @@
 //! WHAT: turns final template-head control-flow suffixes into a structured body
 //! parser mode.
 //! WHY: the head parser must recognize control flow before body parsing, but
-//! branch/body splitting belongs to the body parser in the next phase.
+//! body construction belongs to the body parser under the selected binding scope.
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::statements::if_headers::{ParsedIfHeader, parse_if_header};
@@ -108,13 +108,10 @@ pub(crate) fn parse_if_suffix(
             inline_source_consts_for_const_required_if_condition(condition, context, string_table);
     }
 
-    let else_context = context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
-
     Ok(TemplateBodyParseMode::If(Box::new(
         TemplateIfBodyParseInput {
             selector: condition,
             then_context,
-            else_context,
             span: Some(SourceSpan::new(token_stream.source_id(), marker_span)),
         },
     )))

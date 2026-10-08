@@ -1276,7 +1276,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         if !matches!(preparation.outcome, TemplatePreparationOutcome::Foldable) {
             return Err(self.diagnostic_messages(
                 match preparation.outcome {
-                    TemplatePreparationOutcome::Helper(_) => {
+                    TemplatePreparationOutcome::SlotInsertHelper => {
                         CompilerDiagnostic::invalid_template_structure(
                             InvalidTemplateStructureReason::HelperInConstTemplate,
                             template.span,

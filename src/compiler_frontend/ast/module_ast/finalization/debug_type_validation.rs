@@ -809,7 +809,6 @@ fn debug_validate_runtime_template_node_type_ids(
 
         OwnedRuntimeTemplateNode::Text { .. }
         | OwnedRuntimeTemplateNode::AggregateOutput
-        | OwnedRuntimeTemplateNode::LoopControl { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => {}

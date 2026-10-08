@@ -26,7 +26,7 @@ use crate::compiler_frontend::ast::templates::tir::overlays::{
     TirSlotResolutionKind, TirWrapperApplicationMode,
 };
 use crate::compiler_frontend::ast::templates::tir::preparation::{
-    TemplateHelperKind, TemplatePreparation, TemplatePreparationOutcome,
+    TemplatePreparation, TemplatePreparationOutcome,
 };
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirChildReference;
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirReference;
@@ -450,14 +450,7 @@ pub(crate) fn fold_prepared_const_template_pattern(
     }
 
     match prepared.outcome {
-        TemplatePreparationOutcome::Foldable
-        | TemplatePreparationOutcome::Helper(TemplateHelperKind::SlotInsert) => {}
-        TemplatePreparationOutcome::Helper(TemplateHelperKind::LoopControl) => {
-            return Err(CompilerError::compiler_error(
-                "TIR const-template projection cannot publish a loop-control helper.",
-            )
-            .into());
-        }
+        TemplatePreparationOutcome::Foldable | TemplatePreparationOutcome::SlotInsertHelper => {}
         TemplatePreparationOutcome::Runtime(_) => {
             return Err(CompilerError::compiler_error(
                 "TIR const-template projection received a runtime preparation.",
@@ -843,16 +836,6 @@ pub(super) fn fold_tir_node_into_buffer(
                 .into(),
             ),
         },
-
-        TemplateIrNodeKind::LoopControl { kind } => {
-            if insertion.is_aggregate() {
-                return Err(CompilerError::compiler_error(
-                    "TIR fold: loop-control signal reached aggregate wrapper folding.",
-                )
-                .into());
-            }
-            Ok(Some(*kind))
-        }
 
         TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Err(

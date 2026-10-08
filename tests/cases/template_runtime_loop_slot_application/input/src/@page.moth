@@ -6,12 +6,14 @@ list = [:
 ]
 
 row = [:<li data-copy="[$slot(1)]">[$slot]</li>]
+slot_probe = [$raw:<span>[$slot(1)]|[$slot]|</span>]
 
 items = {"one", "two"}
 
 rendered = [list:
     [loop items |item|:
         [row, item: [item]]
+        [slot_probe, item:[$raw: 	 ]]
     ]
 
     [$insert("summary"): done]

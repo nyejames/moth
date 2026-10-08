@@ -141,7 +141,7 @@ impl TirCopyState {
         self.update_depth();
     }
 
-    /// Records a control-flow node (branch, loop, or loop control).
+    /// Records a control-flow node (branch or loop).
     pub(crate) fn record_control_flow(&mut self) {
         self.summary.record_control_flow();
         self.update_depth();

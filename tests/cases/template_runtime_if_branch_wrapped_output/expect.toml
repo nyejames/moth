@@ -1,0 +1,12 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = [
+  "template_runtime_if_branch_wrapped_output",
+  "branch-head",
+  "first branch",
+  "<ul class=\"branch-list\">",
+  "<li class=\"branch-item\">",
+]
+rendered_output_contains_exactly_once = ["<li class=\"branch-item\">", "first branch"]
+rendered_output_not_contains = ["fallback branch"]

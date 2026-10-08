@@ -71,11 +71,11 @@ use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    ExpressionSiteId, RuntimeTemplateReason, TemplateHelperKind, TemplateIrStore,
-    TemplatePreparation, TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase,
-    TemplateTirReference, TirView, collect_effective_tir_expression_overlay_payloads,
-    finalized_tir_view_for_template, owned_runtime_slot_handoff_for_prepared_view,
-    owned_runtime_template_handoff_for_prepared_view, replace_expression_overlay_entries,
+    ExpressionSiteId, RuntimeTemplateReason, TemplateIrStore, TemplatePreparation,
+    TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase, TemplateTirReference,
+    TirView, collect_effective_tir_expression_overlay_payloads, finalized_tir_view_for_template,
+    owned_runtime_slot_handoff_for_prepared_view, owned_runtime_template_handoff_for_prepared_view,
+    replace_expression_overlay_entries,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
@@ -1179,7 +1179,6 @@ fn discard_inactive_assertion_messages_in_owned_runtime_node(
         | OwnedRuntimeTemplateNode::ChildTemplate { .. }
         | OwnedRuntimeTemplateNode::ConditionalWrapper { .. }
         | OwnedRuntimeTemplateNode::AggregateOutput
-        | OwnedRuntimeTemplateNode::LoopControl { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => {}
@@ -1443,10 +1442,8 @@ fn normalize_expression_templates_with_context(
                     materialize_runtime_template_handoff_for_hir(template, context, &prepared)?
                 }
 
-                FinalizedTemplateValue::Helper(kind) => {
-                    if helper_artifact_policy == HelperArtifactPolicy::RejectFinalHelperValue
-                        && matches!(kind, TemplateHelperKind::SlotInsert)
-                    {
+                FinalizedTemplateValue::SlotInsertHelper => {
+                    if helper_artifact_policy == HelperArtifactPolicy::RejectFinalHelperValue {
                         return Err(CompilerDiagnostic::invalid_template_structure(
                             InvalidTemplateStructureReason::HelperOutsideWrapperSlot,
                             template.span,
@@ -1789,7 +1786,6 @@ fn normalize_owned_runtime_template_node_for_hir(
         | OwnedRuntimeTemplateNode::Loop { .. }
         | OwnedRuntimeTemplateNode::Text { .. }
         | OwnedRuntimeTemplateNode::AggregateOutput
-        | OwnedRuntimeTemplateNode::LoopControl { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => {}

@@ -18,9 +18,9 @@ use crate::compiler_frontend::ast::templates::template::{
 };
 use crate::compiler_frontend::ast::templates::template_folding::TemplateEmission;
 use crate::compiler_frontend::ast::templates::tir::{
-    FoldedConstTemplatePiece, SlotOccurrenceId, TemplateHelperKind, TemplatePreparation,
-    TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase, TirView,
-    TirViewIdentity, fold_prepared_const_template_pattern, prepare_tir_view,
+    FoldedConstTemplatePiece, SlotOccurrenceId, TemplatePreparation, TemplatePreparationMode,
+    TemplatePreparationOutcome, TemplateTirPhase, TirView, TirViewIdentity,
+    fold_prepared_const_template_pattern, prepare_tir_view,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
@@ -263,8 +263,8 @@ pub(super) fn const_template_value_from_projection(
             provenance: projected.provenance,
         }),
 
-        // Preparation never publishes these, so the guard above already rejected them.
-        TemplateConstValueKind::LoopControlSignal | TemplateConstValueKind::NonConst => {
+        // Preparation never publishes non-const values, so the guard above already rejected them.
+        TemplateConstValueKind::NonConst => {
             Err(CompilerError::compiler_error(
                 "A non-const template classification reached module-constant store construction with a public projection.",
             )
@@ -300,7 +300,7 @@ pub(super) fn project_const_template_value(
     let publish = matches!(prepared.outcome, TemplatePreparationOutcome::Foldable)
         || matches!(
             prepared.outcome,
-            TemplatePreparationOutcome::Helper(TemplateHelperKind::SlotInsert)
+            TemplatePreparationOutcome::SlotInsertHelper
         );
     if !publish {
         return Ok(ProjectedConstTemplateValue {
@@ -339,9 +339,7 @@ pub(super) fn project_const_template_value(
                 }
             })
         }
-        TemplateConstValueKind::SlotInsertHelper
-        | TemplateConstValueKind::LoopControlSignal
-        | TemplateConstValueKind::NonConst => None,
+        TemplateConstValueKind::SlotInsertHelper | TemplateConstValueKind::NonConst => None,
     };
 
     Ok(ProjectedConstTemplateValue {

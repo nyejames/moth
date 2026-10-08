@@ -2,8 +2,6 @@ runtime || -> String:
     return [:runtime]
 ;
 
-#[if true:
-    Static
-[else]
+#[if false:
     [runtime()]
 ]

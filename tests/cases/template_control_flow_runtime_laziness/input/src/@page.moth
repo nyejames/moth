@@ -2,16 +2,22 @@ inactive_branch || -> String, Error!:
     return! Error("inactive branch evaluated", 500)
 ;
 
-render_selected || -> String, Error!:
-    return [if true:
+render_selected |selected Bool| -> String:
+    return [if selected:
         selected lazy branch
-    [else]
+    ]
+;
+
+selected_result = render_selected(true)
+
+render_fallible |should_render Bool| -> String, Error!:
+    return [if should_render:
         [inactive_branch()!]
     ]
 ;
 
-result = render_selected() catch:
+inactive_result = render_fallible(false) catch:
     then "caught inactive branch"
 ;
 
-[:template_control_flow_runtime_laziness [result]]
+[:template_control_flow_runtime_laziness [selected_result] [inactive_result]]

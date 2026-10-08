@@ -170,7 +170,6 @@ fn validate_runtime_tir_view_node(
         | TemplateIrNodeKind::DynamicExpression { .. }
         | TemplateIrNodeKind::Slot { .. }
         | TemplateIrNodeKind::AggregateOutput
-        | TemplateIrNodeKind::LoopControl { .. }
         | TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => {}
     }
@@ -312,7 +311,6 @@ fn tir_view_subtree_contains_runtime_artifact(
         TemplateIrNodeKind::Text { .. }
         | TemplateIrNodeKind::DynamicExpression { .. }
         | TemplateIrNodeKind::AggregateOutput
-        | TemplateIrNodeKind::LoopControl { .. }
         | TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(false),
     }

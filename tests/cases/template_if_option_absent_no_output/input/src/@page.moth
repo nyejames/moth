@@ -1,0 +1,21 @@
+inactive_branch || -> String, Error!:
+    return! Error("inactive option body evaluated", 500)
+;
+
+card #= [:<section class="option-wrapper">[$slot]</section>]
+list #= [$children([:<li class="option-child-wrapper">[$slot]</li>]):<ul>[$slot]</ul>]
+
+render |maybe_name String?| -> String, Error!:
+    return [list:
+        [card, if maybe_name is |name|:
+            [inactive_branch()!]
+            Hello [name]
+        ]
+    ]
+;
+
+absent_result = render(none) catch:
+    then "caught inactive option body"
+;
+
+[:template_if_option_absent_no_output [absent_result]]

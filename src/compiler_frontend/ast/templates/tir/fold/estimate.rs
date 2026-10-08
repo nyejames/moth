@@ -76,8 +76,7 @@ pub(super) fn estimate_tir_node_output_bytes(
         TemplateIrNodeKind::Slot { .. } => Ok(0),
         TemplateIrNodeKind::BranchChain { .. }
         | TemplateIrNodeKind::Loop { .. }
-        | TemplateIrNodeKind::InsertContribution { .. }
-        | TemplateIrNodeKind::LoopControl { .. } => match mode {
+        | TemplateIrNodeKind::InsertContribution { .. } => match mode {
             FoldEstimateMode::Structural => Ok(0),
             FoldEstimateMode::Aggregate { .. } => Err(CompilerError::compiler_error(
                 "TIR fold: malformed aggregate wrapper subtree contains a node kind that cannot be estimated inside a wrapper.",

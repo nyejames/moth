@@ -9,7 +9,7 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateElseMarker, TemplateLoopControlKind, TemplateLoopHeader,
+    TemplateElseMarker, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::tir::ids::{TemplateIrId, TemplateIrNodeId};
 use crate::compiler_frontend::ast::templates::tir::node::{
@@ -170,17 +170,6 @@ impl<'store> TemplateIrBuilder<'store> {
                 body,
                 aggregate_wrapper,
             },
-            span,
-        ))
-    }
-
-    pub(crate) fn push_loop_control_node(
-        &mut self,
-        kind: TemplateLoopControlKind,
-        span: Option<SourceSpan>,
-    ) -> TemplateIrNodeId {
-        self.store.push_node(TemplateIrNode::new(
-            TemplateIrNodeKind::LoopControl { kind },
             span,
         ))
     }

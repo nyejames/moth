@@ -14,13 +14,9 @@ different = first is not other
 [: [first]
     [if same:
         same=true
-    [else]
-        same=false
     ]
     [if different:
         different=true
-    [else]
-        different=false
     ]
 ]
 #[:entry]

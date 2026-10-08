@@ -18,7 +18,6 @@ use crate::compiler_frontend::ast::templates::tir::{
     build_branch_body_candidate_root_from_tir_nodes, compose_tir_head_chain_from_root,
     format_tir_body_root, head_prefix_tir_nodes, prepare_loop_aggregate_wrapper,
     run_tir_formatter_with_warnings, sequence_children,
-    trim_whitespace_before_loop_control_boundary,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -192,17 +191,14 @@ fn prepare_branch_or_fallback_body(
 
 /// Prepares a loop body TIR root from the parsed body root.
 ///
-/// WHAT: formats the parsed TIR body root, trims whitespace-only text nodes
-///       before any top-level loop-control marker, and installs the result as
-///       the loop's body root. Inherited `$children(..)` wrappers stay on the
+/// WHAT: formats the parsed TIR body root and installs the result as the loop's
+///       body root. Inherited `$children(..)` wrappers stay on the
 ///       wrapper-context overlay attached after composition.
 /// WHY: loop bodies do not carry the owning template's shared head prefix (that
 ///      wraps the aggregate output), so they can skip head-chain composition.
-///      Loop-control boundary whitespace trimming is applied as a TIR-local
-///      transform so the loop body root owns the behavior. The prepared root is
-///      installed directly onto the TIR `Loop` node; a missing store/root or
-///      impossible replacement is an internal `CompilerError`, not a silent
-///      fallback.
+///      The formatted root is installed directly onto the TIR `Loop` node; a
+///      missing store/root or impossible replacement is an internal
+///      `CompilerError`, not a silent fallback.
 fn prepare_loop_body_tir_root(
     control_flow_node_id: TemplateIrNodeId,
     style: &Style,
@@ -210,20 +206,16 @@ fn prepare_loop_body_tir_root(
     context: &ScopeContext,
     string_table: &mut StringTable,
 ) -> Result<(), TemplateError> {
-    // The loop body is already a parser-emitted TIR sequence node; formatting
-    // and loop-control boundary trimming operate on it directly without
-    // reconstructing a second template representation.
+    // The loop body is already a parser-emitted TIR sequence node, so formatting
+    // operates on it directly without reconstructing a second representation.
 
     // Release the store borrow around the TIR formatter call; the formatter
     // authority mutates the shared module store through `TirView`.
     let body_root = format_tir_body_root(body_root, style, context, string_table)?;
 
-    let mut store = context.template_ir_store.borrow_mut();
-    let body_root =
-        trim_whitespace_before_loop_control_boundary(body_root, &mut store, string_table)
-            .map_err(TemplateError::from)?;
-
-    store
+    context
+        .template_ir_store
+        .borrow_mut()
         .replace_control_flow_body(
             control_flow_node_id,
             ControlFlowBodyKind::LoopBody,
@@ -237,10 +229,8 @@ fn prepare_loop_body_tir_root(
 /// WHAT: reads the parsed body root node ID from the owning TIR `Loop` node and
 ///       formats that root via the TIR-native formatter. Loop bodies
 ///       intentionally skip head-prefix composition because the owning head
-///       wraps the aggregate output once, not each iteration. Loop-control
-///       boundary whitespace trimming is applied as a TIR-local transform.
-/// WHY: the loop body root owns loop-control boundary whitespace trimming and
-///      formatting natively in TIR.
+///       wraps the aggregate output once, not each iteration.
+/// WHY: the loop body root owns its formatting natively in TIR.
 fn prepare_loop_body(
     ctx: ControlFlowBodyPreparationContext<'_>,
     control_flow_node_id: TemplateIrNodeId,

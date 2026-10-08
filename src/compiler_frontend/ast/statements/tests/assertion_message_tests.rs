@@ -31,7 +31,6 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidControlFlowStatementReason, InvalidFallibleHandlingReason,
-    InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::source::SourceSpan;
@@ -368,16 +367,15 @@ check || -> String:
 }
 
 #[test]
-fn static_true_assertion_still_reports_invalid_template_message_source() {
-    let payload = crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic(
-        "assert(true, [: before [break] after])\n",
-    )
-    .payload;
+fn static_true_assertion_still_validates_invalid_template_message_source() {
+    let diagnostic =
+        crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagnostic(
+            "assert(true, [: before [break] after])\n",
+        );
 
+    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0002");
     assert!(matches!(
-        payload,
-        DiagnosticPayload::InvalidTemplateStructure {
-            reason: InvalidTemplateStructureReason::OrphanTemplateBreak,
-        }
+        diagnostic.payload,
+        DiagnosticPayload::UnexpectedToken { .. }
     ));
 }

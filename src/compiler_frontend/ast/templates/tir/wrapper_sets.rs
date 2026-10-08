@@ -1,23 +1,22 @@
 //! TIR wrapper-set and wrapper-context overlay helpers.
 //!
-//! WHAT: owns the conservative equivalence predicate used to deduplicate
-//! `$children(..)` wrapper sets in the `TemplateIrStore` side table, and the
-//! wrapper-context overlay construction that records inherited wrapper sets
-//! and `$fresh` suppression for child-template occurrences on a template's
-//! authoritative structural root. Wrapper-context overlays are the sole owner
-//! of direct-child inherited wrappers, including children inside branch and
-//! loop bodies.
+//! WHAT: owns wrapper-set equivalence, conditional slot-wrapper composition,
+//! and wrapper-context overlay construction. The overlays record inherited
+//! wrapper sets and `$fresh` suppression for child-template occurrences on a
+//! template's authoritative structural root. Wrapper-context overlays are the
+//! sole owner of direct-child inherited wrappers, including children inside
+//! branch and loop bodies.
 //!
 //! WHY: wrapper sets and wrapper-context overlays both describe how
-//! `$children(..)` wrappers apply to child-template boundaries. Keeping the
-//! equivalence predicate, wrapper-reference normalization, and overlay
-//! construction in one module makes the wrapper application boundary explicit
-//! and easy to audit without leaking store internals into the template
-//! construction orchestrator.
+//! `$children(..)` wrappers apply to child-template boundaries. Keeping set
+//! composition, wrapper-reference normalization, and overlay construction in
+//! one module makes that boundary explicit without leaking store internals
+//! into the template construction orchestrator.
 
 use crate::compiler_frontend::ast::templates::template::Template;
+use crate::compiler_frontend::ast::templates::tir::contribution_shape::ContributionShape;
 use crate::compiler_frontend::ast::templates::tir::ids::{
-    ChildTemplateOccurrenceId, TemplateIrNodeId,
+    ChildTemplateOccurrenceId, TemplateIrNodeId, TemplateWrapperSetId,
 };
 use crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind;
 use crate::compiler_frontend::ast::templates::tir::overlays::{
@@ -55,6 +54,81 @@ pub(crate) fn wrapper_sets_are_equivalent(
     right: &[TemplateWrapperReference],
 ) -> bool {
     left.len() == right.len() && left.iter().zip(right.iter()).all(|(l, r)| l == r)
+}
+
+/// Combines the placeholder wrapper sets that apply to a control-flow contribution.
+///
+/// The child wrapper set respects `$fresh` on the contribution. The applied
+/// wrapper set respects the placeholder's parent-skip flag. The existing set
+/// order is preserved so runtime and folded paths build the same nesting.
+pub(crate) fn conditional_wrapper_set_for_control_flow(
+    store: &mut TemplateIrStore,
+    child_wrapper_set: Option<TemplateWrapperSetId>,
+    applied_child_wrapper_set: Option<TemplateWrapperSetId>,
+    skip_parent_child_wrappers: bool,
+    shape: ContributionShape,
+) -> Result<Option<TemplateWrapperSetId>, CompilerError> {
+    let mut combined = Vec::new();
+
+    if let Some(wrapper_set_id) = child_wrapper_set {
+        let wrapper_set = store.get_wrapper_set(wrapper_set_id).ok_or_else(|| {
+            CompilerError::compiler_error(
+                "TIR slot composition: conditional child wrapper set ID was not present in the store.",
+            )
+        })?;
+
+        if !shape.skips_parent_child_wrappers() {
+            combined.extend(wrapper_set.wrappers.iter().copied());
+        }
+    }
+
+    if let Some(wrapper_set_id) = applied_child_wrapper_set {
+        let wrapper_set = store.get_wrapper_set(wrapper_set_id).ok_or_else(|| {
+            CompilerError::compiler_error(
+                "TIR slot composition: conditional applied wrapper set ID was not present in the store.",
+            )
+        })?;
+
+        if !skip_parent_child_wrappers {
+            combined.extend(wrapper_set.wrappers.iter().copied());
+        }
+    }
+
+    if combined.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(store.push_or_reuse_wrapper_set(combined)))
+    }
+}
+
+/// Merges wrappers already attached to a control-flow template with a new set.
+///
+/// Additional wrappers are appended after existing wrappers to retain the
+/// established innermost-to-outermost order.
+pub(crate) fn merge_wrapper_sets(
+    store: &mut TemplateIrStore,
+    existing: Option<TemplateWrapperSetId>,
+    additional: TemplateWrapperSetId,
+) -> Result<TemplateWrapperSetId, CompilerError> {
+    let mut combined = Vec::new();
+
+    if let Some(existing_id) = existing {
+        let existing_set = store.get_wrapper_set(existing_id).ok_or_else(|| {
+            CompilerError::compiler_error(
+                "TIR slot composition: existing conditional wrapper set ID was not present in the store.",
+            )
+        })?;
+        combined.extend(existing_set.wrappers.iter().copied());
+    }
+
+    let additional_set = store.get_wrapper_set(additional).ok_or_else(|| {
+        CompilerError::compiler_error(
+            "TIR slot composition: additional conditional wrapper set ID was not present in the store.",
+        )
+    })?;
+    combined.extend(additional_set.wrappers.iter().copied());
+
+    Ok(store.push_or_reuse_wrapper_set(combined))
 }
 
 /// Converts a wrapper `Template` into an effective module-local wrapper reference.

@@ -1,6 +1,7 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
+rendered_output_contains_exactly_once = ["<span class=\"selected-empty\"></span>"]
 
 [[backends.html.artifact_assertions]]
 path = "index.html"

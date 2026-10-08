@@ -13,9 +13,8 @@ use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateEmission, TirFoldContext,
 };
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateHelperKind, TemplateIrStore, TemplatePreparation, TemplatePreparationMode,
-    TemplatePreparationOutcome, TemplateTirPhase, TirView, fold_prepared_template,
-    prepare_tir_view,
+    TemplateIrStore, TemplatePreparation, TemplatePreparationMode, TemplatePreparationOutcome,
+    TemplateTirPhase, TirView, fold_prepared_template, prepare_tir_view,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
@@ -32,7 +31,7 @@ use std::rc::Rc;
 pub(super) enum FinalizedTemplateValue {
     Folded(ConstStringValue, SyntheticInterfaceProvenance),
     Runtime(TemplatePreparation),
-    Helper(TemplateHelperKind),
+    SlotInsertHelper,
 }
 
 /// Prepares and finalizes one exact template value for its owning boundary.
@@ -68,9 +67,9 @@ pub(super) fn finalize_template_value(
     // folding. Its compact result is the sole final-value decision source.
     let preparation = prepare_tir_view(&view, preparation_mode)?;
     let fold_preparation = match preparation.outcome {
-        TemplatePreparationOutcome::Helper(kind) => {
+        TemplatePreparationOutcome::SlotInsertHelper => {
             increment_ast_counter(AstCounter::TirFinalizationFoldSuccesses);
-            return Ok(FinalizedTemplateValue::Helper(kind));
+            return Ok(FinalizedTemplateValue::SlotInsertHelper);
         }
         TemplatePreparationOutcome::Runtime(_) => {
             return Ok(FinalizedTemplateValue::Runtime(preparation));

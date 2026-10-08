@@ -11,7 +11,7 @@ use crate::compiler_frontend::ast::expressions::expression::{Expression, Express
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateBodyEmission, TemplateLoopControlKind, TemplateLoopHeader,
+    TemplateBodyEmission, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::template_slots::{
     RuntimeSlotContributionSourceId, RuntimeSlotSiteId,
@@ -34,12 +34,11 @@ use crate::compiler_frontend::hir::ids::{HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
 
 use super::aggregate::RuntimeTemplateAggregateAppend;
-use super::append_context::{RuntimeSlotLoopControlFlush, RuntimeTemplateAppendContext};
+use super::append_context::RuntimeTemplateAppendContext;
 use super::is_owned_runtime_template_node_control_flow;
 
 #[derive(Clone, Copy)]
@@ -234,10 +233,6 @@ impl<'a> HirBuilder<'a> {
                         TemplateBodyEmission::Output => {
                             emitted_output = true;
                         }
-
-                        TemplateBodyEmission::Break | TemplateBodyEmission::Continue => {
-                            return Ok(emission);
-                        }
                     }
 
                     let current_block = self.current_block_id_or_error(span_ref)?;
@@ -276,15 +271,8 @@ impl<'a> HirBuilder<'a> {
                     span_ref,
                 )?;
 
-                // Whitespace-only text is appended to the accumulator for
-                // rendering, but must not mark the runtime-slot emitted flag.
-                // When a `continue` or `break` follows whitespace inside a
-                // contribution source, loop control should discard the entire
-                // iteration's output. If whitespace set the emitted flag, the
-                // flush would replay the wrapper around the whitespace,
-                // producing spurious wrapper tags (e.g. `<li>\n</li>`).
-                // Treating whitespace as non-output for the emitted flag keeps
-                // the wrapper conditional on meaningful content only.
+                // Preserve whitespace bytes for replay, but don't let whitespace
+                // alone select a wrapper that depends on structural output.
                 if whitespace_only {
                     return Ok(TemplateBodyEmission::NoOutput);
                 }
@@ -377,22 +365,6 @@ impl<'a> HirBuilder<'a> {
                 Ok(TemplateBodyEmission::Output)
             }
 
-            OwnedRuntimeTemplateNode::LoopControl { kind, .. } => {
-                if let Some(flush) = append_context.loop_control_flush {
-                    self.flush_runtime_slot_application_for_loop_control(flush, *kind, span_ref)?;
-                    return Ok(match kind {
-                        TemplateLoopControlKind::Break => TemplateBodyEmission::Break,
-                        TemplateLoopControlKind::Continue => TemplateBodyEmission::Continue,
-                    });
-                }
-
-                self.emit_template_loop_control(*kind, span_ref)?;
-                Ok(match kind {
-                    TemplateLoopControlKind::Break => TemplateBodyEmission::Break,
-                    TemplateLoopControlKind::Continue => TemplateBodyEmission::Continue,
-                })
-            }
-
             OwnedRuntimeTemplateNode::RuntimeSlotSite { site, .. } => {
                 let emission =
                     self.append_runtime_slot_site_to_accumulator(*site, append_context, span_ref)?;
@@ -438,7 +410,7 @@ impl<'a> HirBuilder<'a> {
         span_ref: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         if emission == TemplateBodyEmission::Output
-            && let Some(flag) = append_context.emitted_output
+            && let Some(flag) = append_context.emitted_output()
         {
             self.mark_runtime_template_output_emitted(flag, span_ref)?;
         }
@@ -531,7 +503,12 @@ impl<'a> HirBuilder<'a> {
                         Ok(())
                     },
                 )?;
-                Ok(TemplateBodyEmission::Output)
+                // Runtime selection alone does not prove the chosen body appended output.
+                Ok(if append_context.emitted_output().is_some() {
+                    TemplateBodyEmission::NoOutput
+                } else {
+                    TemplateBodyEmission::Output
+                })
             }
 
             crate::compiler_frontend::ast::templates::template_control_flow::TemplateBranchSelector::OptionPresentCapture { scrutinee, pattern } => self
@@ -583,7 +560,12 @@ impl<'a> HirBuilder<'a> {
                 Ok(())
             },
         )?;
-        Ok(TemplateBodyEmission::Output)
+        // Runtime selection alone does not prove the chosen body appended output.
+        Ok(if append.append_context.emitted_output().is_some() {
+            TemplateBodyEmission::NoOutput
+        } else {
+            TemplateBodyEmission::Output
+        })
     }
 
     fn append_owned_runtime_template_fallback_branch(
@@ -693,9 +675,8 @@ impl<'a> HirBuilder<'a> {
 
         // The loop's emitted flag is runtime data: zero-iteration collection
         // loops and false conditional loops must not mark the surrounding
-        // wrapper as emitted just because HIR built a loop CFG. When a parent
-        // emitted flag exists, `append_runtime_template_aggregate_when_emitted`
-        // marks it only on the runtime-emitted path.
+        // wrapper as emitted just because HIR built a loop CFG. The aggregate
+        // append callback propagates output only on the runtime-emitted path.
         if append_context.emitted_output().is_some() {
             Ok(TemplateBodyEmission::NoOutput)
         } else {
@@ -823,60 +804,6 @@ impl<'a> HirBuilder<'a> {
         }
     }
 
-    fn flush_runtime_slot_application_for_loop_control(
-        &mut self,
-        flush: RuntimeSlotLoopControlFlush<'_>,
-        control_kind: TemplateLoopControlKind,
-        span_ref: &Option<SourceSpan>,
-    ) -> Result<(), HirConstructionFailure> {
-        let condition_block = self.current_block_id_or_error(span_ref)?;
-        let parent_region = self.current_region_or_error(span_ref)?;
-        let flush_region = self.create_child_region(parent_region);
-        let skip_region = self.create_child_region(parent_region);
-        let flush_block = self.create_block(flush_region, span_ref, "runtime-slot-flush")?;
-        let skip_block = self.create_block(skip_region, span_ref, "runtime-slot-skip")?;
-        let condition = self.make_local_load_expression(
-            flush.contribution_emitted_flag,
-            builtin_type_ids::BOOL,
-            span_ref,
-            parent_region,
-        )?;
-
-        self.emit_terminator(
-            condition_block,
-            HirTerminator::If {
-                condition,
-                then_block: flush_block,
-                else_block: skip_block,
-            },
-            span_ref,
-        )?;
-
-        // If a slot contribution produced output before loop control, replay the
-        // wrapper on this terminating path before jumping to the surrounding
-        // template loop target. The skip path still emits the same loop control
-        // without rendering an empty wrapper.
-        self.set_current_block(flush_block, span_ref)?;
-        let wrapper_context = RuntimeTemplateAppendContext::new(flush.target_accumulator)
-            .with_runtime_slot_sites(flush.source_accumulators, flush.slot_sites)
-            .with_emitted_output(flush.parent_emitted_flag)
-            .rejecting_unresolved_slots();
-        self.append_owned_runtime_template_node_to_accumulator(
-            flush.wrapper_plan,
-            wrapper_context,
-            None,
-            span_ref,
-        )?;
-
-        let flush_tail = self.current_block_id_or_error(span_ref)?;
-        if !self.block_has_explicit_terminator(flush_tail, span_ref)? {
-            self.emit_template_loop_control(control_kind, span_ref)?;
-        }
-
-        self.set_current_block(skip_block, span_ref)?;
-        self.emit_template_loop_control(control_kind, span_ref)
-    }
-
     fn append_runtime_slot_site_to_accumulator(
         &mut self,
         site_id: RuntimeSlotSiteId,
@@ -919,38 +846,41 @@ impl<'a> HirBuilder<'a> {
                 self.hir_error_location(span_ref)
             );
         };
-        let Some(source_accumulator) = source_accumulators.local_for(source_id) else {
+        let Some(source_locals) = source_accumulators.for_source(source_id) else {
             return_hir_transformation_error!(
                 "Runtime slot site referenced a missing contribution source.",
                 self.hir_error_location(span_ref)
             );
         };
 
-        let region = self.current_region_or_error(span_ref)?;
-        let source_value = self.make_expression(
-            span_ref,
-            HirExpressionKind::Load(HirPlace::local(source_accumulator)),
-            builtin_type_ids::STRING,
-            ValueKind::Place,
-            region,
-        )?;
-        self.append_template_chunk_to_accumulator(
-            source_value,
-            append_context.target_accumulator,
+        // Replay authored bytes even when whitespace-only text did not set the structural flag.
+        self.append_aggregate_local_to_accumulator(
+            source_locals.accumulator,
+            append_context.target_accumulator(),
             span_ref,
         )?;
 
-        Ok(TemplateBodyEmission::Output)
-    }
+        // Structural emission gates parent flags, not replay of the source buffer.
+        if append_context.emitted_output().is_some() {
+            self.append_runtime_template_aggregate_when_emitted(
+                RuntimeTemplateAggregateAppend {
+                    aggregate: source_locals.accumulator,
+                    emitted_output: source_locals.emitted_output,
+                    append_context,
+                },
+                span_ref,
+                |builder, append, span_ref| {
+                    builder.mark_owned_runtime_template_output_if_needed(
+                        TemplateBodyEmission::Output,
+                        append.append_context,
+                        span_ref,
+                    )
+                },
+            )?;
 
-    fn emit_template_loop_control(
-        &mut self,
-        control_kind: TemplateLoopControlKind,
-        span_ref: &Option<SourceSpan>,
-    ) -> Result<(), HirConstructionFailure> {
-        match control_kind {
-            TemplateLoopControlKind::Break => self.emit_break_to_current_loop(span_ref, None),
-            TemplateLoopControlKind::Continue => self.emit_continue_to_current_loop(span_ref, None),
+            Ok(TemplateBodyEmission::NoOutput)
+        } else {
+            Ok(TemplateBodyEmission::Output)
         }
     }
 
@@ -960,48 +890,18 @@ impl<'a> HirBuilder<'a> {
         append_context: RuntimeTemplateAppendContext<'_>,
         span_ref: &Option<SourceSpan>,
     ) -> Result<TemplateBodyEmission, HirConstructionFailure> {
-        match node {
-            OwnedRuntimeTemplateNode::LoopControl {
-                kind,
-                span: control_span,
-                ..
-            } => {
-                if let Some(flush) = append_context.loop_control_flush {
-                    self.flush_runtime_slot_application_for_loop_control(
-                        flush,
-                        *kind,
-                        control_span,
-                    )?;
-                    return Ok(match kind {
-                        TemplateLoopControlKind::Break => TemplateBodyEmission::Break,
-                        TemplateLoopControlKind::Continue => TemplateBodyEmission::Continue,
-                    });
-                }
+        let emission = self.append_owned_runtime_template_node_to_accumulator(
+            node,
+            append_context,
+            None,
+            span_ref,
+        )?;
 
-                self.emit_template_loop_control(*kind, control_span)?;
-                Ok(match kind {
-                    TemplateLoopControlKind::Break => TemplateBodyEmission::Break,
-                    TemplateLoopControlKind::Continue => TemplateBodyEmission::Continue,
-                })
-            }
-
-            _ => {
-                let emission = self.append_owned_runtime_template_node_to_accumulator(
-                    node,
-                    append_context,
-                    None,
-                    span_ref,
-                )?;
-
-                if append_context.emitted_output().is_some()
-                    && emission == TemplateBodyEmission::Output
-                {
-                    return Ok(TemplateBodyEmission::NoOutput);
-                }
-
-                Ok(emission)
-            }
+        if append_context.emitted_output().is_some() && emission == TemplateBodyEmission::Output {
+            return Ok(TemplateBodyEmission::NoOutput);
         }
+
+        Ok(emission)
     }
 
     fn append_output_conditioned_runtime_wrapper(
@@ -1045,13 +945,6 @@ impl<'a> HirBuilder<'a> {
                 Ok(())
             },
         )?;
-
-        if matches!(
-            emission,
-            TemplateBodyEmission::Break | TemplateBodyEmission::Continue
-        ) {
-            return Ok(emission);
-        }
 
         if append_context.emitted_output().is_some() && emission == TemplateBodyEmission::Output {
             return Ok(TemplateBodyEmission::NoOutput);
@@ -1239,9 +1132,8 @@ fn runtime_template_append_candidate_for_expression(
         }
 
         // String-boundary coercions are inserted around template helpers before
-        // HIR lowering. Append-mode slot applications must see through that
-        // wrapper so loop control does not escape through expression lowering
-        // before the outer template accumulator receives the rendered wrapper.
+        // HIR lowering. Append-mode slot applications need to see through them
+        // so they append into the active template accumulator.
         ExpressionKind::Coerced { value, .. } => {
             runtime_template_append_candidate_for_expression(value)
         }
@@ -1332,7 +1224,6 @@ fn owned_runtime_template_node_contains_runtime_slot_application(
 
         OwnedRuntimeTemplateNode::Text { .. }
         | OwnedRuntimeTemplateNode::AggregateOutput
-        | OwnedRuntimeTemplateNode::LoopControl { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
         | OwnedRuntimeTemplateNode::RuntimeSlotContributionSource { .. }
         | OwnedRuntimeTemplateNode::Slot { .. } => false,

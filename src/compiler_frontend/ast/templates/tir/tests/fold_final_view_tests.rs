@@ -20,8 +20,7 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    ConstRangeCursor, ConstRangeIterationValue, TemplateBranchSelector, TemplateLoopControlKind,
-    TemplateLoopHeader,
+    ConstRangeCursor, ConstRangeIterationValue, TemplateBranchSelector, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateEmission, TemplateFoldResult, TirFoldContext,
@@ -1064,60 +1063,6 @@ fn final_view_fold_zero_iteration_loop_rejects_missing_body_authority() {
         error.msg.contains("TIR preparation: node"),
         "expected a stable preparation node error, got: {}",
         error.msg
-    );
-}
-
-#[test]
-fn final_view_fold_loop_preserves_output_before_break_and_continue() {
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-
-    // [break] stops the loop after the first iteration, preserving only the
-    // output produced before the break signal.
-    let break_fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
-        let mut builder = TemplateIrBuilder::new(store);
-        let dot_text = string_table.intern(".");
-        let after_text = string_table.intern("after");
-        let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
-        let break_node = builder.push_loop_control_node(TemplateLoopControlKind::Break, None);
-        let after_node = builder.push_text_node(after_text, 5, TemplateSegmentOrigin::Body, None);
-        let body_root = builder.push_sequence_node(vec![dot_node, break_node, after_node], None);
-        build_range_loop_template(string_table, store, 0, 3, body_root, None)
-    });
-    let break_emission = fold_final_view_fixture(
-        &break_fixture,
-        &mut string_table,
-        TemplateTirPhase::Composed,
-    )
-    .expect("break fold should succeed");
-    assert_eq!(
-        emission_to_string(break_emission, &string_table),
-        ".",
-        "output before [break] should be preserved once and iteration should stop"
-    );
-
-    // [continue] skips the rest of the body but continues iterating, so the
-    // output before the continue signal accumulates across all iterations.
-    let continue_fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
-        let mut builder = TemplateIrBuilder::new(store);
-        let dot_text = string_table.intern(".");
-        let after_text = string_table.intern("after");
-        let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
-        let continue_node = builder.push_loop_control_node(TemplateLoopControlKind::Continue, None);
-        let after_node = builder.push_text_node(after_text, 5, TemplateSegmentOrigin::Body, None);
-        let body_root = builder.push_sequence_node(vec![dot_node, continue_node, after_node], None);
-        build_range_loop_template(string_table, store, 0, 3, body_root, None)
-    });
-    let continue_emission = fold_final_view_fixture(
-        &continue_fixture,
-        &mut string_table,
-        TemplateTirPhase::Composed,
-    )
-    .expect("continue fold should succeed");
-    assert_eq!(
-        emission_to_string(continue_emission, &string_table),
-        "...",
-        "output before [continue] should be preserved each iteration"
     );
 }
 

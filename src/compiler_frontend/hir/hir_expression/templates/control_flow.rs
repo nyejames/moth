@@ -63,6 +63,5 @@ fn is_control_flow_node(node: &OwnedRuntimeTemplateNode) -> bool {
         OwnedRuntimeTemplateNode::BranchChain { .. }
             | OwnedRuntimeTemplateNode::Loop { .. }
             | OwnedRuntimeTemplateNode::ConditionalWrapper { .. }
-            | OwnedRuntimeTemplateNode::LoopControl { .. }
     )
 }

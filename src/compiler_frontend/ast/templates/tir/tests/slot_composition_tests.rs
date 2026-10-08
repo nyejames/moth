@@ -28,7 +28,7 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateBranchSelector, TemplateLoopControlKind, TemplateLoopHeader,
+    TemplateBranchSelector, TemplateLoopHeader,
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidTemplateSlotReason};
@@ -787,12 +787,7 @@ fn skipped_node_kinds_do_not_contribute_to_schema() {
     let expression = Expression::string_slice(text_id, None, ValueMode::ImmutableOwned);
     let dynamic_node =
         builder.push_dynamic_expression_node(expression, TemplateSegmentOrigin::Body, None);
-    let loop_control_node = builder.push_loop_control_node(TemplateLoopControlKind::Break, None);
-
-    let root = builder.push_sequence_node(
-        vec![text_node, dynamic_node, aggregate_node, loop_control_node],
-        None,
-    );
+    let root = builder.push_sequence_node(vec![text_node, dynamic_node, aggregate_node], None);
     let template_id = builder.finish_template(
         root,
         Style::default(),
@@ -2142,13 +2137,6 @@ fn expand_preserves_non_slot_nodes() {
         None,
     ));
 
-    let loop_control_node = store.push_node(TemplateIrNode::new(
-        TemplateIrNodeKind::LoopControl {
-            kind: TemplateLoopControlKind::Break,
-        },
-        None,
-    ));
-
     let expression = Expression::string_slice(text_id, None, ValueMode::ImmutableOwned);
     let site_id = store.next_expression_site_id();
     let dynamic_node = store.push_node(TemplateIrNode::new(
@@ -2192,7 +2180,6 @@ fn expand_preserves_non_slot_nodes() {
                 text_node,
                 aggregate_node,
                 slot_node,
-                loop_control_node,
                 dynamic_node,
                 runtime_slot_site,
             ],
@@ -2227,13 +2214,12 @@ fn expand_preserves_non_slot_nodes() {
             text_node,
             aggregate_node,
             contribution_node,
-            loop_control_node,
             dynamic_node,
             runtime_slot_site,
         ],
         "expansion must preserve every non-slot node identity and splice the exact contribution"
     );
-    assert_eq!(child_kinds.len(), 6);
+    assert_eq!(child_kinds.len(), 5);
     assert!(matches!(child_kinds[0], TemplateIrNodeKind::Text { .. }));
     assert!(matches!(
         child_kinds[1],
@@ -2245,14 +2231,10 @@ fn expand_preserves_non_slot_nodes() {
     );
     assert!(matches!(
         child_kinds[3],
-        TemplateIrNodeKind::LoopControl { .. }
-    ));
-    assert!(matches!(
-        child_kinds[4],
         TemplateIrNodeKind::DynamicExpression { .. }
     ));
     assert!(matches!(
-        child_kinds[5],
+        child_kinds[4],
         TemplateIrNodeKind::RuntimeSlotSite { .. }
     ));
     assert_eq!(

@@ -30,7 +30,7 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateBranchSelector, TemplateElseMarker, TemplateLoopControlKind, TemplateLoopHeader,
+    TemplateBranchSelector, TemplateElseMarker, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::template_slots::{
     RuntimeSlotContributionSourceId, RuntimeSlotSiteId,
@@ -283,9 +283,6 @@ pub(crate) enum TemplateIrNodeKind {
     /// WHY: this replaces the AST aggregate-plan placeholder and makes the
     /// aggregate wrapper a first-class TIR subtree.
     AggregateOutput,
-
-    /// Loop control signal (`break` / `continue`).
-    LoopControl { kind: TemplateLoopControlKind },
 
     /// Runtime slot site placeholder resolved by AST planning.
     RuntimeSlotSite {

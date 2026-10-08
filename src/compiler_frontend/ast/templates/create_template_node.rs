@@ -319,7 +319,6 @@ impl Template {
             parsing_mode,
             control_flow_validation,
             preparation_mode,
-            control_context,
             default_style,
             allow_stored_insert_carrier,
         } = parse_options;
@@ -388,7 +387,6 @@ impl Template {
                 body_mode: parsed_head.body_mode,
                 direct_child_wrappers: &direct_child_wrappers,
                 control_flow_validation,
-                control_context,
                 string_table,
                 default_style: default_style.clone(),
                 source_path,

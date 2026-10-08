@@ -43,13 +43,11 @@ pub enum TemplateLoopControlKind {
     Continue,
 }
 
-/// Output/control result from a selected template body.
+/// Structural output result from appending an owned runtime-template body.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TemplateBodyEmission {
     NoOutput,
     Output,
-    Break,
-    Continue,
 }
 
 /// Authored `[else]` marker provenance for a branch-chain fallback.
@@ -96,7 +94,6 @@ pub(crate) enum TemplateControlFlowValidationMode {
 pub(crate) struct TemplateIfBodyParseInput {
     pub(crate) selector: TemplateBranchSelector,
     pub(crate) then_context: ScopeContext,
-    pub(crate) else_context: ScopeContext,
     pub(crate) span: Option<SourceSpan>,
 }
 

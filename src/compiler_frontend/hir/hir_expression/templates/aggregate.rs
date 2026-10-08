@@ -59,9 +59,6 @@ impl<'a> HirBuilder<'a> {
             span_ref,
         )?;
         self.set_current_block(then_block, span_ref)?;
-        if let Some(parent_flag) = append.append_context.emitted_output() {
-            self.mark_runtime_template_output_emitted(parent_flag, span_ref)?;
-        }
         append_aggregate(self, append, span_ref)?;
 
         let then_tail_block = self.current_block_id_or_error(span_ref)?;

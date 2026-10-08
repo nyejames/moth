@@ -30,7 +30,7 @@ use crate::compiler_frontend::ast::statements::value_production::ProducedValues;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::template::{SlotKey, TemplateType};
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateBranchSelector, TemplateLoopControlKind, TemplateLoopHeader,
+    TemplateBranchSelector, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateBranch, OwnedRuntimeTemplateHandoff,
@@ -524,36 +524,6 @@ fn runtime_template_without_handoff_reports_compiler_bug() {
     assert!(
         err.msg
             .contains("Raw template reached HIR runtime-template lowering")
-    );
-}
-
-#[test]
-fn top_level_loop_control_handoff_reports_compiler_bug() {
-    let mut path_fork = super::PathInternerFork::empty();
-    let mut string_table = StringTable::new();
-    let span = None;
-    let mut builder = setup_builder(&mut string_table, &mut path_fork);
-    let handoff = OwnedRuntimeTemplateHandoff {
-        body: OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::LoopControl {
-            kind: TemplateLoopControlKind::Break,
-            span,
-        }),
-        span,
-    };
-
-    let err = expect_infrastructure_error(
-        builder
-            .lower_expression(&Expression::runtime_template_handoff(
-                handoff,
-                ValueMode::ImmutableOwned,
-            ))
-            .expect_err("top-level loop control handoffs should be rejected in HIR"),
-    );
-
-    assert_eq!(err.error_type, ErrorType::HirTransformation);
-    assert!(
-        err.msg
-            .contains("Template loop-control signal reached HIR outside")
     );
 }
 

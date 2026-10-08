@@ -324,10 +324,6 @@ fn accumulate_nodes(
                 }
             }
 
-            TemplateIrNodeKind::LoopControl { .. } => {
-                summary.record_control_flow();
-            }
-
             TemplateIrNodeKind::RuntimeSlotSite { .. } => {
                 summary.record_runtime_slot_site();
             }

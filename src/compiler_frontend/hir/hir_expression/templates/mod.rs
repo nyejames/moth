@@ -20,7 +20,6 @@ use crate::compiler_frontend::ast::templates::{
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::return_hir_transformation_error;
 
 use super::LoweredExpression;
 
@@ -42,8 +41,6 @@ impl<'a> HirBuilder<'a> {
         handoff: &OwnedRuntimeTemplateHandoff,
         span_ref: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
-        self.validate_runtime_template_handoff_lowering_input(handoff, span_ref)?;
-
         match &handoff.body {
             OwnedRuntimeTemplateBody::RuntimeSlotApplication(handoff) => {
                 self.lower_runtime_slot_application_template_expression(handoff, span_ref)
@@ -71,21 +68,6 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<LoweredExpression, HirConstructionFailure> {
         self.lower_runtime_slot_application_template_expression(handoff, span_ref)
     }
-
-    fn validate_runtime_template_handoff_lowering_input(
-        &mut self,
-        handoff: &OwnedRuntimeTemplateHandoff,
-        span_ref: &Option<SourceSpan>,
-    ) -> Result<(), HirConstructionFailure> {
-        if runtime_template_handoff_has_top_level_loop_control(handoff) {
-            return_hir_transformation_error!(
-                "Template loop-control signal reached HIR outside an owned template loop body.",
-                self.hir_error_location(span_ref)
-            );
-        }
-
-        Ok(())
-    }
 }
 
 fn is_owned_runtime_template_node_control_flow(node: &OwnedRuntimeTemplateNode) -> bool {
@@ -94,15 +76,5 @@ fn is_owned_runtime_template_node_control_flow(node: &OwnedRuntimeTemplateNode) 
         OwnedRuntimeTemplateNode::BranchChain { .. }
             | OwnedRuntimeTemplateNode::Loop { .. }
             | OwnedRuntimeTemplateNode::ConditionalWrapper { .. }
-            | OwnedRuntimeTemplateNode::LoopControl { .. }
-    )
-}
-
-fn runtime_template_handoff_has_top_level_loop_control(
-    handoff: &OwnedRuntimeTemplateHandoff,
-) -> bool {
-    matches!(
-        &handoff.body,
-        OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::LoopControl { .. })
     )
 }

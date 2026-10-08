@@ -1263,7 +1263,7 @@ fn doc_brackets_remain_literal_text() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = template_tokens_from_source(
-        "[$doc:\n[: child]\n]",
+        "[$doc:\n[else][break][continue]\n]",
         &mut string_table,
         &mut span_builder,
         &mut path_fork,
@@ -1293,19 +1293,13 @@ fn doc_brackets_remain_literal_text() {
 
     let folded = fold_template_in_context(&template, &context, &mut string_table);
     let result = string_table.resolve(folded);
-    // Each bracket, colon, and body text become separate atoms, markdown-formatted individually.
-    assert!(
-        result.contains("["),
-        "Opening bracket should appear as literal text: {result}"
-    );
-    assert!(
-        result.contains("child"),
-        "Body text should appear as literal text: {result}"
-    );
-    assert!(
-        result.contains("]"),
-        "Closing bracket should appear as literal text: {result}"
-    );
+    // Direct source markers remain intact when `$doc` suppresses child-template parsing.
+    for marker in ["[else]", "[break]", "[continue]"] {
+        assert!(
+            result.contains(marker),
+            "suppressed body should preserve literal marker {marker:?}: {result}"
+        );
+    }
 }
 
 #[test]

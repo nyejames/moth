@@ -279,9 +279,7 @@ fn tir_tree_is_const_evaluable_standalone_value(
             Ok(true)
         }
         TemplateIrNodeKind::Text { .. } => Ok(true),
-        TemplateIrNodeKind::Slot { .. }
-        | TemplateIrNodeKind::AggregateOutput
-        | TemplateIrNodeKind::LoopControl { .. } => Ok(true),
+        TemplateIrNodeKind::Slot { .. } | TemplateIrNodeKind::AggregateOutput => Ok(true),
         TemplateIrNodeKind::DynamicExpression { expression, .. } => {
             let kind =
                 expression.const_value_kind_with_template_classifier(&mut |template| {
@@ -450,9 +448,7 @@ fn tir_tree_is_const_evaluable_value(
             Ok(true)
         }
         TemplateIrNodeKind::Text { .. } => Ok(true),
-        TemplateIrNodeKind::Slot { .. }
-        | TemplateIrNodeKind::AggregateOutput
-        | TemplateIrNodeKind::LoopControl { .. } => Ok(true),
+        TemplateIrNodeKind::Slot { .. } | TemplateIrNodeKind::AggregateOutput => Ok(true),
         TemplateIrNodeKind::DynamicExpression { expression, .. } => expression_is_const_evaluable(
             expression,
             loop_binding_paths,

@@ -15,7 +15,7 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotPlaceholder, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateElseMarker, TemplateLoopControlKind, TemplateLoopHeader,
+    TemplateElseMarker, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::tir::ids::{
     ExpressionSiteId, TemplateIrId, TemplateIrNodeId,
@@ -32,7 +32,7 @@ use crate::compiler_frontend::ast::templates::tir::summary::summarize_existing_r
 use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::string_interning::StringId;
 
 /// Parser-local owner for in-progress TIR emission.
 pub(crate) struct TemplateConstructionContext {
@@ -265,22 +265,6 @@ impl TemplateConstructionContext {
         self.record_control_flow_node(node_id);
     }
 
-    pub(crate) fn record_loop_control(
-        &mut self,
-        kind: TemplateLoopControlKind,
-        span: Option<SourceSpan>,
-    ) {
-        let node_id = {
-            let mut store = self.store.borrow_mut();
-            store.push_node(TemplateIrNode::new(
-                TemplateIrNodeKind::LoopControl { kind },
-                span,
-            ))
-        };
-
-        self.children.push(node_id);
-    }
-
     fn record_control_flow_node(&mut self, node_id: TemplateIrNodeId) {
         self.children.push(node_id);
         if self.control_flow_node_id.is_none() {
@@ -291,40 +275,6 @@ impl TemplateConstructionContext {
     fn note_head_origin(&mut self, origin: TemplateSegmentOrigin) {
         if origin == TemplateSegmentOrigin::Head {
             self.head_node_count += 1;
-        }
-    }
-
-    // -------------------------
-    //  Whitespace trimming
-    // -------------------------
-
-    pub(crate) fn trim_leading_whitespace(&mut self, string_table: &StringTable) {
-        let store = self.store.borrow();
-        let first_meaningful_index = self
-            .children
-            .iter()
-            .position(|child_id| !node_is_whitespace_only_text(*child_id, &store, string_table))
-            .unwrap_or(self.children.len());
-
-        if first_meaningful_index == 0 {
-            return;
-        }
-
-        drop(store);
-        self.children.drain(0..first_meaningful_index);
-    }
-
-    pub(crate) fn trim_trailing_whitespace(&mut self, string_table: &StringTable) {
-        let store = self.store.borrow();
-
-        while self
-            .children
-            .last()
-            .is_some_and(|child_id| node_is_whitespace_only_text(*child_id, &store, string_table))
-        {
-            if self.children.pop().is_none() {
-                break;
-            }
         }
     }
 
@@ -408,19 +358,4 @@ impl TemplateConstructionContext {
             context: TemplateViewContext::default(),
         })
     }
-}
-
-fn node_is_whitespace_only_text(
-    node_id: TemplateIrNodeId,
-    store: &TemplateIrStore,
-    string_table: &StringTable,
-) -> bool {
-    let Some(node) = store.get_node(node_id) else {
-        return false;
-    };
-    let TemplateIrNodeKind::Text { text, .. } = &node.kind else {
-        return false;
-    };
-
-    string_table.resolve(*text).trim().is_empty()
 }

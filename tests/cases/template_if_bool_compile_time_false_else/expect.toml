@@ -1,9 +1,0 @@
-[backends.html]
-mode = "success"
-warnings = "forbid"
-
-[[backends.html.artifact_assertions]]
-path = "index.html"
-kind = "html"
-must_contain = ["template_if_bool_compile_time_false_else selected"]
-must_not_contain = ["template_if_bool_compile_time_false_else inactive"]

@@ -3,6 +3,8 @@
 //! `ContributionShape` classifies a single TIR contribution node as a
 //! potential child-template contribution, capturing whether it represents
 //! child output and whether it opts out of parent `$children(..)` wrappers.
+//! Control-flow-root classification stays alongside these contribution facts
+//! so slot composition and runtime sites share the same decision.
 
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
@@ -74,4 +76,36 @@ pub(crate) fn classify_tir_contribution_node(
     };
 
     Ok(shape)
+}
+
+/// Returns whether a contribution root makes output conditional on template control flow.
+///
+/// Direct branch and loop roots are conditional. A child-template reference is
+/// conditional when its owned subtree contains control flow. Other contribution
+/// shapes retain their ordinary wrapper behavior.
+pub(crate) fn tir_node_is_control_flow_root(
+    store: &TemplateIrStore,
+    node_id: TemplateIrNodeId,
+) -> Result<bool, CompilerError> {
+    let node = store.get_node(node_id).ok_or_else(|| {
+        CompilerError::compiler_error(
+            "TIR contribution control-flow classification: contribution node ID was not present in the store.",
+        )
+    })?;
+
+    match &node.kind {
+        TemplateIrNodeKind::BranchChain { .. } | TemplateIrNodeKind::Loop { .. } => Ok(true),
+        TemplateIrNodeKind::ChildTemplate { reference, .. } => {
+            let template = store.get_template(reference.root).ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "TIR contribution control-flow classification: child template ID was not present in the store.",
+                )
+            })?;
+
+            Ok(store
+                .control_flow_node_id_in_subtree(template.root)?
+                .is_some())
+        }
+        _ => Ok(false),
+    }
 }

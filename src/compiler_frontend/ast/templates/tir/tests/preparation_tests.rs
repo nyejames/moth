@@ -6,7 +6,7 @@
 
 use super::super::ids::{TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId, TemplateWrapperSetId};
 use super::super::preparation::{
-    RuntimeTemplateReason, TemplateHelperKind, TemplatePreparation, TemplatePreparationMode,
+    RuntimeTemplateReason, TemplatePreparation, TemplatePreparationMode,
     TemplatePreparationOutcome, prepare_tir_view,
 };
 use super::super::slot_plan::{
@@ -24,7 +24,7 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, Template, TemplateConstValueKind, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateBranchSelector, TemplateLoopControlKind, TemplateLoopHeader,
+    TemplateBranchSelector, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotContributionSourceId;
 use crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotSiteId;
@@ -209,7 +209,7 @@ fn preparation_uses_structural_const_facts_for_static_string_function() {
 }
 
 #[test]
-fn preparation_returns_explicit_helper_results() {
+fn preparation_classifies_slot_insert_helpers() {
     let (slot_insert, _) = prepare_root(
         TemplateType::SlotInsert(SlotKey::Default),
         |builder, table| {
@@ -222,18 +222,7 @@ fn preparation_returns_explicit_helper_results() {
     .expect("slot insert preparation should succeed");
     assert!(matches!(
         slot_insert.outcome,
-        TemplatePreparationOutcome::Helper(TemplateHelperKind::SlotInsert)
-    ));
-
-    let (loop_control, _) = prepare_root(
-        TemplateType::String,
-        |builder, _| builder.push_loop_control_node(TemplateLoopControlKind::Break, None),
-        TemplatePreparationMode::Value,
-    )
-    .expect("loop-control preparation should succeed");
-    assert!(matches!(
-        loop_control.outcome,
-        TemplatePreparationOutcome::Helper(TemplateHelperKind::LoopControl)
+        TemplatePreparationOutcome::SlotInsertHelper
     ));
 }
 

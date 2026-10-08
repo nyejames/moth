@@ -184,7 +184,6 @@ fn child_node_ids(kind: &TemplateIrNodeKind) -> Vec<TemplateIrNodeId> {
         | TemplateIrNodeKind::Slot { .. }
         | TemplateIrNodeKind::InsertContribution { .. }
         | TemplateIrNodeKind::AggregateOutput
-        | TemplateIrNodeKind::LoopControl { .. }
         | TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Vec::new(),
     }
@@ -509,7 +508,6 @@ where
             TemplateIrNodeKind::Text { .. }
             | TemplateIrNodeKind::Slot { .. }
             | TemplateIrNodeKind::AggregateOutput
-            | TemplateIrNodeKind::LoopControl { .. }
             | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(Vec::new()),
         }
     }

@@ -5,9 +5,9 @@
 //!
 //! WHY: runtime applications must evaluate each source once while repeated slot
 //! placeholders can still carry different `$children(..)` and `$fresh`
-//! metadata. Wrapper injection keeps the complete wrapper reference and plants
-//! the same TIR marker whether the splice sits directly in a site or inside
-//! control flow.
+//! metadata. Ordinary contributions compose wrappers around the source marker;
+//! control-flow contributions attach them conditionally to the marker's fresh
+//! template root so a skipped source emits no wrapper.
 
 use super::types::{RuntimeSlotContributionSourceDraft, RuntimeSlotSiteId};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
@@ -18,8 +18,10 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
 use crate::compiler_frontend::ast::templates::tir::{
     DerivedTemplateMetadata, TemplateIrId, TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind,
     TemplateIrStore, TemplateSlotPlanId, TemplateSlotSitePlan, TemplateWrapperSetId, TirCopyState,
-    TirSlotPlaceholderRef, collect_tir_slot_layout, collect_tir_slot_layout_from_root,
+    TirSlotPlaceholderRef, attach_conditional_wrapper_set, collect_tir_slot_layout,
+    collect_tir_slot_layout_from_root, conditional_wrapper_set_for_control_flow,
     copy_tir_subtree_with_active_slot_plan, push_runtime_slot_contribution_source,
+    tir_node_is_control_flow_root,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
@@ -109,13 +111,29 @@ impl RuntimeWrapperSitePlanBuilder<'_> {
             }
 
             let source = self.sources[source_index].clone();
+            let source_has_control_flow =
+                tir_node_is_control_flow_root(self.store, source.source.render_root)?;
             let source_root = push_runtime_slot_contribution_source(
                 self.store,
                 self.slot_plan_id,
                 source.source.source,
                 source.source.span,
             );
-            let wrapped_root = self.apply_site_wrappers(placeholder, &source, source_root)?;
+            let wrapped_root = if source_has_control_flow {
+                if let Some(wrapper_set_id) = conditional_wrapper_set_for_control_flow(
+                    self.store,
+                    placeholder.child_wrapper_set,
+                    placeholder.applied_child_wrapper_set,
+                    placeholder.skip_parent_child_wrappers,
+                    source.shape,
+                )? {
+                    attach_conditional_wrapper_set(self.store, source_root, wrapper_set_id)?
+                } else {
+                    source_root
+                }
+            } else {
+                self.apply_site_wrappers(placeholder, &source, source_root)?
+            };
             fill_roots.push(wrapped_root);
         }
 

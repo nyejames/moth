@@ -27,3 +27,4 @@ pub(crate) use head_chain::compose_tir_head_chain;
 
 pub(crate) use contributions::TirSlotContributions;
 pub(crate) use helpers::stored_insert_contribution_templates;
+pub(crate) use schema::attach_conditional_wrapper_set;

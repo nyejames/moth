@@ -1,4 +1,4 @@
-//! WHAT: prepares one exact TIR view into exclusive Foldable, Runtime, or Helper facts.
+//! WHAT: prepares one exact TIR view into exclusive Foldable, Runtime, or SlotInsertHelper facts.
 //! WHY: this is the sole final-value semantic owner; folding emits values and
 //!      handoff owns runtime materialization after consuming the prepared result.
 
@@ -53,12 +53,6 @@ pub(crate) enum RuntimeTemplateReason {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TemplateHelperKind {
-    LoopControl,
-    SlotInsert,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TemplatePreparationMode {
     Value,
     ConstRequired,
@@ -80,7 +74,7 @@ pub(crate) struct TemplatePreparationFacts {
 pub(crate) enum TemplatePreparationOutcome {
     Foldable,
     Runtime(RuntimeTemplateReason),
-    Helper(TemplateHelperKind),
+    SlotInsertHelper,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -269,12 +263,7 @@ fn prepare_tir_view_in_scope(
         .store()
         .get_template(view.root_ref())
         .ok_or_else(|| missing_template_error(view.root_ref()))?;
-    let const_value_kind = if matches!(
-        view.store().get_node(template.root).map(|node| &node.kind),
-        Some(TemplateIrNodeKind::LoopControl { .. })
-    ) {
-        TemplateConstValueKind::LoopControlSignal
-    } else if !facts.const_evaluable {
+    let const_value_kind = if !facts.const_evaluable {
         TemplateConstValueKind::NonConst
     } else if matches!(template.kind, TemplateType::SlotInsert(_)) {
         if facts.has_slot_insertions {
@@ -293,12 +282,7 @@ fn prepare_tir_view_in_scope(
     };
 
     let outcome = match const_value_kind {
-        TemplateConstValueKind::LoopControlSignal => {
-            TemplatePreparationOutcome::Helper(TemplateHelperKind::LoopControl)
-        }
-        TemplateConstValueKind::SlotInsertHelper => {
-            TemplatePreparationOutcome::Helper(TemplateHelperKind::SlotInsert)
-        }
+        TemplateConstValueKind::SlotInsertHelper => TemplatePreparationOutcome::SlotInsertHelper,
         TemplateConstValueKind::RenderableString | TemplateConstValueKind::WrapperTemplate => {
             if let Some(reason) = walk.runtime_reason
                 && !matches!(reason, RuntimeTemplateReason::SlotResolution)
@@ -745,19 +729,6 @@ impl PreparationWalk<'_> {
                             RuntimeTemplateReason::AggregateOutput,
                         );
                         Ok(facts)
-                    }
-                }
-                TemplateIrNodeKind::LoopControl { .. } => {
-                    if role.virtual_wrapper {
-                        let mut facts = PreparationFacts::default();
-                        self.record_role_runtime(
-                            &mut facts,
-                            role,
-                            RuntimeTemplateReason::WrapperApplication,
-                        );
-                        Ok(facts)
-                    } else {
-                        Ok(PreparationFacts::const_value())
                     }
                 }
             }

@@ -147,7 +147,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
         - [expression_sites.rs](src/compiler_frontend/ast/templates/tir/expression_sites.rs): exact-view and nested expression-payload traversal.
         - [expression_overlays.rs](src/compiler_frontend/ast/templates/tir/expression_overlays.rs): structural/effective expression-overlay collection and precedence.
         - [expression_constness.rs](src/compiler_frontend/ast/templates/tir/expression_constness.rs): shared expression constness and narrow structural queries.
-        - [preparation.rs](src/compiler_frontend/ast/templates/tir/preparation.rs): exact-view semantic preparation for foldable, runtime and helper values.
+        - [preparation.rs](src/compiler_frontend/ast/templates/tir/preparation.rs): exact-view semantic preparation for foldable values, runtime values and slot-insert helpers.
         - [fold/](src/compiler_frontend/ast/templates/tir/fold/), [formatter_view.rs](src/compiler_frontend/ast/templates/tir/formatter_view.rs), [render_unit.rs](src/compiler_frontend/ast/templates/tir/render_unit.rs): TIR-native fold reducer, control-flow/wrapper owners, output estimates, format and render-unit preparation.
         - [slot_layout.rs](src/compiler_frontend/ast/templates/tir/slot_layout.rs), [slot_plan.rs](src/compiler_frontend/ast/templates/tir/slot_plan.rs), [slot_composition/](src/compiler_frontend/ast/templates/tir/slot_composition/), [wrapper_sets.rs](src/compiler_frontend/ast/templates/tir/wrapper_sets.rs): slot layout, routing and wrapper reuse.
         - [handoff_materialization.rs](src/compiler_frontend/ast/templates/tir/handoff_materialization.rs): owned runtime-template trees for HIR lowering.

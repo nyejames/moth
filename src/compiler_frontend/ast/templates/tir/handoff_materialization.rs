@@ -129,6 +129,11 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         id: TemplateIrId,
     ) -> Result<Option<OwnedRuntimeSlotApplicationHandoff>, CompilerError> {
         let template = self.get_template(view, id)?;
+        if template.conditional_child_wrapper_set.is_some() {
+            // The direct slot result cannot carry a template-level conditional
+            // wrapper. Let the general handoff materialize and consume it once.
+            return Ok(None);
+        }
         let root = template.root;
         let Some(slot_plan_id) = template.runtime_slot_plan else {
             return Ok(None);
@@ -175,6 +180,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         let template = self.get_template(view, id)?;
         let span = template.span;
         let runtime_slot_plan = template.runtime_slot_plan;
+        let conditional_child_wrapper_set = template.conditional_child_wrapper_set;
         let root = template.root;
         let body = if let Some(slot_plan_id) = runtime_slot_plan {
             OwnedRuntimeTemplateBody::RuntimeSlotApplication(Box::new(
@@ -192,6 +198,46 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 active_slot_plan,
                 injection,
             )?)
+        };
+
+        let body = if let Some(wrapper_set_id) = conditional_child_wrapper_set {
+            let wrapper_references = view
+                .store()
+                .get_wrapper_set(wrapper_set_id)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "TIR HIR handoff: conditional child wrapper set referenced by a template is missing.",
+                    )
+                })?
+                .wrappers
+                .as_slice();
+
+            if wrapper_references.is_empty() {
+                body
+            } else {
+                let child_handoff = match body {
+                    OwnedRuntimeTemplateBody::Render(node) => node,
+                    OwnedRuntimeTemplateBody::RuntimeSlotApplication(application) => {
+                        OwnedRuntimeTemplateNode::ChildTemplate {
+                            template: Box::new(OwnedRuntimeTemplateHandoff {
+                                body: OwnedRuntimeTemplateBody::RuntimeSlotApplication(application),
+                                span,
+                            }),
+                            span,
+                        }
+                    }
+                };
+
+                OwnedRuntimeTemplateBody::Render(
+                    self.apply_conditional_wrapper_templates_around_child_handoff(
+                        view,
+                        wrapper_references,
+                        child_handoff,
+                    )?,
+                )
+            }
+        } else {
+            body
         };
 
         Ok(OwnedRuntimeTemplateHandoff { body, span })
@@ -442,11 +488,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
             }
 
             TemplateIrNodeKind::AggregateOutput => Ok(OwnedRuntimeTemplateNode::AggregateOutput),
-
-            TemplateIrNodeKind::LoopControl { kind } => Ok(OwnedRuntimeTemplateNode::LoopControl {
-                kind: *kind,
-                span: node.span,
-            }),
 
             TemplateIrNodeKind::RuntimeSlotSite { plan, site } => {
                 if Some(*plan) != active_slot_plan {

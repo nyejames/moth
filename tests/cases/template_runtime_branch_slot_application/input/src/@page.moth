@@ -12,18 +12,12 @@ body = "runtime body"
 
 rendered = [card:
     [$insert("title"):
-        [if show_title:
-            Hidden title
-        [else if maybe_title is |title|]
+        [if maybe_title is |title|:
             Hello [title]
-        [else]
-            Missing title
         ]
     ]
 
-    [if show_title:
-        Hidden body
-    [else]
+    [if not show_title:
         Body [body]
     ]
 ]

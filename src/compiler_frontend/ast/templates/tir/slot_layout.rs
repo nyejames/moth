@@ -301,7 +301,6 @@ fn collect_from_node(
         | TemplateIrNodeKind::DynamicExpression { .. }
         | TemplateIrNodeKind::InsertContribution { .. }
         | TemplateIrNodeKind::AggregateOutput
-        | TemplateIrNodeKind::LoopControl { .. }
         | TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(()),
     };
