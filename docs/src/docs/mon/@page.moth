@@ -34,40 +34,38 @@ page_head #= language_theme_head
     and the static project builder remain deferred separately.
     Source `{=}`, Unicode escapes and contextual `::Variant` construction also
     remain undelivered. MON's data forms do not implement those source features.
+    The accepted exact numeric API removes profile selection without aliases.
+    That cutover remains pending. The fixed-width example below publishes its
+    final contract, not a claim that the profile API has already been removed.
 ]
 
 #[section, $md:
     ## Use MON from Rust
 
     Supply a schema rather than a compiler type or a file path. This example
-    selects Int64/Float32, checks the typed result and reuses the prepared
-    schema for a second document. Add a dependency on `moth-mon` for an
-    independent application. Existing compiler clients can change the import
-    to `moth::mon` without changing the API.
+    selects declared fixed widths, checks the typed result and reuses the
+    prepared schema for a second document. Add a dependency on `moth-mon` for
+    an independent application. Existing compiler clients can change the
+    import to `moth::mon` without changing the API.
 
     [codeblock, $code("rust"):
         use moth_mon::{
-            Field, FloatPrecision, IntWidth, MonErrorCode, NumericProfile, Schema,
-            SchemaType, Value, decode_document,
+            Field, MonErrorCode, Schema, SchemaType, Value, decode_document,
         };
 
         fn main() -> Result<(), Box<dyn std::error::Error>> {
             let schema = Schema::record(vec![
-                Field::required("count", SchemaType::Int),
-                Field::required("ratio", SchemaType::Float),
+                Field::required("count", SchemaType::I64),
+                Field::required("ratio", SchemaType::F32),
             ])
-            .with_profile(NumericProfile {
-                int_width: IntWidth::Bits64,
-                float_precision: FloatPrecision::Bits32,
-            })
             .prepare()?;
 
             let value = decode_document("count = 3_000_000_000, ratio = 0.5", &schema)?;
             assert_eq!(
                 value,
                 Value::Record(vec![
-                    ("count".into(), Value::Int(3_000_000_000)),
-                    ("ratio".into(), Value::Float(0.5)),
+                    ("count".into(), Value::I64(3_000_000_000)),
+                    ("ratio".into(), Value::F32(0.5)),
                 ]),
             );
 
@@ -81,7 +79,9 @@ page_head #= language_theme_head
 
     Successful values own their data and outlive the input. `MonError` keeps
     structured code, path, span and detail while supporting `Display` and
-    `std::error::Error`. The `moth-mon` crate documentation contains the full
+    `std::error::Error`. Preparing a schema once and decoding multiple
+    documents around it remains valid; the prepared schema's widths and
+    limits stay fixed. The `moth-mon` crate documentation contains the full
     executable example with defaults, fixed-width values and encoding.
 ]
 

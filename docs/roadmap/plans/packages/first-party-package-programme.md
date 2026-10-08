@@ -35,11 +35,11 @@ own Phase 2 (`@core/text` v1) has not started, and its capability prerequisites 
 
 The main roadmap makes this programme active in parallel. That scheduling state
 supersedes the earlier programme-wide pause recorded during MON and data-layout
-integration. MON syntax and Rust tooling v1 are now delivered. After the Dec
-contextual typing correction and separate Uint addition, the next serial compiler
-foundation consolidates dense HIR, typed semantic expressions, native result
-channels, Reactivity V1 retirement, bounded Wire/Route contracts and Core constant
-evaluation. Package slices consume its delivered capability checkpoints.
+integration. MON syntax and Rust tooling v1 are delivered. The active exact
+numeric contract publication precedes further expression work. Package slices
+consume delivered exact numeric, dense HIR, native result, bounded Wire/Route
+and Core constant-evaluation capabilities where required, not obsolete Dec/Uint
+sequencing or permission to resume the paused expression plan.
 
 Parallel status does not remove a package's own capability gate. Text v1 and any
 slice requiring result slots or Core folding still wait for those deliveries.
@@ -48,6 +48,10 @@ rather than independently extending legacy i32/f64-only representations. A sync
 adopts a completed shared shape directly and runs the complete package gate.
 Historical checkpoint and validation records below do not establish the current
 branch state or reinstate a programme-wide pause.
+
+The exact numeric contract is accepted but not yet implemented. Delivered
+package slices and historical evidence below remain valid at their old
+profile-based checkpoint, not evidence of the exact API cutover.
 
 The main roadmap links only this umbrella plan. Package-specific plans live in
 `docs/roadmap/plans/packages/` and are linked from the tracker in this file. Built-in `@web/*`
@@ -71,7 +75,7 @@ Read these from the active worktree before changing package code:
 - `AGENTS.md`
 - `docs/compiler-design-overview.md`, especially binding-backed symbols, numeric ownership, HIR call targets, link facts and target-contract validation
 - `docs/build-system-design.md`, especially selected builder capabilities, package classification,
-  Core and Builder package availability, numeric-profile compatibility and external JavaScript emission
+  Core and Builder package availability, exact semantic compatibility and external JavaScript emission
 - `docs/src/docs/packages/` and the canonical numeric/cast/Error references
 - `docs/src/docs/progress/@page.moth`
 - `docs/src/docs/progress/packages-and-builders/@page.moth`
@@ -123,7 +127,7 @@ This programme does not own:
 - package acquisition, registries, fetching, version solving, lockfiles or publishing
 - transitive dependency policy
 - generic binding-backed functions as a general feature
-- the shared numeric type/profile or external ABI migration
+- the shared exact numeric type or external ABI migration
 - Wasm or native implementation of every package
 - async, task or event-loop language design
 - exhaustive copies of JavaScript or Web Platform APIs
@@ -185,28 +189,35 @@ surface rather than mechanically clone every JavaScript method.
 
 ### Numeric checkpoint coordination
 
-Int and Float remain deliberate Moth API types, distinct from I*/U*/F*. Keep
-ordinary counts, indices and Float-oriented functions unless their own accepted
-contract needs fixed precision. The shared numeric migration separates language
-signatures from fixed foreign ABI carriers. Replacing `ExternalAbiType::I32 ->
-Int` and `F64 -> Float` must not accidentally change every Core API to I32/F64.
+Ordinary default-language APIs migrate to I32 counts/indices, U32 unsigned
+contracts and F64 binary-float contracts. Core Math is F64-only. Preserve
+foreign signatures that already declare exact widths. A foreign ABI carrier
+does not redefine the Moth semantic type. The accepted annotated JavaScript
+subset is I32/I64/U32/U64/F32/F64, not all eleven language numeric types.
 
-One NumericProfile is selected before input/config typing and is shared by the
-directly linked Moth graph and JS/Wasm partitions. Package constants, Core
-folding and runtime conversion consume that profile. Validate both Float
-precisions and both Int widths through the existing numeric owners rather than
-adding package-local rounding, range or overflow rules.
+Package constants, Core folding and runtime conversion consume exact numeric
+identities with no semantic profile selection. Reuse shared direct rounding,
+range, overflow and external finite-result validation rather than introducing
+package-local numeric policy. D15 keeps equal operand types and the smallest
+supported mixed domain without I32/F32 floors. Check results at the selected
+integer width and complete F16 rounding/finiteness at each operation, not
+merely at storage. Plain cast has an immediate concrete destination and
+resolves its source independently.
 
-The fixed type family and runtime Byte land before Dec/DecN in the same
-serial checkpoint. Dec retains exact scale semantics and initially has
-HTML-JS runtime support only. Wasm scalar support does not imply a Dec runtime,
-completed collection runtime or a lowering for every Core host function.
+Safety-catch eligibility is not a failure summary. Authored arithmetic/casts
+and same-level multi-call expressions may qualify without producing Error.
+Argument-nested calls do not inflate that count. Fatal integrity guards
+remain fatal unless their documented builtin Error! boundary provides a route.
 
-Error.code changes to U32 at the end of that checkpoint. Preserve existing code
-values and messages while adopting the shared constructor/helper representation.
-Test codes above I32::MAX and explicit conversion from Int variables where those
-paths cross package interfaces. This does not change Rust diagnostic identifiers
-or the MON Rust error-code enum.
+Byte remains distinct without arithmetic and Dec retains exact scale
+semantics. Wasm scalar support does not imply a Dec runtime, collection
+runtime or lowering for every Core host function. Numeric migration adds
+no Wasm capabilities.
+
+Error.code already uses U32. Preserve code values, messages and the shared
+constructor/helper representation, including codes above I32::MAX. Explicit
+conversion from other typed integers remains required. Rust diagnostic
+identifiers and the MON Rust error-code enum remain unchanged.
 
 A parallel package slice touching these shared owners coordinates its boundary
 and adopts the completed migration. It does not create a temporary cast adapter,
@@ -403,7 +414,7 @@ Every code-bearing phase ends with all of the following.
 - compare implementation with canonical package docs and the active package plan
 - verify fallibility, access, alias and return contracts
 - verify Core semantics do not inherit accidental JavaScript behaviour
-- verify numeric profile, fixed-width conversions and U32 runtime errors use shared owners after the numeric checkpoint
+- verify exact numeric identities, fixed-width conversions and U32 runtime errors use shared owners after the numeric checkpoint
 - verify target validation rejects unsupported reachable use before lowering
 - verify package availability and prelude policy did not drift
 - verify every changed public contract has one clear primary test owner
@@ -483,7 +494,7 @@ materially safer to implement. Record the reason in the tracker rather than sile
 | 0 | Package foundations | this plan | Implementation merged. Programme active in parallel, with per-slice capability and shared-owner coordination gates | Remove speculative package kinds, enforce terminology and add the first-party dependency guard |
 | 1 | `@core/text` | [core-text.md](./core-text.md) | v1 designed and queued behind native result slots and Core constant evaluation; pre-checkpoint hardening of the five shipped functions delivered | Add scalar-aware inspection and slicing, exact location/counting, Unicode-whitespace trimming and literal replacement without temporary ABI-shaped APIs |
 | 2 | `@core/random` | `core-random.md` | TODO: create when activated | Complete common scalar random generation and specify portable observable rules while allowing unpromised generator identity to differ by backend |
-| 3 | `@core/math` | [core-math.md](./core-math.md) | Activated ahead of order 2 because its existing surface needs no new compiler capability; current-surface coverage, registration cleanup and the accepted scalar expansion with its published numerical contract are delivered | Audit the broad existing Float surface, fill common omissions and preserve finite-result boundaries |
+| 3 | `@core/math` | [core-math.md](./core-math.md) | Activated ahead of order 2 because its existing surface needs no new compiler capability; current-surface coverage, registration cleanup and the accepted scalar expansion with its published numerical contract are delivered; F64-only exact migration pending | Preserve all six constants, thirty-one helpers, their mathematical contracts and shared finite-result boundaries |
 | 4 | `@core/time` | [core-time.md](./core-time.md) | v1 delivered: the semantic contract is published, the four defects it exposed are corrected and the accepted Duration and Timestamp arithmetic is registered and covered | Complete the common Duration, TimeMark and Timestamp slice, then stop before an unreviewed civil-time or time-zone design |
 | 5 | `@web/canvas` | [canvas README](../../../../src/projects/html_project/binding_packages/web/canvas/README.md) | README seeded from accepted direction and the deferred notes formerly in `canvas.js`; expansion not started | Expand drawing, state, path, transform, text, image and pixel workflows deeply enough to support substantial visual stress-test programs |
 | 5a | `@html` | `html.md` | TODO: create only when needed | Add source-backed wrappers or broadly useful helpers required by canvas and HTML package work, without turning `@html` into a framework |
@@ -507,9 +518,9 @@ Reuse the compiler-owned Rust Text evaluator infrastructure delivered by the pre
 Eligible deterministic operations gain Rust const-eval parity as they are added. Fallible `char_at`
 and `slice` keep Error semantics even though the initial evaluator cannot fold error channels.
 
-Text indices/counts remain Int under the selected numeric profile. Host string
-length limits and offset conversions remain separately checked. Fixed-width
-support does not change these public signatures to U32 or I32.
+Text indices/counts use I32 under the accepted exact contract. Host string
+length limits and offset conversions remain separately checked. The current
+profile-based implementation does not claim that cutover has landed.
 
 Collection-valued `split`, `join`, `lines` and character surfaces wait for a final collection-valued
 binding route. Unicode case conversion, case folding, normalization and grapheme APIs wait for pinned
@@ -519,15 +530,15 @@ Moth-owned Unicode data rather than host Unicode versions.
 
 Keep bounds and result-domain semantics portable. Decide seeded or reproducible generation only in
 the package design checkpoint. Backend-local algorithms remain permitted until sequence identity is
-explicitly promised. A deliberate Int/Float API follows the selected profile,
-while any fixed-width API needs its own explicit signature and range contract.
+explicitly promised. Default numeric APIs use I32/F64. A different exact-width
+API needs its own accepted signature and range contract.
 
 #### `@core/math`
 
 Start with an inventory because the package is already broad. Add common omissions, not specialised
-numeric subfields. Consume the shared numeric profile and preserve deliberate
-Float signatures. Package-specific `round` and approximation rules remain in the
-Math reference rather than inheriting cast or Dec rounding semantics.
+numeric subfields. Consume the F64-only exact contract without adding F16/F32
+overloads or generic Math. Package-specific `round` and approximation rules
+remain in the Math reference rather than inheriting cast or Dec rounding.
 
 #### `@core/time`
 
@@ -536,9 +547,10 @@ implementation source, not a semantic authority. Civil dates, time zones and loc
 formatting need their own careful design before implementation.
 
 Opaque Duration/TimeMark/Timestamp representations remain package-owned contracts.
-A host f64 used internally is not automatically Moth Float and must not change
-precision when Float's numeric profile changes. Wider integer support alone does
-not accept a nanosecond representation or silently alter the existing time ABI.
+A host f64 used internally is not automatically a source-visible F64 value.
+Numeric API parameters/accessors use F64 while opaque range, units and read
+boundaries remain unchanged. Wider integer support alone does not accept a
+nanosecond representation or silently alter the existing time ABI.
 
 #### `@web/canvas`
 
@@ -570,8 +582,8 @@ contract and link it from the collection plan.
 Review non-sorting gaps against collection, borrow and memory-management authorities. Operations such
 as whole-domain clear may carry lifetime and retained-edge meaning, so package convenience must not
 outrun those contracts. Consume fixed integer/Byte map-key eligibility, numeric
-ordering and compact scalar strides through their shared owners. Keep Int indices
-and lengths rather than introducing an unrelated API migration.
+ordering and compact scalar strides through their shared owners. Use I32 indices
+and lengths without broadening the accepted collection API.
 
 #### `@core/json`
 

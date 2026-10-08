@@ -1,43 +1,40 @@
-Use `catch` when the current code has a useful fallback.
-
-[codeblock, $code("moth"):
-    count = parse_number(text) catch:
-        then 0
-    ;
-]
-
-Use `catch |err|:` when the message or code matters:
-
-[codeblock, $code("moth"):
-    count = parse_number(text) catch |err|:
-        io.line(err.message)
-        then 0
-    ;
-]
-
-A short fallback can stay on one line:
+Use `catch` when a local fallback makes sense:
 
 [codeblock, $code("moth"):
     count = parse_number(text) catch then 0
 ]
 
-Use `then` to provide the value expected by the surrounding assignment.
-
-### Recovering a complete expression
-
-The accepted contract also lets `catch` handle checked numeric failure:
+The handler covers the complete selected expression, including arithmetic,
+receivers, call arguments, nested calls and cast operands:
 
 [codeblock, $code("moth"):
-    value = left * right + offset catch then 0
+    total = left * right + offset catch then 0
     amount = load_amount(left * right) catch then 0
 ]
 
-The first handler covers both operators. The second covers argument evaluation
-and the call when `load_amount` returns `Error!`. Parentheses around the whole
-protected expression are not required. See @../progress (Progress) for current
-compiler support.
+Authored arithmetic or a valid cast can qualify for a safety catch even when
+the operation cannot fail. Two calls in the same expression also qualify:
 
-Implicit failure and built-in `Error!` may share one handler. A bound `err` has
-type `Error`, and an existing typed error keeps its message, code and identity.
-A custom error cannot share that handler with implicit failure. Split the work
-or map it explicitly instead.
+[codeblock, $code("moth"):
+    chained = source.first().second() catch then fallback
+    pair = left() is right() catch then false
+]
+
+Calls inside an argument do not add to the enclosing call count:
+
+[codeblock, $code("moth"):
+    -- INVALID safety catch when both calls are infallible
+    value = outer(inner()) catch then fallback
+]
+
+The nested call remains protected. If it can fail, its actual error makes the
+catch eligible. A safety catch does not claim a failure effect or catch fatal
+conditions.
+
+Implicit failure and compatible builtin `Error!` may share a handler. A bound
+error has type `Error`; existing typed errors keep their message, code and
+identity. A custom error cannot mix with implicit failure. Catch does not
+legalise statically invalid numeric work.
+
+See @../errors/#catch-and-recovery (Catch and recovery) for handler
+constraints, placement and current support.

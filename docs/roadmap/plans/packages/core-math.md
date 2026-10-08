@@ -2,10 +2,10 @@
 
 ## Role and authority
 
-`@core/math` is the portable Core package for scalar `Float` mathematics: trigonometry, logarithms,
+`@core/math` is the portable Core package for F64-only scalar mathematics: trigonometry, logarithms,
 exponentials, roots, rounding and bounded selection.
 
-Canonical source semantics belong to `docs/src/docs/packages/core/math/` and the canonical `Float`,
+Canonical source semantics belong to `docs/src/docs/packages/core/math/` and the canonical numeric,
 `Error` and dependency references. This living plan records implementation strategy, sequencing,
 coverage ownership, open semantic questions and blockers. Implementation code never becomes the
 semantic authority, and this plan cannot accept public API.
@@ -17,9 +17,9 @@ an explicit dependency clause.
 
 ```text
 STATUS: the accepted scalar expansion is delivered; package programme remains active in parallel
-CURRENT_SLICE: none - the expansion, its published numerical contract and its coverage are complete
+CURRENT_SLICE: exact F64-only API contract accepted; implementation migration pending
 BLOCKERS: compile-time folding waits for Core const evaluation and its accepted Math precision contract
-NEXT_ACTION: coordinate the numeric-profile migration through shared compiler/binding owners; a Wasm Math lowering set remains a separate contract-gated candidate
+NEXT_ACTION: coordinate exact F64 migration through shared compiler/binding owners; Wasm Math remains separate deferred work
 ```
 
 Math was activated ahead of `@core/random`, `@core/time` and the queued `@core/text` v1 slice because
@@ -46,24 +46,28 @@ implementation-relevant facts are:
 
 ### Numeric checkpoint handoff
 
-The numeric migration preserves the package's deliberate Float API. It separates
-that language signature from a fixed F64 foreign ABI rather than changing every
-Math call to accept F64. Float precision comes from the one compilation-wide
-NumericProfile, shared by folding, JS and any later Wasm implementation. Binary
-conversion and finite validation stay in the shared numeric boundary. Constants
-materialise directly at the selected Float precision and their exact expectations
-must be profile-aware, not fixed f64 spellings.
+The exact numeric migration changes every current Math constant, parameter
+and result to F64. Preserve the homogeneous registration loop, foreign F64
+ABI, six constants, thirty-one functions, inline expressions, access modes,
+arities and declared error contracts. The profile-based implementation
+snapshot above remains historical evidence, not the accepted final signature.
 
-Fixed I*/U*/F*, Uint and Dec support does not automatically add Math overloads or
-change `round`'s package-specific tie rule to the numeric cast's ties-to-even rule.
-Dec retains its own exact scale semantics. Keep package-specific accuracy,
-domain and signed-zero guarantees in the Math reference. Reconcile boundary
-rounding there before enabling Float32, while retaining explicitly documented
-approximation limits rather than promising correctly rounded transcendentals.
+Preserve radians, domain restrictions, exact identities, approximation bounds,
+clamp composition, the package's positive-infinity `round` tie rule, signed-zero
+policy and underflow policy. No global correctly-rounded transcendental
+contract follows from F64. D15 arithmetic does not change Math's signatures or
+helper-internal mathematical contracts.
 
-Numeric failures reuse the delivered `Error.code U32` representation and existing
-code values. Add no Math-only error carrier or signed-code compatibility path.
-Wasm scalar arithmetic support alone does not implement Math's host functions.
+Generalise the shared external binary-float boundary to the resolved exact
+result type and precision on supported result shapes. Remove hardcoded builtin
+Float allocation as well as old selection predicates. Preserve success-only
+validation, valid returned Error identity, code 304 and the documented builtin
+Error! recovery versus fatal-guard delivery. Authored safety catch does not
+manufacture recoverable failure or catch a fatal guard.
+
+F16/F32 overloads, generic Math, Math constant evaluation and Wasm lowerings
+remain deferred. A cast wrapper around F64 adds no native lower-precision Math
+support. Wasm scalar arithmetic alone does not implement these helpers.
 
 ## Implementation notes
 
@@ -71,12 +75,12 @@ Wasm scalar arithmetic support alone does not implement Math's host functions.
 
 `src/builder_surface/core_packages/math.rs` owns one package-local table plus a registration loop.
 It is the right shape while every function has the same homogeneous signature. Replace it only when
-signatures actually diverge - an error channel, a non-Float parameter or const-eval metadata - and
+signatures actually diverge - an error channel, a non-F64 parameter or const-eval metadata - and
 then with the smallest package-local spec, not a cross-Core registration framework.
 
 ### Finite-result boundary
 
-Math does not own numeric failure. A non-finite external `Float` result is rejected by the shared
+Math does not own numeric failure. Under the exact contract, a non-finite external F64 result is rejected by the shared
 boundary: `__moth_float_validate` in `src/backends/js/runtime/numeric.rs` returns builtin error code
 304, and `src/compiler_frontend/hir/hir_expression/numeric.rs` selects the enclosing function's
 failure mode. A builtin `Error!` enclosing function recovers through that channel; an infallible
@@ -95,13 +99,13 @@ numerical contract, not a transliteration of the JS expressions.
 ### Constant evaluation boundary
 
 Math folding waits for the shared Core const-eval prerequisite **and** for an accepted compile-time
-contract covering profile-selected precision and numeric failure. An eligible scalar signature alone does not settle
+contract covering exact F64 semantics and numeric failure. An eligible scalar signature alone does not settle
 that contract. Add no Math-local interpreter, callback registry, package-name dispatch or
 placeholder evaluator metadata.
 
 ## Design rationale worth preserving
 
-- `NaN`, positive infinity and negative infinity are never valid Moth `Float` values, so the package
+- `NaN`, positive infinity and negative infinity are never valid Moth F64 values, so the package
   can keep infallible signatures without hiding invalid results.
 - The host `Math` object is not an API checklist. Each addition needs a common use and an accepted
   contract.
@@ -197,7 +201,7 @@ Every other approximating sample is a bounded comparison.
 
 - A Wasm lowering set, with an accepted numerical contract rather than a JS transliteration.
 - Compile-time folding once the Core const-eval prerequisite and a precision contract exist.
-- Profile-aware constants, rounding and finite-boundary coverage during the shared numeric migration. Fixed-width, Uint and Dec types do not implicitly extend this Float-only API or replace its function-specific rounding rules.
+- Exact F64 constants, rounding and shared finite-boundary coverage during numeric migration. Other fixed widths and Dec do not extend the F64-only API or replace its function-specific rounding rules. F32/generic Math stays deferred.
 - `ExternalConstantDef::data_type` is registered but never read by production code, so a constant's
   declared ABI type is unenforced: mutating `PI`'s type survives the whole suite. Either the field
   gains a consumer in the constant path or it should go; the owner is the external-package registry,
@@ -212,7 +216,7 @@ Every other approximating sample is a bounded comparison.
 
 ## Previous blockers and rejected approaches
 
-- Reject adding `Error!` to Math signatures: the shared `Float` boundary already owns numeric
+- Reject adding `Error!` to Math signatures: the shared exact external binary-float boundary already owns numeric
   failure, and a fallible signature would change the accepted contract.
 - Reject a Math-specific finite-result guard duplicating `__moth_float_validate`.
 - Reject a Math runtime helper module, registration macro DSL or unary/binary dispatch hierarchy for
@@ -242,11 +246,13 @@ deterministic pass or fail; exact rendered output is reserved for the three grou
 Every function needs at least one sample that no plausible mis-registration survives, which means a
 fixed point such as `asinh(0)` or `cosh(0)` is never the only sample for its function.
 
-When adapting these owners to NumericProfile, exercise Float32 and Float64
-constants/results and preserve exact versus approximate assertions deliberately.
-Bounds themselves must be representable at the selected precision. Test shared
-finite-boundary recovery with U32 error codes without changing Math signatures.
-Current evidence below predates that migration and does not claim profile coverage.
+When migrating these owners, preserve every existing mathematical assertion
+and classify old Float32-specific cases before retiring them. Math's final
+constants/results use F64. Preserve exact versus approximate assertions and
+shared finite-boundary recovery with U32 error codes without changing declared
+Math error slots. General exact float boundary coverage belongs to shared
+numeric tests, not fabricated Math overloads. Current evidence below predates
+the exact migration.
 
 Historical slice validation record (not current-state evidence): the expansion could not close the
 mandatory `just validate` gate at that checkpoint. After that branch merged the published

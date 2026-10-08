@@ -27,6 +27,8 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
     The compiler and memory design references may describe accepted end-state architecture that
     has not fully landed. This matrix determines what the compiler supports today.
 
+    An exact-numeric migration is active at Phase 0 on the existing `expression-refactor` branch. Its approved fixed-width, I32/F64 default, D15 arithmetic, bounded-inference, plain-cast and authored safety-catch contracts are not implemented yet. Exact config inputs, retained raw CLI numeric spelling and the clean exact MON API also remain pending. The rows below continue to describe current profile-based support.
+
     JS/HTML delivers most of the accepted implicit-failure and entry [$html:<code>Error!</code>]
     contract: private propagation, expression-wide catches, success-only runtime fragment
     publication and [$html:<code>moth dev</code>] entry-error reporting. Wasm rejects recoverable

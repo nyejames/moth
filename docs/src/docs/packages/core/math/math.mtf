@@ -1,4 +1,4 @@
-`@core/math` provides `Float` constants and helper functions. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit dependency clause.
+`@core/math` provides `F64` constants and helper functions. It belongs to the binding-backed Core package family with no prelude alias, so it requires an explicit dependency clause.
 
 `@core/math` carries Core origin with ExternalBinding backing. See @../../#package-origins-and-backing (Package origins and backing) for origin and backing rules.
 
@@ -32,46 +32,46 @@ A namespace alias creates a file-local name:
 
     [td:
         [: `PI`]
-        [: `Float`]
+        [: `F64`]
         [: pi]
     ]
 
     [td:
         [: `TAU`]
-        [: `Float`]
+        [: `F64`]
         [: 2 * pi]
     ]
 
     [td:
         [: `E`]
-        [: `Float`]
+        [: `F64`]
         [: Euler's number]
     ]
 
     [td:
         [: `SQRT_2`]
-        [: `Float`]
+        [: `F64`]
         [: square root of 2]
     ]
 
     [td:
         [: `LN_2`]
-        [: `Float`]
+        [: `F64`]
         [: natural log of 2]
     ]
 
     [td:
         [: `LN_10`]
-        [: `Float`]
+        [: `F64`]
         [: natural log of 10]
     ]
 ]
 
-Constants form compile-time `Float` values. They fold into expressions at compile time and do not produce runtime lookups.
+Constants form compile-time `F64` values. They fold into expressions at compile time and do not produce runtime lookups.
 
 ### Functions
 
-All functions take `Float` parameters and return `Float`. Parameters stay positional-only. Named arguments lack support because binding-backed packages do not expose source-function features.
+All functions take `F64` parameters and return `F64`. Parameters stay positional-only. Named arguments lack support because binding-backed packages do not expose source-function features.
 
 [table:
     [th:
@@ -82,209 +82,212 @@ All functions take `Float` parameters and return `Float`. Parameters stay positi
 
     [td:
         [: `sin(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `cos(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `tan(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `atan2(y, x)`]
-        [: `Float, Float`]
-        [: `Float`]
+        [: `F64, F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `log(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `log2(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `log10(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `exp(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `pow(base, exponent)`]
-        [: `Float, Float`]
-        [: `Float`]
+        [: `F64, F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `sqrt(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `abs(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `floor(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `ceil(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `round(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `trunc(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `min(a, b)`]
-        [: `Float, Float`]
-        [: `Float`]
+        [: `F64, F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `max(a, b)`]
-        [: `Float, Float`]
-        [: `Float`]
+        [: `F64, F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `clamp(x, min, max)`]
-        [: `Float, Float, Float`]
-        [: `Float`]
+        [: `F64, F64, F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `asin(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `acos(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `atan(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `cbrt(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `hypot(x, y)`]
-        [: `Float, Float`]
-        [: `Float`]
+        [: `F64, F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `expm1(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `log1p(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `sinh(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `cosh(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `tanh(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `asinh(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `acosh(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 
     [td:
         [: `atanh(x)`]
-        [: `Float`]
-        [: `Float`]
+        [: `F64`]
+        [: `F64`]
     ]
 ]
 
 The functions declare no typed error slot. A non-finite result is still rejected
-at the shared external `Float` boundary before ordinary Moth code observes it.
+at the shared external `F64` boundary before ordinary Moth code observes it.
 That boundary is a fatal integrity guard, not implicit built-in failure: it halts
 unless a declared builtin `Error!` contract returns it, with code 304 for a
 non-finite result. `NaN`, positive infinity and negative infinity never become
-valid Moth `Float` values. See @../../../progress (Progress) for current compiler
+valid Moth `F64` values. See @../../../progress (Progress) for current compiler
 support.
 
 This guard adds no recoverable adapter for a foreign implementation that throws
 unexpectedly or otherwise violates its declared value contract.
+
+Authored safety-catch eligibility does not manufacture a recoverable failure
+or make this fatal integrity guard catchable.
 
 ### Numerical contract
 
 Angles are radians for `sin`, `cos`, `tan`, `asin`, `acos`, `atan` and
 `atan2`. `PI` is the radian measure of a half turn and `TAU` of a full turn.
 
-A mathematical result that is undefined or infinite produces no Moth `Float`.
-The shared external `Float` boundary rejects the non-finite host result with
+A mathematical result that is undefined or infinite produces no Moth `F64`.
+The shared external `F64` boundary rejects the non-finite host result with
 builtin error code 304 before source observes it. The functions with
 restricted domains are:
 
@@ -314,7 +317,7 @@ intermediate overflow.
 
 The sign of a zero result is not part of this contract.
 
-A result too small to be a normal `Float` stays finite. It becomes a
+A result too small to be a normal `F64` stays finite. It becomes a
 subnormal value or zero and never fails the finite boundary. Which of the
 two occurs is unspecified.
 
@@ -324,11 +327,11 @@ comparisons use a tolerance. These identities are exact: `exp(0)` is `1`,
 An approximating function may still round when its mathematical result is
 exactly representable, so a result that happens to be a whole number is not
 guaranteed exact: `hypot(20, 99)` need not be exactly `101`. Every constant is
-the nearest `Float` to its mathematical value.
+the nearest `F64` to its mathematical value.
 
 ### Access and return contracts
 
-All parameters use shared access. No function requires mutable access. Every function returns a fresh `Float` value.
+All parameters use shared access. No function requires mutable access. Every function returns a fresh `F64` value.
 
 ### Backend behaviour
 
@@ -344,10 +347,10 @@ HTML-Wasm lacks a Wasm lowering for these functions. See @../../../progress (pro
 
 ### Deferred surfaces
 
-Deferred math surfaces include integer math helpers, broader numeric tower support and non-JS lowerings. Explicit wrapping remains an open design question, not an accepted numeric mode. See @../../../progress (progress matrix) for current status.
+This package has an F64-only API. It provides no F16/F32 overloads or generic Math API, and a cast around an F64 result does not add native lower-precision support. F32/generic Math, integer helpers and Wasm lowerings remain deferred. Fast Math has a separate contract and does not change these regular helpers. See @../../../progress (Progress) for current status.
 
 ### Related concepts
 
 - For package origin and backing see @../../#package-origins-and-backing (Package origins and backing).
 - For dependency-path rules see @../../#dependency-paths (Dependency paths).
-- For `Float` language semantics see @../../../numbers (Numbers).
+- For `F64` language semantics see @../../../numbers (Numbers).

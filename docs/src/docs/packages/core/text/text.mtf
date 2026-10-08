@@ -29,7 +29,7 @@ All functions take `String` parameters with shared access. Parameters stay posit
     [td:
         [: `length(text)`]
         [: `String`]
-        [: `Int`]
+        [: `I32`]
     ]
 
     [td:
@@ -61,7 +61,7 @@ All functions stay infallible at the Moth level. They do not return through `Err
 
 ### Access and return contracts
 
-All parameters use shared access. No function requires mutable access. `length` returns a fresh `Int`. The predicate functions return fresh `Bool` values.
+All parameters use shared access. No function requires mutable access. `length` returns a fresh `I32`. The predicate functions return fresh `Bool` values.
 
 ### Length unit
 
@@ -70,7 +70,7 @@ All parameters use shared access. No function requires mutable access. `length` 
 A string of N `Char` values reports `text.length` of N. Surrogate pairs in the runtime encoding do not inflate the count.
 
 HTML-JS implements this contract with scalar-value iteration, so BMP and
-non-BMP characters each contribute one count. The return type remains `Int`
+non-BMP characters each contribute one count. The return type is `I32`
 and the package stays infallible. HTML-Wasm still lacks a lowering for this
 package; see @../../../progress (progress matrix) for current target
 availability.

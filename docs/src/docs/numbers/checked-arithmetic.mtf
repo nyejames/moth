@@ -1,126 +1,198 @@
-Runtime numeric operations are checked. A failed check produces implicit built-in
-failure, delivered by the enclosing handler or function contract. It does not
-wrap the result or implicitly panic.
+Runtime numeric operations use their selected semantic result type. A failed
+check produces implicit built-in failure for the enclosing handler or function
+contract. Moth does not wrap the value, saturate it or implicitly panic.
 
 ### Checked results
 
-Runtime checks enforce an operation's semantic result type, not the operands' storage
-widths. A `U8` and `U8` sum is a `U32` value and needs no 8-bit mask. An integer
-overflow check can be omitted only when the compiler proves that specific operation
-stays within its result type; a wider backend carrier does not make an unproven
-operation safe. A narrow store needs a source-level range proof, a compiler proof or
-a check.
+A common arithmetic type must contain every operand, but need not contain
+every possible result. Equal narrow operands keep their type, so those
+operations can overflow or underflow in that narrow domain:
 
-A `U8 + U8` result of `256` is valid `U32` arithmetic. A later conversion
-back to `U8` is a separate check.
+[table:
+    [th: [: Operands] [: Selected result type]]
+    [td: [: I8 + I8] [: I8]]
+    [td: [: U8 + U8] [: U8]]
+    [td: [: F16 + F16] [: F16]]
+]
+
+A wider register or scratch value may compute or validate the result. It cannot
+expose a wider semantic type, silently wrap or postpone a required check until
+assignment.
+
+[codeblock, $code("moth"):
+    overflow I8 = 127 + 1
+]
+
+This known `I8` overflow diagnoses at compile time. Runtime operations use the
+same selected-width check:
+
+[codeblock, $code("moth"):
+    add_i8 |left I8, right I8| -> I8, Error!:
+        return left + right
+    ;
+
+    value I8 = add_i8(127, 1) catch then 0
+]
+
+Negating a signed minimum also fails in its original narrow type:
+
+[codeblock, $code("moth"):
+    minimum I8 = -128
+    negative I8 = -minimum
+]
+
+`negative` diagnoses during compilation. A runtime operand uses the same
+check:
+
+[codeblock, $code("moth"):
+    negate_i8 |value I8| -> I8, Error!:
+        return -value
+    ;
+
+    result I8 = negate_i8(-128) catch then 0
+]
+
+`U8 + U8` can overflow at `255 + 1`, while `U8 - U8` can underflow at `0 - 1`.
+Known values never choose a wider type to avoid either failure. A later cast
+or compound write-back forms a separate check.
 
 Failures include:
 
-- integer overflow, including `Uint` overflow and underflow against the selected unsigned range
-- division or remainder by zero, including `Uint` `//` and `%` zero divisors
-- invalid integer exponents, including `Uint` power result overflow
-- non-finite binary float results
-- a `Dec` operation with a zero divisor
-- a compound assignment whose promoted result cannot convert back to the left-hand type, including a `Uint` `/=` float result that cannot convert back
+- fixed-integer overflow or unsigned underflow in the selected result type
+- division or remainder by zero
+- signed minimum `// -1` overflow
+- invalid integer exponents
+- a non-finite binary-float result at the selected precision
+- a `Dec` operation with a zero divisor or invalid negative exponent
+- a compound update whose result cannot convert back to its target type
+
+`% -1` for a signed minimum remains zero and does not inherit the
+`// -1` overflow. Integer real division `/` returns `F64` and does not inherit
+the narrow integer quotient-overflow rule.
+
+### Binary-float completion
+
+Each binary-float operation finishes at its selected precision. In particular,
+`F16` rounds and checks finiteness after every language-level operation.
+`F32` may act as an implementation carrier for an `F16` operation, but cannot
+replace its rounding and finite check:
+
+[codeblock, $code("moth"):
+    too_large F16 = 65504.0 + 65504.0
+]
+
+The constant result exceeds finite `F16` and diagnoses even though `F32` can
+hold the intermediate. Runtime code must check the same boundary:
+
+[codeblock, $code("moth"):
+    double_f16 |value F16| -> F16, Error!:
+        return value + value
+    ;
+
+    result F16 = double_f16(65504.0) catch then 0.0
+]
+
+F16 completion also rounds between operations. With concrete `F16` operands,
+`(2048 + 1) - 2048` produces `0`, not `1`, because the first addition rounds
+to `F16`:
+
+[codeblock, $code("moth"):
+    large F16 = 2048
+    one F16 = 1
+    constant_round F16 = (large + one) - large
+]
+
+A runtime function must finish the same operations at `F16` precision:
+
+[codeblock, $code("moth"):
+    round_f16 |large F16| -> F16, Error!:
+        one F16 = 1
+        return (large + one) - large
+    ;
+
+    runtime_round F16 = round_f16(2048) catch then 0
+]
+
+Preserve direct literal and conversion rounding, signed zero and subnormals.
+Keep operation-specific numerical contracts rather than adding a new
+correctly-rounded Core Math promise.
 
 ### Failure delivery
 
-A function with builtin `Error!` as its error return slot materialises escaping
-implicit failure as `Error` and returns it through that slot.
+A function with builtin `Error!` as its error slot materialises escaping
+implicit failure as `Error`:
 
 [codeblock, $code("moth"):
-    divide |left Int, right Int| -> Float, Error!:
+    divide |left I32, right I32| -> F64, Error!:
         return left / right
     ;
 
-    ratio = divide(10, 0) catch:
-        then 0.0
-    ;
+    ratio = divide(10, 0) catch then 0.0
 ]
 
-- A private function with no error slot infers and propagates implicit failure within the same module. Internal calls need no postfix `!` for that failure.
-- A custom `E!` slot does not automatically convert implicit failure. Recover locally or explicitly map it to `E`.
-- An exported callable with no error slot must discharge implicit failure. The compiler diagnoses failure that could escape its public contract.
-- Entry-selected top-level runtime code runs in `start`, which has builtin `Error!`. Compatible top-level postfix `!` is legal; custom typed errors still need explicit recovery.
+- A private function with no error slot carries implicit failure through the existing same-module failure lane.
+- A custom `E!` slot does not automatically convert implicit failure. Recover locally or map it to `E`.
+- An exported callable without an error slot must discharge failure that could escape its public contract.
+- Entry-selected top-level runtime code runs in `start` with builtin `Error!`.
 
 Numeric operators remain ordinary source expressions. See
 @../errors/#error-returns (Error returns) for function contracts.
-@../progress (Progress) owns current compiler support.
 
 ### Expression recovery
 
-`catch` protects the complete selected expression, including arithmetic,
-receivers, arguments, nested calls and cast operands. Parentheses are not required:
+A `catch` protects the complete selected expression, including arithmetic,
+receivers, arguments, nested calls and cast operands. Parentheses are optional:
 
 [codeblock, $code("moth"):
-    total = left * right + offset catch:
-        then 0
-    ;
+    total = left * right + offset catch then 0
 ]
 
-Implicit failure and builtin `Error!` may share one handler. A bound error name
-has type `Error`; a typed `Error` keeps its message, code and identity, including
-code `0`. Custom `E!` mixed with implicit failure, or two distinct typed error
-types, is rejected. One custom error type with no implicit failure may share a
-handler.
+Catch eligibility can come from authored arithmetic even when a particular
+operation cannot fail. That eligibility does not claim a failure effect or
+create an error producer. See @../errors/#catch-and-recovery (Catch and
+recovery) for eligibility and handler rules.
 
-The existing placement and propagation conflicts still apply. See
-@../errors/#catch-and-recovery (Catch and recovery).
+Implicit failure and builtin `Error!` may share one handler. A bound error has
+type `Error`. A typed `Error` keeps its message, code and identity, including
+code `0`. A custom `E!` cannot mix with implicit failure or another typed error.
 
-### Conversion and write-back
+Catch does not turn a statically invalid operation into runtime recovery. A
+known overflow, invalid operator pair, out-of-range literal or other known
+numeric failure remains a compile-time diagnostic.
 
-`cast expression catch` protects both operand evaluation and conversion.
-`cast!` remains explicit conversion propagation through builtin `Error!`.
-See @../casts/#fallible-casts (Fallible casts).
+### Compound updates
 
-A catch on a compound assignment's right-hand expression protects that expression
-only. The later compound arithmetic and conversion back to the left-hand type
-remain separate checks. The store happens only after all required checks succeed.
-
-### Compile-time failures
-
-A statically known numeric failure is a compile-time diagnostic.
-
-This remains true inside a function with builtin `Error!` and inside an
-expression followed by `catch`.
-
-Statically rejected numeric forms are also diagnostics. They include unary minus
-on a typed `U*` or `Uint` value, a fixed integer operation with no common type, `//` on a
-binary float or a positive-scale `Dec`, `Uint`/`Int` arithmetic without an
-explicit conversion, and a literal that cannot materialise
-at its receiving type. See @./#operators (Operators) and @./#numeric-literals
-(Numeric literals).
+A compound update checks the revised arithmetic domain, then any required
+conversion back. The target changes only after both steps succeed. A catch on
+the right-hand expression protects that expression only; later arithmetic and
+write-back keep their own failure obligations. Same-type updates have no
+artificial widening and narrowing pair. `/=` uses the `F64` real-division
+result and the checked conversion back, while `//=` remains integer division.
 
 ### Optimisation
 
-A compiler proof can remove a runtime check only when it proves that a bounded
-integer operation or narrowing cannot fail. The proof is conservative and
-semantic: it reasons from type domains, not from backend carrier widths, so
-`U8 + U8 -> U32` cannot fail and carries no recoverable obligation. Discharge
-covers `Add`, `Subtract`, `Multiply` and `Negate` over fixed-width integer
-operand and result domains with full-range containment. `Float`, `Dec`, `Int`,
-`Uint` and `Byte` are excluded from this discharge, not proven fallible by it;
-whether such an operation can fail follows the failure catalogue above (exact
-`Dec` add, subtract, multiply and negate and binary-float negation carry no
-implicit failure; `Byte` has no arithmetic). `Divide`, `IntegerDivide`,
-`Remainder` and `Power`, and bounded results outside the domain, stay checked.
-Acceptance, required carriers, side effects and failure order stay identical in
-debug and release and across numeric profiles; check elision is an optional
-optimisation and never changes which programs are valid. A catch over a checked
-operation stays eligible even when proof removes its runtime failure path.
+A proof can omit a runtime check only when it proves that the particular
+fixed-integer operation stays inside its selected result type. The proof uses
+complete operand and result domains, not backend carrier widths or known
+values. It covers `Add`, `Subtract`, `Multiply` and `Negate` only when the full
+input ranges fit the output range. For example, `U8 + I8 -> I16` fits every
+operand pair, but `I8 + I8 -> I8` does not.
 
-Constant folding follows these same operator results and failure rules, so a
-folded program observes the same value or the same diagnostic as the runtime
-path.
+The proof does not discharge binary-float or `Dec` failure, nor `Divide`,
+`IntegerDivide`, `Remainder` or `Power`. A wider carrier never proves semantic
+safety. Check elision cannot change source acceptance, side effects or failure
+order. It behaves the same across build profiles and backends.
+
+An authored catch remains eligible if a proof removes its failure path, but
+that catch creates no runtime error edge. Folding and runtime execution use the
+same result types, rounding and failure rules.
 
 ### Related behaviour
 
 Range-loop counter updates use the same checked numeric operations. Assertions
 remain unrecoverable and checked in release. Allocation and stack exhaustion
-stay outside `catch`.
+and fatal foreign-value integrity guards stay outside `catch`.
 
-Conversions that may lose information, such as `Float -> Int`, belong to the
-Casts documentation rather than implicit arithmetic coercion. Compound
-assignment is the one receiving-context exception: it converts its promoted
-result back to the left-hand type through the same checked conversion. See
-@./#operators (Operators).
+Conversions that may lose information belong to
+@../casts (Casts). Compound write-back remains the receiving-context exception
+described in @./#operators (Operators).

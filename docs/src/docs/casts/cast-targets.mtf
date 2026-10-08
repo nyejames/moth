@@ -1,190 +1,99 @@
-Explicit casts target compiler-supported builtin types:
+`cast expression` needs a target from its immediate concrete receiving
+boundary. The target does not choose the source type. See
+@./#cast-syntax (Cast syntax) for the boundary rules.
 
-[codeblock, $code("moth"):
-    Bool
-    Int
-    String
-    Char
-    Float
-    Error
-]
+### Builtin targets
 
-Numeric targets are the profile-selected `Int`, `Uint` and `Float`, the fixed integer
-and binary float types, `Byte` and the `Dec` family.
+The eleven fixed numeric targets are:
 
-[codeblock, $code("text"):
-    integers:      Int, Uint, I8, I16, I32, I64, U8, U16, U32, U64
-    binary floats: Float, F16, F32, F64
-    other:         Byte, Dec, Dec0, Dec1 through Dec256
-]
+- Integers: `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`
+- Binary floats: `F16`, `F32`, `F64`
 
-A type being a valid target does not mean every source type can convert to it.
+Builtin conversion policies also cover `Byte`, `Dec`, `Dec0`, `Dec1` through
+`Dec256`, `Bool`, `String`, `Char` and `Error`. A target name being valid does
+not make every source-target pair valid.
 
-### Builtin cast table
+### Fixed numeric conversions
 
-- `Int -> Float` (infallible): Numeric conversion to finite `Float`
-- `Uint -> Float` (infallible): Direct unsigned conversion to finite `Float` at the selected precision, also available implicitly at value-receiving and mixed-operator boundaries
-- `Int -> String` (infallible): Base-10 signed integer text
-- `Uint -> String` (infallible): Base-10 unsigned integer text
-- `Float -> String` (infallible): Moth's stable float formatter
-- `Bool -> String` (infallible): `"true"` or `"false"`
-- `Char -> String` (infallible): One Unicode scalar as UTF-8 text
-- `Char -> Int` (infallible): Unicode scalar code point
-- `String -> Error` (infallible): Error message from the text with `U32` code `0`
-- `Error -> String` (infallible): The error message only
-- `Float -> Int` (fallible): Truncate toward zero, then require the `Int` range
-- `Float -> Uint` (fallible): Truncate toward zero, then require the selected unsigned range. `-0.5` truncates to zero and succeeds; `-1.0` fails
-- `Uint -> Int` (fallible): Exact conversion, requiring the selected signed range in every profile
-- `Int -> Uint` (fallible): Exact conversion, requiring the selected unsigned range in every profile
-- `Uint -> Dec` and `Uint -> DecN` (infallible): Exact integer conversion using the full unsigned value
-- `Dec` and `DecN -> Uint` (fallible): Exact integrality and unsigned range required
-- `String -> Uint` (fallible): Parse the complete unsigned whole-number grammar, rejecting `-0` and any non-whole spelling
-- `Int -> Char` (fallible): Require a valid Unicode scalar value
-- `String -> Int` (fallible): Parse the complete Moth integer text grammar
-- `String -> Float` (fallible): Parse the complete numeric grammar and require a finite result
-- `String -> Bool` (fallible): Trim surrounding whitespace, then accept exactly lowercase `true` or `false`
-- `String -> Char` (fallible): Require exactly one Unicode scalar
+Fallibility follows the complete source and target types, not a known value:
 
-`Uint` has no direct builtin conversion with `Byte`, `Char` or `Bool`.
-`Int` and `Uint` need an explicit cast between each other in both directions,
-even when the values would fit.
+- Fixed integer-to-integer conversion preserves the value. It is infallible when the complete source range fits the target and fallible otherwise.
+- Fixed integer-to-`F32` or `F64` conversion is infallible and may round. Conversion goes directly to the destination precision.
+- Fixed integer-to-`F16` is infallible only when the complete source range fits the finite `F16` range. Otherwise it is fallible.
+- Binary-float precision widening is infallible. Narrowing is fallible because a rounded result may become non-finite. Round directly to the destination, nearest with ties to even. Precision loss alone succeeds.
+- Binary-float-to-integer conversion is fallible. Truncate towards zero, then check the target range. `-0.5` truncates to zero and can convert to an unsigned target; `-1.0` fails.
 
-Same-type casts are invalid, including `Uint -> Uint`.
+For example, `U8 -> U16` is infallible, `U16 -> U8` is fallible and
+`F64 -> F16` is a direct narrowing conversion, never an `F64 -> F32 -> F16`
+chain. `U64 -> F32` converts directly without an intermediate binary64
+rounding step.
 
-No other builtin source-target pair is implied by the target list.
+For the complete `U64` value `9007199791611905`, direct conversion to `F32`
+produces bits `0x5a000001`. An intermediate `F64` conversion would collapse
+the value to `0x5a000000`.
 
-Numeric conversion is then classified by the complete source and target types.
+Integer-to-`Dec` and scale widening are exact and infallible. Scale narrowing
+and `Dec`-to-integer conversions are exact or fail: removed fractional digits
+must be zero and the full integer value must fit its target. `Dec` does not
+convert directly to or from a binary float.
 
-- Fixed integer to fixed integer is infallible when the complete source range fits the target range and fallible otherwise. `U8 -> U16` and `U8 -> I16` are infallible. `U16 -> U8` and `I8 -> U8` are fallible.
-- `Uint` converts to and from fixed integers with an explicit cast, infallible exactly when the complete source range fits the target range.
-- `Int`, `Uint`, `Float` and fixed-width values require an explicit cast between distinct types, even at a matching representation. Infallibility follows the complete ranges, so `Int -> I32` is infallible only when the selected `Int` width fits `I32`, and `Uint -> U32` is infallible only under a 32-bit `Int` profile.
-- Integer to `F32` or `F64` is infallible and may round. This covers both `Int` and `Uint` sources, and `Uint64` converts directly without a binary64 intermediate that could double-round. Integer to `F16` is infallible only when the complete source range fits the `F16` finite range, so `I32 -> F16` is a fallible finite-range conversion.
-- A conversion to a binary float of greater precision is infallible. A conversion to a narrower precision is fallible and rounds once, directly from the source precision. `F64 -> F32`, `F32 -> F16` and `F64 -> F16` are all fallible, and `F64 -> F16` is never a two-step `F64 -> F32 -> F16` conversion. `Float` uses the precision selected by the numeric profile.
-- Float to integer is fallible. It truncates toward zero, then checks the target range. `F64 -> I64` is one example, and `Float -> Uint` additionally rejects negative results below zero while `-0.5` still truncates to zero and succeeds.
-- `Byte -> U8` and `U8 -> Byte` are infallible in both directions. Other numeric `Byte` conversions compose through `U8` rather than forming a separate conversion lattice.
-- Integer to `Dec` or any `DecN` is exact and infallible, including `Uint` with its full unsigned value. Scale widening is exact and infallible.
-- Scale narrowing and `Dec` or `DecN` to integer are fallible exact conversions, including to `Uint`. Removed fractional digits must be zero and the integer must fit its explicit or profile-selected target.
-- Every numeric target accepts `String` through the complete numeric text grammar (fallible), including `Uint` with unsigned whole-number spelling. `Dec` and `DecN` parsing is exact at the target scale.
-- Every numeric target converts to `String` (infallible) through its canonical text, including unsigned `Uint` formatting with zero as `0`. `Byte` text conversion composes through `U8`, covering parsing and formatting.
+`Byte` and `U8` convert infallibly in both directions. Other numeric
+conversions involving `Byte` compose through `U8`. `Byte` remains distinct
+from `U8`; no receiving boundary silently changes one into the other.
 
-### Numeric conversion exactness
+`Byte` has no direct conversion to `Bool` or `Char`.
 
-A cast does not promise universal exactness. Binary float conversions round to
-nearest, ties-to-even. `Uint64` converts directly at the destination precision
-without a binary64 intermediate that could double-round. Float to integer truncates toward zero before the integer
-range check, so this conversion does not use the float-narrowing failure rule.
-Precision loss alone never fails a binary-float precision narrowing, and only a
-rounded non-finite result fails one.
+### Text and other builtin conversions
 
-Integer-to-integer conversion preserves the value exactly, including both `Int`
-and `Uint` sources. `Dec` scale
-widening is exact; scale narrowing and `Dec`-to-integer conversion are exact
-or fail, never rounded. Same-type casts remain invalid.
+- `String` parses the complete numeric grammar for fixed integers, binary floats, `Byte` and `Dec` targets. These conversions can fail.
+- Every numeric type formats to `String` infallibly using its canonical text. `Byte` composes through `U8`.
+- `String -> Bool` trims surrounding whitespace and accepts only lowercase `true` or `false`. It can fail.
+- `String -> Char` requires exactly one Unicode scalar and can fail.
+- `Char -> I32` returns the Unicode scalar code point. `I32 -> Char` can fail if the value is not a Unicode scalar.
+- `Bool -> String` and `Char -> String` are infallible.
+- `String -> Error` creates an error message with code `0`. `Error -> String` returns only the message. Both are infallible.
 
-No modulo, wrapping or saturating conversion is added to the language.
+Same-type casts are invalid. No cast acts as an identity conversion.
 
-### Implementation status
+No other source-target pair follows from this list. In particular, `Dec` and
+binary floats have no implicit mixing or direct cast pair.
 
-This reference owns the accepted cast contract. @../progress (Progress) owns
-current compiler and backend support. The Alpha compiler resolves the `Bool`,
-`Int`, `Uint`, `Float`, `String`, `Char` and `Error` targets, plus the fixed-width
-integer, fixed binary float and `Byte` targets for numeric and text conversions.
-Fixed-width casts fold at compile time. The frontend implements compiler-owned
-`Uint` and `Dec` cast policies; HTML-JS executes fixed-width, `Byte`, `Uint` and `Dec`
-runtime casts. The exercised HTML-JS `Dec` casts include infallible
-integer-to-`Dec` and scale widening; scale narrowing and
-`Dec`-to-integer conversions are exact and fallible. `String`-to-`Dec`
-parsing is fallible and consumes the whole existing numeric grammar exactly;
-`Dec`-to-`String` uses canonical formatting. The exercised HTML-JS `Uint`
-casts include `Uint`/`Int` and `Uint`/fixed-integer conversions in both
-directions, direct `Uint`-to-`Float` conversion, `Uint`/`Dec` conversions and
-`String`/`Uint` text conversion with unsigned formatting.
+### Exactness and numeric text
 
-HTML-Wasm executes infallible numeric expression casts that do not involve
-`F16`, as well as integer-to-`F16` and widening `F16`-to-`F32`/`F64`, plus
-`Byte -> U8` and `U8 -> Byte`. F32/F64-to-F16 narrowing and other
-numeric-to-numeric casts from F16 remain target-gated. It supports infallible
-integer-to-`String` expression casts from profile `Int` and fixed
-signed/unsigned integers. `Float`/`F16`/`F32`/`F64`-to-`String` formatting is
-a separate integrity guard, not implicit numeric failure: it halts on a
-non-finite input unless a declared builtin `Error!` contract returns it.
-Reachable `Dec` values and signatures, including nested types and
-generated-function uses, remain Wasm-rejected; unreachable private helpers do
-not gate the target.
+A cast does not promise universal exactness. Integer-to-integer conversions
+preserve values. Binary-float conversions round to nearest, ties-to-even.
+Binary-float-to-integer conversions truncate towards zero before the range check.
+Decimal scale narrowing and decimal-to-integer conversions require exactness
+and never round.
 
-On HTML-Wasm, remaining fallible casts, conversions involving `Bool`, `Char`
-or `Error` (including `Char -> Int`), `String` parsing, statement-form casts,
-source-level external `Float` imports and their finite-boundary validation,
-and reachable `ReturnError` `FormatFloat`/`ValidateFloat` remain target-rejected.
+Numeric text consumes the whole string. Parsing rejects surrounding whitespace,
+unary `+`, uppercase exponent markers, malformed separators or exponents,
+`NaN` and infinity spellings. Unsigned integer targets also reject a leading
+minus, including `-0`. A grammar-valid float spelling still fails if its
+rounded result becomes non-finite.
 
-### Target source
+Binary-float formatting normalises negative zero to `0` and uses lowercase
+exponents when exponential notation is needed. Decimal formatting trims
+fractional trailing zeroes, uses a leading zero before fractions and never
+emits exponent notation or negative zero. Unsigned integer formatting uses
+base ten and writes zero as `0`.
 
-The target must come from the immediate typed boundary.
-
-Valid target boundaries include:
-
-- an annotated declaration or assignment
-- an explicit return slot
-- a concrete function parameter
-- a struct or choice field
-- a default value
-- a typed collection or map entry
-- a compiler-owned typed assertion argument slot (`condition: Bool` or `message: String?`)
-- a `then` arm whose enclosing value-producing block has an explicit receiver
-
-Unsolved generic parameter slots are not cast targets. A generic struct or
-choice field becomes one only after the expected result fixes its parameter, as
-in `boxed Box of U16 = Box(cast small)`. Generic inference does not look through
-`cast`.
-
-These positions do not supply cast targets:
-
-- conditions
-- loop conditions
-- template interpolation
-- operator operands
-- expression statements
-- untyped declarations
-
-[codeblock, $code("moth"):
-    -- INVALID: these positions do not supply cast targets
-    value = cast source
-
-    if cast value:
-        io.line("invalid")
-    ;
-
-    [: [cast value]]
-]
-
-The forms above are invalid because no immediate builtin target exists.
+No modulo, wrapping or saturating conversion exists.
 
 ### Optional receiving contexts
 
-A `T?` receiving context casts to inner `T`, then applies normal contextual
-wrapping to `T?`.
-
-Optional source values are not automatically unwrapped.
-
-In:
+A `T?` receiver casts to inner `T`, then applies ordinary optional wrapping.
+The recovery handler also produces `T`; it cannot use `then none`. Optional
+source values never unwrap automatically.
 
 [codeblock, $code("moth"):
-    target T? = cast source catch:
-        then fallback
+    parse_optional |text String| -> I32?:
+        value I32 = cast text catch:
+            return none
+        ;
+        return value
     ;
 ]
 
-the recovery handler produces inner `T`. `then none` is invalid because
-recovery happens before optional wrapping.
-
-### Numeric and text details
-
-- `String -> Int`, `String -> Uint`, `String -> Float` and every other numeric text conversion consume the whole string.
-- Numeric text rejects surrounding whitespace, uppercase exponent markers, unary plus, malformed separators, malformed exponents, `NaN` and infinity spellings. Unsigned `Uint` text additionally rejects a leading `-`, including `-0`.
-- Binary float text conversion additionally rejects a grammar-valid non-finite result.
-- Every integer target materialises inside its own range. The `Int` and `Uint` ranges follow the selected profile, with `Uint` spanning the unsigned width.
-- `Uint` formats as unsigned base-10 text, with zero always formatted as `0`.
-- Binary float to `String` normalises negative zero to `0` and uses lowercase exponent formatting when exponential notation is required.
-- `Dec` to `String` uses canonical `Dec` text with fractional trailing zeroes trimmed, no exponent notation, no negative zero and a leading zero before a fractional value.
-- `Byte` and `U8` remain nominally distinct. No receiving boundary widens one into the other silently.
-- Contextual `Int -> Float` promotion remains separate from explicit casting, though explicit `cast` is valid from a naturally `Int` source to a `Float` target. Contextual `Uint -> Float` promotion is likewise separate from its explicit cast form.
+The Progress matrix owns current compiler and backend support:
+@../progress (Progress).

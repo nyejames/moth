@@ -95,14 +95,14 @@ All three use the handle ABI. They carry no source-visible fields.
 
     [td:
         [: `timestamp_from_unix_seconds(seconds)`]
-        [: `Float`]
+        [: `F64`]
         [: `Timestamp`]
         [: no]
     ]
 
     [td:
         [: `timestamp_from_unix_milliseconds(milliseconds)`]
-        [: `Float`]
+        [: `F64`]
         [: `Timestamp`]
         [: no]
     ]
@@ -137,14 +137,14 @@ All three use the handle ABI. They carry no source-visible fields.
 
     [td:
         [: `duration_from_seconds(seconds)`]
-        [: `Float`]
+        [: `F64`]
         [: `Duration`]
         [: no]
     ]
 
     [td:
         [: `duration_from_milliseconds(milliseconds)`]
-        [: `Float`]
+        [: `F64`]
         [: `Duration`]
         [: no]
     ]
@@ -152,14 +152,14 @@ All three use the handle ABI. They carry no source-visible fields.
     [td:
         [: `as_seconds(duration)`]
         [: `Duration`]
-        [: `Float`]
+        [: `F64`]
         [: no]
     ]
 
     [td:
         [: `as_milliseconds(duration)`]
         [: `Duration`]
-        [: `Float`]
+        [: `F64`]
         [: no]
     ]
 
@@ -200,7 +200,7 @@ All three use the handle ABI. They carry no source-visible fields.
 
     [td:
         [: `duration_scale(duration, factor)`]
-        [: `Duration, Float`]
+        [: `Duration, F64`]
         [: `Duration`]
         [: no]
     ]
@@ -221,14 +221,14 @@ All three use the handle ABI. They carry no source-visible fields.
     [td:
         [: `unix_seconds(timestamp)`]
         [: `Timestamp`]
-        [: `Float`]
+        [: `F64`]
         [: no]
     ]
 
     [td:
         [: `unix_milliseconds(timestamp)`]
         [: `Timestamp`]
-        [: `Float`]
+        [: `F64`]
         [: no]
     ]
 
@@ -276,21 +276,21 @@ Fractional seconds resolve to milliseconds. Digits beyond the third are truncate
 
 `to_iso_string` renders the same format with a `Z` designator and exactly three fractional digits. Rendering requires an instant between `0000-01-01T00:00:00.000Z` and `9999-12-31T23:59:59.999Z`, the window the four-digit year spelling can express, so every rendered string parses back through `timestamp_from_iso_string`. An instant outside that window returns builtin error code 311 through `Error!`, and the window is tested before truncation, so a fractional instant just outside it is rejected rather than pulled in. A fractional millisecond inside the window is truncated toward zero before rendering. Parsing applies the same window after the offset is converted, so accepted text naming an instant outside it also returns code 311.
 
-Duration arithmetic is addition, subtraction and multiplication of millisecond quantities. It is exact while the operands and the result stay within the whole numbers a `Float` represents exactly, a range far wider than the renderable window; beyond that it rounds like any other `Float` arithmetic, so adding one millisecond to a duration of `1e16` milliseconds returns the same duration. Because the arithmetic functions return opaque values, a result that leaves the finite `Float` range is not rejected where the arithmetic happens: it is rejected with builtin error code 304 when the duration is read as a `Float` by `as_seconds` or `as_milliseconds`, at the shared external `Float` boundary.
+Duration arithmetic is addition, subtraction and multiplication of millisecond quantities. It is exact while the operands and the result stay within the whole numbers an `F64` represents exactly, a range far wider than the renderable window; beyond that it rounds like any other `F64` arithmetic, so adding one millisecond to a duration of `1e16` milliseconds returns the same duration. Because the arithmetic functions return opaque values, a result that leaves the finite `F64` range is not rejected where the arithmetic happens: it is rejected with builtin error code 304 when the duration is read as an `F64` by `as_seconds` or `as_milliseconds`, at the shared external `F64` boundary.
 
 `clamp(duration, min, max)` is the composition `min(max(duration, min), max)`, so when `min` exceeds `max` the upper bound wins and the result is `max`.
 
-A duration whose quantity has already left the finite range is still a valid opaque `Duration`, and whether it is outside the range when it is read depends on what is applied to it. `clamp` can bring an infinite quantity back between its bounds, and that clamped result is an ordinary finite duration. A quantity that is not a number, which repeated arithmetic can reach by scaling an overflowed duration by zero, propagates through `abs` and `clamp` instead, and no bound recovers it. `is_negative` answers from the same comparison with zero as it does for any duration, so it is `false` for a quantity that is not a number and `true` only for a quantity below zero. The composition rule and the reversed-bound result above hold whenever the operands hold a number. Any quantity still outside the finite range when a `Float` accessor reads it is rejected with builtin error code 304.
+A duration whose quantity has already left the finite range is still a valid opaque `Duration`, and whether it is outside the range when it is read depends on what is applied to it. `clamp` can bring an infinite quantity back between its bounds, and that clamped result is an ordinary finite duration. A quantity that is not a number, which repeated arithmetic can reach by scaling an overflowed duration by zero, propagates through `abs` and `clamp` instead, and no bound recovers it. `is_negative` answers from the same comparison with zero as it does for any duration, so it is `false` for a quantity that is not a number and `true` only for a quantity below zero. The composition rule and the reversed-bound result above hold whenever the operands hold a number. Any quantity still outside the finite range when an `F64` accessor reads it is rejected with builtin error code 304.
 
-Every `Float` reaching this package is already finite, because `NaN` and the infinities are never valid Moth `Float` values, so the package validates no argument of its own. The four `Float`-returning accessors `as_seconds`, `as_milliseconds`, `unix_seconds` and `unix_milliseconds` are checked by that shared boundary.
+Every `F64` reaching this package is already finite, because `NaN` and the infinities are never valid Moth `F64` values, so the package validates no argument of its own. The four `F64`-returning accessors `as_seconds`, `as_milliseconds`, `unix_seconds` and `unix_milliseconds` are checked by that shared boundary.
 
 `Duration`, `TimeMark` and `Timestamp` support no equality, no ordering and no use as map keys. Compare durations through `as_milliseconds` and timestamps through `unix_milliseconds`.
 
-Every failure this package itself detects is observable in Moth as a returned `Error!`. The one failure it delegates is a non-finite `Float` result at the shared external boundary. That Moth-owned check is a fatal integrity guard, not implicit built-in failure: it halts unless a declared builtin `Error!` contract returns it. No function in this package throws a host error of its own. See @../../../progress (Progress) for current support.
+Every failure this package itself detects is observable in Moth as a returned `Error!`. The one failure it delegates is a non-finite `F64` result at the shared external boundary. That Moth-owned check is a fatal integrity guard, not implicit built-in failure: it halts unless a declared builtin `Error!` contract returns it. Safety-catch eligibility does not turn this guard into a recoverable failure. No function in this package throws a host error of its own. See @../../../progress (Progress) for current support.
 
 ### Access and return contracts
 
-All parameters use shared access. No function requires mutable access. All return values stay fresh. `timestamp_from_iso_string` returns through `Error!` on text outside the accepted ISO format and on accepted text whose offset-adjusted instant leaves the renderable window. `to_iso_string` returns through `Error!` when the instant lies outside that window. Every other function declares no typed error slot; a non-finite `Float` at that shared boundary still halts unless a declared builtin `Error!` contract returns it.
+All parameters use shared access. No function requires mutable access. All return values stay fresh. `timestamp_from_iso_string` returns through `Error!` on text outside the accepted ISO format and on accepted text whose offset-adjusted instant leaves the renderable window. `to_iso_string` returns through `Error!` when the instant lies outside that window. Every other function declares no typed error slot; a non-finite `F64` at that shared boundary still halts unless a declared builtin `Error!` contract returns it.
 
 ### Backend behaviour
 

@@ -36,7 +36,7 @@ For every compiler task, read the authority text and `Architectural invariants`.
 | Typing, calls, directives, constants or casts | Relevant Stage 4 subsection | The feature's accepted language contract |
 | Multiple results and Core constant evaluation | Stage 4 > `Result slots and receiving boundaries` and `Core external constant evaluation` | Stage 5 > `Result channels` and routed memory references |
 | Wiring | Stage 4 > `Wiring boundary` | The accepted Wiring source contract named there |
-| Numeric identities, literals and profiles | `Numeric model and profile` and Stage 4 > `Numeric typing and literal materialisation` | Stage 5 > `Numeric ownership` and build bootstrap |
+| Numeric identities, literals and arithmetic | `Exact numeric identities and physical representation` and Stage 4 > `Numeric typing and literal materialisation` | Stage 5 > `Numeric ownership` and build-input materialisation |
 | Templates and structural strings | Stage 4 > `Templates and TIR` and `File values and resources` | Canonical template/resource references and build resource linking |
 | HIR lowering and validation | Stage 5 | The producing Stage 4 owner and consuming analysis or lowerer |
 | Borrow validation and transfer facts | Stage 6 | The memory overview's borrow-validation route |
@@ -60,7 +60,7 @@ For every compiler task, read the authority text and `Architectural invariants`.
 - Ordinary static `if` validates both branches before selecting executable work and preserves the selected lexical scope. Structural `$feature` selection is a separate pre-graph contract.
 - Authored physical file references establish graph/input validity before executable reachability. Exact output liveness neither creates nor retracts graph membership.
 - File values are `String`, with structural resource and site-root pieces until builder placement. Semantic origins, authored uses, byte sources and rendered URLs remain distinct.
-- Source cannot select or inspect physical targets. One boundary-wide `NumericProfile` fixes the semantic `Int` width and `Float` precision independently of target partition and build profile.
+- Source cannot select or inspect physical targets. The language has one exact numeric identity for each fixed width and precision. Target partition, build profile and backend never select semantic numeric types.
 - TIR is AST-local. Completed AST and HIR contain folded values or neutral owned runtime data, never TIR authority. HIR is the first backend-facing semantic IR.
 - Zero, one and multiple results remain ordered semantic slots, with a separate error channel. They do not manufacture tuple types. Wiring capabilities do not turn strings into live templates.
 - Borrow and lifetime-topology validation are mandatory. GC choice and build profile preserve access/lifetime legality. Physical planning cannot repair invalid topology or reject legal source because an optimisation failed.
@@ -110,7 +110,7 @@ bind provider interfaces
 -> validate and return the module result with its generated delta
 ```
 
-Summary-dependent source/generated work converges inside this transaction. Every published source and generated function has validated HIR, borrow facts and local lifetime facts, with any conservative integer proofs paired to that exact executable. Link-level lifecycle validation remains a later operation.
+Summary-dependent source/generated work converges inside this transaction. Every published source and generated function has validated HIR, borrow facts and local lifetime facts, with any conservative integer proofs paired to that exact executable. Pending numeric construction state and recipes never cross publication. Link-level lifecycle validation remains a later operation.
 
 A new local semantic stage belongs inside this service. Normal modules, support modules, project facades and synthetic single-file modules use it after preparation. The compiler receives compiler-owned options, not the project tool's configuration container.
 
@@ -128,7 +128,6 @@ A module input contains:
 - graph-resolved providers and immutable dependency-ordered interfaces
 - the selected namespace and capability surface
 - resolved configuration values and visible synthetic compile-time interfaces
-- the boundary `NumericProfile`
 - final source identities and the diagnostic identity context
 
 Stage 2 defines prepared syntax and bound headers. Binding consumes retained dependency clauses without retokenizing or reparsing. Provider-created bindings can exist before source compilation. A source provider must publish its public interface before consumer binding.
@@ -150,7 +149,7 @@ Separate four consumer lanes:
 | Lane | Contract |
 |---|---|
 | `PublicSemanticInterface` | Complete canonical facts visible to semantic consumers, defined under `Public semantic interfaces`. |
-| `ModuleExecutable` | Module-local `TypeEnvironment`, validated HIR, borrow facts and local lifetime/escape facts, plus optional profile-aware integer proofs paired with the executable. |
+| `ModuleExecutable` | Module-local `TypeEnvironment`, validated HIR, borrow facts and local lifetime/escape facts, plus optional canonical integer proofs paired with the executable. |
 | `ModuleLinkFacts` | Backend-neutral per-function facts and generated materialisation requests, defined under `Per-function link facts`. |
 | `ModuleCompilerMetadata` | Dormant root activity, folded fragments and runtime insertion indexes, folded root metadata, documentation/API-index data, semantic resource origins and non-executable uses, site-root use and warnings. |
 
@@ -222,7 +221,7 @@ Moving an exported declaration between ordinary files in one module preserves id
 
 ### Type identity
 
-Each compiled module owns one `TypeEnvironment`. Module-local semantic equality compares its `TypeId` handles. Interfaces instead carry canonical identities for builtins, nominal structs and choices, transparent aliases, constructed types such as options/collections/maps, concrete generic instances, exported generic parameters and binding-backed external types. Numeric identities retain width, signedness, precision or scale as applicable.
+Each compiled module owns one `TypeEnvironment`. Module-local semantic equality compares its `TypeId` handles. Interfaces instead carry canonical identities for builtins, nominal structs and choices, transparent aliases, constructed types such as options/collections/maps, concrete generic instances, exported generic parameters and binding-backed external types. Numeric identities retain exact width, signedness, precision or scale as applicable. Construction-only numeric unknowns never become `TypeId`s or canonical identities.
 
 A consumer interns dependency types into local handles with a canonical-origin map. Cross-module equality compares canonical identity, never rendered names or unrelated local handles. After resolution, `DataType` is parse/diagnostic vocabulary only. Mutability and shared/exclusive access remain classifications, not manufactured type shapes.
 
@@ -238,35 +237,38 @@ Binding-backed packages expose stable package/symbol identities, opaque types, c
 
 Binding metadata maps to imports, helpers, glue or native operations after HIR. WIT component discovery validates a supported foreign profile and projects it once into canonical Moth types and binding identities. AST and HIR carry no WIT syntax. The value-only V1 profile crosses independent semantic values, retains no Moth reference and returns independent Moth result graphs. Backend planning retains the closed boundary classification needed for Canonical ABI lowering.
 
-Foreign `s8` through `s64` and `u8` through `u64` map to explicit `I*` and `U*` types. Foreign `f32`/`f64` map to `F32`/`F64`, not `Float`. `u8` does not imply `Byte`. The baseline WIT profile has no `f16` primitive, so `F16` needs an explicit foreign conversion or bit-representation contract. Correcting a foreign carrier never changes a Moth-native Core or Builder signature declared with `Int` or `Float`.
+Foreign `s8` through `s64` and `u8` through `u64` map to explicit `I*` and `U*` types. Foreign `f32`/`f64` map to `F32`/`F64`. `u8` does not imply `Byte`. The baseline WIT profile has no `f16` primitive, so `F16` needs an explicit foreign conversion or bit-representation contract. Foreign ABI carriers never select or rewrite a Moth-native Core or Builder type.
 
 `Error.code` is a runtime Moth `U32` value with default `0`. It is distinct from compiler diagnostic codes, process-local IDs and Rust MON error codes. Its representation follows the ordinary numeric and runtime Error contracts.
 
 An optional WIT-compatible export projects a package facade for foreign consumers without replacing its Moth interface or hiding Moth-only declarations. The bare `io` namespace is Core IO prelude policy, not a package category.
 
-## Numeric model and profile
+## Exact numeric identities and physical representation
 
-The canonical numeric and cast references routed by `docs/src/developer-docs/language/overview.mtf` own the complete numeric contract. This section owns compiler identities, profile propagation and separation from physical representation, not another operator matrix.
+The canonical numeric and cast references routed by `docs/src/developer-docs/language/overview.mtf` own the complete source contract and operator matrix. This section owns compiler identities and their separation from physical representation. Stage 4 > `Numeric typing and literal materialisation` owns construction-only inference and its publication boundary.
 
 ### Canonical numeric identities
 
-The numeric types are `Int`, `Uint`, `Float`, `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`, `F16`, `F32`, `F64` and the `Dec` family, with scales `Dec0` through `Dec256`. `Uint` follows the profile-selected `Int` width, so it is `Uint32` under `Int32` and `Uint64` under `Int64`. `Byte` is a separate octet scalar, nominally distinct from `U8`, `I8` and `Char`, with no arithmetic.
+The bounded numeric types are exactly:
 
-`Int`, `Uint` and `Float` keep distinct canonical identities even when their selected precision matches a fixed-width type. `Dec0` aliases the scale-zero `Dec` identity. Other `DecN` types carry scale in identity. Leading-zero scales and scales above 256 are invalid.
+```text
+Signed integers:    I8, I16, I32, I64
+Unsigned integers:  U8, U16, U32, U64
+Binary floats:      F16, F32, F64
+```
 
-### Compilation-wide numeric profile
+`Byte` remains a separate octet scalar, nominally distinct from `U8`, `I8` and `Char`, with no arithmetic. `Dec` and `Dec0` share the scale-zero identity. `Dec1` through `Dec256` retain their scale-specific identities. Leading-zero scales and scales above 256 are invalid.
 
-`NumericProfile` independently selects 32- or 64-bit `Int` and `Float`. The default is 32-bit `Int` and 64-bit `Float`, and therefore `Uint32`. `Uint` follows that selection with no separate setting. The builder settles it before command-input materialisation and config compilation. It has no source, directive, build-input or command-line selection syntax.
-
-The profile is fixed across directly linked Moth modules, generated functions, Core/Builder source packages and Moth-source dependencies. It never varies by function, target partition or development/release representation. Incompatible precompiled Moth artefacts require a matching build or rejection, never silent numeric adaptation. Foreign components retain explicit foreign types and separate value boundaries.
-
-The profile affects numeric materialisation, folding, overflow limits, rounding, diagnostics and ABI/layout facts. `Uint` scalar element stride is 4 or 8 bytes where compact scalar storage is supported, following the selected `Int` width. Every numeric compiler service consumes it, including synthetic sources, config, direct templates and MON schema preparation. Existing fingerprint and compatibility owners include profile-dependent facts, including private implementation behaviour. They do not form a separate numeric cache system.
+An otherwise unconstrained whole literal defaults to `I32`, and an otherwise unconstrained binary-float literal defaults to `F64`. The grammar has no unsigned-literal category or unsigned default. Literal size never selects a type: an unconstrained whole value outside `I32` is diagnosed, while a `U64` receiver can materialise the full `U64` range directly. These defaults are language policy, not a builder or project setting.
 
 ### Semantic and physical separation
 
-Promotion, comparison, conversion, rounding and failure follow the accepted language rules on every target. Arithmetic checks its semantic result domain, not a narrow operand's storage width. Operator promotion does not authorise receiving coercions. Cast evidence follows source/target policy rather than an optimiser's proof about one value.
+The numeric references own the full operator and conversion tables. D15 makes equal fixed types retain their type for eligible arithmetic and selects the smallest supported common domain for mixed operands. No 32-bit integer or `F32` floor remains. Checked integer results fail at the selected result width. Every binary-float operation completes at its selected precision: `F16` rounds and checks finiteness after each language-level operation, even when a wider carrier computes it. Fixed-integer comparison remains exact for every pair, including `I64` and `U64`, without requiring a common arithmetic type.
 
-Semantic type, scalar storage layout and computation carrier remain distinct. A Wasm carrier's wrapping or truncating behaviour is not Moth arithmetic. Lowerers cannot substitute wrapping, saturation or arbitrary precision for a required checked result. Compile-time and runtime operations preserve the same failure order and rounding boundaries.
+Source-visible lengths, capacities, collection/map positional indices and fixed count-like builtin arguments use `I32`, with a maximum of `2_147_483_647` subject to stricter target or resource limits. Range counters retain their selected exact numeric type. Decimal exponentiation receives an `I32` exponent and keeps the base scale: `DecN ^ I32 -> DecN`.
+Allocation byte products, offsets, alignment and address calculations use suitable checked physical-size/offset representations and arithmetic, independent of source-visible `I32` counts. A valid `I32` element count neither permits a byte-product overflow nor requires the physical byte size to fit in `I32`; for example, 300,000,000 `I64` elements represent 2.4 GB where target and resource limits permit. The backend's scalar-storage section owns this physical boundary.
+
+Semantic type, scalar storage layout and computation carrier remain distinct. A Wasm carrier's wrapping or truncating behaviour is not Moth arithmetic. A wider register or scratch value may implement a checked operation, but cannot widen its result or delay its required check. Lowerers preserve exact identities, finite values, checked failures and rounding boundaries on every target. Build profiles and physical variants may change analysis effort, layout or allocation strategy, never the language's numeric types.
 
 `Frontend stages > Stage 5: HIR and validation > Numeric ownership` defines layer responsibilities. `Backend-facing compiler handoff > Numeric scalar storage and carriers` defines physical handoff ownership.
 
@@ -324,7 +326,7 @@ Each successful base module has five distinct fingerprint domains:
 
 Generated requests come from the active specialised AST. They are materialisation dependencies carried with link data, not runtime-dependency fingerprint contents. A changed request set follows implementation invalidation and updates the generated sidecars. Sidecars retain their own implementation, runtime and compatibility fingerprints.
 
-Configuration values and `NumericProfile` participate in whichever existing domains they affect. Configuration may change folded values, executable behaviour and derived public, root or link facts while preserving declaration/export existence and declaration-origin identity. Provenance survives folding. Structural `$feature` selection requires separate selection-compatibility facts, not ordinary configuration folding.
+Resolved exact numeric types and values participate in the existing fingerprint domains they affect. Configuration may change folded values, executable behaviour and derived public, root or link facts while preserving declaration/export existence and declaration-origin identity. Provenance survives folding. Structural `$feature` selection requires separate selection-compatibility facts, not ordinary configuration folding.
 
 Private implicit-failure changes use the existing implementation, dormant-root activity and runtime-dependency facts they affect. They create no new fingerprint domain.
 
@@ -338,7 +340,7 @@ A request key contains the stable generic declaration, canonical concrete type i
 
 The compiler canonicalises and deduplicates requests against an immutable view of published instances and work completed within its transaction. It owns materialisation, HIR validation, borrow analysis, lifetime/escape analysis, call-summary installation and semantic convergence. The build system owns the published set, sidecar storage, placement, reuse and atomic publication with the requesting module.
 
-Each sidecar owns its concrete HIR, generated-local type environment or immutable canonical-to-local delta, borrow/lifetime facts, complete effect summaries, link facts, fingerprints and its own numeric proof table computed from its HIR under the boundary profile after validation. It neither borrows the requester's mutable type environment nor extends the declaring dependency artefact. Its compatibility includes the boundary `NumericProfile`.
+Each sidecar owns its concrete HIR, generated-local type environment or immutable canonical-to-local delta, borrow/lifetime facts, complete effect summaries, link facts, fingerprints and its own canonical numeric proof table computed from that executable's validated HIR before publication. It neither borrows the requester's mutable type environment nor extends the declaring dependency artefact. Its generated key and compatibility use concrete canonical types, evidence and the applicable ABI/language version, never a pending numeric recipe or semantic profile.
 
 Nested requests, including cross-module and cross-package requests, converge inside the requesting compiler transaction using the declaring artefact's retained context. They never create another source-module job or alter provider-wave ordering. Build code does not filter requests later or rerun analyses to complete them.
 
@@ -423,7 +425,7 @@ The service owns the bundle's source database and live span builders through fol
 
 #### Project config compilation service
 
-One named compiler service prepares the single authored config source, binds its permitted compiler surface, orders declarations and performs AST checking/folding. It consumes the boundary `NumericProfile` and stops at folded values, with no HIR, borrow facts, link facts or public module interface.
+One named compiler service prepares the single authored config source, binds its permitted compiler surface, orders declarations and performs AST checking/folding. It applies the same exact numeric types and `I32`/`F64` defaults as source compilation and returns only folded values, with no HIR, borrow facts, link facts or public module interface.
 
 It returns typed folded directive arguments, input-contract results, original key/argument locations and diagnostics. Build-owned config consumers apply the settings. They do not scan recognised record names or compose compiler stages.
 
@@ -450,8 +452,9 @@ Its owners cover body-local declarations, generic inference/evidence, traits/con
 The semantic order is:
 
 ```text
-parse and type-check complete authored bodies
--> fold constants and final compile-time expressions
+construct each authored body and collect its eligible numeric constraints
+-> resolve body-local numeric origins, defaults and conflicts; finish body checking
+-> fold constants and final compile-time expressions at their owning boundaries
 -> specialise known-Bool if branches
 -> derive active generated requests and executable summaries
 -> validate active terminality
@@ -460,11 +463,15 @@ parse and type-check complete authored bodies
 
 This specifies dependencies, not a fixed count of internal passes. `Static Bool control-flow specialisation` defines exactly what remains validated and what selection removes.
 
-The frontend owns one implicit-failure fact on expression and function summaries. Checked numeric failure is implicit built-in failure, delivered by the enclosing handler or function contract without wrapping or an implicit panic. Private functions without an error slot infer and propagate it inside the same module without postfix `!` at each internal call. This inferred failure is an internal lane, not a public effect row or a third error channel.
+AST records actual implicit-failure contributors separately from authored catch eligibility at each occurrence. Checked numeric failure is implicit built-in failure, delivered by the enclosing handler or function contract without wrapping or an implicit panic. Private functions without an error slot infer and propagate actual failure inside the same module without postfix `!` at each internal call. This inferred failure is an internal lane, not a public effect row or a third error channel.
 
 Built-in `Error!` materialises that failure as an `Error` value. A custom `E!` does not: its body needs local recovery or explicit mapping. Export validation requires callables without an error slot to discharge bare failure before publication and diagnoses those that do not. Handler selection and typed-error compatibility stay frontend-owned.
 
-Statically known invalid numeric work remains a source diagnostic, including inside `Error!` and `catch`. Compound write-back checks conversion to the destination separately and writes only after success.
+Statically known invalid numeric work remains a source diagnostic, including inside `Error!` and `catch`; catch eligibility never suppresses it. Compound write-back checks conversion to the destination separately and writes only after success.
+
+Catch eligibility is occurrence-local safety syntax, not evidence that an expression can fail. A well-typed authored cast or arithmetic operation (including unary negation), at least two function/member calls at the selected expression level, or an actual compatible recoverable producer can make an expression eligible. Receiver-chain and sibling-operand calls count at that level; calls inside an argument are counted by that argument's own level and do not increase its parent count. An actually fallible nested argument still contributes its real failure to the protected expression and follows ordinary handler/function-contract delivery; only its call is excluded from the parent's authored count. Eligibility alone adds no error type, failure contributor or recoverable-runtime capability.
+
+Handler types and fallback constraints are validated before failure analysis, even when a protected operation later proves infallible. A missing provisional summary is not proof of no failure and cannot justify removing a handler. Pruning waits for the relevant source/generated summaries and private failure-lane installation to converge; HIR revalidation and affected borrow, numeric-proof and link analyses precede publication.
 
 #### Dependencies and visibility
 
@@ -486,7 +493,8 @@ Separate these responsibilities at their real owners:
 
 | Owner | Retained facts |
 |---|---|
-| Parser and receiving-context scratch | Unresolved numeric spelling, operator stacks and incomplete construction while their immediate context is being resolved. These states do not escape as completed semantic expressions. |
+| Parser and receiving-context scratch | Unresolved numeric spelling/category handles, operator stacks and incomplete construction. These states live only until their owning body or expression boundary resolves them. |
+| Body-local numeric construction | Explicit unresolved numeric origins, eligible constraint relationships and authored span witnesses for one executable body; no general type variables, placeholder `TypeId`s or persisted inference recipes. |
 | Declarations and symbols | Declaration identity, visibility, binding mode, receiver identity and links to any real initialiser. A declaration without an initialiser does not manufacture a `NoValue` expression. |
 | Callable and constructor contracts | Resolved parameter types, access/capability requirements, defaults, receiver information and success/error signature. Parsing, inference and validation borrow the same contract and retain one argument-slot mapping. |
 | Semantic expression store | Resolved value-producing operations, compact graph edges and authoritative result shapes. Zero results remain a real shape, distinct from a missing default. |
@@ -520,23 +528,38 @@ Source misuse receives a typed arity/type diagnostic at its receiving site. A co
 
 #### Numeric typing and literal materialisation
 
-AST consumes the boundary `NumericProfile` for `Int`, `Uint` and `Float`. Fixed-width types, `Byte` and `Dec` scales are profile-independent.
+AST constructs one numeric resolution state per executable body, including the body root and nested control flow. A binding has one static type. The state is numeric-only and construction-owned: it retains unresolved literal origins, lexical category/spelling handles and source-span witnesses, plus eligible numeric constraints. It is not a general unknown type, a placeholder `TypeId`, a second AST or a durable expression recipe. Resolved structure remains fixed while numeric leaves are pending.
 
-Numeric literals retain source-local spelling until a destination is known:
+Constraints come only from eligible exact receiving boundaries and numeric equalities: annotations, writes/copies of one binding, concrete parameter and result slots, fields, typed collection entries, value-producing receivers, and equality links through copies or an existing numeric generic parameter. No value/range guesses, trait/effect/backend choices, search over conversions or callee-body inspection choose a type. One generic signature can connect existing numeric origins; each concrete generic body gets its own state.
 
-- An unconstrained whole literal defaults to `Int`. Decimal/exponent spelling defaults to `Float`. Small values never infer a narrow type by size.
-- A direct typed receiver materialises a lone literal of the requested numeric type without an `Int` intermediate. A `U64` literal can therefore exceed the default `Int` range.
-- A concrete `Dec` or `Uint` receiver additionally types unresolved literal arithmetic before operator typing and folding. The `Dec` scale flows down raw arithmetic and parenthesised groups to pending literal leaves, which materialise directly at that scale; an explicit `Uint` receiver reaches unresolved whole-number leaves the same way at the selected unsigned width. Without an explicit receiver, a typed `Dec` peer supplies its scale to a wholly literal-only opposite subtree from either side, while a local typed `Uint` peer supplies `Uint` the same way. Only `Dec` and `Uint` peers extend to compound literal subtrees, with different exponent rules: `Dec` context never crosses a power exponent edge, a cast operand, a call argument, a comparison or logical operator, a typed suffix needing a completed value, or an unresolved generic slot, while a raw `Uint` exponent receives `Uint` context too.
-- Whole literals may initialise binary floats, `Uint` and the `Dec` family. Decimal/exponent spelling never initialises an integer, `Uint` or `Byte` merely because its mathematical value is integral.
-- Binary float literals round directly to the destination using round-to-nearest, ties-to-even. Inexact finite values are valid. Rounded non-finite results fail. Subnormals and signed zero are preserved.
-- Signed integer minima materialise with their sign without first rejecting the positive magnitude. Negative values cannot initialise unsigned types or `Byte`.
-- `Dec` uses its exact decimal scale rule, not binary literal rounding. Each leaf must fit the selected scale exactly. A `Uint` leaf must fit the selected unsigned width.
+The body considers all eligible uses before defaulting. Priority is exact receiving context, then a local concrete numeric peer for unresolved literal arithmetic, then the language default. Conflicting exact constraints produce a deterministic diagnostic with both constraint locations; traversal order, source order, hashing and worker scheduling never select a winner. An unconstrained whole origin defaults to `I32`, and an unconstrained decimal/exponent binary-float origin to `F64`. Literal size never selects a narrower or wider type, so an unconstrained whole value outside `I32` is diagnosed.
 
-An immediate concrete numeric peer may type an otherwise untyped lone literal before operator promotion. A literal outside that peer's range is diagnosed. A receiving annotation does not retrospectively retag an already typed operator result. Typed operands keep their identities. Generic inference uses these local rules, without distant conversion search. Parentheses preserve grouping without adding a receiving boundary.
+Receiving context reaches unresolved raw numeric leaves through arithmetic and grouping, including raw literal leaves beside already named operands. It stops at binding references, concrete values or results, explicit cast operands, comparison/logical result boundaries and the decimal-power exponent edge. A call argument uses its parameter slot's established context: an exact concrete type when known, or an existing numeric origin/equality carried by the same generic type parameter. A call result is normally a barrier, except that a concrete existing generic signature may carry the same numeric origin through an established parameter/result equality, such as `T -> T`; this forwards only that origin. An unresolved generic slot without that numeric-only equality remains a barrier. An expected result never searches the callee body, creates an unrestricted generic unknown or retags a concrete result. A local numeric peer supplies context only to unresolved raw literal arithmetic, never to retag an existing named operand or result.
 
-Groups retain their infix syntax as pending fragments until ordering flattens them into one RPN stream. Destination selection runs on the ordered stream before literal materialisation, materialisation runs before operator typing and operator typing runs before named-constant substitution and folding. Completed AST and HIR retain resolved semantic values only. Neither pending form survives there.
+For example, the raw `1` receives `I64` in the first body while the named `base` remains `I32`:
 
-Materialisation never routes through a fixed `i32`/`f64` bottleneck. Operator promotion, comparison and cast eligibility remain separate decisions. The canonical numeric and cast references own their matrices and checked result domains.
+```moth
+base I32 = 10
+total I64 = base + 1
+```
+
+The later `U64` use does not infer backwards through the completed named addition in the second body, so `base` defaults to `I32` and the call is rejected:
+
+```moth
+base = 1
+twice = base + base
+take_u64(twice)
+```
+
+An independent eligible `take_u64(base)` constraint can resolve the binding before forward promotion. An existing generic identity signature `T -> T` can also connect its argument and result numeric origin: `value = identity(1); take_u64(value)` selects `U64` from the later use. This is signature equality only; the compiler does not inspect `identity`'s body, and each concrete instance still receives its own body-local state.
+
+Whole literals may initialise fixed integers, binary floats and `Dec` directly at the resolved destination; they never pass through an `I32` intermediary. Decimal/exponent spelling cannot initialise an integer or `Byte` merely because its mathematical value is integral. Binary floats round directly to `F16`, `F32` or `F64` using round-to-nearest, ties-to-even; inexact finite values, subnormals and signed zero are preserved, and a non-finite rounded value is rejected. Signed minima materialise with their sign without first rejecting the positive magnitude; negative values cannot initialise unsigned types or `Byte`. `DecN` materialises against its exact decimal scale, with no binary rounding and no scale inference from value.
+
+The shared `moth-lexical` owner supplies spelling classification and destination-aware materialisation without a fixed `i32`/`f64` bottleneck. The compiler selects the destination and owns `TypeId` resolution, operator rules and semantic folding. Compile-time constants resolve at their declaration boundary. Config, direct-template and other synthetic single-file services finish the same exact types and defaults before returning; no unresolved body state escapes.
+
+Canonical numeric references own the full operator matrix. D15 checks each result in its selected semantic type: equal fixed-type operands keep that type and an out-of-range result fails there rather than widening. Mixed types use the smallest supported common operand domain, with no 32-bit floor. Binary-float operations complete at their selected precision; every `F16` result is rounded and checked for finiteness before a later operation consumes it, even where an `F32` carrier performs the computation. Storage size and carrier width do not widen the semantic result. Comparison, explicit casts, assignment compatibility and operator selection remain separate decisions.
+
+Groups retain their infix syntax as pending fragments until ordering flattens them into one RPN stream. Destination selection resolves permitted numeric leaves before materialisation, which precedes operator typing, named-constant substitution and folding. Completed AST and HIR retain canonical exact values and types only; no pending unknown, constraint recipe or numeric construction state survives body finalisation or publication.
 
 #### Core external constant evaluation
 
@@ -616,7 +639,7 @@ The declaring module validates immutable generic templates. At a call, AST infer
 
 `ModuleMaterialisationPreparation` is retained separately from the executable `Ast` and its expression store. Before HIR lowering consumes the `Ast` or that store is released, project the generic body to stable owned syntax and capture canonical owned callable signatures, receiver/type facts, folded defaults and module constants. The preparation contains no expression IDs, expression views or borrows into the completed expression store. Keep it through same-module generated requests and summary convergence. Freeze the stable generic context after those readers finish, then release preparation.
 
-Active calls emit requests under `Generated concrete functions`. HIR and backends receive concrete targets, never unresolved generic inference or evidence work. Generic materialisation preserves result-slot, numeric-profile, source-identity and Wiring contracts.
+Active calls emit requests under `Generated concrete functions`. HIR and backends receive concrete targets, never unresolved generic inference or evidence work. Generic materialisation preserves result-slot, exact numeric, source-identity and Wiring contracts.
 
 #### Traits, conformances and casts
 
@@ -624,9 +647,11 @@ Headers retain trait/conformance shells. AST resolves requirement types, stable 
 
 Traits are compile-time contracts, not value types. Static bound calls become concrete executable targets before HIR. No trait object, erased dispatch or runtime evidence crosses that boundary.
 
-Cast evidence proves that an explicit source/target conversion is permitted. Builtin conversions use compiler-defined policy. Source-authored evidence comes from explicit conformance of an eligible same-file nominal source type to a compiler-owned cast trait, together with its required receiver method. Matching method shape alone is insufficient. Fallible/infallible evidence for the same target remains mutually exclusive.
+Cast evidence proves that an explicit source/target conversion is permitted. The sole source spelling is plain `cast expression`; its target must be an already concrete type supplied by the immediate eligible typed receiver. That target is not a constraint on the cast operand: the source resolves independently, and the cast boundary blocks outer receiving context. A later use cannot retype either side.
 
-AST resolves evidence and folds permitted conversions. Builtin runtime conversions become explicit HIR cast operations. Source-authored evidence becomes an ordinary direct source-function call before or during HIR lowering. Evidence metadata itself never enters HIR.
+Builtin conversions use compiler-defined policy. Source-authored evidence comes from explicit conformance of an eligible same-file nominal source type to a compiler-owned cast trait, together with its required receiver method. Fixed-width numeric cast evidence covers exactly `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`, `F16`, `F32` and `F64`; `Byte` and `Dec` are excluded. Matching method shape alone is insufficient. Fallible/infallible evidence for the same target remains mutually exclusive.
+
+AST resolves evidence and folds permitted conversions. Builtin runtime conversions become explicit HIR cast operations. A cast that can fail follows the ordinary implicit failure contract (`catch`, `Error!` or the private same-module lane); no `cast!` form or separate cast-failure channel exists. Source-authored evidence becomes an ordinary direct source-function call before or during HIR lowering. Evidence metadata itself never enters HIR.
 
 Contextual coercion remains separate from explicit casting. User-defined cast targets, generic target parameters, opaque foreign targets and a general user conversion framework are not implied. The canonical cast references own eligibility, handling syntax and the numeric target table.
 
@@ -816,7 +841,7 @@ Value-producing branches and catch recovery join individual slots through ordina
 
 HIR makes implicit-failure edges, handler joins and built-in `Error` materialisation explicit. The private inferred lane preserves the same success/failure exclusion: success slots do not exist on failure edges. Handlers and propagation consume frontend-owned contracts rather than reconstructing expression coverage or error compatibility.
 
-The private same-module failure lane uses the same explicit success/error control-flow contract. Any shared physical carrier belongs to the target ABI only. The lane adds no public or foreign result contract, global last-error variable, semantic aggregate or fabricated payload extraction. Installing the lane and pruning obsolete handlers preserve slot definitions, CFG validation and final link facts.
+The private same-module failure lane uses the same explicit success/error control-flow contract. Any shared physical carrier belongs to the target ABI only. The lane adds no public or foreign result contract, global last-error variable, semantic aggregate or fabricated payload extraction. Pruning waits until all relevant source/generated failure summaries converge and the private lane is installed; a missing provisional summary is not evidence of infallibility. It removes unreachable handler HIR and dead executable contributions, calls, captures, generated requests, link facts and capability requirements. The rewritten HIR is revalidated and affected borrow, numeric-proof and link analyses are refreshed before publication.
 
 JavaScript may pack results into a private array/object and external wrappers may translate their success/error envelope at the ABI boundary. Supported Wasm result types use native ordered results through function types, calls and returns. Unsupported aggregate, handle or fallible ABI capabilities receive the normal target diagnostic until their lowering contract exists. ABI storage alone creates no source allocation family and merges no result lifetimes.
 
@@ -838,16 +863,18 @@ The module artefact validator, not HIR validation, checks folded fragments and t
 
 #### Numeric ownership
 
-- `moth-lexical` owns shared numeric leaf facts: spelling grammar and classification, token-free materialisation, precision-aware formatting, fixed scalar identities, width/profile/precision vocabulary and borrowed decimal scale/text facts. It owns neither compiler type lookup nor a general numeric runtime.
-- `moth` owns semantic numeric typing, receiving rules, promotion, constant evaluation and cast evidence. Its immutable Dec coefficients and exact arithmetic retain the compiler's `num-bigint`, `num-integer` and `num-traits` dependencies rather than moving them into either extracted crate.
-- HIR records canonical numeric domain, operator and failure mode, not backend helper names or one statement family per target. `NumericFailureMode` selects the disposition required by the enclosing handler or function contract. A backend never infers it from the function name.
-- Compile-time and runtime operations round/fail at the same semantic boundaries. `Dec` rounds at every language-level operation result.
-- Semantic discharge is separate from check elision. The pure predicate `numeric_operation_cannot_fail`, beside the promotion table, proves fixed-width integer `Add`/`Subtract`/`Multiply`/`Negate` infallible when the operands' complete canonical ranges keep the mathematical result inside the result domain (for example `U8 + U8 -> U32`). It reads types only, never a `NumericProfile` or build profile. AST failure facts and HIR emission call it with the same pre-promotion operand domains: a discharged operation keeps catch eligibility, records no implicit contributor and lowers as a `NumericOp` with `NumericFailureMode::Infallible`, which backends lower like `Trap` and which never requests the recoverable-numeric Wasm capability or becomes a private-lane producer.
-- `NumericProofs` is an optional sparse side table of proven-safe integer operations and fallible integer narrowings, keyed by HIR statement id and stamped with one `NumericProfile`. Each base executable and generated sidecar computes its own table from that executable's validated HIR before publication; facts stay paired with that exact immutable executable. Summary convergence itself does not alter numeric statements. After convergence, the private failure lane rewrites escaping private checked operations from trap delivery to `ReturnError`. That changes failure delivery, not which results are valid.
-- An absent or empty table, a missing statement fact or a profile-mismatched query retains runtime checks; statement ids need no remap. The analysis reads HIR without mutating it and changes neither source acceptance, AST evidence nor target gates.
+- `moth-lexical` owns shared numeric leaf facts: spelling grammar and category, token-free direct materialisation into an explicit destination, precision-aware formatting, exact fixed scalar identities and borrowed decimal scale/text facts. It owns neither compiler type lookup nor a general numeric runtime.
+- `moth` owns semantic numeric typing, body-local receiving rules, promotion, constant evaluation and cast evidence. Its immutable Dec coefficients and exact arithmetic retain the compiler's `num-bigint`, `num-integer` and `num-traits` dependencies rather than moving them into either extracted crate.
+- HIR records the canonical exact numeric domain, operator and actual failure mode, not backend helper names or one statement family per target. `NumericFailureMode` selects failure delivery required by the enclosing handler or function contract. A backend never infers it from a name or catch-eligibility marker.
+- Compile-time and runtime operations preserve the same selected-width checks and rounding boundaries. `Dec` applies its exact scale rule at each operation result. Each `F16` operation rounds and checks finiteness before its result feeds another operation, even if an `F32` carrier computes it.
+- D15's mixed integer domain contains the complete operand ranges, not every possible mathematical result. Equal integer types retain their width, so `U8 + U8 -> U8` may overflow; a mixed signed/unsigned pair uses the smallest signed width containing both ranges, with no 32-bit floor. The canonical operator reference owns the full table and its explicit exceptions.
+- Safety catch eligibility remains separate from actual operation failure. Proving an operation infallible does not remove authored eligibility, but adds no failure contributor or recoverable capability. Statically invalid selected-width work remains a diagnostic in every handler context.
+- Semantic discharge is separate from check elision. The pure predicate `numeric_operation_cannot_fail`, beside the promotion table, proves fixed-width integer `Add`/`Subtract`/`Multiply`/`Negate` infallible only after applying the particular operation to the complete canonical operand ranges and proving every mathematical result lies within the selected result domain. D15's mixed-domain selection contains the complete input ranges, not every operation result: `U8 + U8 -> U8` may reach 510, and negating the minimum `I8` value may produce 128, so both can fail at their selected widths. By contrast, adding the complete `I8` and `U8` ranges yields `[-128, 382]`, which lies inside `I16` for `I8 + U8 -> I16`. The predicate reads exact types, never a semantic or build profile. AST failure facts and HIR emission use the same exact operation, operand and result predicate. Only an operation proven safe gets `NumericFailureMode::Infallible` on its `NumericOp`; backends implement it without a recoverable numeric failure edge or Wasm capability.
+- `NumericProofs` is an optional sparse side table of proven-safe integer operations and fallible integer narrowings, keyed by HIR statement id and paired with that executable's exact validated HIR. Each base executable and generated sidecar computes its own table from final validated HIR before publication. It carries no semantic-profile stamp and is never detached into a public or cross-executable proof identity. Summary convergence alone does not alter numeric operations; if private-lane installation or handler pruning rewrites HIR, affected proof analysis is refreshed.
+- An absent or empty table or a missing statement fact retains runtime checks; statement ids need no remap. The analysis reads HIR without mutating it and changes neither source acceptance, AST evidence nor target gates.
 - The analysis derives closed `i128` intervals from canonical integer bounds, including the complete `U64` range, fixed integer literals and infallible integer casts. It walks each block independently with a single last-written-local cache. Every write invalidates the earlier fact: a direct-local assignment replaces it with its new interval, while projected writes clear the cache; calls and unknown statements also clear it. If checked endpoint arithmetic cannot represent an intermediate in `i128`, the analysis declines proof.
-- `Power`, real division, `Byte`, `Float`, binary floats and the language `Dec` domain never prove. Lowerers elide only a proven predicate they support; source validity, evaluation and failure order, and required recovery or narrowing carriers remain unchanged.
-- Target validation checks reachable numeric capabilities. Lowerers consume the boundary profile, canonical domain and physical plan rather than parallel width tables.
+- `Power`, real division, `Byte`, `F16`, `F32`, `F64` and the language `Dec` domain never prove. Lowerers elide only a proven predicate they support; source validity, evaluation and failure order, and required recovery or narrowing carriers remain unchanged.
+- Target validation checks reachable exact operations and target capabilities. Lowerers consume canonical HIR numeric domains and the physical plan rather than parallel width tables or semantic profile inputs.
 - Binary-float and Dec formatting use the common value-to-string boundary for templates and runtime lowering.
 
 Target-specific check elision remains a lowerer responsibility; each backend consumes only the proof classes it supports. Check elision is independent of failure delivery and preserves explicit failure continuations. Scalar size, alignment and computation carriers remain distinct from semantic numeric identity. Broader numeric proof algorithms remain deferred.
@@ -892,7 +919,7 @@ Closed external profiles restrict transfer: WIT value-only and restricted host-v
 
 Wire identity is not a persistent value borrow. Ordinary reads, captures, mutations and their lifetimes still undergo normal validation. Fresh rvalues passed to mutable call slots become hidden locals before checking, without becoming legal mutable receivers merely because they were materialised.
 
-GC-native targets may ignore physical affine-cleanup facts but cannot skip access or lifetime-topology validation. Collector choice preserves these source-law decisions. Numeric-profile differences and target capability checks remain separate contracts.
+GC-native targets may ignore physical affine-cleanup facts but cannot skip access or lifetime-topology validation. Collector choice preserves these source-law decisions. Exact numeric operations are target-independent; unsupported reachable operations receive target diagnostics rather than different semantic widths.
 
 ## Lifetime-region and escape validation
 
@@ -987,9 +1014,9 @@ Target validation precedes physical memory planning. A failed physical refinemen
 A lowerer receives only explicit validated inputs:
 
 - selected module/generated HIR and paired type environments
-- the boundary `NumericProfile` and stable call targets
+- canonical exact numeric domains in selected HIR and stable call targets
 - borrow/lifetime facts and exported summaries where needed as validation context
-- paired profile-aware numeric-proof facts for predicate elision only; they do not change source legality or mutate HIR
+- numeric-proof facts paired to the exact validated HIR for predicate elision only; they do not change source legality or mutate HIR
 - the variant's `ValidatedMemoryPlan`
 - closed external-boundary classifications
 - per-function link facts and selected function/import/export/capability plans
@@ -1010,7 +1037,7 @@ Scalar metadata alone creates no allocation family and moves no aggregate-layout
 
 ## Rust-only MON service
 
-The standalone Rust crate `moth-mon` owns the isolated literal-data codec. Its allowed dependency direction is `moth` -> `moth-mon` -> `moth-lexical`, with a direct `moth` -> `moth-lexical` edge. Neither extracted crate depends on `moth` or `xtask`, including development and build dependencies. Independent Rust consumers depend on `moth-mon` without linking the compiler. The supported `pub use moth_mon as mon;` convenience re-export exposes the same API and Rust types, not a compatibility shim, wrapper or second implementation. Canonical Rust API documentation belongs to `moth-mon`. The codec receives complete caller-supplied text or values and a prepared schema, then returns owned data or encoded text. It performs no project discovery, file IO, module compilation, expression evaluation or backend lowering.
+The standalone Rust crate `moth-mon` owns the isolated literal-data codec. Its allowed dependency direction is `moth` -> `moth-mon` -> `moth-lexical`, with a direct `moth` -> `moth-lexical` edge. Neither extracted crate depends on `moth` or `xtask`, including development and build dependencies. Independent Rust consumers depend on `moth-mon` without linking the compiler. The supported `pub use moth_mon as mon;` convenience re-export exposes the same API and Rust types, not a wrapper or second implementation. Canonical Rust API documentation belongs to `moth-mon`. The codec receives complete caller-supplied text or values and a prepared exact schema, then returns owned data or encoded text. It performs no project discovery, file IO, module compilation, expression evaluation or backend lowering.
 
 `moth-lexical` also owns the shared identifier character rules, source-word
 inventory and reserved user-name predicate. Its numeric ownership appears
@@ -1033,7 +1060,7 @@ The literal reader uses a bounded MON cursor, not AST expression parsing, compil
 
 A caller prepares and validates its finite schema/default tree once, then reuses it immutably. Schema eligibility is transitive. Owned decoded values remain valid after the caller releases input, with no public borrowed document view, alias preservation or cyclic value graph. Internal borrowing during a call is permitted.
 
-Schema preparation captures `NumericProfile` for `Int`/`Uint`/`Float`, defaulting to the standard profile for standalone Rust callers. `Uint` follows the profile `Int` width there too. Explicit-width and Byte schemas are profile-independent. The accepted numeric extension covers all fixed widths, `Uint`, Byte and Dec scales through 256 without another numeric parser. Integer/Byte targets require whole-number spelling, with `Uint` applying the shared unsigned policy and retaining the full `u64` payload, fixed floats use direct binary rounding and Dec conversion remains exact. Encoding preserves typed round trips, including signed zero. Map-key schemas include `Uint`, fixed integers and Byte, while binary floats and Dec remain excluded.
+MON is schema-directed literal data, not source inference. A prepared schema records concrete receiver contracts, never a stored source semantic profile or `Schema::with_profile` selection. Explicit-width schema variants retain their own range/precision limits. `SchemaType::Integer` names the MON receiver contract, not the removed Moth source `Int`; lossless `Integer` and `Decimal` value data remain owned MON values without source-type aliases. Shared `moth-lexical` materialisation applies the chosen receiver directly, while MON preserves its independent bounded parsing, finite/default checks, negative zero, integer map-key identity, insertion order, duplicate-key behavior and owned output/error contexts.
 
 ### Publication and receiving contracts
 

@@ -767,7 +767,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
-    <p><code>@web/canvas</code> provides 2D canvas drawing as a builder binding-backed runtime package. It belongs to the Builder origin family with ExternalBinding backing, so the compiler registers typed external functions and opaque types from annotated JavaScript. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><p><code>@web/canvas</code> ships as a skeleton. The current surface covers element management, context state, rectangles, paths, text, gradients, patterns, image drawing, image data and pixel access. It will grow as the language stabilises and the first-party packages expand.</p><h3 id="dependency-roots">Dependency roots</h3><p>Bind individual symbols or the whole namespace:</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@web/canvas</span> <span class='moth-code-nominal'>get_canvas</span>, <span class='moth-code-nominal'>context_2d</span>, <span class='moth-code-nominal'>fill_rect</span>
+    <p><code>@web/canvas</code> provides 2D canvas drawing as a builder binding-backed runtime package. It belongs to the Builder origin family with ExternalBinding backing, so the compiler registers typed external functions and opaque types from annotated JavaScript. See <a href="../../#package-origins-and-backing">Package origins and backing</a> for origin and backing rules.</p><p><code>@web/canvas</code> ships as a skeleton. The current surface covers element management, context state, rectangles, paths, text, gradients, patterns, image drawing, image data and pixel access. It will grow as the language stabilises and the first-party packages expand.</p><p>The accepted numeric API uses I32 dimensions/indices and F64 coordinates and measurements. That exact cutover remains pending in the profile-based Alpha implementation. It preserves existing ranges, units, foreign contracts and the Wasm gap rather than expanding binding support.</p><h3 id="dependency-roots">Dependency roots</h3><p>Bind individual symbols or the whole namespace:</p><pre style=""><code class='codeblock'><span class='moth-code-string'>@web/canvas</span> <span class='moth-code-nominal'>get_canvas</span>, <span class='moth-code-nominal'>context_2d</span>, <span class='moth-code-nominal'>fill_rect</span>
 
 <span class='moth-code-string'>@web/canvas</span></code></pre><h3 id="opaque-types">Opaque types</h3><p><code>@web/canvas</code> exposes seven opaque handle types. They have no public fields, cannot be constructed with struct syntax and must not be inspected directly. You obtain them only through <code>@web/canvas</code> functions.</p><table style="">
             
@@ -808,35 +808,35 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
                 <tr style="">
              <td style=""><p> <code>get_canvas</code></p></td> <td style=""><p> <code>id String</code></p></td> <td style=""><p> <code>CanvasElement, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>create_canvas</code></p></td> <td style=""><p> <code>width Int, height Int</code></p></td> <td style=""><p> <code>CanvasElement</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>create_canvas</code></p></td> <td style=""><p> <code>width I32, height I32</code></p></td> <td style=""><p> <code>CanvasElement</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
              <td style=""><p> <code>get_image</code></p></td> <td style=""><p> <code>id String</code></p></td> <td style=""><p> <code>CanvasImage, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
              <td style=""><p> <code>create_image</code></p></td> <td style=""><p> <code>src String</code></p></td> <td style=""><p> <code>CanvasImage</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>create_image_with_size</code></p></td> <td style=""><p> <code>src String, width Int, height Int</code></p></td> <td style=""><p> <code>CanvasImage</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>create_image_with_size</code></p></td> <td style=""><p> <code>src String, width I32, height I32</code></p></td> <td style=""><p> <code>CanvasImage</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
              <td style=""><p> <code>context_2d</code></p></td> <td style=""><p> <code>canvas CanvasElement</code></p></td> <td style=""><p> <code>Canvas2d, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>canvas_width</code></p></td> <td style=""><p> <code>canvas CanvasElement</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>canvas_width</code></p></td> <td style=""><p> <code>canvas CanvasElement</code></p></td> <td style=""><p> <code>I32</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>canvas_height</code></p></td> <td style=""><p> <code>canvas CanvasElement</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>canvas_height</code></p></td> <td style=""><p> <code>canvas CanvasElement</code></p></td> <td style=""><p> <code>I32</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>canvas_client_width</code></p></td> <td style=""><p> <code>canvas CanvasElement</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>canvas_client_width</code></p></td> <td style=""><p> <code>canvas CanvasElement</code></p></td> <td style=""><p> <code>I32</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>canvas_client_height</code></p></td> <td style=""><p> <code>canvas CanvasElement</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>canvas_client_height</code></p></td> <td style=""><p> <code>canvas CanvasElement</code></p></td> <td style=""><p> <code>I32</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>set_canvas_width</code></p></td> <td style=""><p> <code>canvas ~CanvasElement, width Int</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>set_canvas_width</code></p></td> <td style=""><p> <code>canvas ~CanvasElement, width I32</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>set_canvas_height</code></p></td> <td style=""><p> <code>canvas ~CanvasElement, height Int</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>set_canvas_height</code></p></td> <td style=""><p> <code>canvas ~CanvasElement, height I32</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>set_canvas_size</code></p></td> <td style=""><p> <code>canvas ~CanvasElement, width Int, height Int</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>set_canvas_size</code></p></td> <td style=""><p> <code>canvas ~CanvasElement, width I32, height I32</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>to_data_url</code></p></td> <td style=""><p> <code>canvas CanvasElement</code></p></td> <td style=""><p> <code>String, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
              <td style=""><p> <code>to_data_url_type</code></p></td> <td style=""><p> <code>canvas CanvasElement, mime_type String</code></p></td> <td style=""><p> <code>String, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>to_data_url_quality</code></p></td> <td style=""><p> <code>canvas CanvasElement, mime_type String, quality Float</code></p></td> <td style=""><p> <code>String, Error!</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>to_data_url_quality</code></p></td> <td style=""><p> <code>canvas CanvasElement, mime_type String, quality F64</code></p></td> <td style=""><p> <code>String, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr>
             
 </table><h3 id="image-queries">Image queries</h3><table style="">
@@ -850,13 +850,13 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
 
 
                 <tr style="">
-             <td style=""><p> <code>image_width</code></p></td> <td style=""><p> <code>image CanvasImage</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>image_width</code></p></td> <td style=""><p> <code>image CanvasImage</code></p></td> <td style=""><p> <code>I32</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>image_height</code></p></td> <td style=""><p> <code>image CanvasImage</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>image_height</code></p></td> <td style=""><p> <code>image CanvasImage</code></p></td> <td style=""><p> <code>I32</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>image_natural_width</code></p></td> <td style=""><p> <code>image CanvasImage</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>image_natural_width</code></p></td> <td style=""><p> <code>image CanvasImage</code></p></td> <td style=""><p> <code>I32</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>image_natural_height</code></p></td> <td style=""><p> <code>image CanvasImage</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>image_natural_height</code></p></td> <td style=""><p> <code>image CanvasImage</code></p></td> <td style=""><p> <code>I32</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
              <td style=""><p> <code>image_is_loaded</code></p></td> <td style=""><p> <code>image CanvasImage</code></p></td> <td style=""><p> <code>Bool</code></p></td> <td style=""><p> shared</p></td>
         </tr>
@@ -892,11 +892,11 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
 
 
                 <tr style="">
-             <td style=""><p> <code>clear_rect</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>clear_rect</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x F64, y F64, width F64, height F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>fill_rect</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>fill_rect</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x F64, y F64, width F64, height F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>stroke_rect</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>stroke_rect</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x F64, y F64, width F64, height F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr>
             
 </table><h3 id="fill-and-stroke-style">Fill and stroke style</h3><table style="">
@@ -934,7 +934,7 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
 
 
                 <tr style="">
-             <td style=""><p> <code>set_global_alpha</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, alpha Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>set_global_alpha</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, alpha F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>set_global_composite_operation</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, operation String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr>
@@ -950,19 +950,19 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
 
 
                 <tr style="">
-             <td style=""><p> <code>set_line_width</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, width Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>set_line_width</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, width F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>set_line_cap</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, line_cap String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>set_line_join</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, line_join String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>set_miter_limit</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, limit Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>set_miter_limit</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, limit F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>set_line_dash</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, dash Float, gap Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>set_line_dash</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, dash F64, gap F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>set_line_dash_solid</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>set_line_dash_offset</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, offset Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>set_line_dash_offset</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, offset F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr>
             
 </table><h3 id="text-rendering-settings">Text rendering settings</h3><table style="">
@@ -1018,9 +1018,9 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
         </tr><tr style="">
              <td style=""><p> <code>set_shadow_color</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, color String</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>set_shadow_blur</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, blur Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>set_shadow_blur</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, blur F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>set_shadow_offset</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>set_shadow_offset</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x F64, y F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr>
             
 </table><h3 id="path-construction">Path construction</h3><table style="">
@@ -1036,29 +1036,29 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
                 <tr style="">
              <td style=""><p> <code>begin_path</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>move_to</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>move_to</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x F64, y F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>line_to</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>line_to</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x F64, y F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>close_path</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>rect</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>rect</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x F64, y F64, width F64, height F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>round_rect</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, width Float, height Float, radius Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>round_rect</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x F64, y F64, width F64, height F64, radius F64</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>arc</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, radius Float, start_angle Float, end_angle Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>arc</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x F64, y F64, radius F64, start_angle F64, end_angle F64</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>arc_counterclockwise</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, radius Float, start_angle Float, end_angle Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>arc_counterclockwise</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x F64, y F64, radius F64, start_angle F64, end_angle F64</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>arc_to</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x1 Float, y1 Float, x2 Float, y2 Float, radius Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>arc_to</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x1 F64, y1 F64, x2 F64, y2 F64, radius F64</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>quadratic_curve_to</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, cpx Float, cpy Float, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>quadratic_curve_to</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, cpx F64, cpy F64, x F64, y F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>bezier_curve_to</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, cp1x Float, cp1y Float, cp2x Float, cp2y Float, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>bezier_curve_to</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, cp1x F64, cp1y F64, cp2x F64, cp2y F64, x F64, y F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>ellipse</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, radius_x Float, radius_y Float, rotation Float, start_angle Float, end_angle Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>ellipse</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x F64, y F64, radius_x F64, radius_y F64, rotation F64, start_angle F64, end_angle F64</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>ellipse_counterclockwise</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float, radius_x Float, radius_y Float, rotation Float, start_angle Float, end_angle Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>ellipse_counterclockwise</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x F64, y F64, radius_x F64, radius_y F64, rotation F64, start_angle F64, end_angle F64</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr>
             
 </table><h3 id="fill-stroke-and-clip">Fill, stroke and clip</h3><table style="">
@@ -1082,9 +1082,9 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
         </tr><tr style="">
              <td style=""><p> <code>clip_even_odd</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>is_point_in_path</code></p></td> <td style=""><p> <code>ctx Canvas2d, x Float, y Float</code></p></td> <td style=""><p> <code>Bool</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>is_point_in_path</code></p></td> <td style=""><p> <code>ctx Canvas2d, x F64, y F64</code></p></td> <td style=""><p> <code>Bool</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>is_point_in_stroke</code></p></td> <td style=""><p> <code>ctx Canvas2d, x Float, y Float</code></p></td> <td style=""><p> <code>Bool</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>is_point_in_stroke</code></p></td> <td style=""><p> <code>ctx Canvas2d, x F64, y F64</code></p></td> <td style=""><p> <code>Bool</code></p></td> <td style=""><p> shared</p></td>
         </tr>
             
 </table><h3 id="transformations">Transformations</h3><table style="">
@@ -1098,15 +1098,15 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
 
 
                 <tr style="">
-             <td style=""><p> <code>translate</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>translate</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x F64, y F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>rotate</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, angle Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>rotate</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, angle F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>scale</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>scale</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, x F64, y F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>transform</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, a Float, b Float, c Float, d Float, e Float, f Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>transform</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, a F64, b F64, c F64, d F64, e F64, f F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>set_transform</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, a Float, b Float, c Float, d Float, e Float, f Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>set_transform</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, a F64, b F64, c F64, d F64, e F64, f F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>reset_transform</code></p></td> <td style=""><p> <code>ctx ~Canvas2d</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr>
@@ -1122,13 +1122,13 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
 
 
                 <tr style="">
-             <td style=""><p> <code>fill_text</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, text String, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>fill_text</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, text String, x F64, y F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>fill_text_max_width</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, text String, x Float, y Float, max_width Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>fill_text_max_width</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, text String, x F64, y F64, max_width F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>stroke_text</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, text String, x Float, y Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>stroke_text</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, text String, x F64, y F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>stroke_text_max_width</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, text String, x Float, y Float, max_width Float</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>stroke_text_max_width</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, text String, x F64, y F64, max_width F64</code></p></td> <td style=""><p> void</p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
              <td style=""><p> <code>measure_text</code></p></td> <td style=""><p> <code>ctx Canvas2d, text String</code></p></td> <td style=""><p> <code>CanvasTextMetrics</code></p></td> <td style=""><p> shared</p></td>
         </tr>
@@ -1144,19 +1144,19 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
 
 
                 <tr style="">
-             <td style=""><p> <code>text_width</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>text_width</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>F64</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>text_actual_bounding_box_left</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>text_actual_bounding_box_left</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>F64</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>text_actual_bounding_box_right</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>text_actual_bounding_box_right</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>F64</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>text_actual_bounding_box_ascent</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>text_actual_bounding_box_ascent</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>F64</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>text_actual_bounding_box_descent</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>text_actual_bounding_box_descent</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>F64</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>text_font_bounding_box_ascent</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>text_font_bounding_box_ascent</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>F64</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>text_font_bounding_box_descent</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>Float</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>text_font_bounding_box_descent</code></p></td> <td style=""><p> <code>metrics CanvasTextMetrics</code></p></td> <td style=""><p> <code>F64</code></p></td> <td style=""><p> shared</p></td>
         </tr>
             
 </table><h3 id="gradients">Gradients</h3><table style="">
@@ -1170,13 +1170,13 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
 
 
                 <tr style="">
-             <td style=""><p> <code>create_linear_gradient</code></p></td> <td style=""><p> <code>ctx Canvas2d, x0 Float, y0 Float, x1 Float, y1 Float</code></p></td> <td style=""><p> <code>CanvasGradient, Error!</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>create_linear_gradient</code></p></td> <td style=""><p> <code>ctx Canvas2d, x0 F64, y0 F64, x1 F64, y1 F64</code></p></td> <td style=""><p> <code>CanvasGradient, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>create_radial_gradient</code></p></td> <td style=""><p> <code>ctx Canvas2d, x0 Float, y0 Float, r0 Float, x1 Float, y1 Float, r1 Float</code></p></td> <td style=""><p> <code>CanvasGradient, Error!</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>create_radial_gradient</code></p></td> <td style=""><p> <code>ctx Canvas2d, x0 F64, y0 F64, r0 F64, x1 F64, y1 F64, r1 F64</code></p></td> <td style=""><p> <code>CanvasGradient, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>create_conic_gradient</code></p></td> <td style=""><p> <code>ctx Canvas2d, start_angle Float, x Float, y Float</code></p></td> <td style=""><p> <code>CanvasGradient, Error!</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>create_conic_gradient</code></p></td> <td style=""><p> <code>ctx Canvas2d, start_angle F64, x F64, y F64</code></p></td> <td style=""><p> <code>CanvasGradient, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>add_color_stop</code></p></td> <td style=""><p> <code>gradient ~CanvasGradient, offset Float, color String</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>add_color_stop</code></p></td> <td style=""><p> <code>gradient ~CanvasGradient, offset F64, color String</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr>
             
 </table><h3 id="patterns">Patterns</h3><table style="">
@@ -1206,15 +1206,15 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
 
 
                 <tr style="">
-             <td style=""><p> <code>draw_image</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, image CanvasImage, x Float, y Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>draw_image</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, image CanvasImage, x F64, y F64</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>draw_image_scaled</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, image CanvasImage, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>draw_image_scaled</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, image CanvasImage, x F64, y F64, width F64, height F64</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>draw_image_cropped</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, image CanvasImage, source_x Float, source_y Float, source_width Float, source_height Float, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>draw_image_cropped</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, image CanvasImage, source_x F64, source_y F64, source_width F64, source_height F64, x F64, y F64, width F64, height F64</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>draw_canvas</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, canvas CanvasElement, x Float, y Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>draw_canvas</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, canvas CanvasElement, x F64, y F64</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>draw_canvas_scaled</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, canvas CanvasElement, x Float, y Float, width Float, height Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>draw_canvas_scaled</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, canvas CanvasElement, x F64, y F64, width F64, height F64</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr>
             
 </table><p>Image drawing functions fail with <code>Error!</code> when the image has not finished loading.</p><h3 id="image-data">Image data</h3><table style="">
@@ -1228,19 +1228,19 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
 
 
                 <tr style="">
-             <td style=""><p> <code>get_image_data</code></p></td> <td style=""><p> <code>ctx Canvas2d, x Int, y Int, width Int, height Int</code></p></td> <td style=""><p> <code>CanvasImageData, Error!</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>get_image_data</code></p></td> <td style=""><p> <code>ctx Canvas2d, x I32, y I32, width I32, height I32</code></p></td> <td style=""><p> <code>CanvasImageData, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>create_image_data</code></p></td> <td style=""><p> <code>ctx Canvas2d, width Int, height Int</code></p></td> <td style=""><p> <code>CanvasImageData, Error!</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>create_image_data</code></p></td> <td style=""><p> <code>ctx Canvas2d, width I32, height I32</code></p></td> <td style=""><p> <code>CanvasImageData, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
              <td style=""><p> <code>create_image_data_from</code></p></td> <td style=""><p> <code>ctx Canvas2d, image_data CanvasImageData</code></p></td> <td style=""><p> <code>CanvasImageData, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>put_image_data</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, image_data CanvasImageData, x Float, y Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>put_image_data</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, image_data CanvasImageData, x F64, y F64</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>put_image_data_dirty</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, image_data CanvasImageData, x Float, y Float, dirty_x Float, dirty_y Float, dirty_width Float, dirty_height Float</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>put_image_data_dirty</code></p></td> <td style=""><p> <code>ctx ~Canvas2d, image_data CanvasImageData, x F64, y F64, dirty_x F64, dirty_y F64, dirty_width F64, dirty_height F64</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>image_data_width</code></p></td> <td style=""><p> <code>image_data CanvasImageData</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>image_data_width</code></p></td> <td style=""><p> <code>image_data CanvasImageData</code></p></td> <td style=""><p> <code>I32</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>image_data_height</code></p></td> <td style=""><p> <code>image_data CanvasImageData</code></p></td> <td style=""><p> <code>Int</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>image_data_height</code></p></td> <td style=""><p> <code>image_data CanvasImageData</code></p></td> <td style=""><p> <code>I32</code></p></td> <td style=""><p> shared</p></td>
         </tr>
             
 </table><h3 id="pixel-access">Pixel access</h3><table style="">
@@ -1254,17 +1254,17 @@ width <span class='moth-code-operator'>=</span> <span class='moth-code-function'
 
 
                 <tr style="">
-             <td style=""><p> <code>image_data_get_red</code></p></td> <td style=""><p> <code>image_data CanvasImageData, x Int, y Int</code></p></td> <td style=""><p> <code>Int, Error!</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>image_data_get_red</code></p></td> <td style=""><p> <code>image_data CanvasImageData, x I32, y I32</code></p></td> <td style=""><p> <code>I32, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>image_data_get_green</code></p></td> <td style=""><p> <code>image_data CanvasImageData, x Int, y Int</code></p></td> <td style=""><p> <code>Int, Error!</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>image_data_get_green</code></p></td> <td style=""><p> <code>image_data CanvasImageData, x I32, y I32</code></p></td> <td style=""><p> <code>I32, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>image_data_get_blue</code></p></td> <td style=""><p> <code>image_data CanvasImageData, x Int, y Int</code></p></td> <td style=""><p> <code>Int, Error!</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>image_data_get_blue</code></p></td> <td style=""><p> <code>image_data CanvasImageData, x I32, y I32</code></p></td> <td style=""><p> <code>I32, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>image_data_get_alpha</code></p></td> <td style=""><p> <code>image_data CanvasImageData, x Int, y Int</code></p></td> <td style=""><p> <code>Int, Error!</code></p></td> <td style=""><p> shared</p></td>
+             <td style=""><p> <code>image_data_get_alpha</code></p></td> <td style=""><p> <code>image_data CanvasImageData, x I32, y I32</code></p></td> <td style=""><p> <code>I32, Error!</code></p></td> <td style=""><p> shared</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>image_data_set_pixel</code></p></td> <td style=""><p> <code>image_data ~CanvasImageData, x Int, y Int, red Int, green Int, blue Int, alpha Int</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>image_data_set_pixel</code></p></td> <td style=""><p> <code>image_data ~CanvasImageData, x I32, y I32, red I32, green I32, blue I32, alpha I32</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr><tr style="">
-             <td style=""><p> <code>image_data_clear_pixel</code></p></td> <td style=""><p> <code>image_data ~CanvasImageData, x Int, y Int</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
+             <td style=""><p> <code>image_data_clear_pixel</code></p></td> <td style=""><p> <code>image_data ~CanvasImageData, x I32, y I32</code></p></td> <td style=""><p> <code>Error!</code></p></td> <td style=""><p> mutable</p></td>
         </tr>
             
 </table><p>Pixel getters and setters fail with <code>Error!</code> when coordinates fall outside the image data bounds. Channel values clamp to 0 through 255.</p><h3 id="access-and-return-contracts">Access and return contracts</h3><p>Functions that mutate the context take <code>~Canvas2d</code> (mutable access). Query functions take <code>Canvas2d</code> (shared access). The same pattern applies to <code>~CanvasElement</code>, <code>~CanvasGradient</code> and <code>~CanvasImageData</code>. Fresh values from creation functions satisfy mutable parameters without <code>~</code>. Existing places require explicit <code>~</code> at the call site.</p><p>All parameters stay positional-only. Named arguments are not supported because binding-backed packages do not expose source-function features.</p><h3 id="error-codes">Error codes</h3><p>Fallible canvas functions return builtin <code>Error</code> values whose <code>code</code> names a host-operation category. The compiler owns these codes and <code>canvas.js</code> imports them by name from <code>@moth/runtime</code>.</p><table style="">

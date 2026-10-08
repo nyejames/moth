@@ -10,7 +10,7 @@ evaluation, not after evaluating and inspecting a result.
 The standalone Rust crate `moth_mon` owns the codec. The compiler provides the
 same API and Rust types through the convenience re-export `moth::mon`. Full
 standalone-use examples belong in the crate documentation rather than this
-format reference. Compiled Moth programs have no runtime codec support.
+format reference. Compiled Moth programs currently have no runtime codec support.
 Moth-native operations, automatic schema extraction and the static project
 builder remain deferred separately. See @../progress (Progress) for current
 support.
@@ -70,8 +70,9 @@ shapes. The receiving schema enforces its element type. Heterogeneous text
 changes no Moth collection typing rule and adds no `Any` type to Moth.
 
 Maps preserve insertion order. Keys use the supported Moth map-key families:
-`String`, `Bool`, `Char`, `Int`, `Uint`, the fixed-width integers `I8` through `U64`
-and `Byte`. Bare names are references, not key shorthand, and are invalid as
+`String`, `Bool`, `Char`, `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`
+and `Byte`, with each width retaining its own range and comparison. Bare names
+are references, not key shorthand, and are invalid as
 MON map keys. The schema checks the declared key and value types. Map entries
 and collection items cannot be mixed.
 
@@ -83,10 +84,9 @@ on either side.
 Duplicate keys are rejected rather than keeping the first or last value. Keys
 compare as decoded values under the receiving key contract, so different escape
 or numeric spellings cannot evade uniqueness. A key of one declared type never
-matches another, so `Int`, `Uint`, `I32`, `I64` and `U64` stay distinct key families.
-String and Char remain distinct, and Bool is not a numeric key. Record labels
-remain identifiers, while map keys are data: a string-keyed map does not become
-a record.
+matches another. String and Char remain distinct, and Bool is not a numeric
+key. Record labels remain identifiers, while map keys are data: a
+string-keyed map does not become a record.
 
 The empty forms never change kind:
 
@@ -154,45 +154,48 @@ infinity have no MON spelling.
 
 Conversion is strict about categories:
 
-- `Int`, exact `Integer` and every fixed-width integer from `I8` to `U64`
+- Exact `Integer` and every fixed-width integer from `I8` to `U64`
   require whole-number spelling. Decimal data such as `3.0` fails such a
   target even when mathematically integral, and `1e3` fails it too. `Byte`
   also requires whole-number spelling and accepts only `0` through `255`.
   Formatting cannot rewrite one category as the other.
-- `Uint` requires whole-number spelling and applies the shared unsigned policy:
-  it accepts only the selected unsigned width, rejects negative spellings
-  including `-0`, and retains the full `u64` payload. `Uint32` rejects a
-  supplied value above its maximum. Programmatic encode and default preparation
-  validate against the captured profile too.
+- Unsigned schemas reject negative spelling, including `-0`, and check their
+  declared range. U64 retains the full payload from `0` through
+  `18446744073709551615` without a signed or binary-float intermediate.
+  Programmatic encoding and defaults undergo the same exact-width checks.
 - Exact `Decimal` data with a declared scale from `0` to `256` accepts whole,
   decimal and exponent forms only when the value is exact after removing
   trailing fractional zeroes and the effective scale is at most the declared
   scale. A scale-two target accepts `1.2` but rejects `1.239` without
   rounding. Exact decimal data is the materialisation path for `Dec` and
   `DecN` schemas, and it rejects inexact values instead of rounding.
-- `Float` and the fixed binary floats `F16`, `F32` and `F64` accept all valid
+- The fixed binary floats `F16`, `F32` and `F64` accept all valid
   finite categories and reject non-finite source values and conversion
   results. A fixed binary float materialises with its binary rounding
   contract, so an inexact value rounds instead of failing. Encoding
   round-trips each supported typed value, including `F16`, `F32` and signed
   zero: negative zero writes `-0.0` and positive zero writes `0`.
 
-`Int`, `Uint` and `Float` destinations are profile-dependent, and fixed-width schemas
-are profile-independent. `Schema::with_profile` selects any of the four
-combinations of 32/64-bit Int width and 32/64-bit Float precision, and `Uint`
-follows the selected `Int` width there too. Preparation
-captures that profile immutably. Schemas without an explicit selection
-materialise `Int` at Int32, `Uint` at Uint32 and `Float` at Float64 for standalone Rust callers.
-The declared decimal scale covers `0` through `256`. `moth-lexical` owns the
-shared numeric grammar and materialisation facts. The compiler's receiving
-context and MON's schema independently select the destination. Source
-expression context does not permit MON arithmetic.
+The schema owns these categories directly. A schema's declared width or scale
+is checked during preparation and reused verbatim during decoding and
+encoding, so a numeric destination never depends on external numeric context.
+`Integer` and `Decimal` remain lossless exact families, while fixed widths
+round or reject exactly by their declared rule. Large integer and exact
+decimal data are retained and round-tripped without a second arithmetic
+runtime. Unsupported concrete adapters fail explicitly rather than narrowing
+or converting through a binary float.
 
-Large integer and exact decimal data are retained and round-tripped without a
-second arithmetic runtime. Unsupported concrete adapters fail explicitly
-rather than narrowing or converting through Float. The added widths, `Uint`,
-`Byte`, profile capture and the widened scale range are delivered; see
-@../progress (Progress) for current support.
+The exact API removes profile-dependent schema/value variants, stored numeric
+profiles, `Schema::with_profile` and their public re-exports without aliases.
+Former selected widths become explicit schemas: a former 64-bit Int schema
+becomes I64 and a former Float32 schema becomes F32. The lossless Rust
+`SchemaType::Integer` is not the removed source `Int` identity. MON performs
+no source inference or numeric default selection. The exact API cutover
+remains pending in the current implementation, as recorded in @../progress (Progress).
+
+`moth-lexical` owns shared numeric grammar, direct materialisation and
+formatting. The source compiler and MON schema independently select their
+receivers. Source expression context never permits MON arithmetic.
 
 ### Structs and choices
 
@@ -250,7 +253,9 @@ Schemas define ordinary data shapes, field types, nominal identities, choice
 variants and explicit default values. They do not define a second expression
 language. Records are closed: every unknown field fails, including a
 misspelling of a field whose correct name has a default. Maps provide the
-explicit dynamic-key surface.
+explicit dynamic-key surface. Each schema declares its own numeric types by
+explicit width or decimal scale, with the lossless `Integer`/`Decimal`
+family retained.
 
 V1 supplies a small immutable Rust schema description for host callers. The
 engine defines its save-data contract once and supplies it explicitly. A
@@ -360,7 +365,8 @@ mismatches.
 ### Deferred source and builder surfaces
 
 MON text has no file IO, module imports, schema discovery, command, builder
-registration, output write or runtime opcode. Compiler `$mon` convenience,
+registration, output write or runtime opcode. Compiled Moth programs currently
+have no encoder or decoder calls. Compiler `$mon` convenience,
 with its invocation syntax still undecided, belongs to later Moth-native
 integration, as do Moth-side encode and decode operations, automatic schema
 extraction from ordinary Moth types and the static `.mon` project builder.

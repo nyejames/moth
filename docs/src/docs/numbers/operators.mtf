@@ -1,4 +1,4 @@
-Moth keeps equality and logical operators readable.
+Moth uses word forms for equality and logic:
 
 [codeblock, $code("moth"):
     same = left is right
@@ -8,170 +8,157 @@ Moth keeps equality and logical operators readable.
     blocked = not ready
 ]
 
-- `and` and `or` require `Bool` operands.
-- `not` requires one `Bool` operand.
+- `and` and `or` require `Bool` operands and short-circuit.
+- `not` requires one `Bool`.
 - Symbolic equality and symbolic logical-not forms are not language operators.
-
-### Arithmetic results
-
-The convenience family for `Int`, `Uint` and `Float` is unchanged.
-
-- `Int`, `Int` with `+`, `-`, `*`, `%`, `^`, `//` produces `Int`
-- `Int`, `Int` with `/` produces `Float`
-- `Uint`, `Uint` with `+`, `-`, `*`, `//`, `%`, `^` produces `Uint`, checked against the selected unsigned range
-- `Uint`, `Uint` with `/` produces `Float`, converted directly at the selected `Float` precision
-- `Float`, `Float` with `+`, `-`, `*`, `/`, `%`, `^` produces `Float`
-- mixed `Int` and `Float` with `+`, `-`, `*`, `/`, `%`, `^` produces `Float`
-- mixed `Uint` and `Float` in either order with `+`, `-`, `*`, `/`, `%`, `^` produces `Float`, with ordinary `Float` rounding and failure
-- `Uint` and `Float` with `//` is invalid
-
-`Uint` subtraction underflow is failure, not an `Int` result. `//` and `%`
-reject zero divisors. `Uint` exponents are non-negative by type and power
-still checks bounded result overflow. The existing integer convention for
-exponent zero holds, including `0 ^ 0 == 1`.
-
-The implicit `Int` to `Float` conversion remains and rounds at the selected
-`Float` precision. `Uint` to `Float` conversion is likewise implicit at
-value-receiving and mixed-operator boundaries, direct at the selected
-precision and infallible. There is no implicit `Float` to `Int` or
-`Float` to `Uint` conversion.
-
-`Uint` and `Int` arithmetic in either order, including `/` and `^`,
-needs an explicit conversion. `Uint` arithmetic or comparison with a
-fixed-width numeric type also needs an explicit conversion. There is no
-search through `Float` to make a `Uint`/`Int` arithmetic pair legal, no
-signed-to-unsigned reinterpretation and no arbitrary-precision overflow
-fallback. An explicit `Float` operand may select the normal `Float` mixed rule.
-
-Typed `Int`, `Uint` and `Float` values do not implicitly mix with fixed-width values.
-Fixed integers do not implicitly mix with fixed binary floats; within each
-family, the operator rules below select a common result domain. The same
-cross-family restriction applies to comparisons, except the existing `Int`, `Uint`
-and `Float` comparison relationships. `Byte` has no arithmetic operators.
 
 ### Fixed integer arithmetic
 
-For `+`, `-`, `*`, `//`, `%` and `^`, fixed integer operands first select one
-common type from their complete ranges. The selection ignores known values and
-the receiving context.
+Fixed integer `+`, `-`, `*`, `//`, `%` and `^` choose one common operand
+domain from the complete declared ranges:
 
-- Same signedness selects the wider operand width, with a minimum of 32 bits.
-- Mixed signedness selects the smallest signed type, at least 32 bits, that represents every value of both input types.
-- No available common type is a source diagnostic.
+- Equal types keep that type.
+- Different widths with the same signedness use the wider width.
+- Mixed signedness uses the smallest available signed type that contains both complete ranges.
+- No 32-bit minimum applies. Reject a pair when no supported type contains both ranges.
 
-[codeblock, $code("text"):
-    U8 + U8 -> U32             I8 + I16 -> I32
-    U8 + U16 -> U32            I16 + U16 -> I32
-    U32 + U64 -> U64           I32 + U32 -> I64
-    I32 + I64 -> I64           I64 + U32 -> I64
-    I64 + U64 -> invalid       I32 + U64 -> invalid
+[table:
+    [th: [: Operands] [: Result type]]
+    [td: [: I8 + I8] [: I8]]
+    [td: [: U8 + U8] [: U8]]
+    [td: [: I8 + I16] [: I16]]
+    [td: [: U8 + U16] [: U16]]
+    [td: [: I8 + U8] [: I16]]
+    [td: [: I16 + U8] [: I16]]
+    [td: [: I8 + U16] [: I32]]
+    [td: [: I16 + U16] [: I32]]
+    [td: [: I32 + U32] [: I64]]
+    [td: [: I64 + U32] [: I64]]
+    [td: [: I64 + U64] [: invalid]]
+    [td: [: I32 + U64] [: invalid]]
 ]
 
-There is no unsigned reinterpretation and no implicit arbitrary-precision
-fallback.
+The common type must contain every input value, not every possible result.
+`U8 + U8` stays `U8` and can overflow. `U8 - U8` stays `U8` and can
+underflow. Known operand values never select a wider type to avoid failure.
+The result uses a supported fixed type, never an invented width or an
+arbitrary-precision fallback.
 
-Compatible fixed integer `/` operands use the same common-integer eligibility
-rule, then convert to `F64` and divide. `/` produces `F64` in every profile.
+Fixed integer `/` first requires the same common-integer eligibility as the
+other binary operators, then converts the operands and divides as `F64`.
+Every eligible integer `/` produces `F64`, including `I8 / I8`. A receiving
+context cannot narrow this completed result.
 
-`//` is integer division on the common integer type. It truncates toward zero.
-`%` follows the dividend's sign. `^` is exponentiation, not XOR.
+`//` truncates towards zero. `%` follows the dividend's sign. `^` means
+exponentiation, not XOR. Preserve the established zero-divisor and
+invalid-exponent failures, including the exponent-zero convention `0 ^ 0 is 1`.
+Signed minimum `// -1` overflows its selected integer domain, while its `% -1`
+result remains zero.
 
-- A signed minimum divided by `-1` overflows its result type.
-- Its remainder by `-1` is zero and does not inherit the division overflow check.
-- Zero divisors and invalid integer exponents are checked. See @./#checked-arithmetic (Checked arithmetic).
+Fixed integers compare exactly across all widths and signedness. `I64` and
+`U64` need no arithmetic common type to compare. Comparisons use neither a
+binary-float conversion nor subtraction, so they preserve the order of every
+value.
 
 ### Unary minus
 
-Unary minus on a typed `U*` or `Uint` value is a compilation error, including a
-known zero. Cast to a signed type first. There is no automatic signed promotion
-for unary minus.
+Unary `-` preserves the type of a fixed signed integer or binary float:
 
-Signed narrow integers use the corresponding `I32` arithmetic domain. `I32`,
-`I64` and `Int` negation checks its own result limits.
+[table:
+    [th: [: Negated operand type] [: Result type]]
+    [td: [: -I8] [: I8]]
+    [td: [: -I16] [: I16]]
+    [td: [: -I32] [: I32]]
+    [td: [: -I64] [: I64]]
+    [td: [: -F16] [: F16]]
+    [td: [: -F32] [: F32]]
+    [td: [: -F64] [: F64]]
+]
 
-### Fixed binary float arithmetic
+Negating a signed integer minimum overflows in that same type. Unary minus on a
+fixed unsigned integer remains invalid, including a known zero. It does not
+insert a signed conversion. Floating negation reverses the sign of zero:
+positive zero becomes negative zero and negative zero becomes positive zero.
 
-Fixed binary float arithmetic uses the wider operand precision with a minimum of
-`F32`.
+### Fixed binary-float arithmetic
 
-- `F16` with `F16` produces `F32`
-- `F16` with `F32` produces `F32`
-- `F32` with `F32` produces `F32`
-- any `F64` operand produces `F64`
+Fixed binary-float `+`, `-`, `*`, `/`, `%` and `^` select the wider operand
+precision. Equal precisions retain their type; `F16` has no minimum-`F32`
+domain:
 
-`//` is unavailable on binary floats. Unary negation uses the same minimum
-`F32` precision.
+[table:
+    [th: [: Operands] [: Result type]]
+    [td: [: F16 + F16] [: F16]]
+    [td: [: F16 + F32] [: F32]]
+    [td: [: F32 + F64] [: F64]]
+]
 
-`Float` keeps its profile-selected type. It does not implicitly mix with `F16`,
-`F32` or `F64`.
+Binary floats do not support `//`. Each operation completes at its selected
+semantic precision. `F16` rounds after every language-level operation and
+checks finiteness there. An `F32` carrier may implement an `F16` operation, but
+cannot defer the `F16` rounding or finite check until a later store. For
+concrete `F16` operands, `(2048 + 1) - 2048` produces zero because the first
+addition rounds to `F16`.
 
-Every semantic operation rounds its result. All binary float values are finite,
-so an operation that would produce a non-finite result fails. Comparisons use
-numeric values and treat positive and negative zero as equal.
+Binary floats remain finite. Subnormals and signed zero remain valid and
+positive and negative zero compare equal. Existing operation-specific numerical
+contracts still apply; this rule adds no new correctly-rounded Core Math
+promise.
 
-### Dec arithmetic
+### `Dec` arithmetic
 
-- Same-scale `+` and `-` are exact.
-- Multiplication computes the exact product and rounds to the result scale using half-even.
-- Positive-scale `/` checks for a zero divisor and rounds to the result scale. Scale-zero `/` is invalid.
-- Scale-zero `//` truncates toward zero and `%` is the integer remainder.
-- Positive-scale `//` is invalid. Positive-scale `%` is a decimal remainder at that scale.
-- Unary minus is exact.
-- `DecN ^ Int` takes a non-negative exponent and rounds half-even where needed. The exponent is an `Int`, never a silently converted `Dec`. A typed `Uint` exponent needs an explicit handled cast to `Int`.
+- Same-scale `+` and `-` and unary minus are exact.
+- Multiplication computes the exact product then rounds half-even to the result scale.
+- Positive-scale `/` checks zero and rounds half-even to the result scale. Scale-zero `/` is invalid.
+- Scale-zero `//` truncates towards zero and `%` gives the integer remainder. Positive-scale `//` is invalid and `%` gives a decimal remainder at that scale.
+- `DecN ^ I32` takes an `I32` exponent. Negative exponents keep their existing failure. Power rounds half-even where the result scale requires it.
 
-Rounding happens at every language operation result, not only at assignment or
-final formatting.
+Each decimal operation applies its own scale and rounding rule. A later
+operation cannot defer a required rounding step. `Dec` and `Dec0` share the
+scale-zero identity.
 
-Ordinary mixed `Dec` arithmetic and comparison can scale `Int`, `Uint` and every
-fixed integer exactly into the `Dec` operand's scale, using the full unsigned
-`Uint` value directly, including values above `Int` maximum. Different `Dec`
-scales require an explicit conversion. Binary floats and `Byte` never
-participate implicitly. Fixed integer arithmetic never falls back to `Dec` on
-overflow. A `Uint` receiver does not turn a completed `Dec` result into
-`Uint`, and a plain typed `Uint` variable is not implicitly assignable to
-`Dec` merely because mixed arithmetic is supported.
+Fixed integers mix with a `Dec` operand by exact scaling at the decimal
+operand's scale, including the full `U64` range. Different `Dec` scales need
+an explicit conversion. Fixed binary floats and `Byte` never mix with `Dec`
+implicitly. An integer operation never falls back to `Dec` on overflow.
 
-### `Dec` and `Uint` receiving contexts
+These examples show why decimal operations round at their own result scale:
 
-A `Dec` or `Uint` receiver types unresolved literal arithmetic at its scale or
-unsigned width before operator selection, including grouped shapes, right-hand
-peers and compound-assignment right sides. Their exponent rules differ: `Dec`
-keeps an `Int` exponent while a `Uint` exponent stays `Uint`. See
-@./#numeric-literals (Numeric literals) for the complete receiving and peer contract.
+[codeblock, $code("moth"):
+    chain Dec4 = 1 / 3 * 3 -- 0.9999: division rounds before multiplication
+    cube Dec2 = 1.07 ^ 3 -- 1.23: power rounds its exact result once
+    repeated Dec2 = (1.07 * 1.07) * 1.07 -- 1.22: each multiplication rounds
+]
 
 ### Comparisons
 
-- Any two fixed integer types compare exactly, including `I64` and `U64`. No arithmetic common type is needed and no value converts through a binary float or a subtraction. Negative versus unsigned ordering keeps its true order and every 64-bit value compares exactly.
-- Fixed binary floats compare by numeric value.
-- `Int` and `Float` support equality and ordering, including mixed numeric comparisons.
-- `Uint` and `Uint` compare exactly.
-- `Uint` and `Int` in either order compare exactly over both complete ranges. A negative `Int` is less than every `Uint`. Values above signed maximum never convert to `Int` or `Float` merely to compare.
-- `Uint` and `Float` in either order convert `Uint` directly to profile `Float`, then use existing float comparison. These comparisons intentionally inherit `Float` rounding, as `Int`/`Float` already do, and do not promise exact integer equality above `Float` integral precision.
-- `Byte` supports equality and unsigned-octet ordering with another `Byte` only.
-- `Dec` compares with another `Dec` at the same scale, with `Int`, with `Uint` and with fixed integers through the exact mixed rule above.
-- `Char` supports equality and ordering.
-- `Bool` supports equality only.
-- `String` supports `is` and `is not`. It does not support ordering operators.
+- Fixed integers compare exactly across all widths and signedness, including `I64` with `U64`.
+- Fixed binary floats compare by numeric value. Positive and negative zero compare equal.
+- A `Dec` compares with the same-scale `Dec` type and with fixed integers through the exact scaling rule. Different `Dec` scales need an explicit conversion.
+- `Byte` supports equality and unsigned ordering with another `Byte`.
+- `Char` supports equality and ordering. `Bool` supports equality only.
+- `String` supports `is` and `is not`, not ordering.
 - Choices and options have additional equality rules in their own references.
 
-`+` is a numeric operator only. Source string concatenation uses templates. See
-@../language-overview/#strings-and-characters (Strings and characters) for the
-canonical concatenation form.
+`+` adds numbers only. Use templates for string concatenation and
+interpolation. See @../language-overview/#strings-and-characters (Strings and
+characters).
 
 ### Compound assignment
 
-`+=`, `-=`, `*=`, `/=`, `//=`, `%=` and `^=` compute in the normal promoted
-domain of the operator, then perform a checked conversion to the left-hand type.
-This is the deliberate receiving-context exception that allows a typed value to
-narrow. An `Int`/`Uint` compound pair stays invalid before store conversion.
+`+=`, `-=`, `*=`, `/=`, `//=`, `%=` and `^=` use the ordinary operator
+domain, then perform a checked conversion back when the result type differs
+from the left-hand type. Same-type updates add no artificial promotion and
+narrowing pair, but their arithmetic still checks and the store commits only
+on success.
 
-- The place and the right operand are evaluated once.
-- The store happens only after the arithmetic and the conversion both succeed.
-- A catch on the right-hand expression handles that expression only. The later compound arithmetic and conversion back to the left-hand type can still fail through the enclosing handler or function contract.
-- `/=` on an integer operand uses the `/` result, so it converts the `Float` result back to the left-hand type through the specified float-to-integer conversion. A `Uint` `/=` has a `Float` result before checked conversion back to `Uint`. Use `//=` for integer division.
+- Evaluate the place and right operand once.
+- Write only after arithmetic and any write-back conversion succeed.
+- A `catch` on the right-hand expression protects that expression only. Later arithmetic and write-back can still fail.
+- Integer `/=` uses its `F64` result and the checked conversion back. Use `//=` for integer division.
 
-To recover the complete update locally, put it in a private helper and catch its
-call, or compute and check the replacement before assigning it. See
+To recover a whole update locally, catch a private helper call or compute and
+check the replacement before assignment. See
 @./#checked-arithmetic (Checked arithmetic).
 
 ### Precedence and associativity
@@ -186,14 +173,13 @@ From highest to lowest:
 - level 1: `and`
 - level 0: `or`
 
-`^` is right-associative. Other binary operators are left-associative.
-
-Parentheses override normal precedence.
+`^` associates right. Other binary operators associate left. Parentheses
+override normal precedence.
 
 ### Spacing
 
 Symbolic binary operators require spaces on both sides. Assignment `=` follows
-the same outer-spacing rule, but it is not a binary operator.
+the same outer-spacing rule but is not a binary operator.
 
 [codeblock, $code("moth"):
     total = left + right
@@ -208,8 +194,7 @@ These forms are invalid:
     count=1
 ]
 
-The compound forms `+=`, `-=`, `*=`, `/=`, `//=`, `%=` and `^=` follow the
-same rule:
+Compound forms follow the same rule:
 
 [codeblock, $code("moth"):
     count += 1
@@ -227,5 +212,5 @@ before `~` and after `=`:
 
 `count~= 1`, `count ~=1` and `count ~ = 1` are invalid.
 
-Operator overloading is outside Moth's language design. Operators remain
+Operator overloading remains outside Moth's language design. Operators stay
 compiler-owned and predictable.

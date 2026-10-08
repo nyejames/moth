@@ -277,7 +277,7 @@ pub struct BenchmarkMeasurementIdentity {
 }
 
 /// A single benchmark case result after measured iterations.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct BenchmarkCaseResult {
     /// Authored stable benchmark case identity.
     pub case_id: String,
@@ -305,7 +305,7 @@ pub struct BenchmarkMetric {
 }
 
 /// Local-only detailed observations for one benchmark case.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct BenchmarkCaseObservations {
     /// Timing schema used by the stage observations; zero marks legacy data.
     pub timing_schema_version: u32,
@@ -318,7 +318,7 @@ pub struct BenchmarkCaseObservations {
 /// Groups are deliberately simple summary buckets, not compiler-stage
 /// categories. They make public benchmark output easier to compare without
 /// committing per-case timing tables.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct BenchmarkGroupStats {
     /// Public group label.
     pub group_name: String,
@@ -1154,7 +1154,7 @@ fn format_signed_ms(value: f64) -> String {
 ///
 /// WHAT: Privacy-safe identity for a single machine/clone
 /// WHY: Allows per-system tracking without exposing machine-derived identifiers
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct BenchmarkSystem {
     /// Stable private UUID for this clone (local-only)
     pub system_uuid: String,

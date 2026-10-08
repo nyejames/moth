@@ -62,7 +62,7 @@ Authors interact with collections through language-level syntax and receiver met
 - `set(index, value)` replaces the element at `index` or fails with `Error!`
 - `push(value)` appends `value` after the last element. One spelling serves both shapes: on a growable `{T}` it is infallible and returns no value; on a fixed `{N T}` it returns no success value and fails with `Error!` only when the collection is full
 - `remove(index)` removes and returns the element at `index` or fails with `Error!`
-- `length()` returns the logical length as `Int`
+- `length()` returns the logical length as `I32`
 
 `get`, `set`, `remove` and fixed-collection `push` take the fallible path. `length` and growable `push` stay infallible. `set`, both push forms and `remove` require mutable receiver access through `~`. Both push forms return no success value, and growable `push` rejects `catch` and postfix `!`.
 

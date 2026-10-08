@@ -48,8 +48,8 @@ The Moth dependency clause uses the annotation names, not the JavaScript export 
 - signatures have zero or one success return
 - an optional final `Error!` channel is allowed
 - `Error!` must be final
-- scalar slots spell `Int`, `Uint`, `Float`, `U32`, `F32`, `Bool`, `String` or `Char` alongside opaque handle types
-- fixed `I32` and `F64` slots come only from compiler-registered bindings and never from `@moth.sig` spelling
+- numeric slots spell `I32`, `I64`, `U32`, `U64`, `F32` or `F64`, alongside `Bool`, `String`, `Char` and opaque handle types
+- the exact numeric cutover does not add `I8`, `I16`, `U8`, `U16`, `F16`, `Byte` or Dec annotation support
 - generic signatures are rejected
 - option and collection types are rejected
 - callbacks are rejected
@@ -108,28 +108,33 @@ Observable external resources require explicit close or teardown. Host finalisat
 
 ### Numeric signature types
 
-External numeric signatures distinguish fixed foreign ABI scalars from language-semantic `Int`, `Uint` and `Float`. Annotated JavaScript accepts those native names plus `U32` and `F32`, whose unsigned 32-bit and binary32 identities don't depend on the numeric profile. Native signatures retain their profile-selected types even when their widths match a fixed type. Compiler-registered foreign bindings also support fixed `I32` and `F64` slots, which `@moth.sig` cannot spell. The HTML-JS rules below cover native and fixed bindings.
+External numeric signatures use exact Moth types separately from their foreign ABI carriers. Ordinary default-language registrations migrate to I32, U32 and F64. Already fixed foreign signatures retain their widths. Annotated JavaScript's numeric subset is I32, I64, U32, U64, F32 and F64, not every language numeric type. This accepted cutover remains pending in the Alpha compiler, whose current native signatures still use numeric profiles. See @../progress (Progress).
 
-- A native `Int` in a 64-bit Int profile crosses annotated JavaScript as a `Number` only within the safe-integer range, from -9,007,199,254,740,991 through 9,007,199,254,740,991 inclusive. Values outside that range fail rather than silently losing precision.
-- A native `Uint32` crosses annotated JavaScript as a `Number` integer from `0` through 4294967295.
-- A native `Uint64` inside Moth JavaScript is a `BigInt` from `0` through 18446744073709551615. Across the existing `Number`-based foreign adapter it crosses only from `0` through 9007199254740991. That safe-`Number` restriction is a foreign-boundary policy, not the Moth `Uint` range.
-- The `Uint64` adapter rejects negative or unsafe values before precision can be lost. It validates one evaluated snapshot, canonicalises `Number` `-0` to integer `0`, and rejects fractions, non-finite values and wrong carrier types. Foreign contract violations throw like the existing `Int` adapters rather than creating a new implicit-failure or `Error` code.
-- A fixed `U32` crosses annotated JavaScript as a `Number` integer from `0` through 4294967295. The wrapper doesn't coerce or wrap and it throws like the existing `Int` adapters when the carrier or range is wrong. Integer `-0` canonicalises to `0` at ingress and success results keep the same gate in infallible and fallible calls. Each foreign result is evaluated once.
-- A fixed `F32` parameter must already be an exact finite binary32 `Number`. The wrapper checks `typeof`, finiteness and `Math.fround` equality before the foreign call observes the value and it preserves signed zero and subnormals. Inexact, non-finite or wrong-carrier values throw.
-- A fixed `F32` result rounds once at binary32 with `Math.fround` and it must stay finite. The wrapper evaluates the foreign value once, preserves `-0` and subnormals and turns a non-`Number` into failure the same way. A rounded non-finite value throws in an infallible wrapper and becomes builtin `Error` code `304` in a fallible wrapper through the existing Float boundary channel.
-- A native `Float` result in a Float32 profile is rounded with `Math.fround` and rejected if the rounded value is non-finite. Native `Float` results in a Float64 profile are also checked for finiteness. Fixed `F64` results retain binary64 width and are checked for finiteness; a non-finite result from a fallible external function becomes built-in `Error` code `304`.
-- Native `Int` results in a 32-bit Int profile and fixed `I32` values must be JavaScript Numbers, integral and within -2,147,483,648 through 2,147,483,647. Invalid successful payloads fail at the wrapper boundary in both infallible and fallible calls. Integer ingress converts `-0` to `0`, while binary-float ingress preserves signed zero.
+- I64 crosses annotated JavaScript as a `Number` only within the safe-integer range, from -9,007,199,254,740,991 through 9,007,199,254,740,991 inclusive. Values outside that range fail rather than silently losing precision.
+- U64 inside Moth JavaScript is a `BigInt` from `0` through 18446744073709551615. Across the existing `Number`-based foreign adapter it crosses only from `0` through 9007199254740991. That restriction belongs to the foreign boundary, not the Moth U64 range.
+- The U64 adapter rejects negative or unsafe values before precision can be lost. It validates one evaluated snapshot, canonicalises `Number` `-0` to integer `0` and rejects fractions, non-finite values and wrong carrier types. Foreign contract violations throw rather than creating a new implicit-failure or `Error` code.
+- U32 crosses annotated JavaScript as a `Number` integer from `0` through 4294967295. The wrapper does not coerce or wrap and rejects invalid carriers or ranges. Integer `-0` canonicalises to `0` at ingress. Infallible and fallible calls validate successful payloads identically, evaluating each foreign result once.
+- An F32 parameter must already be an exact finite binary32 `Number`. The wrapper checks `typeof`, finiteness and `Math.fround` equality before the foreign call observes the value. It preserves signed zero and subnormals. Inexact, non-finite or wrong-carrier values throw.
+- An F32 result rounds once at binary32 with `Math.fround` and must stay finite. The wrapper evaluates the foreign value once and preserves signed zero and subnormals. A non-`Number` fails at the same boundary. A rounded non-finite value throws in an infallible wrapper and becomes builtin `Error` code `304` through the documented builtin `Error!` boundary.
+- F64 results retain binary64 width and undergo the shared finite-result check. A non-finite result uses code `304` through a declared builtin `Error!` boundary, otherwise the integrity guard halts.
+- I32 values must be JavaScript Numbers, integral and within -2,147,483,648 through 2,147,483,647. Invalid successful payloads fail at the wrapper boundary in both infallible and fallible calls. Integer ingress converts `-0` to `0`, while binary-float ingress preserves signed zero.
 - Opaque external types retain their package-specific identities and representations; numeric carrier adaptation does not reinterpret them.
 
-Moth-owned finite-value checks, including the shared external `Float` boundary
-check with code `304`, are fatal integrity guards, not implicit built-in failure:
+Moth-owned finite-value checks, including the shared external binary-float
+boundary with code `304`, are fatal integrity guards, not implicit built-in failure:
 they halt unless a declared builtin `Error!` contract returns them. This changes
 failure delivery, not numeric validity or the foreign signature.
 See @../errors (Errors) and @../progress (Progress) for the contract and current
 support.
 
+Validation uses the resolved exact result type and precision for every
+supported result shape, not a package-name test. Unsupported shapes retain
+their capability rejection. Validate only successful payloads and preserve a
+valid returned Error's code, message and identity. Authored safety catch never
+creates an Error producer or makes a fatal integrity guard recoverable.
+
 Fallible JavaScript bindings project `error.code` onto Moth's `U32` field,
-independently of the `Int` profile. The wrapper reads the foreign code once and
+without numeric-profile dependence. The wrapper reads the foreign code once and
 accepts JavaScript Number integers from `0` through `4294967295`. It normalises
 integer `-0` to `0` and uses code `0` for missing or invalid codes.
 The existing adapter for declared fallible JavaScript bindings turns exceptions

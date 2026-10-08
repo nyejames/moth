@@ -1,120 +1,82 @@
-Moth has one closed family of numeric types plus a nominal octet type.
-That family is `Int`, `Uint`, `Float`, the fixed-width integers and binary
-floats, and the `Dec` family.
+Moth gives every bounded numeric value an exact width or precision. The numeric
+inventory has eleven fixed types, plus the separate exact `Dec` family and the
+non-arithmetic `Byte` type. No project profile selects a different semantic
+identity.
 
-### `Int`, `Uint` and `Float`
+### Exact numeric inventory
 
-`Int` is Moth's ordinary signed integer type. `Uint` is Moth's ordinary
-unsigned integer type. `Float` is Moth's ordinary finite
-binary float type.
+- Signed integers: `I8`, `I16`, `I32`, `I64`
+- Unsigned integers: `U8`, `U16`, `U32`, `U64`
+- Binary floats: `F16`, `F32`, `F64`
 
-They are distinct semantic identities. `Int` is not an alias for `I32` or
-`I64`, `Uint` is not an alias for `U32` or `U64`, and `Float` is not an
-alias for `F32` or `F64`, even when the selected
-profile gives them the same physical precision.
+Each integer name fixes its complete value range:
 
-One compiler-owned numeric profile selects the `Int` and `Float` widths independently.
-`Uint` follows the selected `Int` width. There is no separate `Uint` setting.
-
-[codeblock, $code("text"):
-    Int width    Float precision    Uint width and range
-    32-bit       32-bit             Uint32, 0 through 4294967295
-    32-bit       64-bit             Uint32, 0 through 4294967295          (default)
-    64-bit       32-bit             Uint64, 0 through 18446744073709551615
-    64-bit       64-bit             Uint64, 0 through 18446744073709551615
+[table:
+    [th: [: Type] [: Range]]
+    [td: [: I8] [: -128 through 127]]
+    [td: [: I16] [: -32768 through 32767]]
+    [td: [: I32] [: -2147483648 through 2147483647]]
+    [td: [: I64] [: -9223372036854775808 through 9223372036854775807]]
+    [td: [: U8] [: 0 through 255]]
+    [td: [: U16] [: 0 through 65535]]
+    [td: [: U32] [: 0 through 4294967295]]
+    [td: [: U64] [: 0 through 18446744073709551615]]
 ]
 
-An `Int` value has the range of its selected width.
+`F16`, `F32` and `F64` use IEEE-754 binary16, binary32 and binary64
+precision. Binary floats keep subnormals and signed zero, but Moth values never
+include `NaN` or either infinity. A conversion or operation that produces a
+non-finite result fails at its selected precision.
 
-[codeblock, $code("text"):
-    Int width    Range
-    32-bit       -2147483648 through 2147483647
-    64-bit       -9223372036854775808 through 9223372036854775807
-]
+`Bool` and `Char` remain non-numeric types.
 
-All four combinations are valid. The builder supplies the profile before
-command input materialises and before configuration compiles. No source,
-directive or command line syntax selects it.
+### Defaults and numeric families
 
-The profile is fixed for a whole compilation. It applies to directly linked
-Moth modules, generated functions, Core and Builder source packages and
-Moth-source dependencies. It never varies by function, target partition or
-debug and release representation. Source dependencies compile for that profile.
-An incompatible precompiled Moth artefact is rebuilt or rejected, never
-silently adapted. Foreign components remain separate value boundaries with
-explicit foreign types.
+An unconstrained integer-origin value defaults to `I32`. An unconstrained
+binary-float-origin value defaults to `F64`. Moth has no unsigned literal
+category and no value-size-based type selection. An unconstrained whole literal
+outside the `I32` range produces a diagnostic rather than retrying as `I64`,
+`U64` or `Dec`. An independent exact `U64` receiver can materialise the full
+`U64` range directly from the retained spelling.
 
-A profile can change `Int` and `Uint` overflow limits, `Float` rounding and folded results.
-The same profile preserves behaviour across JavaScript and Wasm.
+The default pair chooses otherwise unconstrained origins. It does not impose a
+minimum width on arithmetic. When inference selects `I8`, `U16` or `F16`, an
+eligible same-type operation keeps that type and checks or rounds there. See
+@./#operators (Operators).
 
-[codeblock, $code("moth"):
-    count Uint = 1 + 2
-    large Uint = 3_000_000_000 + 1
-]
+The source grammar has no numeric suffixes or radix forms. Whole spelling
+introduces an integer origin. Decimal-point or exponent spelling introduces a
+binary-float origin. Delayed inference can choose a width or precision within
+that family, but it does not turn a bound integer into a float or a bound
+binary float into `Dec`. A mixed collection of raw whole and decimal/exponent
+literals selects the binary-float family regardless of item order. A named
+integer value does not change family to make such a collection fit.
 
-`large` is valid in both integer profiles. Unannotated `1 + 2` remains
-`Int`. See @./#numeric-literals (Numeric literals) for the `Uint`
-receiving and peer contract, and @./#operators (Operators) for the
-`Uint` operator and comparison rules.
-
-### Fixed-width numeric types
-
-[codeblock, $code("text"):
-    signed integers:    I8, I16, I32, I64
-    unsigned integers:  U8, U16, U32, U64
-    binary floats:      F16, F32, F64
-]
-
-Each fixed integer type names its width and signedness exactly.
-
-[codeblock, $code("text"):
-    Type   Range
-    I8     -128 through 127
-    I16    -32768 through 32767
-    I32    -2147483648 through 2147483647
-    I64    -9223372036854775808 through 9223372036854775807
-    U8     0 through 255
-    U16    0 through 65535
-    U32    0 through 4294967295
-    U64    0 through 18446744073709551615
-]
-
-`F16`, `F32` and `F64` are IEEE-754 binary16, binary32 and binary64 values.
-
-`Float`, `F16`, `F32` and `F64` are finite. `NaN`, positive infinity and
-negative infinity are not valid Moth values. A boundary that could introduce a
-non-finite result rejects it.
-
-Fixed integers can promote with other fixed integers inside operators; fixed
-binary floats can promote with other fixed binary floats. Neither family
-implicitly mixes with `Int` or `Float`, and fixed integers do not implicitly
-mix with fixed binary floats. See Promotion and @./#operators (Operators).
+Receiving compatibility remains exact outside the operator rules. An operator
+may select a common arithmetic domain, but that does not grant general
+assignment, parameter or return widening. Fixed integers and fixed binary
+floats also require an explicit conversion to mix.
 
 ### `Byte`
 
-`Byte` is a one-byte octet value. It is nominally distinct from `U8`, `I8` and
-`Char`.
+`Byte` names one octet and remains distinct from `U8`, `I8` and `Char`.
 
 [codeblock, $code("moth"):
     raw Byte = 255
 ]
 
-- `Byte` values support equality and unsigned-octet ordering.
-- A contextual whole-number literal from `0` through `255` initialises a `Byte`. A negative value cannot.
-- `Byte` takes no part in arithmetic, unary minus or numeric promotion, and it has no range-loop domain.
-- Explicit `Byte` and `U8` conversion is infallible in both directions. Other numeric `Byte` conversions compose through `U8`.
-- `{Byte}` remains an ordinary collection. Compact physical storage does not create a buffer source type or a binary text encoding.
+- A whole literal from `0` through `255` can initialise `Byte`; a negative value cannot.
+- `Byte` supports equality and unsigned-octet ordering with another `Byte`.
+- `Byte` has no arithmetic operators, unary minus or range-loop domain.
+- `Byte` and `U8` convert infallibly in both directions. Other numeric conversions compose through `U8`.
+- `{Byte}` remains an ordinary collection, not a buffer source type or text encoding.
 
 ### `Dec` and `DecN`
 
-`Dec` is an arbitrary-precision integer at scale zero. `Dec0` is the
-accepted spelling alias for that same scale-zero identity. `Dec1` through
-`Dec256` are arbitrary-precision scaled integers representing
-`coefficient / 10^scale`.
-
-Scale is part of the semantic identity. `Dec2` and `Dec4` are different
-types, even for a value with no fractional digits. Leading-zero scales such as
-`Dec01` and scales above 256 are rejected.
+`Dec` and `Dec0` name the same scale-zero arbitrary-precision integer.
+`Dec1` through `Dec256` represent `coefficient / 10^scale`. Scale belongs to
+the type identity, so `Dec2` and `Dec4` remain different types. `Dec01` and
+scales above `256` are invalid.
 
 [codeblock, $code("moth"):
     large Dec = 1000000000000000000000
@@ -122,109 +84,22 @@ types, even for a value with no fractional digits. Leading-zero scales such as
 ]
 
 - Whole literals materialise exactly at any scale.
-- A decimal or exponent literal must be exactly representable at the receiving scale, including exact integrality at scale zero. `money Dec2 = 1.239` is invalid rather than rounded.
-- Integer-to-`Dec` conversion and scale widening are exact and infallible. Scale narrowing and `Dec`-to-integer conversion are exact or fail. `Uint` joins the exact mixed-integer category with its full unsigned value, including values above `Int` maximum.
-- Binary floats and `Byte` never participate in `Dec` arithmetic implicitly.
-- Canonical `Dec` text trims fractional trailing zeroes, never uses exponent notation or negative zero and always writes a leading zero before a fractional value.
-- A `Dec` receiver types unresolved literal arithmetic before operator selection. An explicit scale reaches through arithmetic and parentheses, and a typed `Dec` peer supplies its scale to a literal-only opposite operand from either side. Only `Dec` and `Uint` peers extend to compound literal subtrees, with different exponent rules: `Dec` keeps an `Int` exponent while a `Uint` exponent stays `Uint`. See @./#numeric-literals (Numeric literals) for the full contract.
-- `DecN ^ Int` keeps a non-negative `Int` exponent. A typed `Uint` exponent needs an explicit handled cast to `Int`.
+- Decimal-point and exponent literals must fit the receiving scale exactly. `money Dec2 = 1.239` fails rather than rounding.
+- Integer conversion and scale widening preserve the value exactly. Scale narrowing and `Dec`-to-integer conversion fail if removed digits are non-zero or the target range cannot hold the value.
+- `Dec` arithmetic follows its existing scale and per-operation rounding rules. Binary floats and `Byte` never mix with `Dec` implicitly.
+- `Dec` exponentiation takes an `I32` exponent. It keeps the exponent separate from the base scale and preserves the existing negative-exponent failure.
+- Canonical text trims fractional trailing zeroes, uses a leading zero before fractions and never uses exponent notation or negative zero.
 
-`Dec` is an immutable value. It is not a source-visible `BigInt` and it adds
-no numeric trait or overload system.
-
-### Promotion
-
-`Int` may promote to `Float` at a contextual numeric boundary.
-
-[codeblock, $code("moth"):
-    count Int = 3
-    ratio Float = count
-]
-
-Mixed `Int` and `Float` arithmetic produces `Float`. The conversion rounds at
-the selected `Float` precision.
-
-`Uint` may promote to `Float` at the same value-receiving and mixed-operator
-boundaries. The conversion is direct at the selected `Float` precision and
-infallible, although it can lose precision. There is no implicit `Uint`
-promotion to or from `Int`, and no implicit `Uint` mixing with fixed-width
-values, `Byte`, `Bool` or `Char`.
-
-There is no implicit `Float -> Int` conversion. Use a fallible explicit cast at
-an `Int` target.
-
-Typed `Int`, `Uint` and `Float` values do not implicitly mix with fixed-width values.
-Fixed integers and fixed binary floats also require an explicit conversion to
-mix with each other. Compatible fixed integer `/` operands first select their
-common integer type, then divide as `F64`. `Byte` never participates in numeric
-promotion.
-
-Widening between fixed integer operands inside an operator is operator
-promotion, not a general receiving conversion. It never narrows, and it never
-makes an already typed value convertible at an arbitrary receiving boundary. An
-implicit receiving boundary never narrows an already typed numeric value.
-
-`Bool` and `Char` are not numeric types.
-
-### Implementation status
-
-This reference owns the accepted contract for the complete numeric family.
-@../progress (Progress) owns current compiler and backend support.
-The frontend recognises fixed-width types and `Byte`, materialises their literals,
-records fixed-width operator facts in HIR, checks their casts and folds numeric
-operators, casts and text. HTML-JS executes fixed-width numeric and `Byte` runtime
-values, formats `Float` for templates and casts and validates successful external
-`Float` returns before ordinary Moth code observes them.
-
-The frontend lazily resolves the scale-zero identity shared by `Dec` and
-`Dec0`, plus canonical identities for `Dec1` through `Dec256`. Exact
-receiver literals preserve their coefficient and scale through constant
-folding, public constants and HIR. HTML-JS transports immutable BigInt-backed
-values through ordinary copies, collections, options and generic instances.
-Same-scale comparisons stay exact, and templates and `String` share the exact
-Dec formatter.
-
-HTML-Wasm executes supported scalar arithmetic (fixed integers, `Byte`, fixed
-binary floats, profile-selected `Int`/`Float`/`Uint`) through values, comparisons and
-supported infallible numeric expression casts, including integer-to-`F16` and
-widening `F16`-to-`F32`/`F64`. Any operation that can actually fail and needs
-recoverable delivery is rejected with a structured backend capability
-diagnostic; there is no trap fallback. Conservative semantic proof discharges
-`Add`, `Subtract`, `Multiply` and `Negate` over fixed-width integer operand
-and result domains with full-range containment (for example, `U8 + U8 -> U32`
-cannot fail). Other domains are excluded from that discharge; see
-@./#checked-arithmetic (Checked arithmetic) for which operations can fail.
-The proof is type-domain based and profile-free, identical in debug and release
-and across numeric profiles. It also converts profile `Int` and fixed integers
-to decimal `String` values.
-`Float` formatting and finite-boundary validation are integrity guards, not
-implicit numeric failure: they halt unless a declared builtin `Error!` contract
-returns them. HTML-Wasm formats runtime `Float` templates and
-`Float`/`F16`/`F32`/`F64`-to-`String` expression casts at their own precision,
-while negative zero formats as `0`. See @../progress (Progress).
-
-Source-level external `Float` calls still need Wasm import/metadata support.
-Reachable `ReturnError` `FormatFloat` and `ValidateFloat`, plus `String`-to-numeric
-parsing, remain target-rejected. Wasm rejects reachable `Dec` values and
-signatures, including nested types and generated-function uses. Unreachable
-private helpers don't gate the target. Other builtin runtime casts stay gated,
-including conversions involving `Bool`, `Char` or `Error` (including
-`Char -> Int`) and statement-form casts. The frontend implements Dec
-arithmetic and exact negation; HTML-JS executes both, with exact mixed
-operations and comparisons against profile `Int` and `Uint` and all eight fixed integer
-types, rounded half-even per operation. Integer-to-Dec and scale widening
-are infallible; scale narrowing and Dec-to-integer conversions are exact
-and fallible. HTML-JS `String`-to-`Dec` conversion is fallible and parses
-the whole existing numeric grammar exactly; HTML-JS formats Dec canonically.
+`Dec` remains an immutable value, not a source-visible `BigInt` or an added
+numeric trait family. See @./#numeric-literals (Numeric literals) and
+@./#operators (Operators) for receiving and operation details.
 
 ### MON data boundary
 
-MON literal data consumes the shared numeric facts from `moth-lexical` and keeps
-whole-number and decimal or exponent categories lossless until the receiving
-schema is known. Standalone Rust callers select a profile through
-`moth_mon::Schema::with_profile`, and `Uint` follows the profile `Int` width there too.
-The convenience re-export `moth::mon` exposes
-the same API and Rust types to compiler clients. `SchemaType::Integer` and
-`SchemaType::Decimal` name Rust data families, not additional Moth source types.
-Current source syntax uses `Dec` and `DecN`. MON conversion, profile handling
-and scale limits belong to @../mon/#mon-format (MON format).
+MON remains schema-directed literal data, not a source-body inference engine.
+Its parser keeps integer and decimal/exponent categories lossless until the
+schema selects an exact destination. Rust `Integer` and `Decimal` data families
+do not add Moth source types. See @../mon/#mon-format (MON format).
+
+The Progress matrix owns current compiler and backend support:
+@../progress (Progress).

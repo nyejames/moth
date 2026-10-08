@@ -37,7 +37,13 @@ names and emitted helper names cannot drift.
 | Handle | `input.Input` | opaque `Handle`, `ExternalTypeId(1)` |
 | Lifecycle | `input.new`, `input.update`, `input.close` | `new -> Input, Error!` is the only fallible function; `update` and `close` take `~Input` |
 | Keyboard | `input.key_down`, `input.key_pressed`, `input.key_released`, `input.last_key_pressed`, `input.last_key_released` | shared `Input` plus `String` key `-> Bool`, or `Input -> String?` |
-| Pointer | `input.pointer_down`, `input.pointer_pressed`, `input.pointer_released`, `input.pointer_x`, `input.pointer_y`, `input.last_pointer_pressed`, `input.last_pointer_released` | shared `Input` plus `String` button `-> Bool`, `Input -> Float` or `Input -> String?` |
+| Pointer | `input.pointer_down`, `input.pointer_pressed`, `input.pointer_released`, `input.pointer_x`, `input.pointer_y`, `input.last_pointer_pressed`, `input.last_pointer_released` | shared `Input` plus `String` button `-> Bool`, `Input -> F64` or `Input -> String?` |
+
+F64 coordinates are the accepted exact numeric contract, pending implementation
+cutover from profile-based Float. Preserve coordinate units, pointer semantics
+and the existing Wasm rejection. Shared finite-result validation and its
+documented fatal/builtin Error! delivery remain independent from authored
+safety-catch eligibility.
 
 `register_core_prelude` (`src/builder_surface/core_packages/prelude.rs`) registers bare `io` as a
 compile-time namespace alias. `io.set_title` is accepted queued design with no registration,

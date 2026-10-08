@@ -15,7 +15,7 @@ Function calls use positional arguments, named arguments or both.
 - Omitted defaulted parameters use their declared default.
 - Every non-defaulted parameter must receive an argument.
 - Extra positional arguments are invalid.
-- Argument values are checked and contextually coerced against their parameter types.
+- Argument values are checked against concrete parameter types. Eligible raw numeric origins can materialise at that exact receiver before fallback; already typed values still require exact compatibility.
 
 Named arguments can skip earlier defaults.
 
@@ -69,7 +69,7 @@ Passing `~value` to a shared parameter is invalid.
 An existing mutable place needs explicit `~` at the call site.
 
 [codeblock, $code("moth"):
-    increment |value ~Int|:
+    increment |value ~I32|:
         value += 1
     ;
 

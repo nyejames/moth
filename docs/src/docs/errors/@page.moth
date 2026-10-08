@@ -42,16 +42,17 @@ page_head #= language_theme_head
     # Errors, options and assertions
 
     Moth separates ordinary absence, recoverable failure and broken invariants.
-    Many languages combine these cases through null values or exceptions, which
-    hides part of a function's behaviour.
-
     Use options for absence, implicit built-in failure for checked numeric work,
-    typed `Error!` returns for explicit failure and `assert` only when continuing
-    would violate an invariant. An enclosing catch or function contract delivers
-    implicit failure. JS/HTML delivers private propagation, builtin `Error`
-    materialisation and expression-wide catch; HTML-Wasm rejects recoverable
-    numeric failure with a structured capability diagnostic. See @../progress
-    (Progress) for per-target support.
+    typed `Error!` returns for explicit failure and `assert` only when
+    continuing would violate an invariant.
+
+    `catch` protects a selected expression and accepts eligible safety catches
+    even when authored arithmetic, a cast or multiple calls cannot fail.
+    Eligibility does not create a failure effect. Assertions, resource exhaustion
+    and fatal foreign-value integrity guards stay outside `catch`. A foreign
+    integrity failure returned through a declared builtin `Error!` slot remains
+    a typed `Error` and can be caught under ordinary compatibility rules. The
+    Progress matrix owns current support: @../progress (Progress).
 ]
 
 #[section:

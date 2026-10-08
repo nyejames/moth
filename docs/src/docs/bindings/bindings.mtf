@@ -2,7 +2,7 @@ A binding gives a value a visible name.
 
 [codeblock, $code("moth"):
     count = 42
-    ratio Float = 0.5
+    ratio F64 = 0.5
 ]
 
 ### Declaration forms
@@ -13,11 +13,26 @@ A binding gives a value a visible name.
 ]
 
 - A binding must have an initializer.
-- Without an annotation, the initializer supplies the natural type.
-- An explicit annotation supplies a receiving type and may apply normal contextual coercion.
+- Without an annotation, the initializer supplies its shape and numeric-literal family. An eligible numeric origin may stay unresolved until body-wide constraints select its exact type.
+- An explicit annotation supplies an exact receiving type. Raw literals can materialise directly in it, while already typed values need exact compatibility.
 - Ordinary bindings are immutable by default.
 - `=` creates a binding when the name is new.
 - `=` reassigns an existing binding only when that binding is mutable.
+
+### Numeric inference in a runtime body
+
+One function body, including nested blocks, branches, loops and handlers, is
+one numeric inference boundary. The implicit root runtime body follows the
+same rule. Eligible exact annotations, assignment targets, concrete parameter,
+return and field receivers, copies and mutable writes all constrain numeric
+origins before fallback. Every eligible use participates regardless of source
+order, and each binding keeps one static type across all paths.
+
+After eligible body-wide constraints resolve numeric origins, an otherwise
+unconstrained whole-number origin defaults to `I32`; a decimal/exponent origin
+defaults to `F64`. These defaults do not set a minimum arithmetic width. A bound
+integer keeps its family, and a result constraint cannot infer named arithmetic
+operands backwards. See @../numbers (Numbers) for the exact numeric rules.
 
 Compile-time constants use `#` and are documented separately by @../constants (Constants and compile-time behaviour).
 

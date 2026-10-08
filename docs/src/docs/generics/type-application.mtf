@@ -8,7 +8,7 @@ They do not become ordinary type arguments or change generic nesting rules.
 ### Type application syntax
 
 [codeblock, $code("moth"):
-    number_box Box of Int = Box(42)
+    number_box Box of I32 = Box(42)
     text_box Box of String = Box("hello")
 
     Pair type A, B = |
@@ -16,7 +16,7 @@ They do not become ordinary type arguments or change generic nesting rules.
         second B,
     |
 
-    item Pair of String, Int = Pair("count", 3)
+    item Pair of String, I32 = Pair("count", 3)
 ]
 
 ### Exact type application contract
@@ -34,13 +34,13 @@ Nested inline `of` applications are rejected. Use a named concrete alias for any
 
 [codeblock, $code("moth"):
     -- Error
-    value Box of Pair of String, Int = Box(Pair("count", 3))
+    value Box of Pair of String, I32 = Box(Pair("count", 3))
 ]
 
 Work around the limit with an intermediate alias:
 
 [codeblock, $code("moth"):
-    StringIntPair as Pair of String, Int
+    StringIntPair as Pair of String, I32
     value Box of StringIntPair = Box(Pair("count", 3))
 ]
 

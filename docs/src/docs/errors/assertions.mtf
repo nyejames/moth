@@ -8,8 +8,8 @@ message:
 ]
 
 This is compiler-owned metadata, not an importable or shadowable Moth
-function. The rules below describe the accepted contract. See @../progress
-(Progress) for current compiler and backend support.
+function. These rules describe the accepted contract. The Progress matrix owns
+current compiler and backend support: @../progress (Progress).
 
 [codeblock, $code("moth"):
     assert(index < items.length())

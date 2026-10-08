@@ -24,7 +24,7 @@ Follow `AGENTS.md` and read the style, testing and validation guides. Read both 
 Consume these merged capabilities, without rebuilding them:
 
 - Compact typed semantic expressions, dense HIR, native success/error result channels and the bounded Wiring foundation.
-- Current numeric identities, including the separately scheduled Uint addition and Dec contextual-materialisation corrections. Use their accepted profile and promotion rules rather than preserving today's type inventory.
+- Exact numeric identities and I32/F64 defaults, D15's equal-type preservation and smallest mixed domains, per-operation F16 completion and bounded body-local numeric-origin inference.
 - Shared directive recognition, retained attachment syntax and argument validation.
 - Explicit HTML root purposes, `$page` and runtime title capability.
 - Existing implicit-failure inference, expression catch, public summaries, generic convergence and trusted Core constant evaluation where advertised.
@@ -53,7 +53,7 @@ Imports, type/field/parameter declarations, standalone compile-time declarations
 
 Numeric initialisers and other expressions inside a covered body keep that body's mode even when constant folding removes runtime work. Explicit `#` initialisers inside the body still obey required-constant rules. A called function's body is never retargeted by its caller's `$fast_math`. Caller-authored argument and receiver expressions use the caller's lexical mode. Ordinary calls to Math helpers do not automatically select `fast_*` names.
 
-`$fast_math` covers eligible numeric operators and their implicit compound write-back. Explicit `cast`/`cast!`, comparison semantics, logical operators, collection/map APIs, assertions and foreign boundary validation retain their own contracts. No new operator/type pair becomes legal, including unsigned negation, Byte arithmetic or binary-float `//`.
+`$fast_math` covers eligible numeric operators and their implicit compound write-back. Explicit `cast`, comparison semantics, logical operators, collection/map APIs, assertions and foreign boundary validation retain their own contracts. No new operator/type pair becomes legal, including unsigned negation, Byte arithmetic or binary-float `//`. A cast requires an immediate concrete target and does not constrain its source type.
 
 ### Meaning of the three directives
 
@@ -71,6 +71,16 @@ Environmental resource exhaustion, stack exhaustion, external termination and co
 
 For a statement constraint, its completion/escape is the boundary. For a function constraint, its callable return is the boundary. Recoverable failure discharged inside that boundary is allowed. Catch cannot discharge a semantic trap. Effects of code executed before failure are not rolled back.
 
+Authored safety-catch eligibility remains separate from actual recoverable
+failure or trap summaries. Valid arithmetic, casts or more than one call at
+the selected expression's level can permit catch even when currently
+infallible. Receiver-chain and separate-operand calls count, argument-nested
+calls do not inflate the enclosing count. Actual nested failures remain
+protected. Validate handlers and fallbacks normally before erasing unreachable
+work. Eligibility creates no Error producer or edge and cannot catch a fatal
+integrity guard or fast trap. `$infallible` checks actual failure/trap paths,
+not the eligibility flag.
+
 ### Guarantees versus value history
 
 `$safe_math` constrains computations, not the history of argument bits. Calling a safe function with an already wrapped but valid integer does not recover the original mathematical value. Keep no fast-origin taint on ordinary values. Width/range and finiteness invariants make such values safe to consume under their ordinary types.
@@ -81,7 +91,7 @@ Use active semantic reachability after the existing static selection rules. Inva
 
 ### Shared domain and execution rules
 
-Both modes use the same literal materialisation, allowed operands, promotion, result types, profile-selected precision, exactly-once evaluation and observable source ordering. A receiving type does not retag an operator result. In particular, `U8 + U8 -> U32` remains true in fast mode. `Int` and the delivered unsigned convenience type use their authoritative NumericProfile widths. Fixed widths are profile-independent.
+Both modes use the same literal materialisation, operand eligibility, D15 result domains, exact precision, exactly-once evaluation and observable source ordering. A receiving type does not retag a concrete result or infer named arithmetic operands backwards. Equal types retain their width: `U8 + U8 -> U8` and `F16 + F16 -> F16`. Mixed integers select the smallest supported common operand domain and mixed floats the wider precision. No I32 or F32 promotion floor applies.
 
 For an N-bit integer domain define `wrap_N(x)` as the unique non-negative residue modulo `2^N`. An unsigned result is that residue. A signed result is its two's-complement interpretation, subtracting `2^N` when the high bit is set. Use the **semantic result** width, never incidental carrier width. Every published integer remains in its declared range. Integer zero has its ordinary canonical representation.
 
@@ -104,11 +114,11 @@ Compiler-known invalid numeric work remains a source diagnostic, including under
 
 Unsigned exponents cannot be negative. Preserve the ordinary exponent-zero identity, including `0 ^ 0 == 1`. Use bounded modular exponentiation rather than constructing an unbounded host power and truncating afterwards. Modular intermediate multiplication is part of that algorithm, not another source failure boundary.
 
-Ordinary convenience integer `/` produces its existing Float result. Compatible fixed integer `/` produces F64. The signed-division overflow pair belongs to `//`, not these floating-point operations. Fast mode adds no bitwise surface operators.
+Eligible fixed integer `/` produces F64, including narrow equal operands. The signed-division overflow pair belongs to `//`, not real division. Fast mode adds no bitwise surface operators.
 
 ### Binary-float operators
 
-This covers profile Float and fixed F16/F32/F64 through their ordinary promotion rules. F16 arithmetic still promotes to at least F32. Every language-level operation rounds at the required precision using its current rule. Preserve primitive signed zero and subnormal behaviour. Finite underflow to subnormal or zero is valid.
+This covers exact F16/F32/F64 through D15's result-domain rules. Every language-level operation rounds and checks finiteness at its selected semantic precision. F16 completes at each operation, not only at write-back into storage. A wider carrier is not a wider result type. Preserve direct rounding, signed zero and subnormal behaviour. Finite underflow to subnormal or zero is valid.
 
 | Operator | Fast result | Fast semantic trap condition |
 |---|---|---|
@@ -136,7 +146,7 @@ Preserve arbitrary-precision coefficients, scales, accepted integer mixing and a
 | Positive-scale `/` | Ordinary half-even division at the result scale | Zero divisor |
 | Scale-zero `//` | Ordinary truncating integer quotient | Zero divisor |
 | `%` | Ordinary coefficient/decimal remainder at the result scale | Zero divisor |
-| `DecN ^ Int` | Existing exact-power and half-even result contract | Negative exponent |
+| `DecN ^ I32` | Existing exact-power and half-even result contract | Negative exponent |
 
 Scale-zero `/`, positive-scale `//`, unsupported scale mixing and other invalid pairs remain source errors. Preserve the exponent-zero identity. Round at each language operation result, not at arbitrary implementation multiplications. Resource limits remain fatal environmental limitations rather than new recoverable Dec errors or invented semantic arithmetic traps.
 
@@ -184,7 +194,7 @@ Use native Wasm modular integer operations and integer division/remainder where 
 
 A future RISC-V backend must add the universal division traps even though its division instructions return specified values for those inputs. A future C/LLVM backend must implement modular addition without signed-overflow undefined behaviour and guard invalid division/remainder before executing undefined instructions. Source fast mode does not permit LLVM poison, `undef`, unjustified `nsw`/`nuw` or blanket fast-math flags. LLVM `unreachable` alone is not a runtime trap. Emit actual termination where required.
 
-These are backend conformance obligations, not work to create C, LLVM or RISC-V backends now. If a target cannot implement an accepted operation, use an explicit capability rejection rather than different semantics. Source constraint validity remains independent of target selection and debug/release. NumericProfile remains a semantic input, never a per-backend switch.
+These are backend conformance obligations, not work to create C, LLVM or RISC-V backends now. If a target cannot implement an accepted operation, use an explicit capability rejection rather than different semantics. Source constraint validity remains independent of target selection and debug/release. Exact numeric identities are semantic facts, never per-backend switches. This coordination introduces no additional Wasm capability.
 
 ## 4. Constraint analysis and public guarantees
 
@@ -202,7 +212,7 @@ Verify annotated private and exported declarations even if no selected entry cal
 
 A bounded semantic proof policy decides acceptance. Initially reuse full numeric type bounds, exact constants, existing semantic discharge, local facts supported by the canonical analyser and completed trusted call contracts. Add only narrowly justified branch refinement with explicit invalidation tests. No SMT dependency, whole-program path solver or termination proof is required.
 
-Use the same policy in debug/release and every target for a fixed semantic numeric profile. A possible case that cannot be excluded is a constraint diagnostic. Optional `NumericProofs` must not become an accidental source-acceptance authority. Shared interval arithmetic may have one owner while mandatory verification and optional predicate elision remain separate consumers.
+Use the same policy in debug/release and every target for fixed exact semantic types. A possible case that cannot be excluded is a constraint diagnostic. Optional `NumericProofs` must not become an accidental source-acceptance authority. Shared interval arithmetic may have one owner while mandatory verification and optional predicate elision remain separate consumers.
 
 Wrapping integer add/subtract/multiply/negate have no numeric panic obligation. Fast integer division and finite-float arithmetic still do. `$fast_math` skips work needed only to recover/check integer overflow, not all analysis of the containing function. It never hides fallible API calls, explicit casts or assertions.
 
@@ -218,7 +228,7 @@ Future side-effect restrictions should isolate capability origins to designated 
 
 Declared guarantees and all inferred facts visible to constrained consumers belong in PublicSemanticInterface and its existing fingerprint. Keep implementation/runtime/physical fingerprints responsible for their own affected facts. Changing a private helper from checked to fast or introducing a trap must invalidate every dependent public guarantee even when exported source text is unchanged.
 
-Include numeric semantics and contract compatibility in existing retained/cached artefact domains. Reject or rebuild incompatible precompiled contracts. No parallel effects cache or new public effect fingerprint family. Generic sidecars and base modules retain facts paired to their exact final executable and semantic profile.
+Include numeric semantics and contract compatibility in existing retained/cached artefact domains. Reject or rebuild incompatible precompiled contracts. No parallel effects cache or new public effect fingerprint family. Generic sidecars and base modules retain facts paired to their exact final executable and exact numeric identities.
 
 ### Diagnostics
 
@@ -230,7 +240,7 @@ Changing to `$fast_math` is an explicit semantic tradeoff, never an automatic fi
 
 Keep ordinary helpers and their published numerical contracts. Their existing lack of a declared Error slot does not prove the stronger `$infallible` constraint. The shared finite-value boundary must be classified honestly. Do not silently convert all regular Math APIs to Error-returning functions.
 
-Investigate and deliver a small useful `fast_*` set, beginning with Float-only counterparts of `sqrt`, `log`, `exp`, `pow` and `hypot`. Preserve profile-selected Float parameters/results and ordinary arities. All fast counterparts carry fast-math semantic metadata, retain finite result invariants and expose no typed numeric error slot. They remain ordinary calls usable outside an annotated function. `$safe_math` rejects their transitive use.
+Investigate and deliver a small useful `fast_*` set, beginning with F64-only counterparts of `sqrt`, `log`, `exp`, `pow` and `hypot`. Preserve F64 parameters/results and ordinary arities. All fast counterparts carry fast-math semantic metadata, retain finite result invariants and expose no typed numeric error slot. They remain ordinary calls usable outside an annotated function. `$safe_math` rejects their transitive use. F16/F32 overloads, generic Math and new Wasm Math capabilities remain deferred.
 
 | Counterpart | Initial V1 contract |
 |---|---|
@@ -244,7 +254,7 @@ Package approximations retain their documented tolerance instead of promising bi
 
 At activation, measure the proposed counterparts against the then-current regular lowering. Seal the useful exported subset before implementation. Retain fast_hypot as the concrete algorithmic tradeoff. Omit a redundant counterpart when it provides neither a cheaper implementation nor a distinct documented contract, and record why. Do not mechanically double the package, invent lower-accuracy approximations or claim speed from a name. New approximation algorithms require explicit error bounds and separate approval.
 
-Reuse one package-local registration table, demand-driven helpers and trusted binding metadata. Never dispatch semantics by `fast_` prefix or package alias. Support every target where the corresponding regular helper is delivered, and the scalar Wasm primitives already available for the selected fast helper. Broader Wasm transcendental support is not an implicit prerequisite or promised side project. Unsupported reachable helpers retain honest target diagnostics.
+Reuse one package-local registration table, demand-driven helpers and trusted binding metadata. Never dispatch semantics by `fast_` prefix or package alias. Support only targets with the required accepted helper contract and lowering. Existing scalar Wasm primitives do not deliver Core Math's F64 functions. Additional Wasm Math support remains later target work, not an implicit prerequisite or promised side project. Unsupported reachable helpers retain honest target diagnostics.
 
 ## 6. Existing numeric optimisation work
 
@@ -293,7 +303,7 @@ For each behaviour change, add the failing test first, run it to establish the f
 
 - [ ] Rebase onto the named prerequisites and record the baseline and exact toolchain in working notes.
 - [ ] Read the authorities and map the current directive, numeric, summary, binding, proof, runtime and test owners. Classify each as reuse, extend, replace or leave unchanged.
-- [ ] Inventory every legal numeric operator/domain and implicit compound conversion, including the delivered Uint rules, against section 3. Unsupported pairs stay unsupported.
+- [ ] Inventory every legal exact numeric operator/domain and implicit compound conversion against section 3, including D15 narrow checks and operation-level F16 completion. Unsupported pairs stay unsupported.
 - [ ] Identify all known semantic fatal paths and all trusted external operations that can reach them. Separate resource limits and unknown foreign evidence.
 - [ ] Seal the Core Math subset with contracts and comparative generated-code/runtime evidence. Record omitted redundant counterparts rather than padding the API.
 - [ ] Run the baseline checks required by the validation guide. Treat unrelated blockers separately and never weaken coverage to make the baseline green.
@@ -328,7 +338,7 @@ Gate: one typed mode owner, equivalent folded/runtime contracts and no enabled r
 - [ ] Carry guarantees through public interfaces, fingerprints and generated sidecars. Test same-text exports whose private implementation changes and stale/unknown imported summaries.
 - [ ] Reuse bounded diagnostic witnesses. Add deterministic rendering and recursive back-edge tests, including a terminal unknown foreign leaf.
 
-Gate: same source verdict on JS/Wasm and debug/release for the same numeric profile. Optional proof tables cannot alter acceptance. No duplicate global effects engine or new IO/purity machinery.
+Gate: same source verdict on JS/Wasm and debug/release for the same exact types. Optional proof tables cannot alter acceptance. No duplicate global effects engine or new IO/purity machinery.
 
 ### Phase 4: JS fast lowering and scalar success paths
 
@@ -363,7 +373,7 @@ Gate: no name-based semantics, no unverified no-panic claims and no promised spe
 
 ### Phase 7: integration, performance and final documentation
 
-- [ ] Run all primary contract cases and boundary cases across applicable numeric profiles, debug/release and JS/Wasm. Use runtime parameters to exercise runtime traps rather than folding all inputs.
+- [ ] Run all primary contract cases and boundary cases across applicable exact widths, debug/release and supported JS/Wasm paths. Use runtime parameters to exercise runtime traps rather than folding all inputs.
 - [ ] Measure runtime cost and frontend time on integer kernels, finite-float kernels, deep private call chains and constraint-heavy recursive/generic cases. Include ordinary no-directive baselines and cold failure cases.
 - [ ] Review summary storage, expression sizes, convergence counts and generated helper/carrier counts against baseline. Remove redundant walks and temporary compatibility structures instead of normalising regressions.
 - [ ] Finish every documentation owner in section 7 and rebuild generated docs. Check links, all examples and the exact operation/support matrix.
@@ -386,7 +396,7 @@ increment |value I32| -> I32:
 
 $safe_math
 $infallible
-sum_small |left U8, right U8| -> U32:
+sum_small |left I8, right U8| -> I16:
     return left + right
 ;
 
@@ -399,9 +409,9 @@ recover_sum |left I32, right I32| -> I32:
 
 Accept those declarations. Reject an otherwise identical `$infallible` function performing unproved `a // b`, even with `$fast_math`. Reject a `$safe_math` wrapper calling increment because its guarantee covers mode use, not whether one observed input wraps. Accept a recovered checked operation only when the selected recovery path has no remaining panic/failure obligation.
 
-Primary numeric boundaries include I32/I64 MIN/MAX, U32/U64 maxima, operand domains promoted from narrow types, a U32 product whose Number intermediate loses low bits, negative-to-unsigned compound stores, MIN/-1 division and remainder, both signed float zeros, largest finite results, subnormals, F16 write-back overflow, modular powers with huge exponents, Dec zero divisors and exactness failures. Do not replicate every equivalent case across every type without a distinct boundary reason.
+Primary numeric boundaries include signed/unsigned narrow MIN/MAX, I32/I64 MIN/MAX, U32/U64 maxima, mixed operand-domain selection, a U32 product whose Number intermediate loses low bits, negative-to-unsigned compound stores, MIN/-1 division and remainder, both signed float zeros, largest finite results, subnormals, operation-level F16 overflow/rounding, modular powers with huge exponents, Dec zero divisors and exactness failures. Do not replicate every equivalent case across every type without a distinct boundary reason.
 
-Primary control-flow boundaries include exactly-once receiver/RHS evaluation, earlier observable work surviving a trap, no store after failed write-back, no later call after failure, catch not handling fast traps, inactive ordinary branches, generic materialisation, same-module recursion, opaque foreign leaves and stale published guarantees. Keep one primary test owner per behaviour and use boundary-role fixtures for additional target/profile coverage.
+Primary control-flow boundaries include exactly-once receiver/RHS evaluation, earlier observable work surviving a trap, no store after failed write-back, no later call after failure, catch not handling fast traps, safety eligibility without a failure producer, same-level versus argument-nested call counts, inactive ordinary branches, generic materialisation, same-module recursion, opaque foreign leaves and stale published guarantees. Keep one primary test owner per behaviour and use boundary-role fixtures for additional target/width coverage.
 
 ## 10. External specification references
 

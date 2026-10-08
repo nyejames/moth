@@ -1,4 +1,7 @@
-The source spelling of a number determines its natural type.
+Literal spelling establishes a numeric origin. Moth keeps that spelling until
+the permitted receiving and peer constraints have resolved its exact type.
+
+### Spelling and defaults
 
 [codeblock, $code("moth"):
     whole = 42
@@ -8,35 +11,166 @@ The source spelling of a number determines its natural type.
     precise = 1.0e+21
 ]
 
-### Contract
+- Whole-number spelling creates an integer origin. An otherwise unconstrained origin defaults to `I32`.
+- Decimal-point or exponent spelling creates a binary-float origin. An otherwise unconstrained origin defaults to `F64`.
+- The grammar has no unsigned literal category, numeric suffixes or radix forms.
+- Value size never chooses a width. An unconstrained whole literal outside `I32` diagnoses instead of retrying as `I64`, `U64` or `Dec`.
+- A concrete receiver can materialise a retained whole spelling directly as `U64`, including values above the `I32` range.
+- Decimal or exponent spelling cannot initialise an integer merely because its mathematical value is integral.
+- Exponents use lowercase `e`. Uppercase `E`, unary `+` and a spaced prefix minus such as `- count` are invalid.
+- A leading `-` stays attached to its literal or expression. Signed minimum values materialise directly from their negative spelling.
 
-- A whole-number literal is naturally `Int`.
-- A decimal-point or exponent literal is naturally `Float`.
-- Value size never infers a narrow type. `1` is `Int`, never `U8` or `I8`.
-- Exponents use lowercase `e`.
-- Uppercase `E` is rejected.
-- Unary `+` is rejected.
-- A leading `-` must be attached to the literal or expression it negates.
-- `-1`, `-1e6` and `-count` are valid prefix forms.
-- `- count` is invalid.
-- No radix literals and no numeric suffixes are added to the grammar.
+### Body-local constraints
 
-[codeblock, $code("moth"):
-    valid_literal = -42
-    valid_expression = -count
+Each runtime function body forms an inference boundary, including nested blocks,
+branches, loops and handlers. The implicit root runtime body follows the same
+rule. Each binding has one static type across all writes and control-flow paths.
+Compile-time declarations resolve at their own declaration boundary, so later
+runtime uses cannot retype a named constant. Each concrete generic instance
+gets its own body-local inference state.
 
-    invalid_exponent = 1E6
-    invalid_plus = +1
-    invalid_spacing = - count
+Value-producing blocks keep their existing placement and explicit-receiver
+requirements. Inference operates inside legal constructs and does not invent a
+missing receiver to legalise a different block form.
+
+Numeric constraints can come from exact annotations, assignments, concrete
+parameters, return slots, fields, typed container entries and eligible
+value-producing receivers. Copies connect the same numeric unknown. Mutation
+constrains one binding type rather than creating a new type for each write.
+A known generic signature can connect an existing numeric unknown across its
+parameters and result. The compiler uses that signature alone: it does not
+inspect a callee body or search traits to choose a type.
+
+Every eligible use contributes before defaulting. Source order cannot pick the
+winning receiver. Conflicting exact receivers diagnose with both useful source
+locations, independent of traversal order. A trait requirement, overload,
+failure effect, proven value range, backend capability or optimisation never
+chooses a numeric type.
+
+This bounded process does not add general type inference. Function signatures,
+fields, public interfaces and named constants remain concrete at their existing
+declaration boundaries. No pending numeric unknown crosses a module boundary.
+
+### Receiving, peer and default priority
+
+Inference applies this priority before materialisation:
+
+[codeblock, $code("text"):
+    eligible receiving context
+        -> eligible local numeric peer context
+        -> language default
 ]
 
-The invalid lines above demonstrate rejected syntax. They are not valid program
-forms.
+An exact receiver reaches unresolved literal arithmetic and grouping, including
+raw literal leaves beside named operands. It never retypes a named binding,
+constant, field, call result or completed operator result.
+
+[codeblock, $code("moth"):
+    base I32 = 10
+    total I64 = base + 1
+]
+
+The receiver types raw `1` as `I64`, so the mixed fixed-integer operation
+produces `I64`. `base` stays `I32`. If both operands name `I32` values, the
+operation stays `I32` and an `I64` receiver rejects it.
+
+Without an explicit receiver, an eligible typed numeric peer can supply its
+exact type to the opposite unresolved literal-only arithmetic subtree. The
+peer never changes its own type. A subtree containing a binding, field, call
+result or cast result is not literal-only. Call arguments use their own
+parameter receivers.
+
+[codeblock, $code("moth"):
+    small U8 = 10
+    same_width = small + 1
+]
+
+The local `U8` peer types the raw `1` as `U8`, so `same_width` has type `U8`.
+An explicit wider receiver can type the raw leaf wider without changing
+`small`:
+
+[codeblock, $code("moth"):
+    wider U16 = small + 1
+]
+
+Here `1` receives `U16` and ordinary mixed-integer arithmetic produces `U16`.
+`small` remains `U8`.
+
+### Forward arithmetic only across named values
+
+A later consumer can resolve an initializer that still consists only of
+unresolved literal arithmetic:
+
+[codeblock, $code("moth"):
+    value = 1 + 2
+    take_u64(value) -- Assume this parameter requires U64.
+]
+
+The initializer becomes `U64` before operator selection. A completed operation
+over named values cannot search backwards for a wider operand type:
+
+[codeblock, $code("moth"):
+    base = 1
+    twice = base + base
+    take_u64(twice) -- Rejected without an independent U64 constraint on base.
+]
+
+`base` defaults to `I32`, so `twice` has type `I32`. The receiver cannot make
+either named operand `U64`. An independent `take_u64(base)` can resolve `base`
+before forward arithmetic. Its position relative to other eligible uses does
+not change that result.
+
+Copies preserve the same rule. A copied numeric unknown shares its type
+constraints with the source, while a copy of a completed value keeps that
+value's concrete type. Mutation also keeps one type across its initializer and
+all later writes. A write cannot create a new type version or push a constraint
+back through a completed named arithmetic expression.
+
+Assume `take_u64` accepts a `U64` parameter:
+
+[codeblock, $code("moth"):
+    source = 1
+    duplicate = copy source
+    take_u64(duplicate)
+
+    count ~= 1
+    count += 1
+    take_u64(count)
+]
+
+The copy connects `source` and `duplicate` to one numeric type. Mutation keeps
+one type across `count`'s initializer, update and later use. Both examples
+resolve to `U64` from the direct parameter receiver; source order does not
+choose a different type.
+
+### Literal families in collections
+
+A non-empty numeric collection can retain one unresolved numeric element type
+until an exact collection receiver or another eligible use resolves it. Raw
+whole and decimal/exponent literals select the binary-float family regardless
+of order:
+
+[codeblock, $code("moth"):
+    values = {1, 2.5}
+    samples = {2.5, 1}
+]
+
+Both default to `F64` unless a receiver selects another binary-float precision.
+A bound integer never changes family to fit:
+
+[codeblock, $code("moth"):
+    count = 1
+    mixed = {count, 2.5} -- Rejected: count remains an integer.
+]
+
+An empty collection creates no numeric unknown and keeps its existing explicit
+typing requirements. Arithmetic promotion does not search for a common
+collection storage type.
 
 ### Destination-aware materialisation
 
-A literal materialises directly in the numeric type of its immediate receiving
-boundary. The boundary never builds another type first.
+A literal materialises directly at an immediate concrete numeric receiver.
+The compiler does not first construct a default value and convert it:
 
 [codeblock, $code("moth"):
     small U8 = 200
@@ -46,201 +180,75 @@ boundary. The boundary never builds another type first.
     raw Byte = 255
 ]
 
-- A whole literal may initialise a binary float, `Uint` or the `Dec` family.
-- Decimal or exponent spelling does not initialise a fixed integer, `Int`, `Uint` or `Byte` merely because its value is integral.
-- A negative value cannot initialise `U*`, `Uint` or `Byte`.
-- A signed minimum materialises from its signed spelling without first rejecting the positive magnitude.
-- An integer literal must fit its receiving type's range. A `Uint` literal must fit the selected unsigned width, so `4_294_967_296` fits `Uint64` but not `Uint32`.
-- A decimal or exponent literal must be exactly representable at a receiving `Dec` scale. `money Dec2 = 1.239` is invalid rather than rounded.
+- A whole literal can initialise a fixed integer, binary float, `Dec` or `Byte` when it fits.
+- A negative value cannot initialise an unsigned type or `Byte`. Negative unsigned spellings, including `-0`, are rejected.
+- Integer literals must fit the receiving range. `4_294_967_296` fits `U64` but not `U32`.
+- Decimal or exponent literals must fit a receiving `Dec` scale exactly. `money Dec2 = 1.239` fails rather than rounding.
+- A binary-float literal rounds directly to its destination using nearest, ties-to-even. Inexact values such as `0.1`, subnormals and signed zero remain valid, while a non-finite rounded result fails.
 
-An immediate concrete numeric peer may type an otherwise untyped literal before
-operator promotion. When `channel` is a `U8` value, `channel + 1` types the
-literal `1` as `U8` and produces `U32`. The literal `300` cannot materialise as
-that `U8` peer, so that expression needs an explicitly widened operand. A local
-typed `Uint` peer supplies `Uint` to its opposite literal-only arithmetic
-subtree from either side, while a typed `Int` never becomes `Uint` through a peer.
+### `Dec` literal context
 
-A receiving annotation does not retrospectively retag an operator's result.
-Already typed variables and constants keep their identities. Parentheses do not
-add a receiving boundary. Generic inference uses these same local rules and
-gains no distant conversion search.
-
-### `Dec` arithmetic context
-
-A `Dec` receiving boundary types unresolved numeric arithmetic before
-operator typing and folding. An explicit `Dec` scale reaches through raw
-arithmetic and parentheses to every unresolved literal leaf. Each leaf
-materialises directly at that scale from its retained spelling and never
-passes through `Int`, `Float` or a formatted intermediate first.
+An explicit `Dec` receiver reaches every unresolved literal leaf in its
+arithmetic and grouping. Each leaf materialises directly at the selected scale,
+without passing through a binary float or a formatted intermediate:
 
 [codeblock, $code("moth"):
     whole Dec4 = 1 + 1
     fraction Dec4 = 0.1 + 0.2
-    group Dec4 = (1 + 2) * 3
-    negative Dec4 = -(0.1 + 0.2)
+    grouped Dec4 = (1 + 2) * 3
 ]
 
-`whole` holds `2`, `fraction` holds exactly `0.3`, `group` respects its
-parentheses with `9` and `negative` holds `-0.3`. Parentheses keep
-precedence and structure without adding a receiving boundary of their own.
+`fraction` holds exactly `0.3`. Parentheses preserve the expression's grouping
+but do not add a receiving boundary. A `Dec` peer can supply its scale to an
+opposite literal-only arithmetic subtree from either side. A concrete `Dec`
+value, call result or cast result does not become a raw literal.
 
-Without an explicit receiver, a typed `Dec` operand can still supply its
-scale to an opposite operand made only of unresolved literals, arithmetic
-and parentheses. That peer context works from either side, so both shapes
-below type their literal arithmetic at `Dec4`:
+Every decimal leaf must fit the selected scale. `small Dec2 = 0.005 + 0.005`
+fails even though the mathematical sum fits because neither leaf can
+materialise at scale two. Different `Dec` scales never rescale silently. A
+completed operation over named operands also keeps its own type rather than
+changing to satisfy a wider decimal receiver.
+
+`Dec` context reaches a power base but not its exponent. The exponent uses the
+separate `I32` rule below.
+
+### Cast and operator barriers
+
+A cast destination never chooses the source type. Resolve the source from its
+own eligible constraints or its language default, then check the complete
+source-target pair:
 
 [codeblock, $code("moth"):
-    left = rate + (0.1 + 0.2)
-    right = 0.1 + 0.2 + rate
+    value = 1
+    take_u32(cast value)
+    take_i64(value)
 ]
 
-An opposite operand holding anything else keeps its own type. Variables,
-named constants, fields, call results and cast results never count as
-unresolved literals, even when the compiler knows their values.
+The later `I64` parameter resolves `value` as `I64`; the `U32` cast target does
+not. The cast then uses the `I64`-to-`U32` policy. A cast also forms a barrier
+to incoming arithmetic receiver context. An untyped declaration such as
+`converted = cast source` remains invalid because no immediate target exists.
 
-The explicit receiver wins over a peer. It also reaches strictly further:
-it can type a literal nested inside partly typed arithmetic where a peer
-cannot. With `count` an `Int`, `total Dec4 = count + (other + 1)` types
-the `1` at `Dec4` and evaluates both additions as mixed `Dec4`
-arithmetic. The uninstructed `total = rate + (count + 1)` keeps checked
-`Int` arithmetic for its inner addition.
+Already concrete operator results never change type to satisfy a wider
+receiver. Comparison and logical results stop numeric context and remain
+`Bool`. Member access, propagation and completed catch results also stop later
+peer context. Explicit cast operands resolve independently.
 
-Every literal leaf must still fit its selected scale exactly. `total Dec2
-= 0.005 + 0.005` fails even though the mathematical sum fits, because
-each `0.005` leaf cannot materialise at scale two. Only `Dec` and `Uint`
-peers extend to compound literal subtrees, with the exponent difference
-described below. Other numeric receivers keep the
-single-literal rule above, with no distant search for a convenient type.
+`Dec` exponentiation has one separate boundary:
 
-### `Dec` distinctions
-
-Typed arithmetic keeps its own domain. With `left` and `right` both `Int`,
-`total Dec4 = left + right` rejects the completed `Int` sum at the `Dec4`
-receiver. Mixed `Int` arithmetic still works: `total Dec4 = count + 1`
-scales the typed `count` exactly into `Dec4`. Because the receiver reaches
-every raw literal, `total Dec4 = value + count // 2` and `total += count // 2`
-give the `2` scale four and are rejected by the positive-scale `//` rule;
-name or cast the `Int` halving first. Different `Dec` scales never
-rescale silently, so `total Dec4 = small + (1 + 1)` fails when `small` is
-`Dec2`. `Float` and `Byte` values never join `Dec` arithmetic implicitly.
-
-[codeblock, $code("moth"):
-    exponent Dec4 = 2 ^ (1 + 2)
-    right_power Dec4 = 2 ^ 3 ^ 2
-    cast_sum Dec4 = cast (1 + 2)
+[table:
+    [th: [: Base] [: Exponent type] [: Result]]
+    [td: [: DecN] [: I32] [: DecN]]
 ]
 
-`Dec` context reaches a power base but never its exponent. `exponent`
-holds `8` with an `Int` exponent subtree, and `right_power` holds `512`
-with right-associative grouping. A cast operand types naturally behind
-its own boundary, so `cast_sum` converts completed `Int` arithmetic and
-holds `3`. By contrast `total Dec4 = cast (0.1 + 0.2)` stays an
-unsupported `Float`-to-`Dec` cast.
+An explicit `Dec` receiver reaches the power base but not the exponent. A raw
+exponent receives the default `I32`; an already typed other-width integer needs
+an explicit cast at a legal receiving site. Negative exponents keep their
+existing failure behaviour.
 
-The same per-operation rule explains two numerical pairs. `chain Dec4 = 1
-/ 3 * 3` holds `0.9999` because each operation rounds half-even at its
-own result. `cube Dec2 = 1.07 ^ 3` holds `1.23`: power computes one exact
-power before that single rounding, while `(1.07 * 1.07) * 1.07` rounds
-twice and holds `1.22`. See @./#operators (Operators) for the rounding
-boundaries.
+### MON data boundary
 
-### `Dec` and `Uint` arithmetic contexts
-
-`Dec` and `Uint` both type unresolved numeric arithmetic before operator
-selection, with different exponent rules. A `Uint` receiving boundary types
-whole-number literal arithmetic at the selected unsigned width before
-operator typing and folding. An explicit `Uint` receiver reaches through
-raw arithmetic and parentheses to every unresolved whole-number leaf. Each
-leaf materialises directly as `Uint` from its retained spelling and never
-passes through `Int` first.
-
-[codeblock, $code("moth"):
-    count Uint = 1 + 2
-    large Uint = 3_000_000_000 + 1
-    grouped Uint = (1 + 2) * 3
-
-    peer Uint = 10
-    from_right = (1 + 2) + peer
-    from_left = peer + (1 + 2)
-]
-
-Without an explicit receiver, a local typed `Uint` peer supplies `Uint`
-context to its opposite literal-only arithmetic subtree from either side.
-A subtree holding a variable, named constant, field, call result or cast
-result is not literal-only, so with `signed` an `Int`, `invalid Uint =
-signed + 2` stays invalid. Explicit receiver context takes precedence
-over peer context. Context preserves authored intermediate operations:
-`(0 - 1) + 2` in a `Uint` context fails at the subtraction, even though
-the mathematical final result is positive. An oversized literal fails at
-materialisation even if a later operation would reduce it.
-
-`Uint` context selects whole-number leaves only. Decimal or exponent
-leaves keep natural `Float` typing and can select ordinary `Uint`/`Float`
-mixed arithmetic. A completed `Float` result still cannot enter a `Uint`
-receiver implicitly.
-
-`Uint` power differs from `Dec` power. `Uint` operands use ordinary
-same-family arithmetic, so a raw exponent receives `Uint` context too.
-`Dec` context reaches a power base but never its exponent, which stays
-`Int`. A typed `Uint` is not an implicit `Dec` exponent: it needs an
-explicit handled cast to `Int`.
-
-Negative unsigned literal spellings, including `-0`, are rejected. Unary
-negation of any typed `Uint` is invalid, including known zero.
-
-### `Dec` receiving boundaries
-
-A compound assignment evaluates its right side at the target scale. `total += count + 1` types its right side at the target, so the
-addition runs as `Dec` arithmetic before the checked write-back. The
-power exponent edge keeps profile `Int` for `Dec`: `total ^= 1 + 2` evaluates `1 +
-2` as `Int` arithmetic and holds `8` from a target of `2`.
-
-[codeblock, $code("moth"):
-    tally ~Uint = 0
-    steps Uint = 4
-    tally += steps + 1
-]
-
-A `Uint` compound assignment likewise evaluates its right side at the unsigned width, so with `steps` a `Uint` the addition runs as `Uint` arithmetic before the checked write-back. A `Uint` power
-exponent instead keeps `Uint` context.
-
-Comparisons and logical operators stop an enclosing `Dec` or `Uint` arithmetic
-context. A comparison can still use an immediate `Dec` or `Uint` peer to type its
-opposite literal-only arithmetic operand, so `same Bool = value is (0.1
-+ 0.2)` types the parenthesised arithmetic at the peer scale and produces
-a `Bool`. Logical results stay `Bool`.
-
-Call arguments keep their own parameter receivers. An outer `Dec` or `Uint`
-receiver never flows through a call result into that call's arguments, and
-an unresolved generic slot gains no distant numeric guess. A `Uint`
-receiver does not push through `cast (1 + 2)`: that cast converts the
-completed `Int` expression and requires fallible-cast handling. A typed suffix
-that needs a completed value stays a completion boundary: later peer
-context never pushes through member access, propagation or a completed
-catch.
-
-Received `then` values and protected expressions take the enclosing
-receiver through the existing catch and value-block owners, so when
-`risky()` returns `Dec4`, `recovered Dec4 = risky() catch then 0.1 + 0.2`
-types the handler arithmetic at `Dec4`. A handler never retypes the call:
-an `Int`-returning call keeps its `Int` success type and is rejected at a
-`Dec4` receiver, while `read_int() + 0 catch then 0` is mixed `Dec`
-arithmetic. Conditions and handler control flow receive no ambient
-numeric context.
-
-### Binary floats
-
-A binary float literal rounds directly to its destination using round-to-nearest,
-ties-to-even. Inexact values such as `0.1` are valid.
-
-- A materialisation whose rounded result is non-finite is rejected.
-- Subnormals and signed zero are preserved.
-- Rounding happens once, at the destination precision.
-
-### Numeric literal MON data boundary
-
-MON literal data and source receivers share numeric grammar and materialisation
-facts from `moth-lexical`. Their independent parsers select the destination from
-a MON schema or the source receiving context. MON keeps whole-number and decimal
-or exponent categories lossless until that selection. Its strict category
-conversion belongs to @../mon/#mon-format (MON format).
+MON literal data shares numeric spelling and materialisation facts but keeps
+its independent schema-directed parser. Its integer and decimal/exponent
+categories remain lossless until the schema selects a destination. See
+@../mon/#mon-format (MON format).

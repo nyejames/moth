@@ -3,10 +3,10 @@
 ## Status
 
 ```text
-STATUS: paused after Phase 3; template control-flow simplification complete
+STATUS: paused after accepted Phase 3M closeout; template control-flow simplification complete
 CURRENT_SLICE: Phase 3 implementation, review corrections and 3M closeout accepted
 BLOCKERS: completion of the exact numeric migration and a fresh restart review
-NEXT_ACTION: after numeric completion, reassess owners, lifetimes, coverage and benchmarks; require explicit user resumption before further implementation
+NEXT_ACTION: numeric Phase 11 owns the fresh owner/lifetime/coverage/benchmark reassessment and restart handoff; require explicit user resumption before further expression implementation
 ```
 
 ## Purpose and authority

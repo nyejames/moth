@@ -1,46 +1,22 @@
-Moth uses `Int` for whole numbers and `Float` for decimal numbers.
+Moth's bounded numeric types name their exact width or precision:
+
+- Signed integers: `I8`, `I16`, `I32`, `I64`
+- Unsigned integers: `U8`, `U16`, `U32`, `U64`
+- Binary floats: `F16`, `F32`, `F64`
+
+An unconstrained whole-number value defaults to `I32`. An unconstrained
+decimal/exponent value defaults to `F64`. These defaults do not set a minimum
+arithmetic width. For example, `I8 + I8` stays `I8` and can overflow `I8`.
 
 [codeblock, $code("moth"):
-    lives Int = 3
-    progress Float = 0.75
+    small I8 = 12
+    ratio F16 = 0.5
 ]
 
-An `Int` can be used where a `Float` is expected:
+Binary floats preserve signed zero and subnormals. They never hold `NaN` or
+infinity. Moth also has `Byte`, a distinct octet with no arithmetic, and the
+exact decimal types `Dec`, `Dec0` and `Dec1` through `Dec256`. `Dec` and
+`Dec0` share the scale-zero identity.
 
-[codeblock, $code("moth"):
-    lives Int = 3
-    display_value Float = lives
-]
-
-A `Float` never silently becomes an `Int`. That conversion can lose
-information, so it needs an explicit cast.
-
-### The wider numeric family
-
-The accepted design also includes `Uint`, fixed-width integers (`I8`, `I16`, `I32`,
-`I64`, `U8`, `U16`, `U32`, `U64`), fixed-precision binary floats (`F16`, `F32`,
-`F64`), the one-byte octet type `Byte` and the exact `Dec` family (`Dec`,
-`Dec0` and `Dec1` through `Dec256`).
-
-`Uint` follows the selected `Int` width: `Uint32` under `Int32`, `Uint64`
-under `Int64`. It stays distinct from `Int` and from `U32`/`U64` even where
-their widths match.
-
-`Int`, `Uint` and `Float` stay separate types. None is a shorthand for a fixed-width
-type, even when the selected width matches, because one compiler-owned numeric
-profile chooses the `Int` width and the `Float` precision independently. The
-default profile is `Int32` with `Float64`, and therefore `Uint32`.
-
-[codeblock, $code("moth"):
-    count Uint = 1 + 2
-]
-
-Whole literals naturally become `Int`, while a `Uint` receiver types whole-number
-literal arithmetic as `Uint`. See @./#numeric-literals (Numeric literals) for
-that contract.
-
-`Byte` is not a number. It holds one octet, compares as an unsigned byte value
-and needs an explicit conversion to `U8` before any arithmetic. A `{Byte}` is an
-ordinary collection rather than a special buffer or text type.
-
-**Current versus accepted.** The Alpha compiler supports all four `Int`/`Float` runtime profiles, destination-aware fixed-width, `Uint` and `Byte` literals, typed fixed-width and `Uint` operators and casts, and folded numeric operations. HTML-JS executes fixed-width, `Uint`, `Byte` and `Dec` values. HTML-Wasm executes supported fixed integers, `Uint` scalars through `U32`/`U64` carriers in trap-mode-supported paths, `Byte`, `F16`, `F32` and `F64`; any operation that can actually fail and needs recoverable delivery is rejected with a structured capability diagnostic, while operations proven unable to fail, such as `U8 + U8 -> U32`, compile. Supported infallible numeric expression casts include those that do not involve `F16`, integer-to-`F16`, widening `F16` casts, `Byte -> U8` and `U8 -> Byte`. It also converts profile `Int` and fixed integers to decimal `String` values, and formats `Float`, `F16`, `F32` and `F64` text; those `Float` guards are integrity guards, not implicit numeric failure. Remaining builtin runtime casts stay gated, including fallible casts, conversions involving `Bool`, `Char` or `Error` (including `Char -> Int`), parsing from `String` and statement-form casts. Recoverable numeric failures, aggregates and reachable `Error` and `Dec` values remain Wasm-rejected. See @../progress (Progress) for current support.
+See @./#numeric-types (Numeric types) for ranges, type boundaries and current
+implementation support.

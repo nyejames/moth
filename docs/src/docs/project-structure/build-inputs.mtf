@@ -1,4 +1,4 @@
-**Current support versus accepted design.** Declaration-owned `#Config of T` contracts, typed `--input` values, ordinary static `if` and explicit `@project` are implemented. `$config` prefixes and explicit-only providers are accepted queued design. See @../progress (Progress).
+**Current support versus accepted design.** Declaration-owned `#Config of T` contracts, typed `--input` values, ordinary static `if` and explicit `@project` are implemented. The Alpha compiler still uses its profile-based numeric input types. The active exact-numeric migration accepts all fixed integer and binary-float input types and retains raw CLI numeric spelling until the exact contract is known; that change is not implemented yet. `$config` prefixes and explicit-only providers remain accepted queued design. See @../progress (Progress).
 
 Build configuration values are typed primitive values resolved before module AST execution semantics are finalised. They can represent schema-approved settings and similar stable semantic configuration. They do not represent project identity, source-discovery settings, operating-system, architecture, backend or target identity.
 
@@ -11,7 +11,7 @@ Build configuration values are typed primitive values resolved before module AST
     analytics #Bool = false
 
     $config
-    max_retries #Int = 3
+    max_retries #I32 = 3
 
     $config
     api_url #String
@@ -49,7 +49,7 @@ Build configuration values are typed primitive values resolved before module AST
 
 Ordinary constants still require initializers. Only a marked configuration contract may omit one. Reject inferred `#=` configuration contracts, runtime or mutable bindings, multi-bind targets, parameters, fields, function-local declarations and type-position or value-position directives.
 
-Accepted types stay `String`, `Int`, `Float`, `Bool`, `Char` and one optional layer around those primitives. The `Int`-only build-input scope is intentional: there is no `#Config` of `Uint`, `Dec` or fixed-width type, even though those types accept ordinary literals elsewhere.
+The accepted input types are `String`, `Bool`, `Char`, all fixed-width integers (`I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`), all fixed binary floats (`F16`, `F32`, `F64`) and one optional layer around those types. `Byte` and `Dec` remain excluded. This exact numeric input contract applies to the existing input path before the later `$config` syntax migration.
 
 ### Explicit-only providers
 
@@ -82,18 +82,24 @@ Operational source uses declaration-owned `#Config of T` contracts:
 
 In `config.moth`, the input declaration sits at the top level and the grouped project field carries only `name = expression`; for example `version #Config of String = "0.1.0"` declares the input while `project #=` passes `version = version`. Only the future `$config` prefix creates explicit-only providers.
 
-### Command build-input typing
+### Command build-input parsing and resolution
 
-The command accepts repeated `--input name=value` arguments. It splits at the first `=` and preserves all later `=` characters. Names must be lower_snake_case. Values are typed immediately in this order:
+The command accepts repeated `--input name=value` arguments. It splits at the first `=` and preserves all later `=` characters. Names must be lower_snake_case. The command retains each numeric category and its exact spelling until the corresponding input contract supplies a destination. It does not first materialise whole-number input as I32 or decimal/exponent input as F64.
 
 1. exact lowercase `true` or `false` -> `Bool`
-2. a complete valid signed whole-number literal -> `Int`
-3. a complete valid decimal-point or exponent literal -> `Float`
+2. a complete valid whole-number literal -> retain whole-number category and spelling
+3. a complete valid decimal-point or exponent literal -> retain binary-float category and spelling
 4. a complete valid single-quoted character literal -> `Char`
 5. a complete valid double-quoted string literal -> `String`
 6. every other value -> `String`
 
-Examples:
+Numeric destination examples:
+
+[codeblock, $code("text"):
+    --input count=4_294_967_296 -> accepted by U64
+    --input ratio=1 -> accepted by F32
+    --input count=1.0 -> rejected by an integer contract
+]
 
 [codeblock, $code("bash"):
     moth build . --input analytics=true
@@ -106,7 +112,14 @@ Examples:
 
 Anything else, including empty text after `name=`, falls back to `String`. A value beginning with a quote must be a complete valid quoted literal; malformed quoted text is a command-input diagnostic rather than a String fallback. Bare `none` is String text. To force an ambiguous String such as `true` or `42`, use explicit double-quoted Moth String syntax. A Char requires explicit single-quoted syntax and never infers from an unquoted character.
 
-Omitting an input lets optional absence resolve to `none` through the contract or default. A concrete `T` input may satisfy a matching `T?` contract as a present value. There is no implicit numeric/String coercion: in particular, `Int` does not satisfy `Float`. Programmatic build APIs use the same typed carrier and conversion policy.
+Omitting an input lets optional absence resolve to `none` through the contract or default. A raw CLI `T` value may materialise directly as the exact contract type, including an optional's inner type. An already typed programmatic input must have the exact contract type; a concrete `T` may satisfy a matching `T?` as a present value. Typed values receive no implicit numeric conversion. The exact compatibility and provenance rules remain separate from raw CLI literal materialisation.
+
+Programmatic inputs and builder globals retain their exact types and are not
+reparsed to match a receiver. Contract identity and effective-value
+fingerprints include the resolved exact type and canonical value. Resolution
+origin and source location remain diagnostic provenance, not semantic
+fingerprint inputs. The existing bootstrap/source ordering and conflict
+checks remain unchanged.
 
 ### Ordinary static `if`
 

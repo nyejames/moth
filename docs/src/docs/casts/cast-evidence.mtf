@@ -1,37 +1,48 @@
-Compiler-owned static traits prove cast availability. The compiler also
-registers builtin evidence for the builtin cast table.
+Compiler-owned static traits prove source evidence for explicit casts. The
+compiler also registers builtin evidence for its supported source-target policies.
 
-### Trait table
+### Source-authored target families
 
-Each source-authored evidence family has one infallible trait and one fallible
-trait.
+Moth defines an infallible and a fallible evidence trait for each of fifteen
+targets: the eleven fixed numeric types, `Bool`, `String`, `Char` and `Error`.
+Each infallible trait requires a method returning its target. Each fallible
+trait requires a `try_to_*` method returning the target and builtin `Error!`.
 
-- `Int`: `CASTABLE_TO_INT` requires `to_int |This| -> Int`; `TRY_CASTABLE_TO_INT` requires `try_to_int |This| -> Int, Error!`
-- `Float`: `CASTABLE_TO_FLOAT` requires `to_float |This| -> Float`; `TRY_CASTABLE_TO_FLOAT` requires `try_to_float |This| -> Float, Error!`
-- `Bool`: `CASTABLE_TO_BOOL` requires `to_bool |This| -> Bool`; `TRY_CASTABLE_TO_BOOL` requires `try_to_bool |This| -> Bool, Error!`
-- `String`: `CASTABLE_TO_STRING` requires `to_string |This| -> String`; `TRY_CASTABLE_TO_STRING` requires `try_to_string |This| -> String, Error!`
-- `Char`: `CASTABLE_TO_CHAR` requires `to_char |This| -> Char`; `TRY_CASTABLE_TO_CHAR` requires `try_to_char |This| -> Char, Error!`
-- `Error`: `CASTABLE_TO_ERROR` requires `to_error |This| -> Error`; `TRY_CASTABLE_TO_ERROR` requires `try_to_error |This| -> Error, Error!`
+- `I8`: `CASTABLE_TO_I8` requires `to_i8 |This| -> I8`. `TRY_CASTABLE_TO_I8` requires `try_to_i8 |This| -> I8, Error!`.
+- `I16`: `CASTABLE_TO_I16` requires `to_i16 |This| -> I16`. `TRY_CASTABLE_TO_I16` requires `try_to_i16 |This| -> I16, Error!`.
+- `I32`: `CASTABLE_TO_I32` requires `to_i32 |This| -> I32`. `TRY_CASTABLE_TO_I32` requires `try_to_i32 |This| -> I32, Error!`.
+- `I64`: `CASTABLE_TO_I64` requires `to_i64 |This| -> I64`. `TRY_CASTABLE_TO_I64` requires `try_to_i64 |This| -> I64, Error!`.
+- `U8`: `CASTABLE_TO_U8` requires `to_u8 |This| -> U8`. `TRY_CASTABLE_TO_U8` requires `try_to_u8 |This| -> U8, Error!`.
+- `U16`: `CASTABLE_TO_U16` requires `to_u16 |This| -> U16`. `TRY_CASTABLE_TO_U16` requires `try_to_u16 |This| -> U16, Error!`.
+- `U32`: `CASTABLE_TO_U32` requires `to_u32 |This| -> U32`. `TRY_CASTABLE_TO_U32` requires `try_to_u32 |This| -> U32, Error!`.
+- `U64`: `CASTABLE_TO_U64` requires `to_u64 |This| -> U64`. `TRY_CASTABLE_TO_U64` requires `try_to_u64 |This| -> U64, Error!`.
+- `F16`: `CASTABLE_TO_F16` requires `to_f16 |This| -> F16`. `TRY_CASTABLE_TO_F16` requires `try_to_f16 |This| -> F16, Error!`.
+- `F32`: `CASTABLE_TO_F32` requires `to_f32 |This| -> F32`. `TRY_CASTABLE_TO_F32` requires `try_to_f32 |This| -> F32, Error!`.
+- `F64`: `CASTABLE_TO_F64` requires `to_f64 |This| -> F64`. `TRY_CASTABLE_TO_F64` requires `try_to_f64 |This| -> F64, Error!`.
+- `Bool`: `CASTABLE_TO_BOOL` requires `to_bool |This| -> Bool`. `TRY_CASTABLE_TO_BOOL` requires `try_to_bool |This| -> Bool, Error!`.
+- `String`: `CASTABLE_TO_STRING` requires `to_string |This| -> String`. `TRY_CASTABLE_TO_STRING` requires `try_to_string |This| -> String, Error!`.
+- `Char`: `CASTABLE_TO_CHAR` requires `to_char |This| -> Char`. `TRY_CASTABLE_TO_CHAR` requires `try_to_char |This| -> Char, Error!`.
+- `Error`: `CASTABLE_TO_ERROR` requires `to_error |This| -> Error`. `TRY_CASTABLE_TO_ERROR` requires `try_to_error |This| -> Error, Error!`.
 
-The table shows trait requirement signatures. A source-authored implementation
-uses an ordinary lowercase `this` receiver of the concrete type.
+The list gives trait requirement signatures. A source implementation uses an
+ordinary lowercase `this` receiver with its concrete type.
 
 ### Builtin evidence
 
-The compiler registers evidence for the supported builtin source-target table,
-including `Uint`, the fixed-width integers, binary floats, `Byte` and the `Dec`
-family.
+Builtin evidence follows the complete conversion policies, including the fixed
+numeric targets, `Byte` and the `Dec` family. A known value, folded result,
+proven range or optimiser fact never changes the evidence class. A safe value
+cannot make a fallible source-target pair infallible.
 
-- Evidence comes from the complete source and target types. A folded value, a proven range or an optimiser fact never changes the evidence class.
-- A proven-safe fallible cast can fold or lose its runtime check. It cannot make plain `cast` legal for that type pair.
-- The evidence class is fixed before HIR and backend lowering.
+`Byte` and `Dec` retain their builtin conversion policies but gain no
+source-authored evidence families. The removed `Int`, `Uint` and `Float` names
+have no aliases or trait families.
 
 ### Source-authored evidence
 
-A same-file nominal struct, choice or aligned generic nominal constructor may
-add evidence for a supported builtin target.
-
-It must provide the required receiver method and declare explicit conformance.
+A same-file nominal struct, choice or aligned generic nominal constructor can
+provide evidence for one supported target. It must define the required
+receiver method and declare explicit conformance:
 
 [codeblock, $code("moth"):
     Label = |
@@ -48,27 +59,46 @@ It must provide the required receiver method and declare explicit conformance.
     text String = cast label
 ]
 
+Fallible evidence declares its actual typed route:
+
+[codeblock, $code("moth"):
+    try_to_i32 |this Label| -> I32, Error!:
+        value I32 = cast this.text
+        return value
+    ;
+
+    Label must TRY_CASTABLE_TO_I32
+
+    parsed I32 = cast Label("42") catch then 0
+]
+
+The cast uses the ordinary failure rules. Builtin conversion failures enter
+implicit failure. A fallible source method exposes its declared `Error!`
+outcome. An eligible catch or compatible function boundary handles the actual
+failure; the cast syntax does not select a separate propagation route.
+
 ### Contract
 
 - Core cast traits resolve without dependency clauses.
-- They cannot be redeclared.
-- They cannot be imported, exported, aliased or shadowed.
-- They are static contracts, not ordinary value types.
+- They cannot be redeclared, imported, exported, aliased or shadowed.
+- Traits are static contracts, not value types.
 - Matching method shape alone is not evidence. Explicit conformance is required.
-- Same-file nominal source types may provide explicit evidence.
-- Aligned generic nominal constructors may provide evidence for their concrete instances.
-- Source-authored evidence remains the six families above. The fixed-width numeric types, `Uint`, `Byte` and the `Dec` family carry compiler-owned builtin evidence, and Moth defines no source-authorable cast trait family for them.
-- Infallible and fallible trait pairs for the same target are incompatible through compiler-owned `must not` metadata.
-- Evidence is resolved before HIR and backend lowering.
+- Same-file nominal types and aligned generic nominal instances may provide source evidence.
+- Infallible and fallible evidence for the same source type and target are mutually exclusive.
+- Evidence resolves before HIR and follows the complete static source and target types.
+- Infallible evidence implementations cannot acquire an inferred failure contract.
+- The traits prove source evidence only. They add no user-defined target types or general conversion framework.
 
 ### Outside cast design scope
 
-- user-defined cast target types
+- user-defined target types
 - generic cast target parameters
 - external opaque cast targets
 - generic cast traits
 - broad return-type-directed conversion
-- implicit conversion chosen from distant context
+- conversion search through an intermediate target
+- implicit conversion selected from distant context
 
-Cast traits prove source evidence only. They do not create a general user
-conversion framework.
+See @./#cast-targets (Cast targets) for builtin conversion exactness and
+@../traits/#trait-incompatibility (Trait incompatibility) for conflicting
+trait implementations.

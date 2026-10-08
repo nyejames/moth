@@ -18,7 +18,7 @@ Use `of` to choose the concrete type for a generic declaration.
         second B,
     |
 
-    item Pair of String, Int = Pair("count", 3)
+    item Pair of String, I32 = Pair("count", 3)
 ]
 
 ### Concrete aliases
@@ -26,6 +26,6 @@ Use `of` to choose the concrete type for a generic declaration.
 When a type would need nested `of` applications, name an intermediate alias.
 
 [codeblock, $code("moth"):
-    StringIntPair as Pair of String, Int
+    StringIntPair as Pair of String, I32
     value Box of StringIntPair = Box(Pair("count", 3))
 ]

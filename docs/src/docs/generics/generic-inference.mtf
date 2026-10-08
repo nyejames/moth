@@ -1,4 +1,7 @@
-Generic function calls use ordinary call syntax. Type arguments are inferred from local evidence only.
+Generic calls use ordinary syntax. Ordinary type parameters come from immediate
+evidence. A bounded numeric-origin exception lets an existing numeric unknown
+pass through a generic signature's parameter and result before the caller body
+defaults it.
 
 ### Inference sources
 
@@ -11,48 +14,67 @@ Generic function calls use ordinary call syntax. Type arguments are inferred fro
         return {}
     ;
 
+    accept_u64 |value U64|:
+    ;
+
     value = identity(42)
-    typed_value Int = identity(42)
-    items {Int} = empty()
+    typed_value I32 = identity(42)
+    items {I32} = empty()
+
+    forwarded = identity(1)
+    accept_u64(forwarded)
 ]
 
-The concrete type for `A` can come from:
+Ordinary generic types come from immediate arguments or an immediate expected
+result shape. When an argument already contains a numeric origin, a signature
+such as `A -> A` may share that origin between parameter and result. Eligible
+exact constraints elsewhere in the same function body resolve it before
+defaulting. In the final call above, the generic signature alone carries the
+whole-number origin to `U64`.
 
-- immediate call arguments
-- the immediate expected result type at a closed receiving site
+The compiler does not inspect the callee body or search trait evidence to
+select a numeric type. Generic declarations, instances and public interfaces
+contain declared type parameters or completed exact types, never pending
+numeric identities.
 
 ### What inference does not use
 
 [codeblock, $code("moth"):
-    -- Error: T is ambiguous at the declaration site
+    -- Error: T has no immediate evidence and no numeric origin.
     values = empty()
 ]
 
-Inference does not use:
+Outside the bounded numeric-origin relation above, later use does not infer a
+generic parameter. In particular, inference does not search:
 
-- later mutation
-- later reads
-- whole-program analysis
-- HIR
-- borrow validation
-- distant return use
-- expected parameter context from an outer call into a nested generic call
+- later mutation or later reads to create an otherwise missing type
+- whole-program uses, another function body or HIR
+- borrow validation or trait implementations
+- distant return uses
+- an outer call's parameter context into a nested generic call
+- backward from an operation result into already named operands
 
-Use an intermediate annotation when a nested generic call would otherwise need evidence from its parent call.
+An existing numeric origin can be shared through a known collection, map,
+nominal/generic or optional shape while the shape, capacity, key restrictions,
+constructor identity and nonnumeric types remain fixed. This does not infer
+anonymous structure or turn an empty container into a numeric origin.
+
+Use an intermediate annotation when a nested generic call has no immediate
+evidence.
 
 [codeblock, $code("moth"):
     empty type A || -> {A}:
         return {}
     ;
 
-    consume |values {Int}|:
+    consume |values {I32}|:
     ;
 
-    -- Rejected: outer parameter context does not solve the nested call.
+    -- Rejected: the outer parameter context does not solve the nested call.
     consume(empty())
 
     -- Valid: annotate the nested result first.
-    items {Int} = empty()
+    items {I32} = empty()
     consume(items)
 ]
 
@@ -82,7 +104,9 @@ Visible imported generic functions use the same local inference rules. There is 
 
 ### Cast boundary
 
-Generic inference does not look through `cast`. The cast target must be selected after the generic call has already been solved.
+A cast target does not constrain the source type. Resolve the generic call's
+source independently, using eligible body-local numeric constraints and then
+the ordinary default. The cast classifies the completed source/target pair.
 
 ### Generic error parameter inference
 
@@ -90,7 +114,7 @@ A concrete callee error type does not specialise an otherwise unsolved generic e
 
 [codeblock, $code("moth"):
     -- Rejected: E is not solved by the concrete Error inside the body.
-    generic_fail type E || -> Int, E!:
+    generic_fail type E || -> I32, E!:
         return! Error("bad")
     ;
 ]
@@ -102,10 +126,10 @@ A generic error parameter must be solved by immediate call-site evidence, like a
 All of these are rejected:
 
 [codeblock, $code("moth"):
-    identity of Int(42)
-    identity<Int>(42)
-    identity[Int](42)
-    identity(42 Int)
+    identity of I32(42)
+    identity<I32>(42)
+    identity[I32](42)
+    identity(42 I32)
 ]
 
 ### Concepts related to generic inference

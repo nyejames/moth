@@ -282,7 +282,7 @@ the standalone crate. `crates/moth-lexical/` owns shared identifier, reserved-wo
 and numeric-text facts without compiler tokens, type lookup or arithmetic.
 Source call-argument and declaration parsers remain compiler-local. The real-source
 suite at `src/compiler_tests/mon_syntax_parity/` checks the common notation under
-equivalent receiving types and numeric profiles.
+equivalent exact receiving types.
 The codec does not imply Moth-native `$mon`, automatic schema extraction or a
 static project builder. Source `{=}`, Unicode escapes beyond the existing five
 and contextual `::Variant` construction remain named undelivered parity gaps.

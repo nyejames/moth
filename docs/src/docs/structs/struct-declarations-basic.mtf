@@ -3,7 +3,7 @@ A struct groups named values into one new type.
 [codeblock, $code("moth"):
     Player = |
         name String,
-        score Int,
+        score I32,
     |
 ]
 
@@ -14,7 +14,7 @@ Fields can have defaults:
 [codeblock, $code("moth"):
     Player = |
         name String,
-        score Int = 0,
+        score I32 = 0,
     |
 ]
 

@@ -8,7 +8,7 @@ A generic declaration describes a family of types or functions using a placehold
     |
 ]
 
-`A` stands for some concrete type. Later you can make a `Box of Int`, a `Box of String`, and so on.
+`A` stands for some concrete type. Later you can make a `Box of I32`, a `Box of String` and so on.
 
 ### A generic function
 

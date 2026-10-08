@@ -2,13 +2,13 @@
 
 [codeblock, $code("moth"):
     names ~{String} = {}
-    values {Int} = {1, 2, 3}
+    values {I32} = {1, 2, 3}
 ]
 
 ### Contract
 
 - The element type is part of semantic type identity.
-- A growable `{Int}` is not compatible with `{String}`.
+- A growable `{I32}` is not compatible with `{String}`.
 - Growable and fixed collections are different types.
 - A mutable binding is required for operations that change the collection.
 - An immutable growable collection remains readable but cannot be mutated through that binding.

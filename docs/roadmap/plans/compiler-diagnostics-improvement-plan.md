@@ -44,13 +44,22 @@ STATUS: paused
 NEXT_SLICE: Phase 4.2, catch-recovery type context
 BLOCKERS: delivered compact diagnostic records, frozen type-display snapshots and failure-lane migration
 TRANSFERRED: pending 4.1c and 4.4 belong to the typed semantic expression and native result cutover
+NUMERIC_CATCH_HANDOFF: accepted diagnostic requirements remain pending implementation; the semantic owner supplies their facts and primary tests; consume them through the final schema without duplicating coverage
 RESUME_ACTION: reload routed authorities and current source, refresh producers/schema APIs and confirm the transferred capabilities are delivered before starting Phase 4.2
 ```
 
-The transfers below are pending implementation, not completed diagnostics. The typed semantic
-expression and native result cutover owns their implementation, coverage and source-visible
-messages because it removes the ambiguous result representation. This plan retains their design
-record and owns the remaining diagnostic improvements after the layout migration.
+The native-result transfers below remain pending implementation. Their implementation, coverage
+and source-visible messages belong to the typed semantic expression and native result cutover.
+This plan retains their design record and owns the remaining diagnostic improvements after the
+layout migration.
+
+The accepted exact numeric contract also requires deterministic conflicting-receiver diagnostics
+with both source locations, out-of-range default diagnostics, diagnostics for statically invalid
+selected-width operations and normal handler/fallback type diagnostics for authored safety catches.
+These requirements remain unimplemented. The numeric semantic owner supplies their classification
+and primary source coverage. This plan must not claim delivery or duplicate that coverage. It
+consumes the resolved diagnostic facts through the final schema after the layout migration. Catch
+eligibility remains separate from actual failure effects.
 
 ### Historical implementation and validation
 
@@ -690,8 +699,9 @@ sequence without a migration-specific reason. Do not carry either reason into th
 matrix.
 
 Rename `TypeMismatchContext::ResultError` to `ErrorReturn` and render `error return`. Apply the
-same source-visible context to incompatible postfix `!` call propagation and `cast!` propagation.
-Keep the expected and found error types as semantic `TypeId`s and preserve `MOTH-TYPE-0001`.
+same source-visible context to incompatible postfix `!` call propagation. A plain `cast` uses
+ordinary implicit-failure delivery and has no cast-specific propagation spelling. Keep the expected
+and found error types as semantic `TypeId`s and preserve `MOTH-TYPE-0001`.
 
 Render the `MOTH-RULE-0051` descriptor title as `Invalid fallible handling`. Internal reason-family
 identifiers must also change coherently in this slice: rename `InvalidResultHandlingReason`, its
@@ -763,7 +773,7 @@ unchanged.
 
 Message:
 
-> Type mismatch in catch recovery: expected `Int`, found `String`.
+> Type mismatch in catch recovery: expected `I32`, found `String`.
 
 Guidance may explain that each `then` value must match the corresponding success slot. Keep expected and found types as `TypeId`s.
 
@@ -1045,26 +1055,26 @@ Apply the same terminology to the non-optional-scrutinee, type-annotation and mi
 reasons. Internal AST `OptionPresentCapture` node names are outside this diagnostic wording slice
 and do not need a semantic refactor.
 
-### 5.6 Make scalar type-call diagnostics factual
+### 5.6 Keep scalar type-call diagnostics factual
 
-**Additional audit finding:** `InvalidBuiltinCallReason::ScalarConstructorRemoved`, several
-`*_constructor_removed` fixtures and the dead `InvalidCastReason::ScalarConstructorRemoved`
-encode history rather than the authored mistake. Unlike a discontinued compatibility-only parser
-path, the current expression parser must still handle a builtin type token followed by `(`.
+**Additional confirmed audit finding:** `InvalidBuiltinCallReason::ScalarConstructorRemoved`,
+several `*_constructor_removed` fixtures and the dead
+`InvalidCastReason::ScalarConstructorRemoved` encode historical type names rather than the current
+authored mistake. The accepted numeric inventory has no builtin `Int`, `Uint` or `Float`
+identities. Those spellings receive ordinary name or parse diagnostics, with no compatibility
+reason or alias. The parser still needs a factual diagnostic when an active exact scalar type is
+called as a function.
 
-- Replace the builtin-call reason with a factual type-as-call reason such as
-  `ScalarTypeCalledAsFunction`.
+- Use one factual type-as-call reason such as `ScalarTypeCalledAsFunction` for active scalar types.
 - Render:
 
-  > `Int` is a type, not a conversion function. Use `cast` at an explicit typed boundary.
+  > `I32` is a type, not a conversion function. Use `cast` at an explicit typed receiving boundary.
 
-- Carry the exact builtin type name already available at the emission site.
-- Remove the unused `InvalidCastReason::ScalarConstructorRemoved` variant and render branch.
-- Rename the focused fixtures and tests around current rejection, then remove redundant
-  per-scalar coverage where one table test or one primary integration case protects the same
-  parser contract.
-- Preserve positive `cast` coverage. Do not recognise a former scalar-constructor language
-  feature or describe anything as removed.
+- Carry the exact active builtin type name already available at the emission site.
+- Delete `InvalidCastReason::ScalarConstructorRemoved` and its render branch.
+- Rename focused fixtures and tests around the current rejection. Remove redundant per-scalar
+  coverage only when one table test or primary integration case protects the same parser contract.
+- Preserve positive `cast` coverage. Do not add a compatibility path for removed scalar names.
 
 ## Phase 6: Template and external-JavaScript diagnostics
 
@@ -1255,7 +1265,7 @@ Keep the found semantic `TypeId`.
 
 Message:
 
-> Collection loop source must be a collection, found `Int`. Use a collection after `loop`. For numeric iteration, use range syntax such as `loop 0 to 10 |i|:`.
+> Collection loop source must be a collection, found `I32`. Use a collection after `loop`. For numeric iteration, use range syntax such as `loop 0 to 10 |i|:`.
 
 Do not imply every non-collection source was intended as a range.
 

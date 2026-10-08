@@ -84,9 +84,12 @@ The implementation must converge on:
 Broad diagnostics-improvement work remains paused until this plan is complete. The typed semantic
 expression and native result cutover owns the pending multiple-success postfix `?` reason,
 enclosing propagation-boundary facts and single-target/multiple-result rejection. Those narrow
-semantic requirements land before this layout work. After completion, diagnostics work refreshes
-its inventory and resumes at catch-recovery type context, preserving the earlier delivered reasons
-instead of implementing them again.
+semantic requirements land before this layout work. The exact numeric semantic cutover owns the
+pending exact-receiver conflict/default-range and authored safety-catch diagnostics with their
+primary source coverage. None of that numeric or catch diagnostic work is delivered yet. After this
+layout migration completes, diagnostics work refreshes its inventory and resumes at catch-recovery
+type context, consuming delivered reasons rather than implementing their semantic classification
+or primary coverage again.
 
 ---
 
@@ -511,7 +514,7 @@ The following edits are authorized in their owning phases:
 - `docs/src/developer-docs/style-guide/style-guide.mtf`: compact-record rules and removal of boxed large-error advice
 - `docs/src/developer-docs/style-guide/testing.mtf`: layout/property/schema/render-equivalence/failure-worker test ownership
 - `docs/src/developer-docs/style-guide/validation.mtf`: new manual architecture and failure-lane audit wording
-- the paused user-facing diagnostics improvement work: keep it parked, then refresh it against the final schema APIs when this migration completes
+- the paused user-facing diagnostics improvement work: keep it parked. The semantic owner delivers exact-numeric conflict/default-range and authored-catch diagnostics with primary coverage. After those facts and this migration are delivered, refresh the diagnostics plan against the final schema APIs without duplicating semantic work
 - `docs/src/docs/progress/@page.moth`: only when current support wording changes
 - `benchmarks/README.md` and `CONTRIBUTING.md`: document the alternate data-layout benchmark case list/command if that surface is added
 - `index.md`: final source, token, path and diagnostic module map
@@ -981,14 +984,36 @@ Dec contextual correction and Uint addition, in their owning semantic work.
 - [ ] explicitly reactivate Phase 4 against those delivered capabilities. Their merge alone does
   not activate this plan or claim its 32-byte record and 48-byte draft model is implemented
 - [ ] re-run the owning validation gate after the rebase
-- [ ] fresh inventory of diagnostic producers, result boundaries, warnings, type environments and
-  generated functions as they exist after those semantic checkpoints merged. Include compact
-  expression-store disposal, TIR view lifetimes, generated donor/requester domains and native
-  signature/result-shape facts. Do not revive removed expression or transport-type owners
+- [ ] fresh inventory of diagnostic producers, result boundaries, warnings, type environments,
+  generated functions and construction-only numeric state/span lifetimes after the semantic
+  capabilities merge. Include compact expression-store disposal, TIR view lifetimes, generated
+  donor/requester domains, native signature/result-shape facts and numeric body/service release
+  boundaries. Do not revive removed expression or transport-type owners
 - [ ] stale name refresh: update schema inventories and slice wording for any diagnostic family,
   result shape or owner renamed or moved by the rebase
 - [ ] every locked architecture decision in `docs/compiler-data-layout-design.md` is preserved.
   No reactivation change may weaken a locked size, ownership or failure-lane contract
+
+### Construction-only numeric state and source-span lifetime
+
+The numeric construction lifetime does not change this plan's independent activation gate or any
+locked layout decision:
+
+- The owning body or short compiler service retains numeric-only unresolved origins, eligible
+  constraints, lossless numeric-text handles and authored `SourceSpan` witnesses only until
+  resolution, defaulting, materialisation and required diagnostics finish. The existing source-token
+  owner retains the spelling. Numeric construction borrows it through its typed handle rather than
+  copying spelling, cloning token ranges or rescanning source.
+- Keep each source/span owner alive through its last diagnostic producer. A conflict diagnostic
+  captures both authored constraint spans and resolved type facts through the ordinary diagnostic
+  draft, schema and secondary-label or typed cold-store paths. Capture type-display facts while the
+  producing `TypeEnvironment` remains live.
+- Drop pending numeric construction state at the owning body or service boundary. No unresolved
+  origin, placeholder type or inference recipe enters canonical `TypeId`s, public interfaces,
+  generic keys, folded values, completed AST/HIR, backend requests or durable reports.
+- These requirements preserve the existing `NumericLiteralId`, `SourceSpan`, `TokenShape`,
+  diagnostic-record and failure-lane contracts. They do not add a stored layout field, change a
+  hard size, activate Phase 4 or replace its explicit reactivation gate.
 
 ### Summary, reasoning and context
 

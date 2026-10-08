@@ -42,6 +42,10 @@ Every mode preflights its selected cases before measurement. That successful pre
 
 Non-recording commands never append local JSONL history or change tracked summaries.
 
+Full-suite read-only runs (`just bench-check`, `just bench-frontend-check` and `just bench-data-layout-check`) print one compact JSON object on stdout after measurement and unchanged-worktree verification. Its line begins with `MOTH_BENCH_EVIDENCE `; parse the JSON suffix after that marker.
+
+The object retains suite and per-case means, medians, standard deviations, workload/source/measurement identities, timing observations and counters, plus protocol/schema, revision, environment and thread identity. It is stdout evidence only: it does not create local system identity or write history or summaries. `just bench-ci` keeps its existing terse output and does not emit this evidence line.
+
 Recorded runs (`just bench`, `just bench-frontend` and `just bench-data-layout`) require a clean committed worktree. The command rejects a dirty or uncommitted repository before fingerprint traversal, compiler construction or history access. Read-only commands (`bench-ci`, `bench-validate`, `bench-check`, `bench-frontend-check` and `bench-data-layout-check`) permit a dirty worktree as long as it stays unchanged during the run.
 
 ## Manifest And Stable Identity

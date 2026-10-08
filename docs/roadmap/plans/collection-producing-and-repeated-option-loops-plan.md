@@ -18,7 +18,7 @@ The implementation stays frontend-owned. Both source forms lower to ordinary HIR
 ```text
 status: queued, low priority
 current_slice: none
-blockers: roadmap order only, plus the ordinary loop, closed value-production, option-capture, collection mutation and memory-analysis owners must still be stable when this plan activates
+blockers: roadmap order plus the ordinary loop, closed value-production, option-capture, collection mutation and memory-analysis owners; exact-width numeric identity and bounded numeric-leaf construction must also be stable at activation
 next_action: when activated, refresh every named owner from the current worktree and run Phase 0 before changing syntax
 ```
 
@@ -53,6 +53,7 @@ Before activation, confirm these capabilities are already delivered and stable:
 - stable `break` and `continue` targeting for nested loops
 - HIR validation, borrow validation and lifetime-region analysis over ordinary loop CFG
 - target validation for ordinary collection construction and mutation
+- canonical fixed-width numeric identities and bounded body-local resolution of eligible numeric leaves in known `{T}` result shapes, with completed types before HIR publication and no numeric profile selection
 - the current async design still owns `yield` as explicit suspension syntax
 
 No iterator protocol, generator support, closure support or async implementation is a prerequisite.
@@ -194,13 +195,13 @@ values = loop items |item|:
 ```
 
 ```moth
-values {Int} = loop 0 to 10 |value|:
+values {I32} = loop 0 to 10 |value|:
     then value
 ;
 ```
 
 ```moth
-positive |items {Int}| -> {Int}:
+positive |items {I32}| -> {I32}:
     return loop items |item|:
         if item > 0:
             then item
@@ -231,12 +232,12 @@ Compile-time constant receivers are outside the initial experiment. Do not make 
 For an explicit `{T}` receiver, each `then` expression is parsed and checked with `T` as its receiving element type.
 
 ```moth
-values {Float} = loop items |item|:
+values {F64} = loop items |item|:
     then item.ratio
 ;
 ```
 
-The result is `{Float}`. The `then` expression is checked through the ordinary contextual-coercion owner.
+The result is `{F64}`. The `then` expression is checked through the ordinary contextual-coercion owner.
 
 For an inferred declaration:
 
@@ -257,6 +258,14 @@ Rules:
 - a non-collection receiver is rejected with a focused producing-loop diagnostic
 - at least one frontend-reachable `then` must exist in the producing loop
 - `none` or another context-dependent value may use an explicit optional element type, but it does not gain new inference rules
+
+The result shape `{T}` is already known. Eligible numeric origins in its `then` contributions may
+use the approved bounded numeric-leaf relationships through that shape and an eligible exact
+receiver. The loop adds no new constraint edge or loop-wide numeric type search. Concrete
+contributions still require exact compatibility, and collection typing never searches for a common
+storage type. Resolve pending numeric construction facts and retain their authored source spans only
+through body finalisation and required diagnostics. Completed AST/HIR carries concrete types and
+values, not pending inference state.
 
 Both branches of an ordinary compile-time-known `if` remain frontend-valid before static selection. Producing-loop type inference follows the same Stage 4 rule. Inactive code contributes no HIR or runtime collection mutation after specialization.
 
@@ -540,6 +549,7 @@ The important contracts are:
 
 - a producing loop is represented as closed value-producing control flow
 - the semantic payload retains the ordinary loop source, typed result collection identity and body IDs under their issuing owner
+- numeric-only pending construction facts and authored span witnesses remain with the body owner until finalisation; this payload and HIR carry only completed element/result types
 - repeated option capture is represented as one typed loop-header form
 - `then` inside the producing body has one active collection-production target
 - all AST finalization walkers visit the new value-block payload

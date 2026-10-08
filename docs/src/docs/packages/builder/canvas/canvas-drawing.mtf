@@ -2,6 +2,11 @@
 
 `@web/canvas` ships as a skeleton. The current surface covers element management, context state, rectangles, paths, text, gradients, patterns, image drawing, image data and pixel access. It will grow as the language stabilises and the first-party packages expand.
 
+The accepted numeric API uses I32 dimensions/indices and F64 coordinates and
+measurements. That exact cutover remains pending in the profile-based Alpha
+implementation. It preserves existing ranges, units, foreign contracts and
+the Wasm gap rather than expanding binding support.
+
 ### Dependency roots
 
 Bind individual symbols or the whole namespace:
@@ -79,7 +84,7 @@ All opaque types lower to object references in the JS backend. The Wasm backend 
 
     [td:
         [: `create_canvas`]
-        [: `width Int, height Int`]
+        [: `width I32, height I32`]
         [: `CanvasElement`]
         [: shared]
     ]
@@ -100,7 +105,7 @@ All opaque types lower to object references in the JS backend. The Wasm backend 
 
     [td:
         [: `create_image_with_size`]
-        [: `src String, width Int, height Int`]
+        [: `src String, width I32, height I32`]
         [: `CanvasImage`]
         [: shared]
     ]
@@ -115,48 +120,48 @@ All opaque types lower to object references in the JS backend. The Wasm backend 
     [td:
         [: `canvas_width`]
         [: `canvas CanvasElement`]
-        [: `Int`]
+        [: `I32`]
         [: shared]
     ]
 
     [td:
         [: `canvas_height`]
         [: `canvas CanvasElement`]
-        [: `Int`]
+        [: `I32`]
         [: shared]
     ]
 
     [td:
         [: `canvas_client_width`]
         [: `canvas CanvasElement`]
-        [: `Int`]
+        [: `I32`]
         [: shared]
     ]
 
     [td:
         [: `canvas_client_height`]
         [: `canvas CanvasElement`]
-        [: `Int`]
+        [: `I32`]
         [: shared]
     ]
 
     [td:
         [: `set_canvas_width`]
-        [: `canvas ~CanvasElement, width Int`]
+        [: `canvas ~CanvasElement, width I32`]
         [: void]
         [: mutable]
     ]
 
     [td:
         [: `set_canvas_height`]
-        [: `canvas ~CanvasElement, height Int`]
+        [: `canvas ~CanvasElement, height I32`]
         [: void]
         [: mutable]
     ]
 
     [td:
         [: `set_canvas_size`]
-        [: `canvas ~CanvasElement, width Int, height Int`]
+        [: `canvas ~CanvasElement, width I32, height I32`]
         [: void]
         [: mutable]
     ]
@@ -177,7 +182,7 @@ All opaque types lower to object references in the JS backend. The Wasm backend 
 
     [td:
         [: `to_data_url_quality`]
-        [: `canvas CanvasElement, mime_type String, quality Float`]
+        [: `canvas CanvasElement, mime_type String, quality F64`]
         [: `String, Error!`]
         [: shared]
     ]
@@ -196,28 +201,28 @@ All opaque types lower to object references in the JS backend. The Wasm backend 
     [td:
         [: `image_width`]
         [: `image CanvasImage`]
-        [: `Int`]
+        [: `I32`]
         [: shared]
     ]
 
     [td:
         [: `image_height`]
         [: `image CanvasImage`]
-        [: `Int`]
+        [: `I32`]
         [: shared]
     ]
 
     [td:
         [: `image_natural_width`]
         [: `image CanvasImage`]
-        [: `Int`]
+        [: `I32`]
         [: shared]
     ]
 
     [td:
         [: `image_natural_height`]
         [: `image CanvasImage`]
-        [: `Int`]
+        [: `I32`]
         [: shared]
     ]
 
@@ -280,21 +285,21 @@ All opaque types lower to object references in the JS backend. The Wasm backend 
 
     [td:
         [: `clear_rect`]
-        [: `ctx ~Canvas2d, x Float, y Float, width Float, height Float`]
+        [: `ctx ~Canvas2d, x F64, y F64, width F64, height F64`]
         [: void]
         [: mutable]
     ]
 
     [td:
         [: `fill_rect`]
-        [: `ctx ~Canvas2d, x Float, y Float, width Float, height Float`]
+        [: `ctx ~Canvas2d, x F64, y F64, width F64, height F64`]
         [: void]
         [: mutable]
     ]
 
     [td:
         [: `stroke_rect`]
-        [: `ctx ~Canvas2d, x Float, y Float, width Float, height Float`]
+        [: `ctx ~Canvas2d, x F64, y F64, width F64, height F64`]
         [: void]
         [: mutable]
     ]
@@ -365,7 +370,7 @@ All opaque types lower to object references in the JS backend. The Wasm backend 
 
     [td:
         [: `set_global_alpha`]
-        [: `ctx ~Canvas2d, alpha Float`]
+        [: `ctx ~Canvas2d, alpha F64`]
         [: void]
         [: mutable]
     ]
@@ -390,7 +395,7 @@ All opaque types lower to object references in the JS backend. The Wasm backend 
 
     [td:
         [: `set_line_width`]
-        [: `ctx ~Canvas2d, width Float`]
+        [: `ctx ~Canvas2d, width F64`]
         [: void]
         [: mutable]
     ]
@@ -411,14 +416,14 @@ All opaque types lower to object references in the JS backend. The Wasm backend 
 
     [td:
         [: `set_miter_limit`]
-        [: `ctx ~Canvas2d, limit Float`]
+        [: `ctx ~Canvas2d, limit F64`]
         [: void]
         [: mutable]
     ]
 
     [td:
         [: `set_line_dash`]
-        [: `ctx ~Canvas2d, dash Float, gap Float`]
+        [: `ctx ~Canvas2d, dash F64, gap F64`]
         [: void]
         [: mutable]
     ]
@@ -432,7 +437,7 @@ All opaque types lower to object references in the JS backend. The Wasm backend 
 
     [td:
         [: `set_line_dash_offset`]
-        [: `ctx ~Canvas2d, offset Float`]
+        [: `ctx ~Canvas2d, offset F64`]
         [: void]
         [: mutable]
     ]
@@ -566,14 +571,14 @@ All opaque types lower to object references in the JS backend. The Wasm backend 
 
     [td:
         [: `set_shadow_blur`]
-        [: `ctx ~Canvas2d, blur Float`]
+        [: `ctx ~Canvas2d, blur F64`]
         [: void]
         [: mutable]
     ]
 
     [td:
         [: `set_shadow_offset`]
-        [: `ctx ~Canvas2d, x Float, y Float`]
+        [: `ctx ~Canvas2d, x F64, y F64`]
         [: void]
         [: mutable]
     ]
@@ -598,14 +603,14 @@ All opaque types lower to object references in the JS backend. The Wasm backend 
 
     [td:
         [: `move_to`]
-        [: `ctx ~Canvas2d, x Float, y Float`]
+        [: `ctx ~Canvas2d, x F64, y F64`]
         [: void]
         [: mutable]
     ]
 
     [td:
         [: `line_to`]
-        [: `ctx ~Canvas2d, x Float, y Float`]
+        [: `ctx ~Canvas2d, x F64, y F64`]
         [: void]
         [: mutable]
     ]
@@ -619,63 +624,63 @@ All opaque types lower to object references in the JS backend. The Wasm backend 
 
     [td:
         [: `rect`]
-        [: `ctx ~Canvas2d, x Float, y Float, width Float, height Float`]
+        [: `ctx ~Canvas2d, x F64, y F64, width F64, height F64`]
         [: void]
         [: mutable]
     ]
 
     [td:
         [: `round_rect`]
-        [: `ctx ~Canvas2d, x Float, y Float, width Float, height Float, radius Float`]
+        [: `ctx ~Canvas2d, x F64, y F64, width F64, height F64, radius F64`]
         [: `Error!`]
         [: mutable]
     ]
 
     [td:
         [: `arc`]
-        [: `ctx ~Canvas2d, x Float, y Float, radius Float, start_angle Float, end_angle Float`]
+        [: `ctx ~Canvas2d, x F64, y F64, radius F64, start_angle F64, end_angle F64`]
         [: `Error!`]
         [: mutable]
     ]
 
     [td:
         [: `arc_counterclockwise`]
-        [: `ctx ~Canvas2d, x Float, y Float, radius Float, start_angle Float, end_angle Float`]
+        [: `ctx ~Canvas2d, x F64, y F64, radius F64, start_angle F64, end_angle F64`]
         [: `Error!`]
         [: mutable]
     ]
 
     [td:
         [: `arc_to`]
-        [: `ctx ~Canvas2d, x1 Float, y1 Float, x2 Float, y2 Float, radius Float`]
+        [: `ctx ~Canvas2d, x1 F64, y1 F64, x2 F64, y2 F64, radius F64`]
         [: `Error!`]
         [: mutable]
     ]
 
     [td:
         [: `quadratic_curve_to`]
-        [: `ctx ~Canvas2d, cpx Float, cpy Float, x Float, y Float`]
+        [: `ctx ~Canvas2d, cpx F64, cpy F64, x F64, y F64`]
         [: void]
         [: mutable]
     ]
 
     [td:
         [: `bezier_curve_to`]
-        [: `ctx ~Canvas2d, cp1x Float, cp1y Float, cp2x Float, cp2y Float, x Float, y Float`]
+        [: `ctx ~Canvas2d, cp1x F64, cp1y F64, cp2x F64, cp2y F64, x F64, y F64`]
         [: void]
         [: mutable]
     ]
 
     [td:
         [: `ellipse`]
-        [: `ctx ~Canvas2d, x Float, y Float, radius_x Float, radius_y Float, rotation Float, start_angle Float, end_angle Float`]
+        [: `ctx ~Canvas2d, x F64, y F64, radius_x F64, radius_y F64, rotation F64, start_angle F64, end_angle F64`]
         [: `Error!`]
         [: mutable]
     ]
 
     [td:
         [: `ellipse_counterclockwise`]
-        [: `ctx ~Canvas2d, x Float, y Float, radius_x Float, radius_y Float, rotation Float, start_angle Float, end_angle Float`]
+        [: `ctx ~Canvas2d, x F64, y F64, radius_x F64, radius_y F64, rotation F64, start_angle F64, end_angle F64`]
         [: `Error!`]
         [: mutable]
     ]
@@ -728,14 +733,14 @@ All opaque types lower to object references in the JS backend. The Wasm backend 
 
     [td:
         [: `is_point_in_path`]
-        [: `ctx Canvas2d, x Float, y Float`]
+        [: `ctx Canvas2d, x F64, y F64`]
         [: `Bool`]
         [: shared]
     ]
 
     [td:
         [: `is_point_in_stroke`]
-        [: `ctx Canvas2d, x Float, y Float`]
+        [: `ctx Canvas2d, x F64, y F64`]
         [: `Bool`]
         [: shared]
     ]
@@ -753,35 +758,35 @@ All opaque types lower to object references in the JS backend. The Wasm backend 
 
     [td:
         [: `translate`]
-        [: `ctx ~Canvas2d, x Float, y Float`]
+        [: `ctx ~Canvas2d, x F64, y F64`]
         [: void]
         [: mutable]
     ]
 
     [td:
         [: `rotate`]
-        [: `ctx ~Canvas2d, angle Float`]
+        [: `ctx ~Canvas2d, angle F64`]
         [: void]
         [: mutable]
     ]
 
     [td:
         [: `scale`]
-        [: `ctx ~Canvas2d, x Float, y Float`]
+        [: `ctx ~Canvas2d, x F64, y F64`]
         [: void]
         [: mutable]
     ]
 
     [td:
         [: `transform`]
-        [: `ctx ~Canvas2d, a Float, b Float, c Float, d Float, e Float, f Float`]
+        [: `ctx ~Canvas2d, a F64, b F64, c F64, d F64, e F64, f F64`]
         [: void]
         [: mutable]
     ]
 
     [td:
         [: `set_transform`]
-        [: `ctx ~Canvas2d, a Float, b Float, c Float, d Float, e Float, f Float`]
+        [: `ctx ~Canvas2d, a F64, b F64, c F64, d F64, e F64, f F64`]
         [: void]
         [: mutable]
     ]
@@ -806,28 +811,28 @@ All opaque types lower to object references in the JS backend. The Wasm backend 
 
     [td:
         [: `fill_text`]
-        [: `ctx ~Canvas2d, text String, x Float, y Float`]
+        [: `ctx ~Canvas2d, text String, x F64, y F64`]
         [: void]
         [: mutable]
     ]
 
     [td:
         [: `fill_text_max_width`]
-        [: `ctx ~Canvas2d, text String, x Float, y Float, max_width Float`]
+        [: `ctx ~Canvas2d, text String, x F64, y F64, max_width F64`]
         [: void]
         [: mutable]
     ]
 
     [td:
         [: `stroke_text`]
-        [: `ctx ~Canvas2d, text String, x Float, y Float`]
+        [: `ctx ~Canvas2d, text String, x F64, y F64`]
         [: void]
         [: mutable]
     ]
 
     [td:
         [: `stroke_text_max_width`]
-        [: `ctx ~Canvas2d, text String, x Float, y Float, max_width Float`]
+        [: `ctx ~Canvas2d, text String, x F64, y F64, max_width F64`]
         [: void]
         [: mutable]
     ]
@@ -853,49 +858,49 @@ All opaque types lower to object references in the JS backend. The Wasm backend 
     [td:
         [: `text_width`]
         [: `metrics CanvasTextMetrics`]
-        [: `Float`]
+        [: `F64`]
         [: shared]
     ]
 
     [td:
         [: `text_actual_bounding_box_left`]
         [: `metrics CanvasTextMetrics`]
-        [: `Float`]
+        [: `F64`]
         [: shared]
     ]
 
     [td:
         [: `text_actual_bounding_box_right`]
         [: `metrics CanvasTextMetrics`]
-        [: `Float`]
+        [: `F64`]
         [: shared]
     ]
 
     [td:
         [: `text_actual_bounding_box_ascent`]
         [: `metrics CanvasTextMetrics`]
-        [: `Float`]
+        [: `F64`]
         [: shared]
     ]
 
     [td:
         [: `text_actual_bounding_box_descent`]
         [: `metrics CanvasTextMetrics`]
-        [: `Float`]
+        [: `F64`]
         [: shared]
     ]
 
     [td:
         [: `text_font_bounding_box_ascent`]
         [: `metrics CanvasTextMetrics`]
-        [: `Float`]
+        [: `F64`]
         [: shared]
     ]
 
     [td:
         [: `text_font_bounding_box_descent`]
         [: `metrics CanvasTextMetrics`]
-        [: `Float`]
+        [: `F64`]
         [: shared]
     ]
 ]
@@ -912,28 +917,28 @@ All opaque types lower to object references in the JS backend. The Wasm backend 
 
     [td:
         [: `create_linear_gradient`]
-        [: `ctx Canvas2d, x0 Float, y0 Float, x1 Float, y1 Float`]
+        [: `ctx Canvas2d, x0 F64, y0 F64, x1 F64, y1 F64`]
         [: `CanvasGradient, Error!`]
         [: shared]
     ]
 
     [td:
         [: `create_radial_gradient`]
-        [: `ctx Canvas2d, x0 Float, y0 Float, r0 Float, x1 Float, y1 Float, r1 Float`]
+        [: `ctx Canvas2d, x0 F64, y0 F64, r0 F64, x1 F64, y1 F64, r1 F64`]
         [: `CanvasGradient, Error!`]
         [: shared]
     ]
 
     [td:
         [: `create_conic_gradient`]
-        [: `ctx Canvas2d, start_angle Float, x Float, y Float`]
+        [: `ctx Canvas2d, start_angle F64, x F64, y F64`]
         [: `CanvasGradient, Error!`]
         [: shared]
     ]
 
     [td:
         [: `add_color_stop`]
-        [: `gradient ~CanvasGradient, offset Float, color String`]
+        [: `gradient ~CanvasGradient, offset F64, color String`]
         [: `Error!`]
         [: mutable]
     ]
@@ -976,35 +981,35 @@ All opaque types lower to object references in the JS backend. The Wasm backend 
 
     [td:
         [: `draw_image`]
-        [: `ctx ~Canvas2d, image CanvasImage, x Float, y Float`]
+        [: `ctx ~Canvas2d, image CanvasImage, x F64, y F64`]
         [: `Error!`]
         [: mutable]
     ]
 
     [td:
         [: `draw_image_scaled`]
-        [: `ctx ~Canvas2d, image CanvasImage, x Float, y Float, width Float, height Float`]
+        [: `ctx ~Canvas2d, image CanvasImage, x F64, y F64, width F64, height F64`]
         [: `Error!`]
         [: mutable]
     ]
 
     [td:
         [: `draw_image_cropped`]
-        [: `ctx ~Canvas2d, image CanvasImage, source_x Float, source_y Float, source_width Float, source_height Float, x Float, y Float, width Float, height Float`]
+        [: `ctx ~Canvas2d, image CanvasImage, source_x F64, source_y F64, source_width F64, source_height F64, x F64, y F64, width F64, height F64`]
         [: `Error!`]
         [: mutable]
     ]
 
     [td:
         [: `draw_canvas`]
-        [: `ctx ~Canvas2d, canvas CanvasElement, x Float, y Float`]
+        [: `ctx ~Canvas2d, canvas CanvasElement, x F64, y F64`]
         [: `Error!`]
         [: mutable]
     ]
 
     [td:
         [: `draw_canvas_scaled`]
-        [: `ctx ~Canvas2d, canvas CanvasElement, x Float, y Float, width Float, height Float`]
+        [: `ctx ~Canvas2d, canvas CanvasElement, x F64, y F64, width F64, height F64`]
         [: `Error!`]
         [: mutable]
     ]
@@ -1024,14 +1029,14 @@ Image drawing functions fail with `Error!` when the image has not finished loadi
 
     [td:
         [: `get_image_data`]
-        [: `ctx Canvas2d, x Int, y Int, width Int, height Int`]
+        [: `ctx Canvas2d, x I32, y I32, width I32, height I32`]
         [: `CanvasImageData, Error!`]
         [: shared]
     ]
 
     [td:
         [: `create_image_data`]
-        [: `ctx Canvas2d, width Int, height Int`]
+        [: `ctx Canvas2d, width I32, height I32`]
         [: `CanvasImageData, Error!`]
         [: shared]
     ]
@@ -1045,14 +1050,14 @@ Image drawing functions fail with `Error!` when the image has not finished loadi
 
     [td:
         [: `put_image_data`]
-        [: `ctx ~Canvas2d, image_data CanvasImageData, x Float, y Float`]
+        [: `ctx ~Canvas2d, image_data CanvasImageData, x F64, y F64`]
         [: `Error!`]
         [: mutable]
     ]
 
     [td:
         [: `put_image_data_dirty`]
-        [: `ctx ~Canvas2d, image_data CanvasImageData, x Float, y Float, dirty_x Float, dirty_y Float, dirty_width Float, dirty_height Float`]
+        [: `ctx ~Canvas2d, image_data CanvasImageData, x F64, y F64, dirty_x F64, dirty_y F64, dirty_width F64, dirty_height F64`]
         [: `Error!`]
         [: mutable]
     ]
@@ -1060,14 +1065,14 @@ Image drawing functions fail with `Error!` when the image has not finished loadi
     [td:
         [: `image_data_width`]
         [: `image_data CanvasImageData`]
-        [: `Int`]
+        [: `I32`]
         [: shared]
     ]
 
     [td:
         [: `image_data_height`]
         [: `image_data CanvasImageData`]
-        [: `Int`]
+        [: `I32`]
         [: shared]
     ]
 ]
@@ -1084,42 +1089,42 @@ Image drawing functions fail with `Error!` when the image has not finished loadi
 
     [td:
         [: `image_data_get_red`]
-        [: `image_data CanvasImageData, x Int, y Int`]
-        [: `Int, Error!`]
+        [: `image_data CanvasImageData, x I32, y I32`]
+        [: `I32, Error!`]
         [: shared]
     ]
 
     [td:
         [: `image_data_get_green`]
-        [: `image_data CanvasImageData, x Int, y Int`]
-        [: `Int, Error!`]
+        [: `image_data CanvasImageData, x I32, y I32`]
+        [: `I32, Error!`]
         [: shared]
     ]
 
     [td:
         [: `image_data_get_blue`]
-        [: `image_data CanvasImageData, x Int, y Int`]
-        [: `Int, Error!`]
+        [: `image_data CanvasImageData, x I32, y I32`]
+        [: `I32, Error!`]
         [: shared]
     ]
 
     [td:
         [: `image_data_get_alpha`]
-        [: `image_data CanvasImageData, x Int, y Int`]
-        [: `Int, Error!`]
+        [: `image_data CanvasImageData, x I32, y I32`]
+        [: `I32, Error!`]
         [: shared]
     ]
 
     [td:
         [: `image_data_set_pixel`]
-        [: `image_data ~CanvasImageData, x Int, y Int, red Int, green Int, blue Int, alpha Int`]
+        [: `image_data ~CanvasImageData, x I32, y I32, red I32, green I32, blue I32, alpha I32`]
         [: `Error!`]
         [: mutable]
     ]
 
     [td:
         [: `image_data_clear_pixel`]
-        [: `image_data ~CanvasImageData, x Int, y Int`]
+        [: `image_data ~CanvasImageData, x I32, y I32`]
         [: `Error!`]
         [: mutable]
     ]

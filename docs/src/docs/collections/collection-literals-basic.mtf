@@ -10,7 +10,7 @@ Every item has the same element type.
 An empty collection needs an explicit type:
 
 [codeblock, $code("moth"):
-    scores ~{Int} = {}
+    scores ~{I32} = {}
 ]
 
 Collections start at index `0`.

@@ -3,8 +3,8 @@ or state it explicitly.
 
 [codeblock, $code("moth"):
     enabled = true
-    count Int = 42
-    ratio Float = 0.5
+    count I32 = 42
+    ratio F64 = 0.5
     letter Char = '🦋'
     label String = "Moth"
 ]
@@ -12,24 +12,25 @@ or state it explicitly.
 ### Core forms
 
 - `true` and `false` are `Bool` values.
-- Whole-number literals are naturally `Int`.
-- Decimal-point and exponent literals are naturally `Float`.
-- A direct typed boundary materialises a numeric literal in that type, so explicit-width and exact literals need no intermediate `Int` or `Float`.
+- Whole-number literals belong to the integer family and default to `I32` only after eligible constraints resolve.
+- Decimal-point and exponent literals belong to the binary-float family and default to `F64` only after eligible constraints resolve.
+- A direct typed boundary materialises a raw numeric literal in that exact type.
 - Single-quoted literals create `Char` values.
 - Quoted slices and string templates use the `String` type.
 - `none` requires an optional `T?` receiving context.
 
 ### Numeric types
 
-- `Int`, `Uint` and `Float` are the signed integer, unsigned integer and binary float selected by the compiler's numeric profile. `Uint` follows the selected `Int` width. The default profile selects `Int32` and `Float64`, and therefore `Uint32`.
-- Fixed-width spellings are the integers `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32` and `U64`, and the binary floats `F16`, `F32` and `F64`.
+- Exact signed integers are `I8`, `I16`, `I32` and `I64`.
+- Exact unsigned integers are `U8`, `U16`, `U32` and `U64`.
+- Exact binary floats are `F16`, `F32` and `F64`.
 - `Byte` is a one-byte octet value with equality and unsigned-octet ordering. It takes no part in numeric arithmetic.
 - `Dec` is an arbitrary-precision integer at scale zero, `Dec1` through `Dec256` are arbitrary-precision scaled integers, and `Dec0` is another spelling of `Dec`'s scale-zero identity.
-- `Int`, `Uint` and `Float` keep their own identities even when their selected width matches an explicit-width type.
 
 The Numbers documentation owns the complete type family, exact numeric grammar,
-literal inference, operators and conversions. Current implementation and
-backend support are recorded by @../progress (Progress).
+literal inference, operators and conversions. The standard defaults do not set
+a minimum arithmetic width. Current implementation and backend support are
+recorded by @../progress (Progress).
 
 The Strings and characters section owns the implemented string source forms.
 Options are documented with Errors and options.

@@ -61,7 +61,7 @@ Pointer helpers report button state and coordinates.
     ;
 ]
 
-Buttons use `"left"`, `"middle"` and `"right"`. Coordinates are `Float` values measured from the top-left of the page's visible area, with Y increasing downward.
+Buttons use `"left"`, `"middle"` and `"right"`. Coordinates are `F64` values measured from the top-left of the page's visible area, with Y increasing downward.
 
 `io.set_title` is an accepted queued helper that sets the title of the current host
 surface, such as the browser document title. It takes one `String` and returns no

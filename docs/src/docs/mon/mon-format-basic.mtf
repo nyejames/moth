@@ -1,6 +1,8 @@
 A small MON document is one root record of literal values. This save record
 shows the accepted shape: named fields, a nested record, a map, an explicit
-`none` and ordinary string data.
+`none` and ordinary string data. The standalone schema declares numeric widths
+or decimal scales explicitly and retains lossless Integer and Decimal data.
+MON has no source inference or unconstrained numeric default.
 
 [codeblock, $code("text"):
     format_version = 1,
@@ -36,7 +38,7 @@ Strictness is the point. These inputs fail:
     -- INVALID: duplicate keys are rejected, not merged
     scores = {"Priya" = 10, "Priya" = 12},
 
-    -- INVALID: decimal spelling never converts to an Int target
+    -- INVALID: decimal spelling never converts to an I32 target
     width = 1280.0,
 
     -- INVALID: unknown record fields fail, even with defaults nearby
@@ -56,4 +58,6 @@ once and reuse it across documents. The codec returns owned values or a
 structured `MonError` that supports ordinary Rust reporting and propagation.
 Moth-native operations, `$mon`, automatic schema extraction and the static
 project builder remain deferred. Compiled Moth programs have no runtime codec
-support.
+support. The accepted exact API removes numeric-profile selection without
+aliases and preserves nested schemas. Its implementation cutover remains
+pending. See @#mon-format (MON format) and @../progress (Progress).

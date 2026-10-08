@@ -1,7 +1,6 @@
-The compiler already knows the built-in conversions.
-
-A user-defined struct or choice can opt into a supported target by providing
-the required method and declaring explicit conformance.
+The compiler owns cast evidence. A nominal type can add source evidence for
+one of the supported target families by defining the required method and
+declaring explicit conformance:
 
 [codeblock, $code("moth"):
     Label = |
@@ -13,31 +12,15 @@ the required method and declaring explicit conformance.
     ;
 
     Label must CASTABLE_TO_STRING
+    value String = cast Label("docs")
 ]
 
-Now a `Label` can be cast to `String` at a typed destination.
+Fifteen source-authored target families have infallible and fallible evidence:
+the eleven fixed numeric types plus `Bool`, `String`, `Char` and `Error`.
+Fallible evidence returns the target with builtin `Error!`; conversion uses
+ordinary failure handling and the same plain `cast` syntax. For one target,
+infallible and fallible evidence cannot coexist.
 
-This stays explicit. Matching method names alone do not create cast support.
-
-### Numeric evidence
-
-Builtin numeric conversions are decided by the static source and target types,
-not by values the compiler happens to know. An integer conversion is exact when
-the whole source range fits the destination, and fallible otherwise. `Byte` and
-`U8` convert in both directions without failing. `Uint` and `Int` need an
-explicit cast between each other in both directions, even when the values would
-fit.
-
-Binary conversions may lose precision by design. Integer-to-float and
-binary-float precision narrowing round to nearest, ties to even, and
-float-to-integer conversion truncates toward zero and then checks the target
-range. Narrowing a binary float fails only when the rounded result is not
-finite, so precision loss alone is not a failure.
-
-The frontend implements fixed-width, `Byte` and `Dec` evidence. HTML-JS
-executes `Dec` casts: integer-to-`Dec` conversion and scale widening are
-exact and infallible, scale narrowing and `Dec`-to-integer conversion are
-exact or fail, and `String`-to-`Dec` parsing is fallible. `Dec` formats to
-`String` exactly, including through matching generic cast bounds. HTML-Wasm
-executes supported infallible numeric expression casts and rejects reachable
-`Dec` values. See @../progress (Progress) for target support.
+Builtin conversion evidence also covers `Byte` and `Dec`, but Moth defines no
+source-authored traits for them. See @./#cast-evidence (Cast evidence) for the
+complete trait signatures and conversion rules.

@@ -3,7 +3,7 @@ Moth uses explicit block delimiters.
 A colon opens a block. A semicolon closes that block.
 
 [codeblock, $code("moth"):
-    clamp_to_zero |value Int| -> Int:
+    clamp_to_zero |value I32| -> I32:
         if value < 0:
             return 0
         ;

@@ -3,10 +3,10 @@
 ## Status
 
 ```text
-STATUS: activated by the user; implementation not started
-CURRENT_SLICE: Phase 0 pending
-BLOCKERS: next-session setup on the existing `expression-refactor` branch
-NEXT_ACTION: start Phase 0 in a new session on `expression-refactor` only
+STATUS: active on the user-selected expression-refactor branch
+CURRENT_SLICE: Phase 0 accepted; Phase 1 construction-owner mapping next
+BLOCKERS: no external prerequisite; compiler cutover and all new acceptance rows remain pending
+NEXT_ACTION: map bounded construction state and finalisation before selecting the numeric inference representation
 ```
 
 **Intended repository location:** `docs/roadmap/plans/exact-numeric-types-and-bounded-inference-plan.md`
@@ -637,13 +637,13 @@ This does not require running the full suite after every edit. Use focused crate
 
 #### 0A. Establish the actual base
 
-- [ ] Read current local/remote branch state, working-tree changes and the expression plan's accepted checkpoints. Preserve the user's existing branch and uncommitted work.
-- [ ] Identify which expression phases and template changes are accepted but not merged to main. Record their relationship to the intended numeric worktree.
-- [ ] Create an isolated feature worktree containing that accepted work through the normal repository workflow. Do not force-reset, overwrite or quietly restart from an older main.
-- [ ] Record the actual base SHA, branch, toolchains, features, build flags and source cohort under `tmp/exact-numerics/`. A research SHA in Appendix A is not a substitute.
-- [ ] Put the new numeric work first in the roadmap sequence and mark it active only when implementation activates.
-- [ ] Change the expression plan's small status capsule to paused for exact numeric/inference/conversion completion and subsequent restart reassessment. Preserve accepted checked items and their historical evidence.
-- [ ] Prevent overlapping edits to expression construction, numeric bindings and fixtures by other active work. Unrelated package work may continue behind stable interfaces. Do not pause unrelated programmes wholesale.
+- [x] Read current local/remote branch state, working-tree changes and the expression plan's accepted checkpoints. Preserve the user's existing branch and uncommitted work.
+- [x] Identify which expression phases and template changes are accepted but not merged to main. Record their relationship to the intended numeric worktree.
+- [x] Use the existing `expression-refactor` branch and worktree, as explicitly selected by the user instead of a separate implementation worktree. Preserve the accepted checkpoint without resetting or overwriting other work.
+- [x] Record the actual base SHA, branch, toolchains, features, build flags and source cohort under `tmp/exact-numerics/`. A research SHA in Appendix A is not a substitute.
+- [x] Put the new numeric work first in the roadmap sequence and mark it active only when implementation activates.
+- [x] Change the expression plan's small status capsule to paused for exact numeric/inference/conversion completion and subsequent restart reassessment. Preserve accepted checked items and their historical evidence.
+- [x] Prevent overlapping edits to expression construction, numeric bindings and fixtures by other active work. Unrelated package work may continue behind stable interfaces. Do not pause unrelated programmes wholesale.
 
 Suggested expression pause wording:
 
@@ -658,21 +658,25 @@ The actual accepted checkpoint belongs in its existing history/status context. D
 
 #### 0B. Inventory semantics and evidence
 
-- [ ] Search tracked production code, tests, fixtures, benchmark sources, docs, scripts, schemas and feature-gated owners for the removed names and profile carriers. Classify each hit by owner and meaning.
-- [ ] Trace semantic identity through parsed types, TypeId interning, public canonical types, folded values, HIR constants, generated keys, casts, external ABI projection and output helpers.
-- [ ] Inventory current support separately for HTML-JS and HTML-Wasm. Record successful runtime cases, target rejections and actual failure-delivery routes.
-- [ ] Record old minimum-width arithmetic, unary negation, F16 rounding and full-domain proof cases separately. Identify which source outcomes intentionally change under D15 and which still require equivalent target coverage.
-- [ ] Create the assertion-level coverage ledger described in Section 8 before modifying fixtures. Include the source revision, old profile, semantic property, backend and replacement owner.
-- [ ] Run the current integration audit and selected baseline suites. Capture existing failures without editing expectations to suppress them.
-- [ ] Capture five matched non-recording benchmark invocations for the affected surviving cohort under Section 11. Record targeted baseline probes if the full cohort is temporarily blocked.
-- [ ] Inventory current `#Config` implementation versus queued `$config` semantics, current result carriers versus future native results and current external float integrity routing. These are separate migration boundaries.
+- [x] Search tracked production code, tests, fixtures, benchmark sources, docs, scripts, schemas and feature-gated owners for the removed names and profile carriers. Classify each hit by owner and meaning.
+- [x] Trace semantic identity through parsed types, TypeId interning, public canonical types, folded values, HIR constants, generated keys, casts, external ABI projection and output helpers.
+- [x] Inventory current support separately for HTML-JS and HTML-Wasm. Record successful runtime cases, target rejections and actual failure-delivery routes.
+- [x] Record old minimum-width arithmetic, unary negation, F16 rounding and full-domain proof cases separately. Identify which source outcomes intentionally change under D15 and which still require equivalent target coverage.
+- [x] Complete the assertion-level coverage ledger described in Section 8 before modifying fixtures. Include the source revision, old profile, semantic property, backend and replacement owner. Activation review corrections now include numeric-proof/TIR-range owners and 120 generated float instances.
+- [x] Run the current integration audit and selected baseline suites. Capture existing failures without editing expectations to suppress them.
+- [x] Capture five matched non-recording benchmark invocations for the affected surviving cohort under Section 11. Record targeted baseline probes if the full cohort is temporarily blocked.
+- [x] Inventory current `#Config` implementation versus queued `$config` semantics, current result carriers versus future native results and current external float integrity routing. These are separate migration boundaries.
+
+Activation evidence is local under `tmp/exact-numerics/`: `activation-baseline.md`, `baseline-performance.md`, `production-owner-census.json` and `coverage-ledger.md`. The inventory records 127 explicit-profile fixtures, their 183 backend expectation blocks and 350 assertion rows, plus 459 named Rust tests/examples across 54 owners. All 136 new acceptance rows retain open replacement dispositions. Five native frontend and five CLI full-fidelity invocations passed on the unchanged compiler/workload cohort. Changed documentation workloads are excluded from the 41 frontend and 39 CLI comparable cases. All measurements are retained, including substantial unexplained variance in the first two frontend runs. Final comparison uses the median of all five invocation medians per matched case, with individual statistics reported.
+
+Independent numeric, inference, service, architecture, rendering, native-evidence and activation-evidence reviews accepted Phase 0 after corrections. The publication passed docs checking, a 79-output release build, actual Chromium inspection of 30 affected routes and introduced-link/anchor checks. The native benchmark evidence owner passed five focused xtask tests, package formatting, all-target Clippy and full/quick command smoke. Compiler numeric behaviour and fixture migration remain unchanged at this checkpoint.
 
 #### 0C. Publish the approved design
 
-- [ ] Update the permanent numeric, cast, catch, generic, collection and compiler/build contracts listed in Section 10 with the agreed final design.
-- [ ] Keep implementation support explicitly in the progress matrices. Future syntax in explanatory code blocks does not claim executable support.
-- [ ] Record the numeric changes required by the queued general-config, constraints, mixed-Wasm and living package owners using capability wording.
-- [ ] Preserve historical audit and benchmark measurements. Add current supersession/status notes only where needed, rather than rewriting history to appear current.
+- [x] Update the permanent numeric, cast, catch, generic, collection and compiler/build contracts listed in Section 10 with the agreed final design.
+- [x] Keep implementation support explicitly in the progress matrices. Future syntax in explanatory code blocks does not claim executable support.
+- [x] Record the numeric changes required by the queued general-config, constraints, mixed-Wasm and living package owners using capability wording.
+- [x] Preserve historical audit and benchmark measurements. Add current supersession/status notes only where needed, rather than rewriting history to appear current.
 
 **Validation:** inspect roadmap and authority diffs, run the integration inventory audit, use the documentation branch gate and record baseline commands/outcomes. Review every removed or replaced design sentence for lost invariants.
 

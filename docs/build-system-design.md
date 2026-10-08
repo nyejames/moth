@@ -42,7 +42,7 @@ Use `index.md` and owning module entry points for code locations. Source-path in
 - Physical file references establish conservative graph/input membership before executable selection. Exact output liveness does not change that membership.
 - Compiler-owned resource origins/uses are distinct from build-owned byte sources, placement and URL contexts. Builders never rediscover resources by scanning rendered strings.
 - Ordinary `$config` and static `if` do not change source graphs, declarations, exports or package topology. Structural `$feature` selection has a separate pre-graph contract.
-- One boundary-wide `NumericProfile` fixes semantic numeric precision. Target partition and development/release policy never reselect it.
+- Numeric type identity and defaults are language-owned and fixed at `I32`/`F64` for unconstrained whole/binary-float literals. Exact annotations and input contracts choose among the eleven fixed types; targets, builders and physical build profiles never select or reselect semantics.
 - The compiler validates lifetime topology and selects physical memory strategies. The build system supplies roots, target assignments and profiles, then stores the validated plans.
 - Builders/lowerers return output records. The build system validates, writes and owns manifests, conflicts and stale cleanup.
 - Parallelism, caching and reuse preserve deterministic identities, diagnostics and output order.
@@ -51,7 +51,7 @@ Use `index.md` and owning module entry points for code locations. Source-path in
 
 Bootstrap starts with a command selecting the artefact builder, build profile, tooling overlays, explicit inputs and target intent. Builder-selection source/CLI syntax and a Moth-native build-script design remain unsettled.
 
-The selected builder supplies the boundary's `NumericProfile` before command values or config numbers are materialised. The shared profile vocabulary belongs to `moth-lexical`, while compiler and build services retain boundary-wide selection and propagation. The build profile controls optimisation/planning effort, instrumentation and physical representation policy, not semantic numeric precision or mandatory access/lifetime legality. `docs/compiler-design-overview.md` > `Numeric model and profile` owns numeric values and compatibility.
+The selected builder does not supply or propagate a semantic numeric profile. It supplies its capability surface and exact typed primitive globals; compiler language policy owns the `I32`/`F64` literal defaults, while each source/input contract names an exact type. The build profile controls optimisation/planning effort, instrumentation and physical representation policy, not numeric semantics or mandatory access/lifetime legality. `docs/compiler-design-overview.md` > `Exact numeric identities and physical representation` owns numeric values and compatibility.
 
 The capability surface contains registered directive signatures/contexts, source-backed Core/Builder packages, binding-backed packages, template directives, import providers, runtime requirements, supported source kinds, primitive build globals and target-affinity/capability metadata.
 
@@ -65,7 +65,7 @@ Builder globals express stable semantic configuration. They never reveal a physi
 
 `config.moth` is one build-owned compile-time source, not a semantic module. It creates no `start`, HIR, runtime artefact or package interface. Bootstrap creates no config dependency graph, companion source set, package resolver or second project scan.
 
-The build system calls the named compiler config service with the source, capability surface and numeric profile. It consumes folded directive arguments, input-contract results, key locations and diagnostics, then applies validated project/builder settings. The compiler alone sequences preparation and folding.
+The build system calls the named compiler config service with the source, capability surface, retained explicit command-input spellings and exact typed programmatic/builder inputs. The compiler resolves each input against its declared exact contract, materialises directly from retained numeric spelling and returns folded directive arguments, input-contract results, key locations and diagnostics. The build system then applies validated project/builder settings. The compiler alone sequences preparation and folding.
 
 Completed config values use the compiler's ordinary constant projection. Applying them does not retain or reconstruct an expression graph. Source-span construction remains live for the later build validations described below, independently of the expression store's lifetime.
 
@@ -89,13 +89,13 @@ Only predefined fields are accepted and published through `@project`. Arbitrary 
 
 Project identity, discovery and compiler-control fields are fixed-only. Reject `$config` dependence in `name`, `entry_root` and `template_const_loop_iteration_limit`, including indirect dependence through helpers. An equal folded literal does not erase input provenance. Ordinary input-independent constant expressions remain valid.
 
-`entry_root` defaults to `"src"` and obeys the containment rules under `Source indexing and source sets`. The loop limit uses one compiler-owned default and resource-bound validator, separate from the profile-selected `Int` range.
+`entry_root` defaults to `"src"` and obeys the containment rules under `Source indexing and source sets`. The loop limit uses one compiler-owned default and resource-bound validator, independently of source literal ranges and numeric type selection.
 
 ### Bootstrap `$config` declarations
 
 `$config` takes no arguments and modifies exactly one following explicitly typed top-level compile-time `#` binding. Its name is the input name, its type is the contract and its initialiser is the fallback. Whitespace/comments may separate modifier and declaration, but another source item or block boundary may not. Duplicate or dangling modifiers are errors.
 
-The domain is `String`, `Int`, `Float`, `Bool`, `Char` and one optional layer. Fixed-width numerics, Byte, Dec, aliases, inferred types, collections and records are excluded. Runtime/mutable bindings, parameters, fields, locals and multi-bind targets are ineligible. Ordinary constants still require initialisers.
+The domain is `String`, `Bool`, `Char`, `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`, `F16`, `F32`, `F64` and one optional layer around a supported primitive. `Byte`, `Dec`, aliases, inferred types, collections and records are excluded. Runtime/mutable bindings, parameters, fields, locals and multi-bind targets are ineligible. Ordinary constants still require initialisers.
 
 A non-optional binding without an initialiser requires an input. A fallback supplies the missing value otherwise. An optional binding without an initialiser and one with `= none` share the same normalised absence default. A present optional fallback stays present.
 
@@ -108,19 +108,23 @@ Bootstrap resolution order is:
 
 Config fallbacks may fold the permitted single-file surface and earlier helper constants. They finish as a supported primitive/optional and retain normal same-file forward-reference errors. Resolution occurs inside config compilation before settings such as `entry_root` are applied.
 
+After resolution, numeric inputs are owned as values of their exact canonical type with a lossless value, and original input provenance remains available for diagnostics and dependency tracking. Existing semantic fingerprint domains include the exact type and canonical value; they do not use raw spelling or source location as a second semantic input.
+
 Project fields and ordinary helper constants neither supply nor block same-named inputs. Supplying an input binding to a differently named directive parameter does not rename its contract. Project metadata publication and input resolution are separate systems.
 
 ### Command build-input typing
 
-Repeated `--input name=value` arguments are typed before contracts are discovered:
+Repeated `--input name=value` arguments are split and classified before contracts are known; numeric values are not materialised yet:
 
 1. Split at the first `=` and retain later `=` characters. Require a lower_snake_case name.
-2. Recognise exact lowercase Bool, a complete signed whole-number literal, a complete decimal/exponent literal, a quoted Char or a quoted String, in that order.
+2. Recognise exact lowercase Bool, a complete signed whole-number literal, a complete decimal/exponent literal, a quoted Char or a quoted String, in that order. Retain the original numeric spelling and whole/decimal-exponent category.
 3. Treat other text, including empty text after `=`, as String.
 
-A quote-starting value must be a complete valid quoted literal. Malformed quotes are diagnostics, not String fallback. Shared `moth-lexical` numeric validation/materialisation enforces range and finite-value checks using the already selected profile.
+A quote-starting value must be a complete valid quoted literal. Malformed quotes are diagnostics, not String fallback. Shared `moth-lexical` validates numeric grammar; once a concrete contract is known, it materialises directly to that exact destination with range/finite checks and no `i32`/`f64` intermediary.
 
-Bare `none` is String text. Optional absence comes from omission/default resolution. A concrete `T` may satisfy matching `T?` as present, with no other coercion. In particular, `Int` does not satisfy `Float`.
+Bare `none` is String text. Optional absence comes from omission/default resolution. A concrete typed `T` satisfies only a matching `T?` as present, with no numeric coercion or width conversion. In particular, `I32` does not satisfy `F64`; a retained whole-number CLI spelling may nevertheless materialise directly as `F64` when that exact input contract receives it.
+
+For an input contract of type `U64`, `count=4_294_967_296` materialises from its spelling directly as `U64`. A contract of type `F32` can receive whole spelling `ratio=1` directly as `F32`; `count=1.0` remains a decimal/exponent spelling and is rejected by an integer receiver even though its mathematical value is integral.
 
 Explicit quotes force String for ambiguous values:
 
@@ -129,7 +133,7 @@ moth build . --input 'label="true"'
 moth build . --input "separator=':'"
 ```
 
-Programmatic APIs use the same typed carrier and conversion policy. Unknown inputs are diagnosed only after the selected contract inventory is complete, not merely because config lacks a matching declaration.
+Programmatic APIs supply already typed exact primitive values. They retain their declared type/value rather than converting through a default numeric type; only exact `T` to matching optional `T?` presence wrapping is permitted. CLI numeric values retain spelling/category until the contract resolves. Unknown inputs are diagnosed only after the selected contract inventory is complete, not merely because config lacks a matching declaration.
 
 ### `ProjectGlobalsInterface` and `@project`
 
@@ -143,11 +147,11 @@ Internal declarations may derive from project values while carrying project-cont
 
 ### Source contracts and static specialisation
 
-Selected-source `$config` contracts use the same primitive/optional domain and explicitly typed top-level binding rule. Their defaults are narrower than bootstrap defaults: a matching String, signed integer/float, Bool or Char literal, or `none` for an optional. A present primitive literal may supply an optional default.
+Selected-source `$config` contracts use the same exact primitive/optional domain and explicitly typed top-level binding rule. Defaults are supported literals materialised directly for that declared type, plus `none` for an optional. A present primitive literal may supply an optional default.
 
-Names, projections, operators, calls, casts, templates, collections, records and references to other inputs are invalid source defaults. This permits literal normalisation before provider interfaces or AST evaluation, without a second general constant evaluator in Stage 0.
+Names, projections, operators, calls, casts, templates, collections, records and references to other inputs are invalid source defaults. This permits retained-literal classification and exact receiver materialisation before provider interfaces or AST evaluation, without a second general constant evaluator in Stage 0.
 
-Preparation retains each contract's name, type/optionality, required/default state, normalised default and source location. A boundary-wide barrier validates all selected contracts before module AST compilation.
+Preparation retains each contract's name, exact canonical type/optionality, required/default state, directly materialised default and source location. A boundary-wide barrier validates all selected contracts before module AST compilation.
 
 Matching names agree on all those semantic contract properties. Explicit overrides do not excuse conflicting defaults. Same-file duplicates and no-shadowing rules still apply. Matching declarations in different modules share an input, not a local declaration identity.
 
@@ -188,13 +192,14 @@ Entry filtering retains unpurposed executable candidates for diagnostics rather 
 ### Fixed bootstrap order
 
 ```text
-select command, builder, build profile, NumericProfile and overlays
--> type explicit command inputs
+select command, builder, build profile and overlays
+-> retain/classify explicit command-input spellings and exact typed API values
 -> construct the compiler/builder capability surface
--> call the config compiler service and apply folded settings
--> publish predefined project globals and input results separately
+-> compile the config source, resolve its exact input contracts and apply folded settings
+-> publish predefined project globals and resolved config input values separately
 -> derive entry_root and construct canonical source/provider graphs
--> collect, validate and resolve selected-source input contracts
+-> collect and validate selected-source input contracts
+-> materialise remaining CLI spellings directly to exact contract types and resolve all source inputs
 -> compile dependency-ordered waves through the module service
 -> atomically publish complete module/generated results
 -> assemble success-only project inputs
@@ -203,7 +208,7 @@ select command, builder, build profile, NumericProfile and overlays
 -> lower variants and emit owned outputs
 ```
 
-All numeric steps consume the same profile. Source contracts resolve after discovery but before module semantics. The compiler document owns local semantic sequencing. The HTML planning section owns the detailed link-to-output order. `check` stops after applicable validation, before lowering and emission.
+Numeric values are materialised only after their exact contract is known; the compiler's `I32`/`F64` defaults apply only to unconstrained source literals. Source contracts resolve after discovery but before module semantics. The compiler document owns local semantic sequencing. The HTML planning section owns the detailed link-to-output order. `check` stops after applicable validation, before lowering and emission.
 
 Structural `$feature` selection must use bootstrap-available facts and act before excluded source publishes graph or declaration facts. Selected-source input values cannot drive this pre-graph step. Feature declarations, predicate grammar and lexical exclusion remain open design.
 
@@ -356,7 +361,7 @@ Precompiled is a storage state, not another backing kind. A precompiled Moth Was
 
 Each source dependency compiles in its own package graph, with its own config, private project globals, source index, immutable module artefacts, external facade and compatibility facts. Its private implementation never joins the consuming project graph or sees the consumer's `@project`.
 
-Dependencies use the selected builder's frontend capability surface and the directly linked compilation's `NumericProfile`. Compatibility records the Core/Builder interfaces actually used, not just a builder name. Incompatible precompiled numeric profiles require a matching build or rejection.
+Dependencies use the selected builder's frontend capability surface and the directly linked compilation's exact canonical numeric types. Compatibility records the Core/Builder interfaces actually used, their exact type identities and applicable language/ABI versions, not just a builder name. An artefact using removed profile-selected source types is incompatible and must be rebuilt or rejected, never numerically adapted.
 
 An external facade may expose no declaration whose public semantic facts or reachable executable implementation depends directly or transitively on private project globals. This includes constants/defaults, types, generic templates/bounds, trait evidence, receivers, all access/effect/lifetime summaries, generated code and compile-time-derived implementation facts. An exported function calling a private project-dependent helper is also prohibited.
 
@@ -370,7 +375,7 @@ Canonical package identity stays separate from a local alias. Aliases affect bin
 
 ### Core and Builder source package graphs
 
-Source-backed Core/Builder packages also compile as separate immutable graphs under the consuming numeric profile. They do not receive the project's globals. Moth-native `Int`/`Uint`/`Float` signatures remain native contracts rather than being rewritten to physical foreign carrier types.
+Source-backed Core/Builder packages compile as separate immutable graphs under the same fixed language numeric contract. They do not receive the project's globals. Moth-native signatures keep exact canonical types such as `I32`, `U64` and `F64`; they are never rewritten to physical foreign carrier types.
 
 A package needing project-specific compile-time input receives an explicit builder-owned synthetic interface declared in capability metadata. It is not `@project`, is never implicitly injected, carries provenance/fingerprints and makes the resulting artefact project-specific. Otherwise compatible pure package artefacts remain reusable.
 
@@ -438,9 +443,9 @@ Check and LSP-style analysis overlay the selected builder's capabilities. They m
 
 ## MON tooling and static assets
 
-The standalone Rust crate `moth-mon` owns the MON literal-data codec, with `moth::mon` as a supported convenience re-export of the same API and types. It consumes the shared `moth-lexical` policies without depending on compiler or build services. Its ownership, schema and error contracts live in the compiler design's `Rust-only MON service`.
+The standalone Rust crate `moth-mon` owns the MON literal-data codec, with `moth::mon` as the supported convenience re-export of the same API and types. It consumes shared `moth-lexical` policies without depending on compiler or build services. Its ownership, schema and error contracts live in the compiler design's `Rust-only MON service`.
 
-Callers own input IO and supply complete text or values plus a prepared schema. Compiler/build callers pass their boundary's selected numeric profile into schema preparation. Independent Rust callers select a schema profile themselves or use the standard default. The codec returns owned results and performs no input/output writing. Crate extraction creates no new builder, command, tooling overlay or compilable source kind.
+Callers own input IO and supply complete text or values plus a prepared exact schema. Compiler/build callers pass the exact receiver types required by their contracts. Independent Rust callers select explicit schema receiver types; neither path selects a semantic numeric profile. The codec returns owned results and performs no input/output writing. Crate extraction creates no new builder, command, tooling overlay or compilable source kind.
 
 A `.mon` file is literal data, not a compilable Moth source kind or semantic provider. It may be referenced as an ordinary resource under the explicit-extension resource rules. Parsing MON never discovers dependencies from its strings.
 
@@ -452,7 +457,7 @@ Each module receives an immutable view of published generated identities/summari
 
 The compiler completes native success/error channels, private failure rewrites and their final link-fact refresh before handing over the result. Canonical parameter contracts distinguish ordinary values, wires and constructor routes across publication. Module-local expression IDs, binding identities and capture storage never become build-level or cross-module keys. Frozen generic syntax/context remains compiler-owned and can support later materialisation after an earlier validation body's expression storage has been released.
 
-Nested requests converge within the compiler transaction. They create no extra source jobs or wave edges. Cross-package instances belong to the consuming boundary and retain numeric-profile compatibility. Active-request selection, semantic deduplication and diagnosed transaction rollback follow the compiler authority, not a build-side post-filter.
+Nested requests converge within the compiler transaction. They create no extra source jobs or wave edges. Cross-package instances belong to the consuming boundary and retain concrete canonical numeric types, evidence and applicable ABI/language compatibility. Active-request selection, semantic deduplication and diagnosed transaction rollback follow the compiler authority, not a build-side post-filter.
 
 ## Entry and package link planning
 
@@ -568,7 +573,7 @@ entry/package roots and exact reachable facts
 -> verify collector-free artefacts where required
 ```
 
-The compiler owns topology, target validation and physical strategy decisions. The builder supplies lifecycle roots, partition and output context, then orchestrates the services. Shared topology/requirements are target-independent. Refinement and physical plans are per variant. The semantic numeric profile is fixed across all variants.
+The compiler owns topology, target validation and physical strategy decisions. The builder supplies lifecycle roots, partition and output context, then orchestrates the services. Shared topology/requirements are target-independent. Refinement and physical plans are per variant. Every variant retains the same canonical source numeric semantics; build profiles and targets do not reselect types.
 
 Output-context policies must be available for target capability validation. Concrete URL maps must be validated before final variant identity and lowering. These are build-owned inputs, not decisions delegated to the memory planner. Check performs applicable context, target and memory-plan validation without lowering/output. Output path/conflict validation precedes resource content IO under the resource/output contracts below.
 
@@ -593,11 +598,13 @@ The complete conceptual key includes:
 
 - stable entry or package assembly identity
 - selected concrete function set and target assignment
-- build profile and boundary `NumericProfile`
+- build profile
 - ABI and layout identities
 - runtime capabilities and relevant backend configuration
 - validated memory-plan fingerprint
 - relevant normalised resource URL map and site-root rendering policy, or their fingerprints
+
+The selected HIR already carries exact canonical numeric identities. They are language/interface facts, not another physical-variant profile key.
 
 Reuse requires equality of this full key, including assembly identity. Matching function sets or pre-plan layouts alone is insufficient. This rule defines no extra equivalence between distinct assembly identities. One source function may be JavaScript in one entry variant and Wasm in another.
 
@@ -623,7 +630,7 @@ Compiler and memory authorities own plan contents, refinement fallback and publi
 
 A backend declares whether it supports collector-free release lowering. This is capability metadata, not a source-visible no-GC mode or config field.
 
-A full-control release backend realises every topology accepted by semantic and target validation without a tracing/reachability collector. Physical-planning imprecision cannot become another source rejection or collector fallback. Debug/development may use GC for simpler lowering or instrumentation. GC-native targets may use their host collector in any profile. These choices preserve mandatory access/lifetime legality. Numeric profiles and reachable target capabilities are independent semantic/target inputs.
+A full-control release backend realises every topology accepted by semantic and target validation without a tracing/reachability collector. Physical-planning imprecision cannot become another source rejection or collector fallback. Debug/development may use GC for simpler lowering or instrumentation. GC-native targets may use their host collector in any profile. These choices preserve mandatory access/lifetime legality. Exact numeric semantics are common across backends; reachable-operation capability validation independently rejects unsupported operations without selecting different widths or changing source legality.
 
 After lowering, a builder may verify that an artefact contains no tracing runtime. That reports an output property without changing source legality or behaviour.
 
@@ -635,7 +642,7 @@ WIT components remain foreign bindings with private runtime memory and closed va
 
 Wasm lowering consumes the explicit function/import/export/capability/layout and validated memory plans. The runtime supports allocator, inferred/declared-region, REC counter and destruction-plan requirements selected by those plans. Lowering encodes planned obligations/discharge sites rather than inventing generic retain/release operations.
 
-Wasm LIR is structured and backend-owned, not another frontend semantic authority. The architecture has no durable dispatcher-loop backend, per-semantic-module memory, `moth_start` export, helper-export booleans or unconditional Int-as-i64 bridge. Valid I64/U64 and profile-selected 64-bit Int lowering remain required numeric cases.
+Wasm LIR is structured and backend-owned, not another frontend semantic authority. The architecture has no durable dispatcher-loop backend, per-semantic-module memory, `moth_start` export, helper-export booleans or unconditional `I32`-to-`i64` bridge. Existing exact `I64`/`U64` lowering cases remain governed by the current backend contract; this architecture adds no Wasm capabilities.
 
 ### Lowerer use cases
 
@@ -727,7 +734,7 @@ The first development build compiles the full selected graph. Later builds reuse
 
 Entries relink or regenerate when their implementation, dormant-root, runtime-dependency, generated, entry-settings, project-field or relevant backend-config inputs change. A private body change need not recompile semantic consumers. Dormant root changes affect entries that activate that root. Runtime-dependency changes update capabilities, glue and resource planning.
 
-Configuration and numeric-profile dependence uses existing fingerprint domains, including private implementation and compatibility. Static Bool selection creates no new fingerprint family and never changes declaration identity. Project-field dependencies remain field-granular. Documentation-only changes update documentation/editor indexes without invalidating semantic consumers or executable variants.
+Configuration and exact typed-input dependence use existing fingerprint domains, including private implementation and compatibility. Fingerprints carry the canonical exact numeric type and value wherever those facts affect semantics; there is no numeric-profile dimension. Static Bool selection creates no new fingerprint family and never changes declaration identity. Project-field dependencies remain field-granular. Documentation-only changes update documentation/editor indexes without invalidating semantic consumers or executable variants.
 
 The M02 reuse gate requires evidence that a semantic or physical cache reused an artefact before testing invalidation. Cover private effect/body changes, public contracts, entry outcome changes, generated sidecars and backend/profile/ABI compatibility against that demonstrated reuse. A cold recompilation or a writer's skipped-unchanged result alone cannot satisfy this gate. Rebuild/write/serve tests prove current output freshness separately, including exact entry cause codes and diagnosed exports without treating old successful output as the new result.
 
@@ -739,7 +746,7 @@ URL maps and site-root policies follow the same physical/output separation. Reso
 
 ### Persistent compatibility
 
-Persisted modules, packages and generated artefacts preserve the same semantic boundaries. Reuse requires compatible compiler artefact/language versions, stable project/package identity, source/config fingerprints, dependency interface fingerprints, used Core/Builder capabilities, frontend feature selection, numeric profile, relevant ABI/layout policy and generated request identity where applicable.
+Persisted modules, packages and generated artefacts preserve the same semantic boundaries. Reuse requires compatible compiler artefact/language versions, stable project/package identity, source/config fingerprints containing their exact typed facts, dependency interface fingerprints, used Core/Builder capabilities, frontend feature selection, relevant ABI/layout policy and generated request identity where applicable.
 
 Persisted physical variants also require the complete validated physical identity, including memory-plan and applicable URL-map/site-root fingerprints. Process-local IDs and absolute paths are not compatibility keys. Canonical identities and self-contained or remappable lookup data preserve meaning across processes.
 

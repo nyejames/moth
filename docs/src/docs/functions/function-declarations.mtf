@@ -5,7 +5,7 @@ A source function forms a named top-level declaration.
         io.line([: Hello, [name]])
     ;
 
-    double |value Int| -> Int:
+    double |value I32| -> I32:
         return value * 2
     ;
 ]
@@ -41,6 +41,11 @@ module without postfix `!` at each internal call. Exported callables without
 an error slot must discharge it. See @#returns-and-multiple-values (Returns
 and multiple values) and @../progress (Progress) for the contract and current
 support.
+
+Parameters and return slots use exact declared types. Body-local numeric
+inference resolves origins before publication but never changes a signature or
+public interface. Generic signature relationships follow the separate bounded
+rules in @../generics (Generics).
 
 ### Generic functions
 

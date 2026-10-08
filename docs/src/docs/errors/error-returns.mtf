@@ -1,7 +1,7 @@
 A function with an explicit typed error path marks one return slot with `!`.
 
 [codeblock, $code("moth"):
-    parse_number |text String| -> Int, Error!:
+    parse_number |text String| -> I32, Error!:
         if text is "":
             return! Error("Missing number", 200)
         ;
@@ -85,7 +85,7 @@ Map implicit failure into a custom error with `catch` and `return!`:
         InvalidDimensions,
     ;
 
-    area |width Int, height Int| -> Int, GeometryError!:
+    area |width I32, height I32| -> I32, GeometryError!:
         result = width * height catch:
             return! GeometryError::InvalidDimensions
         ;

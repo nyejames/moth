@@ -2,7 +2,7 @@ Add `!` after a call with a typed error return when the current function should
 pass that error to its caller.
 
 [codeblock, $code("moth"):
-    wrapper |text String| -> Int, Error!:
+    wrapper |text String| -> I32, Error!:
         value = parse_number(text)!
         return value
     ;

@@ -32,7 +32,7 @@ A payload variant requires constructor parentheses.
 - Each payload field must be supplied exactly once.
 - Payload fields have no defaults.
 - Extra or missing arguments are invalid.
-- Argument values are checked and contextually coerced against field types.
+- Argument values are checked against the exact payload field types. Eligible raw numeric origins may materialise in their field type; already typed values need exact compatibility.
 
 An immediate `Route of ...` parameter supplies one bounded exception to complete
 construction: a direct constructor may capture a leading payload prefix and

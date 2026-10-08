@@ -78,7 +78,7 @@ Current open questions include:
   agreed future source-block spelling is `$checked:` but whose proof-tier
   semantics, placement and soundness evidence remain open
 - `Dec` and `DecN` range domains
-- lossy `Float`/`Dec` conversion helpers and explicit rounded `Dec` scale changes
+- lossy binary-float/`Dec` conversion helpers and explicit rounded `Dec` scale changes
 - source-level bitwise integer operations
 - speculative `Byte` buffer and text-encoding APIs
 - grouped `if:` handlers, rewind and richer effects

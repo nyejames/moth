@@ -4,7 +4,7 @@
 
 - Status: queued. The canonical and Basic runtime references are published.
 - Current slice: implementation not started.
-- Blockers: shared MON syntax and Rust tooling are delivered. Unified numeric semantics, compact typed expression/dense HIR construction and the required ordinary-struct validation paths must be delivered.
+- Blockers: shared MON syntax and Rust tooling are delivered. Exact numeric identities, bounded numeric-leaf construction and materialisation, compact typed expression/dense HIR construction and the required ordinary-struct validation paths remain implementation capabilities to verify at activation.
 - Next action: establish the activation tree and complete Phase 0.
 
 ## Purpose and prerequisites
@@ -13,7 +13,11 @@ Enable named-only parenthesised MON construction in runtime receiving contexts. 
 
 Reuse the shared argument parser, type environment, struct construction, field access, copy, borrow and lifetime owners. This work introduces no structural typing, anonymous-specific runtime IR or MON serialisation implementation.
 
-Run after shared MON syntax, unified numeric semantics and the typed semantic expression/dense HIR checkpoint, before the HTML mixed JavaScript/Wasm backend work that consumes this capability. The main roadmap owns ordering. Establish the revision, worktree status and baseline at activation in local working notes, not in this queued plan.
+Run after shared MON syntax and the capabilities for exact numeric identities and bounded
+construction-time numeric-leaf resolution, typed semantic expression/dense HIR construction and
+ordinary struct construction, before the HTML mixed JavaScript/Wasm backend work that consumes this
+capability. The main roadmap owns ordering. Establish the revision, worktree status and baseline at
+activation in local working notes, not in this queued plan.
 
 Required capabilities:
 
@@ -23,7 +27,8 @@ Required capabilities:
 - compact typed expression IDs and resolved constructor descriptors, with dense HIR field/child ranges and native result shapes
 - ordinary struct HIR construction, projections, copy, borrow validation and lifetime/escape validation
 - public-surface rejection of hidden runtime identities
-- post-Dec/Uint canonical numeric identities with the compilation-wide NumericProfile, fixed I*/U*/F* types and non-numeric Byte, consuming each type's delivered target support
+- exact canonical numeric identities: `I8`/`I16`/`I32`/`I64`, `U8`/`U16`/`U32`/`U64`, `F16`/`F32`/`F64`, distinct non-arithmetic `Byte` and scale-specific `Dec` types
+- bounded numeric-only construction state for eligible leaves in already known record structure. Keep lossless spelling handles and source-span witnesses with their existing owners until body finalisation. Resolve pending numeric facts before registering canonical hidden struct types or publishing HIR. Add no profile-selected identity, placeholder type, general shape inference or persisted inference recipe
 
 Use the activation tree's current APIs. Reuse delivered MON parsing and constructor descriptors
 rather than reconstructing a predecessor record parser or owned expression tree. The required
@@ -43,12 +48,12 @@ Use the canonical runtime reference for construction, hidden identity, recursive
 
 - Each static literal site owns one hidden nominal type per owning compiled body. Repeated execution reuses that type, while different sites remain distinct. Aliases and copies preserve type identity.
 - Qualify the source-site key by its module/body and concrete materialisation identity where required. Reuse current retained source-site and instantiated-body identities. Runtime execution counters, field shape and rendered type names are not keys. The exact local Rust representation is an implementation choice, not a new public identity contract.
-- Resolve children before registering ordered parent fields. An anonymous parent may store a hidden child directly or by an existing local reference. Explicit nominal children remain ordinary typed values.
-- The composition exception applies to compiler-generated anonymous parent fields. It does not permit hidden types in authored nominal declarations, function arguments/returns, exported surfaces, collections/maps or generic arguments.
+- Resolve each eligible numeric leaf before registering the parent's complete canonical nominal identity. Pending origins and authored span witnesses remain with the body-construction owner only until resolution and required diagnostics finish.
+- Authored field names and constructed children establish the record shape. Numeric inference may refine eligible leaves inside that known shape, but later shape matching, shape unification and field inference remain excluded.
 - Apply those restrictions recursively, including through a containing parent, optional or captured value. An ordinary leaf extracted from a record keeps its ordinary permitted uses.
 - Constructing a local record inside an already concrete generic body differs from passing a hidden type as a generic argument. Only the former is permitted.
 - Empty runtime records remain invalid. Ordinary constant-looking fields do not select the const-record path. Wire and Route storage restrictions remain independent of shared syntax.
-- Numeric leaves retain their canonical semantic type. Extracting a U8 field yields U8, while arithmetic may separately promote it to U32. An i32 carrier does not widen the field's semantic type or physical storage. Int/Uint/Float fields retain their profile-selected contract and Byte gains no arithmetic from being stored in a record.
+- Numeric leaves retain exact canonical identities. Extracting a `U8` field yields `U8`; `U8 + U8` remains `U8` and checks at that width. An `F16` field likewise keeps its type and each eligible operation completes at `F16`. A physical I32 or F32 carrier does not retype the field, widen its operation or choose its layout. `I*`, `U*` and `F*` fields have no profile-selected alternatives. `Byte` gains no arithmetic from being stored in a record.
 
 The initial implementation includes nesting. It must not accept only a flat subset and leave parent/child support or recursive escape checks for later.
 
@@ -79,7 +84,7 @@ Each code-bearing phase includes its focused tests and `AGENTS.md` Slice review.
 2. Read the shared MON owner and existing const-record deferral boundary, ordinary nominal registration, HIR struct paths and recursive escape validators.
 3. Read the published runtime reference and confirm the current owner map. Identify remaining architecture, cheatsheet and status edits without rewriting the source contract or claiming runtime support.
 4. Select the existing source-site/body identities that implement the key above, including nested sites and concrete materialisations. Record the mapping locally. Inventory every prohibited boundary and its current recursive validation owner.
-5. Confirm ordinary struct representation can express nested children and all required access/copy/lifetime relationships without new runtime IR. Include fixed-width, Byte, profile-selected and Dec leaves in that inventory.
+5. Confirm ordinary struct representation can express nested children and all required access/copy/lifetime relationships without new runtime IR. Include every exact integer and binary-float width, Byte and Dec leaves in that inventory.
 
 Exit: one identity rule, one shared parse path and explicit recursive boundary coverage.
 
@@ -106,7 +111,7 @@ Exit: anonymous syntax produces no anonymous-specific HIR/backend representation
 
 1. Validate supported targets through ordinary struct lowering. Assert an explicit target/deferred rejection where a required ordinary capability is unavailable, rather than claiming executable parity from frontend-only tests.
 2. Add or consolidate end-to-end cases for nested output, mutation/copy, existing-child aliasing, duplicate inner labels, distinct-site mismatch and each materially different prohibited boundary.
-3. Keep grammar/separator tests with the shared MON owner. Runtime tests cover runtime policy, identity, value behaviour and escapes instead of duplicating that grammar suite. Exercise fixed-width/Byte leaves and preserve scalar type identity through projection and mutation.
+3. Keep grammar/separator tests with the shared MON owner. Runtime tests cover runtime policy, identity, value behaviour and escapes instead of duplicating that grammar suite. Exercise exact fixed-width and binary-float leaves, Byte and Dec, preserving scalar identity through projection and mutation.
 4. Update support notices in the published structs references and teaching page, then reconcile the cheatsheet, compiler/build authorities, Design Scope, progress matrices, comments and queued consumers. Preserve the precise local-composition boundary. Shared grammar remains with the delivered MON owner.
 5. Remove obsolete deferral paths, fixtures and temporary construction helpers. Rebuild generated docs.
 
@@ -127,8 +132,8 @@ Tests should prove:
 - retained aliases constrain nested mutation under ordinary borrow rules
 - prohibited wrappers do not hide an anonymous identity from escape checks
 - ordinary extracted leaves retain their normal permitted uses
-- fixed integer/float and Byte field identity survives construction, projection and mutation without carrier-based retyping or implicit narrowing
-- Int/Uint/Float examples still work under their selected profile and Dec leaves keep exact scale semantics
+- exact `I*`/`U*`/`F*` and Byte field identities survive construction, projection and mutation without carrier-based retyping or implicit narrowing
+- exact-width fields need no numeric profile, and Dec leaves keep their exact scale semantics
 - compile-time records remain compile-time-only and named nominal construction stays explicit
 - supported backend execution agrees with ordinary struct semantics, while unsupported aggregate or Dec targets reject explicitly
 

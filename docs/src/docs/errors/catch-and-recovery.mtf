@@ -1,13 +1,11 @@
-`catch` handles the complete selected expression locally, including implicit
-built-in failure and compatible typed errors.
-
-The expression-wide rules below are delivered on JS/HTML. HTML-Wasm rejects
-recoverable numeric failure with a capability diagnostic. See @../progress (Progress).
+`catch` handles the complete selected expression locally. It accepts compatible
+typed errors and recoverable implicit built-in failure. An eligible authored
+expression may also use a safety catch when no failure currently exists.
 
 ### Protected expression
 
-`catch` has lower precedence than the ordinary operators. Parentheses around
-the protected expression are not required.
+`catch` has lower precedence than ordinary operators. Parentheses around the
+protected expression are optional:
 
 [codeblock, $code("moth"):
     value = left * right + offset catch:
@@ -15,106 +13,127 @@ the protected expression are not required.
     ;
 ]
 
-This handler covers multiplication and addition, not only the last operand.
-It also covers receiver evaluation, arguments, nested calls and cast operands.
+The handler covers both arithmetic operations, receiver evaluation, arguments,
+nested calls and cast operands:
 
 [codeblock, $code("moth"):
     amount = load_amount(left * right + offset) catch then 0
 ]
 
-If `load_amount` returns `Int, Error!`, this handler covers its returned error
-and both arithmetic operations in its argument. Compatible typed calls inside
-the protected expression supply their success values without per-call `!`.
+If `load_amount` returns `T, Error!`, the handler covers that returned error
+and the arithmetic in its argument. Compatible typed calls inside the
+protected expression supply their success values without per-call postfix `!`.
 
-Evaluate the protected work once in ordinary source order. The first failure
-skips the rest of the expression and enters the handler, which replaces the
-whole expression's success values. Earlier successful mutations and IO remain
-visible. A catch is not a transaction, and failure in its handler goes outward
-rather than entering the same handler again.
+Evaluate protected work once in ordinary source order. The first failure skips
+the remaining work and enters the handler, which replaces the expression's
+success values. Earlier mutations and IO remain visible. A catch is not a
+transaction, and failure in its handler goes outwards rather than re-entering
+it.
 
-### Compatible failures
+### Safety-catch eligibility
 
-- Implicit built-in failure alone is accepted. A bound name has type `Error`.
-- One or more built-in `Error!` outcomes may share a catch with implicit failure.
-- Existing typed `Error` values keep their message, code and identity, including code `0`.
-- One custom error type `E` may share a catch when no implicit failure remains. The binding has type `E`.
-- A custom `E!` outcome mixed with implicit failure is rejected.
-- Two distinct typed error types are rejected, including custom `E` mixed with `Error`.
+Catch placement and catch eligibility are separate from actual failure
+effects. At a legal catch position, an authored expression qualifies through
+at least one of these conditions:
 
-Split incompatible work into separate handled expressions or map errors
-explicitly. An unbound catch need not construct an observable `Error` for an
-implicit failure. A bound catch materialises the corresponding built-in error.
+1. It contains a valid authored cast.
+2. It contains a valid authored arithmetic operation, including unary numeric negation.
+3. It contains more than one function or member call at the selected expression's call-count level.
+4. Its evaluation contains an actual compatible typed or inferred recoverable failure producer.
 
-A checked operation, inferred-failure private call or typed error producer
-makes catch eligible. A literal or an ordinary infallible call alone does not.
-Later proof or optimisation removing the failure path does not invalidate an
-otherwise eligible catch. Statically known invalid numeric work remains a
-compile-time diagnostic, even inside a catch.
+Comparisons and Boolean operators alone do not count as arithmetic.
 
-### Block forms
+A signed literal such as `-1` remains one literal and does not count as authored
+unary arithmetic. `-value` counts as an authored unary operation when `value`
+has a valid signed-integer or binary-float type.
+Compiler-inserted conversions, numeric helpers and hidden calls do not create
+eligibility. A constructor follows its existing constructor rules rather than
+counting as a function call.
 
-Use `catch:` when the error value is not needed.
+Count calls through receiver chains and in separate operands. Do not add calls
+inside an argument to the enclosing expression's call count. That exclusion
+does not remove argument evaluation from the protected expression or hide
+authored arithmetic there. Ordinary grouping remains transparent. A nested
+handler owns its expression and fallback rather than lending their work to an
+outer catch.
+
+Assuming named calls below cannot fail:
+
+[table:
+    [th: [: Expression] [: Safety catch]]
+    [td: [: `source.first().second()`] [: Eligible: two receiver-chain calls]]
+    [td: [: `left() is right()`] [: Eligible: two calls in separate operands]]
+    [td: [: `outer(inner())`] [: Ineligible by call count: one outer-level call]]
+    [td: [: `outer(inner())`, with fallible `inner`] [: Eligible through the actual failure producer]]
+    [td: [: `left is right`] [: Ineligible unless evaluation contains another qualifying operation]]
+    [td: [: `-value` for a valid signed numeric type] [: Eligible: authored arithmetic]]
+    [td: [: A supported infallible cast] [: Eligible: authored cast]]
+    [td: [: A literal or one infallible call] [: Ineligible without another qualifying operation]]
+]
+
+Eligibility belongs to this source occurrence. A reference to a binding or
+constant does not inherit arithmetic or call counts from its initializer.
+Folding, constant substitution, inlining or optional check removal cannot
+erase authored eligibility. A proven-infallible operation does not create an
+error effect, and safety catches do not receive a new default warning.
+
+### Handler constraints and error types
+
+The handler participates in ordinary receiving and numeric constraints even
+when failure analysis later proves it unreachable:
+
+[codeblock, $code("moth"):
+    fallback U64 = 0
+    result = 1 + 2 catch then fallback
+]
+
+The fallback types the unresolved literal arithmetic as `U64` before operator
+selection. A completed concrete result cannot change type to satisfy a
+fallback of another type. Catch cannot infer named arithmetic operands
+backwards.
+
+When no error producer exists, a bound handler name has builtin `Error` type.
+When compatible typed producers exist, their error type determines the
+binding. Syntax-only eligibility never fabricates an `Error` producer or
+changes a custom error type.
+
+- Implicit built-in failure can share a handler with builtin `Error!`.
+- A bound implicit error has type `Error`. Typed `Error` keeps its message, code and identity, including code `0`.
+- One custom error type can share a handler only when no implicit failure remains.
+- A custom `E!` mixed with implicit failure is rejected.
+- Two distinct typed error types are rejected, including custom `E` with builtin `Error`.
+
+An unbound catch need not construct an observable `Error` for implicit
+failure. A bound catch materialises the compatible error.
+
+### Handler forms and result requirements
+
+Use `catch:` for a block handler without an error binding, or
+`catch |err|:` when the handler needs the error:
 
 [codeblock, $code("moth"):
     value = parse_number(text) catch:
         then 0
     ;
-]
 
-Use `catch |err|:` when the handler needs the error.
-
-[codeblock, $code("moth"):
-    value = parse_number(text) catch |err|:
+    other = parse_number(text) catch |err|:
         io.line(err.message)
         then 0
     ;
 ]
 
-The error binding:
-
-- is immutable
-- is visible only inside the handler
-- must not shadow another visible name
-- has the compatible error type described above
-
-### Inline forms
-
-A simple recovery may stay on one logical line.
+Inline recovery uses `then` on one logical line and has no statement body:
 
 [codeblock, $code("moth"):
     value = parse_number(text) catch then 0
-    label = load_label(text) catch |err| then err.message
+    other = parse_number(text) catch |err| then 0
 ]
 
-Inline catch:
-
-- uses `then`
-- stays on one logical line
-- may produce the receiver's required value list
-- binds the error only inside the fallback expression
-- does not contain a statement body
-- cannot combine with postfix `!`
-
-### Value requirements
-
-When the handled expression has success values and the receiving site needs
-them, every reachable handler path must:
-
-- produce the required values with `then`
-- leave the enclosing function with `return`
-- leave through its error channel with `return!`
-- end in a proven terminal assertion such as `assert(false, "cannot recover")`
-
-A handler that can fall through without producing or terminating is invalid.
-
-[codeblock, $code("moth"):
-    value = parse_number(text) catch |err|:
-        io.line(err.message)
-        return 0
-    ;
-]
-
-A multi-success recovery uses `then` with the matching arity:
+When a receiving site needs success values, every reachable handler path must
+produce the required number and types with `then`, leave the function with
+`return` or `return!`, or end in a proven terminal assertion. A path cannot
+fall through without producing or terminating. Multi-success handlers match
+the expression's arity:
 
 [codeblock, $code("moth"):
     name, score = load_user(id) catch |err|:
@@ -123,31 +142,46 @@ A multi-success recovery uses `then` with the matching arity:
     ;
 ]
 
-A fallible operation with no success values does not need `then`.
+A fallible operation with no success values does not need `then`. The error
+binding is immutable, visible only in the handler and cannot shadow another
+visible name. Its type follows the compatible producers described above.
 
-[codeblock, $code("moth"):
-    items ~{4 Int} = {}
+Validate these rules even for a handler later erased as unreachable.
 
-    ~items.push(value) catch:
-        io.line("push failed")
-    ;
-]
+Every handler gets ordinary validation even if it cannot run. Validate names,
+types, access, casts, generic evidence, required constant expressions and
+all-path value or terminality rules. A handler cannot hide an unsupported
+cast, incompatible fallback or statically invalid numeric operation.
 
-### Context and conflicts
+### Unreachable handler erasure
 
-- `catch` and postfix `!`, `cast!` or optional `?` conflict on the same expression.
-- Explicit propagation still leaves the function. It does not target the nearest catch.
-- Catch bodies remain statement-like and are rejected inside conditions, templates and constants, except for directly foldable cast recovery at an explicit constant/default receiving boundary.
-- Comma, parenthesis, logical-line and statement boundaries still delimit the selected expression.
-- Grouping an operand without a catch inside it does not shrink an outer handler's scope.
+Wait until semantic typing and the applicable failure-summary convergence
+prove that recovery cannot execute. Then remove the handler's executable
+contribution through the existing construction/finalisation owner. Emit no
+handler work, runtime captures, inactive generic requests, reachable backend
+requirements or executable link facts. Preserve source graph membership and
+ordinary declaration and visibility validation.
+
+Do not prune a handler because a provisional failure summary appears empty.
+Revalidate rewritten HIR and recompute affected borrow, proof and link facts
+before publication. Later optional lowerer optimisation may remove checks or
+blocks without changing source acceptance.
+
+### Existing recovery boundaries
+
+- `catch` and postfix `!` or optional `?` conflict on the same expression. Postfix `!` remains ordinary function-call propagation.
+- Explicit propagation exits the function and does not target the nearest catch.
+- Catch bodies remain statement-like and stay out of conditions, templates and constants, except for directly foldable cast recovery at an explicit constant/default receiver.
+- Commas, parentheses, logical-line boundaries and statements delimit the selected expression.
 - First-class fallible carriers cannot be stored without handling.
+- Assertions, resource exhaustion, fatal foreign-value integrity guards and host termination remain outside `catch`.
 
 A catch on an assignment's right-hand expression protects that expression
-only. Compound arithmetic and conversion back to the target are separate
-checks, and the target is written only after all checks succeed. To recover a
-complete compound update locally, catch a private helper call or compute and
-check the replacement before assignment. Catch-after-loop and grouped handlers
-are not part of this contract.
+only. Compound arithmetic and checked conversion back remain separate checks,
+and the target changes only after success. To recover a complete update
+locally, catch a private helper call or compute and check the replacement
+before assignment. Catch-after-loop and grouped handlers remain outside this
+contract.
 
 `then` and closed receiving sites are specified by
 @../branching/#value-producing-if (Value-producing if).

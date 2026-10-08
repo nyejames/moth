@@ -7,7 +7,7 @@
 backing and no prelude alias.
 
 Canonical source semantics belong to `docs/src/docs/packages/core/time/time.mtf` and the canonical
-`Float`, `Error` and external-binding references. That reference now states the package's semantic
+numeric, `Error` and external-binding references. That reference now states the package's semantic
 contract, so this living plan records implementation strategy, the inherited defects the slice
 exposed but does not own, and coverage ownership. It cannot accept public API or semantics.
 
@@ -23,6 +23,14 @@ native result-slot/Core const-eval checkpoints land. Data-layout Phase 3 closeou
 `4cfd9d492` is accepted.
 NEXT_ACTION: none required; a Wasm lowering set is the next candidate and needs its own accepted decision
 ```
+
+The accepted numeric migration changes default numeric parameters/accessors to
+F64 and remains pending. The implementation snapshot and historical Float
+evidence below retain their checkpoint meaning. Preserve opaque time domains,
+units, arithmetic range/exactness and code 304 at the read boundary. Shared
+external validation uses resolved F64 without package-specific guards.
+Safety-catch eligibility alone cannot make a fatal integrity guard recoverable.
+This cutover adds no Wasm lowering.
 
 ## Current surface
 
@@ -153,7 +161,7 @@ Candidates only. Nothing here is accepted API.
    the same contract instead of duplicating unspecified behaviour. It needs a target decision first.
 2. **Duration range rules.** `abs` of the most negative representable value is still unstated, and so
    is whether the arithmetic functions should saturate instead of leaving a quantity outside the
-   finite `Float` range for the read boundary to reject. The reference already states where exact
+   finite F64 range for the read boundary to reject. The reference already states where exact
    arithmetic ends and what `abs`, `clamp` and `is_negative` do with a quantity outside that range,
    so what remains is the saturation decision.
 

@@ -1,49 +1,40 @@
-Moth checks arithmetic instead of quietly wrapping or producing invalid
-floating-point values.
+Moth checks each numeric operation in its selected result type. Overflow,
+division by zero and non-finite binary-float results produce recoverable
+failure rather than wrapping or implicitly panicking.
 
-These operations can fail:
+Narrow same-type operations can fail:
 
-- overflowing an integer type
-- dividing by zero
-- using an invalid integer exponent
-- producing `NaN` or infinity
+[table:
+    [th: [: Operands] [: Selected result type]]
+    [td: [: I8 + I8] [: I8]]
+    [td: [: U8 + U8] [: U8]]
+    [td: [: F16 + F16] [: F16]]
+]
 
-A function with an `Error!` return can pass that failure through its normal
-error path:
+For example, `127 + 1` overflows when both operands and the result use `I8`.
+An `F16` operation rounds and checks at `F16` precision, even if a wider
+temporary could hold its intermediate.
+
+A function can return implicit failure through builtin `Error!`:
 
 [codeblock, $code("moth"):
-    divide |left Int, right Int| -> Float, Error!:
+    divide |left I32, right I32| -> F64, Error!:
         return left / right
     ;
 ]
 
-Checked numeric failure is implicit built-in failure, not wrapping or an implicit
-panic. A private function without an error slot can pass it through internal calls
-in the same module without postfix `!`. A custom error return needs local recovery
-or explicit mapping. An exported function without an error slot must handle it.
-Entry code runs through `start` with `Error!`.
-
-Use `catch` to recover the complete selected expression, including arithmetic
-and failures inside call arguments or cast operands:
+Private functions can carry implicit failure through internal calls. Custom
+error slots need local recovery or explicit mapping. Use `catch` for a local
+fallback:
 
 [codeblock, $code("moth"):
     total = left * right + offset catch then 0
 ]
 
-The handler can also receive builtin `Error!` from calls in that expression.
-See @../errors/#catch-and-recovery (Catch and recovery) for placement rules.
+The handler protects the complete selected expression, including arithmetic
+and nested call arguments. Authored arithmetic can make a safety catch eligible
+even when the operation proves infallible. That does not create a failure
+effect. Known invalid numeric work still diagnoses during compilation.
 
-A failure the compiler can prove in advance is reported during compilation,
-even inside `Error!` or an expression with `catch`.
-
-Each operation checks its own result type rather than the storage width of its
-operands. Fixed-width arithmetic typing and numeric constant folding are
-implemented in the frontend/HIR. HTML-JS executes checked runtime arithmetic,
-including fixed-width and `Uint` operations. HTML-Wasm executes supported scalar
-arithmetic; any operation that can actually fail and needs recoverable delivery
-is rejected with a capability diagnostic, while operations proven unable to
-fail, such as `U8 + U8 -> U32`, compile. There is no trap fallback.
-HTML-JS executes `Uint` checked arithmetic with unsigned-range failure and
-`Dec` arithmetic with exact coefficients and per-operation
-half-even rounding at the result scale. Wasm rejects reachable `Dec` values
-and recoverable numeric failures. See @../progress (Progress) for current support.
+See @./#checked-arithmetic (Checked arithmetic) for result domains, narrow
+failure witnesses and current implementation support.

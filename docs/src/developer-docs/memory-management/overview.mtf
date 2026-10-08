@@ -117,7 +117,7 @@ The mechanisms are ordered. A later mechanism consumes validated facts from earl
 
 **6. One lifetime owner and retained-edge legality.** Every allocation family has exactly one semantic lifetime owner. An object may retain a reference only when the referenced allocation belongs to the same lifetime region or to a region statically known to outlive the retaining object (`R_value >= R_container`).
 
-**7. Lifetime-topology validation is mandatory.** Lifetime topology is a backend-neutral source-legality check after borrow validation. GC cannot bypass it. Build profiles may vary optional optimisation-analysis effort and physical allocation strategy. They must run semantically equivalent mandatory borrow and lifetime-topology validation and must not change source legality. Numeric width and precision come from the compiler-owned `NumericProfile`, which is a separate boundary-wide semantic input rather than a build profile or backend choice (`docs/compiler-design-overview.md` > `Numeric model and profile`).
+**7. Lifetime-topology validation is mandatory.** Lifetime topology is a backend-neutral source-legality check after borrow validation. GC cannot bypass it. Build profiles may vary optional optimisation-analysis effort and physical allocation strategy. They must run semantically equivalent mandatory borrow and lifetime-topology validation and must not change source legality. Exact numeric types, operation results and `I32`/`F64` defaults are language contracts, not memory-model or profile choices. Scalar layouts and carriers preserve those contracts without selecting numeric semantics (`docs/compiler-design-overview.md` > `Exact numeric identities and physical representation`).
 
 **8. Inferred regions are non-lexical.** Inferred regions are compiler-generated CFG intervals, not merely lexical scopes. The compiler starts from the narrowest valid candidate owner and may widen only along the nearest existing ancestor on one ordered lifetime chain. It must not promote laterally across independently ending siblings, and it must not invent a page, application or process owner to avoid a diagnostic.
 
@@ -344,7 +344,7 @@ Local module compilation produces local lifetime constraints and exported summar
 ## Hard invariants
 
 - Every backend and build profile accepts and rejects exactly the same source with respect to access and lifetime topology.
-- Numeric width and precision are not a memory-model choice: the compiler-owned `NumericProfile` is one fixed compilation-boundary input, not a per-backend or per-build-profile decision. Different numeric profiles may change `Int` overflow limits, `Float` rounding and folded results without changing any access or lifetime guarantee on this page.
+- Exact numeric identities and operation results are language-owned, not memory-model choices. Scalar layout and carriers may vary but cannot select a type, widen a checked result or defer an `F16` operation boundary. Numeric failures follow ordinary language control flow and do not alter access or lifetime-topology guarantees.
 - Borrow validation reads HIR and writes side tables. It does not rewrite HIR or perform backend lowering.
 - Lifetime-topology validation is mandatory, backend-independent and build-profile-independent.
 - Every allocation family has exactly one semantic lifetime owner.

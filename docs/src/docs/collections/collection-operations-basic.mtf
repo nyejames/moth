@@ -19,7 +19,7 @@ Whether `push` can fail depends on the collection. A growable collection gains
 room as needed, so its `push` cannot fail:
 
 [codeblock, $code("moth"):
-    growable ~{Int} = {10, 20}
+    growable ~{I32} = {10, 20}
 
     ~growable.push(30)
 ]
@@ -27,7 +27,7 @@ room as needed, so its `push` cannot fail:
 A fixed-size collection can be full, so its `push` can fail and must be handled:
 
 [codeblock, $code("moth"):
-    fixed ~{3 Int} = {10, 20}
+    fixed ~{3 I32} = {10, 20}
 
     ~fixed.push(30) catch:
     ;

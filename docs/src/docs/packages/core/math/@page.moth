@@ -9,7 +9,7 @@
     doc_pager
 
 page_title #= "Core math"
-page_description #= "Math constants and Float helper functions."
+page_description #= "F64 math constants and helper functions."
 page_head #= language_theme_head
 
 #[navbar]
@@ -19,7 +19,7 @@ page_head #= language_theme_head
 
     # Core math
 
-    `@core/math` provides finite `Float` constants and functions for
+    `@core/math` provides finite `F64` constants and functions for
     trigonometry, powers, rounding and clamping. Unlike host math libraries,
     every result must satisfy Moth's finite-number contract before source code
     observes it.

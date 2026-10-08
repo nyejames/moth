@@ -39,8 +39,10 @@ page_head #= language_theme_head
     or functions. Moth specialises each use statically and doesn't expose erased
     generic values at runtime.
 
-    Type inference stays local. It reads the immediate arguments and receiving
-    type rather than searching later uses or the whole program.
+Ordinary type inference uses immediate arguments and receiving types. A
+bounded numeric-origin exception can carry an existing numeric value through
+a generic signature to later exact uses in the same body. It never searches
+callee bodies or the whole program.
 ]
 
 #[section:

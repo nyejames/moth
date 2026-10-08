@@ -18,7 +18,7 @@ Implement the HTML project builder mixed JavaScript and Wasm backend strategy, f
 - per-function link facts and target validation roots
 - dense HIR values and places, native zero/one/multiple success slots and separate error CFG channels, with the supported JS/Wasm consumers migrated
 - removal of Reactivity V1 without a replacement observation or scheduler runtime
-- unified numeric types with a compilation-wide NumericProfile, fixed scalar JS/Wasm execution, runtime Byte and U32 Error.code
+- exact I*/U*/F* identities and I32/F64 defaults, D15 result domains, per-operation F16 completion, runtime Byte and U32 Error.code, with actual scalar target coverage inventoried
 
 These are capability gates, not a requirement to wait for every later optimisation in the compiler
 foundation work. Confirm the required checkpoints have merged and refresh actual target support at
@@ -32,7 +32,7 @@ lowering. A completed expression/result cutover does not claim those capabilitie
 - `docs/src/developer-docs/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
 - `docs/src/docs/progress/@page.moth` for current support
 - canonical package/module references for the graph contract
-- canonical numeric and cast references for profile, fixed-width, Byte and Dec semantics
+- canonical numeric and cast references for exact widths, bounded numeric inference, plain cast, Byte and Dec semantics
 
 ## Activation snapshot to refresh
 
@@ -85,7 +85,7 @@ Consume these completed compiler/build inputs. The referenced permanent document
 - output manifest ownership (see `docs/build-system-design.md` "Output ownership")
 - explicit root-only HTML entry metadata and purpose facts from compiled module metadata (see `docs/build-system-design.md` "Root metadata and purpose directives" and "Entry candidates and selection")
 - validated `$layout` representation contracts when delivered. ABI and struct-lowering phases honour offsets, alignment and those contracts without inventing a new nominal type category
-- the early-selected NumericProfile, canonical numeric identities, scalar size/alignment/stride facts and explicit numeric failure/conversion HIR
+- canonical exact numeric identities, scalar size/alignment/stride facts and explicit numeric failure/conversion HIR, with no pending inference state
 - dense HIR stores and typed ranges, native result shapes and the final success/error CFG after private failure-channel convergence
 
 ### Expression and result handoff
@@ -103,24 +103,45 @@ Slot identity alone proves no fresh allocation, disjointness or ownership transf
 
 ### Numeric handoff
 
-Refresh this inventory against the completed Dec correction and Uint addition. Consume their
-canonical numeric identities, profile rules and target-support decisions directly. Do not infer
-unsigned support or change a public signature from the physical carrier of a signed sibling.
+Refresh the inventory against the completed exact numeric migration. Consume
+canonical numeric identities and actual target-support decisions directly.
+Do not infer unsigned support or a public signature from a physical carrier.
+Numeric defaults are language-owned I32/F64, not backend or package options.
 
-Consume the scalar implementation already delivered by the numeric checkpoint:
+Consume the scalar implementation delivered by that checkpoint:
 I8/U8/Byte use one memory byte, I16/U16 two, I32/U32/F32 four and I64/U64/F64
-eight. Narrow integers and Byte use i32 carriers. F16 stores two bytes and uses
-an f32 carrier with explicit binary16 conversion. Int, Uint and Float follow the
-selected numeric profile, not the selected backend. Reuse existing scalar
-checks, conversions, formatting and helpers rather than implementing a second
+eight. Narrow integers and Byte use i32 carriers. F16 stores two bytes and may
+use an f32 carrier only while completing the required binary16 rounding and
+finite check at every language operation. Reuse existing scalar checks,
+direct conversions, formatting and helpers rather than introducing a second
 numeric runtime while restructuring control flow.
 
-NumericProfile is fixed before semantic compilation and shared by every direct
-Moth dependency and every JS/Wasm partition. A physical variant may not choose a
-different Int width or Float precision. Carry profile compatibility through ABI,
-layout and variant identity. Preserve deliberate Core/Builder Int/Float language
-signatures separately from foreign fixed-width ABI types. Error.code is U32 in
-both targets, including values above I32::MAX.
+D15 preserves equal operand types and uses the smallest supported mixed
+operand domain without an I32/F32 floor. Check integer results at the selected
+width and complete binary-float results at the selected precision. Integer
+real division remains F64, unsigned negation remains invalid and Dec keeps
+its scale rules with an I32 exponent. A wider carrier or result cast cannot
+erase an earlier narrow failure or F16 rounding boundary.
+
+Every partition shares exact semantic types. Physical variants carry exact
+ABI/layout compatibility, not a NumericProfile. Ordinary Core/Builder APIs
+use I32/U32/F64 defaults while fixed foreign signatures retain their widths.
+Error.code remains U32, including values above I32::MAX.
+
+Shared external binary-float validation uses each resolved result type and
+precision on supported success shapes. It preserves returned Error identity
+and the distinction between a recoverable builtin Error! route and a fatal
+integrity guard. Plain cast requires an immediate concrete destination and
+does not infer its source backwards. Safety-catch eligibility does not add an
+actual failure edge or permit catching a fatal guard.
+
+The numeric checkpoint adds no Wasm capabilities. Refresh and preserve
+reachable rejection for unsupported conversions, recoverable error paths,
+collections and host bindings. Core Math has F64-only signatures but no Wasm
+Math lowerings. Core IO, Text, Time, Random and Canvas retain their documented
+Wasm gaps until an explicit target delivery. This mixed-backend plan owns
+later conversions, error channels and package lowering work, not a claim that
+those capabilities already exist.
 
 Dec/DecN have frontend and HTML-JS support but no Wasm arbitrary-precision
 runtime from that checkpoint. Retain precise reachable target rejection until a
@@ -157,7 +178,7 @@ Retain:
 - JavaScript-to-Wasm wrappers (JS-owned functions may call Wasm-owned functions through generated wrappers)
 - explicit partition reasons (every decision records why)
 - entry-specific partition (partitioning is per-entry, not global)
-- physical variant keys (deduplicate by entry or package assembly identity, function set, target assignment, profile-compatible ABI, layout, capability requirements and backend config fingerprint)
+- physical variant keys (deduplicate by entry or package assembly identity, function set, target assignment, exact ABI compatibility, layout, capability requirements and backend config fingerprint)
 - one Moth Wasm entry bundle per physical entry variant. Semantic modules do not force separate Wasm modules
 - page-local runtime and memory (each page owns one runtime instance and one memory for its Moth Wasm entry bundle)
 - generated JavaScript companions (each entry physical variant has a JS companion facade)
@@ -174,7 +195,7 @@ The final design removes (deleted rather than retained through compatibility ada
 - `moth_start`
 - per-module memories
 - helper-export booleans
-- the legacy unconditional Int-as-i64 bridge, not valid 64-bit numeric lowering
+- the legacy unconditional default-integer-as-I64 bridge, not valid I64/U64 formatting or lowering
 - flat basic-block Wasm LIR
 - whole-module JS or Wasm mode
 - global `HtmlWasm` mode as durable architecture
@@ -185,14 +206,14 @@ The final design removes (deleted rather than retained through compatibility ada
 - no Wasm-to-JavaScript Moth call
 - no per-module Wasm memory
 - no dispatcher-loop LIR
-- no unconditional Int-as-i64 bridge
+- no unconditional default-integer-as-I64 bridge
 - no `moth_start` export
 - no whole-module JS or Wasm validation mode
 - no compatibility adapters for old paths
 - no standalone Wasm output pipeline design beyond the HTML builder orchestration
 - no WIT component import or export implementation beyond preserving its foreign-binding boundary
 - no conversion of Moth-source package interfaces to WIT
-- no second scalar numeric implementation, per-partition NumericProfile or Wasm Dec runtime
+- no parallel scalar numeric implementation, partition-specific semantic numeric identities or Wasm Dec runtime
 
 ## Risks and blockers
 
@@ -238,10 +259,10 @@ See `docs/build-system-design.md` "Mixed-target planning and validation" for par
 - Compute target affinity from semantic package and capability metadata.
 - Apply partition rules: `start` is JavaScript-owned, DOM and browser JS force JavaScript, JS requirements propagate backwards, no Wasm-to-JS Moth call after propagation, JS-to-Wasm wrappers, remaining functions default to Wasm.
 - Every decision records an explicit reason.
-- Partitioning is entry-specific and independent of development or release mode. NumericProfile is already fixed and never changed by partitioning.
+- Partitioning is entry-specific and independent of development or release mode. Exact semantic numeric identities never change with partitioning.
 - Run compiler target validation against the completed deterministic partition.
 - Validate every function against its assigned target.
-- Validate permitted cross-target edges, including fixed-width and profile-selected scalar conversions at the wrapper boundary.
+- Validate permitted cross-target edges, including exact scalar conversions and finite-result validation at the wrapper boundary.
 - `check` runs the same sequence and stops before lowering.
 - Preserve Dec's target restriction until a real Wasm runtime supports it.
 - Carry assertion-message capability facts through the selected-function partition: JavaScript-owned
@@ -294,8 +315,8 @@ See `docs/build-system-design.md` "Runtime and memory" for the LIR contract.
 
 Context: consume the delivered scalar ABI and complete aggregate/runtime lowering.
 
-- Remove any remaining unconditional Int-as-I64 bridge. Int uses i32 or i64 according to NumericProfile. Keep I64/U64 and legitimate 64-bit formatting support.
-- Consolidate the profile-Int `StringFromI64` instruction into semantic numeric formatting when general scalar formatting lands. Preserve its complete signed-64-bit decimal helper and direct profile-Int32 input adaptation rather than replacing every 64-bit formatter with `StringFromI32`.
+- Remove any remaining unconditional legacy default-integer-as-I64 bridge. Use exact I32/I64/U32/U64 types and their validated carriers. Preserve the signed-64-bit decimal formatter and explicit I64/U64 support.
+- Consolidate redundant legacy `StringFromI64` bridge instructions into semantic numeric formatting when general scalar formatting lands. Preserve the complete signed-64-bit decimal formatter and direct I32 input handling rather than replacing every 64-bit formatter with `StringFromI32`.
 - Preserve the delivered no-result contract as an empty result list. Extend the supported aggregate and cross-target ABI from native zero/one/multiple success slots plus the separate error channel, without reintroducing `Void` or a semantic carrier.
 - Consume scalar ABI mappings and complete mappings for handles, strings, collections, structs, choices, options and errors.
 - Consume compiler-owned physical struct layouts: field offsets, alignment, scalar widths/strides and representation constraints. Lower construction, field access, mutation and ownership hooks from those facts.
@@ -316,7 +337,7 @@ See `docs/build-system-design.md` "External JavaScript".
 - Build-level runtime emission deduplicates runtime assets, required module specifiers and shared provider runtime files.
 - Entry-level glue generation emits only wrappers for external functions referenced by the selected JavaScript bundle, required import preambles and import-map entries.
 - Direct builder packages and provider-created packages use the same binding identity and runtime asset model.
-- Keep foreign I*/U*/F* widths distinct from deliberate Moth Int/Uint/Float signatures. Preserve finite validation, F16 conversion boundaries and U32 runtime error codes.
+- Preserve exact foreign I*/U*/F* signatures independently of default-language APIs, which use I32/U32/F64 where applicable. Retain shared finite validation, F16 operation/conversion boundaries and U32 runtime error codes.
 - Reserve WIT/component handling for a later foreign-Wasm binding delivery. This phase must not encode Moth-source package interfaces as WIT.
 
 ### Phase 9: Physical variants, manifests and output ownership
@@ -325,9 +346,9 @@ Context: partitioning is entry-specific and physical variants are deduplicated b
 
 See `docs/build-system-design.md` "Physical variants" and "Output ownership".
 
-- Deduplicate completed validated physical variants by entry or package assembly identity, selected concrete function set, target assignment, profile-compatible ABI identity, layout identity, memory-plan fingerprint, runtime capability requirements and relevant backend config fingerprint.
+- Deduplicate completed validated physical variants by entry or package assembly identity, selected concrete function set, target assignment, exact semantic signature identity, exact ABI/layout compatibility, memory-plan fingerprint, runtime capability requirements and relevant backend config fingerprint.
 - Entries with the same key reuse one variant.
-- One source function may be JavaScript in one entry variant and Wasm in another, with the same NumericProfile semantics.
+- One source function may be JavaScript in one entry variant and Wasm in another, with the same exact semantic signature.
 - Each entry physical variant has a generated JavaScript companion facade and one Moth Wasm bundle for its selected Wasm-owned closure.
 - Central output writing with manifests, stale cleanup and conflict diagnostics.
 - Output ownership is keyed by stable builder identity and build profile.
@@ -344,12 +365,12 @@ Context: the refactor is not complete while old whole-module modes, dispatcher l
 - Delete `Flag::HtmlWasm` whole-module mode selection.
 - Delete `moth_start` export and bootstrap path.
 - Delete dispatcher-loop emission code and `WasmCfgLoweringStrategy::DispatcherLoop`.
-- Delete redundant numeric formatting bridge instructions after consolidation, preserving the current signed-64-bit decimal formatter and profile-selected Int behavior.
+- Delete redundant numeric formatting bridge instructions after consolidation, preserving the signed-64-bit decimal formatter, direct I32 input handling and explicit I64/U64 support.
 - Delete per-module memory section emission for user modules.
 - Delete per-module Wasm emission from the final HTML entry path once entry bundling is in place.
 - Delete `WasmFunctionEmissionPolicy::AllFunctions` and `ReachableFromExports` from the final module path.
 - Delete whole-module validation in `compile_one_module`.
-- Delete unconditional Int-as-I64 bridge assumptions, not supported I64/U64 or profile-selected Int64 lowering.
+- Delete unconditional default-integer-as-I64 bridge assumptions, not supported exact I32 or I64/U64 lowering and formatting.
 - Delete helper-export boolean structs.
 - Delete duplicated helper export types between HTML-Wasm and core Wasm.
 - Search for `DispatcherLoop`, `StringFromI64`, `moth_start`, `export_str_ptr` and old helper booleans. Review each hit. Legitimate i64 operations are required, not forbidden names.
@@ -375,7 +396,7 @@ Context: documentation, tests and progress matrix must reflect the final backend
 - redundant numeric formatting bridge instructions after consolidation, not legitimate signed-64-bit formatting
 - per-module memory section emission for user modules
 - `WasmLirBlock` flat block model with `Jump` and `Branch` terminators
-- unconditional Int-as-I64 ABI assumptions
+- unconditional default-integer-as-I64 ABI assumptions
 - helper-export boolean structs
 - duplicated helper export types between HTML-Wasm and core Wasm
 - `WasmCfgLoweringStrategy::DispatcherLoop`
@@ -392,7 +413,7 @@ Cover:
 - JavaScript-to-Wasm wrappers
 - explicit partition reasons
 - entry-specific partition
-- physical variant keys and reuse, including incompatible NumericProfile rejection
+- physical variant keys and reuse, including incompatible exact ABI/layout rejection
 - one Moth Wasm entry bundle across ordinary module dependencies
 - page-local runtime and entry-bundle memory
 - WIT components remain separate external bindings and `MothSource` packages are not reclassified
@@ -403,7 +424,7 @@ Cover:
 - direct dense HIR consumption with no AST/TIR lifetime extension or owned semantic-tree reconstruction
 - imported runtime memory
 - explicit selected-function, import, export, capability and layout plans
-- fixed integer/float and Byte wrapper parity, including I64/U64 extremes, F16 rounding and every numeric profile
+- fixed integer/float and Byte wrapper parity, including I64/U64 extremes, direct F16/F32 rounding, D15 narrow overflow and per-operation F16 completion across supported exact widths
 - compact scalar fields and collection strides consumed from validated layouts
 - Error.code above I32::MAX through source, backend and wrapper paths
 - preserved Dec Wasm target rejection without a separate runtime delivery
@@ -422,7 +443,7 @@ Cover:
 - update `docs/build-system-design.md` only if a durable mixed-target contract is confirmed missing
 - update `docs/compiler-design-overview.md` only if HIR view or target validation ownership moves
 - update Wasm capability matrix and backend coverage rows in the progress matrix
-- preserve the numeric authority's scalar/profile contract and distinguish delivered scalar support from new aggregate/runtime support
+- preserve the numeric authority's exact semantic type/signature and ABI/layout compatibility contracts, distinguishing delivered scalar support from new aggregate/runtime support
 - update `index.md` as owners move
 
 ## Validation requirements
@@ -449,8 +470,9 @@ Before marking this plan complete, verify:
 - each entry physical variant emits one Moth Wasm bundle rather than per-module Wasm modules
 - the entry Wasm bundle imports page-local runtime memory rather than owning a separate memory
 - WIT is not used as the semantic interface for Moth-source modules or packages
-- numeric semantics/profile are shared across partitions and scalar storage remains compact
-- U32 Error.code and valid I64/U64/Int64 paths survive removal of legacy bridges
+- exact semantic numeric signatures and ABI/layout compatibility are shared across partitions; scalar storage remains compact
+- U32 Error.code, exact I32/I64/U64 operations and the signed-64-bit decimal formatter survive removal of legacy bridges
+- ordinary builder/build-profile output ownership, including development versus release, remains separate from semantic numeric identity
 - `moth_start`, redundant numeric formatting bridges and helper-export booleans are gone
 - no compatibility adapter remains
 - `check` runs the same planning and validation as `build`

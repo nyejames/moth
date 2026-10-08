@@ -9,17 +9,36 @@ Collection types and literals use braces.
 
 ### Literal inference
 
-- A non-empty literal infers one element type from its items.
-- Every item must be compatible with that element type.
-- A typed collection receiving site may apply normal contextual coercion to each item.
-- A mixed literal such as `{1, "bad"}` is invalid.
-- The element type is fixed when the literal is created.
+- A non-empty literal has one homogeneous element shape. Raw numeric origins in its entries can remain unresolved until eligible constraints across the function body select exact element types.
+- Whole-number origins stay in the integer family. A non-empty literal with raw whole and decimal/exponent values selects the binary-float family in either item order. Whole values materialise directly at the selected float precision.
+- A bound integer keeps its integer family. `{count, 2.5}` is rejected rather than reclassified.
+- Every already typed item must match one exact element type. Arithmetic promotion does not search for a collection storage type. Convert differently typed items explicitly.
+- Element type and fixed capacity remain stable through mutation.
+
+[codeblock, $code("moth"):
+    accept_u64_values |items {U64}|:
+    ;
+
+    values = {1, 2, 3}
+    accept_u64_values(values)
+
+    first {F32} = {1, 2.5}
+    second {F32} = {2.5, 1}
+
+    count = 1
+    -- Invalid: count keeps its integer family.
+    mixed = {count, 2.5}
+]
+
+The same numeric-origin rules can pass through a known collection, map,
+nominal/generic or optional shape when that shape already exists. They do not
+infer an empty container or anonymous-record structure.
 
 An empty literal needs an explicit collection type at its declaration or field
 default site.
 
 [codeblock, $code("moth"):
-    values ~{Int} = {}
+    values ~{I32} = {}
 ]
 
 The compiler does not infer an empty collection from:

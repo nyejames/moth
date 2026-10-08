@@ -261,47 +261,6 @@ fn case_result_builder_computes_expected_statistics() {
 }
 
 #[test]
-fn cli_and_frontend_suites_share_one_presentation_owner() {
-    // All suite kinds route through the same shared functions; this test pins
-    // the read-only no-write contract for each kind.
-    let fixture = CliFixture::new();
-    let compiler = fixture.mock_path("read-only");
-    create_output_executable(&compiler, clean_fixed_output(), "", 0);
-
-    let prepared = fixture.prepared();
-    let workspace =
-        BenchmarkExecutionWorkspace::create(fixture.root()).expect("workspace should be creatable");
-    let context = BenchmarkExecutionContext::new(&prepared.manifest, &compiler, &workspace);
-
-    let iterations = NonZeroUsize::new(1).expect("one iteration");
-    let results = measure_cases(&context, &prepared, &prepared.manifest.cases, iterations)
-        .expect("measurement should succeed");
-
-    for suite_kind in [
-        BenchmarkSuiteKind::EndToEndCli,
-        BenchmarkSuiteKind::FrontendPhases,
-        BenchmarkSuiteKind::DataLayout,
-    ] {
-        present_read_only(
-            &results,
-            suite_kind,
-            None,
-            BenchmarkSelection::Full,
-            &BenchmarkPaths::for_repository(fixture.root()),
-        )
-        .expect("read-only presentation should succeed without system identity");
-        assert!(
-            !Path::new("benchmarks/local-data/runs.jsonl").exists(),
-            "read-only presentation must not write normal history"
-        );
-        assert!(
-            !Path::new("benchmarks/summaries").exists(),
-            "read-only presentation must not write tracked summaries"
-        );
-    }
-}
-
-#[test]
 fn previous_run_loader_is_shared_and_returns_none_without_local_history() {
     for suite_kind in [
         BenchmarkSuiteKind::EndToEndCli,

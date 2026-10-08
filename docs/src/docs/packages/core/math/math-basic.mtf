@@ -1,4 +1,4 @@
-`@core/math` gives you `Float` constants and helper functions for common math operations. Bind it explicitly when you need trigonometry, rounding or clamping.
+`@core/math` gives you `F64` constants and helper functions for common math operations. Bind it explicitly when you need trigonometry, rounding or clamping.
 
 ### Binding
 
@@ -24,7 +24,7 @@ You can also bind the whole namespace and access members through field access.
 
 ### Basic constants
 
-`PI`, `TAU`, `E`, `SQRT_2`, `LN_2` and `LN_10` form compile-time `Float`
+`PI`, `TAU`, `E`, `SQRT_2`, `LN_2` and `LN_10` form compile-time `F64`
 values. Use them directly in expressions.
 
 ### Common functions
@@ -39,5 +39,5 @@ values. Use them directly in expressions.
 - `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` for the hyperbolics
 - `min(a, b)`, `max(a, b)`, `clamp(x, min, max)` for comparisons
 
-All functions take `Float` values and return `Float`.
+All functions take `F64` values and return `F64`.
 For the full function list, backend behaviour and deferred surfaces, see @./ (Core math advanced).

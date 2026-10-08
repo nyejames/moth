@@ -18,6 +18,8 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
     It also records the important accepted gaps and next extensions for partial package surfaces so
     later work does not need to rediscover them from implementation details.
 
+    An exact-numeric migration is active at Phase 0. Its approved contracts are not implemented yet. The package rows below continue to describe current profile-based APIs. The cutover changes ordinary defaults to I32/U32/F64 and Core Math to F64 only, preserving already fixed foreign types and the actual external signature subset. It adds no Wasm capabilities.
+
     The @../ (compiler progress matrix) tracks the core language, compiler, memory work and backend
     implementation. Backend implementation progress belongs there even when a project builder consumes
     that backend. This page tracks builder-owned project behaviour and the packages supplied by Core or

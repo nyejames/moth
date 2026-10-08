@@ -1,6 +1,5 @@
-The compiler owns a fixed set of traits that let user types work with `cast`.
-
-### String conversion
+The compiler owns a fixed set of traits for user-defined cast sources.
+Conformance proves that a type can reach a target through plain `cast`.
 
 [codeblock, $code("moth"):
     Label = |
@@ -12,28 +11,15 @@ The compiler owns a fixed set of traits that let user types work with `cast`.
     ;
 
     Label must CASTABLE_TO_STRING
-
     value String = cast Label("docs")
 ]
 
-`CASTABLE_TO_STRING` means: this type can become a `String` without failing.
+Fifteen target families support source-authored evidence: `I8`, `I16`, `I32`,
+`I64`, `U8`, `U16`, `U32`, `U64`, `F16`, `F32`, `F64`, `Bool`, `String`,
+`Char` and `Error`. Each target has infallible and fallible evidence. A type
+cannot declare both for the same target.
 
-### Fallible conversion
-
-[codeblock, $code("moth"):
-    Label = |
-        text String,
-    |
-
-    try_to_int |this Label| -> Int, Error!:
-        return! Error("not a number")
-    ;
-
-    Label must TRY_CASTABLE_TO_INT
-
-    parsed_count Int = cast Label("42") catch |err|:
-        then 0
-    ;
-]
-
-`TRY_CASTABLE_TO_INT` means: this type may become an `Int`, but it can also fail. The method signals failure with `return!` and the caller recovers with `cast ... catch`.
+Fallible evidence returns the target and builtin `Error!`. Its caller still
+uses plain `cast`; ordinary error handling delivers the actual failure.
+`Byte` and `Dec` keep builtin conversion evidence but have no source-authored
+traits. See @./#core-cast-traits (Core cast traits) for every signature.

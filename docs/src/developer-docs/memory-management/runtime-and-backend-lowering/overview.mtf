@@ -4,10 +4,10 @@ Physical memory strategies and the collector-free release guarantee.
 
 ## Contract
 
-- Input: validated HIR; `ValidatedMemoryPlan` for this physical variant, the single final physical authority, containing allocation-family layouts, selected strategies, inferred-region and declared-region placement, planned affine-responsibility transitions, planned retained-edge obligation transitions, hidden-destination plans, cleanup and destruction plans, REC layout decisions and physical coalescing decisions; the compilation boundary's `NumericProfile`; borrow facts and validated lifetime topology as validation context; selected function set; target assignment; import/export/capability plan; semantic layout identity; builder lifecycle/runtime plan
+- Input: validated HIR, including canonical exact numeric types, operations and failure facts; `ValidatedMemoryPlan` for this physical variant, the single final physical authority, containing allocation-family layouts, selected strategies, inferred-region and declared-region placement, planned affine-responsibility transitions, planned retained-edge obligation transitions, hidden-destination plans, cleanup and destruction plans, REC layout decisions and physical coalescing decisions; borrow facts and validated lifetime topology as validation context; selected function set; target assignment; import/export/capability plan; semantic layout identity; builder lifecycle/runtime plan
 - Output: target-specific allocation, region, counted, garbage-collected and ownership representations
 - Decides: realisation of the selected memory plan, handle-tag representation and conservative retention behaviour for already-legal topology
-- Must not decide: source legality, borrow facts, region legality, memory-strategy selection, concrete obligation transitions, target partition, page lifecycle policy or the boundary `NumericProfile`
+- Must not decide: source legality, borrow facts, region legality, memory-strategy selection, concrete obligation transitions, target partition, page lifecycle policy or language numeric type/result semantics
 - Invariant: every backend consumes the complete validated memory plan, preserves the same shared, exclusive, copy and move semantics, and a capable full-control release backend must not fall back to a tracing collector
 
 ## Planning order

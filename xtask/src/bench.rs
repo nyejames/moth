@@ -7,7 +7,9 @@
 //! owner in `benchmark_suite.rs`; this file stays a thin entry wrapper.
 
 use crate::bench_history::effective_thread_count;
-use crate::bench_types::{BenchmarkRecording, BenchmarkRunPolicy, BenchmarkSuiteKind};
+use crate::bench_types::{
+    BenchmarkRecording, BenchmarkRunPolicy, BenchmarkSelection, BenchmarkSuiteKind,
+};
 use crate::benchmark_execution::{
     BenchmarkExecutionContext, format_case_failures, preflight_cases,
 };
@@ -67,13 +69,15 @@ pub(crate) fn run_benchmarks(policy: BenchmarkRunPolicy) -> Result<(), String> {
                 thread_count,
                 policy,
                 &git_revision,
-                prepared.paths(),
+                &prepared,
             )
         }
         Err(operation) => finalise_workspace(&workspace, Err(operation)),
     };
 
-    if policy.recording() == BenchmarkRecording::Record {
+    if policy.recording() == BenchmarkRecording::Record
+        || (policy.selection() == BenchmarkSelection::Full && result.is_ok())
+    {
         result
     } else {
         verify_after_operation(

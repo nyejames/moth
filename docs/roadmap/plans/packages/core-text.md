@@ -24,7 +24,7 @@ NEXT_ACTION: after the prerequisite lands, audit its final Text evaluator owner 
 
 The package-foundation baseline this plan waited on is merged. This expansion waits for merged
 native success/error slots and trusted Core constant evaluation on the compact expression/dense
-HIR foundation. That compiler work starts after the Dec correction and Uint addition. The umbrella
+HIR foundation. Consume the exact numeric migration rather than earlier Dec/Uint sequencing. The umbrella
 package programme remains active in parallel for work whose own prerequisites are satisfied.
 Historical data-layout Phase 3 closeout `4cfd9d492` remains accepted.
 
@@ -45,8 +45,8 @@ callback registry, package-name dispatch path or Text-specific `ExternalFunction
 constant evaluation.
 
 At activation, consume the merged capability contracts in `docs/compiler-design-overview.md`
-and the current compiler owners. Reconfirm Text signatures against the delivered numeric/Uint
-contract. Extend the same operation metadata, constant handles and native result receiver rather
+and the current compiler owners. Reconfirm Text signatures against the exact
+I32 counts/indices contract. Extend the same operation metadata, constant handles and native result receiver rather
 than restoring an old expression or tuple/carrier adapter. The prerequisite proves optional and
 multiple-result materialisation at the compiler boundary even though its five Text operations
 each return one result.
@@ -65,6 +65,11 @@ The implemented surface is:
 
 All parameters use shared access. Scalar and Bool results are fresh values. The package is explicit
 rather than preluded.
+
+The table records current profile-based implementation. The accepted exact
+numeric cutover, not yet implemented, changes length to I32 and gives all v1
+indices/counts below I32 contracts without changing Unicode units or target
+coverage.
 
 Current implementation debt relevant to this slice:
 
@@ -86,9 +91,9 @@ Add this bounded v1 expansion:
 | Function | Result | Contract |
 |---|---|---|
 | `char_at(text, index)` | `Char, Error!` | scalar at a zero-based scalar index |
-| `find(text, substring)` | `Int?` | first matching scalar index or `none` |
-| `find_last(text, substring)` | `Int?` | last matching scalar index or `none` |
-| `count(text, substring)` | `Int` | number of non-overlapping exact matches |
+| `find(text, substring)` | `I32?` | first matching scalar index or `none` |
+| `find_last(text, substring)` | `I32?` | last matching scalar index or `none` |
+| `count(text, substring)` | `I32` | number of non-overlapping exact matches |
 | `slice(text, start, end)` | `String, Error!` | scalar-indexed half-open range `[start, end)` |
 | `trim(text)` | `String` | remove Moth whitespace from both ends |
 | `trim_start(text)` | `String` | remove leading Moth whitespace |
@@ -118,6 +123,8 @@ owner rather than deleting it. Do not broaden this package phase into Wasm imple
 
 `char_at` and `slice` are fallible because an invalid index or range is invalid input, not ordinary
 absence.
+
+All index and range parameters use I32, independently of backend carriers.
 
 Use the existing compiler-owned builtin error system. Reserve these currently free codes in
 `src/compiler_frontend/builtins/error_codes.rs`:
@@ -164,7 +171,7 @@ The empty substring has one scalar-boundary meaning:
 
 `count` and `replace_all` use non-overlapping left-to-right matches for non-empty patterns.
 
-Follow the existing String-to-Int representability contract. This package must not invent a separate
+Follow the existing String-to-I32 representability contract. This package must not invent a separate
 large-string overflow channel only for `count` or search positions.
 
 ### Moth whitespace contract
@@ -339,7 +346,7 @@ return their successful value or the canonical Text `BuiltinErrorCode` so future
 can reuse them directly.
 
 All Rust operations use whatever evaluation bound the prerequisite delivers, plus the existing
-concrete-text requirement and current Int range. Structural resource/site-root strings remain
+concrete-text requirement and I32 range. Structural resource/site-root strings remain
 unavailable for character inspection until the existing fold owner can produce concrete text.
 
 ### Constant-evaluation registration

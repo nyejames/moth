@@ -7,11 +7,11 @@ A concrete generic instance substitutes the generic parameters with concrete typ
         value A,
     |
 
-    int_box Box of Int = Box(42)
+    int_box Box of I32 = Box(42)
     string_box Box of String = Box("hello")
 ]
 
-`Box of Int` and `Box of String` are different semantic types. The field `value` has type `Int` in the first and `String` in the second.
+`Box of I32` and `Box of String` are different semantic types. The field `value` has type `I32` in the first and `String` in the second.
 
 ### Generic choices
 
@@ -36,14 +36,14 @@ Same constructor plus same concrete arguments yields the same instance type. Dif
         value A,
     |
 
-    a Box of Int = Box(1)
-    b Box of Int = Box(2)
+    a Box of I32 = Box(1)
+    b Box of I32 = Box(2)
     -- c Box of String = a -- would be an error
 ]
 
 ### Constructor inference
 
-Generic struct and choice constructors infer their concrete type arguments from immediate constructor arguments and from the immediate receiving type. No explicit constructor type arguments are needed or supported.
+Generic struct and choice constructors infer type arguments from immediate arguments and the immediate receiving type. A constructor may preserve an existing numeric origin through its known generic field shape until body-wide numeric constraints resolve it. This does not infer other type arguments or structure from later uses. No explicit constructor type arguments are supported.
 
 [codeblock, $code("moth"):
     Box type A = |
@@ -70,7 +70,7 @@ A receiver method may be declared on a generic type when the method's generic pa
         return this.value
     ;
 
-    box Box of Int = Box(42)
+    box Box of I32 = Box(42)
     value = box.get()
 ]
 

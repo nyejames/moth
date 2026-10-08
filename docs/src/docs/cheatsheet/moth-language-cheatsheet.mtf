@@ -33,7 +33,7 @@ Symbolic binary operators and assignment require spaces on both sides. Keep comp
 
 [codeblock, $code("moth"):
     name = "Priya"              -- inferred, immutable
-    age Int = 30                -- typed, immutable
+    age I32 = 30                -- typed, immutable
     ready Bool = true
     letter Char = 'm'
 
@@ -42,12 +42,12 @@ Symbolic binary operators and assignment require spaces on both sides. Keep comp
     count = 1                   -- reassignment
 
     site_name #= "Moth"          -- inferred compile-time constant
-    version #Int = 1            -- typed compile-time constant
+    version #I32 = 1             -- typed compile-time constant
 ]
 
 `=` declares a new binding or reassigns an existing mutable binding. `~` controls access, not type identity: `names` above has type `{String}`. `#` controls compile-time evaluation, not visibility, and cannot combine with `~`.
 
-Ordinary bindings and constants need initialisers. Constants are immutable and fully evaluate from compile-time values. Use earlier same-file constants or dependency-bound constants, not same-file forward references. Cross-file constants follow dependency order. Cycles are invalid.
+Ordinary bindings and constants need initialisers. Constants are immutable and fully evaluate from compile-time values. Use earlier same-file constants or dependency-bound constants, not same-file forward references. Cross-file constants follow dependency order. Cycles are invalid. Each constant resolves at its declaration boundary; later runtime uses cannot retype it.
 
 Only Core functions with a documented constant-evaluation contract can fold calls. `#` does not make ordinary function or host calls executable at compile time. `$config` input declarations have separate fallback and omission rules under **Project configuration**.
 
@@ -81,7 +81,7 @@ Every record field has a unique name and an explicit value. Initialisers use the
 
 A whole const record is a compile-time field group. Read its ordinary fields in runtime code. Do not pass, return or store the record itself at runtime or call runtime methods on it. This also applies to fully folded struct constants used as const records. Runtime anonymous records have a separate contract below.
 
-MON (Moth Object Notation) is the compiler's official serialisation format, deliberately sharing Moth's core value and construction syntax. See @../mon (MON) for its data contract.
+MON syntax shares Moth's construction notation. The separate Rust `moth-mon` codec reads schema-directed literal data, preserves lossless Integer and Decimal data and uses exact numeric schemas without source inference. It does not provide a Moth runtime codec or automatic schema extraction.
 
 ## References, copies and lifetimes
 
@@ -102,7 +102,7 @@ A later use of `view` would invalidate the mutation. Last use follows control fl
 A mutable declaration from an existing mutable place creates an exclusive write-through alias:
 
 [codeblock, $code("moth"):
-    same_items |value {Int}| -> {Int}:
+    same_items |value {I32}| -> {I32}:
         return value
     ;
 
@@ -151,72 +151,57 @@ Further detail: @../memory (Memory).
 
 ## Numbers and operators
 
-- `Int`, `Uint` and `Float`: signed integer, unsigned integer and finite binary float.
-- `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`: fixed-width integers.
-- `F16`, `F32`, `F64`: fixed-precision binary floats.
-- `Dec`/`Dec0`, `Dec1` through `Dec256`: arbitrary-precision exact values.
-- `Byte`: a one-byte octet outside arithmetic.
+The only bounded numeric types are:
 
-One numeric profile selects `Int` width and `Float` precision independently, each 32 or 64 bits, for the whole build. `Uint` follows the selected `Int` width, so it is `Uint32` under `Int32` and `Uint64` under `Int64`. The default uses 32-bit `Int` and 64-bit `Float`, and therefore `Uint32`. Their identities remain distinct from the fixed-width types. Binary floats allow subnormals and signed zero, never `NaN` or infinities.
+- Signed integers: `I8`, `I16`, `I32`, `I64`
+- Unsigned integers: `U8`, `U16`, `U32`, `U64`
+- Binary floats: `F16`, `F32`, `F64`
 
-### Literals
+`Byte` is an octet without arithmetic. `Dec`/`Dec0` and `Dec1` through `Dec256` retain exact decimal scale identities. Binary floats support subnormals and signed zero, never `NaN` or infinities.
 
-[codeblock, $code("moth"):
-    small U8 = 200
-    total U32 = small + 1
-    count Uint = 1 + 2
-    half F16 = 0.5
-    price Dec2 = 12.50
-]
+### Literals and bounded inference
 
-Whole literals naturally infer `Int`, decimal/exponent literals `Float`. Size never selects a narrower type. A receiving type materialises a literal directly. An immediate typed numeric peer can supply that type before promotion: `small + 1` types `1` as `U8`, then produces `U32`. `small + 300` is invalid. An annotation cannot retag an operation or an already typed value. A `Dec` receiver goes further and types unresolved literal arithmetic: `total Dec4 = 1 + 1` holds `2` and `total Dec4 = 0.1 + 0.2` holds exactly `0.3`. A typed `Dec` peer supplies its scale to a literal-only opposite operand from either side. A `Uint` receiver and peer do the same for whole-number arithmetic: `count Uint = 1 + 2` holds `3`, while a typed `Int` never becomes `Uint` through a peer. Their exponent rules differ: a `Dec` exponent stays `Int`, a `Uint` exponent stays `Uint`.
+An unconstrained whole-number origin defaults to `I32`; a decimal/exponent origin defaults to `F64`, after eligible constraints resolve. Defaults do not set a minimum arithmetic width. Size never selects a type. A whole literal can materialise directly in an exact integer, float, `Byte` or `Dec` receiver. Decimal/exponent spelling cannot initialise an integer merely because its value is whole. Negative values cannot initialise `U*` or `Byte`, and signed minima materialise directly from their negative spelling.
 
-- Whole literals can initialise floats, `Uint` and `Dec`. Decimal/exponent spelling cannot initialise `Int`, `Uint`, fixed integers or `Byte` merely because its value is whole. Negative values cannot initialise `U*`, `Uint` or `Byte`. Signed minima materialise directly from their negative spelling. Binary float literals round once at destination precision, nearest with ties to even. `0.1` is valid.
+Use lowercase `e` and underscores between digits. Uppercase `E`, radix literals, suffixes, unary `+` and spaced `- count` are invalid.
 
-Use lowercase `e`, as in `1.0e+21`, and underscores between digits. Uppercase `E`, radix literals, suffixes, unary `+` and spaced `- count` are invalid.
+One function body, including nested blocks, branches, loops and handlers, is the numeric inference boundary. The implicit root runtime body follows the same rule. Exact annotations, assignment targets, concrete parameters, return slots, fields, copies and mutable writes constrain existing numeric origins before fallback. All eligible uses participate regardless of source order, and each binding keeps one static type.
+
+Raw literal receivers outrank eligible literal peers, which outrank defaults. A receiver can reach unresolved literal arithmetic and raw leaves beside named operands, but it cannot retype a bound value or completed result. For example, an `I32` named operand plus a raw `1` at an `I64` receiver keeps the named value `I32` and materialises the raw leaf as `I64`. Two named `I32` operands still produce `I32`; an `I64` receiver cannot retag their result.
+
+Whole-number origins stay integer-family. Decimal/exponent origins stay binary-float-family. In a non-empty collection, raw whole and decimal/exponent literals select the binary-float family in either order. A bound integer never changes family beside a raw float literal. Existing collection/map/nominal/optional shapes can carry eligible numeric leaves without changing shape, capacity, key rules, constructor identity or nonnumeric types. Empty containers still need their existing explicit declaration or field-default type; no new empty-container argument inference applies.
+
+An existing numeric origin can share a generic parameter and result only through the declared signature. Later exact uses in the same body can select that origin. The compiler does not inspect a callee body or search trait evidence. This adds no general later-use or result-only inference, no inference for a generic parameter without a numeric origin and no outer expected-type forwarding into a nested generic call. Named arithmetic operands never infer backwards from the result.
+
+Function signatures, fields and public interfaces remain concrete under their declaration rules. A generic signature contains declared type parameters, not numeric inference variables. Compile-time declarations resolve at their own constant boundary, and later runtime uses cannot retype named constants.
 
 ### Arithmetic and comparison
 
-- `Int`/`Int` produces `Int` for `+ - * // % ^`, `Float` for `/`. Mixed `Int`/`Float` arithmetic produces `Float`. Receiving `Int -> Float` promotion may round. Reverse conversion needs a cast.
-- `Uint`/`Uint` produces `Uint` for `+ - * // % ^`, checked against the selected unsigned range, and `Float` for `/`. Mixed `Uint`/`Float` arithmetic produces `Float`. Receiving `Uint -> Float` promotion is direct and infallible. Reverse conversion needs a cast.
-- `Uint`/`Int` arithmetic in either order needs an explicit conversion, including `/` and `^`. `Uint` underflow is failure, not an `Int` result. `Uint` also needs an explicit conversion to mix with fixed-width values.
-- Fixed integers promote together, as do fixed floats. Neither family implicitly mixes with typed `Int`/`Uint`/`Float`, and fixed integers do not implicitly mix with fixed floats.
-- Fixed integer `+ - * // % ^` select a common type from complete operand ranges. Same signedness takes the wider width, at least 32 bits. Mixed signedness takes the smallest signed type, at least 32 bits, holding both ranges. `I32 + U32 -> I64`. `I64 + U64` and `I32 + U64` have no common type and are invalid.
-- Fixed integer `/` requires that same common integer type, then converts to and produces `F64`.
-- Fixed float arithmetic uses the wider precision, at least `F32`, rounding each result. Binary floats have no `//`.
-- Unary minus rejects typed `U*` and `Uint`, including zero. `I8`/`I16` negation produces `I32`, `F16` negation `F32`. Wider signed types and `Int` check their own limits.
-- `//` truncates towards zero and `%` follows the dividend's sign. The result type's signed minimum `// -1` overflows, but its `% -1` is zero. `^` means exponentiation.
-- Any fixed integer types compare exactly, including `I64`/`U64`, without an arithmetic common type. `Int`/`Float` support mixed comparisons. `Uint`/`Uint` and `Uint`/`Int` compare exactly, while `Uint`/`Float` converts directly then uses float comparison. Other family restrictions still apply. Positive and negative floating zero compare equal.
+- Fixed integer `+`, `-`, `*`, `//`, `%` and `^` preserve equal operand types. Mixed same-signedness types use the wider width. Mixed signedness uses the smallest available signed type containing both complete ranges. No 32-bit floor applies: `I8 + I8 -> I8`, `I8 + U8 -> I16`, `I8 + U16 -> I32`, `I32 + U32 -> I64`. `I64 + U64` and `I32 + U64` have no common type.
+- Fixed integer `/` checks the common-integer eligibility, then returns `F64`, including for equal narrow operands. `//` truncates towards zero and `%` follows the dividend's sign.
+- Fixed binary-float `+`, `-`, `*`, `/`, `%` and `^` preserve equal types and otherwise use the wider precision. `F16` has no minimum `F32` domain. Every operation completes at its selected precision: `(2048 + 1) - 2048` with `F16` operands produces zero because the addition rounds first.
+- Unary `-` preserves signed integer or float type. Negating a signed minimum fails at that width. Unary minus on every `U*` and on `Byte` is invalid, including zero.
+- Every integer result checks its selected type. Wider scratch carriers cannot wrap, saturate or defer a required check. Float results round and check finiteness at their selected precision. Known invalid operations remain diagnostics, including inside `catch`.
+- Exact fixed-integer comparison does not need an arithmetic common type. `I64`/`U64` comparisons stay exact. Fixed integers and fixed floats never mix implicitly. Binary floats reject `//`.
+- A result cast happens after the operation. To request wider arithmetic, convert operands before the operation at legal typed receivers.
 
-Checks use the operation's result type. `U8 + U8` yielding `256` is valid `U32`. Overflow, zero division and invalid exponents follow the enclosing error contract or handler, without wrapping or implicit panic. Statically known failures remain diagnostics inside `catch`.
+Compound `+= -= *= /= //= %= ^=` evaluate the place and right operand once, use the revised operation domain and check write-back when the destination differs. Commit only on success. A right-hand `catch` covers the right-hand expression, not later arithmetic or conversion. Integer `/=` still starts with `F64` division and checks conversion back; use `//=` for integer division.
 
-Compound `+= -= *= /= //= %= ^=` evaluate the place and right operand once, compute in the promoted domain, then check conversion back. They write only after both checks succeed. Right-hand `catch` does not cover the later operation or conversion. Integer `/=` converts the floating result back. A `Uint` `/=` has a `Float` result before checked conversion back. Use `//=` for integer division.
+### Byte and Dec
 
-Precedence, highest first: unary `not`/`-`, `^`, `* / // %`, `+ -`, comparisons, `and`, `or`. `^` associates right, other binary operators left. Parentheses override precedence.
+`Byte` accepts whole literals `0` through `255` and compares only with `Byte`, using equality or unsigned-octet ordering. It has no arithmetic or range domain.
 
-Logical operators require `Bool` and short-circuit: `and` skips its right operand when the left is `false`, `or` when the left is `true`. Equality uses `is`/`is not`. `+` only adds numbers.
+`Dec` is scale zero, also spelt `Dec0`. `Dec1` through `Dec256` store `coefficient / 10^scale`. Scale determines type identity. `Dec01` and scales above `256` are invalid. Literals must fit the declared scale exactly.
 
-### Byte
-
-`Byte` accepts whole literals `0` through `255` and compares only with `Byte`, using equality or unsigned-octet ordering. `Byte` has no arithmetic, unary minus, promotion or range domain. `{Byte}` adds no buffer or encoding API.
-
-### Dec and DecN
-
-`Dec` is a scale-zero arbitrary-precision integer, also spelt `Dec0`. `Dec1` through `Dec256` store `coefficient / 10^scale`. Scale determines type identity. `Dec01` and scales above `256` are invalid.
-
-Literals must fit the scale exactly. `price Dec2 = 1.239` is invalid. Decimal/exponent spelling can initialise scale zero when exactly integral.
-
-- Same-scale `+`/`-` and unary minus are exact. Multiplication rounds its exact product half to even. Positive-scale `/` and exponentiation also round half to even at each result.
+- Same-scale `+`/`-` and unary minus are exact. Multiplication, positive-scale `/` and exponentiation round half to even at each result.
 - Scale zero permits `//`/`%`, not `/`. Positive scales permit `/`/`%`, not `//`.
-- `DecN ^ Int` requires a non-negative exponent, never silently converted to `Dec`. Context reaches the base but never the exponent. A typed `Uint` exponent needs an explicit handled cast to `Int`.
-- `Int`, `Uint` and fixed integers scale exactly into the `Dec` operand's scale for arithmetic/comparison. Different scales need explicit conversion. Floats and `Byte` never mix implicitly.
-- A `Dec` or `Uint` receiver types unresolved literal arithmetic at its scale or unsigned width before operator selection. Their exponent rules differ: a `Dec` exponent stays `Int`, a `Uint` exponent stays `Uint`. See @../numbers/#numeric-literals (Numeric literals) for the receiving and peer contract.
-
-Decimal text trims fractional trailing zeroes, includes a leading zero before fractions and uses neither exponent notation nor negative zero.
+- `DecN ^ I32` requires a non-negative exponent. A receiving context reaches the base but not the exponent; another exact-width exponent needs explicit conversion at a legal receiving site.
+- Fixed integers scale exactly into the `Dec` operand's scale for arithmetic and comparison. Different scales need explicit conversion. Binary floats and `Byte` never mix implicitly.
+- A `Dec` receiver can type unresolved literal arithmetic at its scale. Decimal text trims fractional trailing zeroes, includes a leading zero before fractions and uses neither exponent notation nor negative zero.
 
 ## Explicit casts
 
-`cast` takes its target from the immediate typed receiving boundary:
+The only conversion spelling is plain `cast`. Its target comes from an immediate concrete typed receiver. The cast target does not constrain or default the source. Resolve the source from independent eligible constraints first, then apply the ordinary default if none exists. A later receiver cannot invent a missing cast target.
 
 [codeblock, $code("moth"):
     octet U8 = 42
@@ -224,52 +209,50 @@ Decimal text trims fractional trailing zeroes, includes a leading zero before fr
     label String = cast count
 
     narrow_sum |left U32, right U32| -> U8:
-        value U8 = cast left + right catch then 0
+        value U8 = cast (left + right) catch then 0
         return value
     ;
 ]
 
-`narrow_sum` catches both `U32` addition overflow and failure to convert its result to `U8`.
+`narrow_sum` handles both `U32` addition overflow and failure to convert its result to `U8`. A result cast does not prevent an earlier narrow operation from failing.
 
-- Plain `cast` needs infallible evidence unless an enclosing `catch` handles the conversion. Even an infallible conversion can have a failing operand.
-- `cast!` needs fallible evidence and a built-in `Error!` return slot, including at top level. It cannot share an expression with `catch`.
-- Typed declarations, assignments, returns, concrete parameters, fields, defaults, container entries, assertion arguments and explicitly received `then` arms supply targets.
-- Untyped declarations, conditions, operators, template interpolation, expression statements and parentheses do not. Generic inference does not look through `cast`.
-- Same-type casts and conversion constructors such as `Int(value)` are invalid. `Error(...)` is a real constructor. Cast targets are builtin types, not user-defined types.
+Typed declarations, assignments, returns, concrete parameters, fields, defaults, container entries, assertion arguments and explicitly received `then` arms supply cast targets. Untyped declarations, conditions, operators, template interpolation, expression statements and parentheses do not. Same-type casts and conversion constructors such as `I32(value)` are invalid. `Error(...)` is a real constructor. Cast targets are builtin types, not user-defined types.
+
+The cast target never selects the source type. For example, an unbound whole-number origin used only as a cast source defaults to `I32` even when the cast targets `U32`. An independent exact use can still select its source type before cast classification.
 
 ### Conversion rules
 
 Fallibility follows the complete source and target types, not a known safe value.
 
-- Integer-to-integer conversion preserves the value. It is infallible only when the complete source range fits the target. `Uint` and `Int` need an explicit cast between each other in both directions, even when the values would fit.
-- Integer-to-`F32`/`F64` conversion is infallible and may round. `Uint64` converts directly without a binary64 intermediate. Integer-to-`F16` conversion is infallible only when the complete source range fits its finite range.
-- `Uint -> Float` is infallible and direct at the selected precision, and also available implicitly at value-receiving and mixed-operator boundaries.
-- Binary-float precision widening is infallible. Narrowing is fallible and rounds directly to the destination, once, to nearest with ties to even. Precision loss alone succeeds. A rounded non-finite result fails.
-- Float-to-integer conversion is fallible: truncate towards zero, then check the destination range. `Float -> Uint` rejects negative results below zero, while `-0.5` truncates to zero and succeeds.
-- `Uint -> Dec`/`DecN` is exact and infallible. `Dec`/`DecN -> Uint` is exact-or-fail with integrality and unsigned range checks.
-- `Byte <-> U8` is infallible. Other numeric and text conversions involving `Byte` go through `U8`. `Uint` has no direct conversion with `Byte`, `Char` or `Bool`.
+- Fixed-integer conversion preserves the value. It is infallible only when the complete source range fits the target.
+- Integer-to-`F32`/`F64` conversion is infallible and may round. Integer-to-`F16` conversion is infallible only when the complete source range fits its finite range. Convert `U64` directly, without a binary64 intermediate.
+- Binary-float precision widening is infallible. Narrowing rounds directly to the destination once, nearest with ties to even. Precision loss alone succeeds; a non-finite rounded result fails.
+- Float-to-integer conversion is fallible: truncate towards zero, then check the destination range.
+- `Byte <-> U8` is infallible. Other numeric or text conversions involving `Byte` go through `U8`.
 - Integer-to-`Dec`/`DecN` and decimal scale widening are exact and infallible. Scale narrowing and decimal-to-integer conversion are exact-or-fail, never rounded.
-- Numeric text casts are fallible and consume the whole string. They reject surrounding whitespace, unary `+`, uppercase `E`, malformed separators or exponents, `NaN` and infinities. Unsigned `Uint` text additionally rejects a leading `-`, including `-0`. Numeric formatting to `String` is infallible, with `Byte` going through `U8`. `Uint` zero formats as `0`.
+- Numeric text casts are fallible and consume the whole string. They reject surrounding whitespace, unary `+`, uppercase `E`, malformed separators or exponents, `NaN` and infinities. Numeric formatting to `String` is infallible and stable.
 - `String -> Bool` trims surrounding whitespace and accepts only lowercase `true` or `false`. `String -> Char` requires exactly one Unicode scalar. Both are fallible.
-- `Char -> Int` produces its code point. `Int -> Char` is fallible and requires a Unicode scalar. `Bool` and `Char` convert infallibly to `String`.
+- `Char -> I32` produces its code point. `I32 -> Char` is fallible and requires a Unicode scalar. `Bool` and `Char` convert infallibly to `String`.
 - `String -> Error` creates a message with code `0`. `Error -> String` returns its message. Both are infallible.
 
-Other source-target pairs are not implied. In particular, do not infer `Float`/`DecN` conversion helpers.
+Other source-target pairs are not implied. No conversion-chain search or generic cast target is added.
+
+Every fixed integer and binary float target has infallible and fallible source-authored cast-evidence families. `CASTABLE_TO_I32` requires `to_i32 |This| -> I32`; `TRY_CASTABLE_TO_I32` requires `try_to_i32 |This| -> I32, Error!`. Existing `Bool`, `String`, `Char` and `Error` evidence remains. `Byte` and `Dec` gain no source-authored evidence. The two evidence classes for one pair conflict, and existing same-file, visibility and generic-nominal conformance rules remain.
 
 ### Optional targets
 
 A `T?` target casts to inner `T`, then wraps the result. Its handler also supplies `T`, so `then none` is invalid. Optional operands never unwrap automatically.
 
 [codeblock, $code("moth"):
-    parse_optional |text String| -> Int?:
-        value Int = cast text catch:
+    parse_optional |text String| -> I32?:
+        value I32 = cast text catch:
             return none
         ;
         return value
     ;
 ]
 
-User-defined conversions require explicit cast conformance, shown under **Traits and conformance**. See @../casts (Casts) for conversion contracts.
+Potentially failing casts use ordinary implicit failure. A compatible local `catch`, private inferred failure lane or builtin `Error!` slot handles it. Custom `E!` needs local recovery or explicit mapping. Postfix `!` remains for declared fallible calls.
 
 ## Functions and calls
 
@@ -289,7 +272,7 @@ Defaults fold at compile time and cannot reference other parameters. Omit `->` o
 Mutable parameters take `~place` for existing mutable storage or a plain fresh value:
 
 [codeblock, $code("moth"):
-    increment |value ~Int|:
+    increment |value ~I32|:
         value += 1
     ;
 
@@ -303,7 +286,7 @@ Shared parameters and fresh rvalues reject `~`. Mutable receivers always require
 Multiple returns remain separate values:
 
 [codeblock, $code("moth"):
-    pair || -> String, Int:
+    pair || -> String, I32:
         return "Priya", 2
     ;
 
@@ -381,7 +364,7 @@ Options of the same type support equality when their inner type does, but have n
 One final `E!` slot declares typed failure. `return!` returns an error, postfix `!` propagates through an exactly compatible caller slot and `catch` recovers.
 
 [codeblock, $code("moth"):
-    load_user |id String| -> String, Float, Error!:
+    load_user |id String| -> String, F64, Error!:
         if id is "":
             return! Error("Missing id", 404)
         ;
@@ -399,7 +382,7 @@ One final `E!` slot declares typed failure. `return!` returns an error, postfix 
     ;
 ]
 
-Builtin `Error` has `message String` and `code U32 = 0`. Codes span `0` to `4294967295`. An `Int` variable needs a fallible cast. Code `0` still represents failure. Errors can be constants or carry runtime messages. Custom errors use ordinary nominal types.
+Builtin `Error` has `message String` and `code U32 = 0`. Codes span `0` to `4294967295`. An `I32` variable needs a fallible cast. Code `0` still represents failure. Errors can be constants or carry runtime messages. Custom errors use ordinary nominal types.
 
 An error-only function succeeds by reaching its end:
 
@@ -429,16 +412,16 @@ Checked numeric failures propagate according to the enclosing boundary:
 The exported rule includes methods, generics and re-exports. Traits and conformance cannot silently widen an error contract.
 
 [codeblock, $code("moth"):
-    product |left Int, right Int| -> Int:
+    product |left I32, right I32| -> I32:
         return left * right
     ;
 
     export:
-        checked_product |left Int, right Int| -> Int, Error!:
+        checked_product |left I32, right I32| -> I32, Error!:
             return product(left, right)
         ;
 
-        product_or_zero |left Int, right Int| -> Int:
+        product_or_zero |left I32, right I32| -> I32:
             return product(left, right) catch then 0
         ;
     ;
@@ -451,7 +434,7 @@ A transparent alias of `Error` preserves this built-in behaviour. A custom wrapp
         InvalidDimensions,
     ;
 
-    area |width Int, height Int| -> Int, GeometryError!:
+    area |width I32, height I32| -> I32, GeometryError!:
         result = width * height catch:
             return! GeometryError::InvalidDimensions
         ;
@@ -461,31 +444,28 @@ A transparent alias of `Error` preserves this built-in behaviour. A custom wrapp
 
 ### Whole-expression catch
 
-`catch` binds below the ordinary operators and protects the complete selected expression, including receivers, arguments, nested calls and cast operands:
+`catch` binds below ordinary operators and protects the complete selected evaluation, including receivers, arguments, nested calls and cast operands.
 
-[codeblock, $code("moth"):
-    load_amount |text String| -> Int, Error!:
-        return cast! text
-    ;
+An otherwise legally placed catch is eligible when its authored expression contains:
 
-    amount_or_zero |text String, quantity Int, fee Int| -> Int:
-        return load_amount(text) * quantity + fee catch then 0
-    ;
-]
+- a valid plain cast
+- valid arithmetic, including numeric unary negation
+- more than one function/member call at the selected expression's call-count level
+- an actual compatible typed or inferred recoverable failure
 
-This handles the call's error and both arithmetic operations. Compatible typed calls inside the expression supply success values without per-call `!`. Explicit `!`, `cast!` and `?` conflict with a catch on the same expression.
+Receiver-chain calls and calls in separate operands count. Calls inside an argument do not increase the enclosing count, though a real failure inside that argument remains protected. Thus `source.first().second()` and `left() is right()` qualify by call count, while `outer(inner())` with infallible calls does not. A fallible `inner()` qualifies by its actual failure instead.
 
-Implicit failure and built-in `Error!` may share a handler. A bound name then receives `Error`, preserving an existing typed error's message, code and identity. Producers of one custom `E!` may share a handler only when no implicit failure remains, and its binding has type `E`. Mixing distinct typed error types, including custom `E` and `Error`, is invalid. Split or map incompatible work.
+Comparisons and Boolean operators alone do not count as arithmetic. A literal or one infallible call alone does not qualify. Eligibility is not a claim that failure exists and creates no failure effect.
 
-Work evaluates once in source order. The first failure skips the remaining expression. Earlier mutations and IO remain visible. A handler's own failure propagates outward, without re-entering it.
+The handler still contributes ordinary type constraints when the protected expression proves infallible. Validate its names, types, access, casts and result paths before removing unreachable executable work. Without a typed failure producer, a bound handler error has builtin `Error` type; syntax-only eligibility does not fabricate an error. Compatible builtin `Error` producers may mix with implicit failure. A custom `E` producer cannot mix with implicit `Error` or a different typed error.
+
+Work evaluates once in source order. The first failure skips later protected work. Earlier mutations and IO remain visible. A handler's own failure propagates outward. A catch is not a transaction.
 
 Use `catch:` or `catch |err|:` for blocks, and `catch then value` or `catch |err| then value` inline. The error binding is immutable and local. A value handler supplies matching `then` values, returns or diverges. A no-success handler may fall through.
 
-To recover a complete update, catch a private helper that performs it or compute the replacement under `catch`, including any required `cast` back to the destination type, then assign.
+To recover a complete update, catch a private helper that performs it or compute the replacement under `catch`, including any required cast back to the destination type, then assign. A catch on a compound assignment RHS covers the RHS only; later arithmetic and checked write-back keep their own failure obligations.
 
-A catch needs a checked operation, inferred-failure private call or typed-error producer. An infallible call or literal alone is insufficient. Proving an eligible operation safe does not invalidate its catch.
-
-Catch bodies cannot appear inside conditions, templates or constants, except directly foldable cast recovery at an explicit constant/default boundary. Commas, parentheses, logical lines and statements delimit the protected expression. Grouping an operand does not shrink an outer handler's scope.
+Catch bodies remain prohibited inside conditions, templates and constants, except directly foldable cast recovery at an explicit constant/default receiving boundary. Safety catch does not handle assertions, allocation or stack exhaustion, foreign-value integrity guards or unexpected host/runtime faults.
 
 ### Assertions
 
@@ -553,6 +533,7 @@ A compile-time-known condition selects one ordinary `if` branch after both branc
 
 [codeblock, $code("moth"):
     count ~= 0
+    names = {"Priya", "Rob"}
 
     loop count < 3:
         count += 1
@@ -567,15 +548,20 @@ A compile-time-known condition selects one ordinary `if` branch after both branc
     ;
 ]
 
-Conditional loops check `Bool` before each iteration. Collection loops capture source and length once, then visit collection order. They accept no binding suffix, `|item|` or `|item, index|`. Bindings are immutable and body-local, with an `Int` index starting at zero. Empty suffixes and more than two names are invalid. Maps are not collection-loop sources.
+Conditional loops check `Bool` before each iteration. Collection loops capture
+source and length once, then visit collection order. They accept no binding
+suffix, `|item|` or `|item, index|`. Bindings are immutable and body-local.
+The optional position index has type `I32`; maps are not collection-loop sources.
 
 Range rules:
 
 - `to` excludes the end, `to &` includes it. `loop to n` starts at zero.
-- Direction follows the bounds. `by` supplies a magnitude, regardless of sign. Integer steps default to one. Any floating range needs explicit `by`.
+- Bounds select one exact counter domain. Omitted zero and default step one materialise in that domain; the automatically supplied position index remains a separate `I32`.
+- Direction follows the bounds. `by` supplies a magnitude regardless of sign. Integer steps default to one. Every binary-float range needs explicit `by`.
 - Start, end and explicit step evaluate once, left to right. Static zero steps are invalid. Dynamic zero fails before iteration.
-- `Int`, `Uint`, `Float`, fixed integer and fixed float operands use normal promotion. All-`Uint` bounds with an optional `Uint` step bind `Uint`. Integer-only headers mixing `Uint` and `Int` need an explicit conversion. A `Float` bound or step instead selects `Float` through the direct `Uint`-to-`Float` rule, still needing an explicit `by` step. The value binding takes the common type, the optional index `Int`. `Byte`/`Dec` have no range domain.
-- Checked updates stop at the last valid value, including inclusive maxima and unsigned descent to zero. Floating candidates round before endpoint checks. Non-finite/out-of-range candidates end the loop. An in-range candidate rounded back to the current value fails.
+- Fixed-width operands follow the exact numeric domain rules in Numbers. `Byte` and `Dec` have no range domain.
+- Checked updates stop at the last valid value, including inclusive maxima and unsigned descent to zero. An inclusive range exits after visiting its endpoint without an unrepresentable successor.
+- Floating candidates round before endpoint checks. Non-finite or out-of-range candidates end the loop. An in-range candidate rounded back to the current value fails as no progress.
 
 `break` exits the nearest ordinary loop. `continue` advances its check, item or step. Neither takes values or labels. `return`/`return!` exit the function.
 
@@ -592,7 +578,7 @@ The header accepts any `T?` expression, evaluated once per attempted iteration. 
 ### Collection-producing loops
 
 [codeblock, $code("moth"):
-    positives {Int} = loop {-2, 1, 3} |item|:
+    positives {I32} = loop {-2, 1, 3} |item|:
         if item > 0:
             then item
         ;
@@ -610,7 +596,7 @@ Branches inherit the production target. An ordinary nested loop blocks it, and a
 ## Structs and receiver methods
 
 [codeblock, $code("moth"):
-    Person = | name String, age Int = 0 |
+    Person = | name String, age I32 = 0 |
 
     birthday |this ~Person|:
         this.age += 1
@@ -663,8 +649,8 @@ Hidden identities cannot cross any function argument/return, authored signature,
 [codeblock, $code("moth"):
     Status ::
         Ready,
-        Loading | progress Float |,
-        Failed | message String, code Int |,
+        Loading | progress F64 |,
+        Failed | message String, code I32 |,
     ;
 
     ready = Status::Ready
@@ -686,13 +672,15 @@ Same-type equality compares tag and payload only when every possible payload typ
 ## Type aliases and generics
 
 [codeblock, $code("moth"):
-    UserId as Int
+    UserId as I32
     Names as {String}
     MaybeName as String?
-    User = | id Int |
+    User = | id I32 |
 ]
 
-Aliases are transparent: `UserId` and `Int` interchange, while `User` has distinct identity. Aliases can chain, not cycle. They introduce no runtime value or constructor. Construct through the canonical nominal name.
+Aliases are transparent: `UserId` and `I32` interchange, while `User` has
+distinct identity. Aliases can chain, not cycle. They introduce no runtime
+value or constructor. Construct through the canonical nominal name.
 
 [codeblock, $code("moth"):
     identity type A |value A| -> A:
@@ -714,29 +702,52 @@ Aliases are transparent: `UserId` and `Int` interchange, while `User` has distin
         return {}
     ;
 
+    accept_u64 |value U64|:
+    ;
+
     box Box of String = Box("Moth")
-    value = identity(42)
-    items {Int} = empty()
+    value = identity(1)
+    accept_u64(value)
+    items {I32} = empty()
     missing Maybe of String = Maybe::Empty
     StringBox as Box of String
 ]
 
-Generics apply to top-level structs, choices and free functions. Parameters must appear in the public signature/type shape. Receiver method parameters must align exactly with the generic constructor. Concrete-instance methods are invalid.
+Generics apply to top-level structs, choices and free functions. Parameters
+must appear in the declared signature/type shape. Receiver method parameters
+must align exactly with the generic constructor. Concrete-instance methods are
+invalid.
 
-`of` supplies concrete types with matching arity. Concrete argument lists determine instance identity. Calls/constructors infer from immediate arguments or the immediate receiving result. They have no explicit call-site type arguments. Later uses, mutations, casts, outer-call parameter contexts and bare `none` cannot solve missing evidence. Annotate an intermediate result.
+`of` supplies concrete types with matching arity. Ordinary generic inference
+uses immediate arguments and an immediate expected result. The bounded numeric
+exception carries an existing numeric origin through its declared parameter
+and result relation, so an exact use later in the same body can select it.
+Only the signature participates: there is no callee-body inspection or trait
+evidence search. A generic parameter with no eligible numeric origin does not
+gain later-use inference.
+
+Known non-empty collection, map, nominal/generic and optional shapes can carry
+eligible numeric leaves while their shape, capacity, keys, constructor identity
+and nonnumeric types stay fixed. This adds no structural inference, empty
+container inference, general result-only inference or backward constraints
+through named arithmetic. An outer call's expected type does not flow into a
+nested generic call. Annotate an intermediate result when that call has no
+immediate evidence.
 
 Nested inline `of` requires an inner alias:
 
 [codeblock, $code("moth"):
     Pair type A, B = | first A, second B |
-    StringIntPair as Pair of String, Int
+    StringIntPair as Pair of String, I32
     paired Box of StringIntPair = Box(Pair("count", 3))
 ]
 
 One application is allowed inside a collection element, such as `{Box of String}`.
 
-Unconstrained code can pass, return, store and forward values, but cannot assume arithmetic, comparison, fields, interpolation, IO or methods. Use bounds. No `where`, generic function values, parameterised aliases, partial application, higher-kinded types, lifetime parameters or general const generics.
-
+Unconstrained code can pass, return, store and forward values, but cannot assume
+arithmetic, comparison, fields, interpolation, IO or methods. Use bounds. No
+`where`, generic function values, parameterised aliases, partial application,
+higher-kinded types, lifetime parameters or general const generics.
 ## Traits and conformance
 
 [codeblock, $code("moth"):
@@ -782,25 +793,47 @@ Using `Label` above, provide a same-file receiver method and explicit conformanc
     text String = cast label
 ]
 
-The six source-authored families target `Int`, `Float`, `Bool`, `String`, `Char` and `Error`. `CASTABLE_TO_*` requires `to_* |This| -> Target`. `TRY_CASTABLE_TO_*` requires `try_to_* |This| -> Target, Error!`. Implement with lowercase `this` and the concrete type. The same-file and generic conformance rules also apply. This six-family scope is intentional: `Uint` carries compiler-owned builtin evidence rather than gaining source-authorable traits.
+Each of the eleven fixed numeric target types has an infallible and a fallible
+source-authored evidence family. `CASTABLE_TO_*` requires `to_* |This| ->
+Target`; `TRY_CASTABLE_TO_*` requires `try_to_* |This| -> Target, Error!`.
+The existing `Bool`, `String`, `Char` and `Error` families remain. `Byte` and
+`Dec` gain no source-authored numeric cast evidence. One source/target pair
+cannot conform through both evidence classes.
 
-A method alone supplies no cast. Infallible and fallible conformance to one target conflict. These predeclared traits cannot be imported, exported, aliased or redeclared. `Uint`, fixed numeric types, `Byte` and `DecN` have no source-authored cast families.
+A method alone supplies no cast. These predeclared traits cannot be imported,
+exported, aliased or redeclared. Generic cast targets and conversion-chain
+search remain outside scope.
 
 ## Collections
 
 [codeblock, $code("moth"):
     names ~= {"Priya", "Rob"}
-    empty ~{Int} = {}
-    fixed ~{3 Int} = {10, 20}
+    empty ~{I32} = {}
+    fixed ~{3 I32} = {10, 20}
 
-    capacity #Int = 4
+    capacity #I32 = 4
     scratch ~{capacity String} = {}
     labels {capacity} = {"a", "b"}
 ]
 
-`{T}` is growable, `{N T}` has maximum capacity `N`. All items share one element type. Element type and fixed capacity cannot change through mutation. Growable/fixed forms and different capacities are incompatible.
+`{T}` is growable and `{N T}` has maximum capacity `N`. Element type,
+collection shape and fixed capacity are semantic identities. Capacity,
+collection length, element index and loop position use `I32`. Fixed capacity
+must be a positive `I32` literal or bare `#I32` name; it is not a growable
+allocation hint.
 
-Empty literals need explicit type. Empty fixed bindings must be mutable. Explicitly typed fields may default empty. Capacity accepts only a positive `Int` literal or bare `#Int` name. `{capacity}` shorthand requires an immediate non-empty literal in a binding.
+Non-empty literals have one homogeneous element type. Raw numeric origins can
+remain unresolved until eligible exact constraints select their element type.
+Raw whole plus decimal/exponent literals choose the binary-float family in
+either order; a bound integer keeps its integer family. Already typed elements
+must match exactly. Arithmetic promotion does not find a collection storage
+type.
+
+Empty literals introduce no numeric origin. Empty collections need an explicit
+type at a declaration or field default, and empty maps need a known map shape.
+No new argument-context inference applies. Later push, assignment or calls
+cannot infer an otherwise untyped empty container. Mutation checks the selected
+element type and never widens it.
 
 [table:
     [th:
@@ -830,7 +863,7 @@ Empty literals need explicit type. Empty fixed bindings must be mutable. Explici
     ]
     [td:
         [: `items.length()`]
-        [: Logical length as `Int`]
+        [: Logical length as `I32`]
         [: Infallible]
     ]
     [td:
@@ -840,29 +873,43 @@ Empty literals need explicit type. Empty fixed bindings must be mutable. Explici
     ]
 ]
 
-Indices use `Int`. Arguments are positional-only. Failures use `Error!` and need `catch`/postfix `!`. Infallible calls take neither. Growable allocation exhaustion is unrecoverable. Failed mutations preserve the target's contents. A live `get` alias blocks conflicting mutation. Collections have no square-bracket indexing or builtin equality.
+Indices use `I32`. Arguments are positional-only. Fallible operations use
+builtin `Error!` and need `catch` or postfix `!`. Growable allocation
+exhaustion is unrecoverable. Failed mutations preserve contents. Collections
+have no square-bracket indexing or builtin equality.
 
 ## Hash maps
 
 [codeblock, $code("moth"):
-    scores ~{String = Int} = {"Priya" = 10, "Rob" = 8}
-    empty_scores ~{String = Int} = {=}
+    scores ~{String = I32} = {"Priya" = 10, "Rob" = 8}
+    empty_scores ~{String = I32} = {=}
 ]
 
-`{Key = Value}` requires one key/value entry form throughout. Bare key names read variables. `{}` always denotes a collection. Empty `{=}` needs a known map type.
+`{Key = Value}` uses one key/value form throughout. Bare key names read
+variables. `{}` always denotes a collection and `{=}` a map. A receiving type
+cannot change the container kind.
 
-Keys: `String`, `Int`, `Uint`, `Bool`, `Char`, fixed integers or `Byte`. Typed keys cannot cross nominal/width boundaries. Contextual literals use the declared key type. Floats, `Dec`, user types and generic parameters are invalid keys.
+Keys are `String`, `Bool`, `Char`, fixed-width integers or `Byte`. Binary
+floats, `Dec`, user types and generic parameters are invalid keys. Typed keys
+never cross nominal or width boundaries. Contextual raw literals materialise
+in the exact declared key type. Non-empty maps can carry eligible numeric
+origins through their known key/value shape; insertion order and duplicate-key
+checking follow the materialised exact key identity.
 
-Replacement preserves insertion position and stored key. Removal then reinsertion appends.
+Replacement preserves insertion position and stored key. Removal then
+reinsertion appends.
 
 - `scores.get(key)`: shared value, fallible.
 - `scores.contains(key)`: `Bool`, infallible.
 - `~scores.set(key, value)`: inserts/replaces, no value, fallible.
 - `~scores.remove(key)`: removed value, fallible.
 - `~scores.clear()`: removes all entries, no value, infallible.
-- `scores.length`: read-only `Int` property, no parentheses.
+- `scores.length`: read-only `I32` property, no parentheses.
 
-Arguments are positional-only, lookup keys borrowed. Failed mutations preserve contents. A live `get` alias blocks mutation. No indexing, collection-loop iteration, entry API, fixed capacity, equality, sets or custom key/hash policy. Inline map nesting beyond two levels needs an inner type alias.
+Arguments are positional-only, lookup keys borrowed. Failed mutations preserve
+contents. A live `get` alias blocks mutation. No indexing, collection-loop
+iteration, entry API, fixed capacity, equality, sets or custom key/hash policy.
+Inline map nesting beyond two levels needs an inner type alias.
 
 ## Templates
 
@@ -986,8 +1033,8 @@ See @../templates (Templates).
 
 [codeblock, $code("moth"):
     TodoMessage ::
-        Rename | id Int, value String |,
-        Delete | id Int |,
+        Rename | id I32, value String |,
+        Delete | id I32 |,
     ;
 
     todo_id = 42
@@ -1120,19 +1167,35 @@ Use exactly one `$project` and, for HTML directory projects, one `$html_builder`
     label #String?
 ]
 
-Initialisers provide fallbacks. Without one, non-optional inputs are required and optional inputs resolve to `none`. Input types are `String`, `Int`, `Float`, `Bool`, `Char` and one optional layer. This `Int`-only scope is intentional: there is no `Uint`, `Dec` or fixed-width input, even though those types accept ordinary literals elsewhere. Inferred `#=`, local, parameter, field and mutable declarations cannot declare inputs.
+Initialisers provide fallbacks. Without one, non-optional inputs are required
+and optional inputs resolve to `none`. Input types are `String`, `Bool`, `Char`,
+all eight exact integers and all three exact binary floats, with one optional
+layer. `Byte` and `Dec` remain excluded. Inferred `#=`, local, parameter,
+field and mutable declarations cannot declare inputs.
 
-Config-file fallbacks may use earlier permitted helpers. Module-source fallbacks accept primitive literals or `none`. Matching input names within a project/package must agree on type, optionality, required/default state and default value. Ordinary constants and `$project` fields neither declare nor satisfy inputs. Dependencies own separate input namespaces.
+Config-file fallbacks may use earlier permitted helpers. Module-source
+fallbacks accept primitive literals or `none`. Matching input names within a
+project/package must agree on type, optionality, required/default state and
+default value. Ordinary constants and `$project` fields neither declare nor
+satisfy inputs. Dependencies own separate input namespaces.
 
-Repeat `--input name=value` for multiple inputs. Names use lower_snake_case. Parsing splits at the first `=`, preserving later equals signs. Values infer Bool, signed Int, Float, quoted Char or quoted String, in order. Other text, including bare `none`, becomes String. Quote-starting values require complete valid literals:
+Repeat `--input name=value` for multiple inputs. Names use lower_snake_case.
+Parsing splits at the first `=`, preserving later equals signs. Numeric
+spelling stays raw until the exact input contract is known, so an integer
+outside `I32` can materialise directly for `U64` and a whole literal can
+materialise directly for `F32`. A decimal/exponent spelling does not satisfy
+an integer contract. Non-numeric fallback and quote validation follow the
+build-input contract:
 
 [codeblock, $code("bash"):
+    moth build . --input count=4_294_967_296
+    moth build . --input ratio=1
     moth build . --input api_url=https://example.com --input analytics=true
     moth build . --input 'label="true"'
-    moth build . --input "separator=':'"
 ]
 
-Types must match exactly, except present `T` satisfies `T?`.
+Already typed values must match the exact contract, except a present `T` can
+satisfy `T?`.
 
 Read predefined project fields explicitly:
 
@@ -1216,9 +1279,21 @@ Annotated JavaScript files expose typed free functions:
     ;
 ]
 
-Annotations name Moth functions independently of JS exports. Signatures use positional typed parameters and zero or one success result with an optional final `Error!`. Numeric slots accept profile-selected `Int`, `Uint` and `Float` plus fixed `U32` and `F32`. `U32` uses the full unsigned 32-bit `Number` range. `F32` parameters need exact finite binary32 values and results round once, preserve signed zero and reject non-finite values. `Uint32` crosses as a `Number` integer, while `Uint64` uses `BigInt` inside Moth JavaScript and the safe-`Number` foreign bridge.
+Annotations name Moth functions independently of JS exports. Signatures use
+positional typed parameters and zero or one success result with an optional
+final `Error!`. Numeric annotations name exact Moth widths, not profile-selected
+types. Existing supported slot shapes remain unchanged. `U32` uses the full
+unsigned 32-bit `Number` range. `F32` parameters need exact finite binary32
+values and results round once, preserve signed zero and reject non-finite
+values. `I64`/`U64` use `BigInt` inside Moth JavaScript and the safe-`Number`
+foreign bridge. Every supported external float result validates against its
+resolved exact precision before Moth code can observe it.
 
 Declare same-file opaque types with `@moth.opaque` before use. `@moth.const name U32` annotates one exported unsigned decimal literal without running JavaScript. Constant-only dependencies emit no JS asset or authored runtime imports.
+
+Core Math exposes F64 constants and signatures only. Additional Math
+precisions, generic helpers and Math WebAssembly lowering remain deferred.
+These contracts add no WebAssembly capability.
 
 Receiver methods, callbacks, async, options, collections, generics, multiple success results, shared-type imports, nested annotation paths and borrowed views remain unavailable.
 

@@ -4,7 +4,7 @@ Hash maps form insertion-ordered key/value groups.
 
 [codeblock, $code("moth"):
     scores ~= {"Priya" = 10, "Rob" = 12}
-    empty_scores ~{String = Int} = {=}
+    empty_scores ~{String = I32} = {=}
 ]
 
 - A map type is `{Key = Value}`.
@@ -18,7 +18,7 @@ Hash maps form insertion-ordered key/value groups.
 
 ### Map MON data boundary
 
-Source and MON data share the empty-container forms: `{}` is a collection and `{=}` is a map, regardless of receiving type or schema. Source `{=}` is accepted design but not implemented yet; see @../progress (Progress) for current support. A bare identifier in a source key position is a variable reference, not string shorthand. MON map keys use the same scalar families, including `Uint`, fixed-width integers and `Byte`, follow the schema's declared key type, preserve insertion order, and reject bare names and duplicate keys. The MON literal-data contract is Rust-only; see @../mon/#mon-format (MON format).
+Source and MON data share the empty-container forms: `{}` is a collection and `{=}` is a map, regardless of receiving type or schema. Source `{=}` is accepted design but not implemented yet; see @../progress (Progress) for current support. A bare identifier in a source key position is a variable reference, not string shorthand. MON map keys use the same scalar families, including fixed-width integers and `Byte`, follow the schema's declared key type, preserve insertion order and reject bare names and duplicate keys. The MON literal-data contract is Rust-only; see @../mon/#mon-format (MON format).
 
 ### Key contract
 
@@ -27,12 +27,12 @@ Builtin map keys are limited to the scalar key families:
 - `String`
 - `Bool`
 - `Char`
-- `Int`, `Uint` and the fixed-width integers `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32` and `U64`
+- the fixed-width integers `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32` and `U64`
 - `Byte`, which compares and hashes as an unsigned octet rather than a number
 
 Invalid key families include:
 
-- `Float` and the fixed binary floats `F16`, `F32` and `F64`
+- the binary floats `F16`, `F32` and `F64`
 - `Dec`, `Dec0` and `Dec1` through `Dec256`
 - structs
 - choices
@@ -44,17 +44,16 @@ Invalid key families include:
 - generic parameters
 
 A map declares one key type and every entry uses it. A contextual key literal
-materialises in that declared type, so a `{U8 = Int}` map accepts `{5 = 1}` and
-a `{Uint = Int}` map accepts whole-number keys in the selected unsigned width.
-A typed key never crosses a nominal or width boundary, so an `Int` key is not an
-`I32` key, a `Uint` key is not a `U32` key even under a 32-bit `Int` profile,
-and an `I64` key is not a `U64` key, even when two of those types
+materialises in that declared type, so a `{U8 = I32}` map accepts `{5 = 1}` and
+a `{U32 = I32}` map accepts whole-number keys in its exact unsigned width.
+A typed key never crosses a nominal or width boundary, so an `I32` key is not a
+`U32` key and an `I64` key is not a `U64` key, even when two of those types
 share a physical width.
 
 Equality, hashing and MON duplicate detection all follow the declared key
-contract, so keys of different declared types never collide. `Uint` keys keep
-typed identity, equality, duplicate detection and hashing across the full
-unsigned width, including `Uint64` values above `Int` maximum.
+contract, so keys of different declared types never collide. `U64` keys keep
+typed identity, equality, duplicate detection and hashing across their full
+range, including values above `I64` maximum.
 
 The builtin map surface does not expose user-defined `HASHABLE`, custom
 hashers or custom comparers.
@@ -64,10 +63,22 @@ template-produced strings follow the same key rule because construction origin
 does not create a second string category.
 
 Fixed-width integer key comparison is exact over each family's complete range,
-including `I64` and `U64`, and `Uint` key comparison is exact over the selected
-unsigned width. `Byte` keys order as unsigned octets without
+including `I64` and `U64`. `Byte` keys order as unsigned octets without
 numeric arithmetic. These key families are accepted end-state design;
 @../progress (Progress) records current implementation and backend support.
+Map keys and values in a non-empty literal can carry eligible numeric origins
+through the known map shape until an exact receiver selects their types. The
+key must still resolve to one of the supported exact key families. Existing
+typed keys and values keep their identities, and an empty map still needs an
+explicit shape.
+
+[codeblock, $code("moth"):
+    accept_scores |scores {U64 = U64}|:
+    ;
+
+    scores = {1 = 2, 3 = 4}
+    accept_scores(scores)
+]
 
 ### Storage and order
 
@@ -118,7 +129,7 @@ Insertion order follows these rules:
 
 - shared read-only property
 - no parentheses
-- returns `Int`
+- returns `I32`
 - cannot be assigned
 
 [codeblock, $code("moth"):

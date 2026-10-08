@@ -2,8 +2,8 @@ A struct declares a nominal runtime type with named fields.
 
 [codeblock, $code("moth"):
     Vector2 = |
-        x Float,
-        y Float = 0.0,
+        x F64,
+        y F64 = 0.0,
     |
 ]
 
@@ -12,7 +12,7 @@ A struct declares a nominal runtime type with named fields.
 - The declaration form is `Name = | fields |`.
 - Struct names use `PascalCase`.
 - Every field has a name and explicit type.
-- A field keeps its declared type identity. An `Int` field is not an `I32` field and a `Byte` field is not a `U8` field, even when two of those types share a physical width.
+- A field keeps its exact declared type. `I32` and `U32` remain distinct even when their physical widths match, as do `Byte` and `U8`.
 - Field names must be unique.
 - A field may provide `= default`.
 - Every field default must fully evaluate at compile time.
@@ -20,15 +20,20 @@ A struct declares a nominal runtime type with named fields.
 - Matching field shapes do not make two structs interchangeable.
 - A transparent type alias does not create a new struct identity.
 
+Field types remain concrete declaration facts. Constructors and defaults check
+values against those exact types; later uses never retag a field. Generic
+nominal shapes follow the bounded numeric-origin rules in
+@../generics (Generics).
+
 [codeblock, $code("moth"):
     Point = |
-        x Int,
-        y Int,
+        x I32,
+        y I32,
     |
 
     Position = |
-        x Int,
-        y Int,
+        x I32,
+        y I32,
     |
 ]
 

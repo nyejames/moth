@@ -2,7 +2,7 @@ Postfix `!` propagates a typed error through the enclosing function's compatible
 error slot.
 
 [codeblock, $code("moth"):
-    wrapper |text String| -> Int, Error!:
+    wrapper |text String| -> I32, Error!:
         value = parse_number(text)!
         return value
     ;
@@ -19,15 +19,16 @@ error slot.
 - Multi-success fallible calls may feed a matching multi-bind.
 
 [codeblock, $code("moth"):
-    items ~{4 Int} = {}
+    items ~{4 I32} = {}
 
     ~items.push(value)!
 ]
 
 Postfix propagation is not panic syntax.
 
-`cast!` uses the same outward error path for a fallible explicit cast, but its
-target and evidence rules remain owned by @../casts (Casts).
+Explicit casts use plain `cast`. A fallible conversion follows ordinary
+implicit or typed error delivery, with local `catch` or a compatible function
+boundary. See @../casts (Casts) for its target and evidence rules.
 
 ### Removed forms
 
@@ -49,16 +50,16 @@ functions without an error slot infer and propagate it within the same semantic
 module. Their internal callers do not add postfix `!`.
 
 [codeblock, $code("moth"):
-    product |left Int, right Int| -> Int:
+    product |left I32, right I32| -> I32:
         return left * right
     ;
 
     export:
-        checked_product |left Int, right Int| -> Int, Error!:
+        checked_product |left I32, right I32| -> I32, Error!:
             return product(left, right)
         ;
 
-        product_or_zero |left Int, right Int| -> Int:
+        product_or_zero |left I32, right I32| -> I32:
             return product(left, right) catch then 0
         ;
     ;

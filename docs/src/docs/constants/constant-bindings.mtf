@@ -14,7 +14,7 @@ then reports a missing-input error, while an optional input resolves to absence.
 
 [codeblock, $code("moth"):
     site_name #= "Moth"
-    major_version #Int = 1
+    major_version #I32 = 1
     names #{String} = {"Priya", "Rob"}
     maybe_name #String? = none
 ]
@@ -44,5 +44,10 @@ Top-level constants follow ordinary module and public-surface visibility rules.
 
 Body-local constant declarations remain local to their scope.
 
-A top-level runtime binding without `#` belongs to entry-selected `start` code rather
-than the dependency-bindable constant surface.
+A top-level runtime binding without `#` belongs to entry-selected `start` code
+rather than the dependency-bindable constant surface.
+
+Each constant resolves at its declaration-owned compile-time boundary. An
+unconstrained numeric initializer uses the `I32` or `F64` default there. A
+later runtime consumer cannot retype a named constant; choose its exact type
+at the declaration.

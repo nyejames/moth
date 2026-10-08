@@ -18,8 +18,8 @@ values or group an expression.
 
 [codeblock, $code("moth"):
     Size = |
-        width Int,
-        height Int,
+        width I32,
+        height I32,
     |
 
     size = Size(width = 1280, height = 720)
@@ -103,8 +103,8 @@ Anonymous values nest directly. Named nominal children still use their construct
 
 [codeblock, $code("moth"):
     Size = |
-        width Int,
-        height Int,
+        width I32,
+        height I32,
     |
 
     settings #= (
@@ -150,11 +150,11 @@ labels, indices and helper wrappers retain their specialised meanings.
 ### Shared construction parity
 
 For a supported common literal form in the same language and format revision,
-equivalent receiving types or schemas and the same numeric profile require both
-parsers to accept the form and produce the same typed value. Source and MON keep
-independent parsers: compiler-local owners parse calls and declarations, while
-`moth-mon` parses literal data. Both consume identifier, reserved-word and numeric
-text facts from `moth-lexical`. The real-source conformance suite at
+equivalent exact receiving types or schemas require both parsers to accept the
+form and produce the same typed value. Source and MON keep independent parsers:
+compiler-local owners parse calls and declarations, while `moth-mon` parses
+literal data. Both consume identifier, reserved-word and numeric text facts
+from `moth-lexical`. The real-source conformance suite at
 `src/compiler_tests/mon_syntax_parity/` checks each expected outcome before
 comparing typed values.
 

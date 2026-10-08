@@ -755,25 +755,25 @@ td {
 
         <p>A struct groups named values into one new type.</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Player</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
     name <span class='moth-code-type'>String</span>,
-    score <span class='moth-code-type'>Int</span>,
+    score <span class='moth-code-type'>I32</span>,
 <span class='moth-code-delimiter'>|</span></code></pre><p>Each field has a name and a type.</p><p>Fields can have defaults:</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Player</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
     name <span class='moth-code-type'>String</span>,
-    score <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>,
+    score <span class='moth-code-type'>I32</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>,
 <span class='moth-code-delimiter'>|</span></code></pre><p><code>Player</code> is its own type. Another struct with the same fields is still a different type.</p>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
     <p>A struct declares a nominal runtime type with named fields.</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Vector2</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
-    x <span class='moth-code-type'>Float</span>,
-    y <span class='moth-code-type'>Float</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0.0</span>,
-<span class='moth-code-delimiter'>|</span></code></pre><h3 id="contract-for-struct-declarations">Contract for struct declarations</h3><ul><li>The declaration form is <code>Name = | fields |</code>.</li><li>Struct names use <code>PascalCase</code>.</li><li>Every field has a name and explicit type.</li><li>A field keeps its declared type identity. An <code>Int</code> field is not an <code>I32</code> field and a <code>Byte</code> field is not a <code>U8</code> field, even when two of those types share a physical width.</li><li>Field names must be unique.</li><li>A field may provide <code>= default</code>.</li><li>Every field default must fully evaluate at compile time.</li><li>A field without a default is required during construction.</li><li>Matching field shapes do not make two structs interchangeable.</li><li>A transparent type alias does not create a new struct identity.</li></ul><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Point</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
-    x <span class='moth-code-type'>Int</span>,
-    y <span class='moth-code-type'>Int</span>,
+    x <span class='moth-code-type'>F64</span>,
+    y <span class='moth-code-type'>F64</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0.0</span>,
+<span class='moth-code-delimiter'>|</span></code></pre><h3 id="contract-for-struct-declarations">Contract for struct declarations</h3><ul><li>The declaration form is <code>Name = | fields |</code>.</li><li>Struct names use <code>PascalCase</code>.</li><li>Every field has a name and explicit type.</li><li>A field keeps its exact declared type. <code>I32</code> and <code>U32</code> remain distinct even when their physical widths match, as do <code>Byte</code> and <code>U8</code>.</li><li>Field names must be unique.</li><li>A field may provide <code>= default</code>.</li><li>Every field default must fully evaluate at compile time.</li><li>A field without a default is required during construction.</li><li>Matching field shapes do not make two structs interchangeable.</li><li>A transparent type alias does not create a new struct identity.</li></ul><p>Field types remain concrete declaration facts. Constructors and defaults check values against those exact types; later uses never retag a field. Generic nominal shapes follow the bounded numeric-origin rules in <a href="../generics">Generics</a>.</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Point</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
+    x <span class='moth-code-type'>I32</span>,
+    y <span class='moth-code-type'>I32</span>,
 <span class='moth-code-delimiter'>|</span>
 
 <span class='moth-code-nominal'>Position</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
-    x <span class='moth-code-type'>Int</span>,
-    y <span class='moth-code-type'>Int</span>,
+    x <span class='moth-code-type'>I32</span>,
+    y <span class='moth-code-type'>I32</span>,
 <span class='moth-code-delimiter'>|</span></code></pre><p><code>Point</code> and <code>Position</code> remain different types.</p><h3 id="generic-structs">Generic structs</h3><p>Struct declarations may introduce declaration-site generic parameters.</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Box</span> <span class='moth-code-keyword'>type</span> <span class='moth-code-nominal'>A</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
     value <span class='moth-code-nominal'>A</span>,
 <span class='moth-code-delimiter'>|</span></code></pre><p>Generic construction and inference are documented by <a href="../generics">Generics</a>.</p>
@@ -830,7 +830,7 @@ td {
 
         <p>Create a struct by calling its type name.</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Player</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
     name <span class='moth-code-type'>String</span>,
-    score <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>,
+    score <span class='moth-code-type'>I32</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>,
 <span class='moth-code-delimiter'>|</span>
 
 player <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Player</span><span class='moth-code-delimiter'>(</span><span class='moth-code-string'>&quot;Priya&quot;</span><span class='moth-code-delimiter'>)</span></code></pre><p>The constructor uses the default score.</p><p>Named fields make larger constructors easier to read:</p><pre style=""><code class='codeblock'>player <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Player</span><span class='moth-code-delimiter'>(</span>
@@ -842,12 +842,12 @@ player.score <span class='moth-code-operator'>=</span> <span class='moth-code-nu
 
 <div class="doc-level__panel doc-level__panel--advanced">
     <p>A struct constructor uses the struct name and supplies its fields through <a href="../language-overview/#mon-syntax">MON syntax</a>.</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Point</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
-    x <span class='moth-code-type'>Int</span>,
-    y <span class='moth-code-type'>Int</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>,
+    x <span class='moth-code-type'>I32</span>,
+    y <span class='moth-code-type'>I32</span> <span class='moth-code-operator'>=</span> <span class='moth-code-number'>0</span>,
 <span class='moth-code-delimiter'>|</span>
 
 first <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Point</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>10</span><span class='moth-code-delimiter'>)</span>
-second <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Point</span><span class='moth-code-delimiter'>(</span>x <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>, y <span class='moth-code-operator'>=</span> <span class='moth-code-number'>20</span><span class='moth-code-delimiter'>)</span></code></pre><h3 id="constructor-routing">Constructor routing</h3><ul><li>Positional arguments fill fields in declaration order.</li><li>Positional arguments must come before named arguments.</li><li>A named argument must match a real field.</li><li>Each field may be supplied once.</li><li>Omitted fields use their declared defaults.</li><li>Every field without a default is required.</li><li>Extra arguments are invalid.</li><li>Values are checked and contextually coerced against field types.</li></ul><p>A constructor creates a fresh value.</p><h3 id="explicit-nested-construction">Explicit nested construction</h3><p>Construct a named child at its field&#39;s receiving boundary:</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Size</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span> width <span class='moth-code-type'>Int</span>, height <span class='moth-code-type'>Int</span> <span class='moth-code-delimiter'>|</span>
+second <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Point</span><span class='moth-code-delimiter'>(</span>x <span class='moth-code-operator'>=</span> <span class='moth-code-number'>10</span>, y <span class='moth-code-operator'>=</span> <span class='moth-code-number'>20</span><span class='moth-code-delimiter'>)</span></code></pre><h3 id="constructor-routing">Constructor routing</h3><ul><li>Positional arguments fill fields in declaration order.</li><li>Positional arguments must come before named arguments.</li><li>A named argument must match a real field.</li><li>Each field may be supplied once.</li><li>Omitted fields use their declared defaults.</li><li>Every field without a default is required.</li><li>Extra arguments are invalid.</li><li>Values are checked and contextually coerced against field types.</li></ul><p>An exact field type can receive a raw numeric literal directly. An already typed value must match the field type; construction does not widen or retag it.</p><p>A constructor creates a fresh value.</p><h3 id="explicit-nested-construction">Explicit nested construction</h3><p>Construct a named child at its field&#39;s receiving boundary:</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Size</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span> width <span class='moth-code-type'>I32</span>, height <span class='moth-code-type'>I32</span> <span class='moth-code-delimiter'>|</span>
 <span class='moth-code-nominal'>Window</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span> size <span class='moth-code-nominal'>Size</span> <span class='moth-code-delimiter'>|</span>
 
 window <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Window</span><span class='moth-code-delimiter'>(</span>size <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Size</span><span class='moth-code-delimiter'>(</span>width <span class='moth-code-operator'>=</span> <span class='moth-code-number'>1280</span>, height <span class='moth-code-operator'>=</span> <span class='moth-code-number'>720</span><span class='moth-code-delimiter'>)</span><span class='moth-code-delimiter'>)</span></code></pre><p>An anonymous <code>(width = 1280, height = 720)</code> does not become a <code>Size</code> because the fields match. MON syntax adds no implicit nominal construction or structural conversion. Named type declarations remain separate, flat declarations.</p><h3 id="mon-data-boundary">MON data boundary</h3><p>Source construction above is unchanged: an anonymous record never becomes a nominal struct because the fields match. MON literal struct data documents both anonymous <code>(...)</code> and one exact <code>Name(...)</code> qualifier by reference. An explicit qualifier is a checked assertion against the receiving schema, never implicit conversion and never user-code invocation. That contract is Rust-only serialised-data documentation; source behaviour is unchanged. See <a href="../mon/#mon-format">MON format</a>.</p><h3 id="field-reads">Field reads</h3><p>Use <code>.</code> to read a field.</p><pre style=""><code class='codeblock'>point <span class='moth-code-operator'>=</span> <span class='moth-code-nominal'>Point</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>10</span>, <span class='moth-code-number'>20</span><span class='moth-code-delimiter'>)</span>
@@ -916,8 +916,8 @@ point.x <span class='moth-code-operator'>=</span> <span class='moth-code-number'
 
 <div class="doc-level__panel doc-level__panel--advanced">
     <p><strong>Accepted deferred implementation.</strong> Runtime anonymous records are queued after shared MON syntax and numeric semantics. The examples below describe the accepted contract, not current executable support. See <a href="../progress">Progress</a>.</p><p>A runtime anonymous record is a local value backed by a hidden nominal struct. It uses the named-only form of <a href="../language-overview/#mon-syntax">MON syntax</a>. The ordinary struct owners provide construction, field access, copy, borrow validation and lifetime validation.</p><h3 id="construction">Construction</h3><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Size</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
-    width <span class='moth-code-type'>Int</span>,
-    height <span class='moth-code-type'>Int</span>,
+    width <span class='moth-code-type'>I32</span>,
+    height <span class='moth-code-type'>I32</span>,
 <span class='moth-code-delimiter'>|</span>
 
 <span class='moth-code-function'>show_window</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>
@@ -994,11 +994,11 @@ point.x <span class='moth-code-operator'>=</span> <span class='moth-code-number'
 
 
         <p>A receiver method attaches behaviour to a struct or choice declared in the same file.</p><p>Its first parameter is named <code>this</code>:</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Vector2</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
-    x <span class='moth-code-type'>Float</span>,
-    y <span class='moth-code-type'>Float</span>,
+    x <span class='moth-code-type'>F64</span>,
+    y <span class='moth-code-type'>F64</span>,
 <span class='moth-code-delimiter'>|</span>
 
-<span class='moth-code-function'>length_squared</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-nominal'>Vector2</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Float</span><span class='moth-code-delimiter'>:</span>
+<span class='moth-code-function'>length_squared</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-nominal'>Vector2</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>F64</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>return</span> <span class='moth-code-keyword'>this</span>.x <span class='moth-code-operator'>*</span> <span class='moth-code-keyword'>this</span>.x <span class='moth-code-operator'>+</span> <span class='moth-code-keyword'>this</span>.y <span class='moth-code-operator'>*</span> <span class='moth-code-keyword'>this</span>.y
 <span class='moth-code-delimiter'>;</span>
 
@@ -1008,11 +1008,11 @@ length <span class='moth-code-operator'>=</span> vector.<span class='moth-code-f
 
 <div class="doc-level__panel doc-level__panel--advanced">
     <p>A receiver method is a top-level function whose first parameter is named <code>this</code>.</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Vector2</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
-    x <span class='moth-code-type'>Float</span>,
-    y <span class='moth-code-type'>Float</span>,
+    x <span class='moth-code-type'>F64</span>,
+    y <span class='moth-code-type'>F64</span>,
 <span class='moth-code-delimiter'>|</span>
 
-<span class='moth-code-function'>length_squared</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-nominal'>Vector2</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>Float</span><span class='moth-code-delimiter'>:</span>
+<span class='moth-code-function'>length_squared</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-nominal'>Vector2</span><span class='moth-code-delimiter'>|</span> <span class='moth-code-operator'>-&gt;</span> <span class='moth-code-type'>F64</span><span class='moth-code-delimiter'>:</span>
     <span class='moth-code-keyword'>return</span> <span class='moth-code-keyword'>this</span>.x <span class='moth-code-operator'>*</span> <span class='moth-code-keyword'>this</span>.x <span class='moth-code-operator'>+</span> <span class='moth-code-keyword'>this</span>.y <span class='moth-code-operator'>*</span> <span class='moth-code-keyword'>this</span>.y
 <span class='moth-code-delimiter'>;</span>
 
@@ -1078,8 +1078,8 @@ length <span class='moth-code-operator'>=</span> vector.<span class='moth-code-f
 
 <div class="doc-level__panel doc-level__panel--advanced">
     <p>A mutable receiver method declares <code>this ~Type</code>.</p><pre style=""><code class='codeblock'><span class='moth-code-nominal'>Vector2</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>|</span>
-    x <span class='moth-code-type'>Float</span>,
-    y <span class='moth-code-type'>Float</span>,
+    x <span class='moth-code-type'>F64</span>,
+    y <span class='moth-code-type'>F64</span>,
 <span class='moth-code-delimiter'>|</span>
 
 <span class='moth-code-function'>reset</span> <span class='moth-code-delimiter'>|</span><span class='moth-code-keyword'>this</span> <span class='moth-code-operator'>~</span><span class='moth-code-nominal'>Vector2</span><span class='moth-code-delimiter'>|</span><span class='moth-code-delimiter'>:</span>

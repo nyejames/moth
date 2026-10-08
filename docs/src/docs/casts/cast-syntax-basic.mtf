@@ -1,27 +1,26 @@
-A cast converts a value to the type expected by its destination.
+`cast` converts a value to the type required by its immediate typed
+destination:
 
 [codeblock, $code("moth"):
-    parse_count |text String| -> Int, Error!:
-        return cast! text
-    ;
-
-    ratio Float = cast 3
+    count U64 = cast 42
+    label String = cast count
 ]
 
-Read the first conversion as:
+The destination must already give a concrete type. An untyped binding cannot
+supply one:
 
-> Convert `text` to the `Int` required by the function's return slot.
+[codeblock, $code("moth"):
+    invalid = cast source
+]
 
-Use:
+Use `catch` to handle a fallible conversion and any failure while evaluating
+its operand:
 
-- `cast` when the conversion cannot fail
-- `cast!` when conversion failure should leave through a compatible builtin `Error!` return
-- `cast ... catch:` when failures in the operand or conversion should be handled here
+[codeblock, $code("moth"):
+    count I32 = cast text catch then 0
+]
 
-`catch` covers the complete cast expression, not only the conversion. It can
-handle arithmetic and builtin `Error!` calls inside the operand too. A cast
-cannot combine `cast!` and `catch`, and invalid conversions remain source errors.
-See @./#fallible-casts (Fallible casts) for recovery rules.
-@../progress (Progress) owns current support.
-
-Moth does not use `Int(value)` or `String(value)` as conversion syntax.
+There is no cast-specific propagation spelling. A fallible cast follows the
+ordinary implicit or typed error route. Postfix `!` still applies to ordinary
+fallible calls. See @./#cast-syntax (Cast syntax) for target boundaries and
+source inference barriers.

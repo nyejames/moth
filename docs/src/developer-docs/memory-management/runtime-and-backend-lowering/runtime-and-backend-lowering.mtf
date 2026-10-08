@@ -36,7 +36,7 @@ GC is a permitted runtime representation for a statically legal lifetime topolog
 - Imprecise planning results in conservative retention, never in rejecting legal source.
 - Missing topology proof is not a backend fallback.
 - A missing physical strategy after successful topology validation is `CompilerError`.
-- Numeric semantics are language-defined and target-independent. The compilation boundary's `NumericProfile` fixes `Int` width and `Float` precision before command inputs and config; lowerers realise that profile and never choose another.
+- Numeric semantics are language-defined and target-independent. The eleven fixed-width identities and `I32`/`F64` defaults are fixed before backend lowering. Lowerers consume canonical types and operation/failure facts from HIR; physical carriers never choose a different width or precision.
 - Scalar storage size, alignment and computation carriers are separate from semantic type (`Scalar storage and carriers`) and move no memory-plan ownership. Scalar width may change concrete layout values inside a `ValidatedMemoryPlan`, but it does not change lifetime-topology legality or let a backend select its own memory strategy.
 
 ## Scalar storage and carriers
@@ -52,27 +52,39 @@ separate facts. For the ordinary Wasm scalar layout:
     F16          2 bytes  f32
     F32          4 bytes  f32
     F64          8 bytes  f64
-    Int, Uint, Float   the boundary profile's scalar size   matching carrier
 ]
 
-`Uint` follows the profile `Int` width there too: 4 bytes on an `i32` carrier
-under `Int32`, 8 bytes on an `i64` carrier under `Int64`, each with unsigned
-interpretation. Carrier or storage width never changes canonical identity, so
-a `Uint32` value stays distinct from `U32` even where their bytes match.
+The eleven fixed numeric types keep distinct canonical identities even when
+their storage and carrier match. `I8` and `U8`, for example, share `i32`
+carriage but keep their signed and unsigned language ranges; neither storage nor
+carrier selects a semantic alias. `Byte` remains a separate scalar, nominally
+distinct from `U8`.
 
 Natural alignment equals scalar byte size, and a scalar collection's stride is
 its scalar size. Narrow integer storage uses signed or unsigned narrow loads and
-narrow stores. `F16` storage converts binary16 bits to `F32` on load and rounds
-to binary16 bits on store; an `F32` arithmetic result carried in `f32` is not
-labelled `F16` before the specified narrowing boundary. Compact storage does not
-create a buffer source type, does not give `Byte` arithmetic, and keeps `Byte`
-nominally distinct from `U8`.
+stores. Integer arithmetic still checks the exact selected result width; an
+`i32` or `i64` carrier does not widen a narrow result or suppress its failure.
 
-These are target scalar facts derived from canonical numeric identity under the
-boundary `NumericProfile`. They create no allocation family and move no layout
-ownership: aggregate layout, allocation and every cleanup, count, ownership and
-coalescing decision remain with the `ValidatedMemoryPlan`. Other targets provide
-their own physical layout policy.
+`F16` storage converts binary16 bits to an `f32` carrier on load and rounds back
+at storage boundaries. In addition, every language-level `F16` operation must
+round to `F16` and check finiteness before its result feeds another operation.
+An `f32` carrier may implement the computation, but it cannot delay rounding
+until the final store. Compact storage does not create a buffer source type or
+give `Byte` arithmetic.
+
+Physical byte products, offsets, alignment and address calculations use
+suitable checked physical-size/offset representations and arithmetic,
+independent of source-visible `I32` counts. Those counts top out at
+`2_147_483_647`, subject to stricter target or resource limits. A valid element
+count neither permits a byte-product overflow nor requires the physical byte
+size to fit in `I32`: 300,000,000 `I64` elements have a 2.4 GB payload where
+target and resource limits permit.
+
+These are target scalar facts derived from exact canonical numeric identity and
+the selected physical policy, not a semantic profile. They create no allocation
+family and move no layout ownership: aggregate layout, allocation and every
+cleanup, count, ownership and coalescing decision remain with the
+`ValidatedMemoryPlan`. Other targets provide their own physical layout policy.
 
 ## Planning order
 
@@ -204,13 +216,13 @@ The representation can use host garbage collection, Wasm GC or a runtime tracing
 
 ## Profiles and backend capability
 
-Build profiles differ only in analysis effort and physical representation, never
-in access or lifetime source legality. Numeric width and precision are not a
-build-profile choice: they come from the compiler-owned `NumericProfile`, fixed
-once per compilation boundary before command inputs and config, and lowerers
-consume it rather than selecting it. Different numeric profiles may change `Int`
-overflow limits, `Float` rounding and folded results, and the same profile must
-preserve behaviour across JS and Wasm.
+Build profiles differ only in optional analysis effort and physical
+representation, never in access/lifetime source legality or language numeric
+semantics. The eleven exact fixed-width types and the `I32`/`F64` defaults do not
+vary by build profile, target or backend. Lowerers consume the resolved HIR
+type and operation facts; target capability validation may reject an unsupported
+operation but never changes its semantic width or precision. JavaScript, Wasm
+and other supported targets preserve the same observable numeric results.
 
 - Debug and development profiles may deliberately use a garbage-collected representation even where collector-free lowering is available, because debuggability, instrumentation, faster compilation and predictable runtime behaviour take priority.
 - GC-native backends may use their host collector on any profile.
@@ -258,10 +270,7 @@ The component may use any private allocation or garbage-collection strategy. Tha
 - options of supported values
 - recursively supported lists
 
-Foreign numeric widths project to explicit Moth widths rather than `Int` or
-`Float` (`docs/compiler-design-overview.md` > `Stable semantic identities` >
-`Compiler-owned and binding-backed symbols`); that mapping changes no lifetime or
-ownership fact on this page.
+Foreign integer widths project to exact Moth `I*`/`U*` widths, and `f32`/`f64` project to `F32`/`F64` (`docs/compiler-design-overview.md` > `Stable semantic identities` > `Compiler-owned and binding-backed symbols`). WIT V1 has no `F16` primitive. These mappings change no lifetime or ownership fact on this page.
 
 ### Rejected V1 WIT surfaces
 
@@ -403,7 +412,7 @@ Backends may consume:
 - region/exit information
 - validated retained-capture and builder-lifecycle constraints
 - external boundary classifications
-- the compilation boundary's `NumericProfile`, consumed rather than selected
+- canonical exact numeric types, operation domains and failure facts already carried by HIR
 
 Advisory drop sites never form final backend input. The current Wasm path that consumes them remains explicitly labelled implementation debt above.
 

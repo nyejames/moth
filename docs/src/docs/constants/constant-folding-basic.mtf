@@ -3,8 +3,8 @@
 The compiler must finish a constant before runtime code begins.
 
 [codeblock, $code("moth"):
-    base #Int = 4
-    larger #Int = base + 2
+    base #I32 = 4
+    larger #I32 = base + 2
 ]
 
 A constant can use another constant that is already available.
