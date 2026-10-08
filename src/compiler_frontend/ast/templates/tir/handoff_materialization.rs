@@ -28,11 +28,9 @@ use crate::compiler_frontend::ast::templates::tir::expression_constness::{
     effective_branch_selector_for_view, effective_loop_header_for_view,
 };
 use crate::compiler_frontend::ast::templates::tir::ids::{
-    ChildTemplateOccurrenceId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId,
+    TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId,
 };
-use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIr, TemplateIrNode, TemplateIrNodeKind,
-};
+use crate::compiler_frontend::ast::templates::tir::node::{TemplateIr, TemplateIrNodeKind};
 use crate::compiler_frontend::ast::templates::tir::overlays::{
     TirSlotResolutionKind, TirWrapperApplicationMode, TirWrapperContext,
 };
@@ -330,7 +328,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
         active_slot_plan: Option<TemplateSlotPlanId>,
         injection: Option<(&SlotKey, &OwnedRuntimeTemplateNode)>,
     ) -> Result<OwnedRuntimeTemplateNode, CompilerError> {
-        let node = self.effective_node(view, id)?;
+        let node = view.effective_node(id)?;
 
         let owned_node = match &node.kind {
             TemplateIrNodeKind::Sequence { children } => {
@@ -391,8 +389,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 reference,
                 occurrence_id,
             } => {
-                let wrapper_context =
-                    self.effective_wrapper_context_for_occurrence(view, *occurrence_id)?;
+                let wrapper_context = view.effective_wrapper_context(*occurrence_id)?;
                 let child_handoff = self.materialize_child_template_node(
                     view,
                     reference,
@@ -404,7 +401,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 if let Some(context) = wrapper_context {
                     self.apply_wrapper_context_overlay_to_child_handoff(
                         view,
-                        &context,
+                        context,
                         child_handoff,
                     )
                 } else {
@@ -517,7 +514,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 }
 
                 if let Some(resolution) =
-                    self.effective_slot_resolution_for_occurrence(view, placeholder.occurrence_id)?
+                    view.effective_slot_resolution(placeholder.occurrence_id)?
                     && let TirSlotResolutionKind::Resolved { sources } = &resolution.kind
                 {
                     return self.materialize_resolved_slot_sources(
@@ -556,64 +553,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 "TIR HIR handoff materialization referenced a missing template.",
             )
         })
-    }
-
-    fn get_node<'store>(
-        &self,
-        view: &TirView<'store>,
-        id: TemplateIrNodeId,
-    ) -> Result<&'store TemplateIrNode, CompilerError> {
-        view.store().get_node(id).ok_or_else(|| {
-            CompilerError::compiler_error(
-                "TIR HIR handoff materialization referenced a missing node.",
-            )
-        })
-    }
-
-    fn effective_node<'store>(
-        &self,
-        view: &TirView<'store>,
-        id: TemplateIrNodeId,
-    ) -> Result<&'store TemplateIrNode, CompilerError> {
-        self.get_node(view, id)
-    }
-
-    /// Resolves the effective wrapper context for a child-template occurrence,
-    /// preferring the override carried by the current exact view.
-    ///
-    /// WHAT: reads the active value-carried view context and resolves its
-    ///       wrapper-context overlay ID through the module store, returning a
-    ///       clone of the wrapper context for `occurrence_id` if one exists.
-    ///       Returns `None` when there is no view context or no wrapper-context
-    ///       overlay. A missing active overlay is an internal error.
-    /// WHY: wrapper context is an overlay dimension of the exact view, so child
-    ///      handoff applies inherited `$children(..)` wrappers and `$fresh`
-    ///      suppression without mutating the structural root.
-    fn effective_wrapper_context_for_occurrence(
-        &self,
-        view: &TirView<'_>,
-        occurrence_id: ChildTemplateOccurrenceId,
-    ) -> Result<Option<TirWrapperContext>, CompilerError> {
-        Ok(view.effective_wrapper_context(occurrence_id)?.cloned())
-    }
-
-    /// Resolves the effective slot resolution for a slot occurrence,
-    /// preferring the resolution carried by the current exact view.
-    ///
-    /// WHAT: reads the active value-carried view context and resolves its
-    ///       slot-resolution overlay ID through the module store, returning a
-    ///       clone of the `TirSlotResolution` for `occurrence_id` if one exists.
-    ///       Returns `None` when there is no view context or no slot-resolution
-    ///       overlay. A missing active overlay is an internal error.
-    /// WHY: slot resolution is an overlay dimension of the exact view, so
-    ///      handoff materializes resolved fills from the final effective view
-    ///      instead of treating every structural `Slot` as an empty placeholder.
-    fn effective_slot_resolution_for_occurrence(
-        &self,
-        view: &TirView<'_>,
-        occurrence_id: SlotOccurrenceId,
-    ) -> Result<Option<super::overlays::TirSlotResolution>, CompilerError> {
-        Ok(view.effective_slot_resolution(occurrence_id)?.cloned())
     }
 
     /// Materializes a `ChildTemplate` node into an owned runtime handoff node.

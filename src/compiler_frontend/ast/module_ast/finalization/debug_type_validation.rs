@@ -44,7 +44,7 @@ use std::convert::Infallible;
 /// Context shared by every helper in this debug validation pass.
 ///
 /// WHAT: bundles the final module `TypeEnvironment` with the module-scoped
-///       `TemplateIrStore` and `TemplateIrStore` so template-expression
+///       `TemplateIrStore` so template-expression
 ///       payload validation resolves one required finalized `TirView`.
 /// WHY: debug validation is read-only and short-lived; a small context struct
 ///      keeps the recursive walk signatures focused.

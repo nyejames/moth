@@ -49,7 +49,7 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateSlotReason, InvalidTemplateStructureReason,
+    CompilerDiagnostic, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::instrumentation::{
     AstCounter, FrontendCounter, add_ast_counter, increment_frontend_counter,
@@ -320,7 +320,6 @@ impl Template {
             control_flow_validation,
             preparation_mode,
             default_style,
-            allow_stored_insert_carrier,
         } = parse_options;
         // The parser-local build state accumulates head/body metadata while
         // parsing. The durable `Template` is constructed once after
@@ -553,37 +552,6 @@ impl Template {
             .into());
         }
 
-        // `$insert(...)` helpers are allowed to survive while a template still has
-        // unresolved `$slot` markers, because that template may later compose into
-        // an immediate parent and contribute upward. Once a template has no slots
-        // left, any remaining `$insert(...)` is out of scope and must error.
-        //
-        // Composed templates are exempt: head-chain composition routes insert
-        // contributions into the receiving wrapper's slots, leaving
-        // `InsertContribution` nodes in the composed tree. These are not
-        // orphaned — they were consumed by composition — so the check must not
-        // fire on a composed reference.
-        let is_stored_insert_carrier = allow_stored_insert_carrier
-            && crate::compiler_frontend::ast::templates::tir::stored_insert_contribution_templates(
-                &context.template_ir_store.borrow(),
-                tir_reference.root,
-            )
-            .map_err(TemplateError::from)?
-            .is_some();
-        if !matches!(build_state.kind, TemplateType::SlotInsert(_))
-            && !template_preparation.facts.has_unresolved_slot_occurrences
-            && template_preparation.facts.has_escaped_insert_helpers
-            && !tir_reference.phase.is_at_least(TemplateTirPhase::Composed)
-            && !is_stored_insert_carrier
-        {
-            return Err(CompilerDiagnostic::invalid_template_slot(
-                InvalidTemplateSlotReason::InsertOutsideParentSlot,
-                None,
-                construction_span,
-            )
-            .into());
-        }
-
         // Write the parser-local classification through the store owner before
         // constructing the durable handle. All later consumers read this TIR entry through the
         // handle.
@@ -600,7 +568,8 @@ impl Template {
         if matches!(
             control_flow_validation,
             TemplateControlFlowValidationMode::RuntimeCapable
-        ) {
+        ) && template_preparation.facts.has_escaped_insert_helpers
+        {
             let store = context.template_ir_store.borrow();
 
             validate_runtime_template_control_flow_slot_artifacts(&template, &store)?;

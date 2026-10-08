@@ -12,8 +12,7 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::TemplateType;
 use crate::compiler_frontend::ast::templates::tir::{
-    TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore, TemplatePreparationMode,
-    TemplateTirPhase, TirView, TirViewIdentity, prepare_tir_view,
+    TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore, TirView, TirViewIdentity,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
@@ -23,45 +22,28 @@ use std::collections::HashSet;
 /// Rejects slot composition artifacts that would otherwise reach runtime
 /// control-flow lowering.
 ///
-/// Compile-time-required callers do not run this check, because slots can still
-/// be resolved or folded before runtime; their proof is the const-mode
-/// preparation construction already performed. This runtime-only check runs
-/// after composition/formatting, when any remaining slot or insertion inside a
-/// control-flow body would otherwise become a HIR invariant failure.
+/// Compile-time-required callers do not run this check because their prepared
+/// view is validated and folded through the const-mode path. Runtime
+/// construction gates the walk on preparation's escaped-insert fact so it can
+/// locate any helper that remains inside a control-flow body.
 ///
-/// WHAT: constructs one required module-store `TirView` and validates every
-///       reachable control-flow body through that view. Missing module store,
-///       template, root, node or overlay authority propagates as an internal
-///       error rather than a silent no-op.
+/// WHAT: constructs the exact module-store `TirView` from the template's
+///       durable reference and checks every reachable control-flow body.
+///       Missing template, root, node or overlay authority propagates as an
+///       internal error rather than a silent no-op.
 pub(crate) fn validate_runtime_template_control_flow_slot_artifacts(
     template: &Template,
     tir_store: &TemplateIrStore,
 ) -> Result<(), TemplateError> {
-    let view = runtime_tir_view_for_template(template, tir_store)?;
-    validate_runtime_tir_view_control_flow_slot_artifacts(&view)
-}
-
-/// Constructs the required module-store `TirView` for runtime artifact
-/// validation.
-///
-/// WHAT: validates the durable reference against the module store before
-///       constructing the effective view. Runtime validation runs during
-///       template construction, so any post-parse phase is sufficient; we do not
-///       require `Finalized` here. Missing authority is an internal compiler
-///       error, not permission to fall back to a raw store walk.
-fn runtime_tir_view_for_template<'a>(
-    template: &Template,
-    tir_store: &'a TemplateIrStore,
-) -> Result<TirView<'a>, TemplateError> {
     let reference = &template.tir_reference;
-
-    TirView::new(
+    let view = TirView::new(
         tir_store,
         reference.root,
         reference.phase,
         reference.context,
     )
-    .map_err(TemplateError::from)
+    .map_err(TemplateError::from)?;
+    validate_runtime_tir_view_control_flow_slot_artifacts(&view)
 }
 
 /// Validates every reachable runtime control-flow body through a module-store
@@ -79,16 +61,6 @@ fn runtime_tir_view_for_template<'a>(
 fn validate_runtime_tir_view_control_flow_slot_artifacts(
     view: &TirView<'_>,
 ) -> Result<(), TemplateError> {
-    // Render-unit validation can still receive parser-owned Parsed TIR. The
-    // complete preparation proof begins at Composed, so retain the narrow
-    // structural check for that earlier construction boundary.
-    if view.phase().is_at_least(TemplateTirPhase::Composed) {
-        let preparation = prepare_tir_view(view, TemplatePreparationMode::Value)?;
-        if !preparation.facts.has_escaped_insert_helpers {
-            return Ok(());
-        }
-    }
-
     let root_node_id = view.root_template()?.root;
     let mut visiting = HashSet::from([view.identity()]);
 

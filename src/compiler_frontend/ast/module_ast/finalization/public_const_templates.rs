@@ -202,8 +202,8 @@ impl AstFinalizer<'_, '_> {
 
 /// Classify one finalization projection into the value the module constant store holds.
 ///
-/// WHAT: maps the four const-template classifications onto the store's template payload, and
-/// rejects the two that cannot be a compile-time constant value.
+/// WHAT: maps const-template classifications onto the store's template payload and rejects the
+/// `NonConst` classification.
 /// WHY: the store must not re-derive template identity, and the classification rule is the same
 /// for every module constant, so it belongs beside the projection that produced it rather than
 /// inline in the finalization sequence.

@@ -207,6 +207,8 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [styles](src/projects/html_project/styles/): $html/$css/$escape_html/$code validation/rendering.
     - [code.rs](src/projects/html_project/styles/code.rs): the `$code` scanner shell, role vocabulary and span emission, with [moth_scanner.rs](src/projects/html_project/styles/moth_scanner.rs) owning the Moth contextual state machines and [language_profiles.rs](src/projects/html_project/styles/language_profiles.rs) the profile registry and non-Moth word tables.
 - [external_js](src/projects/html_project/external_js/): provider-backed JS imports, runtime modules/assets/glue.
+    - [parser](src/projects/html_project/external_js/parser/mod.rs): annotation extraction, JS export/import scanning and binding orchestration.
+        - [binding.rs](src/projects/html_project/external_js/parser/binding.rs): annotation/export matching, signature and type validation, U32 literal materialisation and runtime-import deduplication.
 - [binding_packages](src/projects/html_project/binding_packages/): builder-owned binding packages for HTML projects.
     - [@web packages](src/projects/html_project/binding_packages/web/mod.rs): shared registration of every built-in `@web/*` JS asset. Each package directory holds its asset and a `README.md` with its living design and plan.
         - [@web/canvas](src/projects/html_project/binding_packages/web/canvas/): Canvas 2D asset (`canvas.js`). Used by the `@html` canvas helpers.

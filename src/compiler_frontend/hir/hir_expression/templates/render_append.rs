@@ -501,6 +501,20 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<RuntimeTemplateEmission, HirConstructionFailure> {
         let aggregate = self.initialize_runtime_template_accumulator(span_ref)?;
         let emitted_any_iteration = self.initialize_runtime_template_emitted_flag(span_ref)?;
+        let emit_template_iteration =
+            |builder: &mut HirBuilder<'_>| -> Result<(), HirConstructionFailure> {
+                let iteration_context = append_context
+                    .with_target_accumulator(aggregate)
+                    .with_emitted_output(emitted_any_iteration);
+
+                builder.append_owned_runtime_template_node_to_accumulator(
+                    body,
+                    iteration_context,
+                    aggregate_local,
+                    span_ref,
+                )?;
+                Ok(())
+            };
 
         match header {
             TemplateLoopHeader::Conditional { condition } => {
@@ -508,19 +522,7 @@ impl<'a> HirBuilder<'a> {
                     condition,
                     span_ref,
                     None,
-                    |builder: &mut HirBuilder<'_>| {
-                        let iteration_context = append_context
-                            .with_target_accumulator(aggregate)
-                            .with_emitted_output(emitted_any_iteration);
-
-                        builder.append_owned_runtime_template_node_to_accumulator(
-                            body,
-                            iteration_context,
-                            aggregate_local,
-                            span_ref,
-                        )?;
-                        Ok(())
-                    },
+                    emit_template_iteration,
                 )?;
             }
 
@@ -529,19 +531,7 @@ impl<'a> HirBuilder<'a> {
                     bindings,
                     range,
                     span_ref,
-                    |builder: &mut HirBuilder<'_>| {
-                        let iteration_context = append_context
-                            .with_target_accumulator(aggregate)
-                            .with_emitted_output(emitted_any_iteration);
-
-                        builder.append_owned_runtime_template_node_to_accumulator(
-                            body,
-                            iteration_context,
-                            aggregate_local,
-                            span_ref,
-                        )?;
-                        Ok(())
-                    },
+                    emit_template_iteration,
                 )?;
             }
 
@@ -550,19 +540,7 @@ impl<'a> HirBuilder<'a> {
                     bindings,
                     iterable,
                     span_ref,
-                    |builder: &mut HirBuilder<'_>| {
-                        let iteration_context = append_context
-                            .with_target_accumulator(aggregate)
-                            .with_emitted_output(emitted_any_iteration);
-
-                        builder.append_owned_runtime_template_node_to_accumulator(
-                            body,
-                            iteration_context,
-                            aggregate_local,
-                            span_ref,
-                        )?;
-                        Ok(())
-                    },
+                    emit_template_iteration,
                 )?;
             }
         }

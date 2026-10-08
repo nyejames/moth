@@ -30,7 +30,7 @@ mod types;
 pub(crate) use error::BorrowCheckError;
 pub(crate) use types::{BorrowAnalysis, BorrowCheckReport, BorrowDropSiteKind};
 
-#[cfg(any(test, feature = "show_borrow_checker"))]
+#[cfg(test)]
 pub(crate) use types::{BorrowDropSite, LocalMode, OptionalTransferStatus};
 pub(crate) type BorrowFacts = BorrowAnalysis;
 

@@ -1853,7 +1853,9 @@ fn newline_continuations_do_not_turn_expressions_into_literal_constants() {
         "^ 1",
         "<< 1",
         "< 5",
+        "!= 3",
         "=== 4",
+        "!== 3",
         "? 1 : 0",
         ".toString()",
         "(other)",
@@ -1993,17 +1995,19 @@ fn constant_range_diagnostic_identifies_the_authored_literal_span() {
 }
 
 #[test]
-fn newline_prefix_update_statement_does_not_continue_a_constant_initializer() {
-    for update in ["++counter", "--counter"] {
+fn newline_prefix_statements_do_not_continue_constant_initializers() {
+    for statement in ["++counter", "--counter", "!counter"] {
         for trivia in ["\n", " // comment\n", " /* comment\n */ "] {
             let source = format!(
                 "let counter = 0;\n\
-                 /** @moth.const mode U32 */\nexport const MODE = 4{trivia}{update};"
+                 /** @moth.const mode U32 */\nexport const MODE = 4{trivia}{statement};\n\
+                 /** @moth.const actual U32 */\nexport const ACTUAL = 5;"
             );
             let parsed = parse(&source);
             assert_no_diagnostics(&parsed);
-            assert_eq!(parsed.constants.len(), 1);
+            assert_eq!(parsed.constants.len(), 2);
             assert_eq!(parsed.constants[0].value.as_u64(), Some(4));
+            assert_eq!(parsed.constants[1].moth_name, "actual");
         }
     }
 }

@@ -393,9 +393,10 @@ impl<'a> ExportScanner<'a> {
                     | '`'
                     | ','
             )
-        }) || ["in", "instanceof"]
-            .iter()
-            .any(|keyword| self.peek_str(keyword) && self.is_word_boundary_around(keyword.len()));
+        }) || self.peek_str("!=")
+            || ["in", "instanceof"].iter().any(|keyword| {
+                self.peek_str(keyword) && self.is_word_boundary_around(keyword.len())
+            });
         let starts_prefix_update = self.peek_str("++") || self.peek_str("--");
 
         let has_boundary = has_closed_trivia

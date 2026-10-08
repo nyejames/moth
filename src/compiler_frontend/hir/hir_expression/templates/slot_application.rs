@@ -366,14 +366,9 @@ fn owned_runtime_template_node_guarantees_output(
             dynamic_expression_guarantees_output(expression, string_table)
         }
 
-        OwnedRuntimeTemplateNode::ChildTemplate { template, .. } => match &template.body {
-            OwnedRuntimeTemplateBody::Render(node) => {
-                owned_runtime_template_node_guarantees_output(node, string_table)
-            }
-            OwnedRuntimeTemplateBody::RuntimeSlotApplication(handoff) => {
-                owned_runtime_template_node_guarantees_output(&handoff.wrapper, string_table)
-            }
-        },
+        OwnedRuntimeTemplateNode::ChildTemplate { template, .. } => {
+            runtime_template_handoff_guarantees_output(template, string_table)
+        }
 
         // Runtime template control flow can structurally produce no output
         // after HIR evaluates its condition or iterable. Even when the body

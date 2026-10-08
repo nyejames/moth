@@ -43,12 +43,9 @@ pub struct OwnedRuntimeTemplateHandoff {
 
 /// Runtime template body kind.
 ///
-/// WHAT: distinguishes ordinary render trees from nested runtime slot
-/// applications.
-/// WHY: current HIR lowering gives runtime slot applications precedence over
-/// linear/control-flow rendering. Keeping that distinction in the handoff lets
-/// the later lowering slice preserve the same dispatch rule without looking
-/// back at structural template data.
+/// WHAT: distinguishes ordinary render trees from runtime slot applications.
+/// WHY: HIR sends render bodies and slot application bodies through their
+/// respective lowering paths without consulting structural template data.
 #[derive(Clone, Debug)]
 pub(crate) enum OwnedRuntimeTemplateBody {
     Render(OwnedRuntimeTemplateNode),

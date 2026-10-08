@@ -14736,6 +14736,13 @@ contract = "backend.html.external_fixed_u32_constant_values"
 role = "primary"
 
 [[case]]
+id = "external_const_u32_inequality_initializer_rejected"
+path = "external_const_u32_inequality_initializer_rejected"
+tags = ["integration", "numeric", "external", "fixed-consts", "diagnostics"]
+contract = "language.dependencies.external_const_u32_initializer_rejected"
+role = "primary"
+
+[[case]]
 id = "external_const_u32_int64"
 path = "external_const_u32_int64"
 tags = ["integration", "numeric", "external", "runtime", "fixed-consts", "int64", "release"]

@@ -44,7 +44,7 @@ use crate::compiler_frontend::ast::templates::tir::{TemplateSlotPlan, TemplateSl
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateNode,
 };
-use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::datatype::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
@@ -1055,7 +1055,7 @@ fn runtime_child_reference_uses_structural_handoff() {
 }
 
 #[test]
-fn child_infrastructure_error_propagates_through_hir_handoff() {
+fn missing_child_node_authority_propagates_as_compiler_error_through_hir_handoff() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -1087,9 +1087,11 @@ fn child_infrastructure_error_propagates_through_hir_handoff() {
     let error = materialize_parent_handoff_result(store, parent_id, &mut strings, context)
         .expect_err("malformed child authority must reach the HIR handoff caller");
 
+    assert_eq!(error.error_type, ErrorType::Compiler);
     assert!(
-        error.msg.contains("missing node"),
-        "expected a stable infrastructure lane, got: {}",
+        error.msg.contains("TirView::effective_node")
+            && error.msg.contains("TemplateIrNodeId(999)"),
+        "expected child node authority context, got: {}",
         error.msg
     );
 }
@@ -1903,8 +1905,5 @@ fn handoff_rejects_exact_view_child_cycle() {
 
     let error = handoff_for_view(view, &StringTable::new())
         .expect_err("exact-view child cycles must fail before handoff recursion");
-    assert_eq!(
-        error.error_type,
-        crate::compiler_frontend::compiler_errors::ErrorType::Compiler
-    );
+    assert_eq!(error.error_type, ErrorType::Compiler);
 }

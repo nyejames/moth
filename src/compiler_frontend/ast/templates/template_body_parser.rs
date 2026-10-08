@@ -137,8 +137,8 @@ pub(crate) struct TemplateBodyParseRequest<'a, 'types> {
 
 /// Options that stay stable for one template node while its head and body are parsed.
 ///
-/// WHAT: groups parsing mode, control-flow validation, preparation, style defaults and
-/// stored-insert handling for recursive template construction.
+/// WHAT: groups parsing mode, control-flow validation, preparation and style defaults for
+/// recursive template construction.
 /// WHY: nested template construction preserves source-kind defaults and the owning validation
 /// boundary without inheriting body-parser state.
 #[derive(Clone)]
@@ -150,12 +150,6 @@ pub(crate) struct NestedTemplateParseOptions {
     /// composed view.
     pub(crate) preparation_mode: TemplatePreparationMode,
     pub(crate) default_style: Option<Style>,
-    /// Allows a nested template whose sole content is a stored `$insert(...)`
-    /// helper to be flattened into its immediate parent contribution stream.
-    ///
-    /// A standalone escaped insert remains invalid; only the body parser can
-    /// opt into this carrier form because it owns the immediate parent.
-    pub(crate) allow_stored_insert_carrier: bool,
 }
 
 impl NestedTemplateParseOptions {
@@ -165,7 +159,6 @@ impl NestedTemplateParseOptions {
             control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
             preparation_mode: TemplatePreparationMode::Value,
             default_style: None,
-            allow_stored_insert_carrier: false,
         }
     }
 
@@ -175,7 +168,6 @@ impl NestedTemplateParseOptions {
             control_flow_validation: TemplateControlFlowValidationMode::ConstRequired,
             preparation_mode: TemplatePreparationMode::ConstRequired,
             default_style: None,
-            allow_stored_insert_carrier: false,
         }
     }
 
@@ -411,7 +403,6 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
             control_flow_validation: self.control_flow_validation,
             preparation_mode: TemplatePreparationMode::Value,
             default_style: self.default_style.clone(),
-            allow_stored_insert_carrier: true,
         };
 
         let child_construction = Template::new_nested_template(

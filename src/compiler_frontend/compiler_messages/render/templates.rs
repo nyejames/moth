@@ -7,7 +7,7 @@
 use super::context::DiagnosticRenderContext;
 use super::named_value_or_default;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, InvalidTemplateSlotReason,
+    CompileTimeEvaluationErrorReason, InvalidTemplateSlotReason, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
 use moth_lexical::numeric::profile::NumericProfile;
@@ -193,106 +193,116 @@ pub(crate) fn compile_time_evaluation_error_suggestion(
 }
 
 pub(crate) fn invalid_template_structure_message(
-    reason: crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason,
+    reason: InvalidTemplateStructureReason,
     context: DiagnosticRenderContext<'_>,
 ) -> String {
     match reason {
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::MissingClosingBracket => {
+
+        // Template delimiters, nesting and direct child structure.
+        InvalidTemplateStructureReason::MissingClosingBracket => {
             "Template is missing a closing bracket.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::SlotInHead => {
+        InvalidTemplateStructureReason::SlotInHead => {
             "Slot insertions cannot appear in template heads.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::MissingHandlerBody => {
+        InvalidTemplateStructureReason::MissingHandlerBody => {
             "Template handler is missing a body.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::InvalidChildDirective => {
+        InvalidTemplateStructureReason::InvalidChildDirective => {
             "Invalid child directive in template.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::NestedTemplateNotAllowed => {
+        InvalidTemplateStructureReason::NestedTemplateNotAllowed => {
             "Nested templates are not allowed here.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::HelperInConstTemplate => {
+
+        // Template-head values and compile-time requirements.
+        InvalidTemplateStructureReason::HelperInConstTemplate => {
             "Top-level const templates cannot evaluate to '$insert(...)' helpers.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::NonFoldableConstTemplate => {
+        InvalidTemplateStructureReason::NonFoldableConstTemplate => {
             "Top-level const templates must be fully foldable at compile time.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::NonFoldableDocComment => {
+        InvalidTemplateStructureReason::NonFoldableDocComment => {
             "'$doc' comments can only contain compile-time values.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::FallibleValueInTemplateHead => {
+        InvalidTemplateStructureReason::FallibleValueInTemplateHead => {
             "Template heads do not implicitly unwrap fallible values. Handle the error before using the success value, with postfix `!` in a compatible fallible function or with `catch` recovery.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::UnsupportedTypeInTemplateHead { type_id } => {
+        InvalidTemplateStructureReason::UnsupportedTypeInTemplateHead { type_id } => {
             let type_name = super::context::diagnostic_type_name(type_id, context);
             format!(
                 "Template head expressions only accept final scalar or textual values. Found: {}",
                 type_name
             )
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::RuntimeTemplateInConst => {
+        InvalidTemplateStructureReason::RuntimeTemplateInConst => {
             "Const templates can only capture compile-time templates.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::RuntimeValueInConstTemplateHead => {
+        InvalidTemplateStructureReason::RuntimeValueInConstTemplateHead => {
             "Const templates can only capture compile-time values in the template head.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::EmptyPathInTemplateHead => {
+
+        // Head composition and runtime slot routing.
+        InvalidTemplateStructureReason::EmptyPathInTemplateHead => {
             "Path token in template head cannot be empty.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::IncompatibleHeadItem => {
+        InvalidTemplateStructureReason::IncompatibleHeadItem => {
             "This template head item is incompatible with other meaningful items in this template head.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::HelperOutsideWrapperSlot => {
+        InvalidTemplateStructureReason::HelperOutsideWrapperSlot => {
             "Template helper reached AST finalization outside immediate wrapper-slot composition.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedInsert => {
+        InvalidTemplateStructureReason::RuntimeControlFlowUnresolvedInsert => {
             "Runtime template control-flow bodies cannot leave unresolved `$insert(...)` helpers.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::MissingCommaBeforeControlFlowSuffix => {
+
+        // Control-flow suffix syntax.
+        InvalidTemplateStructureReason::MissingCommaBeforeControlFlowSuffix => {
             "Template control-flow suffixes must be separated from earlier head items with a comma.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::ControlFlowSuffixNotFinal => {
+        InvalidTemplateStructureReason::ControlFlowSuffixNotFinal => {
             "Template control-flow suffixes must be the final item in the template head.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::MissingTemplateIfCondition => {
+        InvalidTemplateStructureReason::MissingTemplateIfCondition => {
             "Template `if` suffix is missing a condition.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::MissingTemplateLoopHeader => {
+        InvalidTemplateStructureReason::MissingTemplateLoopHeader => {
             "Template `loop` suffix is missing a Bool condition, collection source or numeric range header."
                 .to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix => {
+        InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix => {
             "Unexpected token after template control-flow suffix.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateMatchStyleControlFlowUnsupported => {
+        InvalidTemplateStructureReason::TemplateMatchStyleControlFlowUnsupported => {
             "Template `if` heads support Bool conditions and option-present capture only. Use ordinary statement/value `if value is:` blocks for pattern matching outside templates.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateIfConditionNotConst => {
+
+        // Const-required selectors and loop contents.
+        InvalidTemplateStructureReason::TemplateIfConditionNotConst => {
             "This template must be fully evaluated at compile time, so its `if` condition must fold to a Bool.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateIfBranchNotConst => {
+        InvalidTemplateStructureReason::TemplateIfBranchNotConst => {
             "This template must be fully evaluated at compile time, so its `if` body must be a compile-time value even when it is not selected.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateOptionCaptureConstDeferred => {
+        InvalidTemplateStructureReason::TemplateOptionCaptureConstDeferred => {
             "This template must be fully evaluated at compile time, but the optional value's presence cannot be determined at compile time.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst => {
+        InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst => {
             "This template must be fully evaluated at compile time, so its range-loop bounds must fold to numeric values.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateLoopSourceNotConst => {
+        InvalidTemplateStructureReason::TemplateLoopSourceNotConst => {
             "This template must be fully evaluated at compile time, so its collection-loop source must fold to a collection.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateLoopConditionNotConst => {
+        InvalidTemplateStructureReason::TemplateLoopConditionNotConst => {
             "This template must be fully evaluated at compile time, so its conditional-loop condition must fold to a Bool.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateConditionalLoopConstTrue => {
+        InvalidTemplateStructureReason::TemplateConditionalLoopConstTrue => {
             "A conditional loop that is true at compile time cannot appear in a template that must be fully evaluated at compile time because it may not terminate.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateLoopBodyNotConst => {
+        InvalidTemplateStructureReason::TemplateLoopBodyNotConst => {
             "This template must be fully evaluated at compile time, so its loop body must be a compile-time value for every iteration.".to_string()
         }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateConstLoopExpansionLimitExceeded { limit } => {
+        InvalidTemplateStructureReason::TemplateConstLoopExpansionLimitExceeded { limit } => {
             format!(
                 "Const template loop expansion is limited to {} iterations.",
                 limit
