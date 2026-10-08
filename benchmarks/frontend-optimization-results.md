@@ -5206,7 +5206,11 @@ excluded. The subsequent read-only `just bench-report` completed successfully.
 The earlier `ce4dc8831` whole-compiler measurements remain evidence for that
 tree. Final integrated timing, native history and main readiness remain open.
 
-### Current status
+### Phase 3 current status (historical checkpoint)
+
+This preserves the Phase 3 checkpoint as recorded. Current template-control-flow
+evidence and gate status are in **Template control-flow simplification: Phase 10
+evidence** below.
 
 Independent performance, storage, static-output and allocator-correction audits
 accepted the bounded evidence on `ce4dc8831` with the qualifications above.
@@ -5226,3 +5230,78 @@ and main-bound validation. No final main-branch full validation result, native
 benchmark-history entry, squash or pause checkpoint has been recorded. Phase 4
 waits for the user's explicit resumption after the separate template-control-flow
 removal. Record a fresh post-removal baseline before resuming its implementation.
+
+## Template control-flow simplification: Phase 10 evidence (2026-10-08)
+
+The accepted interleaved five-pair Phase 8B comparison is recorded in
+`tmp/template-control-flow/phase8-nested-comparison.json` and
+`tmp/template-control-flow/phase8-nested-comparison.md`. Control
+`981cec8d7` is the `f152` activation with matching package origins. The
+candidate patch became `5b97e59f6`, followed by Phase 9 cleanup and review
+at `eb16fdbe4`. An independent clean verification in
+`tmp/template-control-flow/phase8-final-performance-verification.md`
+recomputed 41 frontend and 39 CLI comparable cases. Only `docs_frontend`
+and `docs_check` were excluded for changed source and measurement
+identities. Results are mixed: they support no broad speed claim, Phase 8A-only
+attribution or package-origin attribution.
+
+| Case | Control → candidate medians (ms) | Median change |
+| --- | ---: | ---: |
+| `template_stress_frontend` | 36.324729 → 35.343812 | -2.700% |
+| `template_render_plan_churn_frontend` | 27.404146 → 27.835583 | +1.574% |
+| `template_stress_check` | 10.958708 → 10.614812 | -3.138% |
+| `template_render_plan_churn_check` | 9.262625 → 9.191730 | -0.765% |
+
+Five actual `just bench-frontend` and five `just bench` recording runs
+added ten history rows (43 → 53). Source/compiler identity stayed at
+`eb16fdbe4`; the ten intervening commits changed only the tracked monthly
+summary. These later runs were not interleaved with control, so the medians in
+`tmp/template-control-flow/phase10-recorded-comparison.json` are absolute
+observations, not paired or causal deltas.
+
+| Case | Five-run median (ms) |
+| --- | ---: |
+| `template_stress_frontend` | 34.7391875 |
+| `template_render_plan_churn_frontend` | 27.6284375 |
+| `template_stress_check` | 10.73825 |
+| `template_render_plan_churn_check` | 9.2745415 |
+| `speed_test_check` | 25.7352085 |
+| `speed_test_build` | 27.9733335 |
+| `root_single_file_check` | 6.5779585 |
+
+The native suites cover 42 frontend and 40 CLI cases with timing schema 2,
+history format 8 and benchmark protocol 4, using one warmup and ten measured
+iterations. Thread overrides were unset (`thread_count` recorded as `null`);
+the toolchain was Node 24.21.0, Rust 1.99.0 and LLVM 23.1.1. The tracked
+monthly summary keeps compact no-change entries; raw benchmark histories and
+profile artefacts remain local-only.
+
+No positive primary-case movement in the later batch exceeds the native case
+floors. `generic_trait_churn_frontend` has two overlapping stage totals roughly
+1.00 ms above the earlier control medians, each exceeding that median plus
+1 ms in three of five later runs. Its primary increase is 0.833 ms, below the
+2 ms floor, and two later runs are faster than control. This is an unpaired
+attribution observation and does not establish a causal regression.
+
+Separate counter-on pressure evidence changed blocks from 205 to 202,
+statements from 1,011 to 776 and guard sets from 1 to 0. Worklist size moved
+1,181 to 1,178 and joins 1,014 to 1,013 after proof reuse. Phase 9 made no
+field-layout change. Native profile symbolication still failed. The derived
+419-sample record adjusts name strings but does not provide fully symbolicated
+attribution.
+
+Phase 9 selected checks recorded C0: 890 template, 397 TIR and 63 HIR tests;
+114 parser and 67 finalisation tests; 198 template, 113 ordinary control-flow
+and 39 external integration backend blocks plus one new case. Clippy, formatting, suite
+audit (2,109 cases and 2,395 blocks), docs check and release build also recorded
+C0. `just boracle` and `just boracle-campaign` subsequently passed on the same
+production tree. The final integrated `just validate-full` passed with Node
+24.21.0 and the repository Rust pin: all ten standard feature lanes, 2,395
+integration backend blocks, the docs check, source/dependency and honesty audits,
+performance budgets, three scaling series and no-timer release-artifact checks.
+The documentation release build produced 79 outputs. Phase 3M is accepted and
+Phase 4 remains paused until explicit user resumption with a fresh baseline.
+
+Optional outbound `I32` adapter consolidation remains a separate follow-up
+in `src/compiler_frontend/runtime_glue/source.rs` because the outbound
+negative-zero contract is unproven.

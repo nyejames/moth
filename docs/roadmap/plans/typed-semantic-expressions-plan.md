@@ -3,10 +3,10 @@
 ## Status
 
 ```text
-STATUS: paused for the approved template control-flow simplification, design direction approved
-CURRENT_SLICE: Phase 3 implementation and review corrections accepted; 3M closeout remains open
-BLOCKERS: template simplification remains active; final integrated costs, native history and main-bound validation remain pending
-NEXT_ACTION: finish template simplification and 3M evidence on the synchronized tree, recheck any later committed package fixes before the main squash; resume Phase 4 only at the user's request with a fresh post-removal baseline
+STATUS: paused after Phase 3; template control-flow simplification complete
+CURRENT_SLICE: Phase 3 implementation, review corrections and 3M closeout accepted
+BLOCKERS: none for this checkpoint; further implementation requires the user's explicit resumption
+NEXT_ACTION: record a fresh post-removal baseline when the user resumes, then continue Phase 4
 ```
 
 ## Purpose and authority
@@ -693,13 +693,23 @@ bit or a compatibility conversion back to ambiguous assignment.
   definition/update tables, backend snapshot-driven assignment/jump decisions,
   obsolete test fixtures and stale comments. Remove unused broad borrow-report
   plumbing. No base/generated or production/oracle split may preserve the old path.
-- [ ] **3M: validation and costs.** Run the parent Phase 3 gates, affected HIR,
+- [x] **3M: validation and costs.** Run the parent Phase 3 gates, affected HIR,
   borrow/Boracle, JS, supported Wasm and integration coverage plus architecture
   checks. Measure destination and statement size, side storage, HIR node/local
   counts, runtime helper/branch changes, JS output after removing alias
   specialisation and frontend deltas on the same Phase 3 cohort. Refresh five-pair
   performance evidence after the hardening. Do not trade semantic integrity for
   a smaller record or an unmeasured optimisation.
+
+  The historical post-hardening layout, capacity, native-output and five-pair
+  evidence is recorded in `benchmarks/frontend-optimization-results.md`, with
+  its corpus and static-stack limits. The accepted interleaved removal comparison
+  covers 41 frontend and 39 CLI comparable cases. Ten subsequent native history
+  runs at the `eb16fdbe4` production tree are absolute observations, not paired
+  speed attribution. Boracle and its differential campaign passed. Final
+  integrated `just validate-full` passed with Node 24.21.0 and the repository
+  Rust pin. The committed package donor was rechecked clean at the shared
+  reviewed checkpoint before integration. Phase 4 remains paused.
 
 **Exit check:** all current HIR consumers use one dense representation directly,
 published stores keep no unnecessary growth capacity, and estimate quality has
