@@ -1310,15 +1310,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             TemplateEmission::NoOutput => {
                 ConstStringValue::Text(fold_context.string_table.intern(""))
             }
-            TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
-                drop(fold_context);
-                return Err(self.error_messages(
-                    CompilerError::compiler_error(
-                        "Template loop-control signal escaped the nearest template loop during folding.",
-                    ),
-                    string_table,
-                ));
-            }
         };
 
         let result = FoldedConstTemplateResult::new(value);

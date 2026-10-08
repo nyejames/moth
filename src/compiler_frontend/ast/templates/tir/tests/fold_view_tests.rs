@@ -4,6 +4,9 @@
 // folding at the owning TIR boundary.
 // WHY: these tests cover the semantic fold invariants of the exact-view reducer.
 
+use crate::compiler_frontend::ast::ast_nodes::{
+    Declaration, LoopBindings, RangeEndKind, RangeLoopSpec,
+};
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
@@ -12,7 +15,7 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, Template, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateBranchSelector, TemplateFoldBinding,
+    TemplateBranchSelector, TemplateFoldBinding, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateEmission, TemplateFoldResult, TirFoldContext,
@@ -38,6 +41,9 @@ use crate::compiler_frontend::ast::templates::tir::summary::TemplateIrSummary;
 use crate::compiler_frontend::ast::templates::tir::view::{TemplateTirPhase, TirView};
 use crate::compiler_frontend::ast::templates::tir::{
     TemplatePreparation, TemplatePreparationMode, TemplatePreparationOutcome, prepare_tir_view,
+};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticPayload, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -476,6 +482,146 @@ fn fold_view_conditional_selectors_use_overlay_or_structural_expression() {
             .expect("overlay option selector should fold"),
         TemplateEmission::Output(ConstStringValue::Text(option_body_text)),
     );
+}
+
+#[test]
+fn fold_view_restores_option_and_loop_bindings_after_const_loop_limit_error() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut store = TemplateIrStore::new();
+
+    let option_capture_name = string_table.intern("option_value");
+    let option_capture_path = path_fork
+        .try_intern_portable_path("main.moth/#option_value", &mut string_table)
+        .expect("option capture path fits");
+    let outer_iteration_path = path_fork
+        .try_intern_portable_path("main.moth/#outer_iteration", &mut string_table)
+        .expect("outer loop binding path fits");
+    let unrelated_outer_path = path_fork
+        .try_intern_portable_path("main.moth/#unrelated_outer", &mut string_table)
+        .expect("outer fold binding path fits");
+
+    let mut type_environment = TypeEnvironment::new();
+    let mut option_scrutinee = Expression::option_none_with_type_id(
+        builtin_type_ids::INT,
+        DataType::Int,
+        &mut type_environment,
+        None,
+    );
+    option_scrutinee.kind = ExpressionKind::Coerced {
+        value: Box::new(Expression::int(7, None, ValueMode::ImmutableOwned)),
+        to_type: option_scrutinee.type_id,
+    };
+
+    let option_pattern = MatchPattern::OptionPresentCapture {
+        name: option_capture_name,
+        binding_path: option_capture_path,
+        inner_type_id: builtin_type_ids::INT,
+        span: None,
+        binding_span: None,
+    };
+
+    let mut builder = TemplateIrBuilder::new(&mut store);
+    let inner_text = string_table.intern("iteration");
+    let inner_text_node = builder.push_text_node(
+        inner_text,
+        "iteration".len(),
+        TemplateSegmentOrigin::Body,
+        None,
+    );
+    let inner_body = builder.push_sequence_node(vec![inner_text_node], None);
+    let range_header = |item, end| TemplateLoopHeader::Range {
+        bindings: Box::new(LoopBindings { item, index: None }),
+        range: Box::new(RangeLoopSpec {
+            start: Expression::int(0, None, ValueMode::ImmutableOwned),
+            end: Expression::int(end, None, ValueMode::ImmutableOwned),
+            end_kind: RangeEndKind::Exclusive,
+            step: None,
+        }),
+    };
+    let inner_loop = builder.push_loop_node(range_header(None, 2), inner_body, None, None);
+    let outer_body = builder.push_sequence_node(vec![inner_loop], None);
+    let outer_loop = builder.push_loop_node(
+        range_header(
+            Some(Declaration {
+                id: outer_iteration_path,
+                value: Expression::int(0, None, ValueMode::ImmutableOwned),
+                binding_span: None,
+                config_qualifier: None,
+            }),
+            1,
+        ),
+        outer_body,
+        None,
+        None,
+    );
+    let conditional_body = builder.push_sequence_node(vec![outer_loop], None);
+    let conditional = builder.push_conditional_node(
+        TemplateBranchSelector::OptionPresentCapture {
+            scrutinee: option_scrutinee,
+            pattern: Box::new(option_pattern),
+        },
+        conditional_body,
+        None,
+    );
+    let root = builder.push_sequence_node(vec![conditional], None);
+    let template_id = builder.finish_template(
+        root,
+        Style::default(),
+        TemplateType::String,
+        TemplateIrSummary::default(),
+        None,
+    );
+
+    let view = TirView::new(
+        &store,
+        template_id,
+        TemplateTirPhase::Composed,
+        TemplateViewContext::default(),
+    )
+    .expect("nested const-control-flow view should construct");
+    let prepared = prepare_tir_view(&view, TemplatePreparationMode::Value)
+        .expect("nested const-control-flow view should prepare");
+    assert!(matches!(
+        prepared.outcome,
+        TemplatePreparationOutcome::Foldable
+    ));
+
+    let mut context = fold_context(&mut string_table);
+    context.template_const_loop_iteration_limit = 1;
+    context.bindings.push(TemplateFoldBinding {
+        path: unrelated_outer_path,
+        value: Expression::int(9, None, ValueMode::ImmutableOwned),
+    });
+
+    let error = fold_prepared_template(&prepared, view, &mut context)
+        .expect_err("the two-iteration inner range should exceed the limit of one");
+    let TemplateError::Diagnostic(diagnostic) = error else {
+        panic!("const-loop expansion limit should remain a source diagnostic");
+    };
+    assert_eq!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidTemplateStructure {
+            reason: InvalidTemplateStructureReason::TemplateConstLoopExpansionLimitExceeded {
+                limit: 1,
+            },
+        }
+    );
+
+    let remaining_binding_paths = context
+        .bindings
+        .iter()
+        .map(|binding| binding.path)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        remaining_binding_paths,
+        vec![unrelated_outer_path],
+        "the failed fold must remove the option capture and active outer loop item"
+    );
+    assert!(matches!(
+        context.bindings[0].value.kind,
+        ExpressionKind::Int(9)
+    ));
 }
 
 // -------------------------

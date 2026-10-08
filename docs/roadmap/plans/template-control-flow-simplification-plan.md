@@ -12,9 +12,9 @@
 
 ```text
 STATUS: active, language simplification approved
-CURRENT_SLICE: Phase 3 accepted; Phase 4 next
+CURRENT_SLICE: Phase 4 accepted; Phase 5 next
 BLOCKERS: none; committed package fixes synchronized both ways at the parser checkpoint
-NEXT_ACTION: remove template loop-control signal propagation from folding
+NEXT_ACTION: replace runtime branch chains and finish HIR emission ownership
 ```
 
 ## Goal
@@ -904,7 +904,7 @@ rg -n \
 
 Every result must be removed or explicitly justified as unrelated text. Do not leave stale comments.
 
-Phase 3's TIR branch vectors, fallback storage and marker metadata are removed. Runtime `BranchChain` remains only in the Phase 5 handoff owner and its tests. `TemplateLoopControlKind` remains only for the Phase 4 fold-signal channel; there is no TIR loop-control node or producer. These two downstream deletions retain their explicit phase boundaries.
+Phase 3 removed TIR branch vectors, fallback storage and marker metadata. At that checkpoint runtime `BranchChain` remained assigned to the Phase 5 handoff owner and its tests, while `TemplateLoopControlKind` remained assigned to Phase 4's fold-signal channel. There was no TIR loop-control node or producer.
 
 - [x] One selector, stable expression site and body per conditional.
 - [x] Construction owns selector-site allocation and enclosing-node spans.
@@ -1107,6 +1107,16 @@ rg -n \
 ```
 
 No template-control signal path should remain.
+
+The helper classification and loop-control nodes were already retired in Phase 2. This checkpoint removes the remaining fold-signal channel and impossible consumer arms. Independent review also found a pre-existing loss of consumed loop-body provenance at aggregate completion. The owning fold now transfers those facts before either output completion path, with regression coverage for emitted bodies, visited no-output selectors and zero-iteration exclusion.
+
+- [x] Fold emissions contain only structural no-output or output.
+- [x] Recursive node, conditional, loop and wrapper folds carry no signal state.
+- [x] Selected option and loop bindings restore before errors propagate.
+- [x] Wrappers retain output modes, structural anchors and projection order.
+- [x] Const consumers use exhaustive matches without escape-signal errors.
+- [x] Consumed loop-body provenance survives aggregate completion.
+- [x] Focused validation and independent review, including correction verification, pass.
 
 Commit:
 

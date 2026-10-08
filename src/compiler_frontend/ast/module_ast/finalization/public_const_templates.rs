@@ -331,12 +331,6 @@ pub(super) fn project_const_template_value(
             Some(match emission {
                 TemplateEmission::NoOutput => ConstStringValue::Text(string_table.intern("")),
                 TemplateEmission::Output(value) => value,
-                TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
-                    return Err(CompilerError::compiler_error(
-                        "Folded module template emitted an unconsumed loop-control signal.",
-                    )
-                    .into());
-                }
             })
         }
         TemplateConstValueKind::SlotInsertHelper | TemplateConstValueKind::NonConst => None,

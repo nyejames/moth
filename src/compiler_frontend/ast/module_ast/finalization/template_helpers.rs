@@ -24,10 +24,7 @@ use moth_lexical::numeric::profile::NumericProfile;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// Exclusive finalization result for one prepared template value.
-///
-/// WHAT: pairs exactly one semantic outcome with the data needed by its owner.
-/// WHY: a folded value, runtime proof and helper artifact must never be represented
+/// A prepared template finishes as a folded value, runtime proof or slot insert helper.
 pub(super) enum FinalizedTemplateValue {
     Folded(ConstStringValue, SyntheticInterfaceProvenance),
     Runtime(TemplatePreparation),
@@ -84,27 +81,13 @@ pub(super) fn finalize_template_value(
     );
     let result = fold_prepared_template(&fold_preparation, view, &mut fold_context)?;
     let provenance = result.provenance;
-    let folded = template_emission_to_const_string_value(result.emission, &mut fold_context)?;
+    let folded = match result.emission {
+        TemplateEmission::NoOutput => ConstStringValue::Text(fold_context.string_table.intern("")),
+        TemplateEmission::Output(output) => output,
+    };
     increment_ast_counter(AstCounter::TemplatesFoldedDuringFinalization);
     increment_ast_counter(AstCounter::TirFinalizationFoldSuccesses);
     Ok(FinalizedTemplateValue::Folded(folded, provenance))
-}
-fn template_emission_to_const_string_value(
-    emission: TemplateEmission,
-    fold_context: &mut TirFoldContext<'_>,
-) -> Result<ConstStringValue, TemplateNormalizationError> {
-    match emission {
-        TemplateEmission::NoOutput => {
-            Ok(ConstStringValue::Text(fold_context.string_table.intern("")))
-        }
-        TemplateEmission::Output(output) => Ok(output),
-        TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
-            Err(CompilerError::compiler_error(
-                "Template loop-control signal escaped the nearest template loop during folding.",
-            )
-            .into())
-        }
-    }
 }
 
 /// Inputs for finalization-time template folding.

@@ -2,9 +2,7 @@
 //!
 //! Template control flow is parsed in the template head/body pipeline and
 //! emitted directly as TIR `Conditional` and `Loop` nodes. The sibling modules
-//! keep the validation, const-evaluability checks, const-loop folding
-//! mechanics separate because later roadmap slices will extend those concerns
-//! independently.
+//! separate shared control-flow data from validation and const-loop mechanics.
 
 mod const_eval;
 mod const_folding;
@@ -24,6 +22,6 @@ pub(crate) use const_folding::{
 pub(crate) use types::{
     TemplateBodyEmission, TemplateBodyParseMode, TemplateBranchSelector,
     TemplateControlFlowValidationMode, TemplateIfBodyParseInput, TemplateLoopBodyParseInput,
-    TemplateLoopControlKind, TemplateLoopHeader,
+    TemplateLoopHeader,
 };
 pub(crate) use validation::validate_runtime_template_control_flow_slot_artifacts;

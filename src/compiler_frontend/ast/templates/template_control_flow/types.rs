@@ -3,8 +3,7 @@
 //! These shared types are used by the parser, TIR, folding, validation and
 //! runtime handoff paths. Control-flow structure itself is owned by TIR
 //! `Conditional` and `Loop` nodes; these types carry only the selector, header,
-//! loop-control kind, parser inputs and validation modes that multiple stages
-//! genuinely share.
+//! parser inputs and validation modes that multiple stages genuinely share.
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{LoopBindings, RangeLoopSpec};
@@ -45,12 +44,6 @@ pub(crate) enum TemplateLoopHeader {
         bindings: Box<LoopBindings>,
         iterable: Box<Expression>,
     },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TemplateLoopControlKind {
-    Break,
-    Continue,
 }
 
 /// Structural output result from appending an owned runtime-template body.

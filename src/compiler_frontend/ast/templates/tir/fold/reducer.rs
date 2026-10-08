@@ -14,7 +14,6 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::TemplateType;
-use crate::compiler_frontend::ast::templates::template_control_flow::TemplateLoopControlKind;
 use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateEmission, TemplateFoldResult, TirFoldContext, resolve_fold_bindings_in_expression,
 };
@@ -475,21 +474,11 @@ pub(crate) fn fold_prepared_const_template_pattern(
         )
     })?;
 
-    match result.emission {
-        TemplateEmission::NoOutput | TemplateEmission::Output(_) => {
-            Ok(FoldedConstTemplatePattern {
-                pieces,
-                emission: result.emission,
-                provenance: result.provenance,
-            })
-        }
-        TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
-            Err(CompilerError::compiler_error(
-                "TIR const-template projection produced an unconsumed loop-control signal.",
-            )
-            .into())
-        }
-    }
+    Ok(FoldedConstTemplatePattern {
+        pieces,
+        emission: result.emission,
+        provenance: result.provenance,
+    })
 }
 
 /// Folds one exact Composed-or-later view through the shared reducer.
@@ -581,7 +570,7 @@ fn fold_tir_template_with_view(
         output_state.enable_projection();
     }
 
-    let signal = fold_tir_node_into_buffer(
+    fold_tir_node_into_buffer(
         template.root,
         &mut output_state,
         fold_context,
@@ -589,7 +578,7 @@ fn fold_tir_template_with_view(
         FoldInsertion::None,
     )?;
 
-    let emission = build_emission_from_buffer(output_state, estimated_bytes, signal, fold_context)?;
+    let emission = build_emission_from_buffer(output_state, estimated_bytes, fold_context);
 
     let wrapper_references = match template.conditional_child_wrapper_set {
         Some(wrapper_set_id) => store
@@ -620,11 +609,10 @@ fn fold_tir_template_with_view(
 //  Node folding
 // -------------------------
 
-/// Folds a single TIR node into an independent emission.
+/// Folds an independent TIR subtree into its own emission.
 ///
-/// WHAT: creates a fresh output buffer for the node and returns the full
-/// `TemplateEmission`. This is the right shape for branch bodies and loop
-/// bodies, which may produce break/continue signals.
+/// WHAT: owns fresh output and projection state for child roots and loop iterations before
+///       packaging their output and provenance.
 pub(super) fn fold_tir_node(
     node_id: TemplateIrNodeId,
     fold_context: &mut TirFoldContext<'_>,
@@ -636,7 +624,7 @@ pub(super) fn fold_tir_node(
         output_state.enable_projection();
     }
 
-    let signal = fold_tir_node_into_buffer(
+    fold_tir_node_into_buffer(
         node_id,
         &mut output_state,
         fold_context,
@@ -644,20 +632,19 @@ pub(super) fn fold_tir_node(
         insertion,
     )?;
 
-    build_emission_from_buffer(output_state, 0, signal, fold_context)
+    Ok(build_emission_from_buffer(output_state, 0, fold_context))
 }
 
 /// Folds a single TIR node, appending any output to the caller's buffer.
 ///
-/// WHAT: dispatches on node kind and appends output directly. Returns an
-/// optional loop-control signal when the node (or a nested node) produced one.
+/// WHAT: dispatches on node kind and appends output directly to the shared fold state.
 pub(super) fn fold_tir_node_into_buffer(
     node_id: TemplateIrNodeId,
     output_state: &mut FoldOutputState,
     fold_context: &mut TirFoldContext<'_>,
     fold_input: &FoldTraversalInput<'_, '_>,
     insertion: FoldInsertion<'_>,
-) -> Result<Option<TemplateLoopControlKind>, TemplateError> {
+) -> Result<(), TemplateError> {
     let store = fold_input.view.store();
     add_ast_counter(AstCounter::TirFoldNodesVisited, 1);
 
@@ -678,7 +665,7 @@ pub(super) fn fold_tir_node_into_buffer(
             let text = fold_context.string_table.resolve(*text);
             output_state.append_text(text);
             output_state.emitted_output = true;
-            Ok(None)
+            Ok(())
         }
 
         TemplateIrNodeKind::DynamicExpression { expression, site_id, .. } => {
@@ -747,7 +734,7 @@ pub(super) fn fold_tir_node_into_buffer(
                 }
                 output_state.append_emission_value(output, fold_context.string_table);
                 output_state.emitted_output = true;
-                return Ok(None);
+                return Ok(());
             }
 
             if insertion.is_aggregate() {
@@ -771,14 +758,14 @@ pub(super) fn fold_tir_node_into_buffer(
                     output_state.provenance.merge(&emission.provenance);
                     append_template_result_to_buffer(emission, output_state, fold_context)?;
                 }
-                return Ok(None);
+                return Ok(());
             }
 
             if fold_input.projection_enabled {
                 output_state.append_slot(placeholder.occurrence_id);
                 output_state.emitted_output = true;
             }
-            Ok(None)
+            Ok(())
         }
 
         TemplateIrNodeKind::InsertContribution { .. } => Err(CompilerError::compiler_error(
@@ -831,7 +818,7 @@ pub(super) fn fold_tir_node_into_buffer(
                 output_state.append_emission_value(output, fold_context.string_table);
                 output_state.append_pieces(projection)?;
                 output_state.emitted_output = true;
-                Ok(None)
+                Ok(())
             }
             FoldInsertion::None | FoldInsertion::Slot { .. } => Err(
                 CompilerError::compiler_error(
@@ -858,17 +845,12 @@ fn fold_tir_sequence(
     fold_context: &mut TirFoldContext<'_>,
     fold_input: &FoldTraversalInput<'_, '_>,
     insertion: FoldInsertion<'_>,
-) -> Result<Option<TemplateLoopControlKind>, TemplateError> {
+) -> Result<(), TemplateError> {
     for &child_id in children {
-        let signal =
-            fold_tir_node_into_buffer(child_id, output_state, fold_context, fold_input, insertion)?;
-
-        if signal.is_some() {
-            return Ok(signal);
-        }
+        fold_tir_node_into_buffer(child_id, output_state, fold_context, fold_input, insertion)?;
     }
 
-    Ok(None)
+    Ok(())
 }
 
 /// Folds a dynamic expression node after resolving fold bindings.
@@ -878,7 +860,7 @@ fn fold_tir_dynamic_expression(
     fold_context: &mut TirFoldContext<'_>,
     expression_span: Option<crate::compiler_frontend::source::SourceSpan>,
     fold_input: &FoldTraversalInput<'_, '_>,
-) -> Result<Option<TemplateLoopControlKind>, TemplateError> {
+) -> Result<(), TemplateError> {
     let store = fold_input.view.store();
     let resolved = resolve_fold_bindings_in_expression(expression, fold_context)?;
     let expression_ref: &Expression = match &resolved {
@@ -903,7 +885,7 @@ fn fold_tir_dynamic_expression(
     ) {
         // Runtime slot applications are helper-owned payloads. They contribute
         // no compile-time text when a surrounding const fold selects this path.
-        return Ok(None);
+        return Ok(());
     }
 
     if let Some(template) = nested_template_value(expression_ref) {
@@ -913,7 +895,7 @@ fn fold_tir_dynamic_expression(
         // rendered output. Slot inserts remain composition helpers and must be
         // rejected if they reach this final nested-value fold boundary.
         if matches!(template_kind, TemplateType::Comment(_)) {
-            return Ok(None);
+            return Ok(());
         }
         reject_slot_insert_template(template_kind)?;
 
@@ -938,7 +920,7 @@ fn fold_tir_dynamic_expression(
             }
         }
         output_state.emitted_output = true;
-        return Ok(None);
+        return Ok(());
     }
 
     match fold_expression_kind_to_string(
@@ -949,7 +931,7 @@ fn fold_tir_dynamic_expression(
         Some(text) => {
             output_state.append_text(&text);
             output_state.emitted_output = true;
-            Ok(None)
+            Ok(())
         }
         None => Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::NonFoldableConstTemplate,
@@ -1127,31 +1109,18 @@ fn fold_resolved_slot_source(
     }
 }
 
-/// Builds a `TemplateEmission` from a filled output buffer.
+/// Packages one completed output state as its fold emission.
 pub(super) fn build_emission_from_buffer(
     mut output_state: FoldOutputState,
     estimated_bytes: usize,
-    signal: Option<TemplateLoopControlKind>,
     fold_context: &mut TirFoldContext<'_>,
-) -> Result<TemplateFoldResult, TemplateError> {
-    if signal.is_some() && !output_state.emitted_output {
-        return Ok(TemplateFoldResult::with_projection(
-            match signal {
-                Some(TemplateLoopControlKind::Break) => TemplateEmission::Break(None),
-                Some(TemplateLoopControlKind::Continue) => TemplateEmission::Continue(None),
-                None => unreachable!(),
-            },
-            output_state.provenance,
-            output_state.projection_pieces,
-        ));
-    }
-
+) -> TemplateFoldResult {
     if !output_state.emitted_output {
-        return Ok(TemplateFoldResult::with_projection(
+        return TemplateFoldResult::with_projection(
             TemplateEmission::NoOutput,
             output_state.provenance,
             output_state.projection_pieces,
-        ));
+        );
     }
 
     let actual_len = output_state.output_buffer.len();
@@ -1164,15 +1133,11 @@ pub(super) fn build_emission_from_buffer(
     let output = output_state.into_const_string_value(fold_context.string_table);
     record_tir_fold_output_intern(actual_len);
 
-    Ok(TemplateFoldResult::with_projection(
-        match signal {
-            None => TemplateEmission::Output(output),
-            Some(TemplateLoopControlKind::Break) => TemplateEmission::Break(Some(output)),
-            Some(TemplateLoopControlKind::Continue) => TemplateEmission::Continue(Some(output)),
-        },
+    TemplateFoldResult::with_projection(
+        TemplateEmission::Output(output),
         provenance,
         projection_pieces,
-    ))
+    )
 }
 
 // -------------------------

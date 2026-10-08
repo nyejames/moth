@@ -102,17 +102,12 @@ fn bool_expression(value: bool) -> Expression {
 fn emission_to_string(emission: TemplateEmission, string_table: &StringTable) -> String {
     match emission {
         TemplateEmission::NoOutput => String::new(),
-        TemplateEmission::Output(ConstStringValue::Text(output))
-        | TemplateEmission::Break(Some(ConstStringValue::Text(output)))
-        | TemplateEmission::Continue(Some(ConstStringValue::Text(output))) => {
+        TemplateEmission::Output(ConstStringValue::Text(output)) => {
             string_table.resolve(output).to_owned()
         }
-        TemplateEmission::Output(ConstStringValue::Pieces(_))
-        | TemplateEmission::Break(Some(ConstStringValue::Pieces(_)))
-        | TemplateEmission::Continue(Some(ConstStringValue::Pieces(_))) => {
+        TemplateEmission::Output(ConstStringValue::Pieces(_)) => {
             panic!("structural emission reached a text-only assertion")
         }
-        TemplateEmission::Break(None) | TemplateEmission::Continue(None) => String::new(),
     }
 }
 
@@ -865,20 +860,25 @@ fn final_view_fold_loop_body_concatenates_iterations() {
 }
 
 #[test]
-fn final_view_fold_loop_binding_provenance_reaches_exact_result() {
+fn final_view_fold_loop_binding_and_body_provenance_reach_exact_result() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let member = SyntheticInterfaceMemberIdentity::new(
+    let header_member = SyntheticInterfaceMemberIdentity::new(
         SyntheticInterfaceClass::ProjectContext,
         "render",
         "range",
+    );
+    let body_member = SyntheticInterfaceMemberIdentity::new(
+        SyntheticInterfaceClass::ProjectContext,
+        "render",
+        "loop_body_value",
     );
     let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let item_path = path_fork
             .try_intern_portable_path("item", string_table)
             .expect("test path fits");
         let mut builder = TemplateIrBuilder::new(store);
-        let body = builder.push_dynamic_expression_node(
+        let item_value = builder.push_dynamic_expression_node(
             Expression::reference_with_type_id(
                 item_path,
                 DataType::Int,
@@ -890,7 +890,17 @@ fn final_view_fold_loop_binding_provenance_reaches_exact_result() {
             TemplateSegmentOrigin::Body,
             None,
         );
-        let range_provenance = SyntheticInterfaceProvenance::single(member.clone());
+        let body_text = string_table.intern("body");
+        let body_value = builder.push_dynamic_expression_node(
+            Expression::string_slice(body_text, None, ValueMode::ImmutableOwned)
+                .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
+                    body_member.clone(),
+                )),
+            TemplateSegmentOrigin::Body,
+            None,
+        );
+        let body = builder.push_sequence_node(vec![item_value, body_value], None);
+        let range_provenance = SyntheticInterfaceProvenance::single(header_member.clone());
         let header = TemplateLoopHeader::Range {
             bindings: Box::new(LoopBindings {
                 item: Some(Declaration {
@@ -940,13 +950,119 @@ fn final_view_fold_loop_binding_provenance_reaches_exact_result() {
 
     assert_eq!(
         emission_to_string(result.emission, &string_table),
-        "01",
-        "the selected range loop should render its bound values"
+        "0body1body",
+        "the selected range loop should render its bound values and folded body payload"
+    );
+    assert!(
+        result.provenance.members().contains(&header_member),
+        "range provenance must reach the exact folded result through the resolved binding"
+    );
+    assert!(
+        result.provenance.members().contains(&body_member),
+        "folded body provenance must reach the exact result through loop aggregation"
     );
     assert_eq!(
-        result.provenance.members(),
-        &[member],
-        "range provenance must reach the exact folded result through the resolved binding"
+        result.provenance.members().len(),
+        2,
+        "the exact result should contain the distinct header and body dependencies"
+    );
+}
+
+#[test]
+fn final_view_fold_loop_preserves_visited_no_output_selector_provenance() {
+    let mut string_table = StringTable::new();
+    let body_member = SyntheticInterfaceMemberIdentity::new(
+        SyntheticInterfaceClass::ProjectContext,
+        "render",
+        "hidden_body_selector",
+    );
+    let build_loop_template =
+        |string_table: &mut StringTable, store: &mut TemplateIrStore, end: i64| {
+            let mut builder = TemplateIrBuilder::new(store);
+            let hidden_text = string_table.intern("hidden");
+            let hidden_body = builder.push_text_node(
+                hidden_text,
+                "hidden".len(),
+                TemplateSegmentOrigin::Body,
+                None,
+            );
+            let selector = bool_expression(false).with_synthetic_interface_provenance(
+                SyntheticInterfaceProvenance::single(body_member.clone()),
+            );
+            let no_output_body = builder.push_conditional_node(
+                TemplateBranchSelector::Bool(selector),
+                hidden_body,
+                None,
+            );
+            let header = TemplateLoopHeader::Range {
+                bindings: Box::new(LoopBindings {
+                    item: None,
+                    index: None,
+                }),
+                range: Box::new(RangeLoopSpec {
+                    start: int_expression(0),
+                    end: int_expression(end),
+                    step: None,
+                    end_kind: RangeEndKind::Exclusive,
+                }),
+            };
+            let root = builder.push_loop_node(header, no_output_body, None, None);
+            builder.finish_template(
+                root,
+                Style::default(),
+                TemplateType::String,
+                TemplateIrSummary::empty(),
+                None,
+            )
+        };
+    let fold_exact_view = |fixture: &FinalViewFoldFixture, string_table: &mut StringTable| {
+        let store = fixture.store.borrow();
+        let view = TirView::new(
+            &store,
+            fixture.template_id,
+            TemplateTirPhase::Composed,
+            fixture.context,
+        )
+        .expect("range loop view should construct");
+        let prepared = prepare_tir_view(&view, TemplatePreparationMode::Value)
+            .expect("range loop view should prepare");
+        assert!(matches!(
+            prepared.outcome,
+            TemplatePreparationOutcome::Foldable
+        ));
+        let mut fold_context = build_test_fold_context(string_table);
+        fold_prepared_template(&prepared, view, &mut fold_context)
+            .expect("range loop exact fold should succeed")
+    };
+
+    let visited_fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
+        build_loop_template(string_table, store, 2)
+    });
+    let visited_result = fold_exact_view(&visited_fixture, &mut string_table);
+    assert_eq!(
+        visited_result.emission,
+        TemplateEmission::NoOutput,
+        "a false conditional should leave the visited loop body at structural no-output"
+    );
+    assert_eq!(
+        visited_result.provenance.members(),
+        std::slice::from_ref(&body_member),
+        "a consumed selector dependency should survive visited no-output iterations"
+    );
+
+    let zero_iteration_fixture =
+        build_final_view_fixture(&mut string_table, |string_table, store| {
+            build_loop_template(string_table, store, 0)
+        });
+    let zero_iteration_result = fold_exact_view(&zero_iteration_fixture, &mut string_table);
+    assert_eq!(
+        zero_iteration_result.emission,
+        TemplateEmission::NoOutput,
+        "an empty range should remain structural no-output"
+    );
+    assert!(
+        zero_iteration_result.provenance.members().is_empty(),
+        "a selector dependency must not reach the result when the loop body is never visited"
     );
 }
 

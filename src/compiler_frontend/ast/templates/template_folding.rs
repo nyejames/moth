@@ -17,9 +17,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateFoldBinding, TemplateLoopControlKind,
-};
+use crate::compiler_frontend::ast::templates::template_control_flow::TemplateFoldBinding;
 use crate::compiler_frontend::ast::templates::tir::{
     FoldedConstTemplatePiece, TemplateIrStore, TemplatePreparationMode, TemplateTirPhase, TirView,
     prepare_tir_view,
@@ -63,15 +61,13 @@ pub(crate) struct TirFoldContext<'a> {
 /// to be an empty string, because parent wrappers apply only to structurally emitted children.
 ///
 /// WHAT: carries the module-local compact or piece-bearing folded string through every recursive
-/// fold result, including loop-control signals.
+/// fold result.
 /// WHY: one emission shape keeps text fast while preserving `Resource` and `SiteRoot` anchors until
 /// the owning public or HIR boundary can handle them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TemplateEmission {
     NoOutput,
     Output(ConstStringValue),
-    Break(Option<ConstStringValue>),
-    Continue(Option<ConstStringValue>),
 }
 
 /// Exact fold output paired with the semantic provenance consumed to produce it.
@@ -316,23 +312,6 @@ fn fold_resolved_bool_condition(
             condition.span.or(fallback_span),
         )
         .into()),
-    }
-}
-
-/// Wrap one module-local folded string in the appropriate loop-control emission.
-///
-/// WHAT: preserves the compact or structural [`ConstStringValue`] unchanged while attaching an
-/// optional `break` or `continue` signal.
-/// WHY: loop reducers and wrapper reducers must forward structural anchors without converting them
-/// into rendered text.
-pub(crate) fn template_emission_from_output_and_signal(
-    output: ConstStringValue,
-    signal_kind: Option<TemplateLoopControlKind>,
-) -> TemplateEmission {
-    match signal_kind {
-        None => TemplateEmission::Output(output),
-        Some(TemplateLoopControlKind::Break) => TemplateEmission::Break(Some(output)),
-        Some(TemplateLoopControlKind::Continue) => TemplateEmission::Continue(Some(output)),
     }
 }
 

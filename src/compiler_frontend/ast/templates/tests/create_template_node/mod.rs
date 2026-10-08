@@ -218,9 +218,6 @@ fn fold_template_with_fold_context(
             panic!("structural emission reached a text-only test helper")
         }
         TemplateEmission::NoOutput => Ok(fold_context.string_table.intern("")),
-        TemplateEmission::Break(_) | TemplateEmission::Continue(_) => {
-            panic!("test template fold signal escaped its loop")
-        }
     }
 }
 
