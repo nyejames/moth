@@ -16,6 +16,7 @@
 //! - Pass 1 collects all public authored declarations for every root file.
 //! - Pass 2 resolves public dependencies against the completed authored export maps.
 
+use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::builtins::casts::traits::is_core_cast_trait_name;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
@@ -70,6 +71,7 @@ struct PublicExportDependencyResolutionInput<'a, 'provider> {
     exporting_source: &'a PathId,
     external_package_registry: &'a ExternalPackageRegistry,
     source_provider_dependencies: &'a SourceProviderDependencySet<'provider>,
+    external_dependency_resolution_table: &'a ExternalImportResolutionTable,
     string_table: &'a mut StringTable,
     path_fork: &'a mut PathInternerFork,
 }
@@ -135,6 +137,7 @@ pub(super) fn build_public_exports(
     source_files: &SourceDatabase,
     external_package_registry: &ExternalPackageRegistry,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
+    external_dependency_resolution_table: &ExternalImportResolutionTable,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> PublicExportDataResult<()> {
@@ -178,6 +181,7 @@ pub(super) fn build_public_exports(
         resolver,
         external_package_registry,
         source_provider_dependencies,
+        external_dependency_resolution_table,
         string_table,
         path_fork,
     )?;
@@ -188,6 +192,7 @@ pub(super) fn build_public_exports(
         source_files,
         external_package_registry,
         source_provider_dependencies,
+        external_dependency_resolution_table,
         string_table,
         path_fork,
     )?;
@@ -263,12 +268,17 @@ fn build_source_package_public_exports(
     Ok(export_locations)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "source package dependency building keeps mutable symbols, export locations, resolver, registry, provider dependencies, resolution table, and mutable string/path state as separate borrows"
+)]
 fn build_source_package_public_dependencies(
     module_symbols: &mut ModuleSymbols,
     export_locations: &FxHashMap<String, FxHashMap<StringId, SourceSpan>>,
     resolver: &ProjectPathResolver,
     external_package_registry: &ExternalPackageRegistry,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
+    external_dependency_resolution_table: &ExternalImportResolutionTable,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> PublicExportDataResult<()> {
@@ -311,6 +321,7 @@ fn build_source_package_public_dependencies(
                             exporting_source: &root_file_interned,
                             external_package_registry,
                             source_provider_dependencies,
+                            external_dependency_resolution_table,
                             string_table,
                             path_fork,
                         },
@@ -433,6 +444,7 @@ fn build_module_root_public_dependencies(
     source_files: &SourceDatabase,
     external_package_registry: &ExternalPackageRegistry,
     source_provider_dependencies: &SourceProviderDependencySet<'_>,
+    external_dependency_resolution_table: &ExternalImportResolutionTable,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> PublicExportDataResult<()> {
@@ -521,6 +533,7 @@ fn build_module_root_public_dependencies(
                         exporting_source: &root_source,
                         external_package_registry,
                         source_provider_dependencies,
+                        external_dependency_resolution_table,
                         string_table,
                         path_fork,
                     },
@@ -562,6 +575,7 @@ fn resolve_public_export_dependency_or_provider(
         selection_index,
         exporting_source,
         external_package_registry,
+        external_dependency_resolution_table,
         source_provider_dependencies,
         string_table,
         path_fork,
@@ -607,6 +621,59 @@ fn resolve_public_export_dependency_or_provider(
             source_name: selection.source_name,
             diagnostic_path,
         });
+    }
+    if dependency.dependency.provider_target.is_none()
+        && matches!(
+            dependency.dependency.target,
+            crate::compiler_frontend::headers::dependency_target::DependencyTargetKind::ExternalProvider { .. }
+        )
+    {
+        return Err(HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+            "external provider dependency is missing its checked target fact",
+        )));
+    }
+    if let Some(provider_target) = dependency.dependency.provider_target.as_ref() {
+        let mut scratch = Vec::new();
+        let source_str = path_fork.render_portable(*exporting_source, &*string_table, &mut scratch);
+        if let Some(resolved) =
+            external_dependency_resolution_table.get(&source_str, provider_target.raw_prefix())
+        {
+            if !provider_target.remaining_components().is_empty() {
+                return Err(HeaderParseFailure::Diagnostic(
+                    CompilerDiagnostic::direct_symbol_path_import(
+                        dependency.dependency.path,
+                        Some(dependency.dependency.span),
+                    ),
+                ));
+            }
+            let package = external_package_registry
+                .get_package_by_id(resolved.package_id)
+                .ok_or_else(|| {
+                    HeaderParseFailure::Diagnostic(CompilerDiagnostic::missing_import_target(
+                        dependency.dependency.path,
+                        Some(dependency.dependency.span),
+                    ))
+                })?;
+            let symbol_name = string_table.resolve(selection.source_name);
+            let Some(symbol_id) =
+                external_package_registry.resolve_package_symbol(&package.path, symbol_name)
+            else {
+                let diagnostic_path = path_fork
+                    .try_intern_child(dependency.dependency.path, selection.source_name)
+                    .ok_or_else(|| {
+                        HeaderParseFailure::Diagnostic(CompilerDiagnostic::source_table_capacity(
+                            SourceSpanCapacityResource::LogicalPath,
+                        ))
+                    })?;
+                return Err(HeaderParseFailure::Diagnostic(
+                    CompilerDiagnostic::missing_import_target(
+                        diagnostic_path,
+                        Some(selection.source_span),
+                    ),
+                ));
+            };
+            return Ok(PublicExportTarget::External(symbol_id));
+        }
     }
 
     resolve_public_export_dependency(

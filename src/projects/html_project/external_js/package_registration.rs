@@ -8,9 +8,10 @@
 use crate::builder_surface::external_import_providers::provider::RequiredRuntimeImport;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::{
-    ExternalAbiType, ExternalAccessKind, ExternalFunctionLowerings, ExternalFunctionSpec,
-    ExternalJsLowering, ExternalPackageId, ExternalPackageRegistry, ExternalParameter,
-    ExternalReturnSlot, ExternalSignatureType, ExternalTypeSpec,
+    ExternalAbiType, ExternalAccessKind, ExternalConstantDef, ExternalConstantValue,
+    ExternalFunctionLowerings, ExternalFunctionSpec, ExternalJsLowering, ExternalPackageId,
+    ExternalPackageRegistry, ExternalParameter, ExternalReturnSlot, ExternalSignatureType,
+    ExternalTypeSpec,
 };
 use crate::projects::html_project::external_js::parser::parsed_js_module::{
     ParsedJsFunction, ParsedJsModule, ParsedSignature,
@@ -31,10 +32,10 @@ pub struct RegisteredJsModule {
 
 /// Registers parsed JS module symbols into the external package registry.
 ///
-/// WHAT: converts parsed opaque types and free functions into registry entries with
-///       `ExternalModuleExport` JS lowerings.
-/// WHY: shared between the JS external import provider and built-in package registration,
-///      while keeping external packages on one free-function-only surface.
+/// WHAT: converts opaque types, free functions and materialised literal constants into registry
+///       entries. Only functions have `ExternalModuleExport` JS lowerings.
+/// WHY: both project-local imports and built-in packages share the canonical registry surface,
+///      including constants. Provider symbol inventories do not duplicate constant registration.
 pub fn register_parsed_js_module(
     package_id: ExternalPackageId,
     parsed: &ParsedJsModule,
@@ -62,7 +63,7 @@ pub fn register_parsed_js_module(
 
     if let Some(receiver_method) = parsed.receiver_methods.first() {
         return Err(CompilerError::compiler_error(format!(
-            "JS package registration reached receiver-style signature '{}'. External packages must expose free functions and opaque types only.",
+            "JS package registration reached receiver-style signature '{}'. External packages expose free functions, literal constants and opaque types, not receiver methods.",
             receiver_method.moth_name
         )));
     }
@@ -71,6 +72,19 @@ pub fn register_parsed_js_module(
         let spec = convert_parsed_function_to_spec(function, &type_id_by_opaque_name)?;
         let function_id = registry.register_external_function(package_id, spec)?;
         exported_free_functions.push(function_id);
+    }
+
+    for constant in &parsed.constants {
+        registry.register_external_constant(
+            package_id,
+            ExternalConstantDef {
+                name: constant.moth_name.clone(),
+                data_type: ExternalSignatureType::Abi(ExternalAbiType::Fixed(
+                    constant.value.scalar(),
+                )),
+                value: ExternalConstantValue::Fixed(constant.value),
+            },
+        )?;
     }
 
     Ok(RegisteredJsModule {

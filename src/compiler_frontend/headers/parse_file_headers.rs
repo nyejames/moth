@@ -750,6 +750,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
             source_files,
             external_package_registry,
             source_provider_dependencies,
+            external_dependency_resolution_table,
             string_table,
             path_fork,
         )

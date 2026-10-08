@@ -14923,3 +14923,31 @@ path = "external_fixed_scalars_int64_float32"
 tags = ["integration", "numeric", "external", "runtime", "fixed-scalars", "int64", "float32"]
 contract = "backend.html.external_fixed_scalar_annotations"
 role = "backend"
+
+[[case]]
+id = "external_const_u32_values"
+path = "external_const_u32_values"
+tags = ["integration", "numeric", "external", "runtime", "fixed-consts"]
+contract = "backend.html.external_fixed_u32_constant_values"
+role = "primary"
+
+[[case]]
+id = "external_const_u32_int64"
+path = "external_const_u32_int64"
+tags = ["integration", "numeric", "external", "runtime", "fixed-consts", "int64", "release"]
+contract = "backend.html.external_fixed_u32_constant_values"
+role = "backend"
+
+[[case]]
+id = "external_const_u32_mixed_emission"
+path = "external_const_u32_mixed_emission"
+tags = ["integration", "numeric", "external", "runtime", "fixed-consts", "reachability"]
+contract = "backend.html.external_fixed_u32_constant_mixed_emission"
+role = "boundary"
+
+[[case]]
+id = "external_const_u32_static_emission"
+path = "external_const_u32_static_emission"
+tags = ["integration", "numeric", "external", "runtime", "fixed-consts", "reachability"]
+contract = "backend.html.external_fixed_u32_constant_static_emission"
+role = "boundary"

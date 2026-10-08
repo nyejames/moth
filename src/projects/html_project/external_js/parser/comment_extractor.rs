@@ -2,7 +2,7 @@
 //!
 //! WHAT: scans raw JS source text, locates multi-line comment blocks that start with
 //!       `/**`, and extracts lines that begin with `@moth.`.
-//! WHY: `@moth.opaque` and `@moth.sig` annotations live inside these comment blocks.
+//! WHY: `@moth.opaque`, `@moth.sig` and `@moth.const` annotations live inside these blocks.
 //!      Keeping extraction separate from signature parsing makes each module easier
 //!      to test and reason about.
 //!
@@ -11,7 +11,10 @@
 //! - Inline `/** ... */` on a single line is supported.
 //! - `//` comments are ignored even if they contain `@moth.`.
 
+use super::export_scanner::ExportScanner;
 use super::parsed_js_module::{JsDiagnosticKind, JsParserDiagnostic, JsSourceSpan};
+use crate::projects::html_project::external_js::runtime_module_registry::RuntimeModuleRegistry;
+use moth_lexical::identifier::is_identifier;
 
 /// A single `@moth.*` annotation extracted from a comment block.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +33,11 @@ pub enum AnnotationKind {
         moth_name: String,
         signature_text: String,
     },
+    /// `@moth.const moth_name U32`
+    Const {
+        moth_name: String,
+        type_name: String,
+    },
 }
 
 /// Result of scanning a JS file for comment blocks.
@@ -39,40 +47,43 @@ pub struct CommentExtractionResult {
 }
 
 /// Scans source text for `/** ... */` blocks and extracts `@moth.*` annotations.
-pub fn extract_annotations(source: &str) -> CommentExtractionResult {
-    let mut scanner = CommentScanner::new(source);
+pub fn extract_annotations(
+    source: &str,
+    registry: &RuntimeModuleRegistry,
+) -> CommentExtractionResult {
+    let mut scanner = CommentScanner::new(source, registry);
     scanner.scan()
 }
 
 struct CommentScanner<'a> {
     source: &'a str,
-    bytes: &'a [u8],
-    pos: usize,
+    cursor: ExportScanner<'a>,
     annotations: Vec<ExtractedAnnotation>,
     diagnostics: Vec<JsParserDiagnostic>,
 }
 
 impl<'a> CommentScanner<'a> {
-    fn new(source: &'a str) -> Self {
+    fn new(source: &'a str, registry: &'a RuntimeModuleRegistry) -> Self {
         Self {
             source,
-            bytes: source.as_bytes(),
-            pos: 0,
+            cursor: ExportScanner::new(source, registry),
             annotations: Vec::new(),
             diagnostics: Vec::new(),
         }
     }
 
     fn scan(&mut self) -> CommentExtractionResult {
-        while !self.is_at_end() {
-            if self.peek_str("/**") {
+        while !self.cursor.is_at_end() {
+            if self.cursor.peek_str("/**") {
                 self.read_doc_comment_block();
-            } else if self.peek_str("/*") {
-                self.skip_block_comment();
-            } else if self.peek_str("//") {
-                self.skip_line_comment();
+            } else if self.cursor.skip_lexical_content_at_current() {
+                continue;
+            } else if self.cursor.current_char_opt() == Some('/')
+                && self.cursor.slash_starts_regular_expression()
+            {
+                self.cursor.skip_regular_expression();
             } else {
-                self.advance_char();
+                self.cursor.advance_char();
             }
         }
 
@@ -87,32 +98,25 @@ impl<'a> CommentScanner<'a> {
     // ------------------------
 
     fn read_doc_comment_block(&mut self) {
-        let block_start_byte = self.pos;
+        let block_start_byte = self.cursor.pos;
+        self.cursor.advance_chars(3);
+        let content_start = self.cursor.pos;
 
-        // Consume `/**`
-        self.advance_chars(3);
-
-        let mut block_text = String::new();
-
-        while !self.is_at_end() {
-            if self.peek_str("*/") {
-                self.advance_chars(2);
-                break;
-            }
-            block_text.push(self.current_char());
-            self.advance_char();
+        while !self.cursor.is_at_end() && !self.cursor.peek_str("*/") {
+            self.cursor.advance_char();
+        }
+        let content_end = self.cursor.pos;
+        if self.cursor.peek_str("*/") {
+            self.cursor.advance_chars(2);
         }
 
-        let block_span = JsSourceSpan::range(block_start_byte, self.pos);
-
-        self.parse_block_content(&block_text, block_span);
+        let block_span = JsSourceSpan::range(block_start_byte, self.cursor.pos);
+        self.parse_block_content(&self.source[content_start..content_end], block_span);
     }
 
     fn parse_block_content(&mut self, content: &str, block_span: JsSourceSpan) {
         // Normalize line breaks and strip leading `*` from each line
-        let lines: Vec<&str> = content.lines().collect();
-
-        for raw_line in lines {
+        for raw_line in content.lines() {
             let trimmed = raw_line.trim_start();
             let after_star = if let Some(stripped) = trimmed.strip_prefix('*') {
                 stripped.trim_start()
@@ -172,6 +176,29 @@ impl<'a> CommentScanner<'a> {
                     });
                 }
             }
+            "@moth.const" => {
+                let moth_name = tokens.next();
+                let type_name = tokens.next();
+                if let (Some(moth_name), Some(type_name), None) =
+                    (moth_name, type_name, tokens.next())
+                    && is_identifier(moth_name)
+                {
+                    self.annotations.push(ExtractedAnnotation {
+                        kind: AnnotationKind::Const {
+                            moth_name: moth_name.to_string(),
+                            type_name: type_name.to_string(),
+                        },
+                        span: block_span,
+                    });
+                } else {
+                    self.diagnostics.push(JsParserDiagnostic {
+                        message: "`@moth.const` requires one flat Moth name followed by `U32`."
+                            .to_string(),
+                        span: block_span,
+                        kind: JsDiagnosticKind::InvalidConstant,
+                    });
+                }
+            }
             "@moth.package" => {
                 self.diagnostics.push(JsParserDiagnostic {
                     message: "`@moth.package` is not supported in Moth JS module comments."
@@ -183,7 +210,7 @@ impl<'a> CommentScanner<'a> {
             unknown => {
                 self.diagnostics.push(JsParserDiagnostic {
                     message: format!(
-                        "Unknown Moth JS annotation `{unknown}`. Supported annotations are `@moth.opaque` and `@moth.sig`."
+                        "Unknown Moth JS annotation `{unknown}`. Supported annotations are `@moth.opaque`, `@moth.sig` and `@moth.const`."
                     ),
                     span: block_span,
                     kind: JsDiagnosticKind::UnknownMothDirective,
@@ -216,62 +243,5 @@ impl<'a> CommentScanner<'a> {
         let body = trimmed[end_of_name..].trim_start();
 
         Some((name, body))
-    }
-
-    // ------------------------
-    //  Skip non-doc comments
-    // ------------------------
-
-    fn skip_block_comment(&mut self) {
-        // Consume `/*`
-        self.advance_chars(2);
-        while !self.is_at_end() {
-            if self.peek_str("*/") {
-                self.advance_chars(2);
-                break;
-            }
-            self.advance_char();
-        }
-    }
-
-    fn skip_line_comment(&mut self) {
-        // Consume `//`
-        self.advance_chars(2);
-        while !self.is_at_end() && self.current_char() != '\n' {
-            self.advance_char();
-        }
-    }
-
-    // ------------------------
-    //  Low-level character ops
-    // ------------------------
-
-    fn current_char(&self) -> char {
-        self.source[self.pos..]
-            .chars()
-            .next()
-            .expect("scanner is not at end")
-    }
-
-    fn is_at_end(&self) -> bool {
-        self.pos >= self.bytes.len()
-    }
-
-    fn peek_str(&self, s: &str) -> bool {
-        self.source[self.pos..].starts_with(s)
-    }
-
-    fn advance_char(&mut self) {
-        if self.is_at_end() {
-            return;
-        }
-        let ch = self.current_char();
-        self.pos += ch.len_utf8();
-    }
-
-    fn advance_chars(&mut self, count: usize) {
-        for _ in 0..count {
-            self.advance_char();
-        }
     }
 }

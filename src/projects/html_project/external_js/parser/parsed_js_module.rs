@@ -5,6 +5,8 @@
 //! WHY: keeps the JS scanner isolated from compiler-stage boundaries so later phases
 //!      (provider wiring, registry insertion) can decide how to map parsed data.
 
+use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
+
 /// A byte range inside a JS file.
 ///
 /// Parser-owned spans deliberately retain only byte offsets. The provider layer
@@ -46,6 +48,9 @@ pub enum JsDiagnosticKind {
     UnknownMothDirective,
     UnannotatedExport,
     MissingExportAfterSig,
+    MissingExportAfterConst,
+    AnnotationExportKindMismatch,
+    InvalidConstant,
     DuplicateMothName,
     DuplicateJsExportName,
     DefaultExport,
@@ -147,6 +152,20 @@ pub struct ParsedJsFunction {
     pub export_span: JsSourceSpan,
 }
 
+/// A literal-backed export matched to `@moth.const`.
+///
+/// The numeric owner has already materialised the value. Its carrier owns both the fixed scalar
+/// identity and exact payload, so registration never reparses or narrows the authored literal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedJsConstant {
+    pub moth_name: String,
+    pub js_name: String,
+    pub value: FixedScalarValue,
+    pub annotation_span: JsSourceSpan,
+    pub export_span: JsSourceSpan,
+    pub literal_span: JsSourceSpan,
+}
+
 /// An opaque external type declared with `@moth.opaque`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedOpaqueType {
@@ -169,8 +188,8 @@ pub struct ParsedRuntimeImport {
 
 /// Final result of parsing one JS source file.
 ///
-/// WHAT: collects all opaque types, free functions, receiver-shaped signatures, registered
-///       runtime imports, and any diagnostics produced while scanning.
+/// WHAT: collects opaque types, callable signatures, literal constants, registered runtime imports
+///       and diagnostics produced while scanning and binding.
 /// WHY: this is the complete parser output consumed by the JS import provider and
 ///      built-in JS-backed package registration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -178,6 +197,7 @@ pub struct ParsedJsModule {
     pub opaque_types: Vec<ParsedOpaqueType>,
     pub free_functions: Vec<ParsedJsFunction>,
     pub receiver_methods: Vec<ParsedJsFunction>,
+    pub constants: Vec<ParsedJsConstant>,
     pub runtime_imports: Vec<ParsedRuntimeImport>,
     pub diagnostics: Vec<JsParserDiagnostic>,
 }
@@ -189,6 +209,7 @@ impl ParsedJsModule {
             opaque_types: Vec::new(),
             free_functions: Vec::new(),
             receiver_methods: Vec::new(),
+            constants: Vec::new(),
             runtime_imports: Vec::new(),
             diagnostics: Vec::new(),
         }

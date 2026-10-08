@@ -56,6 +56,23 @@ The Moth dependency clause uses the annotation names, not the JavaScript export 
 - JavaScript export names are runtime implementation details
 - Moth names come from annotations
 
+#### Exact literal constant subset
+
+`@moth.const` exposes a flat Moth name and the fixed `U32` type. The JavaScript export name may differ:
+
+[codeblock, $code("js"):
+    /** @moth.const primitive_triangles U32 */
+    export const TRIANGLES = 4;
+]
+
+The initializer supplies the value. Compilation reads its authored literal without executing JavaScript and preserves its exact `U32` identity through imports and source re-exports, independently of the native numeric profile.
+
+Each annotation accepts one `export const` declarator with an unsigned decimal integer literal from `0` through `4294967295`. Whitespace and comments may separate tokens. A semicolon may close the declaration, or a newline may end it when the following token doesn't continue the initializer.
+
+Unannotated constants, leading-zero spellings other than `0`, numeric separators, alternate radices, signs, fractions, exponents, BigInt suffixes, arithmetic, references, property reads, calls, multiple declarators and non-`U32` constant annotations remain rejected. `@moth.sig` cannot annotate a literal constant and `@moth.const` cannot annotate a callable export. Duplicate Moth names across functions, constants and opaque types, and duplicate JavaScript export names, also produce diagnostics.
+
+Constant-only dependencies contribute semantic inputs without emitting their JavaScript asset, wrappers or authored runtime imports. A dependency with reachable functions retains the normal runtime asset. Nested annotation names and nominal foreign enum domains remain pending.
+
 #### Rejected JavaScript features
 
 - arbitrary dependency graphs
@@ -63,7 +80,7 @@ The Moth dependency clause uses the annotation names, not the JavaScript export 
 - re-exports
 - CommonJS
 - classes
-- JS constants
+- constants outside the exact `@moth.const` literal subset
 - property accessors
 - callbacks
 - async functions
