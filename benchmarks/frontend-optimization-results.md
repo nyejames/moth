@@ -5303,5 +5303,5 @@ The documentation release build produced 79 outputs. Phase 3M is accepted and
 Phase 4 remains paused until explicit user resumption with a fresh baseline.
 
 Optional outbound `I32` adapter consolidation remains a separate follow-up
-in `src/compiler_frontend/runtime_glue/source.rs` because the outbound
+in `src/projects/html_project/external_js/runtime_glue/source.rs` because the outbound
 negative-zero contract is unproven.
