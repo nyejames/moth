@@ -1,12 +1,18 @@
 # October 2026 Summary
 
+## Frontend phases / macOS Apple Silicon (6D851D)
+Change since initial benchmark: baseline
+Timing schema: 2
+Initial: all ~97ms, Core ~27ms, Docs ~1372ms, Stress ~96ms, Module ~29ms, Parallelism ~19ms, Borrow ~28ms
+Latest: all ~97ms, Core ~27ms, Docs ~1372ms, Stress ~96ms, Module ~29ms, Parallelism ~19ms, Borrow ~28ms
+Case spread latest: ~250ms
+
 ## End-to-end CLI / macOS Apple Silicon (6D851D)
 Change since initial benchmark: +3ms avg; 0 faster, 5 slower; 39/40 cases; workload changed: 1 case (docs_check)
 Timing schema: 2
 Initial: all ~23ms, Core ~23ms, Docs ~201ms, Stress ~21ms, Module ~12ms, Borrow ~9ms
 Latest: all ~26ms, Core ~23ms, Docs ~210ms, Stress ~25ms, Module ~12ms, Borrow ~10ms
 Case spread latest: ~48ms
-
 ---------------------
 
 # End-to-end CLI / macOS Apple Silicon (6D851D): October 1st - 11:59
@@ -26,3 +32,9 @@ Timing schema: 2
 **-12ms avg**; 17 faster, 0 slower; 39/40 cases; workload changed: 1 case (docs_check)
 Avg: all ~26ms, Core ~23ms, Docs ~210ms, Stress ~25ms, Module ~12ms, Borrow ~10ms
 Stage movement: frontend -420ms, boundary compile -418ms, module semantics -417ms
+
+# Frontend phases / macOS Apple Silicon (6D851D): October 8th - 13:43
+Timing schema: 2
+mixed: avg -76ms; 16 faster, 6 slower; 25/42 cases; workload changed: 17 cases (docs_frontend, code_highlighter_stress_frontend, module_graph_frontend, import_fanout_frontend, module_root_stress_frontend, external_js_imports_frontend, import_external_churn_frontend, module_root_role_mix_frontend, tiny_one_file_frontend, tiny_two_files_frontend, tiny_seven_files_frontend, tiny_eight_files_frontend, many_tiny_files_frontend, many_medium_files_frontend, many_markdown_assets_frontend, many_modules_one_file_each_frontend, few_modules_many_files_each_frontend)
+Avg: all ~97ms, Core ~27ms, Docs ~1372ms, Stress ~96ms, Module ~29ms, Parallelism ~19ms, Borrow ~28ms
+Stage movement: generated materialise -1989ms, single-file frontend -1681ms, frontend -1680ms
