@@ -5305,3 +5305,27 @@ Phase 4 remains paused until explicit user resumption with a fresh baseline.
 Optional outbound `I32` adapter consolidation remains a separate follow-up
 in `src/projects/html_project/external_js/runtime_glue/source.rs` because the outbound
 negative-zero contract is unproven.
+
+## Post-main CLI recording (2026-10-08)
+
+The reviewed squash and package-main integration add no compiler changes beyond
+the reviewed squash: merged main tree `7cba8e88fdb8dd31bdbdc1b515443d9467459ae1`
+matches the reviewed, full-validated feature tree. One clean C0 `just bench` CLI
+recording completed on `main` at `a55c97f8c75db9394a2034f8906646a8f7bd5227`
+at 14:56 UTC (171.93 seconds), adding native history row 54 (53 → 54). It
+covered 40 cases with one warmup and ten measured iterations, history format 8,
+protocol 4, timing schema 2, default thread identity (`null`), Node 24.21.0,
+Rust 1.99.0 and LLVM 23.1.1.
+
+The public comparison against the previous CLI result reports 0 ms average, one
+faster and zero slower across 40/40 cases. Absolute medians were 6.665 ms for
+`root_single_file_check`, 25.223542/27.5533545 ms for `speed_test_check`/
+`speed_test_build`, and 10.8856455/9.3607705 ms for `template_stress_check`/
+`template_render_plan_churn_check`. Overlapping stage summaries moved about
+−8 ms for boundary compilation, −8 ms for check total and −7 ms for frontend. This is one unpaired
+observation, not evidence of repeatability or a causal improvement; stage
+timings overlap and are not additive. Keep it separate from the paired Phase 8
+evidence and five-run Phase 10 batch, with their existing qualifications; it
+replaces neither baseline. Raw history and frozen recording artefacts remain
+local. These timings are performance observations. Correctness validation is
+recorded separately.
