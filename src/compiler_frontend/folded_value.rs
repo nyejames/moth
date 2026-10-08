@@ -535,9 +535,7 @@ pub(crate) fn convert_expression_to_folded_value(
 
         ExpressionKind::Template(_) => Err(CompilerError::compiler_error(
             "public-interface draft folded-value projection: a Template expression reached \
-             conversion; normalization folds renderable templates to StringSlice and filters \
-             slot-insert helpers, so only a loop-control signal could remain and it is not a \
-             data value",
+             conversion; template values must be folded before public folded-value projection",
         )),
 
         ExpressionKind::Reference(_) => Err(CompilerError::compiler_error(

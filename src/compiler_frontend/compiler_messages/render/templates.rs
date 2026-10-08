@@ -259,70 +259,8 @@ pub(crate) fn invalid_template_structure_message(
             "Template `if` suffix is missing a condition.".to_string()
         }
         crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::MissingTemplateLoopHeader => {
-            "Template `loop` suffix is missing a range or collection header.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::ElseInTemplateHead => {
-            "`else` is only valid as a standalone template body sentinel `[else]` inside a template `if`.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::OrphanTemplateElse => {
-            "Template `[else]` is only valid inside a template `if` body.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::OrphanTemplateElseIf => {
-            "Template `[else if ...]` is only valid inside a template `if` body before the final `[else]`.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::OrphanTemplateBreak => {
-            "Template `[break]` is only valid inside a template `loop` body.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::OrphanTemplateContinue => {
-            "Template `[continue]` is only valid inside a template `loop` body.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::DuplicateTemplateElse => {
-            "Template `if` bodies can only contain one direct `[else]` sentinel.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateElseIfAfterElse => {
-            "Template `[else if ...]` must appear before the final `[else]` branch.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::MalformedTemplateElse => {
-            "Template `else` must use the exact standalone form `[else]`.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::MalformedTemplateElseIf => {
-            "Template `else if` must use the standalone form `[else if condition]` without a body colon.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::MalformedTemplateBreak => {
-            "Template loop control must use the exact standalone form `[break]`.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::MalformedTemplateContinue => {
-            "Template loop control must use the exact standalone form `[continue]`.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::MissingTemplateElseIfCondition => {
-            "Template `[else if ...]` is missing a condition.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::InlineTemplateElse => {
-            "Template `[else]` must be standalone, with no meaningful same-line body text beside it.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::InlineTemplateElseIf => {
-            "Template `[else if ...]` must be standalone, with no meaningful same-line body text beside it.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::InlineTemplateBreak => {
-            "Template `[break]` must be standalone, with no meaningful same-line body text beside it.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::InlineTemplateContinue => {
-            "Template `[continue]` must be standalone, with no meaningful same-line body text beside it.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateElseInLiteralBody => {
-            "Template `[else]` cannot split a template body whose directive treats bracketed content as literal text.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateElseIfInLiteralBody => {
-            "Template `[else if ...]` cannot split a template body whose directive treats bracketed content as literal text.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateLoopControlInLiteralBody => {
-            "Template `[break]` and `[continue]` cannot control a template body whose directive treats bracketed content as literal text.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateElseInLoopBody => {
-            "Template `[else]` cannot appear directly inside a template `loop` body.".to_string()
-        }
-        crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateElseIfInLoopBody => {
-            "Template `[else if ...]` cannot appear directly inside a template `loop` body.".to_string()
+            "Template `loop` suffix is missing a Bool condition, collection source or numeric range header."
+                .to_string()
         }
         crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::UnexpectedTokenAfterControlFlowSuffix => {
             "Unexpected token after template control-flow suffix.".to_string()
@@ -334,7 +272,7 @@ pub(crate) fn invalid_template_structure_message(
             "This template must be fully evaluated at compile time, so its `if` condition must fold to a Bool.".to_string()
         }
         crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateIfBranchNotConst => {
-            "This template must be fully evaluated at compile time, so both `if` branches must be compile-time values even when one branch is inactive.".to_string()
+            "This template must be fully evaluated at compile time, so its `if` body must be a compile-time value even when it is not selected.".to_string()
         }
         crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason::TemplateOptionCaptureConstDeferred => {
             "This template must be fully evaluated at compile time, but the optional value's presence cannot be determined at compile time.".to_string()

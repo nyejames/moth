@@ -3,4 +3,3 @@ mode = "success"
 warnings = "forbid"
 rendered_output_contains = ["template_if_bool_runtime"]
 rendered_output_contains_exactly_once = ["selected runtime branch"]
-rendered_output_not_contains = ["inactive runtime branch"]

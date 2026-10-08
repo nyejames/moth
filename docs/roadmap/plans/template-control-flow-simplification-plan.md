@@ -12,9 +12,9 @@
 
 ```text
 STATUS: active, language simplification approved
-CURRENT_SLICE: Phase 5 accepted; Phase 6 next
+CURRENT_SLICE: Phase 6 accepted; Phase 7 next
 BLOCKERS: none; committed package fixes synchronized both ways at the parser checkpoint
-NEXT_ACTION: remove obsolete diagnostic reasons and finish test-surface pruning
+NEXT_ACTION: align canonical template contracts, architecture and adjacent plans
 ```
 
 ## Goal
@@ -1427,6 +1427,8 @@ test: prune removed template control-flow coverage
 ```
 
 ---
+
+Phase 6 accepted: removed all 21 obsolete marker reasons, mappings and renderer arms without reusing their keys. Retained diagnostics describe one const-required body and all ordinary loop-header families. Pruned two vacuous absence assertions and updated the singular diagnostic expectation. The focused diagnostic and template checks, refreshed suite inventory and independent cleanup audit pass. The current template inventory retains 184 cases and 198 backend checks, with no retained family losing its activation primary owner.
 
 # Phase 7 - Update canonical documentation and adjacent plans
 
