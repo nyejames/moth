@@ -1,0 +1,11 @@
+render || -> String:
+    colors = {"red", "green"}
+    value #= [loop 0 to 2 |outer|:
+        [loop colors |color|:
+            ([outer], [color])
+        ]
+    ]
+    return value
+;
+
+#[:ok]

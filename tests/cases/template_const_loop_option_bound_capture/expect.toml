@@ -1,0 +1,10 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain_in_order = ["bound-0;", "bound-1;"]
+must_contain_exactly_once = ["bound-0;", "bound-1;"]
+must_not_contain = ["bound-2;"]

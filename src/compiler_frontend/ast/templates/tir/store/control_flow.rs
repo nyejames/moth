@@ -1,7 +1,7 @@
 //! Checked control-flow lookup and body mutation on `TemplateIrStore`.
 
 use super::TemplateIrStore;
-use crate::compiler_frontend::ast::templates::tir::ids::{TemplateIrId, TemplateIrNodeId};
+use crate::compiler_frontend::ast::templates::tir::ids::TemplateIrNodeId;
 use crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use std::collections::HashSet;
@@ -15,24 +15,6 @@ pub(crate) enum ControlFlowBodyKind {
 }
 
 impl TemplateIrStore {
-    /// Returns the first control-flow node under a finalized template root.
-    ///
-    /// `Ok(None)` means the reachable tree is valid and has no owner
-    /// control-flow node. Missing nodes, missing forwarding templates and
-    /// cycles are `CompilerError`.
-    pub(crate) fn control_flow_node_id_for_template(
-        &self,
-        owning_template_id: TemplateIrId,
-    ) -> Result<Option<TemplateIrNodeId>, CompilerError> {
-        let Some(template) = self.get_template(owning_template_id) else {
-            return Err(CompilerError::compiler_error(format!(
-                "TIR store has no template {owning_template_id} while locating its control-flow node."
-            )));
-        };
-
-        self.control_flow_node_id_in_subtree(template.root)
-    }
-
     /// Recursively searches a TIR subtree for the template-owned control-flow node.
     pub(crate) fn control_flow_node_id_in_subtree(
         &self,

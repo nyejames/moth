@@ -1,0 +1,14 @@
+missing #Int? = none
+
+#[:
+    template_const_loop_option_absent_empty before
+    [if missing is |captured|:
+        [loop 0 to captured |i|:
+            absent-[i];
+        ]
+    ]
+    [loop 0 to 0 |j|:
+        empty-[j];
+    ]
+    template_const_loop_option_absent_empty after
+:]

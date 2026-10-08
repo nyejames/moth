@@ -1,0 +1,5 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["template_conditional_loop_inherited_binding_runtime"]
+rendered_output_not_contains = ["text"]
