@@ -11,13 +11,15 @@ NEXT_ACTION: start Phase 0 in a new session on `expression-refactor` only
 
 **Intended repository location:** `docs/roadmap/plans/exact-numeric-types-and-bounded-inference-plan.md`
 
-**Goal:** remove the profile-selected `Int`, `Uint` and `Float` types, make exact-width numerics the only bounded numeric identities, add deliberately bounded numeric inference and give explicit conversions one `cast` spelling. Extend expression recovery so useful safety catches remain valid across type refactors.
+**Goal:** remove the profile-selected `Int`, `Uint` and `Float` types, make exact-width numerics the only bounded numeric identities, preserve equal-operand types in eligible arithmetic and remove minimum-width promotion floors. Add deliberately bounded numeric inference and give explicit conversions one `cast` spelling. Extend expression recovery so useful safety catches remain valid across type refactors.
 
 **Architecture:** retain numeric spelling and unresolved numeric relationships in frontend construction state. Resolve permitted body-local constraints before numeric materialisation, conversion evidence and dependent finalisation. Publish concrete canonical types, values and operation facts through the existing AST, HIR, module and backend boundaries. Reuse the existing failure system, numeric implementations and standalone lexical/MON owners.
 
 **Technology:** safe Rust compiler and standalone crates, Moth source fixtures, JavaScript runtime lowering, supported Wasm lowering and the existing Cargo/just validation and benchmark tools.
 
 **Specification:** Sections 2 through 6 contain the approved design and its operational interpretation. They are self-contained so the implementing agent does not need the originating chat. Publish the durable language and architecture contracts in their permanent owners during Phase 0. The numbered work phases specify delivery, not another competing semantic authority.
+
+**Arithmetic revision, 2026-10-08:** D15 and Section 3.4 supersede the earlier requirement to preserve minimum-32-bit arithmetic. Equal-type arithmetic now preserves its type where the operator is defined. Mixed fixed types use the revised smallest-common-domain rules. This intentionally changes narrow overflow, F16 rounding and some source/backend acceptance outcomes. All unrelated approved decisions remain in force.
 
 **Priority:** this work interrupts the typed semantic expression refactor. That refactor remains paused until this plan is complete and its restart review has been performed. Existing accepted expression-foundation work remains part of the baseline rather than being discarded or repeated automatically.
 
@@ -53,7 +55,7 @@ Required permanent references include:
 
 Use `index.md` as a locator. Follow current paths when older review material names moved files. Apply the substance of `moth-code-review-guide.md`: delete unnecessary structure, preserve ownership and reject duplicate semantic authorities. A slice review is not a new structured audit and must not claim new audit coverage.
 
-The user's approved changes in this plan deliberately replace the old numeric-profile, eager numeric defaulting and cast-spelling contracts. Other existing language rules remain authoritative. Resolve unrelated conflicts through the most specific accepted authority rather than using this migration to redesign them.
+The user's approved changes in this plan deliberately replace the old numeric-profile, eager numeric defaulting, minimum-width arithmetic and cast-spelling contracts. D15 supersedes earlier promotion-preservation wording only within the scope stated in Section 3.4. Other existing language rules remain authoritative. Resolve unrelated conflicts through the most specific accepted authority rather than using this migration to redesign them.
 
 ### 1.2 Global constraints
 
@@ -65,6 +67,8 @@ Keep semantic type, storage layout and computation carrier separate. Removing pr
 
 Preserve checked arithmetic, finite binary-float values, exact integer comparisons, decimal scale rules, evaluation order and ordinary memory/access rules. A migration failure cannot justify a trap fallback for recoverable work, a wider accidental arithmetic domain or a weakened diagnostic.
 
+D15 changes the selected result domain, not the checked-failure policy. A formerly widened operation may now overflow, round differently or require a previously unnecessary failure path. Preserve equivalent behaviour where the semantic contract is unchanged and classify intentional arithmetic changes explicitly in the coverage ledger. The result domain must never be widened merely to preserve an old test outcome or target capability.
+
 Use stage-owned vectors, compact typed IDs and small borrowed descriptors where they solve a real ownership problem. Reuse existing pending-expression, type, literal, constant, call and failure owners before adding storage. Add no general Hindley-Milner engine, conversion search, trait-search inference, whole-project solver, generic allocator framework or second parser.
 
 ### 1.3 Highest-risk review areas
@@ -73,6 +77,9 @@ Use stage-owned vectors, compact typed IDs and small borrowed descriptors where 
 |---|---|
 | Literal defaulting or peer resolution happens too early | Later-use, reordered-use, large-literal and cast-barrier tests with exact resolved types |
 | Inference silently crosses the arithmetic restriction | Negative cases for named operands alongside positive raw-literal receiver cases |
+| Old minimum-width domains survive in typing, folding or proofs | Complete fixed-type operator matrix and boundary failures in the selected result type |
+| F16 work rounds only at storage or changes precision through its carrier | Exact per-operation rounding witnesses and concrete F16/F32 receiver tests |
+| Changed failure facts are mistaken for backend regressions or silently trapped | D15-linked acceptance changes, supported-path parity and honest capability rejection |
 | `Float` removal bypasses external validation | Runtime non-finite F64 boundary tests plus inspection of every success-extraction path |
 | Catch eligibility becomes a failure effect | Separate authored-shape tests, error compatibility tests and dead-handler output tests |
 | Profile-test deletion loses real numeric coverage | Assertion-level before/after coverage ledger, including exact rounding witnesses |
@@ -87,18 +94,18 @@ Existing supported features in those areas still need mechanical migration and r
 
 ## 2. Approved decisions and traceability
 
-The interview settled the following decisions. `D00` records the accepted design that preceded the interview. The remaining IDs correspond to its fourteen substantive questions, including the user's expansion of recovery eligibility.
+The interview settled D00 through D14. D00 records the accepted design that preceded the interview and D01-D14 record its fourteen substantive questions, including the user's expansion of recovery eligibility. D15 records the subsequent approved arithmetic revision. The ledger below states the resulting final contract, not the superseded promotion rule.
 
 | ID | Approved decision | Primary delivery owners |
 |---|---|---|
-| D00 | Remove `Int`, `Uint`, `Float` and semantic profiles. Add numeric-only body-local inference, exact receiving boundaries and one `cast`. Preserve fixed-width promotion and exclude backwards inference through named arithmetic operands. | Phases 1, 4, 5 and 6 |
+| D00 | Remove `Int`, `Uint`, `Float` and semantic profiles. Add numeric-only body-local inference, exact receiving boundaries and one `cast`. Apply the arithmetic domains revised by D15 and exclude backwards inference through named arithmetic operands. | Phases 1, 4, 5 and 6 |
 | D01 | Builtin lengths, capacities and positional indices use `I32`. A later change follows a language-wide default-integer change, not an independent builder or API choice. | Phases 4 and 6 |
 | D02 | Build inputs accept every fixed integer and binary float, with existing optionals. Retain CLI numeric spelling until the exact contract is known. Typed inputs require exact compatibility. Exclude Byte and Dec. | Phase 7 |
 | D03 | Source-authored cast evidence supports all eleven fixed numeric targets, with infallible and fallible evidence pairs. Keep Byte and Dec outside this extension. | Phases 2 and 4 |
 | D04 | Mixed raw whole and decimal literals in a non-empty collection select the binary-float family independently of item order. Bound integers do not change family. | Phase 5 |
 | D05 | Decimal exponentiation uses an `I32` exponent. | Phases 4 and 6 |
 | D06 | The standalone MON API makes a clean break from profile-dependent types and `Schema::with_profile`. Keep lossless Integer and Decimal data. | Phase 7 |
-| D07 | Preserve current backend coverage. Additional Wasm support belongs to the later mixed-backend work. | Phases 3, 6 and 10 |
+| D07 | Preserve current backend coverage under unchanged contracts and explicitly classify D15-caused changes. Additional Wasm capabilities belong to the later mixed-backend work. | Phases 3, 6 and 10 |
 | D08 | Allow safety catch on authored arithmetic, casts and multi-call expressions even when currently infallible. Validate handlers normally before eliminating unreachable work. | Phase 2 |
 | D09 | Multiple calls in receiver chains and separate operands both qualify. Calls nested inside arguments do not inflate the enclosing expression's count. Actual nested failures remain protected. | Phase 2 |
 | D10 | A catch fallback contributes type constraints even when the protected expression proves infallible. Concrete types and the no-backwards-arithmetic rule remain unchanged. | Phases 2 and 5 |
@@ -106,6 +113,7 @@ The interview settled the following decisions. `D00` records the accepted design
 | D12 | Receiving context takes priority over eligible peer context, then defaulting. It reaches unresolved literal arithmetic beside named operands but does not retype the named operands. | Phases 4 and 5 |
 | D13 | A generic signature may connect an existing numeric unknown across parameters and results. Finalise concrete requests afterwards. Inspect no callee body and search no trait implementation to select a type. | Phase 5 |
 | D14 | Core Math moves to F64 only. Generalise shared external finite-result validation and preserve the existing Math coverage before retiring profile fixtures. | Phases 3, 6 and 8 |
+| D15 | Equal fixed numeric types preserve their type for eligible arithmetic. Remove the 32-bit integer and F32 float promotion floors, including unary negation. Mixed fixed types use the smallest allowed common operand domain. Check overflow and round at the selected semantic result type. Preserve the explicit division, unsigned-negation and Dec exceptions in Section 3.4. | Phases 1, 4, 6, 8, 9 and 10 |
 
 ### 2.1 Exact type inventory and defaults
 
@@ -144,6 +152,8 @@ A whole literal can be materialised directly as a binary float in such a context
 For a local binding established from unconstrained whole-number syntax, the family is integer. For one established from decimal/exponent syntax, the family is binary float. Operator results follow their normal family rules. Existing typed operands, call results and constants retain their identities.
 
 The ordinary receiving rules remain strict. Widening inside an operator is not a general assignment, parameter or return coercion. Fixed integer and fixed binary-float values require explicit conversion to mix. Preserve the existing exact Dec/integer operator rules without turning them into general receiving coercions.
+
+The default I32/F64 pair selects otherwise unconstrained origins only. It is not a minimum arithmetic width. Once I8, U16 or F16 is selected, its eligible same-type operations retain that semantic result type under Section 3.4.
 
 ### 2.3 Concrete builtin contracts
 
@@ -212,18 +222,48 @@ Already concrete operator results are never retagged. Integer real division on c
 
 ### 3.4 Forward arithmetic only across named operands
 
-Preserve the accepted promotion matrix. Examples include:
+#### Arithmetic result domains
+
+D15 replaces the old minimum-width promotion matrix with these rules. Operator choice and resolved operand types determine the semantic result domain. The receiving context may first type raw literal leaves as described in Section 3.3, but cannot retype an already concrete operand or result.
+
+| Operator family | Result-domain rule |
+|---|---|
+| Fixed integer `+`, `-`, `*`, `//`, `%` and `^` | Equal operand types produce that type. Mixed same-signedness operands use the wider width. Mixed signedness uses the smallest available signed type containing both complete operand ranges. No 32-bit minimum applies. Reject when no such type exists. |
+| Fixed integer `/` | Retain the common-integer eligibility check above, then the existing conversion and real division in F64. The result is F64, including equal narrow integer operands. |
+| Fixed binary-float `+`, `-`, `*`, `/`, `%` and `^` | Equal operand types produce that type. Different precisions produce the wider precision. F16 has no minimum-F32 semantic domain. |
+| Unary `-` on a fixed signed integer or binary float | Preserve the operand type. Negating a signed minimum fails in that type. Preserve the sign semantics of floating zero. |
+| Unary `-` on a fixed unsigned integer | Remains invalid, including a known zero. No implicit signed conversion is introduced. |
+| Dec operations | Preserve existing exact/rounded per-operation scale rules, exact integer mixing and scale restrictions. `DecN ^ I32 -> DecN` remains the separate exponent contract. |
+
+Binary floats still reject `//`. Fixed integers and binary floats still require explicit conversion to mix. Byte retains its separate non-arithmetic contract. Comparison and Boolean result types are unchanged.
+
+Examples for the revised ordinary arithmetic domain:
 
 ```text
-U8 + U8   -> U32
-I8 + I16  -> I32
-I32 + U32 -> I64
-I64 + U64 -> invalid arithmetic
-F16 + F16 -> F32
-F32 + F64 -> F64
+I8 + I8   -> I8              U8 + U8   -> U8
+I8 + I16  -> I16             U8 + U16  -> U16
+I8 + U8   -> I16             I16 + U8  -> I16
+I8 + U16  -> I32             I16 + U16 -> I32
+I32 + U32 -> I64             I64 + U32 -> I64
+I64 + U64 -> invalid         I32 + U64 -> invalid
+F16 + F16 -> F16             F16 + F32 -> F32
+F32 + F64 -> F64             I8 / I8   -> F64
+-I8       -> I8              -F16      -> F16
 ```
 
+The common domain contains the complete input ranges, not every possible mathematical result of the operation. For example, U8 plus U8 remains U8 and can overflow. U8 minus U8 can underflow. Known operand values never choose a wider type to avoid a failure. Mixed-domain selection is symmetric in operand order and uses only supported widths, not an invented I9 or arbitrary-precision fallback.
+
 Exact fixed-integer comparison remains independent of arithmetic common-type availability. I64/U64 comparisons must stay exact across their complete ranges.
+
+#### Checked results and physical carriers
+
+Every integer arithmetic result is checked against its selected result domain. A wider register or scratch integer may compute or validate the result, but cannot expose a wider semantic type, silently wrap, saturate or postpone a required overflow check until assignment. Preserve the existing division-by-zero, signed-minimum integer division (`//`) by minus one, remainder and invalid-exponent rules at the selected width. Real division (`/`) still returns F64 and does not inherit the narrow integer quotient-overflow check.
+
+Every binary-float operation finishes at its selected semantic precision. In particular, F16 arithmetic rounds its result to F16 at each language-level operation and checks finiteness at that precision. F16 unary negation preserves F16. An F32 carrier is permitted only as an implementation of those F16 semantics, not as an F32 result that happens to be stored narrowly later. Preserve direct literal/conversion rounding, signed zero and subnormals. Keep the existing operation-specific numerical contracts rather than introducing a new correctly-rounded Core Math contract.
+
+Required witnesses include an I8 operation with inputs 127 and 1 failing on addition, unary negation of I8 minimum failing and F16 maximum plus itself failing despite fitting in an F32 carrier. With concrete F16 operands, `(2048 + 1) - 2048` rounds to zero because the addition first rounds to F16. Deferring that rounding to the end would incorrectly produce one. Exercise these as genuinely runtime operations as well as the applicable constant cases.
+
+#### Named operands remain forward-only
 
 An operation can consume the resolved types of named operands and produce its result. A constraint on that result cannot infer the named operands backwards.
 
@@ -244,7 +284,15 @@ In the second case, `base` defaults to I32 and the operation produces I32. Choos
 
 A direct independent `take_u64(base)` can resolve `base` before forward promotion, making the corresponding result U64. Its placement relative to other eligible uses does not change the conclusion.
 
-An I8/U8 receiving context can type literal operands, but arithmetic still promotes to its minimum computation domain. `small U8 = 1 + 2` does not gain implicit narrowing just because the mathematical result fits. Use an explicit cast at a typed receiver when conversion of the completed arithmetic is intended.
+An I8/U8 receiving context types raw literal operands before operator selection. `small U8 = 1 + 2` is now valid: the literals and addition have type U8 and the checked constant result is three. It uses neither implicit narrowing nor a wider computation domain. A known out-of-range result such as `small U8 = 255 + 1` is a compile-time diagnostic, including under catch. Unknown runtime values fail through the existing failure mechanism instead.
+
+Two concrete I8 operands produce I8 even under an I32 result annotation. Two concrete F16 operands similarly produce F16, not F32. Exact receiving compatibility rejects those wider annotations unless the completed result is explicitly converted. Converting the result afterwards preserves the earlier narrow checks and rounding. To request wider arithmetic, convert the operands before the operation at eligible typed receivers. A wider literal receiver beside a named operand may still select a mixed-width domain under D12.
+
+#### Compound updates and shared range policy
+
+Compound updates use the same revised arithmetic domain, then the existing checked write-back conversion where the destination differs. A same-type update has no artificial promotion/narrowing pair, but still checks the arithmetic and commits only on success. Preserve exact-once place/RHS evaluation and the established RHS-only catch scope. Integer `/=` retains its F64 division and specified checked conversion back, while `//=` retains integer division.
+
+Range counters keep their existing independently selected exact domain and positional indices remain I32. Audit range typing and stepping wherever they reuse arithmetic-domain helpers so no removed 32-bit/F32 floor survives accidentally. Preserve range-specific endpoint, omitted-step, no-progress and termination rules rather than treating a range as an unrestricted arithmetic expression.
 
 ### 3.5 Known collection and nominal structure
 
@@ -288,6 +336,8 @@ This uses the signature alone. The compiler neither examines the implementation 
 Delay numeric-dependent argument compatibility, cast classification, bound-evidence validation and request publication until the necessary types are resolved. Retain argument-slot routing, exact source spans, access modes and stable callee identity from the existing parser. Do not parse arguments again after inference.
 
 Member lookup may use known receiver structure. It must not search numeric types for one with a matching method. A consumer requiring a concrete numeric receiver waits for independent constraints/defaulting, then validates the result. Successful copying, collection access or signature-based generic forwarding must not accidentally become an early defaulting boundary.
+
+The later generics plan owns closed compiler-defined numeric capability bounds and forwarding an already concrete expected type into an immediately nested generic call. Those are separate extensions, not delivered here. This plan preserves ordinary generic-template validation and D13's numeric-origin forwarding. It introduces no body-inferred capability bounds, operator overloading, general result-only inference or conditional generic error signatures. D15 removes equal-type narrow promotion as an obstacle to future type-preserving generic arithmetic, while integer real division and Dec scale/operator exceptions still require precise future capability contracts.
 
 ### 3.7 Solver design obligations
 
@@ -417,7 +467,7 @@ Catch protects the complete selected evaluation, including receiver and argument
 
 Preserve custom-error compatibility, postfix-exit conflicts and explicit optional handling. Preserve the restriction on catches in conditions, templates and constant expressions, including the existing narrow foldable cast exception at a constant/default receiver. This plan changes eligibility, not general placement.
 
-A catch on a compound assignment RHS covers the RHS only. The subsequent promoted arithmetic and checked store conversion retain their own failure obligations. Commit the store only on success. Explicit casts remain checked inside any later fast-math scope.
+A catch on a compound assignment RHS covers the RHS only. The subsequent arithmetic in the revised selected domain and any required checked store conversion retain their own failure obligations. Same-type arithmetic does not acquire a redundant narrowing step. Commit the store only on success. Explicit casts remain checked inside any later fast-math scope.
 
 For an optional cast receiver, convert/recover inner T before normal wrapping into T?. Preserve the existing rejection of `then none` as that cast's inner fallback and the absence of implicit optional-source unwrapping.
 
@@ -428,6 +478,8 @@ For an optional cast receiver, convert/recover inner T before normal wrapping in
 Reuse `moth-lexical` for numeric grammar, exact spelling, destination-aware materialisation, binary precision and formatting. Remove semantic profile selection, not the reusable direct conversion algorithms that happen to live beside it.
 
 Preserve signed minima, the complete U64 range, F16/F32/F64 direct rounding, signed zero, subnormals, finite overflow checks and exact decimal spelling. A larger host carrier is an implementation representation, not a semantic widening permission.
+
+Audit every arithmetic consumer that currently equates a 32-bit/F32 computation carrier with the result type. Reuse shared scalar range/precision policy and existing checked algorithms with the revised domain. In F16 paths, establish that the carrier/helper implements each operation's required rounding and finite checks rather than assuming an F32 calculation plus a final store is sufficient.
 
 One important existing witness must survive:
 
@@ -460,6 +512,8 @@ Core Math's current constants, parameters and results become F64. Keep the exist
 Preserve each mathematical contract rather than imposing a new globally correctly-rounded Math contract. Math's `round` tie rule remains its own. Exact identities, approximate transcendental bounds, radians, domain restrictions, clamp composition, signed-zero policy and underflow policy retain their documented meanings.
 
 Additional Math precisions, generic math helpers, Math function constant evaluation and Wasm lowerings remain deferred package work. A cast wrapper around F64 does not constitute native F32 Math support.
+
+D15 changes language arithmetic, not Core Math signatures or their approximation contracts. File-backed Core implementations, WAT package authorship and type-parametric bindings belong to the later generics/package plan and must not enter this migration.
 
 Audit all other `NativeInt`, `NativeUint` and `NativeFloat` signature and constant registrations. Ordinary default-language contracts become their approved exact counterparts, usually I32, U32 and F64. Foreign signatures already declaring fixed widths retain those widths. Do not treat an ABI F64 carrier as proof that the Moth semantic type was F64 before this migration.
 
@@ -510,6 +564,7 @@ The research revisions are recorded in Appendix A as inspection provenance only.
 | Finding | Existing owner | Required change |
 |---|---|---|
 | Contextual arithmetic already has an indexed pending-literal path | `ast/expressions/eval_expression/result_type.rs` and `evaluator.rs` | Extend/reuse its recipes and ordered witnesses instead of a second numeric parser |
+| Fixed arithmetic currently imposes minimum integer/float domains | `datatypes/numeric_operators.rs` and its `common_fixed_integer`, `fixed_float_domain`, unary/domain consumers | Replace the old floors with D15 and update failure discharge, folding and lowering together |
 | Named operands currently expose a concrete expression TypeId immediately | Same result-typing owner and declaration construction | Add explicit construction-owned pending numeric relationships before materialisation |
 | Generic calls eagerly infer, check evidence and record concrete requests | `ast/generic_functions/calls.rs` | Defer numeric-dependent completion while keeping parsed routing and callee identity |
 | Cast spelling chooses evidence/handling today | `builtins/casts/resolution.rs`, `expression_types.rs` and HIR cast lowering | Separate conversion policy from authored syntax and reuse implicit-failure delivery |
@@ -561,7 +616,7 @@ Implement the numbered phases in order. Within a phase, use the smallest coheren
 | 1 | Bounded inference construction design and executable semantic probes | Representation/semantic gate |
 | 2 | Unified cast and authored safety-catch eligibility on the current compiler | Focused feature gate |
 | 3 | Shared exact-width value and external-float boundary preparation | Boundary-preservation gate |
-| 4 | Canonical exact numeric vocabulary and scalar inference cutover | Part of integrated cutover C |
+| 4 | Canonical exact numerics, revised arithmetic domains and scalar inference cutover | Part of integrated cutover C |
 | 5 | Containers, handlers, generics and service finalisation | Part of integrated cutover C |
 | 6 | Builtins, Core Math, external registrations and backend migration | Part of integrated cutover C |
 | 7 | Config, MON, orchestration and profile removal | Part of integrated cutover C |
@@ -606,6 +661,7 @@ The actual accepted checkpoint belongs in its existing history/status context. D
 - [ ] Search tracked production code, tests, fixtures, benchmark sources, docs, scripts, schemas and feature-gated owners for the removed names and profile carriers. Classify each hit by owner and meaning.
 - [ ] Trace semantic identity through parsed types, TypeId interning, public canonical types, folded values, HIR constants, generated keys, casts, external ABI projection and output helpers.
 - [ ] Inventory current support separately for HTML-JS and HTML-Wasm. Record successful runtime cases, target rejections and actual failure-delivery routes.
+- [ ] Record old minimum-width arithmetic, unary negation, F16 rounding and full-domain proof cases separately. Identify which source outcomes intentionally change under D15 and which still require equivalent target coverage.
 - [ ] Create the assertion-level coverage ledger described in Section 8 before modifying fixtures. Include the source revision, old profile, semantic property, backend and replacement owner.
 - [ ] Run the current integration audit and selected baseline suites. Capture existing failures without editing expectations to suppress them.
 - [ ] Capture five matched non-recording benchmark invocations for the affected surviving cohort under Section 11. Record targeted baseline probes if the full cohort is temporarily blocked.
@@ -641,6 +697,7 @@ The actual accepted checkpoint belongs in its existing history/status context. D
 
 - [ ] Build focused tests for equality constraints, explicit receivers, family mismatch, defaulting and deterministic conflict witnesses.
 - [ ] Include the accepted cast-source example, raw arithmetic receiver example, named-arithmetic rejection, collection element inference and signature-only identity generic.
+- [ ] Probe the revised complete scalar type-pair matrix, same-type narrow results, mixed narrow domains, unary negation and per-operation F16 completion before selecting the construction representation. Keep promotion policy separate from permitted inference edges.
 - [ ] Add order permutations that must preserve results: swapped independent use order, reversed collection literal order and reversed peer position.
 - [ ] Exercise a mutable self-update, a long copy chain, fan-out uses and a dependency cycle. Prove termination and annotation diagnostics without backward arithmetic search.
 - [ ] Compare at most two justified storage choices if the existing owners do not determine the representation. Measure pending bytes, allocations, worklist revisits and reclamation. Keep experiments local and delete losing implementations.
@@ -738,9 +795,9 @@ validate that no pending numeric state escapes the owner
 - [ ] Remove Int/Uint/Float from builtin keys, canonical identities, environment seeding, diagnostic/type syntax, numeric scalar domains and value variants.
 - [ ] Migrate all identity-dependent matches and constructor helpers to existing exact fixed-scalar representations. Keep full-width payloads and distinct Byte/Dec types.
 - [ ] Update canonical public value transport, optional/container nesting, aliases and generated type keys. Never equate old process-local IDs with new identities by number.
-- [ ] Remove old receiving promotion from Int/Uint to Float. Retain existing within-operator fixed promotion and explicit cast policies.
+- [ ] Remove old receiving promotion from Int/Uint to Float. Replace minimum-width within-operator promotion with D15 in the shared numeric policy. Preserve explicit cast policies and strict receiving compatibility.
 - [ ] Remove old source-word/highlighter builtin entries and cast trait reservations. Removed spellings gain no implicit alias. Apply normal identifier/name rules rather than a special legacy parser.
-- [ ] Review newly redundant same-type casts in compiler fixtures and packages. Delete a cast only after proving the old type-identity distinction was its sole purpose.
+- [ ] Review newly redundant explicit casts in compiler fixtures and packages. Removed convenience identities and D15 result changes can both make a cast same-type. Delete it only after proving conversion is no longer needed and preserving operand evaluation, narrow arithmetic failure and valid catch scope/eligibility. Source same-type casts remain invalid.
 
 #### 4B. Integrate numeric construction
 
@@ -753,15 +810,26 @@ validate that no pending numeric state escapes the owner
 - [ ] Materialise from retained spelling exactly once at the selected destination. Preserve signed-minimum, U64, float midpoint and Dec exact-leaf checks.
 - [ ] Record complete numeric domain, operator and failure facts for downstream consumers. Required constant failures remain source diagnostics.
 
-#### 4C. Complete scalar consumers
+#### 4C. Apply the arithmetic result-domain contract
+
+- [ ] Add failing policy tests for every fixed-integer pair, every binary-float pair and each supported unary/binary operator. Assert result types independently of particular values and cover the explicit division and mixed-family exceptions.
+- [ ] Update `common_fixed_integer` to choose from all supported widths, including I8/I16/U8/U16, using complete input ranges. Remove the minimum-F32 rule from float domain selection and preserve signed/float operand types under unary negation. Reuse the existing policy owner rather than adding an inference-only or backend-only promotion table.
+- [ ] Make literal recipes and constant evaluators complete every operation in the selected type. Accept typed narrow literal arithmetic when valid and diagnose a known narrow overflow at the authored operation. Preserve parentheses, required rounding boundaries and the cast-source barrier.
+- [ ] Update `numeric_operation_cannot_fail` and all callers to use the revised operand/result domains. Dynamic U8 plus U8 is no longer proven safe from types alone. Retain positive proof coverage with a genuinely contained mixed domain such as I8 plus U8 producing I16.
+- [ ] Distinguish required semantic failure classification from optional value-range check elision. The existence of a wider carrier or a previously accepted Wasm fixture is never proof of safety in the new result type.
+- [ ] Implement F16 operation completion through the existing precision/checked numeric owners. Check finiteness after destination rounding and preserve signed zero/subnormals. Verify carrier sufficiency per operator without inventing a separate Math evaluator or weakening its existing contract.
+- [ ] Cover narrow intermediate overflow before later cancellation, F16 per-operation rounding before a later wider cast and known-invalid work under catch. A wider receiver or final cast cannot repair earlier narrow work.
+- [ ] Audit common-domain consumers in ranges, compound updates, failure summaries and generated functions. A same-type compound update performs one checked operation and no artificial narrowing, while mixed-domain write-back keeps its own checked conversion and commit boundary.
+
+#### 4D. Complete scalar consumers
 
 - [ ] Update expression evaluators, constant folding, compatibility caches, type display, diagnostics and source default policies together.
-- [ ] Update compound operations: normal promoted arithmetic, checked store conversion, exact-once evaluation and commit-after-success remain.
+- [ ] Update compound operations to the revised arithmetic domains, preserving required checked store conversion, exact-once evaluation and commit-after-success. Delete newly redundant same-type store conversions without removing arithmetic checks.
 - [ ] Complete deferred casts only after source resolution, using the already known destination. Do not make a missing target legal through later use.
 - [ ] Preserve optional wrapping and result arity without importing the future native-result redesign.
 - [ ] Add construction/finalisation assertions and release-safe validation for pending-state leaks. Authored source errors use ordinary diagnostics, not compiler bugs.
 
-**Validation:** scalar inference cases N01-N18 in Section 9, existing literal/operator/constant/cast suites and paired constant/runtime witnesses. The rest of cutover C must be complete before declaring repository-wide success.
+**Validation:** the numeric inference and arithmetic rows in Section 9.1, revised domain/failure witnesses in Section 9.4, existing literal/operator/constant/cast suites and paired constant/runtime cases. The rest of cutover C must be complete before declaring repository-wide success.
 
 ### Phase 5 - containers, generic signatures and handler constraints
 
@@ -782,6 +850,7 @@ validate that no pending numeric state escapes the owner
 - [ ] Separate parsed call identity/routing from numeric-dependent signature completion in the existing generic call owner.
 - [ ] Carry the same eligible numeric unknown across a declared generic parameter/result relationship, including known container shapes.
 - [ ] Preserve the ordinary immediate expected-result rules for other generic inference. Numeric unknown support is not general result-only inference.
+- [ ] Record already-concrete outer-parameter forwarding into nested generic calls as later generics work. Preserve currently rejected general nested/result-only cases here, alongside D13's accepted numeric-origin forwarding.
 - [ ] Validate bounds and cast evidence after exact types are chosen. Neither evidence availability nor failure handling selects types.
 - [ ] Record canonical concrete materialisation requests only after resolution. Deduplicate as before and keep owner-local inference IDs out of keys.
 - [ ] Preserve recursion detection, same-file visibility, defaults, access modes, evaluation order and transaction rollback.
@@ -825,15 +894,17 @@ validate that no pending numeric state escapes the owner
 
 - [ ] Replace profile numeric domains and payload cases with exact scalar facts across HIR construction, validation, dense stores, traversal, remapping and debug output.
 - [ ] Preserve the already delivered dense HIR layout and freeze ownership. The construction-only inference substrate does not undo Phase 3's dense value/place work.
-- [ ] Update numeric proof queries to exact type domains. Remove obsolete profile stamping while keeping facts paired to the exact immutable executable and statement identities.
+- [ ] Update semantic safety predicates and optional numeric proof queries to the revised exact operand/result domains. Remove obsolete profile stamping while keeping facts paired to the exact immutable executable and statement identities. Retire old full-domain-safe witnesses only with D15-linked replacement coverage.
 - [ ] Recompute/invalidate proofs after any pre-publication rewrite. A missing fact retains checks. Optional proof never changes cast eligibility, source validity or error contracts.
 - [ ] Update JS literals, BigInt/Number carriers, fixed float rounding, cast/runtime helpers, comparisons, formatting, map keys and helper demand.
+- [ ] Make narrow integer helpers check the selected result width before exposing a value. Make F16 arithmetic finish at F16 at each operation through shared rounding/finite checks, including nested expressions and compound updates. Keep wider scratch carriers private and preserve error ordering.
 - [ ] Preserve full I64/U64 comparisons and direct integer-to-float rounding without a Number detour. Mixed fixed integer/float source arithmetic still requires explicit conversion.
 - [ ] Update Wasm scalar type/layout/carrier queries and supported numeric/cast/formatting paths to exact types. Preserve narrow loads/stores, signed reloads, F16 storage and Error code representation.
+- [ ] Audit Wasm instruction/helper selection when D15 changes a result from I32/U32/F32 to a narrow semantic type. Retain existing physical carriers where appropriate but apply the selected-width checks/rounding before use. Respect existing recoverable-failure capability gates rather than implementing new failure machinery or silently reverting the result domain.
 - [ ] Update HTML mixed-target request/glue inputs without expanding partitioning or reachable numeric support. Unsupported recoverable conversion/Dec/Math operations retain precise capability diagnostics.
 - [ ] Keep unsupported-feature diagnostics at the relevant authored operation rather than at an unrelated new default-type conversion.
 
-**Validation:** existing scalar JS/Wasm matrices, layout/emitter tests, numeric proof tests, package fixtures and explicit external-boundary negative runtime cases. Do not turn a Wasm rejection into a trap merely to preserve a nominal success count.
+**Validation:** existing scalar JS/Wasm matrices, revised narrow operation/rounding tests, layout/emitter tests, numeric proof tests, package fixtures and explicit external-boundary negative runtime cases. A formerly accepted narrow operation may now require recoverable failure that Wasm does not support. Record that intentional D15 consequence and the correct capability diagnostic, then retain positive coverage of still-supported operations. Neither trap substitution nor a wider semantic result may be used to preserve a nominal success count.
 
 ### Phase 7 - configuration, MON and profile plumbing removal
 
@@ -874,11 +945,12 @@ validate that no pending numeric state escapes the owner
 
 **Closes integrated cutover C.** Earlier phases update local tests as they change owners. This phase completes and audits the repository-wide migration rather than postponing all testing until now.
 
-- [ ] Resolve every ledger entry for old numeric source names, profile settings, cast! syntax and changed catch eligibility.
+- [ ] Resolve every ledger entry for old numeric source names, profile settings, cast! syntax, revised narrow arithmetic and changed catch eligibility. Separate D15 changes in result type, rounding and failure from ordinary syntax migration.
 - [ ] Migrate integration input sources and expectations together. Preserve the purpose, runtime data, failure order and diagnostic reason of each test.
 - [ ] Remove the harness numeric_profile field, parsing rules, profile builder selection and tests only after equivalent explicit-width fixtures exist.
 - [ ] Make old harness profile keys fail according to the fixture schema's unsupported-field policy rather than silently ignoring them.
 - [ ] Preserve coverage that deliberately exercised nondefault widths, mixed signedness, finite guards, rounding and target rejections. Relabeling every source as I32/F64 is incorrect.
+- [ ] Apply the minimum-width retirement protocol in Section 8.2. Keep dedicated tests of the new narrow semantics and preserve still-relevant wide-result/failure-analysis properties with explicit wider operands or another valid witness. Never automatically add casts just to keep an old success expectation.
 - [ ] Update compiler-generated Moth snippets, Rust test strings, generators, project scaffolds, first-party source packages, benchmark projects and docs' executable bindings.
 - [ ] Update highlighter vocabulary and tests through the compiler-owned word classification where already shared. Preserve ordinary host-language `int`/`float` tokens in other language profiles.
 - [ ] Run the suite inventory audit again and compare assertion kinds, semantic contracts, backend blocks and diagnostic coverage with the baseline ledger.
@@ -898,13 +970,13 @@ validate that no pending numeric state escapes the owner
 - [ ] Test private call-summary convergence and recursive calls, builtin Error delivery, custom-error mapping and catch continuation routing. Validate all rewritten HIR before analysis/publication.
 - [ ] Test cross-file/module/generic constants and canonical type equality without donor-local IDs or removed default-type aliases.
 - [ ] Exercise overload-free signature lookup and conflicts where a tempting trait or cast choice must not select the type.
-- [ ] Compare compile-time and runtime operation boundaries, including Decimal per-operation rounding, signed division overflow, unsigned underflow and narrow compound write-back.
-- [ ] Exercise development/release parity for source validity and checked results. Existing optional optimisations must not change accepted syntax, required recovery or target rejection.
+- [ ] Compare compile-time and runtime operation boundaries, including Dec and F16 per-operation rounding, same-type narrow overflow, signed minimum negation/division, unsigned underflow and mixed-domain compound write-back. Check cancellation expressions that would hide a required intermediate failure or rounding if widened or reassociated.
+- [ ] Exercise development/release parity for source validity and checked results under the revised arithmetic contract. Existing optional optimisations must not change accepted syntax, required recovery or target rejection. Classify D15-caused changes from the old baseline separately from build-mode differences.
 - [ ] Check finite external F64 values before storage, formatting, comparison, forwarding and nested success extraction. Inject invalid values without relying on constant folding to hide the call.
 - [ ] Run the affected borrow/Boracle mechanical lanes and verify the existing reference rules are unchanged. This does not resume research campaigns or change their design.
 - [ ] Apply the code review guide to all touched owners. Remove duplicate inference maps, compatibility leftovers, unused wrappers, repeated traversals and test-only production hooks.
 
-**Exit:** the new semantics have explicit positive and negative boundaries, the supported runtime matrix is preserved and no pending state or stale analysis reaches a published artifact.
+**Exit:** the new semantics have explicit positive and negative boundaries, unchanged runtime contracts retain coverage, D15-caused matrix changes have reviewed outcomes and no pending state or stale analysis reaches a published artifact.
 
 ### Phase 10 - performance, documentation and full validation
 
@@ -932,6 +1004,7 @@ The numeric plan completes a dependency of the expression refactor. It does not 
 - [ ] Rewrite the remaining expression Phase 4 onward work packages around delivered capabilities. Remove numeric obligations now completed here and retain unrelated native result/Core evaluation/Wiring work.
 - [ ] Keep the restart status as awaiting explicit resumption after reassessment, with concrete remaining actions. Do not silently advance to Phase 4.
 - [ ] Update the downstream consumers listed in Section 10, especially the mixed-Wasm and constraints plans and the living Core Math plan.
+- [ ] Hand the revised operator-domain table and generic exceptions to the later generics/Core binding plan. Record explicit closed bounds and already-concrete nested expected-type forwarding there without treating either as delivered by this plan.
 - [ ] Publish all unique accepted contracts and remaining follow-ups in permanent or appropriate living owners.
 - [ ] Record the final activation-to-completion coverage/performance/validation summary. Retire this one-shot plan and its roadmap bullet in the implementation completion commit under repository policy.
 
@@ -972,6 +1045,21 @@ This maps the old test's semantic domain, not every occurrence in the program. A
 
 Do not preserve obsolete assertions that Int and I32 are distinct identities by inventing a substitute alias. Retire that assertion with its removed-feature rationale, while retaining ordinary exact type identity tests.
 
+#### Minimum-width arithmetic retirement
+
+D15 also changes existing fixed-width programs, independently of profile removal. Give each affected assertion one explicit disposition before deleting or rewriting it:
+
+| Old property | Replacement obligation |
+|---|---|
+| I8/I16/U8/U16 arithmetic yields at least 32 bits | Assert the revised same-type or smallest mixed-width result and its exact narrow failure boundaries. |
+| Narrow operands implicitly produce a wide result accepted by a receiver | Add a negative exact-receiver test, then retain any meaningful wide calculation using explicit operand conversion before the operation. A cast after the operation is not equivalent. |
+| F16 arithmetic produces F32 and rounds only at that domain | Assert F16 completion per operation and keep independently typed F32 tests for the old wider numerical properties. |
+| U8 plus U8 is full-domain infallible | Assert its new potential failure, then preserve proof/discharge coverage with a safe mixed-domain witness such as I8 plus U8 producing I16. |
+| A Wasm success depends on the old wide-domain proof | Record its new source or capability outcome. Keep a separate genuine supported-path witness rather than introducing traps or an old-width fallback. |
+| Compound assignment has a promoted operation followed by a narrowing failure | Keep distinct tests for same-type arithmetic failure and mixed-domain write-back failure, preserving no-commit and evaluation-order assertions. |
+
+Consolidating obsolete minimum-width fixtures is allowed only after those replacement obligations have owners. Preserve all unrelated assertions within each fixture. Explicit widening can change the available static proof, so a numerically equivalent rewrite is not automatically an equivalent capability or proof test. Record those distinctions rather than weakening the expected diagnostic.
+
 ### 8.3 Existing high-value migration owners
 
 | Existing owner or family | Migration obligation |
@@ -994,7 +1082,7 @@ Do not preserve obsolete assertions that Int and I32 are distinct identities by 
 | `src/compiler_frontend/type_coercion/tests/contextual_tests.rs` | Move useful rounding evidence out of removed implicit-coercion tests, retain rejection of new illegal coercions |
 | `src/backends/js/tests/uint_runtime.rs` | Reuse direct BigInt-to-float and unsigned helpers under exact U64 ownership |
 | `src/compiler_frontend/hir/tests/float_formatting_lowering_tests.rs` | Preserve ValidateFloat/FormatFloat precision, result types and delivery distinctions |
-| `src/compiler_frontend/hir/tests/checked_numeric_lowering_tests.rs` | Preserve domains, checked edges, semantic discharge and compound conversion handling |
+| `src/compiler_frontend/hir/tests/checked_numeric_lowering_tests.rs` | Assert revised domains and checked edges, replace obsolete wide-domain proof witnesses and retain distinct compound arithmetic/write-back failures |
 | `crates/moth-mon/src/tests/{schema_tests.rs,uint_tests.rs}` | Migrate schema/default/range assertions to exact widths before deleting profile paths |
 | `crates/moth-mon/tests/` and crate doctests | Preserve public Rust consumer coverage and clean API usage |
 | `src/compiler_tests/mon_syntax_parity/float_rounding.rs` | Preserve exact literal midpoint, subnormal, signed-zero and finite-limit expectations in both parsers |
@@ -1045,8 +1133,8 @@ Examples using helper names assume concrete signatures indicated by those names.
 | N11 | Add an independent U64 use of base to N10 | Base resolves U64, forward promotion succeeds regardless of use order |
 | N12 | I32 base plus raw `1` at I64 receiver | Literal I64, result I64, base remains I32 |
 | N13 | Two concrete I32 operands at I64 receiver | Rejected, no result retagging |
-| N14 | U8 literal arithmetic at a U8 receiver | Promoted U32 result still needs explicit narrowing |
-| N15 | F16 arithmetic versus F32 receiver | Preserve minimum F32 arithmetic precision and required rounding |
+| N14 | U8 literal arithmetic at a U8 receiver | `1 + 2` materialises and evaluates as U8 without narrowing, while known `255 + 1` is a numeric diagnostic |
+| N15 | Two concrete F16 operands versus an F32 receiver | Operation remains F16 and the exact receiver rejects it. An explicit result cast preserves prior F16 rounding, while widening operands requests F32 arithmetic |
 | N16 | Bound whole integer sent to float or Dec receiver | Requires explicit conversion, no family reclassification |
 | N17 | Immediate whole literal at F32/Dec/Byte receiver | Direct valid materialisation, no intermediate integer coercion |
 | N18 | Parentheses, reversed peers and a literal outside a narrow peer range | Preserve receiver priority and the peer-range diagnostic, with an explicit wider receiver able to type raw leaves independently |
@@ -1056,6 +1144,11 @@ Examples using helper names assume concrete signatures indicated by those names.
 | N22 | Known constant or concrete function result | Later use cannot change its declared/completed type |
 | N23 | Use in template formatting before an exact later scalar use | No accidental early default from a non-constraining formatting consumer |
 | N24 | Unsupported method or trait on an unresolved numeric receiver | Resolve independently, then diagnose, no type search to find an implementation |
+| N25 | Every eligible equal-type integer/float arithmetic pair | Result keeps the operand type, including I8/I16/U8/U16/F16, with explicit `/` and unsupported-operator exceptions |
+| N26 | Mixed fixed-integer and float type pairs in both orders | Smallest supported common operand domain without 32-bit/F32 floors. No I64/U64 arithmetic fallback |
+| N27 | Unary signed/float negation, unsigned negation and Byte arithmetic | Signed/float result type preserved, signed minimum checked, unsigned negation and Byte arithmetic rejected |
+| N28 | Concrete I8 arithmetic under an I32 receiver or later I32 use | Exact mismatch, no hidden widening. Wider operand conversion works and a result cast cannot repair earlier narrow failure |
+| N29 | F16 receiving context for raw literal arithmetic versus a named F16 operand and raw F32-context literal | Selected domain follows D12/D15. The raw-only F16 operation stays F16, while the explicit wider literal context can select F32 without retyping the named operand |
 
 ### 9.2 Containers, generics and service boundaries
 
@@ -1128,21 +1221,28 @@ Examples using helper names assume concrete signatures indicated by those names.
 |---|---|---|
 | B01 | Every signed minimum and unsigned maximum | Correct literal materialisation and runtime transport, including full U64 |
 | B02 | Integer overflow/underflow, zero division and invalid exponent | Existing checked failure code and first-failure order |
-| B03 | Signed MIN divided by -1 versus remainder by -1 | Division overflow preserved, remainder zero preserved |
-| B04 | U8/U16 promotion and checked narrow write-back | Arithmetic domain preserved, no operand-width mask, checked commit |
+| B03 | Signed MIN integer division `//` by -1 versus remainder `%` by -1 | Integer quotient overflow preserved, remainder zero preserved. Real division `/` retains its F64 result |
+| B04 | Same-type U8/U16 updates and mixed-domain narrow write-back | Check arithmetic in the revised selected domain and convert only where needed. No wrapping mask, duplicate narrow conversion or partial commit |
 | B05 | U64 9007199791611905 to F32 | Exact destination bits 0x5a000001, never the f64-detour result |
 | B06 | F16 midpoint, just-above-midpoint and finite overflow threshold | Direct destination rounding from original spelling |
 | B07 | F16/F32/F64 subnormals and signed zero | Preserve accepted bit semantics through literals, constants, storage and MON |
 | B08 | Dec `1 / 3 * 3`, power versus repeated multiply and exact leaf fitting | Existing per-operation rounding and scale rules, no whole-expression rational folding |
 | B09 | Decimal exponent literal/group and typed wrong-width exponent | I32 exponent context, explicit conversion required for other concrete widths |
 | B10 | Inclusive numeric maximum singleton and equal exclusive range | Terminate without overflowing successor, empty range not false nonprogress |
-| B11 | Floating range no-progress and out-of-range next candidate | Existing guards and endpoint exceptions, exact F32/F64 domain |
+| B11 | Floating range no-progress and out-of-range next candidate | Existing guards and endpoint exceptions in each already-supported exact counter domain. Audit F16 shared arithmetic completion without a hidden F32 semantic counter |
 | B12 | I32 container positions with large physical byte products | Source limit checked separately from address/allocation arithmetic |
 | B13 | JS BigInt and Number carrier boundaries | Exact I64/U64 values and comparisons, no accidental coercion |
 | B14 | Supported Wasm scalar memory and numeric paths | Existing signed/unsigned load/store, carrier and runtime contracts preserved |
 | B15 | Unsupported Wasm recoverable cast, Dec or Math call | Relevant capability diagnostic, never a trap or silent backend switch |
 | B16 | Optional numeric proof present/absent and pre-publication HIR rewrite | Same source validity and semantics, correctly paired proof or retained check |
 | B17 | Debug/release builds of all critical conversions and failure cases | Same accepted types, values and failure ordering |
+| B18 | Runtime I8 127 plus 1, U8 255 plus 1, U8 zero minus 1 and narrow multiplication overflow | Existing checked failure delivery in the selected narrow domain, never implicit widening or wrapping |
+| B19 | Signed narrow minimum negation and integer division `//` by -1, paired remainder | Negation/integer division fail at the narrow width, remainder remains zero and known invalid work diagnoses at compile time |
+| B20 | Concrete F16 `(2048 + 1) - 2048` and F16 maximum plus itself | First expression produces zero after per-operation rounding. Second fails at F16 finite overflow. An F32 carrier changes neither outcome |
+| B21 | I8 `(a + b) - b` with a=127 and b=1 supplied at runtime | Addition fails before subtraction, even though a wider or reassociated calculation would fit at the end |
+| B22 | Full-domain failure discharge for U8+U8 versus I8+U8 | U8 result remains potentially fallible, I16 mixed result is proven contained. Safety-catch eligibility stays independent of either fact |
+| B23 | Former narrow Wasm success whose wide-domain proof disappears | Correct updated source/capability result and a separate still-supported positive witness. No added recoverable Wasm machinery or trap fallback |
+| B24 | Fixed binary-float operator completion in nested expressions, returns and compound updates | Selected precision completes each operation before use, including F16 finite/subnormal/zero cases, without forcing stores to establish semantics |
 
 ### 9.5 Config, MON and external Math
 
@@ -1199,7 +1299,7 @@ Each entry needs explicit review, even when the final disposition is "already ac
 | `docs/compiler-design-overview.md` | Replace numeric-profile invariants with exact types and fixed defaults. Define construction-only inference scope, literal/receiver priority, generic/cast completion, failure separation and no-pending-state handoff. Update public values, proofs, module inputs, config/MON and external boundary text. |
 | `docs/build-system-design.md` | Remove semantic profile selection/propagation from bootstrap, services, dependency compatibility and variants. Specify exact input materialisation and preserve build/physical profiles and existing ownership. |
 | `docs/compiler-data-layout-design.md` | Remove MON/profile-dependent carriers and describe relevant pending numeric/source-span lifetimes. Preserve packed spans, existing diagnostics and independent MON error ownership. |
-| `docs/src/docs/numbers/` | Exact inventory, defaults, bounded inference, raw/bound family distinction, receiving priority, unchanged promotion, I32 Dec exponent, finite checks and compile/runtime parity. Update both Basic and unsuffixed references and their page composition. |
+| `docs/src/docs/numbers/` | Exact inventory, defaults, bounded inference, raw/bound family distinction, receiving priority, D15 result-domain matrix, narrow checked failures, per-operation F16 rounding, I32 Dec exponent and compile/runtime parity. Update both Basic and unsuffixed references and their page composition. |
 | `docs/src/docs/casts/` | One cast spelling, exact immediate target, source inference barrier, post-resolution policy, ordinary failure delivery, expanded evidence traits and preserved conversion exactness. |
 | `docs/src/docs/errors/` | Authored safety eligibility, call-count levels, handler constraints/error types, unchanged placement, expression-wide protection, failure compatibility and pruning semantics. |
 | `docs/src/docs/collections/` | Non-empty numeric leaf inference, mixed-literal float family, exact typed element compatibility, unchanged empty-container rules and I32 positional/length APIs. |
@@ -1210,14 +1310,14 @@ Each entry needs explicit review, even when the final disposition is "already ac
 | `docs/src/docs/mon/` and standalone crate docs | Clean explicit schema API, retained Integer/Decimal families, direct rounding and typed examples without with_profile. Preserve syntax/runtime integration distinctions. |
 | `docs/src/docs/packages/core/math/` | F64 constants/signatures, mathematical contracts, shared finite-result boundary and existing Wasm gap. Richer/generic Math stays later work. |
 | Other Core/Builder and external-function references | Exact migrated signatures, constant/return validation, lengths/units/distribution and the existing capability matrix. |
-| Memory/runtime scalar and ABI references | Exact scalar metadata and physical carriers without semantic profiles, checked sizes and preserved source/backend separation. |
+| Memory/runtime scalar and ABI references | Exact scalar metadata and physical carriers without semantic profiles. Distinguish narrow checked result domains and F16 completion from wider scratch/register carriers. Preserve checked sizes and source/backend separation. |
 | Design-scope and language overview | Remove convenience-type rationale and unrestricted/eager numeric-inference statements now superseded. Keep all unrelated exclusions. |
 | Cheatsheet | Compact final exact-type and inference examples, one cast and safety catch, with no implementation-status clutter beyond its standard notice. |
 | Style/testing/validation guides | Remove harness numeric_profile configuration and stale example types. Preserve meaningful test selection, assertion and validation contracts. |
 | Both progress matrices | Separate accepted design from delivered scalar, inference, catch, config, MON, package and backend support. Link actual evidence without claiming future Wasm support. |
 | `README.md`, agent routing, `index.md`, diagrams and scaffolds | Correct affected syntax and ownership names. Preserve unrelated content and reflect moved/deleted owners. |
 
-Within the number references, explicitly preserve the unusual but accepted rules that can be lost in a rewrite: U8 arithmetic promotion, exact I64/U64 comparisons without a common arithmetic type, integer `/` versus `//`, unsigned negation rejection, decimal exact literal fitting and operation-level rounding.
+Within the number references, explicitly replace minimum-width promotion with equal-type preservation and the smallest mixed-domain rules. Show that I8/U8 operations can fail in their own ranges and F16 completes at each operation. Preserve exact I64/U64 comparison without a common arithmetic type, integer `/` versus `//`, unsigned negation rejection, decimal exact literal fitting and operation-level rounding. Distinguish operand widening from a result cast and the default inferred type from an arithmetic minimum width.
 
 Within the catch references, include both accepted multiple-call examples and the rejected nested-argument-only example. Explain that eligibility is not a claim that failure exists and that safety catch is not a transaction or a handler for every fatal condition.
 
@@ -1232,11 +1332,12 @@ Update these files as coordination targets, not as new implementation dependenci
 | `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md` | Consume exact numeric types and pending-state/span outcomes, keep its separate activation and diagnostic-layout decisions |
 | `docs/roadmap/plans/compiler-diagnostics-improvement-plan.md` | Reconcile delivered numeric/catch diagnostics and retain only genuine remaining work |
 | `docs/roadmap/plans/general-directives-and-project-config-plan.md` | Consume all fixed numeric input types and destination-aware command literal materialisation, remove profile bootstrap assumptions |
-| `docs/roadmap/plans/constraints-and-fast-math-plan.md` | Remove convenience domains/cast! spelling, keep explicit casts checked and describe safety catch eligibility separately from actual failures/traps |
-| `docs/roadmap/plans/html_project_backend_wasm_final_implementation_plan.md` | Own all further Wasm conversion/error/Math/Dec support, consume exact numeric HIR, shared finite guards and the preserved rejection inventory |
+| `docs/roadmap/plans/constraints-and-fast-math-plan.md` | Remove convenience domains/cast! spelling, consume D15 narrow result domains and F16 rounding, refresh obsolete type-domain safety witnesses and keep explicit casts checked. Separate safety-catch eligibility from actual failures/traps |
+| `docs/roadmap/plans/html_project_backend_wasm_final_implementation_plan.md` | Own all further Wasm conversion/error/Math/Dec support. Consume D15 exact result domains, F16 completion, shared finite guards and the explicitly revised rejection inventory |
 | `docs/roadmap/plans/packages/core-math.md` | Replace profile-based handoff with F64-only migration, retain the coverage inventory, finite-boundary ownership and future generic/precision work |
 | `docs/roadmap/plans/packages/first-party-package-programme.md` and affected package companions | Coordinate numeric registration changes and prevent parallel reintroduction of NativeFloat/profile assumptions |
 | Runtime anonymous-record and collection-producing-loop plans | Consume known numeric leaf inference and current result/collection contracts without adding broader inference |
+| Later generics, type-parametric Core bindings and file-backed JS/WAT plan, not yet authored | Consume D15 and its division/Dec exceptions. Own explicit compiler-defined closed bounds for all visibilities and forwarding an already concrete expected type into a nested generic call. Keep body-inferred capabilities, operator overloading and conditional error signatures outside that work |
 | MON integration/static-builder and package/persistence follow-up notes | Consume exact standalone schemas and explicit compatibility facts, not removed profile APIs |
 
 Update retained benchmark/audit notes only where necessary to mark a conclusion historical or superseded. Preserve exact old evidence rather than changing it to match the new compiler. The numeric plan's completion does not reactivate Boracle research or unrelated diagnostic work automatically.
@@ -1324,7 +1425,7 @@ Keep three comparisons distinct:
 2. Migrated compiler with semantically equivalent explicit-width workloads where equivalence is possible.
 3. New inference/safety-catch workloads measuring the new feature's additional cost.
 
-Removing obsolete profiles or fixtures is not an inference speedup. Changing checked arithmetic to a narrower domain or dropping runtime validation invalidates a comparison rather than improving it.
+Removing obsolete profiles or fixtures is not an inference speedup. D15 intentionally changes narrow result domains and F16 operation completion, so a workload with different checks or rounding is not a like-for-like performance comparison. Separate that new-semantics cost from matched workloads using equivalent explicit domains. Dropping runtime validation invalidates a comparison rather than improving it.
 
 Report type-resolution, materialisation, constant-folding, generic finalisation, failure-summary and HIR time alongside end-to-end time. Include peak/retained bytes, pending literal/constraint counts, allocations, worklist revisits, stack pressure and destruction cost. Use existing counters/timers and extend them only where they answer a specific question.
 
@@ -1342,6 +1443,7 @@ Prefer existing benchmark generators and manifests. Add a small number of focuse
 | Many safety catches with unreachable handlers | Retained dead recipes, sidecars, captures and slow pruning |
 | Mutable cycles and mixed concrete/pending operands | Nontermination or excessive fixed-point iterations |
 | Mostly concrete existing program | Overhead from routing every expression through a general solver |
+| Concrete narrow arithmetic and F16 operation chains | Required selected-width checks/rounding versus duplicate work or accidental wider semantics. Report this separately from equivalent wide-domain baselines |
 
 Measure several increasing sizes under the existing scaling policy. Avoid wall-clock thresholds in correctness tests. A deterministic operation-count invariant can protect a known algorithmic bound without depending on machine speed.
 
@@ -1384,11 +1486,14 @@ Inspect production, test, docs, scaffold, benchmark, feature-gated and generated
 
 ### 12.2 Completion conditions
 
-- [ ] Every approved decision D00-D14 has a permanent contract, implementation owner and verified coverage.
+- [ ] Every approved decision D00-D15 has a permanent contract, implementation owner and verified coverage.
 - [ ] Every mandatory acceptance row has a primary test owner and outcome.
 - [ ] Int/Uint/Float and semantic numeric profiles have no supported public or internal type-identity path.
 - [ ] Defaults are language-owned I32/F64, with no builder-controlled substitute.
 - [ ] Numeric inference respects families, explicit boundaries and forward named-operand promotion.
+- [ ] Equal-type eligible arithmetic preserves the operand type, mixed domains have no minimum-width floor and unary negation follows D15. Division/Dec/unsigned exceptions remain explicit.
+- [ ] Narrow integer checks and F16 per-operation rounding use the semantic result domain rather than a physical carrier. Proofs and capability decisions use those same facts.
+- [ ] Intentional D15 source/backend changes have reviewed coverage dispositions, with no old-domain fallback or missing replacement assertions.
 - [ ] Cast targets never choose source types or appear through illegal distant context.
 - [ ] One cast spelling preserves supported conversion values and ordinary failure delivery.
 - [ ] Safety catch eligibility, actual failure effects and handler placement remain separate.
@@ -1397,7 +1502,7 @@ Inspect production, test, docs, scaffold, benchmark, feature-gated and generated
 - [ ] I32 indices/lengths, I32 Dec exponents and physical size calculations preserve their distinct contracts.
 - [ ] Config materialises command literals directly and preserves exact typed input compatibility/provenance.
 - [ ] Standalone MON is cleanly exact-width without losing lossless Integer/Decimal data or useful profile-era coverage.
-- [ ] Supported JS/Wasm behaviour is preserved and unsupported Wasm work remains accurately tracked.
+- [ ] Unchanged JS/Wasm contracts preserve their supported behaviour, D15-caused source/capability changes are explicit and unsupported Wasm work remains accurately tracked.
 - [ ] The final HIR, analysis, proof, interface and generated artifacts contain no pending or stale facts.
 - [ ] Coverage dispositions preserve every surviving assertion and retire only explicitly removed semantics or proven duplicates.
 - [ ] Documentation, generated output, package notes, roadmap and progress matrices agree.
@@ -1439,6 +1544,8 @@ The following inspection anchors support the main implementation findings:
 
 The research established affected owners and failure mechanisms. It did not execute compiler tests, measure benchmark performance or prove exhaustive coverage of every file in the future activation tree. A local network checkout was unavailable and the planning environment did not contain Rust/Cargo/just. Phase 0 and the later gates deliberately require the implementation agent to establish fresh executable evidence.
 
+**Replacement-document provenance:** the 2026-10-08 revision applies the user-approved type-preserving arithmetic change to this supplied plan, its work packages, acceptance cases, coverage protocol and downstream coordination. It preserves the earlier research receipts and does not claim a new repository baseline or compiler test run. The implementation agent must still refresh the activation tree and validate the revised semantics under the gates above.
+
 ## Appendix B. Agent handoff and resumable work notes
 
 Keep a compact work record under `tmp/exact-numerics/` that survives context compaction. It should contain the actual base/tree, current phase/package, accepted decisions, changed owners, tests run, unresolved failures and the next bounded action. Keep detailed logs and the coverage ledger separate rather than embedding them into every progress note.
@@ -1461,7 +1568,7 @@ A suggested commit sequence follows the phase contracts rather than fixed file c
 record numeric contracts, pause expression work and inventory evidence
 unify cast evidence/delivery and source-authored safety catch
 harden exact-width scalar and external finite-result boundaries
-cut over canonical numeric identities and body-local scalar inference
+cut over exact numeric identities, revised arithmetic domains and scalar inference
 complete container, generic and fallback numeric relationships
 migrate builtins, packages, HIR and supported backend paths
 migrate config/MON and remove semantic profile plumbing
