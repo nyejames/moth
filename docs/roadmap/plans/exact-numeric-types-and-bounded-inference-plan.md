@@ -4,9 +4,9 @@
 
 ```text
 STATUS: active on the user-selected expression-refactor branch
-CURRENT_SLICE: Phase 0 accepted; Phase 1 construction-owner mapping next
-BLOCKERS: no external prerequisite; compiler cutover and all new acceptance rows remain pending
-NEXT_ACTION: map bounded construction state and finalisation before selecting the numeric inference representation
+CURRENT_SLICE: Phase 1 accepted; Phase 2 cast and safety-catch owner mapping next
+BLOCKERS: no external prerequisite; compiler integration and remaining acceptance rows are pending
+NEXT_ACTION: unify cast spelling and evidence, then implement authored safety-catch eligibility
 ```
 
 **Intended repository location:** `docs/roadmap/plans/exact-numeric-types-and-bounded-inference-plan.md`
@@ -690,22 +690,26 @@ Independent numeric, inference, service, architecture, rendering, native-evidenc
 
 #### 1A. Map incomplete and completed owners
 
-- [ ] Identify the point where local declarations currently require a concrete TypeId and where numeric spelling becomes a concrete value.
-- [ ] Map every consumer that can run before body completion: field/member lookup, collection operations, constant evaluation, generic argument/evidence checking, TIR expression intake, catch typing and signature/result construction.
-- [ ] Separate retained syntax/recipe ownership from completed semantic values. Determine which existing indexed RPN or pending records can serve body-local numeric resolution.
-- [ ] Define how an eligible numeric binding/reference is represented before concrete completion. Keep source spans and stable declaration identity without a fake semantic type.
-- [ ] Define the lifetime of pending numeric state for functions, root runtime, named constants, generic templates/instances, config and direct-template services.
-- [ ] Specify the convergence point for private failure summaries and the owner that prunes unrouted handlers. Preserve the current pre-publication lane installer and analysis refresh contract where used.
+- [x] Identify the point where local declarations currently require a concrete TypeId and where numeric spelling becomes a concrete value.
+- [x] Map every consumer that can run before body completion: field/member lookup, collection operations, constant evaluation, generic argument/evidence checking, TIR expression intake, catch typing and signature/result construction.
+- [x] Separate retained syntax/recipe ownership from completed semantic values. Determine which existing indexed RPN or pending records can serve body-local numeric resolution.
+- [x] Define how an eligible numeric binding/reference is represented before concrete completion. Keep source spans and stable declaration identity without a fake semantic type.
+- [x] Define the lifetime of pending numeric state for functions, root runtime, named constants, generic templates/instances, config and direct-template services.
+- [x] Specify the convergence point for private failure summaries and the owner that prunes unrouted handlers. Preserve the current pre-publication lane installer and analysis refresh contract where used.
+
+Phase 1 selects body-owned dense numeric equality origins with retained indexed RPN and directed operation dependencies. Each independent function root owns its domain, including body-local functions sharing a ScopeArena. Pending bindings use existing frame slots and name lookup, with dense body-owned rows rather than a second lookup or per-binding allocation. Binding-family establishment is explicit for literals, literal arithmetic, signature forwarding and numeric collections. Exact receivers precede eligible peers and defaults, repeated equal facts do not retraverse raw subtrees, and directed completion validates the retained binding family. Issuing domains and compact origin indexes are checked. Completion occurs at independent body roots before callable failure-fact collection; dependent checks resume from retained routing without reparsing. No pending state enters canonical types, generic keys, TIR, HIR or publication. The detailed owner, continuation and deletion map is local in `tmp/exact-numerics/phase1/construction-model.md`.
 
 #### 1B. Exercise semantic probes before broad migration
 
-- [ ] Build focused tests for equality constraints, explicit receivers, family mismatch, defaulting and deterministic conflict witnesses.
-- [ ] Include the accepted cast-source example, raw arithmetic receiver example, named-arithmetic rejection, collection element inference and signature-only identity generic.
-- [ ] Probe the revised complete scalar type-pair matrix, same-type narrow results, mixed narrow domains, unary negation and per-operation F16 completion before selecting the construction representation. Keep promotion policy separate from permitted inference edges.
-- [ ] Add order permutations that must preserve results: swapped independent use order, reversed collection literal order and reversed peer position.
-- [ ] Exercise a mutable self-update, a long copy chain, fan-out uses and a dependency cycle. Prove termination and annotation diagnostics without backward arithmetic search.
-- [ ] Compare at most two justified storage choices if the existing owners do not determine the representation. Measure pending bytes, allocations, worklist revisits and reclamation. Keep experiments local and delete losing implementations.
-- [ ] Use exact fixed-width types in probes. Do not use the old Int/Float semantic identities as inference variables or introduce an unrestricted generic unknown.
+- [x] Build focused tests for equality constraints, explicit receivers, family mismatch, defaulting and deterministic conflict witnesses.
+- [x] Include the accepted cast-source example, raw arithmetic receiver example, named-arithmetic rejection, collection element inference and signature-only identity generic.
+- [x] Probe the revised complete scalar type-pair matrix, same-type narrow results, mixed narrow domains, unary negation and per-operation F16 completion before selecting the construction representation. Keep promotion policy separate from permitted inference edges.
+- [x] Add order permutations that must preserve results: swapped independent use order, reversed collection literal order and reversed peer position.
+- [x] Exercise a mutable self-update, a long copy chain, fan-out uses and a dependency cycle. Prove termination and annotation diagnostics without backward arithmetic search.
+- [x] Compare at most two justified storage choices if the existing owners do not determine the representation. Measure pending bytes, allocations, worklist revisits and reclamation. Keep experiments local and delete losing implementations.
+- [x] Use exact fixed-width types in probes. Do not use the old Int/Float semantic identities as inference variables or introduce an unrestricted generic unknown.
+
+The final local invocation passed all 25 selected tests. The scalar probe covers 847 binary cells, 121 common-integer cells, 121 comparison cells and eleven unary/classification rows, with 93 recorded current-versus-D15 differences and ten passing numeric witnesses. Construction evidence covers 36 scenarios and six workload families at authored sizes of 100, 1,000 and 10,000, plus nested-division duplicate-receiver and issuing-ID regressions. Independent scalar, interface, semantic and storage reviews accepted the corrected candidate. Owner-level used/capacity bytes, vector growth events, bounded work counters and release are measured; physical allocator peaks are not. Fifteen real-source baseline checks and the separate full-U64 check record the current eager-defaulting boundary. These are representation-selection receipts, not delivered source/backend semantics. Complete integration remains in Phases 4/5. Temporary test registration was removed before this checkpoint.
 
 #### 1C. Fix interfaces and deletion obligations
 
