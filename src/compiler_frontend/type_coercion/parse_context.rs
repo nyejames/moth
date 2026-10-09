@@ -53,7 +53,7 @@ impl ExpectedType {
 /// Explicit cast target supplied by a receiving boundary.
 ///
 /// WHAT: carries the builtin target type from a typed boundary into expression
-///      parsing so that a leading `cast` / `cast!` keyword can resolve its
+///      parsing so that a leading `cast` keyword can resolve its
 ///      target without making ordinary expression parsing globally type-directed.
 /// WHY: `ExpectedType` owns parse-time literal context only; cast target
 ///      ownership is intentionally separate so boundary callers can offer an

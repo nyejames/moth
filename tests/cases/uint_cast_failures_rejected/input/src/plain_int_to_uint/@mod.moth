@@ -1,3 +1,5 @@
-widen |value Int| -> Uint:
-    return cast value
+export:
+    widen |value Int| -> Uint:
+        return cast value
+    ;
 ;

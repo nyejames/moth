@@ -8,6 +8,7 @@ rendered_output_contains = ["wasm unreachable cast ignored"]
 [backends.html_wasm]
 mode = "success"
 warnings = "forbid"
+rendered_output_contains = ["wasm unreachable cast ignored"]
 
 [[backends.html_wasm.artifact_assertions]]
 path = "page.wasm"

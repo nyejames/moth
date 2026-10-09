@@ -88,7 +88,7 @@
         io = "plain variable"
         error_message #= Error("failed")
         return! value
-        cast! value
+        casted_text String = cast 'x'
 
         -- final placement, decimal scales and error markers
         parsed ParsedPost into scratch = parse_post(post)!

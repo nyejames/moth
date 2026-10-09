@@ -1,5 +1,5 @@
 parse_float |text String| -> Float, Error!:
-    return cast! text
+    return cast text
 ;
 
 one = parse_float("1") catch: then 0.0;

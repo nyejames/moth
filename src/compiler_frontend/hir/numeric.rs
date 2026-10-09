@@ -30,8 +30,8 @@ pub enum NumericFailureMode {
     ///
     /// WHAT: a builtin-accepting catch or the builtin `Error!` return slot receives the
     ///       failure through the normal fallible-carrier path.
-    /// WHY: this keeps recoverable numeric failures in the same control-flow shape as explicit
-    ///      `cast!` propagation and lets later lowering emit `HirTerminator::FallibleBranch`.
+    /// WHY: this keeps recoverable numeric failures in the established Error-return control-flow
+    ///      shape, which later lowering emits as `HirTerminator::FallibleBranch`.
     ReturnError,
 
     /// Stop execution on failure.

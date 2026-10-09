@@ -96,15 +96,12 @@ fn each_source_spelling_maps_to_its_exact_compiler_token() {
 }
 
 #[test]
-fn attached_bang_words_keep_their_dedicated_token_tags() {
+fn return_bang_is_the_only_attached_keyword_token() {
     assert_eq!(
         attached_bang_keyword_token_tag("return"),
         Some(TokenTag::RETURN_BANG)
     );
-    assert_eq!(
-        attached_bang_keyword_token_tag("cast"),
-        Some(TokenTag::CAST_BANG)
-    );
+    assert_eq!(attached_bang_keyword_token_tag("cast"), None);
     assert_eq!(attached_bang_keyword_token_tag("if"), None);
     assert_eq!(attached_bang_keyword_token_tag("return!"), None);
 }

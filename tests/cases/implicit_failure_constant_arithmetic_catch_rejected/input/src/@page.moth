@@ -1,0 +1,5 @@
+sum #= 1 + 2
+
+compare_sum |value Int| -> Bool:
+    return sum is value catch then false
+;

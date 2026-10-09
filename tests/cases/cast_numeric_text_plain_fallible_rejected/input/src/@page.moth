@@ -1,3 +1,5 @@
-narrow |text String| -> U8:
-    return cast text
+export:
+    narrow |text String| -> U8:
+        return cast text
+    ;
 ;

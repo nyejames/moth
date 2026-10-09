@@ -12,19 +12,37 @@
 //!      naming, target classification, or fallibility.
 
 use super::targets::{BuiltinCastFallibility, BuiltinCastTarget};
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 /// The set of compiler-owned core cast traits.
 ///
-/// Each builtin cast target has one infallible evidence trait and one
-/// fallible evidence trait. The metadata rows below are the authoritative
-/// source for their source spellings, requirement names, targets, and
-/// fallibility.
+/// Each cast target has one infallible evidence trait and one fallible evidence trait. The
+/// metadata rows below are authoritative for their source spellings, requirement names, targets,
+/// and fallibility.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum CoreCastTrait {
-    CastableToInt,
-    TryCastableToInt,
-    CastableToFloat,
-    TryCastableToFloat,
+    CastableToI8,
+    TryCastableToI8,
+    CastableToI16,
+    TryCastableToI16,
+    CastableToI32,
+    TryCastableToI32,
+    CastableToI64,
+    TryCastableToI64,
+    CastableToU8,
+    TryCastableToU8,
+    CastableToU16,
+    TryCastableToU16,
+    CastableToU32,
+    TryCastableToU32,
+    CastableToU64,
+    TryCastableToU64,
+    CastableToF16,
+    TryCastableToF16,
+    CastableToF32,
+    TryCastableToF32,
+    CastableToF64,
+    TryCastableToF64,
     CastableToBool,
     TryCastableToBool,
     CastableToString,
@@ -65,31 +83,157 @@ pub(crate) struct CoreCastTraitMetadata {
 ///      catalogue.
 pub(crate) const BUILTIN_CAST_TRAIT_ROWS: &[CoreCastTraitMetadata] = &[
     CoreCastTraitMetadata {
-        kind: CoreCastTrait::CastableToInt,
-        trait_name: "CASTABLE_TO_INT",
-        requirement_name: "to_int",
-        target: BuiltinCastTarget::Int,
+        kind: CoreCastTrait::CastableToI8,
+        trait_name: "CASTABLE_TO_I8",
+        requirement_name: "to_i8",
+        target: BuiltinCastTarget::Fixed(FixedScalar::I8),
         fallibility: BuiltinCastFallibility::Infallible,
     },
     CoreCastTraitMetadata {
-        kind: CoreCastTrait::TryCastableToInt,
-        trait_name: "TRY_CASTABLE_TO_INT",
-        requirement_name: "try_to_int",
-        target: BuiltinCastTarget::Int,
+        kind: CoreCastTrait::TryCastableToI8,
+        trait_name: "TRY_CASTABLE_TO_I8",
+        requirement_name: "try_to_i8",
+        target: BuiltinCastTarget::Fixed(FixedScalar::I8),
         fallibility: BuiltinCastFallibility::Fallible,
     },
     CoreCastTraitMetadata {
-        kind: CoreCastTrait::CastableToFloat,
-        trait_name: "CASTABLE_TO_FLOAT",
-        requirement_name: "to_float",
-        target: BuiltinCastTarget::Float,
+        kind: CoreCastTrait::CastableToI16,
+        trait_name: "CASTABLE_TO_I16",
+        requirement_name: "to_i16",
+        target: BuiltinCastTarget::Fixed(FixedScalar::I16),
         fallibility: BuiltinCastFallibility::Infallible,
     },
     CoreCastTraitMetadata {
-        kind: CoreCastTrait::TryCastableToFloat,
-        trait_name: "TRY_CASTABLE_TO_FLOAT",
-        requirement_name: "try_to_float",
-        target: BuiltinCastTarget::Float,
+        kind: CoreCastTrait::TryCastableToI16,
+        trait_name: "TRY_CASTABLE_TO_I16",
+        requirement_name: "try_to_i16",
+        target: BuiltinCastTarget::Fixed(FixedScalar::I16),
+        fallibility: BuiltinCastFallibility::Fallible,
+    },
+    CoreCastTraitMetadata {
+        kind: CoreCastTrait::CastableToI32,
+        trait_name: "CASTABLE_TO_I32",
+        requirement_name: "to_i32",
+        target: BuiltinCastTarget::Fixed(FixedScalar::I32),
+        fallibility: BuiltinCastFallibility::Infallible,
+    },
+    CoreCastTraitMetadata {
+        kind: CoreCastTrait::TryCastableToI32,
+        trait_name: "TRY_CASTABLE_TO_I32",
+        requirement_name: "try_to_i32",
+        target: BuiltinCastTarget::Fixed(FixedScalar::I32),
+        fallibility: BuiltinCastFallibility::Fallible,
+    },
+    CoreCastTraitMetadata {
+        kind: CoreCastTrait::CastableToI64,
+        trait_name: "CASTABLE_TO_I64",
+        requirement_name: "to_i64",
+        target: BuiltinCastTarget::Fixed(FixedScalar::I64),
+        fallibility: BuiltinCastFallibility::Infallible,
+    },
+    CoreCastTraitMetadata {
+        kind: CoreCastTrait::TryCastableToI64,
+        trait_name: "TRY_CASTABLE_TO_I64",
+        requirement_name: "try_to_i64",
+        target: BuiltinCastTarget::Fixed(FixedScalar::I64),
+        fallibility: BuiltinCastFallibility::Fallible,
+    },
+    CoreCastTraitMetadata {
+        kind: CoreCastTrait::CastableToU8,
+        trait_name: "CASTABLE_TO_U8",
+        requirement_name: "to_u8",
+        target: BuiltinCastTarget::Fixed(FixedScalar::U8),
+        fallibility: BuiltinCastFallibility::Infallible,
+    },
+    CoreCastTraitMetadata {
+        kind: CoreCastTrait::TryCastableToU8,
+        trait_name: "TRY_CASTABLE_TO_U8",
+        requirement_name: "try_to_u8",
+        target: BuiltinCastTarget::Fixed(FixedScalar::U8),
+        fallibility: BuiltinCastFallibility::Fallible,
+    },
+    CoreCastTraitMetadata {
+        kind: CoreCastTrait::CastableToU16,
+        trait_name: "CASTABLE_TO_U16",
+        requirement_name: "to_u16",
+        target: BuiltinCastTarget::Fixed(FixedScalar::U16),
+        fallibility: BuiltinCastFallibility::Infallible,
+    },
+    CoreCastTraitMetadata {
+        kind: CoreCastTrait::TryCastableToU16,
+        trait_name: "TRY_CASTABLE_TO_U16",
+        requirement_name: "try_to_u16",
+        target: BuiltinCastTarget::Fixed(FixedScalar::U16),
+        fallibility: BuiltinCastFallibility::Fallible,
+    },
+    CoreCastTraitMetadata {
+        kind: CoreCastTrait::CastableToU32,
+        trait_name: "CASTABLE_TO_U32",
+        requirement_name: "to_u32",
+        target: BuiltinCastTarget::Fixed(FixedScalar::U32),
+        fallibility: BuiltinCastFallibility::Infallible,
+    },
+    CoreCastTraitMetadata {
+        kind: CoreCastTrait::TryCastableToU32,
+        trait_name: "TRY_CASTABLE_TO_U32",
+        requirement_name: "try_to_u32",
+        target: BuiltinCastTarget::Fixed(FixedScalar::U32),
+        fallibility: BuiltinCastFallibility::Fallible,
+    },
+    CoreCastTraitMetadata {
+        kind: CoreCastTrait::CastableToU64,
+        trait_name: "CASTABLE_TO_U64",
+        requirement_name: "to_u64",
+        target: BuiltinCastTarget::Fixed(FixedScalar::U64),
+        fallibility: BuiltinCastFallibility::Infallible,
+    },
+    CoreCastTraitMetadata {
+        kind: CoreCastTrait::TryCastableToU64,
+        trait_name: "TRY_CASTABLE_TO_U64",
+        requirement_name: "try_to_u64",
+        target: BuiltinCastTarget::Fixed(FixedScalar::U64),
+        fallibility: BuiltinCastFallibility::Fallible,
+    },
+    CoreCastTraitMetadata {
+        kind: CoreCastTrait::CastableToF16,
+        trait_name: "CASTABLE_TO_F16",
+        requirement_name: "to_f16",
+        target: BuiltinCastTarget::Fixed(FixedScalar::F16),
+        fallibility: BuiltinCastFallibility::Infallible,
+    },
+    CoreCastTraitMetadata {
+        kind: CoreCastTrait::TryCastableToF16,
+        trait_name: "TRY_CASTABLE_TO_F16",
+        requirement_name: "try_to_f16",
+        target: BuiltinCastTarget::Fixed(FixedScalar::F16),
+        fallibility: BuiltinCastFallibility::Fallible,
+    },
+    CoreCastTraitMetadata {
+        kind: CoreCastTrait::CastableToF32,
+        trait_name: "CASTABLE_TO_F32",
+        requirement_name: "to_f32",
+        target: BuiltinCastTarget::Fixed(FixedScalar::F32),
+        fallibility: BuiltinCastFallibility::Infallible,
+    },
+    CoreCastTraitMetadata {
+        kind: CoreCastTrait::TryCastableToF32,
+        trait_name: "TRY_CASTABLE_TO_F32",
+        requirement_name: "try_to_f32",
+        target: BuiltinCastTarget::Fixed(FixedScalar::F32),
+        fallibility: BuiltinCastFallibility::Fallible,
+    },
+    CoreCastTraitMetadata {
+        kind: CoreCastTrait::CastableToF64,
+        trait_name: "CASTABLE_TO_F64",
+        requirement_name: "to_f64",
+        target: BuiltinCastTarget::Fixed(FixedScalar::F64),
+        fallibility: BuiltinCastFallibility::Infallible,
+    },
+    CoreCastTraitMetadata {
+        kind: CoreCastTrait::TryCastableToF64,
+        trait_name: "TRY_CASTABLE_TO_F64",
+        requirement_name: "try_to_f64",
+        target: BuiltinCastTarget::Fixed(FixedScalar::F64),
         fallibility: BuiltinCastFallibility::Fallible,
     },
     CoreCastTraitMetadata {
@@ -162,7 +306,8 @@ pub(crate) fn builtin_cast_trait_metadata(
 
 /// Returns the core cast trait proving a conversion to `target` with `fallibility`.
 ///
-/// Fixed and `Dec` targets have no source-authorable trait and return `None`.
+/// `Byte`, profile-sized numeric and `Dec` targets have no source-authored trait and return
+/// `None`.
 pub(crate) fn core_cast_trait_for_target_and_fallibility(
     target: BuiltinCastTarget,
     fallibility: BuiltinCastFallibility,
@@ -178,15 +323,13 @@ pub(crate) fn builtin_cast_trait_name(trait_kind: CoreCastTrait) -> &'static str
     builtin_cast_trait_metadata(trait_kind).trait_name
 }
 
-/// Returns `true` when `name` matches one of the twelve compiler-owned core
-/// cast trait source spellings.
+/// Returns `true` when `name` matches one of the thirty compiler-owned core cast trait spellings.
 ///
 /// WHAT: centralises the exact-name check so header symbol collection, dependency binding
-///      registration, and public export validation can all reject user code
-///      that tries to claim a core cast trait name.
-/// WHY: the trait name table is the single source of truth; every collision
-///      check should consult the same list rather than maintaining a parallel
-///      name set.
+///      registration, and public export validation can all reject user code that tries to claim
+///      a core cast trait name.
+/// WHY: the trait name table is the single source of truth; every collision check should consult
+///      the same list rather than maintaining a parallel name set.
 pub(crate) fn is_core_cast_trait_name(name: &str) -> bool {
     BUILTIN_CAST_TRAIT_ROWS
         .iter()
@@ -195,11 +338,10 @@ pub(crate) fn is_core_cast_trait_name(name: &str) -> bool {
 
 /// Calls `callback` once for each compiler-owned core cast trait source name.
 ///
-/// WHAT: lets header and dependency-binding code reserve or enumerate the 12 core cast trait
+/// WHAT: lets header and dependency-binding code reserve or enumerate all thirty core cast trait
 ///      names without depending on the full metadata table shape.
-/// WHY: keeps the core cast trait name set as the single source of truth while
-///      allowing stage-local consumers such as the visible-name registry to
-///      pre-reserve the names.
+/// WHY: keeps the core cast trait name set as the single source of truth while allowing
+///      stage-local consumers such as the visible-name registry to pre-reserve the names.
 pub(crate) fn for_each_core_cast_trait_name<F: FnMut(&'static str)>(mut callback: F) {
     for row in BUILTIN_CAST_TRAIT_ROWS {
         callback(row.trait_name);

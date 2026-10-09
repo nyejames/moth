@@ -36,7 +36,9 @@ use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
-use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
+use crate::compiler_frontend::builtins::casts::targets::{
+    BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget,
+};
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::DataType;
@@ -1130,6 +1132,7 @@ fn optional_user_defined_cast_recovery_merges_the_inner_target_type() {
             target_type_id: builtin_type_ids::STRING,
             target: BuiltinCastTarget::String,
             requires_optional_wrap_after_cast: true,
+            fallibility: BuiltinCastFallibility::Fallible,
             evidence: ResolvedCastEvidence::UserDefined {
                 evidence_id: TraitEvidenceId(0),
                 method_path,

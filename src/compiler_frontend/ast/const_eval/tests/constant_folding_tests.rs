@@ -1,9 +1,7 @@
 //! Regression tests for constant-expression folding helpers.
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use super::*;
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExpression;
@@ -13,8 +11,9 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
 };
 use crate::compiler_frontend::ast::statements::fallible_handling::wrap_catch_expression;
 use crate::compiler_frontend::ast::statements::value_production::ProducedValues;
-use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
-use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
+use crate::compiler_frontend::builtins::casts::targets::{
+    BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget,
+};
 use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terminal};
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, DiagnosticPayload, InvalidCastReason,
@@ -29,17 +28,12 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
-use crate::compiler_frontend::tests::ast_fixture_support::test_if_branch_metadata;
 use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass, FixedScalarValue};
 use moth_lexical::numeric::grammar::NumericLiteralSign;
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
 use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
-
-fn test_template_ir_store() -> Rc<RefCell<TemplateIrStore>> {
-    Rc::new(RefCell::new(TemplateIrStore::new()))
-}
 
 fn assert_compile_time_error(
     error: &ConstantFoldError,
@@ -103,6 +97,7 @@ fn cast_expression(
     target: BuiltinCastTarget,
     target_type_id: TypeId,
     evidence: ResolvedCastEvidence,
+    fallibility: BuiltinCastFallibility,
     handling: CastHandling,
     requires_optional_wrap_after_cast: bool,
     type_environment: &mut TypeEnvironment,
@@ -115,6 +110,7 @@ fn cast_expression(
         target_type_id,
         target,
         requires_optional_wrap_after_cast,
+        fallibility,
         evidence,
         handling,
         span,
@@ -2142,7 +2138,6 @@ fn fold_float_cast_rejects_non_finite_string_value() {
 fn fold_string_to_int_cast_uses_string_policy_row() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("42".to_string());
     let source = Expression::string_slice(text, Default::default(), ValueMode::ImmutableOwned);
@@ -2155,19 +2150,15 @@ fn fold_string_to_int_cast_uses_string_policy_row() {
         ResolvedCastEvidence::Builtin {
             policy: BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         },
-        CastHandling::Propagate,
+        BuiltinCastFallibility::Fallible,
+        CastHandling::Implicit,
         false,
         &mut type_environment,
     );
 
-    let folded = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect("valid string to int cast should fold");
+    let folded =
+        fold_compile_time_expression(&cast, &mut string_table, true, NumericProfile::STANDARD)
+            .expect("valid string to int cast should fold");
 
     assert_eq!(folded.type_id, target_type_id);
     assert!(matches!(folded.kind, ExpressionKind::Int(42)));
@@ -2177,7 +2168,6 @@ fn fold_string_to_int_cast_uses_string_policy_row() {
 fn fold_string_to_float_cast_uses_string_policy_row() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("3.5e2".to_string());
     let source = Expression::string_slice(text, Default::default(), ValueMode::ImmutableOwned);
@@ -2190,19 +2180,15 @@ fn fold_string_to_float_cast_uses_string_policy_row() {
         ResolvedCastEvidence::Builtin {
             policy: BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float),
         },
-        CastHandling::Propagate,
+        BuiltinCastFallibility::Fallible,
+        CastHandling::Implicit,
         false,
         &mut type_environment,
     );
 
-    let folded = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect("valid string to float cast should fold");
+    let folded =
+        fold_compile_time_expression(&cast, &mut string_table, true, NumericProfile::STANDARD)
+            .expect("valid string to float cast should fold");
 
     assert_eq!(folded.type_id, target_type_id);
     assert!(matches!(folded.kind, ExpressionKind::Float(value) if value == 350.0));
@@ -2541,7 +2527,6 @@ fn full_fold_returns_the_folded_operand_with_its_source_anchor() {
 fn fold_cast_infallible_int_to_string_folds_to_string_literal() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let source = Expression::int(42, None, ValueMode::ImmutableOwned);
     let target_type_id = type_environment.builtins().string;
@@ -2553,19 +2538,15 @@ fn fold_cast_infallible_int_to_string_folds_to_string_literal() {
         ResolvedCastEvidence::Builtin {
             policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Int),
         },
-        CastHandling::Infallible,
+        BuiltinCastFallibility::Infallible,
+        CastHandling::Implicit,
         false,
         &mut type_environment,
     );
 
-    let folded = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect("infallible builtin cast should fold");
+    let folded =
+        fold_compile_time_expression(&cast, &mut string_table, true, NumericProfile::STANDARD)
+            .expect("infallible builtin cast should fold");
 
     assert_eq!(folded.type_id, target_type_id);
 
@@ -2580,7 +2561,6 @@ fn fold_cast_infallible_int_to_string_folds_to_string_literal() {
 fn fold_structural_string_cast_reports_text_unavailable_rule() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let source =
         Expression::structural_string(vec![ConstStringPiece::SiteRoot], Default::default());
@@ -2593,19 +2573,15 @@ fn fold_structural_string_cast_reports_text_unavailable_rule() {
         ResolvedCastEvidence::Builtin {
             policy: BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         },
-        CastHandling::Propagate,
+        BuiltinCastFallibility::Fallible,
+        CastHandling::Implicit,
         false,
         &mut type_environment,
     );
 
-    let error = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect_err("structural string cast should require final text");
+    let error =
+        fold_compile_time_expression(&cast, &mut string_table, true, NumericProfile::STANDARD)
+            .expect_err("structural string cast should require final text");
     assert_compile_time_error(
         &error,
         CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
@@ -2618,7 +2594,6 @@ fn fold_structural_string_cast_reports_text_unavailable_rule() {
 fn fold_cast_optional_wrap_coerces_value_to_optional() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let source = Expression::int(7, None, ValueMode::ImmutableOwned);
     let target_type_id = type_environment.builtins().string;
@@ -2630,19 +2605,15 @@ fn fold_cast_optional_wrap_coerces_value_to_optional() {
         ResolvedCastEvidence::Builtin {
             policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Int),
         },
-        CastHandling::Infallible,
+        BuiltinCastFallibility::Infallible,
+        CastHandling::Implicit,
         true,
         &mut type_environment,
     );
 
-    let folded = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect("optional-wrapped infallible cast should fold");
+    let folded =
+        fold_compile_time_expression(&cast, &mut string_table, true, NumericProfile::STANDARD)
+            .expect("optional-wrapped infallible cast should fold");
 
     assert_eq!(
         folded.type_id,
@@ -2664,7 +2635,6 @@ fn fold_cast_optional_wrap_coerces_value_to_optional() {
 fn fold_cast_fallible_string_to_int_success_folds_to_int() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("123".to_string());
     let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned);
@@ -2677,19 +2647,15 @@ fn fold_cast_fallible_string_to_int_success_folds_to_int() {
         ResolvedCastEvidence::Builtin {
             policy: BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         },
-        CastHandling::Propagate,
+        BuiltinCastFallibility::Fallible,
+        CastHandling::Implicit,
         false,
         &mut type_environment,
     );
 
-    let folded = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect("successful fallible builtin cast should fold");
+    let folded =
+        fold_compile_time_expression(&cast, &mut string_table, true, NumericProfile::STANDARD)
+            .expect("successful fallible builtin cast should fold");
 
     assert_eq!(folded.type_id, target_type_id);
     assert!(matches!(folded.kind, ExpressionKind::Int(123)));
@@ -2699,7 +2665,6 @@ fn fold_cast_fallible_string_to_int_success_folds_to_int() {
 fn fold_cast_fallible_string_to_int_failure_reports_builtin_cast_failed_in_const() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("not a number".to_string());
     let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned);
@@ -2712,19 +2677,15 @@ fn fold_cast_fallible_string_to_int_failure_reports_builtin_cast_failed_in_const
         ResolvedCastEvidence::Builtin {
             policy: BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
         },
-        CastHandling::Propagate,
+        BuiltinCastFallibility::Fallible,
+        CastHandling::Implicit,
         false,
         &mut type_environment,
     );
 
-    let error = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect_err("failed fallible builtin cast should report a const diagnostic");
+    let error =
+        fold_compile_time_expression(&cast, &mut string_table, true, NumericProfile::STANDARD)
+            .expect_err("failed fallible builtin cast should report a const diagnostic");
 
     assert_invalid_cast_error(&error, InvalidCastReason::BuiltinCastFailedInConst);
 }
@@ -2733,7 +2694,6 @@ fn fold_cast_fallible_string_to_int_failure_reports_builtin_cast_failed_in_const
 fn fold_cast_user_defined_evidence_rejected_in_const_context() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let source = Expression::int(42, None, ValueMode::ImmutableOwned);
     let target_type_id = type_environment.builtins().string;
@@ -2749,19 +2709,15 @@ fn fold_cast_user_defined_evidence_rejected_in_const_context() {
             evidence_id: TraitEvidenceId(0),
             method_path,
         },
-        CastHandling::Infallible,
+        BuiltinCastFallibility::Infallible,
+        CastHandling::Implicit,
         false,
         &mut type_environment,
     );
 
-    let error = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect_err("user-defined evidence should not fold in a const context");
+    let error =
+        fold_compile_time_expression(&cast, &mut string_table, true, NumericProfile::STANDARD)
+            .expect_err("user-defined evidence should not fold in a const context");
 
     assert_invalid_cast_error(
         &error,
@@ -2773,7 +2729,6 @@ fn fold_cast_user_defined_evidence_rejected_in_const_context() {
 fn fold_cast_generic_bound_evidence_rejected_in_const_context() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let source = Expression::int(42, None, ValueMode::ImmutableOwned);
     let target_type_id = type_environment.builtins().string;
@@ -2786,19 +2741,15 @@ fn fold_cast_generic_bound_evidence_rejected_in_const_context() {
             trait_id: TraitId(0),
             parameter_id: GenericParameterId(0),
         },
-        CastHandling::Infallible,
+        BuiltinCastFallibility::Infallible,
+        CastHandling::Implicit,
         false,
         &mut type_environment,
     );
 
-    let error = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect_err("generic-bound evidence should not fold in a const context");
+    let error =
+        fold_compile_time_expression(&cast, &mut string_table, true, NumericProfile::STANDARD)
+            .expect_err("generic-bound evidence should not fold in a const context");
 
     assert_invalid_cast_error(
         &error,
@@ -2832,6 +2783,7 @@ fn fallible_builtin_cast_with_catch(
         target,
         target_type_id,
         ResolvedCastEvidence::Builtin { policy },
+        BuiltinCastFallibility::Fallible,
         CastHandling::Recover,
         false,
         type_environment,
@@ -2847,65 +2799,81 @@ fn fallible_builtin_cast_with_catch(
     )
 }
 
-#[test]
-fn fold_cast_fallible_builtin_failure_with_catch_folds_to_handler_value() {
+fn fold_invalid_string_cast_with_catch(
+    constant_context: bool,
+) -> Result<Expression, ConstantFoldError> {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("nope".to_string());
-    let source_member = SyntheticInterfaceMemberIdentity::new(
-        SyntheticInterfaceClass::ProjectContext,
-        "render",
-        "source",
-    );
-    let handler_member = SyntheticInterfaceMemberIdentity::new(
-        SyntheticInterfaceClass::Builder,
-        "render",
-        "fallback",
-    );
-    let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned)
-        .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
-            source_member.clone(),
-        ));
+    let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned);
     let target_type_id = type_environment.builtins().int;
-    let handler_value = Expression::int(0, None, ValueMode::ImmutableOwned)
-        .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::from_members(vec![
-            handler_member.clone(),
-            handler_member.clone(),
-        ]));
-
     let cast = fallible_builtin_cast_with_catch(
         source,
         BuiltinCastTarget::Int,
         target_type_id,
         BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
-        catch_handler_body(handler_value),
+        catch_handler_body(Expression::int(0, None, ValueMode::ImmutableOwned)),
         &mut type_environment,
     );
 
-    let folded = fold_compile_time_expression(
+    fold_compile_time_expression(
         &cast,
-        &template_ir_store,
         &mut string_table,
-        true,
+        constant_context,
         NumericProfile::STANDARD,
     )
-    .expect("failed builtin cast with foldable catch handler should fold to handler value");
+}
 
-    assert_eq!(folded.type_id, target_type_id);
-    assert!(matches!(folded.kind, ExpressionKind::Int(0)));
-    assert_eq!(
-        folded.synthetic_interface_provenance.members(),
-        &[source_member, handler_member]
+#[test]
+fn known_invalid_cast_under_catch_is_diagnostic_in_constant_context() {
+    let error = fold_invalid_string_cast_with_catch(true)
+        .expect_err("a known invalid cast must not use its catch fallback");
+
+    assert_invalid_cast_error(&error, InvalidCastReason::BuiltinCastFailedInConst);
+}
+
+#[test]
+fn known_invalid_cast_under_catch_is_diagnostic_in_runtime_context() {
+    let error = fold_invalid_string_cast_with_catch(false)
+        .expect_err("a known invalid cast must not fall back to runtime catch delivery");
+
+    assert_invalid_cast_error(&error, InvalidCastReason::BuiltinCastFailedInConst);
+}
+
+#[test]
+fn runtime_parameter_cast_under_catch_remains_runtime() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut type_environment = TypeEnvironment::new();
+    let source_path = path_fork
+        .try_intern_portable_path("source", &mut string_table)
+        .expect("test path fits");
+    let source = Expression::reference(
+        source_path,
+        DataType::StringSlice,
+        None,
+        ValueMode::ImmutableReference,
     );
+    let target_type_id = type_environment.builtins().int;
+    let cast = fallible_builtin_cast_with_catch(
+        source,
+        BuiltinCastTarget::Int,
+        target_type_id,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
+        catch_handler_body(Expression::int(0, None, ValueMode::ImmutableOwned)),
+        &mut type_environment,
+    );
+    let folded =
+        fold_compile_time_expression(&cast, &mut string_table, false, NumericProfile::STANDARD)
+            .expect("an unknown parameter value must remain a runtime cast");
+
+    assert!(matches!(folded.kind, ExpressionKind::ValueBlock { .. }));
 }
 
 #[test]
 fn fold_cast_fallible_builtin_success_with_catch_ignores_handler() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("123".to_string());
     let source_member = SyntheticInterfaceMemberIdentity::new(
@@ -2935,14 +2903,9 @@ fn fold_cast_fallible_builtin_success_with_catch_ignores_handler() {
         &mut type_environment,
     );
 
-    let folded = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect("successful builtin cast should fold to success value even with catch handler");
+    let folded =
+        fold_compile_time_expression(&cast, &mut string_table, true, NumericProfile::STANDARD)
+            .expect("successful builtin cast should fold to success value even with catch handler");
 
     assert_eq!(folded.type_id, target_type_id);
     assert!(matches!(folded.kind, ExpressionKind::Int(123)));
@@ -2950,122 +2913,6 @@ fn fold_cast_fallible_builtin_success_with_catch_ignores_handler() {
         folded.synthetic_interface_provenance.members(),
         &[source_member]
     );
-}
-
-#[test]
-fn fold_cast_fallible_builtin_failure_with_non_foldable_catch_rejects_handler() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
-    let mut type_environment = TypeEnvironment::new();
-    let text = string_table.get_or_intern("nope".to_string());
-    let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned);
-    let target_type_id = type_environment.builtins().int;
-
-    let handler_value = Expression::reference(
-        path_fork
-            .try_intern_portable_path("runtime_value", &mut string_table)
-            .expect("test path fits"),
-        DataType::Int,
-        None,
-        ValueMode::ImmutableReference,
-    );
-
-    let cast = fallible_builtin_cast_with_catch(
-        source,
-        BuiltinCastTarget::Int,
-        target_type_id,
-        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
-        catch_handler_body(handler_value),
-        &mut type_environment,
-    );
-
-    let error = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect_err("non-foldable catch handler should be rejected in const context");
-
-    assert_invalid_cast_error(&error, InvalidCastReason::CatchHandlerNotConstFoldable);
-}
-
-#[test]
-fn fold_cast_fallible_builtin_failure_with_empty_catch_rejects_handler() {
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
-    let mut type_environment = TypeEnvironment::new();
-    let text = string_table.get_or_intern("nope".to_string());
-    let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned);
-    let target_type_id = type_environment.builtins().int;
-
-    let cast = fallible_builtin_cast_with_catch(
-        source,
-        BuiltinCastTarget::Int,
-        target_type_id,
-        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
-        Vec::new(),
-        &mut type_environment,
-    );
-
-    let error = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect_err("empty catch handler should be rejected in const context");
-
-    assert_invalid_cast_error(&error, InvalidCastReason::CatchHandlerNotConstFoldable);
-}
-
-#[test]
-fn fold_cast_fallible_builtin_failure_with_branching_catch_rejects_handler() {
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
-    let mut type_environment = TypeEnvironment::new();
-    let text = string_table.get_or_intern("nope".to_string());
-    let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned);
-    let target_type_id = type_environment.builtins().int;
-    let span = None;
-
-    let then_body = catch_handler_body(Expression::int(1, None, ValueMode::ImmutableOwned));
-    let else_body = catch_handler_body(Expression::int(2, None, ValueMode::ImmutableOwned));
-    let branching_handler = vec![AstNode {
-        kind: NodeKind::If(
-            Expression::bool(false, span, ValueMode::ImmutableOwned),
-            then_body,
-            Some(else_body),
-            test_if_branch_metadata(true),
-        ),
-        span,
-        scope: PathId::ROOT,
-    }];
-
-    let cast = fallible_builtin_cast_with_catch(
-        source,
-        BuiltinCastTarget::Int,
-        target_type_id,
-        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
-        branching_handler,
-        &mut type_environment,
-    );
-
-    let error = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect_err("branching catch handler needs real const statement evaluation");
-
-    assert_invalid_cast_error(&error, InvalidCastReason::CatchHandlerNotConstFoldable);
 }
 
 #[test]

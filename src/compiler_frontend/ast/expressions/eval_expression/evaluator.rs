@@ -91,7 +91,6 @@ pub fn evaluate_expression(
 
         let only_expression = fold_compile_time_expression(
             expression,
-            &context.template_ir_store,
             string_table,
             context.kind.is_constant_context(),
             context.numeric_profile,
@@ -201,10 +200,9 @@ pub fn evaluate_expression(
                 _ => None,
             })
             .collect();
-        operation_failure_facts
-            .implicit
-            .retain(|contributor| remaining_operator_spans.contains(&contributor.span));
-        operation_failure_facts.refresh_origin_summary();
+        operation_failure_facts.retain_implicit_contributors(|contributor| {
+            remaining_operator_spans.contains(&contributor.span)
+        });
     }
 
     // Fully folded to a single compile-time value: hand the folded operand back by move.

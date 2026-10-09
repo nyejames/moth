@@ -29,6 +29,15 @@ as_error |source String| -> Error:
 as_string_error |source Error| -> String:
     return cast source
 ;
+octet U8 = 7
+handler_ran ~= false
+caught_wide U16 = cast octet catch |catch_error|:
+    error_code U32 = catch_error.code
+    handler_ran = true
+    then 0
+;
+assert(caught_wide is 7)
+assert(not handler_ran)
 
 ratio_text = as_string_float(as_float(5) + 0.5)
 count = as_string_int(2)

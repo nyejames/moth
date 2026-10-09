@@ -2,7 +2,7 @@
 -- source widens at runtime, a negative source fails with the existing cast
 -- failure which callers recover from like any other error.
 widen_code |value Int| -> U32, Error!:
-    return cast! value
+    return cast value
 ;
 
 positive_wide_code ~U32 = 0

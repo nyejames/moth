@@ -49,7 +49,7 @@ add_float |value Float, increment Float| -> Float:
 ;
 
 number_to_int |value Dec0| -> Int, Error!:
-    return cast! value
+    return cast value
 ;
 
 zero_sum = add_zero(100, 25)

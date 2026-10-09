@@ -2,4 +2,10 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0053"]
-message_contains = ["'none' literal requires an explicit optional type context"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+reason = "compile_time_evaluation_error.none_literal_requires_optional_type_context"
+path = "input/@page.moth"
+line = 2
+column = 10

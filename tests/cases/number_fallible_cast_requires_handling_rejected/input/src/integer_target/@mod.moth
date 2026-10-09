@@ -1,3 +1,5 @@
-number_to_integer |value Dec2| -> Int:
-    return cast value
+export:
+    number_to_integer |value Dec2| -> Int:
+        return cast value
+    ;
 ;

@@ -95,7 +95,7 @@ core_code_plus_one = core_parse_code + 1
 
 -- Backend-generated cast code observed through a U32 addition.
 cast_probe |value F64| -> Int, Error!:
-    return cast! value
+    return cast value
 ;
 
 backend_cast_code ~U32 = 0

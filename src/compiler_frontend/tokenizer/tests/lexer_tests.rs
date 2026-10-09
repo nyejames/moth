@@ -1343,12 +1343,39 @@ fn tokenizes_assert_as_reserved_keyword() {
 }
 
 #[test]
-fn tokenizes_attached_bang_keyword_forms_as_compound_tokens() {
-    let (file_tokens, _string_table) = tokenize_source("return! err\ncast! text\n");
+fn tokenizes_return_bang_splits_cast_bang_and_preserves_call_bang_span() {
+    let source = "return! err\ncast! text\ncall()!\n";
+    let (file_tokens, _string_table) = tokenize_source(source);
     let tokens = file_tokens.tokens.as_ref();
 
-    assert!(token_refs(tokens).any(|token| token.tag() == TokenTag::RETURN_BANG));
-    assert!(token_refs(tokens).any(|token| token.tag() == TokenTag::CAST_BANG));
+    let return_bang_token = token_refs(tokens)
+        .find(|token| token.tag() == TokenTag::RETURN_BANG)
+        .expect("return! should retain its compound keyword token");
+    assert_eq!(token_byte_range(return_bang_token), (0, 7));
+
+    let cast_token = token_refs(tokens)
+        .find(|token| token.tag() == TokenTag::CAST)
+        .expect("cast keyword should remain a token");
+    let cast_start = source.find("cast!").expect("fixture contains cast!") as u32;
+    assert_eq!(token_byte_range(cast_token), (cast_start, cast_start + 4));
+
+    let bang_tokens = token_refs(tokens)
+        .filter(|token| token.tag() == TokenTag::BANG)
+        .collect::<Vec<_>>();
+    assert_eq!(bang_tokens.len(), 2);
+    assert_eq!(
+        token_byte_range(bang_tokens[0]),
+        (cast_start + 4, cast_start + 5)
+    );
+
+    let postfix_bang_start = source
+        .find("call()!")
+        .expect("fixture contains postfix call syntax") as u32
+        + "call()".len() as u32;
+    assert_eq!(
+        token_byte_range(bang_tokens[1]),
+        (postfix_bang_start, postfix_bang_start + 1)
+    );
 }
 
 #[test]
@@ -1357,9 +1384,8 @@ fn tokenizes_spaced_bang_keyword_forms_as_separate_tokens() {
     let tokens = file_tokens.tokens.as_ref();
 
     assert!(
-        !token_refs(tokens)
-            .any(|token| { matches!(token.tag(), TokenTag::RETURN_BANG | TokenTag::CAST_BANG) }),
-        "spaced keyword/bang pairs must not become compound tokens"
+        !token_refs(tokens).any(|token| token.tag() == TokenTag::RETURN_BANG),
+        "spaced return and cast bangs must remain standalone operator tokens"
     );
     assert!(
         token_refs(tokens)

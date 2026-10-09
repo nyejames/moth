@@ -60,11 +60,18 @@ pub enum BuiltinErrorCode {
 }
 
 impl BuiltinErrorCode {
-    /// The single closed classification of failures inferred for checked arithmetic and ranges.
+    /// The closed union of builtin failures with ordinary implicit delivery.
     ///
-    /// Boundary validation and defensive formatting invariants are not implicit failures.
-    /// Their delivery remains governed by separately declared API contracts.
+    /// Keep the operation/range and cast-policy sets aligned with their failure-code owners.
+    /// External boundary validation and formatting invariants remain outside implicit failure;
+    /// their delivery follows their declared API contracts. Host/collection codes and custom
+    /// errors also remain outside this classification.
     pub(crate) fn is_implicit_failure(self) -> bool {
+        self.is_implicit_numeric_or_range_failure() || self.is_implicit_cast_failure()
+    }
+
+    /// Failure codes produced by checked arithmetic and dynamic ranges.
+    pub(crate) fn is_implicit_numeric_or_range_failure(self) -> bool {
         matches!(
             self,
             Self::DivideByZero
@@ -73,6 +80,28 @@ impl BuiltinErrorCode {
                 | Self::FloatNonFinite
                 | Self::InvalidRangeStep
                 | Self::RangeStepNoProgress
+        )
+    }
+
+    /// Failure codes emitted by supported fallible builtin cast policies.
+    pub(crate) fn is_implicit_cast_failure(self) -> bool {
+        matches!(
+            self,
+            Self::IntParseInvalidFormat
+                | Self::IntParseOutOfRange
+                | Self::FloatParseInvalidFormat
+                | Self::FloatParseOutOfRange
+                | Self::StringParseBoolInvalidFormat
+                | Self::StringParseCharInvalidFormat
+                | Self::FloatCastToIntInvalidValue
+                | Self::FloatCastToIntOutOfRange
+                | Self::IntCastOutOfRange
+                | Self::FloatCastNonFinite
+                | Self::IntCastToCharInvalidCodepoint
+                | Self::NumberParseInvalidFormat
+                | Self::NumberParseInexactScale
+                | Self::NumberCastInexact
+                | Self::NumberParseCapacity
         )
     }
 

@@ -557,13 +557,18 @@ pub(crate) fn validate_generic_function_bound_evidence(
                 // evidence identity, so template validation must not manufacture a local row.
                 continue;
             }
-            let evidence_is_visible = trait_is_visible
-                && (generated_evidence_pair_is_selected(
-                    *concrete_type_id,
-                    *trait_id,
-                    type_environment,
-                    context.shared.generated_evidence_pairs.as_ref(),
-                ) || evidence_target_is_visible(
+            // An exact generated pair the requester already transferred authorizes both halves of
+            // its own visibility, because a materialised body may call a provider-owned trait's
+            // evidence from a module that never named that trait. Every pair the requester did
+            // not select still needs ordinary trait and target visibility, and either way the
+            // real evidence row selected below remains mandatory.
+            let evidence_is_visible = generated_evidence_pair_is_selected(
+                *concrete_type_id,
+                *trait_id,
+                type_environment,
+                context.shared.generated_evidence_pairs.as_ref(),
+            ) || (trait_is_visible
+                && evidence_target_is_visible(
                     *concrete_type_id,
                     type_environment,
                     context

@@ -50,7 +50,7 @@ capture_f16_parse |text String, report ~CastReport|:
 ;
 
 propagate_i8 |value I64| -> I8, Error!:
-    return cast! value
+    return cast value
 ;
 
 overflow_i64 |value I64| -> I64, Error!:

@@ -9,54 +9,72 @@ use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastTarget,
 };
 use crate::compiler_frontend::builtins::casts::traits::{
-    BUILTIN_CAST_TRAIT_ROWS, is_core_cast_trait_name,
+    core_cast_trait_for_target_and_fallibility, is_core_cast_trait_name,
 };
-use std::collections::HashMap;
+use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
-/// Verifies unique fallibility pairs and coverage for each source-backed core cast target.
-///
-/// Fixed-width and Dec targets intentionally have no source trait.
 #[test]
-fn target_fallibility_pairs_cover_every_core_cast_trait_target() {
-    use std::collections::HashSet;
+fn every_source_authored_cast_target_has_both_evidence_classes() {
+    let targets = FixedScalar::ALL
+        .into_iter()
+        .filter(|target| *target != FixedScalar::Byte)
+        .map(BuiltinCastTarget::Fixed)
+        .chain([
+            BuiltinCastTarget::Bool,
+            BuiltinCastTarget::String,
+            BuiltinCastTarget::Char,
+            BuiltinCastTarget::Error,
+        ]);
 
-    let mut seen: HashSet<(BuiltinCastTarget, BuiltinCastFallibility)> = HashSet::new();
-    let mut by_target: HashMap<BuiltinCastTarget, (bool, bool)> = HashMap::new();
-
-    for row in BUILTIN_CAST_TRAIT_ROWS {
-        assert!(
-            seen.insert((row.target, row.fallibility)),
-            "duplicate (target, fallibility) row for {:?}",
-            row.target
-        );
-
-        let entry = by_target.entry(row.target).or_insert((false, false));
-        match row.fallibility {
-            BuiltinCastFallibility::Infallible => entry.0 = true,
-            BuiltinCastFallibility::Fallible => entry.1 = true,
+    for target in targets {
+        for fallibility in [
+            BuiltinCastFallibility::Infallible,
+            BuiltinCastFallibility::Fallible,
+        ] {
+            assert!(
+                core_cast_trait_for_target_and_fallibility(target, fallibility).is_some(),
+                "{target:?} must have {fallibility:?} cast evidence"
+            );
         }
-    }
-
-    let expected_targets = [
-        BuiltinCastTarget::Bool,
-        BuiltinCastTarget::Int,
-        BuiltinCastTarget::String,
-        BuiltinCastTarget::Char,
-        BuiltinCastTarget::Float,
-        BuiltinCastTarget::Error,
-    ];
-    assert_eq!(by_target.len(), expected_targets.len());
-    for target in expected_targets {
-        let (infallible, fallible) = by_target.get(&target).copied().unwrap_or((false, false));
-        assert!(infallible && fallible, "{target:?} must have both forms");
     }
 }
 
 #[test]
-fn is_core_cast_trait_name_matches_exact_trait_spellings_only() {
-    assert!(is_core_cast_trait_name("CASTABLE_TO_INT"));
+fn byte_decimal_and_profile_targets_have_no_source_authored_families() {
+    let decimal_zero = NumberScale::new(0).expect("zero is a valid Dec scale");
+    let targets = [
+        BuiltinCastTarget::Int,
+        BuiltinCastTarget::Uint,
+        BuiltinCastTarget::Float,
+        BuiltinCastTarget::Fixed(FixedScalar::Byte),
+        BuiltinCastTarget::Number(decimal_zero),
+    ];
+
+    for target in targets {
+        for fallibility in [
+            BuiltinCastFallibility::Infallible,
+            BuiltinCastFallibility::Fallible,
+        ] {
+            assert_eq!(
+                core_cast_trait_for_target_and_fallibility(target, fallibility),
+                None,
+                "{target:?} must not expose source-authored cast evidence"
+            );
+        }
+    }
+}
+
+#[test]
+fn retired_profile_trait_names_are_not_core_cast_aliases() {
+    assert!(is_core_cast_trait_name("CASTABLE_TO_I8"));
+    assert!(is_core_cast_trait_name("TRY_CASTABLE_TO_F64"));
     assert!(is_core_cast_trait_name("TRY_CASTABLE_TO_STRING"));
+    assert!(!is_core_cast_trait_name("CASTABLE_TO_INT"));
+    assert!(!is_core_cast_trait_name("TRY_CASTABLE_TO_INT"));
+    assert!(!is_core_cast_trait_name("CASTABLE_TO_FLOAT"));
+    assert!(!is_core_cast_trait_name("TRY_CASTABLE_TO_FLOAT"));
     assert!(!is_core_cast_trait_name("DISPLAYABLE"));
-    assert!(!is_core_cast_trait_name("castable_to_int"));
+    assert!(!is_core_cast_trait_name("castable_to_i8"));
     assert!(!is_core_cast_trait_name("CASTABLE_TO_COLOR"));
 }

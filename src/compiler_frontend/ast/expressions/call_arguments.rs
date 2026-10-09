@@ -246,7 +246,7 @@ pub(crate) fn parse_call_arguments_with_receiving_context(
 /// Parses a call argument list with explicit parameter expectations threaded into each argument.
 ///
 /// WHAT: gives every argument expression a `CastTargetContext` derived from its corresponding
-///      parameter type, so `cast` / `cast!` can resolve at concrete source/receiver/host
+///      parameter type, so `cast` can resolve at concrete source/receiver/host
 ///      parameters and generic parameter slots can reject `cast` with `TargetIsGenericParameter`.
 /// WHY: raw call parsing used to resolve arguments before validation. Threading expectations keeps
 ///      the cast-target channel narrow and local to the argument parser.

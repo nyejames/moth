@@ -37,13 +37,12 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
     fallible_catch_allowed_in_context, parse_cast_catch_handling_suffix,
     parse_fallible_handling_suffix_for_expression, wrap_catch_expression,
 };
-use crate::compiler_frontend::ast::statements::match_arm_boundaries::current_token_starts_match_arm_header;
+use crate::compiler_frontend::ast::statements::match_arm_boundaries::token_index_starts_match_arm_header;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::builtins::casts::resolution::{
     CastResolutionInput, resolve_cast_expression,
 };
-use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
 use crate::compiler_frontend::builtins::expression_parsing::parse_curly_literal_expression;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
@@ -52,7 +51,7 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, DiagnosticToken, InvalidBuiltinCallReason,
     InvalidCastReason, InvalidControlFlowStatementReason, InvalidExpressionReason,
-    InvalidFallibleHandlingReason, TypeMismatchContext,
+    InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::declaration_syntax::type_syntax::builtin_scalar_type_name_for_tag;
@@ -60,7 +59,6 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::expression_position::check_expression_common_mistake;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
-use crate::compiler_frontend::type_coercion::compatibility::is_postfix_error_compatible;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::utilities::token_scan::ExpressionBoundaryDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -795,7 +793,7 @@ pub(super) fn dispatch_expression_token(
 
             Ok(ExpressionTokenStep::Advance)
         }
-        TokenTag::CAST | TokenTag::CAST_BANG => parse_cast_expression(
+        TokenTag::CAST => parse_cast_expression(
             token,
             token_stream,
             context,
@@ -977,6 +975,56 @@ fn dispatch_close_parenthesis(
 // -------------------------------
 //  Newline
 // -------------------------------
+
+/// Whether the expression continues past the newline at the cursor.
+///
+/// WHAT: the single owner of the logical-line continuation rule.
+/// WHY: newline dispatch and the cast-operand `catch` lookahead must agree on where an
+///      ordinary expression ends. A lookahead that ignored continuation would stop on a
+///      legal multiline operand (`x +\n y`, `x\n + y`), and a lookahead that ignored the
+///      boundary would adopt a `catch` from a later statement.
+///
+/// PRECONDITION: the cursor is positioned on the newline being tested, and `previous_tag` is
+///      the tag of the token immediately before it.
+fn newline_continues_expression(
+    token_stream: &AstCursor,
+    previous_tag: TokenTag,
+    consume_closing_parenthesis: bool,
+    match_arm_boundary: bool,
+) -> bool {
+    // An incomplete expression carries its own continuation, and inside a consumed
+    // parenthesis list newlines never end the expression at all.
+    if consume_closing_parenthesis
+        || (previous_tag.continues_expression()
+            && !matches!(
+                previous_tag,
+                TokenTag::END | TokenTag::TYPE_PARAMETER_BRACKET
+            ))
+    {
+        return true;
+    }
+
+    // Look past the newline run without moving the caller's cursor: a match-arm header owns
+    // the next line, while a leading operator or call continues the expression.
+    let mut next_index = token_stream.position();
+    while token_stream
+        .token_ref_at(next_index)
+        .is_some_and(|token| token.tag() == TokenTag::NEWLINE)
+    {
+        next_index = next_index.saturating_add(1);
+    }
+
+    if match_arm_boundary
+        && token_index_starts_match_arm_header(token_stream, next_index, None).is_some()
+    {
+        return false;
+    }
+
+    token_stream
+        .token_ref_at(next_index)
+        .is_some_and(|token| token.tag().continues_expression())
+}
+
 fn dispatch_newline(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
@@ -986,35 +1034,15 @@ fn dispatch_newline(
         .previous()
         .map(|token| token.tag())
         .unwrap_or(TokenTag::NEWLINE);
-    if state.consume_closing_parenthesis
-        || (previous_tag.continues_expression()
-            && !matches!(
-                previous_tag,
-                TokenTag::END | TokenTag::TYPE_PARAMETER_BRACKET
-            ))
-    {
+    if newline_continues_expression(
+        token_stream,
+        previous_tag,
+        state.consume_closing_parenthesis,
+        context.match_arm_boundary,
+    ) {
         token_stream.skip_newlines();
         return Ok(ExpressionTokenStep::Continue);
     }
-
-    // ----------------------------
-    //  Lookahead for continuation
-    // ----------------------------
-    // Look ahead past newlines to find the next meaningful token.
-    // If that token continues the expression, skip newlines and keep parsing.
-    let saved_position = token_stream.position();
-    token_stream.skip_newlines();
-    if context.match_arm_boundary && current_token_starts_match_arm_header(token_stream).is_some() {
-        token_stream.set_position(saved_position)?;
-        return Ok(ExpressionTokenStep::Break);
-    }
-
-    if token_stream.position() < token_stream.length()
-        && token_stream.current_tag().continues_expression()
-    {
-        return Ok(ExpressionTokenStep::Continue);
-    }
-    token_stream.set_position(saved_position)?;
 
     ast_log!("Breaking out of expression with newline");
     Ok(ExpressionTokenStep::Break)
@@ -1059,7 +1087,7 @@ fn dispatch_is_token(
     }
 }
 
-/// Parses an explicit `cast` / `cast!` / `cast ... catch:` expression at a typed boundary.
+/// Parses an explicit `cast` or `cast ... catch:` expression at a typed boundary.
 ///
 /// WHAT: validates that `cast` starts the expression and that an explicit builtin target was
 ///      supplied by the boundary, parses the operand and any handling suffix, resolves evidence,
@@ -1120,14 +1148,13 @@ fn parse_cast_expression(
     };
 
     let cast_span = Some(token_stream.current_span());
-    let propagate = token == TokenTag::CAST_BANG;
     token_stream.advance();
 
-    // Attached `cast!` is a lexical token. A standalone `!` after `cast` is a
-    // separated spelling and must not be treated as propagation.
+    // `cast!` was removed. Its separate bang remains an ordinary token so the
+    // diagnostic can point to the exact byte instead of silently changing meaning.
     if token_stream.current_tag() == TokenTag::BANG {
         return Err(CompilerDiagnostic::invalid_cast(
-            InvalidCastReason::BangMustAttachToCast,
+            InvalidCastReason::CastPropagationRemoved,
             None,
             None,
             Some(token_stream.current_span()),
@@ -1149,55 +1176,12 @@ fn parse_cast_expression(
         path_fork,
     )?;
 
-    // `cast!` and `cast ... catch:` are mutually exclusive.
-    if propagate && token_stream.current_tag() == TokenTag::CATCH {
-        return Err(CompilerDiagnostic::invalid_cast(
-            InvalidCastReason::PropagationAndRecoveryConflict,
-            None,
-            None,
-            Some(token_stream.current_span()),
-        )
-        .into());
-    }
-
-    // Evidence owns conversion fallibility; the completed operand owns other producers.
     let has_catch = token_stream.current_tag() == TokenTag::CATCH;
-    let handling = if propagate {
-        CastHandling::Propagate
-    } else if has_catch {
+    let handling = if has_catch {
         CastHandling::Recover
     } else {
-        CastHandling::Infallible
+        CastHandling::Implicit
     };
-
-    // For propagation, validate that the enclosing function can receive the error value.
-    if propagate {
-        let error_type_id =
-            resolve_builtin_error_type_typed(context, operand.span, string_table)?.type_id;
-        let Some(expected_error_type_id) = context.expected_error_type else {
-            return Err(CompilerDiagnostic::invalid_cast(
-                InvalidCastReason::PropagationRequiresErrorReturn,
-                None,
-                None,
-                Some(token_stream.current_span()),
-            )
-            .into());
-        };
-
-        if !is_postfix_error_compatible(
-            expected_error_type_id,
-            error_type_id,
-            type_interner.environment(),
-        ) {
-            return Err(CompilerDiagnostic::type_mismatch(
-                expected_error_type_id,
-                error_type_id,
-                TypeMismatchContext::ErrorReturn,
-                Some(token_stream.current_span()),
-            )
-            .into());
-        }
-    }
 
     let mut cast_expression = resolve_cast_expression(CastResolutionInput {
         source: operand,
@@ -1206,24 +1190,17 @@ fn parse_cast_expression(
         requires_optional_wrap_after_cast,
         handling,
         numeric_profile: context.numeric_profile,
+        scope_context: context,
         trait_environment: context.trait_environment(),
         trait_evidence_environment: context.trait_evidence_environment(),
-        type_environment: type_interner.environment_mut_for_derived_types(),
-        string_table,
-        path_fork: &*path_fork,
+        type_interner: &mut *type_interner,
+        string_table: &mut *string_table,
+        path_fork: &mut *path_fork,
         active_generic_type_context: context.active_generic_type_context(),
         span: cast_span,
     })?;
 
     if has_catch {
-        if matches!(&cast_expression.kind, ExpressionKind::Cast(cast)
-            if matches!(cast.handling, CastHandling::Recover))
-        {
-            let error_type_id =
-                resolve_builtin_error_type_typed(context, cast_expression.span, string_table)?
-                    .type_id;
-            cast_expression = cast_expression.with_typed_error_producer(error_type_id, None);
-        }
         let error_type_id = compatible_expression_error_type(
             &mut cast_expression,
             context,
@@ -1282,13 +1259,49 @@ fn parse_cast_operand_expression(
     let mut depth = ExpressionBoundaryDepth::default();
     let mut catch_is_cast_suffix = false;
     while !token_stream.is_at_end() {
-        if depth.is_top_level() && token_stream.current_tag() == TokenTag::CATCH {
-            catch_is_cast_suffix = true;
-            break;
+        let tag = token_stream.current_tag();
+        if depth.is_top_level() {
+            if tag == TokenTag::CATCH {
+                catch_is_cast_suffix = true;
+                break;
+            }
+
+            // A closer whose opener sits outside this operand ends the cast's own window: the
+            // enclosing call-argument list, group or literal owns it. A `catch` beyond that
+            // closer belongs to the enclosing receiving boundary, so an argument cast must not
+            // treat the handler of its enclosing call as its own. Saturating depth cannot report
+            // the boundary, so test it before stepping past the closer.
+            if matches!(tag, TokenTag::CLOSE_PARENTHESIS | TokenTag::CLOSE_CURLY) {
+                break;
+            }
+
+            // The operand ends exactly where the ordinary expression ends: at a statement
+            // terminator, at an argument separator, or at a newline that does not continue the
+            // expression. Scanning past that boundary would treat a later statement's `catch`
+            // as this cast's suffix and swallow every statement in between.
+            if matches!(tag, TokenTag::END | TokenTag::COMMA) {
+                break;
+            }
+            if tag == TokenTag::NEWLINE {
+                let previous_tag = token_stream
+                    .previous()
+                    .map(|token| token.tag())
+                    .unwrap_or(TokenTag::NEWLINE);
+                if !newline_continues_expression(
+                    token_stream,
+                    previous_tag,
+                    consume_closing_parenthesis,
+                    context.match_arm_boundary,
+                ) {
+                    break;
+                }
+                token_stream.skip_newlines();
+                continue;
+            }
         }
-        depth.step_tag(token_stream.current_tag());
+        depth.step_tag(tag);
         // A malformed payload is surfaced by typed readers at the consuming parser boundary.
-        if token_stream.current_tag() == TokenTag::EOF {
+        if tag == TokenTag::EOF {
             break;
         }
         token_stream.advance();
@@ -1316,7 +1329,7 @@ fn parse_cast_operand_expression(
         return create_expression_until(input, &[TokenTag::CATCH]);
     }
 
-    let input = ExpressionParseInput::without_boundary_catch(
+    let mut input = ExpressionParseInput::without_boundary_catch(
         ExpressionParseResources {
             token_stream,
             scope_context: context,
@@ -1329,6 +1342,11 @@ fn parse_cast_operand_expression(
         },
         consume_closing_parenthesis,
     );
+    // The operand is parsed while its enclosing expression loop is still running, so the
+    // operand must hand the loop back at the operand's own end. Skipping the terminating
+    // newline here would move the loop onto the next statement's first token and report it as
+    // an adjacent operand. The enclosing parse owns the ordinary trailing-newline skip.
+    input.trailing_policy.skip_trailing_newlines = false;
     create_expression_with_trailing_newline_policy(input)
 }
 

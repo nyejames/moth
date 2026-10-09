@@ -3,7 +3,7 @@
 -- casts with a structured diagnostic before lowering.
 
 to_int |value Uint| -> Int, Error!:
-    return cast! value
+    return cast value
 ;
 
 top Uint = 4294967295 + 0

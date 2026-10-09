@@ -28,7 +28,7 @@ must_contain = [
     "value <span class='moth-code-operator'>is</span> MAX_SIZE",
     "<span class='moth-code-keyword'>async</span>",
     "<span class='moth-code-keyword'>return</span><span class='moth-code-error'>!</span> value",
-    "<span class='moth-code-keyword'>cast</span><span class='moth-code-error'>!</span> value",
+    "<span class='moth-code-keyword'>cast</span>",
     "<span class='moth-code-keyword'>into</span> scratch",
     "<span class='moth-code-delimiter'>)</span><span class='moth-code-error'>!</span>",
     "<span class='moth-code-type'>Dec2</span>",

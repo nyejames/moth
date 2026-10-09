@@ -1,12 +1,20 @@
 //! Imported concrete callable signature and carrier projection.
+//!
+//! WHAT: projects imported concrete free functions and receiver methods into consumer-local
+//!       signatures, carriers and dispatch contracts, including receiver methods that only
+//!       imported reusable evidence names.
+//! WHY: reused evidence carries stable method origins, not consumer paths, so this owner keeps
+//!      the one join from those origins to the callable an environment really dispatches through.
 
 use super::*;
 
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::nominal::imported_nominal_path;
 use crate::compiler_frontend::canonical_type_identity::GenericDeclarationOrigin;
-use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
+use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
+use crate::compiler_frontend::semantic_identity::{GeneratedDeclarationIdentity, OriginFunctionId};
 
 use crate::compiler_frontend::symbols::path_interner::PathId;
+
 impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(in crate::compiler_frontend::ast::module_ast::environment::builder) fn project_imported_function_declarations(
         &mut self,
@@ -139,7 +147,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     summary: self
                         .binding_environment
                         .imported_call_summaries_by_origin
-                        .get(&summary_origin(header_contract).map_err(|error| {
+                        .get(summary_origin(header_contract).map_err(|error| {
                             CompilerMessages::from_error_ref(error, string_table)
                         })?)
                         .cloned()
@@ -343,18 +351,34 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     continue;
                 }
 
-                let header_contract = self
+                // The header stage binds the projection path directly when this environment
+                // imported the method through its authored import surface. A materialised
+                // environment instead retains the provider's published summary for the exact
+                // method origin, because reusable evidence names receiver methods by stable
+                // origin rather than by a consumer path.
+                let header_bound = self
                     .binding_environment
                     .imported_functions_by_local_path
-                    .get(&method_path)
-                    .cloned();
-                let Some(header_contract) = header_contract else {
+                    .contains_key(&method_path);
+                let summary_published = self
+                    .binding_environment
+                    .imported_call_summaries_by_origin
+                    .contains_key(&method.method_origin);
+                if !header_bound && !summary_published {
                     // A transparent alias or an evidence-only nominal target may carry the
                     // receiver declaration without re-exporting a concrete executable method.
                     // Such a method is not callable through this local path and must not turn a
                     // missing optional projection into an internal publication failure.
                     continue;
-                };
+                }
+
+                let contract = self
+                    .projected_imported_receiver_method_contract(
+                        method_path,
+                        &method.method_origin,
+                        fallible_carrier_type_id,
+                    )
+                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
                 if self
                     .projected_imported_receiver_methods_by_local_path
                     .insert(method_path, method.method_origin.clone())
@@ -372,32 +396,56 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     method_path,
                     string_table,
                 );
-                self.projected_imported_functions_by_local_path.insert(
-                    method_path,
-                    AstImportedFunctionContract {
-                        target: header_contract.target.clone(),
-                        summary: self
-                            .binding_environment
-                            .imported_call_summaries_by_origin
-                            .get(&summary_origin(&header_contract).map_err(|error| {
-                                CompilerMessages::from_error_ref(error, string_table)
-                            })?)
-                            .cloned()
-                            .ok_or_else(|| {
-                                CompilerMessages::from_error_ref(
-                                    CompilerError::compiler_error(
-                                        "Imported receiver method has no shared call summary",
-                                    ),
-                                    string_table,
-                                )
-                            })?,
-                        fallible_carrier_type_id,
-                    },
-                );
+                self.projected_imported_functions_by_local_path
+                    .insert(method_path, contract);
             }
         }
 
         Ok(())
+    }
+
+    /// Build the contract the callable projection installs for one concrete imported receiver
+    /// method.
+    ///
+    /// WHAT: keeps a header contract's own target and summary origin, and names the method's
+    ///       stable origin at the projection path when only the provider's published summary
+    ///       backs the projection.
+    /// WHY: both cases dispatch the same provider executable, so the contract always carries a
+    ///      real stable target and the provider's published summary; a missing summary stays an
+    ///      internal failure rather than a fabricated one.
+    fn projected_imported_receiver_method_contract(
+        &self,
+        method_path: PathId,
+        method_origin: &OriginFunctionId,
+        fallible_carrier_type_id: Option<TypeId>,
+    ) -> Result<AstImportedFunctionContract, CompilerError> {
+        let header_contract = self
+            .binding_environment
+            .imported_functions_by_local_path
+            .get(&method_path);
+        let (target, summary_key) = match header_contract {
+            Some(contract) => (contract.target.clone(), summary_origin(contract)?),
+            None => (
+                SourceFunctionTarget::Imported {
+                    origin: method_origin.clone(),
+                    local_path: method_path,
+                },
+                method_origin,
+            ),
+        };
+        let summary = self
+            .binding_environment
+            .imported_call_summaries_by_origin
+            .get(summary_key)
+            .cloned()
+            .ok_or_else(|| {
+                CompilerError::compiler_error("Imported receiver method has no shared call summary")
+            })?;
+        Ok(AstImportedFunctionContract {
+            target,
+            summary,
+            fallible_carrier_type_id,
+        })
     }
 
     fn index_imported_receiver_method_path(
@@ -530,12 +578,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 /// The stable function origin whose shared call summary a header-stage contract references.
 fn summary_origin(
     contract: &crate::compiler_frontend::headers::binding_environment::ImportedFunctionContract,
-) -> Result<crate::compiler_frontend::semantic_identity::OriginFunctionId, CompilerError> {
+) -> Result<&OriginFunctionId, CompilerError> {
     match &contract.target {
         crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget::Imported {
             origin,
             ..
-        } => Ok(origin.clone()),
+        } => Ok(origin),
         _ => Err(CompilerError::compiler_error(
             "Header-stage imported function contract must target an imported origin",
         )),

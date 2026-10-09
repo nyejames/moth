@@ -162,7 +162,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ///      then records a `CoreTraitKind::Castable` classifier so the AST
     ///      environment builder can map trait ids to their builtin target
     ///      and fallibility during evidence registration.
-    /// WHY: `cast` requires all twelve `CASTABLE_TO_*` and `TRY_CASTABLE_TO_*`
+    /// WHY: `cast` requires all thirty `CASTABLE_TO_*` and `TRY_CASTABLE_TO_*`
     ///      trait names to resolve without dependency clauses; sharing one registration
     ///      path with `DISPLAYABLE` keeps the trait environment table-driven
     ///      and prevents drift between the catalogue, the trait definitions,
@@ -231,13 +231,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
     /// Registers the automatic incompatibility pairs for core cast traits.
     ///
-    /// WHAT: after all twelve core cast traits are registered, groups their
-    ///      `TraitId`s by builtin target and records each infallible/fallible
-    ///      pair as incompatible in the trait environment.
-    /// WHY: the core cast trait table is the single source of truth for both
-    ///      the trait names and their targets; deriving the six pairs from the
-    ///      table avoids a parallel hand-written list and keeps the catalogue
-    ///      consistent.
+    /// WHAT: after all thirty core cast traits are registered, groups their `TraitId`s by
+    ///      builtin target and records each infallible/fallible pair as incompatible.
+    /// WHY: the trait table is the single source of truth; deriving the fifteen pairs from
+    ///      these rows avoids a parallel hand-written list and keeps registration consistent.
     fn register_core_cast_trait_incompatibility_pairs(trait_environment: &mut TraitEnvironment) {
         #[derive(Default)]
         struct CoreCastTraitPair {
@@ -272,10 +269,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// Registers the compiler-owned builtin evidence rows for every core
     /// cast trait row.
     ///
-    /// WHAT: walks the profile's trait-target builtin evidence rows and inserts one
-    ///      `TraitEvidenceDefinition` with `TraitEvidenceKind::Builtin` for
-    ///      every (source, target) row. Rejects rows whose trait id is
-    ///      missing because registration order was somehow violated.
+    /// WHAT: walks profile-derived builtin evidence rows for registered cast targets and inserts
+    ///      one `TraitEvidenceDefinition` with `TraitEvidenceKind::Builtin` for each supported
+    ///      (source, target) pair. Missing trait metadata indicates an ordering invariant failure.
     /// WHY: builtin evidence must satisfy static generic-bound checks via `builtin_for`.
     pub(in crate::compiler_frontend::ast) fn register_builtin_cast_evidence(
         trait_environment: &TraitEnvironment,

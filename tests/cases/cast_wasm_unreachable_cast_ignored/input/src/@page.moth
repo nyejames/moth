@@ -2,5 +2,23 @@ unused_helper |value Int| -> String:
     text String = cast value
     return text
 ;
+left || -> Int:
+    return 1
+;
+
+right || -> Int:
+    return 1
+;
+
+compare |value Int| -> Bool:
+    result = left() is right() catch |caught_error|:
+        ignored_code U32 = caught_error.code
+        text String = cast value
+        then false
+    ;
+    return result
+;
+comparison = compare(128)
+assert(comparison is true)
 
 [: wasm unreachable cast ignored]

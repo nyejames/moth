@@ -22,12 +22,8 @@
 //!   operations
 
 use std::borrow::Cow;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 use crate::compiler_frontend::ast::ScopeContext;
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
-use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
 #[cfg(test)]
@@ -42,7 +38,6 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
 };
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::builtins::casts::{BuiltinCastLiteral, apply_builtin_cast_policy};
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
@@ -536,13 +531,8 @@ fn fold_unary_operator(
 }
 
 /// Folds a typed expression that has a dedicated AST const-eval path.
-///
-/// `template_ir_store` is the shared module-local store from the caller's `ScopeContext`.
-/// Catch-handler templates retain their exact TIR reference so const classification reads
-/// their effective view instead of reconstructing template structure.
 pub fn fold_compile_time_expression(
     expression: &Expression,
-    template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
     constant_context: bool,
     numeric_profile: NumericProfile,
@@ -554,7 +544,6 @@ pub fn fold_compile_time_expression(
         ExpressionKind::Cast(cast) => {
             let folded_source = fold_compile_time_expression(
                 &cast.source,
-                template_ir_store,
                 string_table,
                 constant_context,
                 numeric_profile,
@@ -563,11 +552,10 @@ pub fn fold_compile_time_expression(
                 expression,
                 cast,
                 &folded_source,
-                template_ir_store,
                 string_table,
                 constant_context,
                 numeric_profile,
-                None,
+                false,
             )
         }
         ExpressionKind::HandledFallibleExpression {
@@ -575,7 +563,6 @@ pub fn fold_compile_time_expression(
         } => {
             let folded_value = fold_compile_time_expression(
                 value,
-                template_ir_store,
                 string_table,
                 constant_context,
                 numeric_profile,
@@ -625,7 +612,7 @@ pub fn fold_compile_time_expression(
         }
         ExpressionKind::ValueBlock { block } => match block.as_ref() {
             ValueBlock::Catch(value_catch) => {
-                let FallibleHandling::Handler { body, .. } = &value_catch.handler else {
+                let FallibleHandling::Handler { .. } = &value_catch.handler else {
                     return Ok(expression.to_owned());
                 };
 
@@ -635,7 +622,6 @@ pub fn fold_compile_time_expression(
 
                 let folded_source = fold_compile_time_expression(
                     &cast.source,
-                    template_ir_store,
                     string_table,
                     constant_context,
                     numeric_profile,
@@ -645,11 +631,10 @@ pub fn fold_compile_time_expression(
                     expression,
                     cast,
                     &folded_source,
-                    template_ir_store,
                     string_table,
                     constant_context,
                     numeric_profile,
-                    Some(body),
+                    true,
                 )
             }
 
@@ -671,17 +656,16 @@ pub fn fold_compile_time_expression(
 ///      runtime casts that could not be folded away.
 #[allow(
     clippy::too_many_arguments,
-    reason = "cast folding keeps the original and folded expressions, the resolved cast, the TIR store, mutable string state, const context, boundary numeric profile and recovery body as separate inputs"
+    reason = "cast folding keeps the original and folded expressions, resolved cast, mutable string state, const context, boundary numeric profile and recovery-presence fact as separate inputs"
 )]
 fn fold_resolved_cast(
     original_expression: &Expression,
     cast: &ResolvedCastExpression,
     folded_source: &Expression,
-    template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
     constant_context: bool,
     numeric_profile: NumericProfile,
-    recovery_handler_body: Option<&[AstNode]>,
+    has_recovery_handler: bool,
 ) -> Result<Expression, ConstantFoldError> {
     #[cfg(feature = "benchmark_counters")]
     increment_frontend_counter(FrontendCounter::CensusCastFoldAttempts);
@@ -733,43 +717,27 @@ fn fold_resolved_cast(
                         folded_source.synthetic_interface_provenance.clone(),
                     );
 
-                    Ok(folded_expression)
-                }
-                Err(_) if !constant_context => Ok(original_expression.to_owned()),
-                Err(_) => {
-                    // A const-required fallible cast with a local recovery handler should
-                    // fold to the handler's produced value when the source folded but the
-                    // builtin policy failed. If the handler itself cannot fold, report that
-                    // as a separate diagnostic so the user knows the recovery path is the
-                    // remaining obstacle.
-                    if let Some(handler_body) = recovery_handler_body
-                        && let Some(folded_handler) = fold_cast_recovery_handler(
-                            handler_body,
-                            cast.target_type_id,
-                            cast.requires_optional_wrap_after_cast,
-                            original_expression.type_id,
-                            original_expression.span,
-                            template_ir_store,
-                            string_table,
-                            numeric_profile,
-                        )?
-                    {
-                        let recovery_provenance = folded_source
-                            .synthetic_interface_provenance
-                            .union(&folded_handler.synthetic_interface_provenance);
-                        let folded_recovery =
-                            folded_handler.with_synthetic_interface_provenance(recovery_provenance);
-                        return Ok(folded_recovery);
+                    if !has_recovery_handler {
+                        let original_facts = &original_expression.failure_facts;
+                        folded_expression.failure_facts.checked_numeric_operation |=
+                            original_facts.checked_numeric_operation;
+                        folded_expression.failure_facts.authored_cast |=
+                            original_facts.authored_cast;
+                        folded_expression.failure_facts.safety_call_count = folded_expression
+                            .failure_facts
+                            .safety_call_count
+                            .max(original_facts.safety_call_count);
                     }
 
-                    Err(CompilerDiagnostic::invalid_cast(
-                        InvalidCastReason::BuiltinCastFailedInConst,
-                        Some(cast.source_type_id),
-                        Some(cast.target_type_id),
-                        original_expression.span,
-                    )
-                    .into())
+                    Ok(folded_expression)
                 }
+                Err(_) => Err(CompilerDiagnostic::invalid_cast(
+                    InvalidCastReason::BuiltinCastFailedInConst,
+                    Some(cast.source_type_id),
+                    Some(cast.target_type_id),
+                    original_expression.span,
+                )
+                .into()),
             }
         }
 
@@ -801,100 +769,6 @@ fn fold_resolved_cast(
             Ok(original_expression.to_owned())
         }
     }
-}
-
-/// Folds a `cast ... catch:` handler body to its produced value in a const-required context.
-///
-/// WHAT: when a builtin cast failed at compile time, the handler body is the only remaining
-///      source for the result. This helper extracts the single produced value, folds it, and
-///      returns it if it collapsed to a compile-time value. If the handler cannot be folded, it
-///      reports a dedicated diagnostic so the failure is attributed to the recovery path, not the
-///      cast.
-/// WHY: keeping this small and local to the AST const-eval owner means HIR lowering does not need to
-///      interpret general catch handler bodies at compile time.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "recovery folding keeps the handler body, target/result types, wrap flag, span, TIR store, mutable string state and boundary numeric profile as separate inputs"
-)]
-fn fold_cast_recovery_handler(
-    handler_body: &[AstNode],
-    target_type_id: TypeId,
-    requires_optional_wrap_after_cast: bool,
-    result_type_id: TypeId,
-    diagnostic_span: Option<SourceSpan>,
-    template_ir_store: &Rc<RefCell<TemplateIrStore>>,
-    string_table: &mut StringTable,
-    numeric_profile: NumericProfile,
-) -> Result<Option<Expression>, ConstantFoldError> {
-    let Some(handler_expression) = extract_single_produced_value(handler_body) else {
-        return Err(CompilerDiagnostic::invalid_cast(
-            InvalidCastReason::CatchHandlerNotConstFoldable,
-            None,
-            Some(target_type_id),
-            diagnostic_span,
-        )
-        .into());
-    };
-
-    let folded_handler = fold_compile_time_expression(
-        handler_expression,
-        template_ir_store,
-        string_table,
-        true,
-        numeric_profile,
-    )?;
-
-    let handler_is_compile_time_constant = folded_handler
-        .const_value_kind_with_template_classifier(&mut |template| {
-            classify_template_from_effective_tir(template, template_ir_store)
-        })?
-        .is_compile_time_value();
-    if !handler_is_compile_time_constant {
-        return Err(CompilerDiagnostic::invalid_cast(
-            InvalidCastReason::CatchHandlerNotConstFoldable,
-            None,
-            Some(target_type_id),
-            folded_handler.span,
-        )
-        .into());
-    }
-
-    let mut result = folded_handler;
-    if requires_optional_wrap_after_cast {
-        result = Expression::coerced(result, result_type_id);
-    }
-
-    Ok(Some(result))
-}
-
-/// Extracts a direct single-value `then` expression from a value-producing body.
-///
-/// WHAT: catch handlers for cast recovery must produce exactly one value in a shape the constant
-///      folder can evaluate without interpreting statements or control-flow conditions.
-/// WHY: nested `if` or `match` handlers require real const statement evaluation to choose the
-///      executed branch. Until that owner exists, the safe frontend behavior is to reject those
-///      handlers in const-required casts instead of guessing at the first branch.
-fn extract_single_produced_value(body: &[AstNode]) -> Option<&Expression> {
-    for node in body {
-        match &node.kind {
-            NodeKind::ThenValue(produced_values) if produced_values.expressions.len() == 1 => {
-                return Some(&produced_values.expressions[0]);
-            }
-
-            NodeKind::If(..)
-            | NodeKind::Match { .. }
-            | NodeKind::LexicalScope { .. }
-            | NodeKind::RangeLoop { .. }
-            | NodeKind::CollectionLoop { .. }
-            | NodeKind::WhileLoop(..)
-            | NodeKind::Return(_)
-            | NodeKind::ReturnError(_) => return None,
-
-            _ => {}
-        }
-    }
-
-    None
 }
 
 /// Converts an AST `Expression` into a `BuiltinCastLiteral` for policy lookup.

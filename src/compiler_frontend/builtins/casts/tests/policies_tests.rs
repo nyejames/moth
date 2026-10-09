@@ -7,9 +7,11 @@
 //!      without re-deriving the expected outcomes in code.
 
 use crate::compiler_frontend::builtins::casts::policies::{
-    BuiltinCastLiteral, apply_builtin_cast_policy,
+    BuiltinCastLiteral, apply_builtin_cast_policy, builtin_cast_failure_codes,
 };
-use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::builtins::casts::targets::{
+    BuiltinCastFallibility, BuiltinCastPolicyId,
+};
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -60,6 +62,7 @@ fn float_to_int_rejects_non_finite_with_invalid_value_code() {
     )
     .expect_err("NaN should fail");
     assert_eq!(error.code, BuiltinErrorCode::FloatCastToIntInvalidValue);
+    assert!(error.code.is_implicit_failure());
 
     let error = apply_builtin_cast_policy(
         policy,
@@ -68,6 +71,14 @@ fn float_to_int_rejects_non_finite_with_invalid_value_code() {
     )
     .expect_err("infinity should fail");
     assert_eq!(error.code, BuiltinErrorCode::FloatCastToIntInvalidValue);
+    assert!(error.code.is_implicit_failure());
+    assert_eq!(
+        builtin_cast_failure_codes(policy, BuiltinCastFallibility::Fallible),
+        &[
+            BuiltinErrorCode::FloatCastToIntInvalidValue,
+            BuiltinErrorCode::FloatCastToIntOutOfRange,
+        ]
+    );
 }
 
 #[test]
@@ -83,6 +94,7 @@ fn float_to_int_rejects_out_of_i32_range_with_out_of_range_code() {
     )
     .expect_err("above i32 range should fail");
     assert_eq!(error.code, BuiltinErrorCode::FloatCastToIntOutOfRange);
+    assert!(error.code.is_implicit_failure());
 
     let error = apply_builtin_cast_policy(
         policy,
@@ -91,6 +103,63 @@ fn float_to_int_rejects_out_of_i32_range_with_out_of_range_code() {
     )
     .expect_err("below i32 range should fail");
     assert_eq!(error.code, BuiltinErrorCode::FloatCastToIntOutOfRange);
+}
+
+#[test]
+fn failure_code_projection_tracks_supported_numeric_pair_failures() {
+    let profile = NumericProfile::STANDARD;
+    let integer_narrowing = BuiltinCastPolicyId::NumericConversion {
+        source: NumericScalar::Int,
+        target: NumericScalar::Fixed(FixedScalar::I8),
+    };
+    let error =
+        apply_builtin_cast_policy(integer_narrowing, &BuiltinCastLiteral::Int(128), profile)
+            .expect_err("128 is outside I8");
+    assert_eq!(error.code, BuiltinErrorCode::IntCastOutOfRange);
+    assert!(error.code.is_implicit_failure());
+    assert_eq!(
+        builtin_cast_failure_codes(integer_narrowing, BuiltinCastFallibility::Fallible),
+        &[BuiltinErrorCode::IntCastOutOfRange]
+    );
+
+    let float_narrowing = BuiltinCastPolicyId::NumericConversion {
+        source: NumericScalar::Float,
+        target: NumericScalar::Fixed(FixedScalar::F16),
+    };
+    let error = apply_builtin_cast_policy(
+        float_narrowing,
+        &BuiltinCastLiteral::Float(f64::INFINITY),
+        profile,
+    )
+    .expect_err("a non-finite value cannot materialise as F16");
+    assert_eq!(error.code, BuiltinErrorCode::FloatCastNonFinite);
+    assert!(error.code.is_implicit_failure());
+    assert_eq!(
+        builtin_cast_failure_codes(float_narrowing, BuiltinCastFallibility::Fallible),
+        &[BuiltinErrorCode::FloatCastNonFinite]
+    );
+
+    let infallible = BuiltinCastPolicyId::NumericConversion {
+        source: NumericScalar::Fixed(FixedScalar::U8),
+        target: NumericScalar::Fixed(FixedScalar::U16),
+    };
+    assert!(builtin_cast_failure_codes(infallible, BuiltinCastFallibility::Infallible).is_empty());
+
+    let unsupported_float_to_number = BuiltinCastPolicyId::NumericConversion {
+        source: NumericScalar::Float,
+        target: NumericScalar::Number(NumberScale::ZERO),
+    };
+    assert!(
+        builtin_cast_failure_codes(
+            unsupported_float_to_number,
+            BuiltinCastFallibility::Fallible
+        )
+        .is_empty()
+    );
+    assert!(!BuiltinErrorCode::FloatBoundaryNonFinite.is_implicit_failure());
+    assert!(!BuiltinErrorCode::FloatFormatInvariant.is_implicit_failure());
+    assert!(!BuiltinErrorCode::CollectionIndexOutOfBounds.is_implicit_failure());
+    assert!(!BuiltinErrorCode::HostInvalidArgument.is_implicit_failure());
 }
 
 #[test]
@@ -188,6 +257,14 @@ fn int_to_char_rejects_negatives_with_invalid_codepoint_code() {
     )
     .expect_err("negative codepoint should fail");
     assert_eq!(error.code, BuiltinErrorCode::IntCastToCharInvalidCodepoint);
+    assert!(error.code.is_implicit_failure());
+    assert_eq!(
+        builtin_cast_failure_codes(
+            BuiltinCastPolicyId::IntToChar,
+            BuiltinCastFallibility::Fallible,
+        ),
+        &[BuiltinErrorCode::IntCastToCharInvalidCodepoint]
+    );
 }
 
 #[test]
@@ -240,6 +317,18 @@ fn string_to_int_is_strict_base_10_with_optional_sign() {
     )
     .expect_err("decimal text should fail");
     assert_eq!(error.code, BuiltinErrorCode::IntParseInvalidFormat);
+    assert!(error.code.is_implicit_failure());
+
+    assert_eq!(
+        builtin_cast_failure_codes(
+            BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
+            BuiltinCastFallibility::Fallible,
+        ),
+        &[
+            BuiltinErrorCode::IntParseInvalidFormat,
+            BuiltinErrorCode::IntParseOutOfRange,
+        ]
+    );
 
     let result = apply_builtin_cast_policy(
         BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
@@ -308,6 +397,7 @@ fn string_to_int_reports_overflow_as_out_of_range() {
     )
     .expect_err("one above i32::MAX should fail");
     assert_eq!(error.code, BuiltinErrorCode::IntParseOutOfRange);
+    assert!(error.code.is_implicit_failure());
 
     let error = apply_builtin_cast_policy(
         BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),

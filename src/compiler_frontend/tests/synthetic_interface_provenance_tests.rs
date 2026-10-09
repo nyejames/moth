@@ -17,7 +17,9 @@ use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExp
 use crate::compiler_frontend::ast::expressions::expression_types::{
     CastHandling, ResolvedCastEvidence,
 };
-use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
+use crate::compiler_frontend::builtins::casts::targets::{
+    BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget,
+};
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -152,13 +154,14 @@ fn provenance_preserved_through_cast() {
         target_type_id: builtin_type_ids::FLOAT,
         target: BuiltinCastTarget::Float,
         requires_optional_wrap_after_cast: false,
+        fallibility: BuiltinCastFallibility::Infallible,
         evidence: ResolvedCastEvidence::Builtin {
             policy: BuiltinCastPolicyId::NumericConversion {
                 source: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Int,
                 target: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Float,
             },
         },
-        handling: CastHandling::Infallible,
+        handling: CastHandling::Implicit,
         span: None,
     };
 

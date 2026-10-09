@@ -1,26 +1,30 @@
 parse_int |text String| -> Int, Error!:
-    return cast! text
+    return cast text
 ;
 
 parse_float |text String| -> Float, Error!:
-    return cast! text
+    return cast text
 ;
 
 parse_bool |text String| -> Bool, Error!:
-    return cast! text
+    return cast text
 ;
 
 parse_char |text String| -> Char, Error!:
-    return cast! text
+    return cast text
 ;
 
 float_to_int |value Float| -> Int, Error!:
-    return cast! value
+    return cast value
 ;
 
 int_to_char |value Int| -> Char, Error!:
-    return cast! value
+    return cast value
 ;
+parse_private |text String| -> Int:
+    return cast text
+;
+
 
 i Int = parse_int("42") catch:
     then -1
@@ -39,6 +43,9 @@ fi Int = float_to_int(-7.8) catch:
 ;
 ic Char = int_to_char(90) catch:
     then ' '
+
 ;
+private_invalid = parse_private("not an integer") catch then -1
+assert(private_invalid is -1)
 
 [: runtime fallible casts: [i]|[f]|[b]|[c]|[fi]|[ic]]

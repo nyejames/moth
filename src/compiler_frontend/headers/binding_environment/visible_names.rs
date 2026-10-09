@@ -47,7 +47,7 @@ pub(crate) enum VisibleNameBinding {
     },
     /// Compiler-owned core cast trait name reserved before any source bindings.
     ///
-    /// WHY: core cast trait names such as `CASTABLE_TO_INT` are globally visible
+    /// WHY: core cast trait names such as `CASTABLE_TO_I8` are globally visible
     ///      without dependencies and must not be shadowed by declarations, aliases,
     ///      dependencies, or namespace records.
     ReservedCoreCastTraitName,

@@ -178,6 +178,22 @@ pub(crate) fn pending_function_failure_facts(
     };
     Ok(facts)
 }
+fn pending_function_failure_facts_with_call_summaries(
+    nodes: &[AstNode],
+    template_ir_store: &TemplateIrStore,
+    active_private_calls: &HashSet<PathId>,
+    known_function_paths: &HashSet<PathId>,
+) -> Result<PendingFunctionFailureFacts, CompilerError> {
+    let mut state = TraversalState::new(TraversalPurpose::FunctionProjection(
+        PendingFunctionFailureFacts::default(),
+    ))
+    .with_call_summaries(active_private_calls, known_function_paths);
+    classify_nodes(nodes, template_ir_store, &mut state)?;
+    let TraversalPurpose::FunctionProjection(facts) = state.purpose else {
+        unreachable!("function projection retains its purpose");
+    };
+    Ok(facts)
+}
 
 /// Closed AST-local verdicts for retained typed bodies, never public concrete call summaries.
 ///
@@ -187,6 +203,7 @@ pub(crate) fn pending_function_failure_facts(
 pub(crate) struct AstBuiltinFailureSummaries {
     functions: HashMap<PathId, PendingFunctionFailureFacts>,
     active: HashSet<PathId>,
+    known_functions: HashSet<PathId>,
 }
 
 impl AstBuiltinFailureSummaries {
@@ -194,40 +211,53 @@ impl AstBuiltinFailureSummaries {
         node_groups: &[&[AstNode]],
         template_ir_store: &TemplateIrStore,
     ) -> Result<Self, CompilerError> {
-        let mut functions = HashMap::new();
+        let mut known_functions = HashSet::new();
         for nodes in node_groups {
             for node in *nodes {
-                if let NodeKind::Function(path, _, body) = &node.kind {
-                    functions.insert(
-                        *path,
-                        pending_function_failure_facts(body, template_ir_store)?,
-                    );
+                if let NodeKind::Function(path, ..) = &node.kind {
+                    known_functions.insert(*path);
                 }
             }
         }
-        let mut summaries = Self {
-            functions,
-            active: HashSet::new(),
-        };
+
+        let mut active = HashSet::new();
         loop {
-            let mut changed = false;
-            for (path, facts) in &summaries.functions {
-                if !summaries.active.contains(path)
-                    && facts
-                        .body
-                        .implicit
-                        .iter()
-                        .any(|contributor| summaries.is_active(contributor))
-                {
-                    summaries.active.insert(*path);
-                    changed = true;
+            let mut functions = HashMap::with_capacity(known_functions.len());
+            for nodes in node_groups {
+                for node in *nodes {
+                    if let NodeKind::Function(path, _, body) = &node.kind {
+                        functions.insert(
+                            *path,
+                            pending_function_failure_facts_with_call_summaries(
+                                body,
+                                template_ir_store,
+                                &active,
+                                &known_functions,
+                            )?,
+                        );
+                    }
                 }
             }
-            if !changed {
-                break;
+
+            let mut newly_active = Vec::new();
+            for (path, facts) in &functions {
+                if !active.contains(path)
+                    && facts.body.implicit.iter().any(|contributor| {
+                        Self::source_is_active(contributor, &active, &known_functions)
+                    })
+                {
+                    newly_active.push(*path);
+                }
             }
+            if newly_active.is_empty() {
+                return Ok(Self {
+                    functions,
+                    active,
+                    known_functions,
+                });
+            }
+            active.extend(newly_active);
         }
-        Ok(summaries)
     }
 
     pub(crate) fn function_facts(&self, path: PathId) -> Option<&PendingFunctionFailureFacts> {
@@ -235,17 +265,22 @@ impl AstBuiltinFailureSummaries {
     }
 
     pub(crate) fn is_active(&self, contributor: &ImplicitFailureContributor) -> bool {
-        match contributor.source {
-            // Both numeric shapes carry their shared code set; an empty set is an exact,
-            // provably infallible operation that never activates a boundary or a witness.
-            ImplicitFailureSource::NumericOperation
-            | ImplicitFailureSource::CompoundWriteBack { .. } => !contributor.codes.is_empty(),
-            ImplicitFailureSource::PrivateCall(path) => self.call_may_fail(path),
-        }
+        Self::source_is_active(contributor, &self.active, &self.known_functions)
     }
 
-    fn call_may_fail(&self, path: PathId) -> bool {
-        !self.functions.contains_key(&path) || self.active.contains(&path)
+    fn source_is_active(
+        contributor: &ImplicitFailureContributor,
+        active_private_calls: &HashSet<PathId>,
+        known_function_paths: &HashSet<PathId>,
+    ) -> bool {
+        match contributor.source {
+            ImplicitFailureSource::NumericOperation
+            | ImplicitFailureSource::CompoundWriteBack { .. } => !contributor.codes.is_empty(),
+            ImplicitFailureSource::AuthoredCastConversion => true,
+            ImplicitFailureSource::PrivateCall(path) => {
+                !known_function_paths.contains(&path) || active_private_calls.contains(&path)
+            }
+        }
     }
 
     pub(crate) fn first_active<'a>(
@@ -299,7 +334,8 @@ impl AstBuiltinFailureSummaries {
         loop {
             if let Some(contributor) = next.take() {
                 match contributor.source {
-                    ImplicitFailureSource::NumericOperation => {
+                    ImplicitFailureSource::NumericOperation
+                    | ImplicitFailureSource::AuthoredCastConversion => {
                         witness.codes.extend_from_slice(contributor.codes);
                         witness.origin_span = contributor.span;
                         witness.origin = BuiltinFailureOriginKind::Operation;
@@ -386,22 +422,76 @@ enum TraversalPurpose {
     ExpressionProjection(PendingFailureFacts),
     FunctionProjection(PendingFunctionFailureFacts),
     PrivateCallCandidates(Vec<ImplicitFailureContributor>),
+    CatchFailureCandidates(Vec<ImplicitFailureContributor>),
 }
 
-struct TraversalState {
+struct TraversalState<'a> {
     purpose: TraversalPurpose,
     loop_depth: usize,
     visited_templates: HashSet<TemplateTirReference>,
     protected_failure_depth: usize,
+    active_private_calls: Option<&'a HashSet<PathId>>,
+    known_function_paths: Option<&'a HashSet<PathId>>,
+    typed_error_seen: bool,
 }
 
-impl TraversalState {
+impl<'a> TraversalState<'a> {
     fn new(purpose: TraversalPurpose) -> Self {
         Self {
             purpose,
             loop_depth: 0,
             visited_templates: HashSet::new(),
             protected_failure_depth: 0,
+            active_private_calls: None,
+            known_function_paths: None,
+            typed_error_seen: false,
+        }
+    }
+
+    fn with_call_summaries(
+        mut self,
+        active_private_calls: &'a HashSet<PathId>,
+        known_function_paths: &'a HashSet<PathId>,
+    ) -> Self {
+        self.active_private_calls = Some(active_private_calls);
+        self.known_function_paths = Some(known_function_paths);
+        self
+    }
+
+    fn with_purpose(&self, purpose: TraversalPurpose) -> TraversalState<'a> {
+        TraversalState {
+            purpose,
+            loop_depth: 0,
+            visited_templates: HashSet::new(),
+            protected_failure_depth: 0,
+            active_private_calls: self.active_private_calls,
+            known_function_paths: self.known_function_paths,
+            typed_error_seen: false,
+        }
+    }
+
+    fn private_call_may_fail(&self, path: PathId) -> bool {
+        match (self.active_private_calls, self.known_function_paths) {
+            (Some(active), Some(known)) => !known.contains(&path) || active.contains(&path),
+            (Some(active), None) => active.contains(&path),
+            _ => true,
+        }
+    }
+
+    fn record_typed_error(&mut self, facts: &ExpressionFailureFacts) {
+        if matches!(self.purpose, TraversalPurpose::CatchFailureCandidates(_))
+            && facts.typed_error.is_some()
+        {
+            self.typed_error_seen = true;
+        }
+    }
+
+    fn contributor_may_fail(&self, contributor: &ImplicitFailureContributor) -> bool {
+        match contributor.source {
+            ImplicitFailureSource::NumericOperation
+            | ImplicitFailureSource::CompoundWriteBack { .. } => !contributor.codes.is_empty(),
+            ImplicitFailureSource::AuthoredCastConversion => true,
+            ImplicitFailureSource::PrivateCall(path) => self.private_call_may_fail(path),
         }
     }
 
@@ -438,6 +528,9 @@ impl TraversalState {
             {
                 candidates.push(*contributor);
             }
+            TraversalPurpose::CatchFailureCandidates(candidates) => {
+                candidates.push(*contributor);
+            }
             _ => {}
         }
     }
@@ -452,7 +545,7 @@ enum RootProtection {
 fn collect_deferred_check(
     expression: &Expression,
     template_ir_store: &TemplateIrStore,
-    state: &mut TraversalState,
+    state: &mut TraversalState<'_>,
 ) -> Result<(), CompilerError> {
     if state.projection_mut().is_none() {
         return Ok(());
@@ -462,6 +555,8 @@ fn collect_deferred_check(
     // private-only catch eligible. Authored numeric checks remain eligible after folding.
     let eligibility_only = matches!(facts.disposition, FailureDisposition::HandledByCatch { .. })
         && !facts.checked_numeric_operation
+        && !facts.authored_cast
+        && facts.safety_call_count < 2
         && facts.summary.first_numeric.is_none()
         && facts.summary.first_typed.is_none()
         && facts.summary.first_private_call.is_some();
@@ -470,7 +565,7 @@ fn collect_deferred_check(
     }
 
     // Ignore only this protected root's handling. Nested catches still exclude their origins.
-    let mut candidates = TraversalState::new(TraversalPurpose::PrivateCallCandidates(Vec::new()));
+    let mut candidates = state.with_purpose(TraversalPurpose::PrivateCallCandidates(Vec::new()));
     classify_expression_with_root_protection(
         expression,
         template_ir_store,
@@ -511,7 +606,7 @@ fn collect_deferred_check(
 fn classify_expression(
     expression: &Expression,
     template_ir_store: &TemplateIrStore,
-    state: &mut TraversalState,
+    state: &mut TraversalState<'_>,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
     classify_expression_with_root_protection(
         expression,
@@ -524,7 +619,7 @@ fn classify_expression(
 fn classify_expression_with_root_protection(
     expression: &Expression,
     template_ir_store: &TemplateIrStore,
-    state: &mut TraversalState,
+    state: &mut TraversalState<'_>,
     root_protection: RootProtection,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
     let ignores_root = matches!(root_protection, RootProtection::Ignore);
@@ -538,6 +633,7 @@ fn classify_expression_with_root_protection(
             | ExpressionKind::RuntimeSlotApplicationHandoff(_)
     );
     if state.protected_failure_depth == 0 && pending_root {
+        state.record_typed_error(&expression.failure_facts);
         if let TraversalPurpose::AssertionMessage = state.purpose {
             // Private candidates wait for exact callee convergence. Numeric failure takes
             // precedence over typed failure, matching the retained aggregate diagnostics.
@@ -600,12 +696,8 @@ fn classify_expression_with_root_protection(
             }
         }
         ExpressionKind::Cast(cast) => {
-            // Only user-authored `cast!` is an expression-level error-propagation effect.
-            // `StoreConversion` belongs to a statement assignment; its HIR error edge is not part
-            // of an assertion-message expression.
-            if state.classifies_exits() && matches!(cast.handling, CastHandling::Propagate) {
-                return Ok(Some(EnclosingExitEffect::ErrorPropagation(cast.span)));
-            }
+            // Compiler store conversions stay statement-local; source casts use ordinary failure
+            // delivery, and only a local `catch` protects this expression from outer exits.
             let recovers = !ignores_root && matches!(cast.handling, CastHandling::Recover);
             state.protected_failure_depth += usize::from(recovers);
             let effect = classify_expression(&cast.source, template_ir_store, state);
@@ -747,7 +839,7 @@ fn classify_expression_with_root_protection(
 
     // Children precede their call/operator origin. This is the old aggregate's witness order,
     // without copying a descendant into each of its ancestors.
-    if state.protected_failure_depth == 0 && pending_root {
+    if state.protected_failure_depth == 0 && pending_root && !owns_payload {
         for contributor in &expression.failure_facts.implicit {
             state.record_origin(contributor);
         }
@@ -763,7 +855,7 @@ fn expression_propagation_span(expression: &Expression) -> Option<SourceSpan> {
 fn classify_call_arguments(
     arguments: &[CallArgument],
     template_ir_store: &TemplateIrStore,
-    state: &mut TraversalState,
+    state: &mut TraversalState<'_>,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
     for argument in arguments {
         if let Some(effect) = classify_expression(&argument.value, template_ir_store, state)? {
@@ -776,7 +868,7 @@ fn classify_call_arguments(
 fn classify_expressions(
     expressions: &[Expression],
     template_ir_store: &TemplateIrStore,
-    state: &mut TraversalState,
+    state: &mut TraversalState<'_>,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
     for expression in expressions {
         if let Some(effect) = classify_expression(expression, template_ir_store, state)? {
@@ -796,7 +888,7 @@ fn classify_place(place: &PlaceExpression) -> Result<Option<EnclosingExitEffect>
 fn classify_value_block(
     block: &ValueBlock,
     template_ir_store: &TemplateIrStore,
-    state: &mut TraversalState,
+    state: &mut TraversalState<'_>,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
     match block {
         ValueBlock::If(value_if) => {
@@ -886,20 +978,45 @@ fn classify_catch_handler(
     body: &[AstNode],
     protected: &Expression,
     template_ir_store: &TemplateIrStore,
-    state: &mut TraversalState,
+    state: &mut TraversalState<'_>,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
-    let dead_handler =
-        !state.classifies_exits() && protected.failure_facts.is_folded_numeric_catch_success();
+    let dead_handler = if state.classifies_exits() {
+        false
+    } else {
+        !catch_protected_expression_can_fail(protected, template_ir_store, state)?
+    };
     state.protected_failure_depth += usize::from(dead_handler);
     let effect = classify_nodes(body, template_ir_store, state);
     state.protected_failure_depth -= usize::from(dead_handler);
     effect
 }
 
+fn catch_protected_expression_can_fail(
+    protected: &Expression,
+    template_ir_store: &TemplateIrStore,
+    state: &TraversalState<'_>,
+) -> Result<bool, CompilerError> {
+    let mut candidates = state.with_purpose(TraversalPurpose::CatchFailureCandidates(Vec::new()));
+    classify_expression_with_root_protection(
+        protected,
+        template_ir_store,
+        &mut candidates,
+        RootProtection::Ignore,
+    )?;
+    let typed_error_seen = candidates.typed_error_seen;
+    let TraversalPurpose::CatchFailureCandidates(contributors) = candidates.purpose else {
+        unreachable!("catch candidate traversal retains its purpose");
+    };
+    Ok(typed_error_seen
+        || contributors
+            .iter()
+            .any(|contributor| state.contributor_may_fail(contributor)))
+}
+
 fn classify_match_arm(
     arm: &MatchArm,
     template_ir_store: &TemplateIrStore,
-    state: &mut TraversalState,
+    state: &mut TraversalState<'_>,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
     if let Some(guard) = &arm.guard
         && let Some(effect) = classify_expression(guard, template_ir_store, state)?
@@ -912,7 +1029,7 @@ fn classify_match_arm(
 fn classify_declarations(
     declarations: &[Declaration],
     template_ir_store: &TemplateIrStore,
-    state: &mut TraversalState,
+    state: &mut TraversalState<'_>,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
     for declaration in declarations {
         if let Some(effect) = classify_expression(&declaration.value, template_ir_store, state)? {
@@ -925,7 +1042,7 @@ fn classify_declarations(
 fn classify_nodes(
     nodes: &[AstNode],
     template_ir_store: &TemplateIrStore,
-    state: &mut TraversalState,
+    state: &mut TraversalState<'_>,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
     for node in nodes {
         let effect = match &node.kind {
@@ -1066,7 +1183,7 @@ fn classify_nodes(
 fn classify_loop_body(
     body: &[AstNode],
     template_ir_store: &TemplateIrStore,
-    state: &mut TraversalState,
+    state: &mut TraversalState<'_>,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
     state.loop_depth += 1;
     let result = classify_nodes(body, template_ir_store, state);
@@ -1077,7 +1194,7 @@ fn classify_loop_body(
 fn classify_runtime_template_handoff(
     handoff: &OwnedRuntimeTemplateHandoff,
     template_ir_store: &TemplateIrStore,
-    state: &mut TraversalState,
+    state: &mut TraversalState<'_>,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
     let mut effect = None;
     let mut visit = |node: &OwnedRuntimeTemplateNode| {
@@ -1093,7 +1210,7 @@ fn classify_runtime_template_handoff(
 fn classify_runtime_slot_application_handoff(
     handoff: &OwnedRuntimeSlotApplicationHandoff,
     template_ir_store: &TemplateIrStore,
-    state: &mut TraversalState,
+    state: &mut TraversalState<'_>,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
     let mut effect = None;
     let mut visit = |node: &OwnedRuntimeTemplateNode| {
@@ -1109,7 +1226,7 @@ fn classify_runtime_slot_application_handoff(
 fn classify_owned_runtime_node(
     node: &OwnedRuntimeTemplateNode,
     template_ir_store: &TemplateIrStore,
-    state: &mut TraversalState,
+    state: &mut TraversalState<'_>,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
     match node {
         OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => {
@@ -1138,7 +1255,7 @@ fn classify_owned_runtime_node(
 fn classify_branch_selector(
     selector: &TemplateBranchSelector,
     template_ir_store: &TemplateIrStore,
-    state: &mut TraversalState,
+    state: &mut TraversalState<'_>,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
     match selector {
         TemplateBranchSelector::Bool(condition) => {
@@ -1169,7 +1286,7 @@ fn classify_branch_selector(
 fn classify_loop_header(
     header: &TemplateLoopHeader,
     template_ir_store: &TemplateIrStore,
-    state: &mut TraversalState,
+    state: &mut TraversalState<'_>,
 ) -> Result<Option<EnclosingExitEffect>, CompilerError> {
     match header {
         TemplateLoopHeader::Conditional { condition } => {
@@ -1204,7 +1321,7 @@ fn classify_loop_header(
 fn classify_range_failure(
     type_id: TypeId,
     span: Option<SourceSpan>,
-    state: &mut TraversalState,
+    state: &mut TraversalState<'_>,
 ) -> Option<EnclosingExitEffect> {
     if state.protected_failure_depth > 0 {
         return None;

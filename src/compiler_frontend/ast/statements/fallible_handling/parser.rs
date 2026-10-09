@@ -289,7 +289,7 @@ pub(crate) fn complete_catch_failure_fact(
         if catch
             .handled_value
             .failure_facts
-            .is_folded_numeric_catch_success()
+            .is_statically_infallible_catch()
         {
             // The handler remains semantically checked but has no executable failure edge.
             ExpressionFailureFacts::default()
@@ -364,7 +364,7 @@ pub(crate) fn compatible_expression_error_type(
         return Ok(first.error_type_id);
     }
 
-    if facts.checked_numeric_operation || facts.summary.first_implicit.is_some() {
+    if facts.has_authored_safety_catch_eligibility() {
         return Ok(
             resolve_builtin_error_type_typed(context, expression.span, string_table)?.type_id,
         );

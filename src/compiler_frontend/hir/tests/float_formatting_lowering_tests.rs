@@ -11,7 +11,9 @@ use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExp
 use crate::compiler_frontend::ast::expressions::expression_types::{
     CastHandling, ResolvedCastEvidence,
 };
-use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
+use crate::compiler_frontend::builtins::casts::targets::{
+    BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -120,10 +122,11 @@ fn make_float_to_string_cast(
         target_type_id: builtin_type_ids::STRING,
         target: BuiltinCastTarget::String,
         requires_optional_wrap_after_cast: false,
+        fallibility: BuiltinCastFallibility::Infallible,
         evidence: ResolvedCastEvidence::Builtin {
             policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Float),
         },
-        handling: CastHandling::Infallible,
+        handling: CastHandling::Implicit,
         span,
     };
 
@@ -423,10 +426,11 @@ fn cast_float_to_string_optional_wrap_lowers_to_format_float() {
         target_type_id: builtin_type_ids::STRING,
         target: BuiltinCastTarget::String,
         requires_optional_wrap_after_cast: true,
+        fallibility: BuiltinCastFallibility::Infallible,
         evidence: ResolvedCastEvidence::Builtin {
             policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Float),
         },
-        handling: CastHandling::Infallible,
+        handling: CastHandling::Implicit,
         span: loc,
     };
 

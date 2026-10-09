@@ -1,0 +1,7 @@
+Response :: Success, Err | message Int, code Int |;
+
+identity || -> Int:
+    return 1
+;
+
+value = Response::Err(identity(), identity()) catch then Response::Err(0, 0)

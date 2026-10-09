@@ -12,6 +12,50 @@ bound_value = 1 + 2 catch |err|:
     handler_runs = 2
     then 0
 ;
+identity_int |value Int| -> Int:
+    return value
+;
+
+identity_text |value String| -> String:
+    return value
+;
+fallback_once |runs ~Int| -> Int:
+    value = identity_int(cast identity_text("not an integer")) catch:
+        runs = runs + 1
+        then cast identity_text("still not an integer")
+    ;
+    return value
+;
+
+negate |value Int| -> Int:
+    result = -value catch then 0
+    return result
+;
+
+argument_sum = identity_int(1 + 2) catch:
+    handler_runs = 3
+    then 0
+;
+argument_text = identity_text(cast 'Q') catch:
+    handler_runs = 4
+    then ""
+;
+argument_parse = identity_int(cast identity_text("42")) catch then -1
+assert(argument_parse is 42)
+inner_runs ~= 0
+outer_runs ~= 0
+fallback_value = fallback_once(~inner_runs) catch:
+    outer_runs = outer_runs + 1
+    then -7
+;
+assert(fallback_value is -7)
+assert(inner_runs is 1)
+assert(outer_runs is 1)
+negated = negate(1)
+assert(argument_sum is 3)
+assert(argument_text is "Q")
+assert(negated is -1)
+
 
 three |left Int, right Int| -> Int, DomainError!:
     value = 1 + 2 catch:

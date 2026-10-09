@@ -386,30 +386,18 @@ pub(crate) fn invalid_cast_message(
         InvalidCastReason::SourceIsOptional => {
             format!("`cast` does not automatically unwrap optional source values; found '{source}'.")
         }
-        InvalidCastReason::OperandIsFallible => {
-            "`cast` only handles cast failures. Handle the operand's `Error!` return before casting."
-                .to_owned()
-        }
         InvalidCastReason::OperandArityMismatch => {
             "`cast` converts exactly one source value. Cast each return slot separately.".to_owned()
         }
         InvalidCastReason::TargetArityMismatch => {
             "`cast` requires exactly one target value. Cast each target slot separately.".to_owned()
         }
-        InvalidCastReason::FallibleEvidenceRequiresHandling => {
-            "`cast` selected fallible evidence. Use `cast!` or `cast ... catch:`.".to_owned()
-        }
-        InvalidCastReason::InfallibleEvidenceCannotUseFallibleForm => {
-            "`cast!` and `cast ... catch:` are only valid for fallible casts.".to_owned()
-        }
-        InvalidCastReason::PropagationRequiresErrorReturn => {
-            "`cast!` requires the current function to have an `Error!` return slot.".to_owned()
-        }
-        InvalidCastReason::PropagationAndRecoveryConflict => {
-            "`cast!` cannot also use `catch:`. Choose propagation or local recovery.".to_owned()
-        }
-        InvalidCastReason::BangMustAttachToCast => {
-            "The `!` must be attached to `cast` as `cast!`.".to_owned()
+        InvalidCastReason::CastPropagationRemoved => {
+            "`cast!` is not a supported form. Use plain `cast`; conversion failure follows ordinary \
+             delivery through local `catch`, a private inferred failure route or a compatible `Error!` \
+             slot. A custom error slot requires local recovery or explicit mapping. Postfix `!` remains \
+             for fallible calls."
+                .to_owned()
         }
         InvalidCastReason::ScalarConstructorRemoved => {
             "Constructor-style scalar conversions are removed. Use `cast` at an explicit typed boundary."
@@ -429,9 +417,6 @@ pub(crate) fn invalid_cast_message(
         }
         InvalidCastReason::BuiltinCastFailedInConst => {
             "This builtin cast failed while evaluating a compile-time expression.".to_owned()
-        }
-        InvalidCastReason::CatchHandlerNotConstFoldable => {
-            "The `catch` handler for this cast must be fully evaluable at compile time.".to_owned()
         }
     }
 }

@@ -1,3 +1,6 @@
-value Int = 1 + 2 catch:
-    then "wrong"
+left I32 = 1
+right I32 = 2
+fallback U64 = 0
+value = left + right catch:
+    then fallback
 ;

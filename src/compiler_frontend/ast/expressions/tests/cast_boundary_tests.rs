@@ -1,15 +1,32 @@
-//! Cast target threading tests for call/constructor boundaries.
+//! Cast evidence and boundary fact tests.
 //!
-//! WHAT: verifies that `cast` receives a concrete builtin target at source/receiver/host
-//!      function parameters and struct/choice constructor fields, and that generic parameter
-//!      slots reject `cast` with `TargetIsGenericParameter`.
-//! WHY: argument parsing owns the cast-target channel at these boundaries; these tests pin the
-//!      boundary behavior without depending on backend lowering.
+//! WHAT: checks resolved builtin cast evidence, fallibility, delivery and failure facts at
+//!       parser-owned call/receiver boundaries, along with targeted invalid diagnostics.
+//! WHY: casts must retain their concrete receiving target and delivery facts after AST
+//!      construction; generic-bound evidence consumption and source acceptance for concrete call
+//!      and constructor boundaries belong to the end-to-end fixture suite.
 
+use crate::compiler_frontend::ast::Ast;
+use crate::compiler_frontend::ast::ast_nodes::NodeKind;
+use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExpression;
+use crate::compiler_frontend::ast::expressions::expression_types::{
+    CastHandling, ResolvedCastEvidence,
+};
+use crate::compiler_frontend::ast::expressions::failure_facts::ImplicitFailureSource;
+use crate::compiler_frontend::builtins::casts::targets::{
+    BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget,
+};
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidBuiltinCallReason, InvalidCallShapeReason, InvalidCastReason,
 };
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::ast_fixture_support::{
+    function_body_by_name, function_signature_by_name, start_function_body,
+};
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
@@ -46,36 +63,34 @@ fn assert_invalid_call_shape(
     assert!(reason_matches(reason));
 }
 
+fn returned_expression<'a>(
+    ast: &'a Ast,
+    path_fork: &PathInternerFork,
+    string_table: &StringTable,
+    function_name: &str,
+) -> &'a Expression {
+    let body = function_body_by_name(ast, path_fork, string_table, function_name);
+    body.iter()
+        .find_map(|node| match &node.kind {
+            NodeKind::Return(values) => values.first(),
+            _ => None,
+        })
+        .expect("function should return a value")
+}
+
+fn resolved_cast(expression: &Expression) -> &ResolvedCastExpression {
+    let ExpressionKind::Cast(cast) = &expression.kind else {
+        panic!(
+            "expected a resolved cast expression, found {:?}",
+            expression.kind
+        );
+    };
+    cast
+}
+
 // ------------------------
 //  Source function parameters
 // ------------------------
-
-#[test]
-fn concrete_function_parameter_accepts_infallible_cast() {
-    let _ = parse_single_file_ast(
-        r#"
-scale |factor Float| -> Float:
-    return factor * 2.0
-;
-
-value = scale(cast 1)
-"#,
-    );
-}
-
-#[test]
-fn concrete_function_parameter_rejects_fallible_cast_without_handling() {
-    assert_invalid_cast(
-        r#"
-draw |x Int, y Int| -> Int:
-    return x + y
-;
-
-value = draw(cast "1", cast "2")
-"#,
-        InvalidCastReason::FallibleEvidenceRequiresHandling,
-    );
-}
 
 #[test]
 fn unknown_named_parameter_with_cast_reports_call_shape() {
@@ -191,35 +206,6 @@ value Int = identity(cast "1")
 // ------------------------
 
 #[test]
-fn struct_constructor_field_accepts_infallible_cast() {
-    let _ = parse_single_file_ast(
-        r#"
-Point = |
-    x Float,
-    y Float,
-|
-
-value = Point(x = cast 1, y = cast 2)
-"#,
-    );
-}
-
-#[test]
-fn struct_constructor_field_rejects_fallible_cast_without_handling() {
-    assert_invalid_cast(
-        r#"
-Point = |
-    x Int,
-    y Int,
-|
-
-value = Point(x = cast "1", y = 0)
-"#,
-        InvalidCastReason::FallibleEvidenceRequiresHandling,
-    );
-}
-
-#[test]
 fn generic_struct_constructor_field_rejects_cast_target() {
     assert_invalid_cast(
         r#"
@@ -234,60 +220,12 @@ value = Box(value = cast "1")
 }
 
 // ------------------------
-//  Choice constructors
-// ------------------------
-
-#[test]
-fn choice_constructor_field_accepts_infallible_cast() {
-    let _ = parse_single_file_ast(
-        r#"
-Measure ::
-    Value | amount Float |,
-;
-
-value = Measure::Value(amount = cast 1)
-"#,
-    );
-}
-
-#[test]
-fn choice_constructor_field_rejects_fallible_cast_without_handling() {
-    assert_invalid_cast(
-        r#"
-Code ::
-    Value | code Int |,
-;
-
-value = Code::Value(code = cast "1")
-"#,
-        InvalidCastReason::FallibleEvidenceRequiresHandling,
-    );
-}
-
-// ------------------------
 //  Receiver method parameters
 // ------------------------
 
 #[test]
-fn receiver_method_parameter_accepts_infallible_cast() {
-    let _ = parse_single_file_ast(
-        r#"
-Item = |
-    price Float,
-|
-
-add |this Item, amount Float| -> Item:
-    return Item(price = this.price + amount)
-;
-
-value = Item(price = 1.0).add(amount = cast 2)
-"#,
-    );
-}
-
-#[test]
-fn receiver_method_parameter_rejects_fallible_cast_without_handling() {
-    assert_invalid_cast(
+fn receiver_method_parameter_records_plain_fallible_cast_facts() {
+    let (ast, path_fork, string_table) = parse_single_file_ast(
         r#"
 Item = |
     price Int,
@@ -297,10 +235,36 @@ add |this Item, amount Int| -> Item:
     return Item(price = this.price + amount)
 ;
 
-value = Item(price = 1).add(amount = cast "2")
+apply_text |text String| -> Item:
+    return Item(price = 1).add(amount = cast text)
+;
 "#,
-        InvalidCastReason::FallibleEvidenceRequiresHandling,
     );
+    let expression = returned_expression(&ast, &path_fork, &string_table, "apply_text");
+    let ExpressionKind::MethodCall { args, .. } = &expression.kind else {
+        panic!("expected a receiver method call");
+    };
+    let [argument] = args.as_slice() else {
+        panic!("expected one receiver method argument");
+    };
+    let cast = resolved_cast(&argument.value);
+
+    assert_eq!(cast.target, BuiltinCastTarget::Int);
+    assert_eq!(cast.fallibility, BuiltinCastFallibility::Fallible);
+    assert!(matches!(
+        &cast.evidence,
+        ResolvedCastEvidence::Builtin {
+            policy: BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int)
+        }
+    ));
+    assert!(matches!(&cast.handling, CastHandling::Implicit));
+    assert!(argument.value.failure_facts.authored_cast);
+    assert!(matches!(
+        argument.value.failure_facts.implicit.as_slice(),
+        [contributor]
+            if contributor.source == ImplicitFailureSource::AuthoredCastConversion
+                && !contributor.codes.is_empty()
+    ));
 }
 
 // ------------------------
@@ -308,56 +272,22 @@ value = Item(price = 1).add(amount = cast "2")
 // ------------------------
 
 #[test]
-fn struct_field_default_rejects_fallible_cast_without_handling() {
+fn struct_field_default_keeps_static_cast_failure_diagnostic() {
     assert_invalid_cast(
         r#"
 Options = |
-    count Int = cast "1",
+    count Int = cast "not an integer",
 |
 
 value = Options()
 "#,
-        InvalidCastReason::FallibleEvidenceRequiresHandling,
+        InvalidCastReason::BuiltinCastFailedInConst,
     );
 }
 
 // ------------------------
 //  Generic-bound source evidence
 // ------------------------
-
-#[test]
-fn generic_function_with_castable_to_string_bound_accepts_infallible_cast() {
-    let _ = parse_single_file_ast(
-        r#"
-render type T is CASTABLE_TO_STRING |value T| -> String:
-    return cast value
-;
-"#,
-    );
-}
-
-#[test]
-fn generic_function_with_try_castable_to_int_bound_rejects_infallible_form() {
-    assert_invalid_cast(
-        r#"
-parse type T is TRY_CASTABLE_TO_INT |value T| -> Int:
-    return cast value
-;
-"#,
-        InvalidCastReason::FallibleEvidenceRequiresHandling,
-    );
-}
-
-#[test]
-fn generic_function_with_try_castable_to_int_bound_accepts_cast_propagation() {
-    let _ = parse_single_file_ast(
-        r#"
-parse type T is TRY_CASTABLE_TO_INT |value T| -> Int, Error!:
-    return cast! value
-;
-"#,
-    );
-}
 
 #[test]
 fn generic_function_without_cast_bound_rejects_cast() {
@@ -375,47 +305,11 @@ render type T |value T| -> String:
 fn generic_function_with_wrong_cast_bound_rejects_cast() {
     assert_invalid_cast(
         r#"
-render type T is CASTABLE_TO_INT |value T| -> String:
+render type T is CASTABLE_TO_I32 |value T| -> String:
     return cast value
 ;
 "#,
         InvalidCastReason::NoEvidence,
-    );
-}
-
-#[test]
-fn concrete_generic_instance_emission_resolves_builtin_cast_evidence() {
-    let _ = parse_single_file_ast(
-        r#"
-render type T is CASTABLE_TO_STRING |value T| -> String:
-    return cast value
-;
-
-result = render(42)
-"#,
-    );
-}
-
-#[test]
-fn concrete_generic_instance_emission_resolves_user_defined_cast_evidence() {
-    let _ = parse_single_file_ast(
-        r#"
-UserId = |
-    value String,
-|
-
-to_string |this UserId| -> String:
-    return this.value
-;
-
-UserId must CASTABLE_TO_STRING
-
-render type T is CASTABLE_TO_STRING |value T| -> String:
-    return cast value
-;
-
-result = render(UserId(value = "abc"))
-"#,
     );
 }
 
@@ -424,41 +318,64 @@ result = render(UserId(value = "abc"))
 // ------------------------
 
 #[test]
-fn concrete_fallible_cast_accepts_attached_bang_propagation() {
-    let _ = parse_single_file_ast(
-        r#"
+fn concrete_fallible_cast_records_plain_error_slot_delivery() {
+    let source = r#"
 parse_count |text String| -> Int, Error!:
-    return cast! text
+    return cast text
 ;
-"#,
-    );
+"#;
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
+    let signature = function_signature_by_name(&ast, &path_fork, &string_table, "parse_count");
+    let expression = returned_expression(&ast, &path_fork, &string_table, "parse_count");
+    let cast = resolved_cast(expression);
+
+    assert!(signature.error_return_type_id().is_some());
+    assert_eq!(cast.target, BuiltinCastTarget::Int);
+    assert_eq!(cast.fallibility, BuiltinCastFallibility::Fallible);
+    assert!(matches!(
+        &cast.evidence,
+        ResolvedCastEvidence::Builtin {
+            policy: BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int)
+        }
+    ));
+    assert!(matches!(&cast.handling, CastHandling::Implicit));
+    assert!(matches!(
+        expression.failure_facts.implicit.as_slice(),
+        [contributor] if contributor.source == ImplicitFailureSource::AuthoredCastConversion
+    ));
 }
 
 #[test]
-fn concrete_fallible_cast_rejects_separated_bang() {
+fn concrete_fallible_cast_rejects_removed_bang_spelling() {
     assert_invalid_cast(
         r#"
 parse_count |text String| -> Int, Error!:
     return cast ! text
 ;
 "#,
-        InvalidCastReason::BangMustAttachToCast,
+        InvalidCastReason::CastPropagationRemoved,
     );
 }
 
 #[test]
-fn concrete_fallible_cast_accepts_recovery_suffix() {
-    let _ = parse_single_file_ast(
+fn constant_receiver_keeps_successful_foldable_cast_catch() {
+    let (ast, path_fork, string_table) = parse_single_file_ast(
         r#"
 value Int = cast "42" catch:
     then 0
 ;
 "#,
     );
+    let body = start_function_body(&ast, &path_fork, &string_table);
+    let NodeKind::VariableDeclaration(declaration) = &body[0].kind else {
+        panic!("expected the constant initializer");
+    };
+
+    assert!(matches!(&declaration.value.kind, ExpressionKind::Int(42)));
 }
 
 #[test]
-fn concrete_fallible_cast_rejects_propagation_recovery_conflict() {
+fn concrete_fallible_cast_rejects_removed_bang_even_with_recovery() {
     assert_invalid_cast(
         r#"
 parse_count |text String| -> Int, Error!:
@@ -467,7 +384,7 @@ parse_count |text String| -> Int, Error!:
     ;
 ;
 "#,
-        InvalidCastReason::PropagationAndRecoveryConflict,
+        InvalidCastReason::CastPropagationRemoved,
     );
 }
 

@@ -1,7 +1,10 @@
--- Plain `cast` with a fallible source in a struct field default is rejected.
+-- A known-invalid conversion in a struct field default is a compile-time
+-- diagnostic. A local catch cannot turn it into a fallback value.
 
 CountBox = |
-    count Int = cast "1",
+    count Int = cast "not an integer" catch:
+        then 0
+    ,
 |
 
 value = CountBox()

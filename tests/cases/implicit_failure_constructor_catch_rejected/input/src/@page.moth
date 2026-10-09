@@ -1,0 +1,4 @@
+Point = |
+    value Int,
+|
+constructed = Point(3) catch then Point(0)

@@ -1,0 +1,9 @@
+Ticket = |
+    text String,
+|
+
+to_string |this Ticket| -> String:
+    return this.text
+;
+
+Ticket must CASTABLE_TO_STRING

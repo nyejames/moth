@@ -68,6 +68,7 @@ impl ModuleMaterialisationContext {
         Self {
             declaration_closure: Box::new([]),
             evidence: Box::new([]),
+            concrete_call_summaries: Box::new([]),
             semantic_closure: StableSemanticClosure::default(),
             artefacts,
             module_origin: None,

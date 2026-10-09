@@ -2,10 +2,13 @@ export:
     Card = |
         text String,
     |
+
+    show_box type T is CASTABLE_TO_STRING |value T| -> String:
+        return cast value
+    ;
 ;
 
 to_string |this Card| -> String:
     return this.text
 ;
-
 Card must CASTABLE_TO_STRING

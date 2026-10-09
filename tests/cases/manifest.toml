@@ -6881,24 +6881,24 @@ contract = "language.casts.non_builtin_target_rejected"
 role = "primary"
 
 [[case]]
-id = "cast_concrete_function_parameter_fallible_rejected"
-path = "cast_concrete_function_parameter_fallible_rejected"
-tags = ["integration","diagnostics","cast"]
-contract = "language.casts.fallible_source_in_plain_cast_position_rejected"
+id = "cast_concrete_function_parameter_plain_fallible_success"
+path = "cast_concrete_function_parameter_plain_fallible_success"
+tags = ["integration","language","cast","runtime"]
+contract = "language.casts.plain_fallible_typed_boundaries"
 role = "primary"
 
 [[case]]
-id = "cast_struct_constructor_field_fallible_rejected"
-path = "cast_struct_constructor_field_fallible_rejected"
-tags = ["integration","diagnostics","cast"]
-contract = "language.casts.fallible_source_in_plain_cast_position_rejected"
+id = "cast_struct_constructor_field_plain_fallible_success"
+path = "cast_struct_constructor_field_plain_fallible_success"
+tags = ["integration","language","cast","runtime"]
+contract = "language.casts.plain_fallible_typed_boundaries"
 role = "boundary"
 
 [[case]]
-id = "cast_choice_constructor_field_fallible_rejected"
-path = "cast_choice_constructor_field_fallible_rejected"
-tags = ["integration","diagnostics","cast"]
-contract = "language.casts.fallible_source_in_plain_cast_position_rejected"
+id = "cast_choice_constructor_field_plain_fallible_success"
+path = "cast_choice_constructor_field_plain_fallible_success"
+tags = ["integration","language","cast","runtime"]
+contract = "language.casts.plain_fallible_typed_boundaries"
 role = "boundary"
 
 [[case]]
@@ -6911,9 +6911,9 @@ role = "primary"
 [[case]]
 id = "cast_struct_field_default_fallible_rejected"
 path = "cast_struct_field_default_fallible_rejected"
-tags = ["integration","diagnostics","cast"]
-contract = "language.casts.fallible_source_in_plain_cast_position_rejected"
-role = "boundary"
+tags = ["integration","diagnostics","cast","const","structs"]
+contract = "language.casts.struct_field_default_static_invalid_rejected"
+role = "primary"
 
 [[case]]
 id = "cast_const_infallible_success"
@@ -7157,21 +7157,21 @@ role = "boundary"
 id = "cast_propagation_requires_error_return_rejected"
 path = "cast_propagation_requires_error_return_rejected"
 tags = ["integration","diagnostics","cast","results"]
-contract = "language.casts.propagation_requires_error_return_rejected"
+contract = "language.casts.exported_plain_cast_failure_rejected"
 role = "primary"
 
 [[case]]
 id = "cast_propagation_recovery_conflict_rejected"
 path = "cast_propagation_recovery_conflict_rejected"
 tags = ["integration","diagnostics","cast","results"]
-contract = "language.casts.propagation_recovery_conflict_rejected"
-role = "primary"
+contract = "language.casts.cast_bang_removed"
+role = "boundary"
 
 [[case]]
 id = "cast_infallible_with_bang_rejected"
 path = "cast_infallible_with_bang_rejected"
 tags = ["integration","diagnostics","cast","results"]
-contract = "language.casts.infallible_with_bang_rejected"
+contract = "language.casts.cast_bang_removed"
 role = "primary"
 
 [[case]]
@@ -7189,10 +7189,10 @@ contract = "language.casts.numeric_fixed_chain_acceptance"
 role = "primary"
 
 [[case]]
-id = "cast_numeric_fixed_const_catch_success"
-path = "cast_numeric_fixed_const_catch_success"
-tags = ["integration","language","cast","const","numeric"]
-contract = "language.casts.numeric_fixed_const_catch_acceptance"
+id = "cast_numeric_fixed_const_catch_rejected"
+path = "cast_numeric_fixed_const_catch_rejected"
+tags = ["integration","diagnostics","cast","const","numeric"]
+contract = "language.casts.numeric_fixed_const_catch_rejected"
 role = "primary"
 
 [[case]]
@@ -7206,15 +7206,15 @@ role = "primary"
 id = "cast_numeric_plain_fallible_rejected"
 path = "cast_numeric_plain_fallible_rejected"
 tags = ["integration","diagnostics","cast","numeric"]
-contract = "language.casts.numeric_plain_fallible_rejected"
-role = "primary"
+contract = "language.casts.exported_plain_cast_failure_rejected"
+role = "boundary"
 
 [[case]]
 id = "cast_numeric_infallible_bang_rejected"
 path = "cast_numeric_infallible_bang_rejected"
 tags = ["integration","diagnostics","cast","numeric"]
-contract = "language.casts.numeric_infallible_with_bang_rejected"
-role = "primary"
+contract = "language.casts.cast_bang_removed"
+role = "boundary"
 
 [[case]]
 id = "cast_numeric_byte_no_evidence_rejected"
@@ -7259,10 +7259,10 @@ contract = "language.casts.numeric_text_parse_acceptance"
 role = "primary"
 
 [[case]]
-id = "cast_numeric_text_string_parse_catch_success"
-path = "cast_numeric_text_string_parse_catch_success"
-tags = ["integration","language","cast","const","numeric"]
-contract = "language.casts.numeric_text_parse_catch_acceptance"
+id = "cast_numeric_text_string_parse_catch_rejected"
+path = "cast_numeric_text_string_parse_catch_rejected"
+tags = ["integration","diagnostics","cast","const","numeric"]
+contract = "language.casts.numeric_text_parse_catch_rejected"
 role = "primary"
 
 [[case]]
@@ -7276,15 +7276,15 @@ role = "primary"
 id = "cast_numeric_text_plain_fallible_rejected"
 path = "cast_numeric_text_plain_fallible_rejected"
 tags = ["integration","diagnostics","cast","numeric"]
-contract = "language.casts.numeric_text_plain_fallible_rejected"
-role = "primary"
+contract = "language.casts.exported_plain_cast_failure_rejected"
+role = "boundary"
 
 [[case]]
 id = "cast_numeric_text_infallible_bang_rejected"
 path = "cast_numeric_text_infallible_bang_rejected"
 tags = ["integration","diagnostics","cast","numeric"]
-contract = "language.casts.numeric_text_infallible_with_bang_rejected"
-role = "primary"
+contract = "language.casts.cast_bang_removed"
+role = "boundary"
 
 [[case]]
 id = "cast_numeric_text_byte_no_evidence_rejected"
@@ -12104,11 +12104,116 @@ contract = "language.results.folded_checked_expression_keeps_catch_eligibility"
 role = "boundary"
 
 [[case]]
+id = "implicit_failure_folded_catch_handler_no_evidence_cast_rejected"
+path = "implicit_failure_folded_catch_handler_no_evidence_cast_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.folded_checked_expression_keeps_catch_eligibility"
+role = "boundary"
+
+[[case]]
 id = "implicit_failure_literal_catch_rejected"
 path = "implicit_failure_literal_catch_rejected"
 tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
-contract = "language.results.literal_does_not_make_catch_eligible"
+contract = "language.results.authored_catch_eligibility_boundaries"
 role = "primary"
+
+[[case]]
+id = "implicit_failure_binding_catch_rejected"
+path = "implicit_failure_binding_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_constant_arithmetic_reference_catch_rejected"
+path = "implicit_failure_constant_arithmetic_reference_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_signed_literal_catch_rejected"
+path = "implicit_failure_signed_literal_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_comparison_catch_rejected"
+path = "implicit_failure_comparison_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_single_call_catch_rejected"
+path = "implicit_failure_single_call_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_nested_argument_call_catch_rejected"
+path = "implicit_failure_nested_argument_call_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_constructor_catch_rejected"
+path = "implicit_failure_constructor_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_constructor_argument_calls_catch_rejected"
+path = "implicit_failure_constructor_argument_calls_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_choice_constructor_argument_calls_catch_rejected"
+path = "implicit_failure_choice_constructor_argument_calls_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_constant_cast_reference_catch_rejected"
+path = "implicit_failure_constant_cast_reference_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_constant_reference_catch_rejected"
+path = "implicit_failure_constant_reference_catch_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.constant_reference_keeps_its_own_occurrence_eligibility"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_constant_arithmetic_catch_rejected"
+path = "implicit_failure_constant_arithmetic_catch_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.constant_reference_keeps_its_own_occurrence_eligibility"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_constant_projection_cast_catch_rejected"
+path = "implicit_failure_constant_projection_cast_catch_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.constant_reference_keeps_its_own_occurrence_eligibility"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_constant_projection_arithmetic_catch_rejected"
+path = "implicit_failure_constant_projection_arithmetic_catch_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.constant_reference_keeps_its_own_occurrence_eligibility"
+role = "boundary"
 
 [[case]]
 id = "implicit_failure_custom_catch_private_rejected"
@@ -13989,16 +14094,16 @@ role = "primary"
 [[case]]
 id = "number_try_castable_to_int_generic_success"
 path = "number_try_castable_to_int_generic_success"
-tags = ["integration", "language", "numeric", "number", "generics", "traits", "casts", "runtime"]
-contract = "language.generics.number_try_castable_to_int"
+tags = ["integration", "language", "numeric", "number", "generics", "traits", "casts", "user-defined", "dependencies", "runtime"]
+contract = "language.generics.number_try_castable_to_i32"
 role = "primary"
 
 [[case]]
 id = "number_fallible_cast_requires_handling_rejected"
 path = "number_fallible_cast_requires_handling_rejected"
 tags = ["integration", "language", "numeric", "number", "casts", "diagnostics"]
-contract = "language.casts.number_fallibility_requires_handling"
-role = "primary"
+contract = "language.casts.exported_plain_cast_failure_rejected"
+role = "boundary"
 
 [[case]]
 id = "dec_keyword_reclaim_and_value_flow_success"
@@ -14832,3 +14937,10 @@ path = "external_const_u32_static_emission"
 tags = ["integration", "numeric", "external", "runtime", "fixed-consts", "reachability"]
 contract = "backend.html.external_fixed_u32_constant_static_emission"
 role = "boundary"
+
+[[case]]
+id = "cast_statement_boundary_catch_runtime"
+path = "cast_statement_boundary_catch_runtime"
+tags = ["integration", "language", "cast", "runtime", "catch", "statement-boundary"]
+contract = "language.casts.cast_operand_ends_at_statement_boundary"
+role = "primary"

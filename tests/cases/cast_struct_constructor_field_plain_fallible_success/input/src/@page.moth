@@ -1,0 +1,37 @@
+-- Plain `cast` fills a struct constructor field from a known-safe value.
+-- The fallible String-to-Int pair folds the value and needs no recovery here.
+
+Point = |
+    x Int,
+    y Int,
+|
+
+value = Point(x = cast "1", y = 0)
+assert(value.x is 1)
+
+runtime_text |text String| -> String:
+    return text
+;
+
+typed_point_field || -> Int, Error!:
+    return! Error("constructor argument", 73)
+;
+
+private_point_field |text String| -> Int:
+    return cast text
+;
+
+-- Constructor arguments keep authored operations and actual failure protection,
+-- even though their calls don't count at the constructor's call-count level.
+arithmetic_point = Point(x = 1 + 2, y = 0) catch then Point(9, 0)
+cast_point = Point(x = cast 'Q', y = 0) catch then Point(9, 0)
+recovered_point = Point(x = cast runtime_text("bad"), y = 0) catch then Point(2, 0)
+assert(arithmetic_point.x is 3)
+assert(cast_point.x is 81)
+assert(recovered_point.x is 2)
+typed_point = Point(x = typed_point_field(), y = 0) catch then Point(3, 0)
+private_point = Point(x = private_point_field("bad"), y = 0) catch then Point(4, 0)
+assert(typed_point.x is 3)
+assert(private_point.x is 4)
+
+[: struct constructor field plain cast: [value.x]]

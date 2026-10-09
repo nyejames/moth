@@ -1,5 +1,5 @@
 try_float |text String| -> Float, Error!:
-    return cast! text
+    return cast text
 ;
 
 code_for_float |text String| -> U32:

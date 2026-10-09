@@ -1,2 +1,3 @@
-text = "hello"
+text = "42"
 value = cast text
+typed_value I32 = value

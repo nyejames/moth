@@ -12,22 +12,22 @@ format_float |value Float| -> String:
 ;
 
 parse_f16 |text String| -> F16, Error!:
-    return cast! text
+    return cast text
 ;
 parse_f32 |text String| -> F32, Error!:
-    return cast! text
+    return cast text
 ;
 parse_f64 |text String| -> F64, Error!:
-    return cast! text
+    return cast text
 ;
 parse_float |text String| -> Float, Error!:
-    return cast! text
+    return cast text
 ;
 round_f64_to_f16 |value F64| -> F16, Error!:
-    return cast! value
+    return cast value
 ;
 round_f64_to_f32 |value F64| -> F32, Error!:
-    return cast! value
+    return cast value
 ;
 round_i64_to_f32 |value I64| -> F32:
     return cast value
@@ -36,18 +36,18 @@ round_u64_to_f32 |value U64| -> F32:
     return cast value
 ;
 round_i64_to_f16 |value I64| -> F16, Error!:
-    return cast! value
+    return cast value
 ;
 round_u64_to_f16 |value U64| -> F16, Error!:
-    return cast! value
+    return cast value
 ;
 i64_via_f64_to_f32 |value I64| -> F32, Error!:
     intermediate F64 = cast value
-    return cast! intermediate
+    return cast intermediate
 ;
 u64_via_f64_to_f32 |value U64| -> F32, Error!:
     intermediate F64 = cast value
-    return cast! intermediate
+    return cast intermediate
 ;
 
 multiply_f32 |left F32, right F32| -> F32, Error!:

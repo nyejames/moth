@@ -107,6 +107,8 @@ Point = |
 
 count Uint = 1 + 2
 large Uint = 3_000_000_000 + 1
+cast_operand_result Uint = cast (1 + 2) catch then 0
+assert(cast_operand_result is 3)
 grouped Uint = (1 + 2) * 3
 peer Uint = 10
 from_right = (1 + 2) + peer

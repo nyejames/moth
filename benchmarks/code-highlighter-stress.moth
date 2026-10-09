@@ -219,7 +219,7 @@ block_scope #= false
 
 -- attached bang forms
 return! value
-cast! value
+casted_text String = cast 'x'
 catch error!:
 
 -- strings and characters with escapes
@@ -365,7 +365,7 @@ type Lookup = {String = Int}
 as_int = value as Int
 as_float = value as Float
 as_string = value as String
-cast_value = cast! value
+cast_value String = cast 'x'
 return_value = return! value
 
 -- assertions

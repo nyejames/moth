@@ -295,12 +295,14 @@ impl Expression {
 
     /// Adopt the authored metadata of the expression a substitution replaces.
     ///
-    /// WHAT: copies the authored span, diagnostic type, receiver, value mode, const-record state
-    ///       and division provenance, and unions the synthetic-interface
+    /// WHAT: copies the authored span, diagnostic type, receiver, value mode, const-record state,
+    ///       division provenance and occurrence failure facts, and unions the synthetic-interface
     ///       provenance of the authored operand into the replacement.
     /// WHY: substituted compile-time operands must stay indistinguishable from their authored
     ///      node for diagnostics and identity; one owner prevents repeated clones between a
-    ///      projection helper and the general evaluator.
+    ///      projection helper and the general evaluator. Eligibility is occurrence-local, so the
+    ///      copied constant content must adopt the reference site's failure facts instead of
+    ///      lending it its initializer's authored cast, checked arithmetic or call count.
     pub(crate) fn preserve_authored_metadata(&mut self, authored: &Expression) {
         self.span = authored.span;
         self.diagnostic_type = authored.diagnostic_type.clone();
@@ -311,6 +313,9 @@ impl Expression {
         self.synthetic_interface_provenance = self
             .synthetic_interface_provenance
             .union(&authored.synthetic_interface_provenance);
+        // Initializer eligibility and witnesses stay at the initializer's occurrence: an
+        // unrelated reference must not inherit its authored cast, checked arithmetic or calls.
+        self.failure_facts = authored.failure_facts.clone();
     }
 
     /// Marks whether this expression originates from a regular division operator.

@@ -1,3 +1,7 @@
+# Retired: the unsupported-cast half of the old second statement now lives in
+# implicit_failure_folded_catch_handler_no_evidence_cast_rejected. Validation
+# fails fast on the handler type mismatch below, so it cannot be observed here.
+
 [backends.html]
 mode = "failure"
 warnings = "forbid"
@@ -6,7 +10,8 @@ diagnostic_codes = ["MOTH-TYPE-0001"]
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
 path = "input/@page.moth"
-line = 2
+line = 5
+column = 10
 
 [backends.html_wasm]
 mode = "failure"
@@ -17,4 +22,5 @@ diagnostic_codes = ["MOTH-TYPE-0001"]
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
 path = "input/@page.moth"
-line = 2
+line = 5
+column = 10

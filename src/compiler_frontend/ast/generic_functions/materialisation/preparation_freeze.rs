@@ -55,7 +55,11 @@ use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
-use crate::compiler_frontend::public_interface::PublicSemanticInterface;
+use crate::compiler_frontend::public_call_summary::PublicCallSummary;
+use crate::compiler_frontend::public_interface::{
+    ConcreteCallSummaryRecord, PublicDeclarationRecord, PublicDeclarationSemantics,
+    PublicEvidenceRecord, PublicReceiverMethodCategory, PublicSemanticInterface,
+};
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModulePrivateExecutableCategory, ModulePrivateExecutableIdentity,
     OriginFunctionId, OriginTraitId, OriginTypeCategory, OriginTypeId, StableModuleOriginIdentity,
@@ -358,6 +362,12 @@ impl ModuleMaterialisationPreparation {
         evidence.extend(public_interface.reusable_evidence.iter().cloned());
         evidence.sort_by(|left, right| left.identity.cmp(&right.identity));
         evidence.dedup_by(|left, right| left.identity == right.identity);
+        let concrete_call_summaries = retained_concrete_call_summaries(
+            &self.binding_environment.imported_call_summaries_by_origin,
+            public_interface,
+            &declaration_closure,
+            &evidence,
+        )?;
         let semantic_closure = self.stable_semantic_closure(resources, path_fork)?;
         // Share one lazily frozen declaring-domain owner across every artefact in this freeze.
         let donor_identity = self.donor_identity().clone();
@@ -378,6 +388,7 @@ impl ModuleMaterialisationPreparation {
         Ok(Some(ModuleMaterialisationContext {
             declaration_closure: declaration_closure.into_boxed_slice(),
             evidence: evidence.into_boxed_slice(),
+            concrete_call_summaries,
             semantic_closure,
             artefacts,
             module_origin: self.module_origin.clone(),
@@ -386,6 +397,7 @@ impl ModuleMaterialisationPreparation {
             source_string_table: None,
         }))
     }
+
     fn freeze_template(
         &self,
         template: &GenericFunctionTemplate,
@@ -1463,4 +1475,87 @@ impl ModuleMaterialisationPreparation {
             capacity_estimate,
         })
     }
+}
+
+/// Retain the exact published summaries needed to reconstruct reusable evidence dispatch.
+///
+/// Generic receiver templates have no base summary. Concrete methods keep the provider's
+/// analysed summary, independently of the template's ordinary file visibility.
+fn retained_concrete_call_summaries(
+    imported_summaries: &FxHashMap<OriginFunctionId, PublicCallSummary>,
+    public_interface: &PublicSemanticInterface,
+    declaration_closure: &[PublicDeclarationRecord],
+    evidence: &[PublicEvidenceRecord],
+) -> Result<Box<[ConcreteCallSummaryRecord]>, CompilerError> {
+    let mut evidenced_origins = evidence
+        .iter()
+        .flat_map(|record| record.requirement_mappings.iter())
+        .map(|mapping| &mapping.method_origin)
+        .collect::<Vec<_>>();
+    evidenced_origins.sort_unstable();
+    evidenced_origins.dedup();
+    if evidenced_origins.is_empty() {
+        return Ok(Box::new([]));
+    }
+
+    let generic_templates = generic_template_receiver_origins(declaration_closure);
+    let mut retained = Vec::with_capacity(evidenced_origins.len());
+    for origin in evidenced_origins {
+        let imported_summary = imported_summaries.get(origin);
+        let published_summary = public_interface
+            .concrete_call_summaries
+            .binary_search_by(|record| record.origin.cmp(origin))
+            .ok()
+            .map(|index| &public_interface.concrete_call_summaries[index].summary);
+        if let (Some(imported), Some(published)) = (imported_summary, published_summary)
+            && imported != published
+        {
+            return Err(CompilerError::compiler_error(format!(
+                "materialisation concrete call summary {origin:?} disagrees between imported provider records and this module's published interface"
+            )));
+        }
+        let Some(summary) = imported_summary.or(published_summary) else {
+            if generic_templates.contains(origin) {
+                continue;
+            }
+            return Err(CompilerError::compiler_error(format!(
+                "retained reusable evidence names receiver method {origin:?} but neither an imported provider interface nor this module's published interface carries its call summary"
+            )));
+        };
+        retained.push(ConcreteCallSummaryRecord {
+            origin: origin.clone(),
+            summary: summary.clone(),
+        });
+    }
+    Ok(retained.into_boxed_slice())
+}
+
+/// Collect every receiver-method origin the closed declaration records mark as a generic template.
+///
+/// WHAT: walks the module-wide declaration closure's struct and choice records for
+///       [`PublicReceiverMethodCategory::GenericTemplate`] methods.
+/// WHY: a generic template never receives a base concrete summary, so it is the one legitimate
+///      evidence method origin without a retained summary. Keeping that classification explicit
+///      lets summary retention reject a genuinely missing concrete summary instead of treating
+///      it as another template.
+fn generic_template_receiver_origins(
+    declaration_closure: &[PublicDeclarationRecord],
+) -> FxHashSet<&OriginFunctionId> {
+    let mut origins = FxHashSet::default();
+    for record in declaration_closure {
+        let methods = match &record.semantics {
+            PublicDeclarationSemantics::Struct(structure) => &structure.receiver_methods,
+            PublicDeclarationSemantics::Choice(choice) => &choice.receiver_methods,
+            _ => continue,
+        };
+        for method in methods {
+            if matches!(
+                method.category,
+                PublicReceiverMethodCategory::GenericTemplate
+            ) {
+                origins.insert(&method.method_origin);
+            }
+        }
+    }
+    origins
 }

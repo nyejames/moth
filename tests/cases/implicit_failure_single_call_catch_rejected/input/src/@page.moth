@@ -1,0 +1,5 @@
+identity || -> Int:
+    return 1
+;
+
+single_call = identity() catch then 0

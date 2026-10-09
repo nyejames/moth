@@ -31,6 +31,7 @@ use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
     runtime_handoff,
 };
+use crate::compiler_frontend::builtins::casts::targets::BuiltinCastFallibility;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
@@ -585,6 +586,8 @@ fn expression_is_recovering_catch_subject(
                 .first_typed
                 .is_none_or(|producer| producer.error_type_id == error_type_id);
         let is_eligible = facts.checked_numeric_operation
+            || facts.authored_cast
+            || facts.safety_call_count >= 2
             || facts.summary.first_implicit.is_some()
             || facts.summary.first_typed.is_some();
         if !implicit_is_compatible
@@ -596,7 +599,7 @@ fn expression_is_recovering_catch_subject(
         }
         // An infallible conversion can still recover checked work in its operand.
         if matches!(&expression.kind, ExpressionKind::Cast(cast)
-            if matches!(cast.handling, CastHandling::Infallible))
+            if cast.fallibility == BuiltinCastFallibility::Infallible)
         {
             return true;
         }

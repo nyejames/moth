@@ -2538,7 +2538,9 @@ fn implicit_failure_cast_catch_retains_operand_and_conversion_contracts() {
     let ast = project.ast();
     let error_type_id = builtin_error_type_id(&project, &ast);
     let expression = initializer(&named_function_body(&project, &ast, "narrow")[0]);
-    let block = assert_catch_contract(expression, true, Some(error_type_id), error_type_id);
+    // Builtin arithmetic and conversion contribute implicit failure. The handler binds Error
+    // without manufacturing a declared typed producer, and protects both operations.
+    let block = assert_catch_contract(expression, true, None, error_type_id);
     let ExpressionKind::Cast(cast) = &block.handled_value.kind else {
         panic!("cast must own the complete arithmetic operand");
     };
@@ -3022,7 +3024,7 @@ fn implicit_failure_catch_remains_ineligible_for_literal_or_infallible_call() {
 }
 
 #[test]
-fn implicit_failure_catch_preserves_bang_cast_bang_and_optional_conflicts() {
+fn implicit_failure_catch_preserves_propagation_and_optional_conflicts() {
     let mut project = failure_project(
         "load |value Int| -> Int, Error!:\n    return value\n;\n\
          bad |value Int| -> Int, Error!:\n    return load(value)! catch then 0\n;\n",
@@ -3035,25 +3037,6 @@ fn implicit_failure_catch_preserves_bang_cast_bang_and_optional_conflicts() {
         &messages,
         InvalidFallibleHandlingReason::ExplicitPropagationCatchConflict,
     );
-
-    let mut project = failure_project(
-        "bad |text String| -> Int, Error!:\n    return cast! text catch then 0\n;\n",
-    );
-    let messages = project
-        .ast_result()
-        .err()
-        .expect("cast propagation cannot also recover");
-    let diagnostic = messages
-        .error_diagnostics()
-        .next()
-        .expect("cast propagation conflict");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidCast {
-            reason: InvalidCastReason::PropagationAndRecoveryConflict,
-            ..
-        }
-    ));
 
     let mut project = failure_project(
         "maybe |value Int| -> Int?:\n    return value\n;\n\
@@ -3149,11 +3132,23 @@ fn implicit_failure_compound_rhs_catch_does_not_consume_arithmetic_or_narrowing(
         .lower_ast_result(ast)
         .expect("existing typed RHS catch and numeric write-back must still lower");
     let update = named_hir_function(&project, &hir, "update");
-    assert!(
-        hir.function_failure_facts[&update.id]
-            .contributors
-            .iter()
-            .any(|producer| { producer.codes.contains(&BuiltinErrorCode::IntOverflow) })
+    let write_back = hir.function_failure_facts[&update.id]
+        .contributors
+        .iter()
+        .find_map(|producer| match &producer.source {
+            HirBuiltinFailureSource::CompoundWriteBack { target, .. } => Some((producer, *target)),
+            _ => None,
+        })
+        .expect("the numeric write-back must reach the function failure facts");
+    assert_eq!(
+        write_back.1,
+        builtin_type_ids::fixed_scalar(FixedScalar::U8),
+        "the write-back contributor names the canonical compound target"
+    );
+    assert_eq!(
+        write_back.0.codes,
+        [BuiltinErrorCode::IntCastOutOfRange],
+        "the narrow back into the target owns the cast range code"
     );
 }
 
@@ -4131,7 +4126,7 @@ fn implicit_failure_catch_abandons_later_temporaries_without_handler_reads() {
 #[test]
 fn implicit_failure_rhs_caught_compound_update_reports_writeback_origin() {
     let mut project = failure_project(
-        "risky |amount U8| -> U8, Error!:\n    wide U32 = amount + 200\n    return cast! wide\n;\n\
+        "risky |amount U8| -> U8, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
          export:\n    bump type T |marker T, extra U8| -> U8:\n\
                  total ~U8 = 250\n        total += risky(extra) catch then extra\n        return total\n    ;\n;\n",
     );
@@ -4148,7 +4143,9 @@ fn implicit_failure_rhs_caught_compound_update_reports_writeback_origin() {
     else {
         panic!("expected exported write-back witness, got {diagnostic:?}");
     };
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
+    // The promoted U8 arithmetic cannot overflow its wider domain, so the escaping failure is
+    // the store conversion's range check into the declared target.
+    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntCastOutOfRange]);
     assert!(witness.call_spans.is_empty());
     let origin_span = witness
         .origin_span
@@ -4165,7 +4162,7 @@ fn implicit_failure_rhs_caught_compound_update_reports_writeback_origin() {
         "the write-back names the canonical compound target"
     );
     let mut project = failure_project(
-        "risky |amount U8| -> U8, Error!:\n    wide U32 = amount + 200\n    return cast! wide\n;\n\
+        "risky |amount U8| -> U8, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
          bump |extra U8| -> U8:\n    total ~U8 = 250\n    total += risky(extra) catch then extra\n    return total\n;\n",
     );
     let ast = project.ast();
@@ -4297,7 +4294,7 @@ fn implicit_failure_plain_return_arithmetic_keeps_operation_origin() {
 fn implicit_failure_custom_slot_keeps_writeback_origin() {
     let mut project = failure_project(
         "Failure = | message String |\n\
-         risky |amount U8| -> U8, Error!:\n    wide U32 = amount + 200\n    return cast! wide\n;\n\
+         risky |amount U8| -> U8, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
          bump |extra U8| -> U8, Failure!:\n    total ~U8 = 250\n    total += risky(extra) catch then extra\n    return total\n;\n",
     );
     let messages = project
@@ -4335,7 +4332,7 @@ fn implicit_failure_custom_slot_keeps_writeback_origin() {
 #[test]
 fn implicit_failure_failed_compound_writeback_keeps_target_after_rhs_catch() {
     let mut project = failure_project(
-        "risky |amount U8| -> U8, Error!:\n    wide U32 = amount + 200\n    return cast! wide\n;\n\
+        "risky |amount U8| -> U8, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
          adjust |extra U8| -> U8:\n\
              total ~U8 = 250\n    total += risky(extra) catch then extra\n    return total\n;\n",
     );

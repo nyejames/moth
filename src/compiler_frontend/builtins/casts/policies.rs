@@ -14,7 +14,9 @@
 
 use std::fmt::{self, Display, Formatter};
 
-use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::builtins::casts::targets::{
+    BuiltinCastFallibility, BuiltinCastPolicyId,
+};
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::datatypes::number::{
     NumberIntegerConversionError, NumberMaterializationError, NumberValue,
@@ -138,6 +140,98 @@ pub(crate) fn apply_builtin_cast_policy(
         }
         BuiltinCastPolicyId::StringToBool => string_to_bool(source),
         BuiltinCastPolicyId::StringToChar => string_to_char(source),
+    }
+}
+
+/// Returns the runtime failure codes for a valid builtin cast policy selected as fallible.
+///
+/// AST failure witnesses use this policy-owned projection rather than matching cast ids in a
+/// later stage. The caller supplies the fallibility selected by cast evidence, so numeric range
+/// classification remains with the evidence owner.
+pub(crate) fn builtin_cast_failure_codes(
+    policy: BuiltinCastPolicyId,
+    fallibility: BuiltinCastFallibility,
+) -> &'static [BuiltinErrorCode] {
+    if fallibility != BuiltinCastFallibility::Fallible {
+        return &[];
+    }
+
+    match policy {
+        BuiltinCastPolicyId::NumericConversion { source, target } => {
+            numeric_conversion_failure_codes(source, target)
+        }
+        BuiltinCastPolicyId::StringToNumeric(target) => string_to_numeric_failure_codes(target),
+        BuiltinCastPolicyId::IntToChar => &[BuiltinErrorCode::IntCastToCharInvalidCodepoint],
+        BuiltinCastPolicyId::StringToBool => &[BuiltinErrorCode::StringParseBoolInvalidFormat],
+        BuiltinCastPolicyId::StringToChar => &[BuiltinErrorCode::StringParseCharInvalidFormat],
+        BuiltinCastPolicyId::ByteToU8
+        | BuiltinCastPolicyId::U8ToByte
+        | BuiltinCastPolicyId::NumericToString(_)
+        | BuiltinCastPolicyId::BoolToString
+        | BuiltinCastPolicyId::CharToString
+        | BuiltinCastPolicyId::CharToInt
+        | BuiltinCastPolicyId::StringToError
+        | BuiltinCastPolicyId::ErrorToString => &[],
+    }
+}
+
+fn numeric_conversion_failure_codes(
+    source: NumericScalar,
+    target: NumericScalar,
+) -> &'static [BuiltinErrorCode] {
+    if source == target {
+        return &[];
+    }
+
+    match (source, target) {
+        (NumericScalar::Number(_), NumericScalar::Number(_)) => {
+            &[BuiltinErrorCode::NumberCastInexact]
+        }
+        (NumericScalar::Number(_), target) if target.is_integer() => &[
+            BuiltinErrorCode::NumberCastInexact,
+            BuiltinErrorCode::IntCastOutOfRange,
+        ],
+        (NumericScalar::Number(_), _) | (_, NumericScalar::Number(_)) => &[],
+        (source, target)
+            if (source.is_integer() || source.is_binary_float())
+                && (target.is_integer() || target.is_binary_float()) =>
+        {
+            if target.is_binary_float() {
+                &[BuiltinErrorCode::FloatCastNonFinite]
+            } else if source.is_binary_float() && target.is_integer() {
+                &[
+                    BuiltinErrorCode::FloatCastToIntInvalidValue,
+                    BuiltinErrorCode::FloatCastToIntOutOfRange,
+                ]
+            } else if source.is_integer() && target.is_integer() {
+                &[BuiltinErrorCode::IntCastOutOfRange]
+            } else {
+                &[]
+            }
+        }
+        _ => &[],
+    }
+}
+
+fn string_to_numeric_failure_codes(target: NumericScalar) -> &'static [BuiltinErrorCode] {
+    if matches!(target, NumericScalar::Number(_)) {
+        &[
+            BuiltinErrorCode::NumberParseInvalidFormat,
+            BuiltinErrorCode::NumberParseInexactScale,
+            BuiltinErrorCode::NumberParseCapacity,
+        ]
+    } else if target.is_binary_float() {
+        &[
+            BuiltinErrorCode::FloatParseInvalidFormat,
+            BuiltinErrorCode::FloatParseOutOfRange,
+        ]
+    } else if target.is_integer() {
+        &[
+            BuiltinErrorCode::IntParseInvalidFormat,
+            BuiltinErrorCode::IntParseOutOfRange,
+        ]
+    } else {
+        &[]
     }
 }
 

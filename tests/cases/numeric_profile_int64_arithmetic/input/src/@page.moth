@@ -27,11 +27,11 @@ power |base Int, exponent Int| -> Int, Error!:
 ;
 
 parse_int |text String| -> Int, Error!:
-    return cast! text
+    return cast text
 ;
 
 float_to_int |value Float| -> Int, Error!:
-    return cast! value
+    return cast value
 ;
 
 assign_divide |target ~Int| -> Int, Error!:

@@ -1229,21 +1229,15 @@ pub enum InvalidCastReason {
     TargetIsGenericParameter,
     SameSourceAndTarget,
     SourceIsOptional,
-    OperandIsFallible,
     OperandArityMismatch,
     TargetArityMismatch,
-    FallibleEvidenceRequiresHandling,
-    InfallibleEvidenceCannotUseFallibleForm,
-    PropagationRequiresErrorReturn,
-    PropagationAndRecoveryConflict,
-    BangMustAttachToCast,
+    CastPropagationRemoved,
     ScalarConstructorRemoved,
     NoEvidence,
     BuiltinEvidenceNotConstFoldable,
     UserDefinedEvidenceNotConstFoldable,
     GenericBoundEvidenceNotConstFoldable,
     BuiltinCastFailedInConst,
-    CatchHandlerNotConstFoldable,
 }
 
 /// Which receiver-call surface produced a receiver-access diagnostic.
@@ -1446,7 +1440,7 @@ impl InvalidFallibleHandlingReason {
             }
 
             InvalidFallibleHandlingReason::CatchOutsideBoundary => {
-                "`catch` can only handle a fallible expression at an assignment, declaration, return, or statement boundary."
+                "`catch` is only allowed at an assignment, declaration, return or statement boundary."
             }
 
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler => {
@@ -1482,7 +1476,8 @@ impl InvalidFallibleHandlingReason {
             }
 
             InvalidFallibleHandlingReason::CatchOnNonFallible => {
-                "`catch` handles implicit built-in failure or compatible typed errors, but this expression is not fallible."
+                "`catch` needs a compatible recoverable failure or an authored cast, arithmetic operation or \
+                 multiple calls at this expression level; this expression has none."
             }
 
             InvalidFallibleHandlingReason::CatchOnOptional => {

@@ -4,7 +4,7 @@ numeric_profile = "Int32/Float64"
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-TYPE-0001", "MOTH-TYPE-0001", "MOTH-RULE-0083", "MOTH-TYPE-0001", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-SYNTAX-0008", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0001", "MOTH-TYPE-0001"]
+diagnostic_codes = ["MOTH-TYPE-0001", "MOTH-TYPE-0001", "MOTH-RULE-0051", "MOTH-TYPE-0001", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-SYNTAX-0008", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0001", "MOTH-TYPE-0001"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"
@@ -79,9 +79,8 @@ path = "input/oversized_leaf/@mod.moth"
 line = 2
 
 [[backends.html.diagnostic_assertions]]
-code = "MOTH-RULE-0083"
+code = "MOTH-RULE-0051"
 occurrence = 1
-reason = "invalid_cast.fallible_evidence_requires_handling"
+reason = "invalid_fallible_handling.unhandled_builtin_failure_in_exported_function"
 path = "input/cast_operand/@mod.moth"
 line = 2
-column = 25

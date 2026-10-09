@@ -1,6 +1,6 @@
-check |condition Bool| -> String:
+check |condition Bool| -> Int:
     assert(condition, "release assert stays checked")
-    return "after assert"
+    return 7
 ;
-result = check(false)
+result I64 = cast check(false) catch then 0
 [: [result]]

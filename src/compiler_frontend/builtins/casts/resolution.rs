@@ -1,20 +1,26 @@
 //! AST cast resolver wiring.
 //!
 //! WHAT: resolves a parsed `cast` operand against an explicit typed boundary by
-//!      selecting builtin, user-defined, or validation-only generic-bound evidence
-//!      and validating the handling form. HIR and backend lowering consume the
-//!      resolved `ExpressionKind::Cast` without re-solving trait evidence.
+//!      selecting builtin, user-defined, or validation-only generic-bound evidence,
+//!      instantiating generic evidence methods, and validating the handling form.
+//!      HIR and backend lowering consume the resolved `ExpressionKind::Cast` without
+//!      re-solving trait evidence.
 //! WHY: centralising evidence selection and cast-specific diagnostics prevents
-//!      boundary callers from duplicating trait/evidence lookup logic.
+//!      boundary callers from duplicating trait/evidence lookup logic, and keeps the
+//!      "evidence resolves before HIR" contract in one stage owner.
 
-use super::evidence::{BuiltinCastEvidenceRow, lookup_builtin_evidence};
+use super::evidence::lookup_builtin_evidence;
 use super::targets::{BuiltinCastFallibility, BuiltinCastTarget, builtin_cast_target_for_type};
 use super::traits::{builtin_cast_trait_metadata, core_cast_trait_for_target_and_fallibility};
+use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExpression;
 use crate::compiler_frontend::ast::expressions::expression_types::{
     CastHandling, ResolvedCastEvidence,
 };
+use crate::compiler_frontend::ast::generic_functions::instantiate_generic_cast_evidence_method;
+use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidCastReason};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -25,34 +31,36 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
-use crate::compiler_frontend::traits::ids::TraitId;
+use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::profile::NumericProfile;
 
 /// Diagnostic result for resolved casts.
 ///
-/// Cast resolution returns directly into the expression parser's diagnostic family, so both
-/// owners share one error shape without changing accumulation or rendering boundaries.
-type CastResolutionResult<T> = Result<T, CompilerDiagnostic>;
+/// Cast resolution returns into the expression parser's diagnostic family, which carries both
+/// user diagnostics and genuine infrastructure failures, so generic evidence instantiation can
+/// report its own diagnostics through the same boundary.
+type CastResolutionResult<T> = Result<T, ExpressionParseError>;
 
 /// Inputs for resolving one explicit `cast` at a typed receiving boundary.
 ///
-/// WHAT: groups the semantic boundary facts, trait evidence stores, and type
-///      environment access needed to turn a parsed cast operand into a resolved
-///      AST expression.
+/// WHAT: groups the semantic boundary facts, trait evidence stores, and body-emission
+///      access needed to turn a parsed cast operand into a resolved AST expression.
 /// WHY: cast resolution is a stage-owned operation with several required
 ///      collaborators. Keeping them named prevents another long parser-to-AST
-pub(crate) struct CastResolutionInput<'a> {
+pub(crate) struct CastResolutionInput<'a, 'interner> {
     pub(crate) source: Expression,
     pub(crate) target_type_id: TypeId,
     pub(crate) target: BuiltinCastTarget,
     pub(crate) requires_optional_wrap_after_cast: bool,
     pub(crate) handling: CastHandling,
     pub(crate) numeric_profile: NumericProfile,
+    pub(crate) scope_context: &'a ScopeContext,
     pub(crate) trait_environment: &'a TraitEnvironment,
     pub(crate) trait_evidence_environment: &'a TraitEvidenceEnvironment,
-    pub(crate) type_environment: &'a mut TypeEnvironment,
-    pub(crate) string_table: &'a StringTable,
-    pub(crate) path_fork: &'a PathInternerFork,
+    pub(crate) type_interner: &'a mut AstTypeInterner<'interner>,
+    pub(crate) string_table: &'a mut StringTable,
+    pub(crate) path_fork: &'a mut PathInternerFork,
     pub(crate) active_generic_type_context: Option<&'a ActiveGenericTypeContext>,
     pub(crate) span: Option<SourceSpan>,
 }
@@ -66,7 +74,7 @@ pub(crate) struct CastResolutionInput<'a> {
 ///      evidence selection and user-facing cast diagnostics so callers do not
 ///      duplicate the lookup logic.
 pub(crate) fn resolve_cast_expression(
-    input: CastResolutionInput<'_>,
+    input: CastResolutionInput<'_, '_>,
 ) -> CastResolutionResult<Expression> {
     let CastResolutionInput {
         source,
@@ -75,9 +83,10 @@ pub(crate) fn resolve_cast_expression(
         requires_optional_wrap_after_cast,
         handling,
         numeric_profile,
+        scope_context,
         trait_environment,
         trait_evidence_environment,
-        type_environment,
+        type_interner,
         string_table,
         path_fork,
         active_generic_type_context,
@@ -85,14 +94,16 @@ pub(crate) fn resolve_cast_expression(
     } = input;
 
     let source_type_id = source.type_id;
+    let source_span = source.span;
 
-    if type_environment.is_option(source_type_id) {
+    if type_interner.environment().is_option(source_type_id) {
         return Err(CompilerDiagnostic::invalid_cast(
             InvalidCastReason::SourceIsOptional,
             Some(source_type_id),
             Some(target_type_id),
-            source.span,
-        ));
+            source_span,
+        )
+        .into());
     }
 
     if source_type_id == target_type_id {
@@ -100,81 +111,60 @@ pub(crate) fn resolve_cast_expression(
             InvalidCastReason::SameSourceAndTarget,
             Some(source_type_id),
             Some(target_type_id),
-            source.span,
-        ));
+            source_span,
+        )
+        .into());
     }
 
-    let builtin_row =
-        builtin_cast_target_for_type(source_type_id, type_environment, string_table, path_fork)
-            .and_then(|source_target| {
-                lookup_builtin_evidence(source_target, target, numeric_profile)
-            });
-
-    let selection = select_cast_evidence(
+    let builtin_row = builtin_cast_target_for_type(
         source_type_id,
-        builtin_row,
-        target,
-        trait_environment,
-        trait_evidence_environment,
-        type_environment,
-        active_generic_type_context,
-    );
-    let operand_only_recovery = matches!(handling, CastHandling::Recover)
-        && selection.fallible.is_none()
-        && selection.infallible.is_some()
-        && (source.failure_facts.checked_numeric_operation
-            || source.failure_facts.summary.first_implicit.is_some()
-            || source.failure_facts.summary.first_typed.is_some());
+        type_interner.environment(),
+        string_table,
+        path_fork,
+    )
+    .and_then(|source_target| lookup_builtin_evidence(source_target, target, numeric_profile));
 
-    let evidence = match handling {
-        CastHandling::Infallible => match selection.infallible {
-            Some(evidence) => evidence,
-            None => {
-                let reason = if selection.fallible.is_some() {
-                    InvalidCastReason::FallibleEvidenceRequiresHandling
-                } else {
-                    InvalidCastReason::NoEvidence
-                };
+    let (evidence, fallibility) = if let Some(row) = builtin_row {
+        (
+            ResolvedCastEvidence::Builtin { policy: row.policy },
+            row.fallibility,
+        )
+    } else {
+        let selection = select_cast_evidence(
+            source_type_id,
+            target,
+            trait_environment,
+            trait_evidence_environment,
+            type_interner.environment(),
+            scope_context,
+            active_generic_type_context,
+        );
+        match (selection.infallible, selection.fallible) {
+            (Some(evidence), None) => (evidence, BuiltinCastFallibility::Infallible),
+            (None, Some(evidence)) => (evidence, BuiltinCastFallibility::Fallible),
+            // Core evidence registration forbids both classes for one pair. Treat an absent or
+            // contradictory pair as unavailable rather than coupling selection to cast spelling.
+            (None, None) | (Some(_), Some(_)) => {
                 return Err(CompilerDiagnostic::invalid_cast(
-                    reason,
+                    InvalidCastReason::NoEvidence,
                     Some(source_type_id),
                     Some(target_type_id),
-                    source.span,
-                ));
-            }
-        },
-
-        CastHandling::Recover if operand_only_recovery => {
-            // Recovery may protect operand evaluation without making the conversion fallible.
-            selection
-                .infallible
-                .expect("the guarded selection contains infallible evidence")
-        }
-
-        CastHandling::Propagate | CastHandling::Recover | CastHandling::StoreConversion => {
-            match selection.fallible {
-                Some(evidence) => evidence,
-                None => {
-                    let reason = if selection.infallible.is_some() {
-                        InvalidCastReason::InfallibleEvidenceCannotUseFallibleForm
-                    } else {
-                        InvalidCastReason::NoEvidence
-                    };
-                    return Err(CompilerDiagnostic::invalid_cast(
-                        reason,
-                        Some(source_type_id),
-                        Some(target_type_id),
-                        source.span,
-                    ));
-                }
+                    source_span,
+                )
+                .into());
             }
         }
     };
-    let handling = if operand_only_recovery {
-        CastHandling::Infallible
-    } else {
-        handling
-    };
+
+    let (evidence, source) = instantiate_user_defined_evidence_method(
+        evidence,
+        source,
+        source_span,
+        scope_context,
+        type_interner,
+        string_table,
+        path_fork,
+    )?;
 
     let cast = ResolvedCastExpression {
         source: Box::new(source),
@@ -183,24 +173,88 @@ pub(crate) fn resolve_cast_expression(
         target,
         requires_optional_wrap_after_cast,
         evidence,
+        fallibility,
         handling,
         span,
     };
 
     let result_type_id = if cast.requires_optional_wrap_after_cast {
-        type_environment.intern_option(cast.target_type_id)
+        type_interner
+            .environment_mut_for_derived_types()
+            .intern_option(cast.target_type_id)
     } else {
         cast.target_type_id
     };
 
-    Ok(Expression::cast(cast, result_type_id, type_environment))
+    Ok(Expression::cast(
+        cast,
+        result_type_id,
+        type_interner.environment(),
+    ))
+}
+
+/// Resolves one selected user-defined evidence method to its concrete instance.
+///
+/// WHAT: when the selected evidence method names a generic receiver template, infers and
+///       validates the template's concrete instance through the shared receiver-method owner,
+///       records its materialisation request, and returns the generated instance path together
+///       with the cast operand moved back out of the hidden call's inference argument.
+/// WHY: a cast's evidence method is a hidden receiver call. Evidence resolves before HIR, so the
+///      template origin must be replaced by its concrete instance here; the operand keeps one
+///      authored evaluation and one AST allocation across inference and the final cast node.
+fn instantiate_user_defined_evidence_method(
+    evidence: ResolvedCastEvidence,
+    source: Expression,
+    source_span: Option<SourceSpan>,
+    scope_context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> CastResolutionResult<(ResolvedCastEvidence, Expression)> {
+    let ResolvedCastEvidence::UserDefined {
+        evidence_id,
+        method_path,
+    } = evidence
+    else {
+        return Ok((evidence, source));
+    };
+
+    // Exact same-file and projected conformance evidence names its concrete method directly.
+    // Constructor fallback selection only accepts generic receiver templates, so a template is
+    // the only case that still has to become a concrete callable before HIR.
+    let Some(template) = scope_context.lookup_generic_function_template(&method_path) else {
+        return Ok((
+            ResolvedCastEvidence::UserDefined {
+                evidence_id,
+                method_path,
+            },
+            source,
+        ));
+    };
+
+    let (instance_path, source) = instantiate_generic_cast_evidence_method(
+        template,
+        source,
+        source_span,
+        scope_context,
+        type_interner,
+        string_table,
+        path_fork,
+    )?;
+
+    Ok((
+        ResolvedCastEvidence::UserDefined {
+            evidence_id,
+            method_path: instance_path,
+        },
+        source,
+    ))
 }
 
 /// Evidence candidates for one source/target pair.
 ///
-/// WHAT: holds the infallible and fallible evidence independently so the
-///      handling-form validation can choose the right one and report the
-///      opposite-form mismatch when applicable.
+/// WHAT: holds both evidence classes independently so plain cast selection follows the
+///       resolved source-target pair rather than a handling spelling.
 struct CastEvidenceSelection {
     infallible: Option<ResolvedCastEvidence>,
     fallible: Option<ResolvedCastEvidence>,
@@ -208,33 +262,20 @@ struct CastEvidenceSelection {
 
 fn select_cast_evidence(
     source_type_id: TypeId,
-    builtin_row: Option<BuiltinCastEvidenceRow>,
     target: BuiltinCastTarget,
     trait_environment: &TraitEnvironment,
     trait_evidence_environment: &TraitEvidenceEnvironment,
     type_environment: &TypeEnvironment,
+    scope_context: &ScopeContext,
     active_generic_type_context: Option<&ActiveGenericTypeContext>,
 ) -> CastEvidenceSelection {
-    if let Some(row) = builtin_row {
-        let evidence = ResolvedCastEvidence::Builtin { policy: row.policy };
-        return match row.fallibility {
-            BuiltinCastFallibility::Infallible => CastEvidenceSelection {
-                infallible: Some(evidence),
-                fallible: None,
-            },
-            BuiltinCastFallibility::Fallible => CastEvidenceSelection {
-                infallible: None,
-                fallible: Some(evidence),
-            },
-        };
-    }
-
-    // Fixed, `Byte` and `Dec` conversions are compiler-owned only. Valid Dec pairs have
-    // already resolved through the lazy builtin row; an absent row must not fall back to a
-    // source-authored or generic-bound conversion.
+    // `Byte` and `Dec` conversions are compiler-owned only: valid pairs already resolved
+    // through the builtin row above, and an absent row must not fall back to a source-authored
+    // or generic-bound conversion. Fixed-width integer and float targets are ordinary
+    // catalogue targets, so user-defined and generic-bound evidence may supply the conversion.
     if matches!(
         target,
-        BuiltinCastTarget::Fixed(_) | BuiltinCastTarget::Number(_)
+        BuiltinCastTarget::Fixed(FixedScalar::Byte) | BuiltinCastTarget::Number(_)
     ) || type_environment.number_scale(source_type_id).is_some()
     {
         return CastEvidenceSelection {
@@ -259,6 +300,8 @@ fn select_cast_evidence(
         BuiltinCastFallibility::Infallible,
         trait_environment,
         trait_evidence_environment,
+        type_environment,
+        scope_context,
     );
 
     let fallible = user_defined_evidence_for(
@@ -267,6 +310,8 @@ fn select_cast_evidence(
         BuiltinCastFallibility::Fallible,
         trait_environment,
         trait_evidence_environment,
+        type_environment,
+        scope_context,
     );
 
     CastEvidenceSelection {
@@ -275,17 +320,36 @@ fn select_cast_evidence(
     }
 }
 
+/// Selects registered user-defined evidence for one source/target/fallibility triple.
+///
+/// WHAT: takes the exact registered evidence for the source type, else the evidence registered on
+///       the nominal constructor of a generic nominal instance source.
+/// WHY: core cast traits resolve before HIR, and a generic nominal constructor conformance is the
+///      declared evidence for every instance of that constructor. The constructor retry mirrors
+///      the generic-bound lookup so both consumers read one stable evidence model.
 fn user_defined_evidence_for(
     source_type_id: TypeId,
     target: BuiltinCastTarget,
     fallibility: BuiltinCastFallibility,
     trait_environment: &TraitEnvironment,
     trait_evidence_environment: &TraitEvidenceEnvironment,
+    type_environment: &TypeEnvironment,
+    scope_context: &ScopeContext,
 ) -> Option<ResolvedCastEvidence> {
     let trait_kind = core_cast_trait_for_target_and_fallibility(target, fallibility)?;
     let trait_id = trait_environment
         .core_trait_id_for_static_name(builtin_cast_trait_metadata(trait_kind).trait_name)?;
-    let evidence_id = trait_evidence_environment.canonical_for(source_type_id, trait_id)?;
+    let evidence_id = trait_evidence_environment
+        .canonical_for(source_type_id, trait_id)
+        .or_else(|| {
+            constructor_evidence_for_instance(
+                source_type_id,
+                trait_id,
+                type_environment,
+                trait_evidence_environment,
+                scope_context,
+            )
+        })?;
     let evidence = trait_evidence_environment.get(evidence_id)?;
     let requirement = evidence.requirements.first()?;
 
@@ -293,6 +357,34 @@ fn user_defined_evidence_for(
         evidence_id,
         method_path: requirement.method_path,
     })
+}
+
+/// Resolves constructor-registered evidence for a generic nominal instance source.
+///
+/// WHAT: retries the exact evidence lookup on the instance's nominal constructor, and keeps the
+///       constructor row only when the conforming method is a visible generic receiver template.
+/// WHY: a constructor conformance is aligned with one instance only when its method is generic
+///      over the constructor's parameters, so it can be instantiated for the actual source type.
+///      A concrete receiver method declared for one sibling instance cannot serve another
+///      instance, and must stay unselected exactly as it was before this retry existed.
+fn constructor_evidence_for_instance(
+    source_type_id: TypeId,
+    trait_id: TraitId,
+    type_environment: &TypeEnvironment,
+    trait_evidence_environment: &TraitEvidenceEnvironment,
+    scope_context: &ScopeContext,
+) -> Option<TraitEvidenceId> {
+    let Some(TypeDefinition::GenericInstance(instance)) = type_environment.get(source_type_id)
+    else {
+        return None;
+    };
+    let base_type_id = type_environment.type_id_for_nominal_id(instance.base)?;
+    let evidence_id = trait_evidence_environment.canonical_for(base_type_id, trait_id)?;
+    let evidence = trait_evidence_environment.get(evidence_id)?;
+    let requirement = evidence.requirements.first()?;
+    scope_context.lookup_generic_function_template(&requirement.method_path)?;
+
+    Some(evidence_id)
 }
 
 /// Validation-only evidence selection for a generic parameter source inside a

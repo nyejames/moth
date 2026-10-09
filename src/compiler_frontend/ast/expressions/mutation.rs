@@ -54,9 +54,7 @@ use crate::compiler_frontend::ast::statements::value_production::receiver::try_p
 use crate::compiler_frontend::ast::statements::value_production::types::ValueReceiverKind;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::casts::evidence::lookup_builtin_evidence;
-use crate::compiler_frontend::builtins::casts::targets::{
-    BuiltinCastFallibility, builtin_cast_target_for_type,
-};
+use crate::compiler_frontend::builtins::casts::targets::builtin_cast_target_for_type;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::{
@@ -234,10 +232,6 @@ fn evaluate_compound_assignment_value(
 
     let source_type_id = value.type_id;
     let cast_span = value.span;
-    let handling = match evidence.fallibility {
-        BuiltinCastFallibility::Infallible => CastHandling::Infallible,
-        BuiltinCastFallibility::Fallible => CastHandling::StoreConversion,
-    };
     let cast = ResolvedCastExpression {
         source: Box::new(value),
         source_type_id,
@@ -247,7 +241,8 @@ fn evaluate_compound_assignment_value(
         evidence: ResolvedCastEvidence::Builtin {
             policy: evidence.policy,
         },
-        handling,
+        fallibility: evidence.fallibility,
+        handling: CastHandling::StoreConversion,
         span: cast_span,
     };
     let cast_value = Expression::cast(cast, target_type_id, type_interner.environment());

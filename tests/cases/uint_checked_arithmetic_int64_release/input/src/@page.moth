@@ -66,7 +66,7 @@ quot_above Uint = floordiv_above(huge, above) catch:
 ;
 
 float_to_uint |value Float| -> Uint, Error!:
-    return cast! value
+    return cast value
 ;
 
 two_pow_64 Float = 18446744073709551616.0
@@ -82,7 +82,7 @@ uint_to_scaled |value Uint| -> Dec2:
 ;
 
 scaled_to_uint |value Dec2| -> Uint, Error!:
-    return cast! value
+    return cast value
 ;
 
 scaled Dec2 = uint_to_scaled(huge)

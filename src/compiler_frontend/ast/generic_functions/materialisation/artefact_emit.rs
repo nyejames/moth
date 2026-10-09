@@ -19,6 +19,7 @@ use super::{MaterialisedGenericAst, ModuleMaterialisationInput};
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::AstBuildContext;
 use crate::compiler_frontend::ast::AstImportedFunctionContract;
+use crate::compiler_frontend::ast::AstImportedStructDefinition;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
@@ -48,7 +49,9 @@ use crate::compiler_frontend::headers::module_symbols::{GenericDeclarationKind, 
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 #[cfg(test)]
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
-use crate::compiler_frontend::public_interface::{PublicDeclarationRecord, PublicEvidenceRecord};
+use crate::compiler_frontend::public_interface::{
+    ConcreteCallSummaryRecord, PublicDeclarationRecord, PublicEvidenceRecord,
+};
 #[cfg(test)]
 use crate::compiler_frontend::semantic_identity::ModulePrivateExecutableIdentity;
 use crate::compiler_frontend::semantic_identity::{
@@ -79,6 +82,11 @@ mod test_support;
 pub(crate) struct ModuleMaterialisationContext {
     pub(super) declaration_closure: Box<[PublicDeclarationRecord]>,
     pub(super) evidence: Box<[PublicEvidenceRecord]>,
+    /// Exact published concrete evidence-method summaries, in stable-origin order.
+    ///
+    /// These precede AST evidence projection. Generic templates have no base summary, and
+    /// ordinary file visibility does not determine which evidence contracts must be retained.
+    pub(super) concrete_call_summaries: Box<[ConcreteCallSummaryRecord]>,
     pub(super) semantic_closure: StableSemanticClosure,
     pub(super) artefacts: Box<[GenericTemplateArtefact]>,
     pub(super) module_origin: Option<StableModuleOriginIdentity>,
@@ -461,6 +469,14 @@ impl GenericTemplateArtefact {
                 .imported_evidence_by_identity
                 .insert(record.identity.clone(), record.clone());
         }
+        // Reusable evidence names its requirement methods by stable origin, and the environment's
+        // AST builder projects those origins only once the provider's real summary is present. The
+        // context retained exactly the summaries the retained evidence names.
+        for record in &context.concrete_call_summaries {
+            environment
+                .imported_call_summaries_by_origin
+                .insert(record.origin.clone(), record.summary.clone());
+        }
         for callable in &self.callables {
             let local_path = callable.local_path;
             let target = callable.target.materialise(local_path);
@@ -532,6 +548,17 @@ impl GenericTemplateArtefact {
             } else {
                 None
             };
+            // HIR learns nominal struct shells only from `imported_struct_definitions`, and the
+            // sidecar's own body construction resolves this exact generated path through
+            // `TypeEnvironment::nominal_path`. Mirror `project_imported_struct_members`: only
+            // non-generic structs are published, choices stay on the AST choice lane, and the
+            // generated type-environment path plus its field definition remain the single source
+            // of that identity.
+            let publishes_struct_shell = generic_kind.is_none()
+                && matches!(
+                    environment.type_environment.get(type_id),
+                    Some(TypeDefinition::Struct(_))
+                );
             let lookups = Rc::make_mut(&mut environment.lookups);
             Rc::make_mut(&mut lookups.nominal_type_ids_by_path).insert(local_path, type_id);
             Rc::make_mut(&mut lookups.source_nominal_paths).insert(local_path);
@@ -569,6 +596,18 @@ impl GenericTemplateArtefact {
                     )?,
                     path_fork,
                 )?;
+            }
+            if publishes_struct_shell
+                && !lookups
+                    .imported_struct_definitions
+                    .iter()
+                    .any(|definition| definition.nominal_path == generated_nominal_path)
+            {
+                lookups
+                    .imported_struct_definitions
+                    .push(AstImportedStructDefinition {
+                        nominal_path: generated_nominal_path,
+                    });
             }
         }
 

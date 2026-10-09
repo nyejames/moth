@@ -1,4 +1,4 @@
-draw |x Int = cast "bad" catch:
+draw |x Int = cast "4" catch:
     then 4
 | -> Int:
     return x

@@ -102,11 +102,12 @@ pub struct HirJumpArgument {
 
 /// Semantic origin retained until private failure lanes have been installed.
 ///
-/// WHY: compound write-back must preserve its conversion carrier independently of
+/// WHY: implicit casts and compound write-backs preserve their failure carrier independently of
 /// the backend-facing runtime failure message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeFailureCause {
     StoreConversion { carrier: LocalId },
+    AuthoredCastConversion { carrier: LocalId },
 }
 
 /// Evaluation fact retained with an assertion failure message.

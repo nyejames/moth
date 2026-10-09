@@ -22,7 +22,9 @@ use crate::compiler_frontend::ast::templates::runtime_handoff::{
 };
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
-use crate::compiler_frontend::builtins::casts::targets::BuiltinCastTarget;
+use crate::compiler_frontend::builtins::casts::targets::{
+    BuiltinCastFallibility, BuiltinCastTarget,
+};
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::number::NumberValue;
@@ -61,6 +63,7 @@ pub struct ResolvedCastExpression {
     pub(crate) target_type_id: TypeId,
     pub(crate) target: BuiltinCastTarget,
     pub(crate) requires_optional_wrap_after_cast: bool,
+    pub(crate) fallibility: BuiltinCastFallibility,
     pub(crate) evidence: ResolvedCastEvidence,
     pub(crate) handling: CastHandling,
     pub(crate) span: Option<SourceSpan>,
@@ -195,7 +198,7 @@ pub enum ExpressionKind {
         propagation_span: Option<SourceSpan>,
     },
 
-    /// Explicit `cast` / `cast!` expression resolved at an explicit typed boundary.
+    /// Explicit `cast` expression resolved at an explicit typed boundary.
     ///
     /// WHAT: carries the resolved source, target, evidence, and handling form.
     /// WHY: the cast surface models builtin and user-defined evidence, fallibility

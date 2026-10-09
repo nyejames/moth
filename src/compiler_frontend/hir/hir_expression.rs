@@ -34,7 +34,9 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueCatchBlock,
 };
 use crate::compiler_frontend::builtins::casts::evidence::type_id_for_builtin_target;
-use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
+use crate::compiler_frontend::builtins::casts::targets::{
+    BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget,
+};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::TypeIdentityKey;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
@@ -990,9 +992,9 @@ impl<'a> HirBuilder<'a> {
         result_type_id: TypeId,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
         let protected = &value_catch.handled_value;
-        if protected.failure_facts.is_folded_numeric_catch_success() {
-            // AST already checked the handler. Folding removed all runtime producers, so there
-            // is no carrier or error edge to lower and the protected value is the whole result.
+        if protected.failure_facts.is_statically_infallible_catch() {
+            // AST validated the authored handler. Converged facts show no error edge can run,
+            // so only the protected value remains executable HIR.
             return self.lower_expression(protected);
         }
         // The parser owns catch compatibility; its validated disposition, not the protected
@@ -1065,16 +1067,17 @@ impl<'a> HirBuilder<'a> {
         span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
         match &cast.evidence {
-            ResolvedCastEvidence::Builtin { policy } => match &cast.handling {
-                CastHandling::Infallible => {
+            ResolvedCastEvidence::Builtin { policy } => match (cast.fallibility, cast.handling) {
+                (BuiltinCastFallibility::Infallible, _) => {
                     self.lower_infallible_builtin_cast_expression(cast, *policy, expr_type_id, span)
                 }
-                CastHandling::Propagate | CastHandling::Recover => {
-                    self.lower_fallible_builtin_cast_expression(cast, *policy, expr_type_id, span)
-                }
-                CastHandling::StoreConversion => {
+                (BuiltinCastFallibility::Fallible, CastHandling::StoreConversion) => {
                     self.lower_store_conversion_cast_expression(cast, *policy, expr_type_id, span)
                 }
+                (
+                    BuiltinCastFallibility::Fallible,
+                    CastHandling::Implicit | CastHandling::Recover,
+                ) => self.lower_fallible_builtin_cast_expression(cast, *policy, expr_type_id, span),
             },
             ResolvedCastEvidence::UserDefined { method_path, .. } => {
                 self.lower_user_defined_cast_expression(cast, method_path, expr_type_id, span)
@@ -1174,8 +1177,8 @@ impl<'a> HirBuilder<'a> {
     ///
     /// WHAT: emits the checked builtin cast carrier and selects the enclosing function's numeric
     ///       failure edge before returning the success payload.
-    /// WHY: this conversion is part of the store contract, not source `cast!` propagation; the
-    ///      assignment statement that consumes it must only be reached on success.
+    /// WHY: this conversion belongs to the assignment write-back boundary, so its failure stays
+    ///      attached to the assignment and the write is committed only on success.
     fn lower_store_conversion_cast_expression(
         &mut self,
         cast: &ResolvedCastExpression,
@@ -1205,48 +1208,42 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<LoweredExpression, HirConstructionFailure> {
         let carrier = self.emit_builtin_cast_carrier(cast, policy, span)?;
 
-        match &cast.handling {
-            CastHandling::Propagate => {
-                let success_value = self.lower_fallible_carrier_to_success_value(carrier, span)?;
-                let value =
-                    self.wrap_cast_result_optional_if_needed(success_value, expr_type_id, span)?;
-                Ok(LoweredExpression {
-                    prelude: vec![],
-                    value,
-                })
+        let success_value = match cast.handling {
+            CastHandling::Implicit => {
+                self.lower_cast_carrier_with_implicit_delivery(carrier, span)?
             }
             CastHandling::Recover => {
-                // Recovering outside a catch is a compiler invariant: with no enclosing
-                // handler the parser never produces a nested recovery cast at this boundary.
                 if self.active_catch_handler.is_none() {
                     return_hir_transformation_error!(
                         "Recovering builtin cast reached HIR outside a value catch block",
                         self.hir_error_location(span)
                     );
                 }
-                // The active catch owns the first failure. Its error edge goes to the
-                // enclosing handler, never into an assertion or template evaluation.
-                let success_value = self.lower_carrier_to_active_catch_success(carrier, span)?;
-                let value =
-                    self.wrap_cast_result_optional_if_needed(success_value, expr_type_id, span)?;
-                Ok(LoweredExpression {
-                    prelude: vec![],
-                    value,
-                })
+                self.lower_carrier_to_active_catch_success(carrier, span)?
             }
             CastHandling::StoreConversion => return_hir_transformation_error!(
                 "Store conversion cast bypassed compound-assignment lowering",
                 self.hir_error_location(span)
             ),
-            CastHandling::Infallible => Err(CompilerError::new(
-                "Fallible builtin cast reached HIR with Infallible handling",
-                self.hir_error_location(span),
-                crate::compiler_frontend::compiler_errors::ErrorType::HirTransformation,
-            )
-            .into()),
-        }
+        };
+        let value = self.wrap_cast_result_optional_if_needed(success_value, expr_type_id, span)?;
+        Ok(LoweredExpression {
+            prelude: vec![],
+            value,
+        })
     }
 
+    fn lower_cast_carrier_with_implicit_delivery(
+        &mut self,
+        carrier: EmittedFallibleCarrier,
+        span: &Option<SourceSpan>,
+    ) -> Result<HirValueId, HirConstructionFailure> {
+        if self.active_catch_handler.is_some() {
+            return self.lower_carrier_to_active_catch_success(carrier, span);
+        }
+        let failure_mode = self.select_numeric_failure_mode(span)?;
+        self.lower_implicit_cast_carrier_to_success_value(carrier, failure_mode, span)
+    }
     /// Lowers a user-defined cast by calling the selected evidence method.
     fn lower_user_defined_cast_expression(
         &mut self,
@@ -1259,8 +1256,11 @@ impl<'a> HirBuilder<'a> {
         let source_argument =
             CallArgument::positional((*cast.source).clone(), CallAccessMode::Shared, *span);
 
-        match &cast.handling {
-            CastHandling::Infallible => {
+        match (cast.fallibility, cast.handling) {
+            (
+                BuiltinCastFallibility::Infallible,
+                CastHandling::Implicit | CastHandling::Recover,
+            ) => {
                 let result_type_ids = vec![cast.target_type_id];
                 let lowered = self.lower_call_expression(
                     call_target,
@@ -1275,10 +1275,11 @@ impl<'a> HirBuilder<'a> {
                     value,
                 })
             }
-            CastHandling::Propagate => {
+            (BuiltinCastFallibility::Fallible, CastHandling::Implicit) => {
                 let carrier =
                     self.emit_user_defined_cast_call_carrier(call_target, &source_argument, span)?;
-                let success_value = self.lower_fallible_carrier_to_success_value(carrier, span)?;
+                let success_value =
+                    self.lower_cast_carrier_with_implicit_delivery(carrier, span)?;
                 let value =
                     self.wrap_cast_result_optional_if_needed(success_value, expr_type_id, span)?;
                 Ok(LoweredExpression {
@@ -1286,17 +1287,13 @@ impl<'a> HirBuilder<'a> {
                     value,
                 })
             }
-            CastHandling::Recover => {
-                // Recovering outside a catch is a compiler invariant: with no enclosing
-                // handler the parser never produces a nested recovery cast at this boundary.
+            (BuiltinCastFallibility::Fallible, CastHandling::Recover) => {
                 if self.active_catch_handler.is_none() {
                     return_hir_transformation_error!(
                         "Recovering user-defined cast reached HIR outside a value catch block",
                         self.hir_error_location(span)
                     );
                 }
-                // The active catch owns the first failure. Its error edge goes to the
-                // enclosing handler, never into an assertion or template evaluation.
                 let carrier =
                     self.emit_user_defined_cast_call_carrier(call_target, &source_argument, span)?;
                 let success_value = self.lower_carrier_to_active_catch_success(carrier, span)?;
@@ -1307,8 +1304,7 @@ impl<'a> HirBuilder<'a> {
                     value,
                 })
             }
-
-            CastHandling::StoreConversion => return_hir_transformation_error!(
+            (_, CastHandling::StoreConversion) => return_hir_transformation_error!(
                 "Store conversion cast reached HIR with non-builtin evidence",
                 self.hir_error_location(span)
             ),

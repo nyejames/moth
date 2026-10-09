@@ -78,17 +78,25 @@ impl<'a> GenericBoundEvidenceContext<'a> {
         }
     }
 
-    pub(crate) fn evidence_target_is_visible_for_trait(
-        &self,
-        type_id: TypeId,
-        trait_id: TraitId,
-    ) -> bool {
+    /// Whether one concrete `(type, trait)` pair may use its evidence in this requester context.
+    ///
+    /// WHAT: an exact generated pair the requester already transferred is visible on its own;
+    ///       every other pair still needs both the trait and the evidence target visible in the
+    ///       requester's file scope.
+    /// WHY: a generated sidecar validates bounds in a domain where a provider-owned trait and its
+    ///      target may never be name-visible, while the pair itself arrives as the request's own
+    ///      selected evidence and is installed beside the body. This predicate owns the whole
+    ///      visibility decision so no caller can re-impose one half of it; a visible pair still
+    ///      needs its real evidence row, which callers check separately through `evidence_for_type`.
+    pub(crate) fn evidence_is_visible_for_trait(&self, type_id: TypeId, trait_id: TraitId) -> bool {
         if self.generated_evidence_pairs.is_some_and(|pairs| {
             generated_evidence_pair_is_selected(type_id, trait_id, self.type_environment, pairs)
         }) {
             return true;
         }
-        evidence_target_is_visible(
+        self.trait_environment.is_some_and(|trait_environment| {
+            trait_is_visible(trait_id, trait_environment, self.visible_trait_names)
+        }) && evidence_target_is_visible(
             type_id,
             self.type_environment,
             self.visible_source_names,
@@ -289,16 +297,18 @@ fn validate_single_bound(
         return Ok(());
     };
 
-    let trait_is_visible =
-        trait_is_visible(trait_id, trait_environment, context.visible_trait_names);
-    if trait_is_visible
-        && generic_parameter_declares_bound(concrete_type_id, trait_id, context.type_environment)
+    // A concrete generic-parameter argument that declares the bound needs no evidence row, but
+    // its trait still has to be visible. The cheap bound lookup runs first so an ordinary
+    // concrete type pays for trait visibility at most once, inside the pair predicate below.
+    if generic_parameter_declares_bound(concrete_type_id, trait_id, context.type_environment)
+        && trait_is_visible(trait_id, trait_environment, context.visible_trait_names)
     {
         return Ok(());
     }
 
-    let has_reusable_evidence = trait_is_visible
-        && context.evidence_target_is_visible_for_trait(concrete_type_id, trait_id)
+    // The predicate owns the whole pair visibility rule, including the generated-pair bypass, so
+    // the trait must not be gated again here; the evidence row itself stays mandatory.
+    let has_reusable_evidence = context.evidence_is_visible_for_trait(concrete_type_id, trait_id)
         && evidence_for_type(
             concrete_type_id,
             trait_id,

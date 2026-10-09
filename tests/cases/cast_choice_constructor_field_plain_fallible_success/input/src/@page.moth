@@ -1,0 +1,17 @@
+-- Plain `cast` fills a choice constructor field from a known-safe value.
+-- The fallible String-to-Int pair folds the value and needs no recovery here.
+
+Code ::
+    Value | code Int |,
+;
+
+value = Code::Value(code = cast "1")
+
+code_value ~= 0
+if value is:
+    Value(code) => code_value = copy code
+;
+
+assert(code_value is 1)
+
+[: choice constructor field plain cast: [code_value]]

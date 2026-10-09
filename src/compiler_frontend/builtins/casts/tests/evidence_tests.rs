@@ -392,6 +392,32 @@ fn numeric_text_evidence_covers_every_numeric_domain_in_both_directions() {
 }
 
 #[test]
+fn fixed_numeric_text_evidence_uses_each_exact_target_identity() {
+    let profile = NumericProfile::STANDARD;
+
+    for fixed_scalar in FixedScalar::ALL
+        .into_iter()
+        .filter(|scalar| *scalar != FixedScalar::Byte)
+    {
+        let target = fixed_target(fixed_scalar);
+        let scalar = NumericScalar::Fixed(fixed_scalar);
+
+        let formatting = lookup_builtin_evidence(target, BuiltinCastTarget::String, profile)
+            .unwrap_or_else(|| panic!("{target:?} -> String evidence should exist"));
+        assert_eq!(formatting.fallibility, BuiltinCastFallibility::Infallible);
+        assert_eq!(
+            formatting.policy,
+            BuiltinCastPolicyId::NumericToString(scalar)
+        );
+
+        let parsing = lookup_builtin_evidence(BuiltinCastTarget::String, target, profile)
+            .unwrap_or_else(|| panic!("String -> {target:?} evidence should exist"));
+        assert_eq!(parsing.fallibility, BuiltinCastFallibility::Fallible);
+        assert_eq!(parsing.policy, BuiltinCastPolicyId::StringToNumeric(scalar));
+    }
+}
+
+#[test]
 fn number_cast_evidence_classifies_exact_pair_boundaries() {
     let profile = NumericProfile::STANDARD;
     let scale_zero = NumberScale::new(0).expect("zero is a valid Dec scale");

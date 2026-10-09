@@ -1,4 +1,4 @@
 compute || -> Int, Error!:
-    narrow #U8 = cast! "300"
+    narrow #U8 = cast "300"
     return 0
 ;

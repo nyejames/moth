@@ -27,7 +27,9 @@ use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::failure_facts::HirBuiltinFailureBoundary;
-use crate::compiler_frontend::hir::hir_builder::{CatchHandlerTarget, CatchProtectedCall};
+use crate::compiler_frontend::hir::hir_builder::{
+    CatchHandlerRecord, CatchHandlerTarget, CatchProtectedCall,
+};
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::{
     BlockId, FunctionId, HirNodeId, HirValueId, LocalId, RegionId,
@@ -68,13 +70,14 @@ pub(crate) fn install_private_failure_lanes(
     // Records are pending CFG edges only until installation. Draining them here keeps
     // post-install validation and every later pass free of record awareness.
     let records = std::mem::take(&mut hir.catch_protected_calls);
+    let handler_records = std::mem::take(&mut hir.catch_handlers);
     let catch_handlers = records
         .iter()
         .map(|record| (record.statement, record.handler))
         .collect::<FxHashMap<_, _>>();
-    // Draining records, installing return lanes and pruning handlers all change the HIR, so
-    // only a module with none of them can stay unchanged.
-    let mut rewritten = !records.is_empty() || !lane_functions.is_empty();
+    // Draining records, installing return lanes and pruning handlers all change the HIR.
+    let mut rewritten =
+        !records.is_empty() || !handler_records.is_empty() || !lane_functions.is_empty();
     {
         let mut installer = LaneInstaller {
             hir,
@@ -89,12 +92,15 @@ pub(crate) fn install_private_failure_lanes(
         };
         installer.assert_records_reference_live_calls(&records)?;
         installer.prepare_ids()?;
-        installer.install_return_lanes(&records)?;
+        installer.install_return_lanes(&handler_records)?;
         rewritten |= installer.rewrite_bodies()?;
-        installer.retarget_store_conversions()?;
+        installer.retarget_implicit_conversion_failures()?;
         rewritten |= installer.narrow_entry_return()?;
-        installer.prune_unrouted_catch_handlers(&records);
+        installer.prune_unrouted_catch_handlers(&handler_records);
         installer.hir.compact_block_ids();
+        rewritten |= installer
+            .hir
+            .finalize_function_provenance_after_rewrites()?;
     }
     if !rewritten {
         return Ok(PrivateFailureLaneInstallation::Unchanged);
@@ -147,10 +153,10 @@ impl LaneInstaller<'_> {
     /// handler `return` as a bare `Return` that the caller misreads as a carrier.
     fn install_return_lanes(
         &mut self,
-        records: &[CatchProtectedCall],
+        handlers: &[CatchHandlerRecord],
     ) -> Result<(), CompilerError> {
         let mut handler_roots: FxHashMap<FunctionId, Vec<BlockId>> = FxHashMap::default();
-        for record in records {
+        for record in handlers {
             if self.lane_functions.contains(&record.owner) {
                 handler_roots
                     .entry(record.owner)
@@ -528,8 +534,8 @@ impl LaneInstaller<'_> {
     ///       are removed; entry-reachable blocks such as the shared catch merge are kept.
     /// WHY: proof may remove a handler's runtime path (plan section 7), and full-strength
     ///      ownership validation requires every remaining block to belong to a function CFG.
-    fn prune_unrouted_catch_handlers(&mut self, records: &[CatchProtectedCall]) {
-        if records.is_empty() {
+    fn prune_unrouted_catch_handlers(&mut self, handlers: &[CatchHandlerRecord]) {
+        if handlers.is_empty() {
             return;
         }
         let entry_reachable = self
@@ -542,7 +548,7 @@ impl LaneInstaller<'_> {
         // deduplicated roots share a single visited set. The walk stops at
         // entry-reachable blocks: successors of a shared merge belong to a live CFG.
         let mut roots = FxHashSet::default();
-        for record in records {
+        for record in handlers {
             if !entry_reachable.contains(&record.handler.block) {
                 roots.insert(record.handler.block);
             }
@@ -564,25 +570,53 @@ impl LaneInstaller<'_> {
         }
         if !remove.is_empty() {
             self.hir.blocks.retain(|block| !remove.contains(&block.id));
+            self.hir
+                .function_provenance_by_block
+                .retain(|(_, block_id), _| match block_id {
+                    Some(block_id) => !remove.contains(block_id),
+                    None => true,
+                });
+            let live_locals = self
+                .hir
+                .blocks
+                .iter()
+                .flat_map(|block| block.locals.iter().map(|local| local.id))
+                .collect::<FxHashSet<_>>();
+            let live_statements = self
+                .hir
+                .blocks
+                .iter()
+                .flat_map(|block| block.statements.iter().map(|statement| statement.id))
+                .collect::<FxHashSet<_>>();
+            self.hir
+                .side_table
+                .retain_live_locals_and_statements(&live_locals, &live_statements);
         }
     }
 
-    /// A compound store conversion is lowered before the lane exists, so its error
-    /// edge is still a trap. The target assign already sits on the success continuation.
-    fn retarget_store_conversions(&mut self) -> Result<(), HirConstructionFailure> {
+    /// Source casts and compound stores initially retain a trap edge until their function lane
+    /// has been installed; each cause keeps the carrier needed to return the original Error.
+    fn retarget_implicit_conversion_failures(&mut self) -> Result<(), HirConstructionFailure> {
         let lane_functions = self.lane_functions.iter().copied().collect::<Vec<_>>();
         for function_id in lane_functions {
             let entry = self.function_entry(function_id)?;
             for block_id in reachable_blocks(self.hir, entry) {
-                let HirTerminator::RuntimeFailure {
-                    cause: Some(RuntimeFailureCause::StoreConversion { carrier }),
-                    ..
-                } = self.hir.blocks[block_id.0 as usize].terminator
-                else {
-                    continue;
+                let cause = match &self.hir.blocks[block_id.0 as usize].terminator {
+                    HirTerminator::RuntimeFailure {
+                        cause: Some(cause), ..
+                    } => *cause,
+                    _ => continue,
+                };
+                let (carrier, owner) = match cause {
+                    RuntimeFailureCause::StoreConversion { carrier } => {
+                        (carrier, "compound write-back")
+                    }
+                    RuntimeFailureCause::AuthoredCastConversion { carrier } => {
+                        (carrier, "authored cast")
+                    }
                 };
                 let carrier_type = self.local_types.get(&carrier).copied().ok_or_else(|| {
-                    CompilerError::compiler_error("compound write-back carrier has no local type")
+                    CompilerError::compiler_error(format!("{owner} carrier has no local type"))
                 })?;
                 let error_type = self.builtin_error_type()?;
                 if self
@@ -590,9 +624,9 @@ impl LaneInstaller<'_> {
                     .fallible_carrier_slots(carrier_type)
                     .is_none_or(|(_, error)| error != error_type)
                 {
-                    return Err(CompilerError::compiler_error(
-                        "compound write-back carrier must contain builtin Error",
-                    )
+                    return Err(CompilerError::compiler_error(format!(
+                        "{owner} carrier must contain builtin Error"
+                    ))
                     .into());
                 }
                 let region = self.hir.blocks[block_id.0 as usize].region;

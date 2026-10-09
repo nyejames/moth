@@ -1,4 +1,4 @@
-count #Int = cast "nope" catch:
+count #Int = cast "0" catch:
     then 0
 ;
 

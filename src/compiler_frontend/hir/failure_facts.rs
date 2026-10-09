@@ -51,6 +51,7 @@ pub(crate) struct HirBuiltinFailureContributor {
 #[derive(Debug, Clone)]
 pub(crate) enum HirBuiltinFailureSource {
     NumericOperation,
+    AuthoredCastConversion,
     /// Checked compound-assignment write-back with its canonical target type.
     ///
     /// WHAT: mirrors the AST write-back contributor through projection so the
@@ -67,7 +68,10 @@ pub(crate) enum HirBuiltinFailureSource {
 impl HirBuiltinFailureContributor {
     pub(crate) fn witness_site(&self) -> FailureWitnessSite {
         match self.source {
-            HirBuiltinFailureSource::NumericOperation => FailureWitnessSite::Arithmetic(self.span),
+            HirBuiltinFailureSource::NumericOperation
+            | HirBuiltinFailureSource::AuthoredCastConversion => {
+                FailureWitnessSite::Arithmetic(self.span)
+            }
             HirBuiltinFailureSource::CompoundWriteBack {
                 arithmetic_span, ..
             } => FailureWitnessSite::WriteBack(arithmetic_span),

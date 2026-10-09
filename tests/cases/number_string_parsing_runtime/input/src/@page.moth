@@ -1,14 +1,14 @@
 parse_number0 |text String| -> Dec0, Error!:
-    return cast! text
+    return cast text
 ;
 parse_number1 |text String| -> Dec1, Error!:
-    return cast! text
+    return cast text
 ;
 parse_number2 |text String| -> Dec2, Error!:
-    return cast! text
+    return cast text
 ;
 parse_number256 |text String| -> Dec256, Error!:
-    return cast! text
+    return cast text
 ;
 
 parsed_scale0 = parse_number0("1.234e3") catch:

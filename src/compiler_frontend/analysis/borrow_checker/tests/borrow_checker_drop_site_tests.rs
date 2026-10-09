@@ -273,7 +273,7 @@ fn failed_field_compound_writeback_keeps_borrow_obligations_on_error_edge() {
     // error edge must skip the field store while still cleaning up the
     // abandoned right-hand-side temporaries.
     let source = "Bucket = |\n    level U8,\n|\n\
-                  risky |amount U8| -> U8, Error!:\n    wide U32 = amount + 200\n    return cast! wide\n;\n\
+                  risky |amount U8| -> U8, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
                   bump |box ~Bucket, extra U8| -> U8, Error!:\n    box.level += risky(extra) catch then extra\n    return box.level\n;\n";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let hir = lower_hir(ast, &mut string_table, &mut path_fork);

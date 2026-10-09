@@ -58,7 +58,7 @@ pub(crate) struct ExpressionParseResources<'a, 'env, 'tokens> {
 /// WHY: `ExpectedType` and `CastTargetContext` intentionally stay separate:
 ///      - `ExpectedType` is for context-sensitive literals (`none`, empty `{}`)
 ///        so the parser can resolve types that would otherwise be ambiguous.
-///      - `CastTargetContext` is for explicit `cast` / `cast!` target boundaries
+///      - `CastTargetContext` is for explicit `cast` target boundaries
 ///        supplied by typed receivers; it does not affect ordinary literal
 ///        resolution and is intentionally independent of expected-type hints.
 pub(crate) struct ExpressionParseInput<'a, 'env, 'tokens> {

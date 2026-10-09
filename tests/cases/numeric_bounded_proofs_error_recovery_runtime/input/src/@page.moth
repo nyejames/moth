@@ -27,18 +27,18 @@ first_failure |huge Int, divisor Int| -> Int, Error!:
 ;
 
 narrow_down |value U32| -> U8, Error!:
-    return cast! value
+    return cast value
 ;
 
 narrow_round_trip |value U32| -> U32, Error!:
     wide U64 = cast value
-    return cast! wide
+    return cast wide
 ;
 
 double_narrow |value U32| -> U32, Error!:
     wide U64 = cast value
     doubled = wide + wide
-    return cast! doubled
+    return cast doubled
 ;
 
 record_once |calls ~Int, marker U8| -> U8:

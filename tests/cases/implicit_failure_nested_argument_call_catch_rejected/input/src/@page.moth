@@ -1,0 +1,9 @@
+identity || -> Int:
+    return 1
+;
+
+forward |value Int| -> Int:
+    return value
+;
+
+nested_argument = forward((identity())) catch then 0

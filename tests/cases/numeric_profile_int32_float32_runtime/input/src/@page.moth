@@ -15,7 +15,7 @@ int_to_float |value Int| -> Float:
 ;
 
 float_to_int |value Float| -> Int, Error!:
-    return cast! value
+    return cast value
 ;
 
 increment |value Int| -> Int, Error!:
@@ -30,7 +30,7 @@ assign_integer_divide_int |target ~Int| -> Int, Error!:
     return target
 ;
 parse_profile_float |text String| -> Float, Error!:
-    return cast! text
+    return cast text
 ;
 divide_profile_float |left Float, right Float| -> Float, Error!:
     return left / right

@@ -2,22 +2,22 @@
 -- fixed-float, Dec-boundary and text pairs (Uint<->Byte/Char/Bool have no
 -- evidence; see uint_cast_failures_rejected). Fallible pairs use handled
 -- casts; infallible pairs use plain cast.
-@helpers to_int
+@helpers try_to_i32
 
 uint_to_int |value Uint| -> Int, Error!:
-    return cast! value
+    return cast value
 ;
 
 int_to_uint |value Int| -> Uint, Error!:
-    return cast! value
+    return cast value
 ;
 
 float_to_uint |value Float| -> Uint, Error!:
-    return cast! value
+    return cast value
 ;
 
 f32_to_uint |value F32| -> Uint, Error!:
-    return cast! value
+    return cast value
 ;
 
 uint_to_float |value Uint| -> Float:
@@ -33,7 +33,7 @@ wide_to_uint |value U32| -> Uint:
 ;
 
 narrow_from_uint |value Uint| -> U8, Error!:
-    return cast! value
+    return cast value
 ;
 
 narrow_to_uint |value U8| -> Uint:
@@ -45,11 +45,11 @@ uint_to_scaled |value Uint| -> Dec2:
 ;
 
 scaled_to_uint |value Dec2| -> Uint, Error!:
-    return cast! value
+    return cast value
 ;
 
 text_to_uint |text String| -> Uint, Error!:
-    return cast! text
+    return cast text
 ;
 
 uint_to_text |value Uint| -> String:
@@ -70,8 +70,8 @@ big_back Int = uint_to_int(4294967295) catch:
     then -2
 ;
 
--- Task 2B: Uint proves TRY_CASTABLE_TO_INT through the core-trait path.
-generic_back Int = to_int(small_uint) catch:
+-- Task 2B: Uint proves TRY_CASTABLE_TO_I32 through the core-trait path.
+generic_back I32 = try_to_i32(small_uint) catch:
     then -3
 ;
 

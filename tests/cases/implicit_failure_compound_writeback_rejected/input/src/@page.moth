@@ -1,6 +1,6 @@
 risky |amount U8| -> U8, Error!:
     wide U32 = amount + 200
-    return cast! wide
+    return cast wide
 ;
 export:
     bump |extra U8| -> U8:

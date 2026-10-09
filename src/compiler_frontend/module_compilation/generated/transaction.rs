@@ -18,7 +18,7 @@ use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
 use crate::compiler_frontend::source::SourceSpan;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Dense index of one request inside this transaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -259,6 +259,49 @@ impl<'a> GeneratedFunctionTransaction<'a> {
                     "Generated transaction summary index for {identity:?} is out of range"
                 ))
             })
+    }
+
+    /// Retain only completed sidecars reachable from the final executable call graph.
+    ///
+    /// The request and completion IDs are transaction-local, so they are rebuilt together after
+    /// convergence has validated every materialised body and unreachable handler work is removed.
+    pub(crate) fn retain_reachable_sidecars(
+        &mut self,
+        reachable: &FxHashSet<GeneratedFunctionIdentity>,
+    ) -> Result<(), CompilerError> {
+        if let Some(record) = self
+            .records
+            .iter()
+            .find(|record| record.state != GeneratedRequestState::Complete)
+        {
+            return Err(CompilerError::compiler_error(format!(
+                "Generated transaction stopped before request {:?} completed",
+                record.identity
+            )));
+        }
+        if self.records.len() != self.completed_records.len() {
+            return Err(CompilerError::compiler_error(
+                "Generated transaction request and sidecar records disagree after convergence",
+            ));
+        }
+
+        self.completed_records
+            .retain(|record| reachable.contains(&record.identity));
+        self.completed_by_identity = self
+            .completed_records
+            .iter()
+            .enumerate()
+            .map(|(index, record)| (record.identity.clone(), GeneratedFunctionId::new(index)))
+            .collect();
+        self.records
+            .retain(|record| reachable.contains(&record.identity));
+        self.ids_by_identity = self
+            .records
+            .iter()
+            .enumerate()
+            .map(|(index, record)| (record.identity.clone(), GeneratedRequestId(index)))
+            .collect();
+        Ok(())
     }
 
     /// Close the transaction and hand back everything it completed.

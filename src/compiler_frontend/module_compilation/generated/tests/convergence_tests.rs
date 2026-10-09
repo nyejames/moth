@@ -18,7 +18,12 @@ use crate::compiler_frontend::hir::reachability::{
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
-use crate::compiler_frontend::module_compilation::generated::test_fixtures::PublishedBoundary;
+use crate::compiler_frontend::module_compilation::generated::test_fixtures::{
+    PublishedBoundary, test_sidecar,
+};
+use crate::compiler_frontend::module_compilation::generated::transaction::{
+    GeneratedFunctionTransaction, GeneratedRequestEntry, GeneratedRequestFacts,
+};
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallSummary,
 };
@@ -643,11 +648,13 @@ fn builtin_failure_inference_requires_semantic_facts_and_call_summary() {
 
 fn failure_contributor(source: HirBuiltinFailureSource) -> HirBuiltinFailureContributor {
     let codes = match &source {
-        HirBuiltinFailureSource::NumericOperation
-        | HirBuiltinFailureSource::CompoundWriteBack { .. } => {
-            vec![BuiltinErrorCode::IntOverflow]
+        HirBuiltinFailureSource::NumericOperation => vec![BuiltinErrorCode::IntOverflow],
+        HirBuiltinFailureSource::CompoundWriteBack { .. } => {
+            vec![BuiltinErrorCode::IntCastOutOfRange]
         }
-        HirBuiltinFailureSource::Call(_) => vec![],
+        HirBuiltinFailureSource::AuthoredCastConversion | HirBuiltinFailureSource::Call(_) => {
+            vec![]
+        }
     };
     HirBuiltinFailureContributor {
         source,
@@ -674,6 +681,7 @@ fn numeric_failure_contributor_rejects_empty_or_non_implicit_catalog_codes() {
     for codes in [
         vec![],
         vec![BuiltinErrorCode::Unsupported],
+        vec![BuiltinErrorCode::IntParseInvalidFormat],
         vec![BuiltinErrorCode::FloatBoundaryNonFinite],
         vec![BuiltinErrorCode::FloatFormatInvariant],
         vec![
@@ -690,6 +698,31 @@ fn numeric_failure_contributor_rejects_empty_or_non_implicit_catalog_codes() {
         hir.function_failure_facts.insert(FunctionId(0), facts);
         let mut report = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
         assert!(infer_builtin_failure_summaries(&hir, &mut report).is_err());
+    }
+}
+
+#[test]
+fn authored_cast_failure_contributor_accepts_cast_policy_codes_only() {
+    for (code, accepted) in [
+        (BuiltinErrorCode::IntParseInvalidFormat, true),
+        (BuiltinErrorCode::IntCastOutOfRange, true),
+        (BuiltinErrorCode::IntOverflow, false),
+        (BuiltinErrorCode::FloatFormatInvariant, false),
+    ] {
+        let mut hir = base_hir(&[], &[private_identity("producer")]);
+        let mut facts = failure_facts(
+            HirBuiltinFailureBoundary::InferPrivate,
+            vec![HirBuiltinFailureSource::AuthoredCastConversion],
+        );
+        facts.contributors[0].codes = vec![code];
+        hir.function_failure_facts.insert(FunctionId(0), facts);
+        let mut report = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
+
+        assert_eq!(
+            infer_builtin_failure_summaries(&hir, &mut report).is_ok(),
+            accepted,
+            "unexpected implicit cast classification for {code:?}"
+        );
     }
 }
 
@@ -1627,3 +1660,74 @@ fn builtin_failure_witness_skipped_back_edge_keeps_writeback_origin() {
 // renderer; the synthetic harness here cannot vary declaration order or workers
 // (its `Local`-call branch never reads `function_ids_by_private_origin`, and
 // semantic jobs stay serial).
+
+#[test]
+fn reachable_generated_sidecars_follow_final_live_call_edges() {
+    let alpha = generated_identity("alpha");
+    let beta = generated_identity("beta");
+    let orphan = generated_identity("orphan");
+    let base_facts = link_facts_for_calls(vec![CallTarget::Generated(alpha.clone())]);
+    let alpha_facts = link_facts_for_calls(vec![CallTarget::Generated(beta.clone())]);
+    let beta_facts = link_facts_for_calls(vec![CallTarget::Generated(alpha.clone())]);
+    let orphan_facts = link_facts_for_calls(vec![CallTarget::Generated(generated_identity(
+        "orphan_child",
+    ))]);
+    let known = PublishedBoundary::empty();
+    let mut transaction = GeneratedFunctionTransaction::new(known.view());
+    let request = |identity: GeneratedFunctionIdentity, display_name: &str| GeneratedRequestFacts {
+        identity,
+        display_name: display_name.to_owned(),
+        call_span: None,
+    };
+    let request_ids = transaction.register_requests([
+        request(alpha.clone(), "alpha"),
+        request(beta.clone(), "beta"),
+        request(orphan.clone(), "orphan"),
+    ]);
+
+    for request_id in request_ids {
+        let identity = transaction.identity(request_id).unwrap().clone();
+        assert_eq!(
+            transaction.enter(request_id).unwrap(),
+            GeneratedRequestEntry::Materialise
+        );
+        let mut sidecar =
+            test_sidecar(identity.clone(), summary(FunctionReturnAliasSummary::Fresh));
+        sidecar.module.link_facts.functions = if identity == alpha {
+            alpha_facts.clone()
+        } else if identity == beta {
+            beta_facts.clone()
+        } else {
+            orphan_facts.clone()
+        };
+        sidecar.module.executable.hir.expressions.freeze();
+        transaction
+            .complete(
+                request_id,
+                summary(FunctionReturnAliasSummary::Fresh),
+                sidecar,
+            )
+            .unwrap();
+    }
+
+    let reachable = reachable_generated_sidecars(&base_facts, &transaction);
+    assert_eq!(
+        reachable,
+        FxHashSet::from_iter([alpha.clone(), beta.clone()])
+    );
+
+    let mut hir = HirModule::new();
+    let expected_summary = summary(FunctionReturnAliasSummary::Fresh);
+    hir.generated_call_summaries
+        .insert(alpha.clone(), expected_summary.clone());
+    hir.generated_call_summaries
+        .insert(orphan.clone(), expected_summary);
+    retain_live_call_summaries(&mut hir, &base_facts);
+    assert_eq!(hir.generated_call_summaries.len(), 1);
+    assert!(hir.generated_call_summaries.contains_key(&alpha));
+
+    transaction.retain_reachable_sidecars(&reachable).unwrap();
+    assert!(transaction.sidecar_mut(&orphan).is_err());
+    let delta = transaction.finish().unwrap();
+    assert_eq!(delta.records().len(), 2);
+}

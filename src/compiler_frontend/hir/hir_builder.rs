@@ -211,6 +211,8 @@ pub struct HirBuilder<'a> {
     /// WHAT: pending records transferred into the module before compaction.
     /// WHY: the lane installer needs the routing captured at lowering time.
     catch_protected_calls: Vec<CatchProtectedCall>,
+    /// All handler roots retained until call-summary convergence prunes inactive paths.
+    catch_handlers: Vec<CatchHandlerRecord>,
 }
 
 /// Target state for value-block lowering inside `HirBuilder`.
@@ -243,6 +245,13 @@ pub(crate) struct CatchHandlerTarget {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CatchProtectedCall {
     pub statement: HirNodeId,
+    pub handler: CatchHandlerTarget,
+    pub owner: FunctionId,
+}
+
+/// One lowered catch handler retained until convergence decides whether its route is live.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CatchHandlerRecord {
     pub handler: CatchHandlerTarget,
     pub owner: FunctionId,
 }
@@ -328,6 +337,7 @@ impl<'a> HirBuilder<'a> {
             active_value_block_target: None,
             active_catch_handler: None,
             catch_protected_calls: Vec::new(),
+            catch_handlers: Vec::new(),
         }
     }
 
@@ -410,6 +420,12 @@ impl<'a> HirBuilder<'a> {
         target: CatchHandlerTarget,
         emit: impl FnOnce(&mut HirBuilder<'_>) -> Result<T, HirConstructionFailure>,
     ) -> Result<T, HirConstructionFailure> {
+        if let Some(owner) = self.current_function {
+            self.catch_handlers.push(CatchHandlerRecord {
+                handler: target,
+                owner,
+            });
+        }
         let previous_handler = self.active_catch_handler.replace(target);
         let result = emit(self);
         self.active_catch_handler = previous_handler;
@@ -540,8 +556,14 @@ impl<'a> HirBuilder<'a> {
         // Scalar calls recorded under catch handlers keep their handler routes for the lane
         // installer; block ids are remapped like every other terminator target.
         self.module.catch_protected_calls = std::mem::take(&mut self.catch_protected_calls);
+        self.module.catch_handlers = std::mem::take(&mut self.catch_handlers);
         // Construction may remove unused scaffolding blocks. Later passes index blocks by id.
         self.module.compact_block_ids();
+
+        if let Err(error) = self.module.refresh_function_provenance_from_blocks() {
+            return Err(CompilerMessages::from_error_ref(error, string_table)
+                .with_type_context_for_all_diagnostics(self.type_environment.clone()));
+        }
 
         // 6. Validate the final HIR module. HIR validation checks executable HIR only; non-HIR
         //    compiler metadata (documentation fragments) is validated separately at the module

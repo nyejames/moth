@@ -1,9 +1,9 @@
 parse_string |text String| -> Int, Error!:
-    return cast! text
+    return cast text
 ;
 
 parse_float |value Float| -> Int, Error!:
-    return cast! value
+    return cast value
 ;
 
 too_big_string_code ~U32 = 0

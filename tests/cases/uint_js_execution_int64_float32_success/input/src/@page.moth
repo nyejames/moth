@@ -78,11 +78,11 @@ explicit_eq Bool = explicit_witness is 9007200328482816.0
 
 -- Dynamic Uint to Int and Int to Uint cast failures recover through catch.
 uint_to_int |value Uint| -> Int, Error!:
-    return cast! value
+    return cast value
 ;
 
 int_to_uint |value Int| -> Uint, Error!:
-    return cast! value
+    return cast value
 ;
 
 huge_to_int Int = uint_to_int(huge) catch:

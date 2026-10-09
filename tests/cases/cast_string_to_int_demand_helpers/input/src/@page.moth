@@ -1,5 +1,5 @@
 parse_int |text String| -> Int, Error!:
-    return cast! text
+    return cast text
 ;
 
 value Int = parse_int("42") catch:

@@ -1,0 +1,30 @@
+export:
+    CUSTOM_DISPLAY must:
+        display |This| -> String
+    ;
+
+    WitnessLabel = |
+        text String,
+    |
+
+    WitnessBox type T is CUSTOM_DISPLAY = |
+        value T,
+    |
+
+    make_label |text String| -> WitnessLabel:
+        return WitnessLabel(text)
+    ;
+;
+
+display |this WitnessLabel| -> String:
+    return this.text
+;
+
+WitnessLabel must CUSTOM_DISPLAY
+
+to_string type T is CUSTOM_DISPLAY |this WitnessBox of T| -> String:
+    item T = this.value
+    return item.display()
+;
+
+WitnessBox must CASTABLE_TO_STRING

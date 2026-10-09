@@ -11,7 +11,9 @@ use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExp
 use crate::compiler_frontend::ast::expressions::expression_types::{
     CastHandling, ResolvedCastEvidence,
 };
-use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
+use crate::compiler_frontend::builtins::casts::targets::{
+    BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget,
+};
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
@@ -248,6 +250,7 @@ fn lower_u8_compound_add_assignment(
             target_type_id: u8_type,
             target: BuiltinCastTarget::Fixed(FixedScalar::U8),
             requires_optional_wrap_after_cast: false,
+            fallibility: BuiltinCastFallibility::Fallible,
             evidence: ResolvedCastEvidence::Builtin {
                 policy: BuiltinCastPolicyId::NumericConversion {
                     source: NumericScalar::Fixed(FixedScalar::U32),

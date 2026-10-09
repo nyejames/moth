@@ -170,8 +170,8 @@ impl<'a> HirBuilder<'a> {
     ///
     /// WHAT: branches on the carrier, emitting a runtime failure terminator for trap mode or
     ///       delegating to ordinary fallible propagation for builtin `Error!`.
-    /// WHY: implicit compound-store conversions use the same enclosing-function policy as checked
-    ///      arithmetic while remaining distinct from a user-authored `cast!` expression.
+    /// WHY: compound-store conversions use the enclosing-function policy while remaining
+    ///      distinct from an authored cast's failure boundary.
     pub(crate) fn lower_store_conversion_carrier_to_success_value(
         &mut self,
         result_carrier: EmittedFallibleCarrier,
@@ -221,6 +221,55 @@ impl<'a> HirBuilder<'a> {
         )
     }
 
+    /// Delivers a fallible source cast through a catch, builtin `Error!` slot, or private lane.
+    pub(crate) fn lower_implicit_cast_carrier_to_success_value(
+        &mut self,
+        result_carrier: EmittedFallibleCarrier,
+        failure_mode: NumericFailureMode,
+        span: &Option<SourceSpan>,
+    ) -> Result<HirValueId, HirConstructionFailure> {
+        if failure_mode == NumericFailureMode::ReturnError {
+            return self.lower_fallible_carrier_to_success_value(result_carrier, span);
+        }
+
+        let branch = self.emit_result_carrier_branch(
+            result_carrier.result_local,
+            result_carrier.carrier_type,
+            span,
+            *span,
+            "cast-conversion-ok",
+            "cast-conversion-err",
+        )?;
+        self.emit_terminator_with_span(
+            branch.error_block,
+            HirTerminator::RuntimeFailure {
+                message: "Cast conversion failed".to_owned(),
+                cause: Some(RuntimeFailureCause::AuthoredCastConversion {
+                    carrier: result_carrier.result_local,
+                }),
+            },
+            span,
+            *span,
+        )?;
+
+        self.set_current_block(branch.success_block, span)?;
+        let success_region = self.current_region_or_error(span)?;
+        let success_result = self.make_local_load_expression(
+            result_carrier.result_local,
+            result_carrier.carrier_type,
+            &None,
+            success_region,
+        )?;
+        self.make_expression(
+            &None,
+            HirExpressionKind::FallibleUnwrapSuccess {
+                result: success_result,
+            },
+            result_carrier.ok_type,
+            ValueKind::RValue,
+            success_region,
+        )
+    }
     pub(super) fn emit_result_carrier_branch(
         &mut self,
         result_local: LocalId,

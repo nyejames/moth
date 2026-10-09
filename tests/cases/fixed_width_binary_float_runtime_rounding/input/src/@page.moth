@@ -7,19 +7,19 @@ add_f16 |left F16, right F16| -> F32:
 ;
 
 round_f64_to_f16 |value F64| -> F16, Error!:
-    return cast! value
+    return cast value
 ;
 
 round_f64_to_f32 |value F64| -> F32, Error!:
-    return cast! value
+    return cast value
 ;
 
 round_f32_to_f16 |value F32| -> F16, Error!:
-    return cast! value
+    return cast value
 ;
 
 parse_f16 |text String| -> F16, Error!:
-    return cast! text
+    return cast text
 ;
 
 half_left #F16 = 0.5

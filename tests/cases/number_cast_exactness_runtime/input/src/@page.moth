@@ -42,16 +42,16 @@ widen_to_number4 |value Dec1| -> Dec4:
     return cast value
 ;
 narrow_to_number2 |value Dec4| -> Dec2, Error!:
-    return cast! value
+    return cast value
 ;
 number_to_u64 |value Dec0| -> U64, Error!:
-    return cast! value
+    return cast value
 ;
 fraction_to_i8 |value Dec1| -> I8, Error!:
-    return cast! value
+    return cast value
 ;
 number_to_int |value Dec0| -> Int, Error!:
-    return cast! value
+    return cast value
 ;
 add_float |value Float, increment Float| -> Float:
     return value + increment

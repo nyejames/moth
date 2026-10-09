@@ -199,6 +199,7 @@ impl<'a> HirValidator<'a> {
         }
         let mut pending_handlers: FxHashMap<(FunctionId, BlockId), Vec<BlockId>> =
             FxHashMap::default();
+        let mut handler_roots: FxHashMap<FunctionId, Vec<BlockId>> = FxHashMap::default();
         for record in &self.module.catch_protected_calls {
             let Some(statement_block) = statement_block_by_id.get(&record.statement).copied()
             else {
@@ -216,10 +217,20 @@ impl<'a> HirValidator<'a> {
                 .push(record.handler.block);
         }
 
+        for record in &self.module.catch_handlers {
+            handler_roots
+                .entry(record.owner)
+                .or_default()
+                .push(record.handler.block);
+        }
+
         for function in &self.module.functions {
             let mut queue = VecDeque::new();
             let mut visited = FxHashSet::default();
             queue.push_back(function.entry);
+            if let Some(handlers) = handler_roots.get(&function.id) {
+                queue.extend(handlers.iter().copied());
+            }
 
             while let Some(block_id) = queue.pop_front() {
                 if !visited.insert(block_id) {
@@ -288,6 +299,19 @@ impl<'a> HirValidator<'a> {
             }
         }
 
+        for record in &self.module.catch_handlers {
+            self.require_block_id(
+                record.handler.block,
+                Some(HirLocation::Function(record.owner)),
+            )?;
+            let handler_owner = self.block_owner_by_id.get(&record.handler.block).copied();
+            if handler_owner != Some(record.owner) {
+                return Err(self.error_with_hir(
+                    "Catch handler record crosses a function boundary",
+                    Some(HirLocation::Block(record.handler.block)),
+                ));
+            }
+        }
         self.validate_incoming_edge_destinations()?;
 
         Ok(())

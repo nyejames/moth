@@ -1,0 +1,5 @@
+stored #Int = cast "42"
+
+compare_stored |value Int| -> Bool:
+    return stored is value catch then false
+;

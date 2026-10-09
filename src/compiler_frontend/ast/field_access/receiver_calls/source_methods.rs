@@ -31,9 +31,7 @@ use crate::compiler_frontend::ast::field_access::receiver_access::{
     ReceiverAccessDiagnostic, ReceiverAccessRequirement, validate_receiver_access,
 };
 use crate::compiler_frontend::ast::generic_functions::{
-    GenericCallExpectedContext, GenericFunctionInferenceInput, GenericFunctionInstantiationRequest,
-    infer_generic_function_call, recursive_generic_function_instantiation,
-    validate_generic_function_bound_evidence,
+    GenericReceiverMethodInstantiationInput, instantiate_generic_receiver_method,
 };
 use crate::compiler_frontend::ast::receiver_methods::ReceiverMethodEntry;
 use crate::compiler_frontend::ast::statements::fallible_handling::HandledFallibleCall;
@@ -87,99 +85,29 @@ impl SourceReceiverMethodTarget<'_> {
     }
 }
 
-struct GenericReceiverMethodInferenceInput<'a, 'interner> {
-    template: &'a crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate,
-    receiver_node: &'a AstNode,
+/// Builds the hidden call's receiver argument for one receiver method call.
+///
+/// WHAT: materialises the receiver expression once in declaration-order slot zero, carrying the
+///       receiver's declared mutability as its access mode.
+/// WHY: generic instantiation and the final call share this single receiver expression; rebuilding
+///      an identical receiver AST for either step would only add an avoidable source copy.
+fn receiver_hidden_call_argument(
+    receiver_node: &AstNode,
     receiver_mutable: bool,
-    raw_args: &'a [CallArgument],
     member_span: Option<SourceSpan>,
-    scope_context: &'a ScopeContext,
-    type_interner: &'a mut AstTypeInterner<'interner>,
-    string_table: &'a mut StringTable,
-    path_fork: &'a mut PathInternerFork,
-}
-
-fn infer_generic_receiver_method_target<'a, 'interner>(
-    input: GenericReceiverMethodInferenceInput<'a, 'interner>,
-) -> Result<
-    (
-        PathId,
-        FunctionSignature,
-        GenericFunctionInstantiationRequest,
-    ),
-    ExpressionParseError,
-> {
-    let GenericReceiverMethodInferenceInput {
-        template,
-        receiver_node,
-        receiver_mutable,
-        raw_args,
-        member_span,
-        scope_context,
-        type_interner,
-        string_table,
-        path_fork,
-    } = input;
-    let receiver_expr = expression_from_postfix_node(receiver_node)?;
+) -> Result<CallArgument, ExpressionParseError> {
     let receiver_access = if receiver_mutable {
         CallAccessMode::Mutable
     } else {
         CallAccessMode::Shared
     };
-    let receiver_arg = CallArgument::positional(receiver_expr, receiver_access, member_span)
-        .with_parameter_slot(ParameterSlot::new(0));
 
-    let mut inference_args = Vec::with_capacity(raw_args.len() + 1);
-    inference_args.push(receiver_arg);
-    for argument in raw_args {
-        let Some(parameter_slot) = argument.parameter_slot else {
-            return Err(CompilerError::compiler_error(
-                "Receiver call argument is missing its retained parameter slot",
-            )
-            .into());
-        };
-        inference_args.push(
-            argument
-                .clone()
-                .with_parameter_slot(ParameterSlot::new(parameter_slot.index() + 1)),
-        );
-    }
-
-    let inference = infer_generic_function_call(GenericFunctionInferenceInput {
-        template,
-        raw_arguments: &inference_args,
-        expected_context: GenericCallExpectedContext::None,
-        call_span: member_span,
-        type_environment: type_interner.environment_mut_for_derived_types(),
-        string_table,
-        path_fork,
-    })?;
-    let selected_evidence = validate_generic_function_bound_evidence(
-        template,
-        inference.key.type_arguments.as_ref(),
-        scope_context,
-        type_interner.environment(),
-        path_fork,
+    Ok(CallArgument::positional(
+        expression_from_postfix_node(receiver_node)?,
+        receiver_access,
         member_span,
-    )?;
-
-    if scope_context.is_generic_function_instantiation_active(&inference.key) {
-        return Err(recursive_generic_function_instantiation(
-            path_fork.component(template.function_path),
-            member_span,
-        )
-        .into());
-    }
-
-    let request = GenericFunctionInstantiationRequest {
-        declaration_identity: template.declaration_identity.clone(),
-        evidence: selected_evidence,
-        key: inference.key,
-        instance_path: inference.instance_path,
-        call_span: member_span,
-    };
-
-    Ok((inference.instance_path, inference.signature, request))
+    )
+    .with_parameter_slot(ParameterSlot::new(0)))
 }
 
 pub(super) struct SourceReceiverMethodCallInput<'a, 'interner, 'tokens> {
@@ -271,53 +199,74 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         path_fork,
     )?;
 
-    let (method_path, call_signature, generic_request) = match &source_method {
+    let (method_path, call_signature, generic_request, receiver_expression) = match &source_method {
         SourceReceiverMethodTarget::Declared(method_entry) => {
-            if let Some(template) =
-                scope_context.lookup_generic_function_template(&method_entry.function_path)
-            {
-                let (instance_path, signature, request) =
-                    infer_generic_receiver_method_target(GenericReceiverMethodInferenceInput {
-                        template,
-                        receiver_node,
-                        receiver_mutable: method_entry.receiver_mutable,
-                        raw_args: &raw_args,
-                        member_span,
-                        scope_context,
-                        type_interner,
-                        string_table,
-                        path_fork,
-                    })?;
+            let receiver_argument = receiver_hidden_call_argument(
+                receiver_node,
+                method_entry.receiver_mutable,
+                member_span,
+            )?;
+            match scope_context.lookup_generic_function_template(&method_entry.function_path) {
+                Some(template) => {
+                    let instantiation = instantiate_generic_receiver_method(
+                        GenericReceiverMethodInstantiationInput {
+                            template,
+                            receiver_argument,
+                            authored_arguments: &raw_args,
+                            call_span: member_span,
+                            scope_context,
+                            type_interner,
+                            string_table,
+                            path_fork,
+                        },
+                    )?;
 
-                (instance_path, signature, Some(request))
-            } else {
-                (
+                    (
+                        instantiation.instance_path,
+                        instantiation.signature,
+                        Some(instantiation.request),
+                        instantiation.receiver_argument.value,
+                    )
+                }
+                None => (
                     method_entry.function_path.to_owned(),
                     method_entry.signature.to_owned(),
                     None,
-                )
+                    receiver_argument.value,
+                ),
             }
         }
 
         SourceReceiverMethodTarget::TraitSurface(method) => {
-            if let Some(template) =
-                scope_context.lookup_generic_function_template(&method.method_path)
-            {
-                let (instance_path, signature, request) =
-                    infer_generic_receiver_method_target(GenericReceiverMethodInferenceInput {
-                        template,
-                        receiver_node,
-                        receiver_mutable: method.receiver_mutable,
-                        raw_args: &raw_args,
-                        member_span,
-                        scope_context,
-                        type_interner,
-                        string_table,
-                        path_fork,
-                    })?;
-                (instance_path, signature, Some(request))
-            } else {
-                (method.method_path, method.signature.clone(), None)
+            let receiver_argument =
+                receiver_hidden_call_argument(receiver_node, method.receiver_mutable, member_span)?;
+            match scope_context.lookup_generic_function_template(&method.method_path) {
+                Some(template) => {
+                    let instantiation = instantiate_generic_receiver_method(
+                        GenericReceiverMethodInstantiationInput {
+                            template,
+                            receiver_argument,
+                            authored_arguments: &raw_args,
+                            call_span: member_span,
+                            scope_context,
+                            type_interner,
+                            string_table,
+                            path_fork,
+                        },
+                    )?;
+                    (
+                        instantiation.instance_path,
+                        instantiation.signature,
+                        Some(instantiation.request),
+                        instantiation.receiver_argument.value,
+                    )
+                }
+                None => (
+                    method.method_path,
+                    method.signature.clone(),
+                    None,
+                    receiver_argument.value,
+                ),
             }
         }
     };
@@ -347,7 +296,6 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
 
     increment_ast_counter(AstCounter::PostfixReceiverNodesCopied);
 
-    let receiver_expression = expression_from_postfix_node(receiver_node)?;
     let method_call_expression = if let Some(error_return_type_id) =
         call_signature.error_return_type_id()
     {

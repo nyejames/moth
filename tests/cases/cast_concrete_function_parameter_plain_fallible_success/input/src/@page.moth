@@ -1,0 +1,11 @@
+-- Plain `cast` fills a concrete function parameter from a known-safe value.
+-- The fallible String-to-Int pair folds the value and needs no recovery here.
+
+draw |x Int, y Int| -> Int:
+    return x + y
+;
+
+value = draw(cast "1", cast "2")
+assert(value is 3)
+
+[: concrete function parameter plain cast: [value]]

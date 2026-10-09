@@ -4,9 +4,9 @@
 
 ```text
 STATUS: active on the user-selected expression-refactor branch
-CURRENT_SLICE: Phase 1 accepted; Phase 2 cast and safety-catch owner mapping next
-BLOCKERS: no external prerequisite; compiler integration and remaining acceptance rows are pending
-NEXT_ACTION: unify cast spelling and evidence, then implement authored safety-catch eligibility
+CURRENT_SLICE: Phase 2 verified; committing the accepted checkpoint
+BLOCKERS: no external prerequisite; later exact-width and inference cutover remains pending
+NEXT_ACTION: commit Phase 2 and prepare exact external boundaries in Phase 3
 ```
 
 **Intended repository location:** `docs/roadmap/plans/exact-numeric-types-and-bounded-inference-plan.md`
@@ -737,35 +737,37 @@ validate that no pending numeric state escapes the owner
 
 #### 2A. Cast spelling and evidence
 
-- [ ] Add tests demonstrating plain cast for supported infallible and fallible conversions, local recovery, builtin Error delivery and private inferred failure.
-- [ ] Remove the special `cast!` grammar and old spelling-selected evidence requirement. Preserve ordinary postfix propagation and its exact source span.
-- [ ] Select evidence by the resolved source/target pair, then choose ordinary failure delivery. Preserve unsupported/same-type/optional-source diagnostics.
-- [ ] Route a fallible source-authored cast implementation through the same selected expression failure context as a builtin conversion. Preserve operand evaluation once and ordinary access/effect summaries.
-- [ ] Add the fixed-width source-evidence metadata families and their conformance/visibility/duplicate/conflict tests. Keep one registration/lookup owner.
-- [ ] Remove obsolete cast-only error reasons only when their semantics are truly retired. Never reuse a stable diagnostic code for a new meaning.
-- [ ] Update all existing positive and negative cast fixtures. A negative `cast!`-required test becomes either a removed-syntax test or a test of the real missing recovery/public-contract rule, with a ledger entry.
+- [x] Add tests demonstrating plain cast for supported infallible and fallible conversions, local recovery, builtin Error delivery and private inferred failure.
+- [x] Remove the special `cast!` grammar and old spelling-selected evidence requirement. Preserve ordinary postfix propagation and its exact source span.
+- [x] Select evidence by the resolved source/target pair, then choose ordinary failure delivery. Preserve unsupported/same-type/optional-source diagnostics.
+- [x] Route a fallible source-authored cast implementation through the same selected expression failure context as a builtin conversion. Preserve operand evaluation once and ordinary access/effect summaries.
+- [x] Add the fixed-width source-evidence metadata families and their conformance/visibility/duplicate/conflict tests. Keep one registration/lookup owner.
+- [x] Remove obsolete cast-only error reasons only when their semantics are truly retired. Never reuse a stable diagnostic code for a new meaning.
+- [x] Update all existing positive and negative cast fixtures. A negative `cast!`-required test becomes either a removed-syntax test or a test of the real missing recovery/public-contract rule, with a ledger entry.
 
 #### 2B. Authored eligibility and parser boundaries
 
-- [ ] Record enough compact authored metadata to distinguish arithmetic, cast and zero/one/multiple same-level calls. A saturating call count is a candidate, not a mandated extra field on every durable node.
-- [ ] Preserve it through grouping, folding and unchanged-node reuse until catch eligibility is checked. Do not derive it from emitted HIR helpers.
-- [ ] Cover method chains, calls in separate operands, nested argument calls, transparent groups, constructors, hidden conversion calls and explicit nested handlers.
-- [ ] Continue to collect actual failures across the full protected evaluation even where nested calls do not count for leniency.
-- [ ] Keep syntax eligibility separate from actual typed/builtin failure contributors and custom-error compatibility.
-- [ ] Preserve the existing placement validator. Add no handler support to previously prohibited conditions, templates or constant contexts.
+- [x] Record enough compact authored metadata to distinguish arithmetic, cast and zero/one/multiple same-level calls. A saturating call count is a candidate, not a mandated extra field on every durable node.
+- [x] Preserve it through grouping, folding and unchanged-node reuse until catch eligibility is checked. Do not derive it from emitted HIR helpers.
+- [x] Cover method chains, calls in separate operands, nested argument calls, transparent groups, constructors, hidden conversion calls and explicit nested handlers.
+- [x] Continue to collect actual failures across the full protected evaluation even where nested calls do not count for leniency.
+- [x] Keep syntax eligibility separate from actual typed/builtin failure contributors and custom-error compatibility.
+- [x] Preserve the existing placement validator. Add no handler support to previously prohibited conditions, templates or constant contexts.
 
 #### 2C. Handler semantics and pruning
 
-- [ ] Permit a normally validated handler on eligible infallible expressions. Default a bound error to builtin Error only when there is no declared/actual compatible source fixing another type.
-- [ ] Preserve catch fallback constraints for the later inference cutover. Concrete result/fallback mismatch remains a source error.
-- [ ] Validate unreachable handlers fully. Remove executable handler contributions only after the applicable semantic/failure convergence proves them unreachable.
-- [ ] Extend existing unrouted-handler pruning to syntax-eligible casts/arithmetic/multiple calls without retaining bogus public effects, generic sidecars or backend requirements.
-- [ ] Keep fallback failures outward, evaluation once, mutation-before-failure visibility, custom-error rejection and compound RHS scope.
-- [ ] Preserve foreign float integrity guards as their own boundary rather than converting them to general implicit failure because catch is now syntactically eligible.
+- [x] Permit a normally validated handler on eligible infallible expressions. Default a bound error to builtin Error only when there is no declared/actual compatible source fixing another type.
+- [x] Preserve catch fallback constraints for the later inference cutover. Concrete result/fallback mismatch remains a source error.
+- [x] Validate unreachable handlers fully. Remove executable handler contributions only after the applicable semantic/failure convergence proves them unreachable.
+- [x] Extend existing unrouted-handler pruning to syntax-eligible casts/arithmetic/multiple calls without retaining bogus public effects, generic sidecars or backend requirements.
+- [x] Keep fallback failures outward, evaluation once, mutation-before-failure visibility, custom-error rejection and compound RHS scope.
+- [x] Preserve foreign float integrity guards as their own boundary rather than converting them to general implicit failure because catch is now syntactically eligible.
 
 **Validation:** the applicable concrete-type cast/catch rows in Section 9, AST facts tests, HIR branch/lane tests and runtime output/error ordering on HTML-JS. Numeric-dependent fallback/source-inference rows remain explicit Phase 4/5 work, not skipped tests reported as passing. Pair supported Wasm cases with equivalent semantics and unsupported cases with their actual rejection contract.
 
 **Exit:** one cast spelling, explicit source evidence pairs and stable authored recovery eligibility. Old numeric identities may still exist until cutover, but there is one current conversion/failure implementation and no compatibility syntax path.
+
+Phase 2 passed its focused gate of 5,804 compiler library tests and 201 selected integration executions under Node v24.21.0: 153 HTML and 48 HTML-Wasm executions across 153 cases. Independent eligibility, pruning and evidence reviews required corrections to occurrence metadata, parser boundaries, constructor call counting, generated evidence/carrier closure and exact concrete receiver-summary transport; focused verification accepted them. Imported generic evidence retains canonical receiver origins and real provider summaries without widening ordinary visibility. A separately exposed private sibling-file nominal-construction gap was corrected by publishing the existing generated struct shell at the AST-to-HIR handoff, independently reviewed and exercised with direct construction inside the generic body. The same-module, same-name receiver regression distinguishes Ticket from the private Note at runtime. After that correction, `just validate` passed formatting, Clippy, feature-lane coverage, source/dependency audits, workspace tests and doctests, all 2,436 integration executions and executable documentation with no errors or warnings. Numeric-dependent source/fallback inference, including H12, remains Phase 4/5 work.
 
 ### Phase 3 - prepare shared exact-width and external boundaries
 

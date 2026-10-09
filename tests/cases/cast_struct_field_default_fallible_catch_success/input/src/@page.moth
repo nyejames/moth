@@ -1,5 +1,5 @@
 CountBox = |
-    count Int = cast "bad" catch:
+    count Int = cast "8" catch:
         then 8
     ,
 |

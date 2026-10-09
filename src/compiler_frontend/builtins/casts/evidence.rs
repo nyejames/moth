@@ -14,6 +14,7 @@ use super::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget,
     builtin_cast_target_for_builtin_type,
 };
+use super::traits::BUILTIN_CAST_TRAIT_ROWS;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -344,34 +345,50 @@ pub(crate) fn builtin_cast_proves_core_trait(
         .is_some_and(|row| row.fallibility == fallibility)
 }
 
-/// The bounded builtin evidence rows registered as core cast trait evidence for one profile.
+/// The builtin evidence rows registered for core cast traits under one numeric profile.
 ///
-/// WHAT: static rows, distinct numeric pairs and numeric text rows whose target carries a
-///       source-authorable core cast trait. Fixed-target rows are never built here; fixed
-///       and `Dec` casts resolve on demand through `lookup_builtin_evidence`.
-/// WHY: registration stays finite and only constructs rows it registers.
+/// Numeric conversions target only the exact-width traits present in the central metadata table.
+/// Profile-sized numeric types remain builtin sources until their Phase 4 removal; Byte and Dec
+/// still have no source-authored target traits.
 pub(crate) fn builtin_evidence_rows_for_profile(
     profile: NumericProfile,
 ) -> impl Iterator<Item = BuiltinCastEvidenceRow> {
-    const NUMERIC_TRAIT_TARGETS: [NumericScalar; 2] = [NumericScalar::Int, NumericScalar::Float];
-
     let numeric_rows = numeric_scalars().flat_map(move |source| {
-        NUMERIC_TRAIT_TARGETS
-            .into_iter()
-            .filter(move |target| *target != source)
-            .map(move |target| numeric_evidence_row(source, target, profile))
+        BUILTIN_CAST_TRAIT_ROWS.iter().filter_map(move |metadata| {
+            if metadata.fallibility != BuiltinCastFallibility::Infallible {
+                return None;
+            }
+
+            let target = metadata.target.numeric_scalar()?;
+            if source == target {
+                return None;
+            }
+
+            Some(numeric_evidence_row(source, target, profile))
+        })
     });
 
     let text_rows = numeric_scalars().map(numeric_text_evidence_row).chain(
-        NUMERIC_TRAIT_TARGETS
-            .into_iter()
-            .map(string_numeric_evidence_row),
+        BUILTIN_CAST_TRAIT_ROWS.iter().filter_map(|metadata| {
+            if metadata.fallibility != BuiltinCastFallibility::Fallible {
+                return None;
+            }
+
+            metadata
+                .target
+                .numeric_scalar()
+                .map(string_numeric_evidence_row)
+        }),
     );
 
     STATIC_BUILTIN_EVIDENCE_ROWS
         .iter()
         .copied()
-        .filter(|row| !matches!(row.target, BuiltinCastTarget::Fixed(_)))
+        .filter(|row| {
+            BUILTIN_CAST_TRAIT_ROWS.iter().any(|metadata| {
+                metadata.target == row.target && metadata.fallibility == row.fallibility
+            })
+        })
         .chain(numeric_rows)
         .chain(text_rows)
 }

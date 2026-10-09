@@ -884,16 +884,6 @@ token_schema! {
     (Checked, CHECKED, 76, "`checked`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (Async, ASYNC, 77, "`async`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (Cast, CAST, 78, "`cast`", Static, 0, TOKEN_CLASS_KEYWORD, None),
-    (
-        CastBang,
-        CAST_BANG,
-        79,
-        "`cast!`",
-        Static,
-        0,
-        TOKEN_CLASS_KEYWORD,
-        None
-    ),
     (Assert, ASSERT, 80, "`assert`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (Loop, LOOP, 81, "`loop`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (By, BY, 82, "`by`", Static, 0, TOKEN_CLASS_KEYWORD, None),

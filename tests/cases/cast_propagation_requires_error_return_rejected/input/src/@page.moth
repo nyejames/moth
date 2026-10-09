@@ -1,4 +1,6 @@
-run || -> Int:
-    value Int = cast! "42"
-    return value
+export:
+    run |text String| -> Int:
+        value Int = cast text
+        return value
+    ;
 ;

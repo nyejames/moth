@@ -1,9 +1,9 @@
 parse_string |text String| -> Int, Error!:
-    return cast! text
+    return cast text
 ;
 
 parse_float |value Float| -> Int, Error!:
-    return cast! value
+    return cast value
 ;
 
 max_from_string = parse_string("2147483647") catch:

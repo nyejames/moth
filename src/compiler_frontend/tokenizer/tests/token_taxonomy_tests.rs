@@ -325,7 +325,7 @@ fn schema_classifications_match_frontend_semantics() {
     assert!(!TokenTag::RAW_STRING_LITERAL.is_operand_start());
 
     assert!(TokenTag::RETURN_BANG.is_keyword());
-    assert!(TokenTag::CAST_BANG.is_keyword());
+    assert!(TokenTag::CAST.is_keyword());
     assert!(TokenTag::NOT.is_word_operator());
     assert!(!TokenTag::NOT.is_keyword());
     assert!(TokenTag::NONE_LITERAL.is_literal());
@@ -433,7 +433,7 @@ fn stats_classification_uses_schema_authority() {
         assert_eq!(stats.map_or_collection_delimiters, 1);
     }
 
-    // Keyword-adjacent operators (`copy`) and bang spellings keep their legacy buckets.
+    // `copy` and the remaining `return!` spelling keep their existing stats buckets.
     assert!(TokenTag::COPY.is_keyword());
     assert!(TokenTag::COPY.is_stats_operator());
     for tag in [TokenTag::RETURN, TokenTag::RETURN_BANG] {
@@ -441,9 +441,7 @@ fn stats_classification_uses_schema_authority() {
         stats.accumulate_tag(tag);
         assert_eq!(stats.return_tokens, 1);
     }
-    for tag in [TokenTag::CAST, TokenTag::CAST_BANG] {
-        let mut stats = TokenStats::default();
-        stats.accumulate_tag(tag);
-        assert_eq!(stats.cast_tokens, 1);
-    }
+    let mut cast_stats = TokenStats::default();
+    cast_stats.accumulate_tag(TokenTag::CAST);
+    assert_eq!(cast_stats.cast_tokens, 1);
 }

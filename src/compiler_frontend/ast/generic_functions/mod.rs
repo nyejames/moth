@@ -10,6 +10,7 @@ mod calls;
 mod diagnostics;
 mod instances;
 mod materialisation;
+mod receiver_method_instantiation;
 mod templates;
 
 pub(crate) use body_rules::{GenericFunctionBodyValidationInput, validate_generic_function_body};
@@ -31,6 +32,10 @@ pub(crate) use materialisation::{
     MaterialisedGenericAst, ModuleMaterialisationContext, ModuleMaterialisationEnvironmentInput,
     ModuleMaterialisationInput, ModuleMaterialisationPreparation,
     ModuleMaterialisationPreparationBuilder, bootstrap_call_summary_from_signature,
+};
+pub(crate) use receiver_method_instantiation::{
+    GenericReceiverMethodInstantiationInput, instantiate_generic_cast_evidence_method,
+    instantiate_generic_receiver_method,
 };
 pub(crate) use templates::{
     GenericFunctionBody, GenericFunctionTemplate, MaterialisedDonorContext,

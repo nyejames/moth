@@ -1,0 +1,30 @@
+export:
+    Label = |
+        text String,
+    |
+    DomainError ::
+        Invalid,
+    ;
+    label_from_text |text String| -> Label:
+        return Label(text)
+    ;
+    label_to_i32 |label Label| -> I32, Error!:
+        return private_label_to_i32(label)
+    ;
+    mapped_label_to_i32 |label Label, mapped_code ~U32| -> I32, DomainError!:
+        result = private_label_to_i32(label) catch |cast_error|:
+            mapped_code = cast_error.code
+            return! DomainError::Invalid
+        ;
+        return result
+    ;
+;
+
+try_to_i32 |this Label| -> I32, Error!:
+    return cast this.text
+;
+Label must TRY_CASTABLE_TO_I32
+
+private_label_to_i32 |label Label| -> I32:
+    return cast label
+;

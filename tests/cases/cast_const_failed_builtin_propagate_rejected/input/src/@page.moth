@@ -1,5 +1,5 @@
 compute || -> Int, Error!:
-    local #Int = cast! "nope"
+    local #Int = cast "nope"
     return local
 ;
 

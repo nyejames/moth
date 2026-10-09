@@ -1,6 +1,12 @@
-maybe Int? = cast "not a number" catch:
-    then 42
+-- Optional cast receivers convert inner T and wrap the result. This helper
+-- converts a runtime parameter and recovers 42 before the normal Int? wrap.
+
+parse_optional |text String| -> Int?:
+    return cast text catch then 42
 ;
+
+maybe Int? = parse_optional("not a number")
+assert(maybe is 42)
 
 text = if maybe is |value| then value else -1
 [: optional cast catch: [text]]
