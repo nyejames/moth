@@ -308,22 +308,22 @@ impl<'a> HirBuilder<'a> {
         self.lower_numeric_carrier_to_success_value(carrier, span)
     }
 
-    /// Validates a `Float` value from an external/backend boundary before exposing it as an
-    /// ordinary Moth `Float`.
+    /// Validates an external/backend-boundary binary float before ordinary Moth code observes it.
     ///
     /// WHAT: allocates a result local, emits `HirStatementKind::ValidateFloat`, and, in
     ///       `ReturnError` mode, branches on the internal fallible carrier before returning the
-    ///       unwrapped finite `Float`. In `Trap` mode the result local receives the scalar `Float`
-    ///       success value and a local load is returned.
-    /// WHY: incoming `Float` values must be rounded at the selected profile precision and
-    ///      validated as finite before ordinary Moth code observes them.
+    ///       unwrapped finite value. In `Trap` mode the result local receives the scalar success
+    ///       value and a local load is returned.
+    /// WHY: incoming binary floats must be rounded at their resolved exact precision and
+    ///      validated as finite, so the source row's type owns both the result local and the
+    ///      recoverable carrier's success slot instead of a re-derived builtin `Float`.
     pub(crate) fn emit_validated_float_value(
         &mut self,
         source: HirValueId,
         span: &Option<SourceSpan>,
     ) -> Result<HirValueId, HirConstructionFailure> {
         let failure_mode = self.select_float_integrity_failure_mode(span)?;
-        let float_type = self.lower_type_id(self.type_environment.builtins().float, span)?;
+        let float_type = self.module.expressions.expression(source).ty;
 
         match failure_mode {
             NumericFailureMode::Trap => {
@@ -341,7 +341,7 @@ impl<'a> HirBuilder<'a> {
         }
     }
 
-    /// Emits a trapping `ValidateFloat` and returns the scalar `Float` local load.
+    /// Emits a trapping `ValidateFloat` and returns the scalar result local load.
     fn emit_trapping_validated_float_value(
         &mut self,
         source: HirValueId,
@@ -356,11 +356,11 @@ impl<'a> HirBuilder<'a> {
         self.make_local_load_expression(result_local, float_type, &no_span, region)
     }
 
-    /// Emits a recoverable `ValidateFloat` and returns the unwrapped finite `Float`.
+    /// Emits a recoverable `ValidateFloat` and returns the unwrapped finite value.
     ///
     /// WHAT: stores the internal fallible carrier in a temp local, emits `FallibleBranch` and a
     ///       `ReturnError` edge, then continues on the success block and returns
-    ///       `FallibleUnwrapSuccess`.
+    ///       `FallibleUnwrapSuccess` at the carrier's resolved success type.
     /// WHY: this mirrors the existing fallible-carrier helpers for calls and casts, keeping the
     ///      error path visible to borrow validation.
     fn emit_recoverable_validated_float_value(

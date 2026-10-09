@@ -1,3 +1,4 @@
+use crate::backends::error_types::BackendErrorType;
 use crate::backends::wasm::backend::lower_hir_to_wasm_lir;
 use crate::backends::wasm::hir_to_lir::context::lower_type_to_abi;
 use crate::backends::wasm::lir::function::WasmLirFunctionOrigin;
@@ -18,6 +19,8 @@ use crate::backends::wasm::tests::lowering::test_support::{
 };
 use crate::compiler_frontend::analysis::borrow_checker::BorrowDropSiteKind;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::compiler_messages::compiler_errors::ErrorType;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
@@ -1664,10 +1667,10 @@ fn validate_float_test_module(
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
     type_environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
+    validated_type: TypeId,
 ) -> crate::compiler_frontend::hir::module::HirModule {
     let mut expressions = HirExpressionStore::default();
     let int_type = type_environment.builtins().int;
-    let float_type = type_environment.builtins().float;
     let start_path = path_fork
         .try_intern_portable_path("main", string_table)
         .expect("test path fits");
@@ -1675,8 +1678,8 @@ fn validate_float_test_module(
         .try_intern_portable_path("validate_float", string_table)
         .expect("test path fits");
     let start_value = int_expression(0, int_type, RegionId(0), &mut expressions);
-    let source = load_local(&mut expressions, LocalId(10), float_type, RegionId(0));
-    let result = load_local(&mut expressions, LocalId(20), float_type, RegionId(0));
+    let source = load_local(&mut expressions, LocalId(10), validated_type, RegionId(0));
+    let result = load_local(&mut expressions, LocalId(20), validated_type, RegionId(0));
 
     build_module(
         path_fork,
@@ -1698,7 +1701,7 @@ fn validate_float_test_module(
                     id: FunctionId(1),
                     entry: BlockId(1),
                     params: vec![LocalId(10)],
-                    return_type: float_type,
+                    return_type: validated_type,
                 },
                 validator_path,
                 HirFunctionOrigin::Normal,
@@ -1716,8 +1719,8 @@ fn validate_float_test_module(
                 id: BlockId(1),
                 region: RegionId(0),
                 locals: vec![
-                    local(10, float_type, RegionId(0)),
-                    local(20, float_type, RegionId(0)),
+                    local(10, validated_type, RegionId(0)),
+                    local(20, validated_type, RegionId(0)),
                 ],
                 statements: vec![statement(
                     102,
@@ -1740,7 +1743,13 @@ fn lowers_validate_float_with_profile_precision_and_local_value_path() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, _) = build_type_environment();
-    let module = validate_float_test_module(&mut path_fork, &mut string_table, &type_environment);
+    let float_type = type_environment.builtins().float;
+    let module = validate_float_test_module(
+        &mut path_fork,
+        &mut string_table,
+        &type_environment,
+        float_type,
+    );
 
     for (float_precision, expected_carrier, expected_precision) in [
         (
@@ -1844,6 +1853,183 @@ fn lowers_validate_float_with_profile_precision_and_local_value_path() {
                 WasmLirTerminator::Return { value: Some(value) } if *value == *dst
             ),
             "{profile} should return the validated destination unchanged"
+        );
+    }
+}
+
+/// Verifies that the Wasm Float guard lowers the exact source type's carrier and precision.
+///
+/// WHAT: a fixed F64 source lowers to an F64 carrier with binary64 precision under a Float32
+///       profile, and a fixed F32 source lowers to F32 with binary32 precision under a Float64
+///       profile.
+/// WHY: the validated source type owns the precision, so a fixed boundary value must never be
+///      checked at the module profile's precision or through the neighbouring carrier.
+#[test]
+fn lowers_validated_fixed_float_guard_with_the_exact_source_precision() {
+    for (scalar, float_precision, expected_carrier, expected_precision) in [
+        (
+            FixedScalar::F64,
+            FloatPrecision::Bits32,
+            WasmAbiType::F64,
+            BinaryFloatPrecision::Binary64,
+        ),
+        (
+            FixedScalar::F32,
+            FloatPrecision::Bits64,
+            WasmAbiType::F32,
+            BinaryFloatPrecision::Binary32,
+        ),
+    ] {
+        let mut string_table = StringTable::new();
+        let mut path_fork = PathInternerFork::empty();
+        let (type_environment, _) = build_type_environment();
+        let source_type = builtin_type_ids::fixed_scalar(scalar);
+        let module = validate_float_test_module(
+            &mut path_fork,
+            &mut string_table,
+            &type_environment,
+            source_type,
+        );
+        let profile = NumericProfile {
+            int_width: IntWidth::Bits64,
+            float_precision,
+        };
+        let request = WasmBackendRequest {
+            numeric_profile: profile,
+            ..Default::default()
+        };
+        let lowered = lower_hir_to_wasm_lir(
+            &module,
+            &default_borrow_facts(),
+            &default_numeric_proofs(),
+            &request,
+            &string_table,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .unwrap_or_else(|error| panic!("{scalar:?} under {profile} should lower: {error:?}"));
+        let function = lowered
+            .lir_module
+            .functions
+            .iter()
+            .find(|function| function.id == WasmLirFunctionId(1))
+            .expect("fixed Float validator should be lowered");
+
+        assert_eq!(
+            function.signature.params,
+            vec![expected_carrier],
+            "{scalar:?}"
+        );
+        assert_eq!(
+            function.signature.results,
+            vec![expected_carrier],
+            "{scalar:?}"
+        );
+        let validation = function
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .find_map(|statement| match statement {
+                WasmLirStmt::ValidateFloat {
+                    dst,
+                    source,
+                    precision,
+                } => Some((*dst, *source, *precision)),
+                _ => None,
+            })
+            .expect("fixed Float validation should lower one guard");
+        assert_eq!(
+            validation.2, expected_precision,
+            "{scalar:?} under {profile}"
+        );
+    }
+}
+
+/// Verifies that the Wasm Float guard rejects unsupported source types as lowering failures.
+///
+/// WHAT: an F16 source (which shares the F32 carrier but keeps binary16 precision) and a fixed
+///       integer source both fail as lowering transformation errors, while the paired F64 and F32
+///       sources in the identical fixture shape lower a guard with their own precision.
+/// WHY: the guard supports exactly the F32 and F64 carriers at their exact precision, so a
+///      permissive carrier check would silently validate F16 at the wrong precision. The paired
+///      controls keep the rejection tied to the source type rather than to the fixture shape.
+#[test]
+fn rejects_validated_float_guards_with_unsupported_source_types() {
+    for (unsupported, supported_control, control_precision) in [
+        (
+            FixedScalar::F16,
+            FixedScalar::F64,
+            BinaryFloatPrecision::Binary64,
+        ),
+        (
+            FixedScalar::I32,
+            FixedScalar::F32,
+            BinaryFloatPrecision::Binary32,
+        ),
+    ] {
+        let mut string_table = StringTable::new();
+        let mut path_fork = PathInternerFork::empty();
+        let (type_environment, _) = build_type_environment();
+        let request = WasmBackendRequest {
+            numeric_profile: NumericProfile::STANDARD,
+            ..Default::default()
+        };
+
+        let unsupported_module = validate_float_test_module(
+            &mut path_fork,
+            &mut string_table,
+            &type_environment,
+            builtin_type_ids::fixed_scalar(unsupported),
+        );
+        let error = lower_hir_to_wasm_lir(
+            &unsupported_module,
+            &default_borrow_facts(),
+            &default_numeric_proofs(),
+            &request,
+            &string_table,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .expect_err("unsupported Float validation sources must fail lowering");
+        let error = error
+            .infrastructure_error()
+            .expect("Wasm lowering failure should be wrapped for rendering");
+        assert_eq!(
+            error.error_type,
+            ErrorType::Backend(BackendErrorType::LirTransformation),
+            "{unsupported:?} must be rejected as a lowering transformation failure"
+        );
+
+        let control_module = validate_float_test_module(
+            &mut path_fork,
+            &mut string_table,
+            &type_environment,
+            builtin_type_ids::fixed_scalar(supported_control),
+        );
+        let lowered = lower_hir_to_wasm_lir(
+            &control_module,
+            &default_borrow_facts(),
+            &default_numeric_proofs(),
+            &request,
+            &string_table,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .expect("the paired supported source must lower");
+        let guard_precision = lowered
+            .lir_module
+            .functions
+            .iter()
+            .flat_map(|function| &function.blocks)
+            .flat_map(|block| &block.statements)
+            .find_map(|statement| match statement {
+                WasmLirStmt::ValidateFloat { precision, .. } => Some(*precision),
+                _ => None,
+            })
+            .expect("the paired supported source must lower one guard");
+        assert_eq!(
+            guard_precision, control_precision,
+            "{supported_control:?} must keep lowering at its own precision"
         );
     }
 }

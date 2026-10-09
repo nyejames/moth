@@ -580,14 +580,7 @@ impl<'a> HirValidator<'a> {
                         anchor,
                     ));
                 }
-                self.validate_float_effect_statement(
-                    "ValidateFloat",
-                    *source,
-                    *failure_mode,
-                    *result,
-                    self.type_environment.builtins().float,
-                    anchor,
-                )?;
+                self.validate_validated_float_statement(*source, *failure_mode, *result, anchor)?;
             }
         }
 
@@ -809,6 +802,42 @@ impl<'a> HirValidator<'a> {
             failure_mode,
             result,
             success_type,
+            anchor,
+        )
+    }
+
+    /// Validates a `ValidateFloat` statement against its source row's exact binary-float type.
+    ///
+    /// WHAT: admits builtin `Float` and fixed `F16`/`F32`/`F64` sources, then requires the
+    ///       result local (or the fallible carrier's success slot) to carry exactly that
+    ///       source type.
+    /// WHY: the source expression row owns the resolved precision, so the validated result must
+    ///      keep it instead of assuming builtin `Float`; a mismatched carrier would erode the
+    ///      value before ordinary Moth code observes it.
+    fn validate_validated_float_statement(
+        &self,
+        source: HirValueId,
+        failure_mode: NumericFailureMode,
+        result: HirLocalDestination,
+        anchor: Option<HirLocation>,
+    ) -> Result<(), CompilerError> {
+        self.validate_expression(source, anchor)?;
+        let source_type = self.expression_row(source, anchor)?.ty;
+
+        if !NumericScalar::from_type_id(source_type, self.type_environment)
+            .is_some_and(NumericScalar::is_binary_float)
+        {
+            return Err(self.error_with_hir(
+                "ValidateFloat source must have an exact binary-float type",
+                anchor,
+            ));
+        }
+
+        self.validate_numeric_result_local(
+            "ValidateFloat",
+            failure_mode,
+            result,
+            source_type,
             anchor,
         )
     }

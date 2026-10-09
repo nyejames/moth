@@ -1,19 +1,25 @@
 //! Checked numeric operation lowering tests for JavaScript output.
 
 use super::support::*;
+use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
-use crate::compiler_frontend::hir::functions::HirFunction;
+use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
 };
+use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
-use moth_lexical::numeric::profile::NumericProfile;
+use crate::compiler_frontend::hir::validate_hir_module;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
+use std::process::Command;
 
 #[test]
 fn trap_mode_range_step_failure_lowers_to_fatal_throw() {
@@ -209,51 +215,405 @@ fn return_error_mode_format_float_lowers_to_carrier() {
     );
 }
 
-/// Verifies that trap-mode `ValidateFloat` assigns the scalar finite Float to the result local.
-#[test]
-fn trap_mode_validate_float_lowers_to_trapped_helper() {
-    let mut expressions = HirExpressionStore::default();
-    let region = RegionId(0);
-    let (_, types) = build_type_environment();
+/// Which value a Float boundary fixture returns from its entry function.
+///
+/// WHY: trap and recoverable lowering differ only in the value the boundary hands back, so the
+///      fixture shape stays shared while each lane names its observable contract.
+#[derive(Clone, Copy)]
+enum FloatBoundaryLane {
+    /// Trap mode: the entry returns the validated scalar and throws on a rejected carrier.
+    Scalar,
+    /// Recoverable mode: the entry returns the internal fallible carrier for observation.
+    Fallible,
+}
 
-    let output = lower_minimal_module_with_float_statement(
-        HirFloatStatementKind::Validate,
-        NumericFailureMode::Trap,
-        float_expression(1.5, types.float, region, &mut expressions),
-        types.float,
-        expressions,
+struct LoweredFloatBoundary {
+    source: String,
+    function_name: String,
+}
+
+/// Builds and lowers a module whose entry parameter is one raw external float carrier.
+///
+/// WHAT: the entry takes a raw carrier, validates it at the source type's exact precision, and
+///       returns the scalar or the fallible carrier so a Node driver observes the real boundary.
+/// WHY: non-finite, malformed and signed-zero carriers cannot exist as HIR literals, so boundary
+///      behavior is only testable by executing the generated module with raw runtime values.
+fn lower_float_boundary_module(
+    profile: NumericProfile,
+    source_scalar: NumericScalar,
+    lane: FloatBoundaryLane,
+) -> LoweredFloatBoundary {
+    let mut expressions = HirExpressionStore::default();
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let (mut type_environment, _) = build_type_environment();
+    let region = RegionId(0);
+
+    let source_type = source_scalar.type_id(&type_environment);
+    // The internal carrier carries the builtin `Error`, exactly like the carrier validated HIR
+    // attaches to a ReturnError boundary result.
+    let result_type = match lane {
+        FloatBoundaryLane::Scalar => source_type,
+        FloatBoundaryLane::Fallible => fixture_carrier(&mut type_environment, source_type),
+    };
+    let failure_mode = match lane {
+        FloatBoundaryLane::Scalar => NumericFailureMode::Trap,
+        FloatBoundaryLane::Fallible => NumericFailureMode::ReturnError,
+    };
+    let source = expression(
+        HirExpressionKind::Load(HirPlace::local(LocalId(0))),
+        source_type,
+        region,
+        ValueKind::RValue,
+        &mut expressions,
+    );
+    let returned = expression(
+        HirExpressionKind::Load(HirPlace::local(LocalId(1))),
+        result_type,
+        region,
+        ValueKind::RValue,
+        &mut expressions,
     );
 
+    let block = HirBlock {
+        id: BlockId(0),
+        region,
+        locals: vec![local(0, source_type, region), local(1, result_type, region)],
+        statements: vec![statement(
+            1,
+            HirStatementKind::ValidateFloat {
+                source,
+                failure_mode,
+                result: HirLocalDestination::Define(LocalId(1)),
+            },
+        )],
+        terminator: HirTerminator::Return(returned),
+    };
+    let function = HirFunction {
+        id: FunctionId(0),
+        entry: BlockId(0),
+        params: vec![LocalId(0)],
+        return_type: result_type,
+    };
+    let mut module = build_module(
+        expressions,
+        &mut path_fork,
+        &mut string_table,
+        "main",
+        vec![block],
+        function,
+        &[(LocalId(0), "value"), (LocalId(1), "result")],
+    );
+
+    // The fixture carries the entry-start tag production lowering records and passes the same HIR
+    // validation every lowered module does, so it cannot drift into a shape real HIR rejects.
+    module
+        .function_origins
+        .insert(FunctionId(0), HirFunctionOrigin::EntryStart);
+    validate_hir_module(&module, &type_environment)
+        .expect("Float boundary fixture must satisfy production HIR validation");
+
+    let lowered = lower_hir_to_js(
+        &module,
+        &NumericProofs::default(),
+        &string_table,
+        JsLoweringConfig::direct_js(false, profile),
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("Float boundary fixture should lower to JavaScript");
+
+    LoweredFloatBoundary {
+        function_name: lowered
+            .function_name_by_id
+            .get(&FunctionId(0))
+            .cloned()
+            .expect("emitted boundary module carries its entry function name"),
+        source: lowered.source,
+    }
+}
+
+fn float32_profile() -> NumericProfile {
+    NumericProfile {
+        int_width: IntWidth::Bits32,
+        float_precision: FloatPrecision::Bits32,
+    }
+}
+
+/// Runs one generated JavaScript program through Node and returns its stdout.
+///
+/// WHY: exact boundary precision, rejection and signed-zero behavior are properties of the
+///      executed module, not of the emitted source text.
+fn run_javascript(source: &str) -> String {
+    let output = Command::new("node")
+        .args(["--eval", source])
+        .output()
+        .expect("Node.js is required for JavaScript runtime behavior tests");
     assert!(
-        output.contains(
-            "moth_result_l0 = __moth_binding(__moth_numeric_trap(__moth_float_validate(1.5)));"
-        ),
-        "trap-mode ValidateFloat must assign the scalar trap result"
+        output.status.success(),
+        "Node.js runtime failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).expect("Node.js output is UTF-8")
+}
+
+/// Verifies that a trapping boundary keeps a fixed F64 carrier exact under a Float32 profile.
+///
+/// WHAT: a finite high-range F64 value, the F64 successor of one and the minimum F64 subnormal
+///       survive unchanged, signed zero stays signed, and every malformed or non-finite carrier
+///       reports the shared Float boundary failure.
+/// WHY: the validated source type owns the precision. Falling back to the module's Float32
+///      profile would round the value to a different number, or overflow a finite F64 to infinity.
+#[test]
+fn trapping_float_boundary_keeps_fixed_f64_precision_under_a_float32_profile() {
+    let lowered = lower_float_boundary_module(
+        float32_profile(),
+        NumericScalar::Fixed(FixedScalar::F64),
+        FloatBoundaryLane::Scalar,
+    );
+    let driver = format!(
+        r#"
+function attempt(value) {{
+    try {{
+        const produced = {function_name}(value);
+        return "value:" + String(produced) + ":signedZero=" + Object.is(produced, -0);
+    }} catch (error) {{
+        return error instanceof Error ? "trap" : "threw:" + typeof error;
+    }}
+}}
+let coercions = 0;
+const hostileCarrier = {{ valueOf() {{ coercions += 1; return 0; }} }};
+console.log([
+    attempt(1e300),
+    attempt(1.0000000000000002),
+    attempt(5e-324),
+    attempt(-0),
+    attempt(NaN),
+    attempt(Infinity),
+    attempt(-Infinity),
+    attempt("1.5"),
+    attempt(true),
+    attempt(undefined),
+    attempt(1n),
+    attempt({{}}),
+    attempt(hostileCarrier),
+    "coercions=" + coercions,
+].join("\n"));
+"#,
+        function_name = lowered.function_name,
+    );
+
+    assert_eq!(
+        run_javascript(&format!("{}\n{driver}", lowered.source)),
+        "value:1e+300:signedZero=false\n\
+         value:1.0000000000000002:signedZero=false\n\
+         value:5e-324:signedZero=false\n\
+         value:0:signedZero=true\n\
+         trap\n\
+         trap\n\
+         trap\n\
+         trap\n\
+         trap\n\
+         trap\n\
+         trap\n\
+         trap\n\
+         trap\n\
+         coercions=0\n",
+        "an F64 boundary value must keep its 64-bit precision, reject every non-Number carrier \
+         without coercing it, and terminate with an Error instead of returning a value"
     );
 }
 
-/// Verifies that return-error-mode `ValidateFloat` assigns the fallible carrier directly.
+/// Verifies that a recoverable boundary reports code 304 exactly while keeping F64 precision.
+///
+/// WHY: the same finite and malformed carriers must produce the documented fallible Result on the
+///      non-trapping route, so recovery callers branch on the error code rather than an exception.
 #[test]
-fn return_error_mode_validate_float_lowers_to_carrier() {
-    let mut expressions = HirExpressionStore::default();
-    let region = RegionId(0);
-    let (_, types) = build_type_environment();
+fn recoverable_float_boundary_reports_304_and_keeps_fixed_f64_precision() {
+    let lowered = lower_float_boundary_module(
+        float32_profile(),
+        NumericScalar::Fixed(FixedScalar::F64),
+        FloatBoundaryLane::Fallible,
+    );
+    let boundary_code = BuiltinErrorCode::FloatBoundaryNonFinite.as_u32();
+    let driver = format!(
+        r#"
+function attempt(value) {{
+    let result;
+    try {{
+        result = {function_name}(value);
+    }} catch (error) {{
+        return error instanceof Error ? "trap" : "threw:" + typeof error;
+    }}
+    if (result.tag === "ok") {{
+        return "ok:" + String(result.value) + ":signedZero=" + Object.is(result.value, -0);
+    }}
+    return "err:" + __moth_error_code(result.value)
+        + ":tag=" + result.tag
+        + ":message=" + (__moth_error_message(result.value).length > 0);
+}}
+let coercions = 0;
+const hostileCarrier = {{ valueOf() {{ coercions += 1; return 0; }} }};
+console.log([
+    attempt(1e300),
+    attempt(1.0000000000000002),
+    attempt(5e-324),
+    attempt(-0),
+    attempt(NaN),
+    attempt(Infinity),
+    attempt(-Infinity),
+    attempt("1.5"),
+    attempt(true),
+    attempt(undefined),
+    attempt(1n),
+    attempt({{}}),
+    attempt(hostileCarrier),
+    "coercions=" + coercions,
+].join("\n"));
+"#,
+        function_name = lowered.function_name,
+    );
+    let rejected = format!("err:{boundary_code}:tag=err:message=true");
 
-    let output = lower_minimal_module_with_float_statement(
-        HirFloatStatementKind::Validate,
-        NumericFailureMode::ReturnError,
-        float_expression(1.5, types.float, region, &mut expressions),
-        types.fallible_int_string,
-        expressions,
+    assert_eq!(
+        run_javascript(&format!("{}\n{driver}", lowered.source)),
+        format!(
+            "ok:1e+300:signedZero=false\n\
+             ok:1.0000000000000002:signedZero=false\n\
+             ok:5e-324:signedZero=false\n\
+             ok:0:signedZero=true\n\
+             {rejected}\n\
+             {rejected}\n\
+             {rejected}\n\
+             {rejected}\n\
+             {rejected}\n\
+             {rejected}\n\
+             {rejected}\n\
+             {rejected}\n\
+             {rejected}\n\
+             coercions=0\n"
+        ),
+        "recoverable validation must keep F64 precision and report the exact boundary code"
+    );
+}
+
+/// Verifies that a fixed F32 boundary rounds once at its own precision under a Float64 profile.
+///
+/// WHAT: finite F64 carriers that are not F32 values round to the nearest F32, F32 subnormals
+///       survive, a value that overflows the F32 finite range is rejected, and malformed carriers
+///       are never coerced into numbers.
+/// WHY: the module profile must not widen a fixed F32 boundary, and rounding before the finite
+///      check is what turns a finite F64 overflow into the documented boundary failure.
+#[test]
+fn trapping_float_boundary_rounds_fixed_f32_once_under_a_float64_profile() {
+    let lowered = lower_float_boundary_module(
+        NumericProfile::STANDARD,
+        NumericScalar::Fixed(FixedScalar::F32),
+        FloatBoundaryLane::Scalar,
+    );
+    let driver = format!(
+        r#"
+function attempt(value) {{
+    try {{
+        const produced = {function_name}(value);
+        return "value:" + String(produced) + ":signedZero=" + Object.is(produced, -0);
+    }} catch (error) {{
+        return error instanceof Error ? "trap" : "threw:" + typeof error;
+    }}
+}}
+let coercions = 0;
+const hostileCarrier = {{ valueOf() {{ coercions += 1; return 0; }} }};
+console.log([
+    attempt(0.1),
+    attempt(1 + 2 ** -24),
+    attempt(2 ** -149),
+    attempt(-(2 ** -150)),
+    attempt(-0),
+    attempt(3.5e38),
+    attempt("0.1"),
+    attempt(true),
+    attempt(hostileCarrier),
+    "coercions=" + coercions,
+].join("\n"));
+"#,
+        function_name = lowered.function_name,
     );
 
-    assert!(
-        output.contains("moth_result_l0 = __moth_binding(__moth_float_validate(1.5));"),
-        "ReturnError ValidateFloat must assign the helper carrier directly"
+    assert_eq!(
+        run_javascript(&format!("{}\n{driver}", lowered.source)),
+        "value:0.10000000149011612:signedZero=false\n\
+         value:1:signedZero=false\n\
+         value:1.401298464324817e-45:signedZero=false\n\
+         value:0:signedZero=true\n\
+         value:0:signedZero=true\n\
+         trap\n\
+         trap\n\
+         trap\n\
+         trap\n\
+         coercions=0\n",
+        "a fixed F32 boundary must round once at F32 precision, keep F32 subnormals and signed \
+         zero, reject F32 overflow, and never coerce a non-Number carrier"
     );
-    assert!(
-        !output.contains("__moth_numeric_trap(__moth_float_validate"),
-        "ReturnError ValidateFloat must not wrap the helper in __moth_numeric_trap"
+}
+
+/// Verifies that a fixed F16 boundary completes exactly at binary16 under a Float64 profile.
+///
+/// WHAT: ties-to-even rounds `1 + 2^-11` to `1` while the representable `1 + 2^-10` survives, the
+///       maximum finite `65504` is accepted, the minimum subnormal `2^-24` is preserved, and
+///       `-(2^-25)` completes to negative zero. A finite `70000` overflows the F16 range and every
+///       non-Number carrier is rejected without coercion.
+/// WHY: the validated source type owns the precision, so an F16 boundary must complete at binary16
+///      instead of leaving the wider module Float64 value untouched. Node 24+ is required for the
+///      `Math.f16round` completion this lane demands.
+#[test]
+fn trapping_float_boundary_completes_fixed_f16_precision_exactly() {
+    let lowered = lower_float_boundary_module(
+        NumericProfile::STANDARD,
+        NumericScalar::Fixed(FixedScalar::F16),
+        FloatBoundaryLane::Scalar,
+    );
+    let driver = format!(
+        r#"
+function attempt(value) {{
+    try {{
+        const produced = {function_name}(value);
+        return "value:" + String(produced) + ":signedZero=" + Object.is(produced, -0);
+    }} catch (error) {{
+        return error instanceof Error ? "trap" : "threw:" + typeof error;
+    }}
+}}
+let coercions = 0;
+const hostileCarrier = {{ valueOf() {{ coercions += 1; return 0; }} }};
+console.log([
+    attempt(1 + 2 ** -11),
+    attempt(1 + 2 ** -10),
+    attempt(65504),
+    attempt(2 ** -24),
+    attempt(-(2 ** -25)),
+    attempt(70000),
+    attempt("0.1"),
+    attempt(true),
+    attempt(hostileCarrier),
+    "coercions=" + coercions,
+].join("\n"));
+"#,
+        function_name = lowered.function_name,
+    );
+
+    assert_eq!(
+        run_javascript(&format!("{}\n{driver}", lowered.source)),
+        "value:1:signedZero=false\n\
+         value:1.0009765625:signedZero=false\n\
+         value:65504:signedZero=false\n\
+         value:5.960464477539063e-8:signedZero=false\n\
+         value:0:signedZero=true\n\
+         trap\n\
+         trap\n\
+         trap\n\
+         trap\n\
+         coercions=0\n",
+        "a fixed F16 boundary must complete at binary16, keep its maximum finite, subnormal and \
+         signed-zero behavior, reject F16 overflow, and never coerce a non-Number carrier"
     );
 }
 

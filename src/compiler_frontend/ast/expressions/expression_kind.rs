@@ -192,6 +192,14 @@ pub enum ExpressionKind {
         id: ExternalFunctionId,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
+        /// Whether HIR must validate the raw success payload as an exact binary float.
+        ///
+        /// WHAT: computed at external-call parsing from the resolved success slot and the
+        ///       callee's lowering metadata.
+        /// WHY: a raw external boundary may hand back any value; only self-validating fixed
+        ///      `F32`/`F64` JS glue is exempt, so HIR must not re-derive the decision from
+        ///      the success type alone.
+        requires_external_float_validation: bool,
         error_type_id: TypeId,
         handling: FallibleExpressionHandling,
         /// Authored postfix `!` span, kept separate from the host-call span.
@@ -239,6 +247,14 @@ pub enum ExpressionKind {
         id: ExternalFunctionId,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
+        /// Whether HIR must validate the raw single binary-float success value.
+        ///
+        /// WHAT: computed at external-call parsing from the resolved success slot and the
+        ///       callee's lowering metadata.
+        /// WHY: a raw external boundary may hand back any value; only self-validating fixed
+        ///      `F32`/`F64` JS glue is exempt, so HIR must not re-derive the decision from
+        ///      the success type alone.
+        requires_external_float_validation: bool,
     },
 
     /// Equivalent to a string when folded at compile time.

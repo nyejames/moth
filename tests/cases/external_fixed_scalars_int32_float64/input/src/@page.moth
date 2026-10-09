@@ -1,4 +1,7 @@
-@fixed_scalars.js identity_u32, load_u32, identity_f32, load_f32, overflow_f32, identity_int, identity_uint, identity_float
+-- Fixed-width results keep their own destination precision and finite validation under every
+-- numeric profile: the annotated JavaScript wrapper rounds `F32` once at binary32, preserves
+-- signed zero and subnormals, and delivers code 304 through the declared builtin Error! boundary.
+@fixed_scalars.js identity_u32, load_u32, identity_f32, load_f32, overflow_f32, raw_f32, identity_int, identity_uint, identity_float
 
 is_max_u32 |value U32| -> Bool:
     return value is 4294967295
@@ -30,4 +33,52 @@ rounded_matches = is_tenth_f32(rounded)
 native_int Int = identity_int(17)
 native_uint Uint = identity_uint(18)
 native_float Float = identity_float(1.5)
-[:fixed scalar zero=[zero] maximum=[maximum_matches] loaded=[loaded_matches] f32=[fraction_matches]/[rounded_matches] overflow=[boundary_code] native=[native_int]/[native_uint]/[native_float]]
+
+f32_classify |value F32| -> U32:
+    expected_half F32 = 1.5
+    expected_tenth F32 = 0.1
+    expected_zero F32 = 0.0
+    if value is expected_half:
+        return 1
+    ;
+    if value is expected_tenth:
+        return 2
+    ;
+    if value is expected_zero:
+        return 3
+    ;
+    if value > expected_zero:
+        return 4
+    ;
+    if value < expected_zero:
+        return 5
+    ;
+    return 6
+;
+
+f32_class |selector U32| -> U32:
+    value F32 = raw_f32(selector) catch:
+        then 0.0
+    ;
+    return f32_classify(value)
+;
+
+f32_failure |selector U32| -> U32:
+    failure ~U32 = 0
+    value F32 = raw_f32(selector) catch |err|:
+        failure = err.code
+        then 0.0
+    ;
+    return failure
+;
+
+f32_half = f32_class(1)
+f32_tenth = f32_class(2)
+f32_large = f32_class(3)
+f32_subnormal = f32_class(5)
+f32_zero = f32_class(9)
+f32_overflow_code = f32_failure(4)
+f32_nan_code = f32_failure(6)
+f32_positive_inf_code = f32_failure(7)
+f32_negative_inf_code = f32_failure(8)
+[:fixed scalar zero=[zero] maximum=[maximum_matches] loaded=[loaded_matches] f32=[fraction_matches]/[rounded_matches] overflow=[boundary_code] native=[native_int]/[native_uint]/[native_float] raw=[f32_half]/[f32_tenth]/[f32_large]/[f32_subnormal]/[f32_zero] codes=[f32_overflow_code]/[f32_nan_code]/[f32_positive_inf_code]/[f32_negative_inf_code]]

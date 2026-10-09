@@ -357,16 +357,19 @@ fn lower_validate_float(
     }
 
     let type_environment = context.module_context.type_environment;
-    let float_type = type_environment.builtins().float;
     let source_type = expression_type(context, source);
-    if source_type != float_type {
-        return Err(lir_transformation_error(format!(
-            "Wasm Float validation source has type {:?}, expected Float",
-            source_type
-        )));
-    }
-
-    let precision = NumericScalar::Float
+    // WHAT: the validated source owns the precision, so the guard reads the source's exact
+    //       binary-float type and only profile-sized `Float` follows the profile bridge.
+    // WHY: a fixed F32/F64 boundary value must not be validated at the module profile's precision,
+    //      and F16 stays an explicit unsupported route instead of being lowered as F32.
+    let source_scalar = NumericScalar::from_type_id(source_type, type_environment)
+        .filter(|scalar| scalar.is_binary_float())
+        .ok_or_else(|| {
+            lir_transformation_error(format!(
+                "Wasm Float validation source has type {source_type:?}, which is not a binary float"
+            ))
+        })?;
+    let precision = source_scalar
         .binary_float_precision(context.module_context.request.numeric_profile)
         .filter(|precision| {
             matches!(
@@ -375,7 +378,9 @@ fn lower_validate_float(
             )
         })
         .ok_or_else(|| {
-            lir_transformation_error("Wasm Float validation requires F32 or F64 precision")
+            lir_transformation_error(format!(
+                "Wasm Float validation requires an F32 or F64 source, found {source_scalar}"
+            ))
         })?;
     let expected_carrier = match precision {
         BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
@@ -390,7 +395,7 @@ fn lower_validate_float(
     })?;
     if context.local_type_by_id.get(&destination).copied() != Some(expected_carrier) {
         return Err(lir_transformation_error(format!(
-            "Wasm Float validation result does not use the profile carrier {expected_carrier:?}"
+            "Wasm Float validation destination does not use the {expected_carrier:?} carrier of the source precision"
         )));
     }
 
@@ -399,7 +404,7 @@ fn lower_validate_float(
     let lowered_source = lower_expression(context, source, statements)?;
     if context.local_type_by_id.get(&lowered_source.value).copied() != Some(expected_carrier) {
         return Err(lir_transformation_error(format!(
-            "Wasm Float validation source does not use the profile carrier {expected_carrier:?}"
+            "Wasm Float validation source does not use the {expected_carrier:?} carrier of its own precision"
         )));
     }
 

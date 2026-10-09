@@ -13882,6 +13882,13 @@ contract = "backend.html.external_native_float64_nonfinite_error"
 role = "backend"
 
 [[case]]
+id = "external_native_float64_start_nonfinite"
+path = "external_native_float64_start_nonfinite"
+tags = ["integration", "numeric", "external", "runtime", "float64"]
+contract = "backend.html.external_native_float64_start_nonfinite_error"
+role = "backend"
+
+[[case]]
 id = "numeric_float_whole_literal_int32_float32"
 path = "numeric_float_whole_literal_int32_float32"
 tags = ["integration", "numeric", "numeric-profile", "float32"]

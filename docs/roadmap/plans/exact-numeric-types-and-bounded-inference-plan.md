@@ -4,9 +4,9 @@
 
 ```text
 STATUS: active on the user-selected expression-refactor branch
-CURRENT_SLICE: Phase 2 verified; committing the accepted checkpoint
+CURRENT_SLICE: Phase 3 verified; committing the accepted checkpoint
 BLOCKERS: no external prerequisite; later exact-width and inference cutover remains pending
-NEXT_ACTION: commit Phase 2 and prepare exact external boundaries in Phase 3
+NEXT_ACTION: commit Phase 3 and start integrated cutover C with exact identities, D15 domains and body-local numeric inference
 ```
 
 **Intended repository location:** `docs/roadmap/plans/exact-numeric-types-and-bounded-inference-plan.md`
@@ -769,32 +769,38 @@ validate that no pending numeric state escapes the owner
 
 Phase 2 passed its focused gate of 5,804 compiler library tests and 201 selected integration executions under Node v24.21.0: 153 HTML and 48 HTML-Wasm executions across 153 cases. Independent eligibility, pruning and evidence reviews required corrections to occurrence metadata, parser boundaries, constructor call counting, generated evidence/carrier closure and exact concrete receiver-summary transport; focused verification accepted them. Imported generic evidence retains canonical receiver origins and real provider summaries without widening ordinary visibility. A separately exposed private sibling-file nominal-construction gap was corrected by publishing the existing generated struct shell at the AST-to-HIR handoff, independently reviewed and exercised with direct construction inside the generic body. The same-module, same-name receiver regression distinguishes Ticket from the private Note at runtime. After that correction, `just validate` passed formatting, Clippy, feature-lane coverage, source/dependency audits, workspace tests and doctests, all 2,436 integration executions and executable documentation with no errors or warnings. Numeric-dependent source/fallback inference, including H12, remains Phase 4/5 work.
 
+Accepted checkpoint: `c798d329552b040cfb0b36e35d760390f671acd0`.
+
 ### Phase 3 - prepare shared exact-width and external boundaries
 
 **Primary owners:** lexical precision/value policy, canonical scalar projection, external registration/import projection, HIR external calls/numeric validation, JS numeric helpers and current Wasm validators.
 
 #### 3A. Reuse fixed-width data and algorithms
 
-- [ ] Characterise existing fixed scalar storage, integer extrema, float bit payloads and direct conversion algorithms before moving code.
-- [ ] Consolidate reusable range/precision/materialisation facts into the current explicit-width owners where profile code currently contains shared algorithms.
-- [ ] Preserve the U64-to-F32 direct-rounding witness and F16 decimal midpoint witnesses through both constant and runtime paths where supported.
-- [ ] Retain Dec's separate coefficient/scale representation, Byte's nonnumeric classification and canonical text formatting.
-- [ ] Avoid a replacement "default numeric profile" object. Exact type metadata supplies width and precision.
+- [x] Characterise existing fixed scalar storage, integer extrema, float bit payloads and direct conversion algorithms before moving code.
+- [x] Consolidate reusable range/precision/materialisation facts into the current explicit-width owners where profile code currently contains shared algorithms.
+- [x] Preserve the U64-to-F32 direct-rounding witness and F16 decimal midpoint witnesses through both constant and runtime paths where supported.
+- [x] Retain Dec's separate coefficient/scale representation, Byte's nonnumeric classification and canonical text formatting.
+- [x] Avoid a replacement "default numeric profile" object. Exact type metadata supplies width and precision.
 
 #### 3B. Generalise external finite validation
 
-- [ ] Add regression fixtures for non-finite raw F64 external results before replacing NativeFloat signatures.
-- [ ] Trace `result_type_ids_are_single_float`, `lower_validated_external_call_expression`, `emit_validated_float_value`, fallible carrier flags, `ValidateFloat` validation and runtime/helper consumers.
-- [ ] Generalise selection and allocated result types to the resolved exact binary-float identity. Retain current-block lowering when validation can branch.
-- [ ] Make destination precision explicit through the established semantic type or the smallest existing boundary descriptor. Delete hardcoded builtin Float allocations rather than merely changing the predicate.
-- [ ] Validate direct calls, explicit return forwarding, catch recovery and fallible success extraction. Preserve arguments before result checking and validate no error payload as a success float.
-- [ ] Test the existing fatal versus source-declared Error! integrity routes, including synthetic start. Keep catch leniency from changing them.
-- [ ] Reuse the existing F64 external constant projection. Check non-finite constants through their compile-time diagnostic boundary, not a new Math path.
-- [ ] Review F16/F32 external cases already supported by the active tree, preserving destination rounding and finite validation. Defer unsupported shapes honestly rather than inventing coverage.
+- [x] Add regression fixtures for non-finite raw F64 external results before replacing NativeFloat signatures.
+- [x] Trace `result_type_ids_are_single_float`, `lower_validated_external_call_expression`, `emit_validated_float_value`, fallible carrier flags, `ValidateFloat` validation and runtime/helper consumers.
+- [x] Generalise selection and allocated result types to the resolved exact binary-float identity. Retain current-block lowering when validation can branch.
+- [x] Make destination precision explicit through the established semantic type or the smallest existing boundary descriptor. Delete hardcoded builtin Float allocations rather than merely changing the predicate.
+- [x] Validate direct calls, explicit return forwarding, catch recovery and fallible success extraction. Preserve arguments before result checking and validate no error payload as a success float.
+- [x] Test the existing fatal versus source-declared Error! integrity routes, including synthetic start. Keep catch leniency from changing them.
+- [x] Reuse the existing F64 external constant projection. Check non-finite constants through their compile-time diagnostic boundary, not a new Math path.
+- [x] Review F16/F32 external cases already supported by the active tree, preserving destination rounding and finite validation. Defer unsupported shapes honestly rather than inventing coverage.
 
 **Validation:** fixed scalar unit tests, external-boundary HIR tests and real JS runtime tests with injected NaN, both infinities, finite values and finite values that overflow after destination rounding. Preserve supported-target gating and exact error-code distinctions.
 
 **Exit:** changing a package from NativeFloat to F64 cannot bypass validation or allocate the wrong semantic result type. This evidence is required before the Math signature migration.
+
+Phase 3 reused the already consolidated exact scalar owners without a speculative code move. Lexical tests, direct U64-to-F32 and F64-to-F16 conversion witnesses and paired constant/runtime rounding fixtures passed. AST external-call parsing now records one neutral validation fact, HIR preserves the resolved success type and JS/Wasm derive guard precision from that type. Native Float32's round-only glue adapter is removed; self-validating fixed F32/F64 JavaScript wrappers retain their own delivery contract. Four real generated-JS tests cover exact F16/F32/F64 completion, non-coercing carrier rejection, finite overflow, signed zero and subnormals. Two real-source tests register raw F64 functions on the builder surface, run canonical module compilation and execute generated JS under Float32, proving binary64 width and fatal versus returned code-304 delivery without expanding annotation support.
+
+Independent frontend and backend reviews found the same direct-postfix-return continuation defect. A strengthened source fixture failed with an already-terminated HIR block before the correction and passed afterwards. The return now uses the live post-validation success continuation. Fresh focused verification accepted the correction and source-registration proof with no remaining findings. The corrected tree passed targeted source-runtime tests and `just validate`: 5,933 compiler tests under workspace-unified features, the other workspace suites and doctests, 2,437 integration executions, formatting, Clippy, feature/source/dependency audits and a documentation check with no errors or warnings. The earlier focused compiler-library run passed 5,817 tests before the continuation correction and final three runtime tests were added. Native numeric identities, profile plumbing and the exact external signature migration remain for integrated cutover C.
 
 ### Phase 4 - exact identities and scalar inference cutover
 

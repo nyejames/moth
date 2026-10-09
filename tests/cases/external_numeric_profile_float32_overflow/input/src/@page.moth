@@ -1,4 +1,8 @@
-@external_float.js overflow_float
+-- Plan section 5.2: every supported external binary-float result is rounded and validated at its
+-- resolved exact precision before ordinary Moth code observes it. A declared builtin `Error!`
+-- channel keeps that shared boundary guard recoverable with code 304; other contexts keep the
+-- fatal integrity guard.
+@external_float.js overflow_float, raw_float, raw_float_calls, fallible_float, fallible_float_reads
 
 checked_float || -> Int, Error!:
     value = overflow_float()
@@ -14,3 +18,112 @@ ignored = checked_float() catch |err|:
     then 0
 ;
 io.line([: external_native_float32 overflow-code=[code]])
+
+-- Raw host payloads are classified after the guard. The classification observes accepted
+-- finite values, including a destination-rounded `0.1`, a large finite value, a negative
+-- binary32 subnormal and an accepted signed zero.
+raw_code |selector U32| -> U32, Error!:
+    value = raw_float(selector)
+    if value is 1.5:
+        return 1
+    ;
+    if value is 0.1:
+        return 2
+    ;
+    if value is 0.0:
+        return 3
+    ;
+    if value > 0.0:
+        return 4
+    ;
+    if value < 0.0:
+        return 5
+    ;
+    return 6
+;
+
+raw_class |selector U32| -> U32:
+    classified = raw_code(selector) catch:
+        then 0
+    ;
+    return classified
+;
+
+raw_failure |selector U32| -> U32:
+    failure ~U32 = 0
+    ignored = raw_code(selector) catch |err|:
+        failure = err.code
+        then 0
+    ;
+    return failure
+;
+
+-- Forwarding the raw result through a declared builtin `Error!` function keeps the same
+-- recoverable 304 delivery at the forwarding boundary.
+forward_raw |selector U32| -> Float, Error!:
+    return raw_float(selector)
+;
+
+-- One counting argument observes that arguments evaluate once, before the result check, even
+-- when the guard rejects the result. The host counter observes one host call per source call.
+selector_calls ~U32 = 0
+next_selector |seen ~U32, value U32| -> U32:
+    seen = seen + 1
+    return value
+;
+
+overflow_code = raw_failure(4)
+nan_code = raw_failure(next_selector(~selector_calls, 6))
+positive_inf_code = raw_failure(7)
+negative_inf_code = raw_failure(8)
+
+half_class = raw_class(1)
+tenth_class = raw_class(2)
+large_class = raw_class(3)
+subnormal_class = raw_class(5)
+zero_class = raw_class(9)
+
+-- A valid returned Error keeps its own code and message and is never validated as a float.
+-- The declared builtin `Error!` function forwards both the guarded success payload and the
+-- foreign error unchanged, because the synthetic entry keeps a trap-only float guard.
+fallible_probe |selector U32| -> Float, Error!:
+    return fallible_float(selector)!
+;
+
+fallible_nan_code ~U32 = 0
+fallible_ok_code ~U32 = 0
+fallible_nan_value = fallible_probe(6) catch |err|:
+    fallible_nan_code = err.code
+    then 0.0
+;
+fallible_ok_value = fallible_probe(1) catch |err|:
+    fallible_ok_code = err.code
+    then 0.0
+;
+fallible_ok_positive = fallible_ok_value > 0.0
+
+error_code ~U32 = 0
+error_message ~= ""
+error_value = fallible_probe(9) catch |err|:
+    error_code = copy err.code
+    error_message = copy err.message
+    then 0.0
+;
+
+forwarded_code ~U32 = 0
+forwarded_value = forward_raw(1) catch |err|:
+    forwarded_code = err.code
+    then 0.0
+;
+forwarded_positive = forwarded_value > 0.0
+forwarded_overflow_code ~U32 = 0
+forwarded_overflow_value = forward_raw(4) catch |err|:
+    forwarded_overflow_code = err.code
+    then 0.0
+;
+
+host_calls U32 = raw_float_calls()
+selectors_used U32 = selector_calls
+fallible_reads U32 = fallible_float_reads()
+
+io.line([: external_native_float32 raw-class=[half_class]/[tenth_class]/[large_class]/[subnormal_class]/[zero_class] raw-codes=[overflow_code]/[nan_code]/[positive_inf_code]/[negative_inf_code] host-calls=[host_calls] selectors=[selectors_used] fallible=[fallible_nan_code]/[fallible_ok_code]/[fallible_ok_positive]/[fallible_reads] error=[error_code]/[error_message] forwarding=[forwarded_code]/[forwarded_overflow_code]/[forwarded_positive]])

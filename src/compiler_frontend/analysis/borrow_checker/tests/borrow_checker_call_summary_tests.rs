@@ -1192,6 +1192,7 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
                 id: external_id,
                 args: vec![],
                 result_type_ids: vec![builtin_type_ids::INT, builtin_type_ids::INT],
+                requires_external_float_validation: false,
                 error_type_id: builtin_type_ids::INT,
                 handling: FallibleExpressionHandling::Propagate,
                 span: None,

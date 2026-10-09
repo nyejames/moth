@@ -11,7 +11,12 @@ pub(super) use crate::backends::js::test_symbol_helpers::{
 pub(super) use crate::backends::js::{JsLoweringConfig, lower_hir_to_js};
 pub(super) use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
-use crate::compiler_frontend::datatypes::definitions::ChoiceTypeDefinition;
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
+use crate::compiler_frontend::datatypes::definitions::{
+    ChoiceTypeDefinition, StructTypeDefinition,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::{
@@ -130,6 +135,40 @@ pub(super) fn helper_source<'a>(source: &'a str, name: &str) -> &'a str {
     }
 
     panic!("helper {name} body is not closed");
+}
+
+/// Returns the builtin `Error` type id, registering it on first use.
+///
+/// WHAT: seeds the canonical `Error` identity the module environment does not seed, so fixtures
+///       can build the same `<success, Error>` carriers validated HIR gives boundary results.
+/// WHY: the internal fallible carrier carries the public builtin `Error`; a fixture-only carrier
+///      shape would diverge from every consumer that inspects the carrier's error slot.
+pub(super) fn fixture_error_type(type_environment: &mut TypeEnvironment) -> TypeId {
+    let error_identity = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error);
+    if let Some(error_type_id) = type_environment.type_id_for_canonical_identity(&error_identity) {
+        return error_type_id;
+    }
+
+    let (_, error_type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: PathId::ROOT,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+    type_environment
+        .register_canonical_identity(error_identity, error_type_id)
+        .expect("test builtin Error identity should register");
+    error_type_id
+}
+
+/// Interns the internal fallible carrier for one success type with the builtin `Error` payload.
+///
+/// WHY: ReturnError results must match the carriers validated HIR produces, so every backend
+///      fixture derives its carrier from the same seeded `Error` identity.
+pub(super) fn fixture_carrier(type_environment: &mut TypeEnvironment, success: TypeId) -> TypeId {
+    let error_type = fixture_error_type(type_environment);
+    type_environment.intern_fallible_carrier(success, error_type)
 }
 
 /// Registers the type surface this backend's tests exercise.

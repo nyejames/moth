@@ -244,26 +244,27 @@ pub enum HirStatementKind {
         result: HirLocalDestination,
     },
 
-    /// Validate that a `Float` value is finite before exposing it as an ordinary Moth `Float`.
+    /// Validate that a binary-float value is finite before ordinary Moth code observes it.
     ///
-    /// WHAT: evaluates `source` (a `Float` value coming from an external/backend boundary) and
-    ///      stores the validated finite `Float` in `result`.
-    /// WHY: Moth `Float` is finite `f64`; values entering from external functions or backend
-    ///      boundaries must be checked explicitly rather than trusted implicitly.
+    /// WHAT: evaluates `source` (an exact binary-float value coming from an external/backend
+    ///      boundary) and stores the validated finite value in `result`.
+    /// WHY: supported binary floats are finite by language contract, so values entering from
+    ///      external functions or backend boundaries must be rounded at their resolved precision
+    ///      and checked explicitly rather than trusted implicitly.
     ///
     /// Result-local contract:
-    /// - In `NumericFailureMode::Trap` the result local receives the scalar `Float` success value.
-    ///   Failure (a non-finite input) is a runtime trap/throw.
+    /// - In `NumericFailureMode::Trap` the result local receives the scalar success value at the
+    ///   source's exact type. Failure (a non-finite input) is a runtime trap/throw.
     /// - In `NumericFailureMode::ReturnError` the result local receives the internal fallible
-    ///   carrier (`Float` success value or builtin `Error`). A later lowering helper is expected to
-    ///   branch with `HirTerminator::FallibleBranch` and unwrap success/error before borrow
-    ///   validation.
+    ///   carrier (success value at the source's exact type or builtin `Error`). A later lowering
+    ///   helper is expected to branch with `HirTerminator::FallibleBranch` and unwrap
+    ///   success/error before borrow validation.
     ValidateFloat {
-        /// The `Float` expression to validate.
+        /// The exact binary-float expression to validate.
         source: HirValueId,
         /// How the operation should behave on failure.
         failure_mode: NumericFailureMode,
-        /// Local that receives the validated float or fallible carrier.
+        /// Local that receives the validated binary-float value or fallible carrier.
         result: HirLocalDestination,
     },
 }

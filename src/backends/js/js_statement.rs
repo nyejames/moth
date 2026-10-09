@@ -556,7 +556,13 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_numeric_carrier_assignment(helper_call, failure_mode, result)
     }
 
-    /// Lower a `HirStatementKind::ValidateFloat` into the profile-aware finite-Float helper call.
+    /// Lower a `HirStatementKind::ValidateFloat` into the exact-precision finite-Float helper.
+    ///
+    /// WHAT: derives the validated source's own binary-float precision and emits it as the
+    ///       helper's precision argument.
+    /// WHY: a validated boundary value can carry a fixed `F32`/`F64` type under any module
+    ///      profile. Only a profile-sized `Float` source reads the profile precision bridge, so
+    ///      exact fixed carriers are never rounded to the neighbouring profile precision.
     fn emit_validate_float_statement(
         &mut self,
         failure_mode: NumericFailureMode,
@@ -564,7 +570,18 @@ impl<'hir> JsEmitter<'hir> {
         result: HirLocalDestination,
     ) -> Result<(), CompilerError> {
         let source_expr = self.lower_expr(source)?;
-        let helper_call = format!("__moth_float_validate({source_expr})");
+        let source_type = self.hir.expressions.expression(source).ty;
+        let precision = NumericScalar::from_type_id(source_type, self.type_environment)
+            .and_then(|scalar| scalar.binary_float_precision(self.config.numeric_profile))
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "JS backend received Float validation source with non-binary-float type {source_type:?}"
+                ))
+            })?;
+        let helper_call = format!(
+            "__moth_float_validate({source_expr}, {})",
+            binary_float_precision_bits(precision)
+        );
         self.emit_numeric_carrier_assignment(helper_call, failure_mode, result)
     }
 

@@ -8,6 +8,7 @@
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{
@@ -33,8 +34,9 @@ pub(crate) struct EmittedFallibleCarrier {
     pub(crate) carrier_type: TypeId,
     pub(crate) ok_type: TypeId,
     pub(crate) err_type: TypeId,
-    /// True when the success payload is a `Float` entering from an external/backend boundary
-    /// and must be validated before ordinary Moth code observes it.
+    /// True when the success payload is a raw binary float entering from an external/backend
+    /// boundary and must be validated at its resolved exact precision before ordinary Moth
+    /// code observes it.
     pub(crate) validate_float_success: bool,
 }
 
@@ -48,12 +50,15 @@ pub(super) struct FallibleCarrierBranch {
 }
 
 impl<'a> HirBuilder<'a> {
-    /// Returns true when the given type is the builtin `Float` type.
+    /// Returns true when the given type is an exact binary-float scalar.
     ///
-    /// WHAT: compares the type id against the registered builtin `Float` id.
-    /// WHY: external/backend boundary Float success values need explicit validation before use.
-    pub(crate) fn type_id_is_float(&self, type_id: TypeId) -> bool {
-        type_id == self.type_environment.builtins().float
+    /// WHAT: resolves the type through the shared numeric-scalar owner, which admits builtin
+    ///       `Float` and every fixed `F16`/`F32`/`F64` identity.
+    /// WHY: external/backend boundary binary-float success values need explicit validation, and
+    ///      the decision must follow the resolved exact scalar rather than builtin `Float`.
+    pub(crate) fn type_id_is_exact_binary_float(&self, type_id: TypeId) -> bool {
+        NumericScalar::from_type_id(type_id, &self.type_environment)
+            .is_some_and(NumericScalar::is_binary_float)
     }
 
     /// Emits a plain call to the current block and stores its result in a temporary local.

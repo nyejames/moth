@@ -1938,23 +1938,32 @@ fn validator_rejects_plain_numeric_unary_op() {
 
 fn inject_float_statement(
     module: &mut HirModule,
-    type_environment: &TypeEnvironment,
     span: &Option<SourceSpan>,
     kind: HirStatementKind,
+    source_type: TypeId,
+    result_type: TypeId,
+) {
+    let entry_block_index = start_entry_block_index(module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let source = float_expression(1.5, source_type, entry_region, span, module);
+    inject_float_statement_with_source(module, span, kind, source, result_type);
+}
+
+/// Emits a `FormatFloat`/`ValidateFloat` statement over an already-built source expression.
+///
+/// WHY: negative fixtures need a source literal that is valid for its own non-float type, so the
+///      statement's own type guard rejects it instead of an ill-typed literal.
+fn inject_float_statement_with_source(
+    module: &mut HirModule,
+    span: &Option<SourceSpan>,
+    kind: HirStatementKind,
+    source: HirValueId,
     result_type: TypeId,
 ) {
     let _path_fork = super::PathInternerFork::empty();
     let entry_block_index = start_entry_block_index(module);
     let entry_region = module.blocks[entry_block_index].region;
     let result_local = LocalId(9000);
-
-    let source = float_expression(
-        1.5,
-        type_environment.builtins().float,
-        entry_region,
-        span,
-        module,
-    );
 
     {
         let entry_block = &mut module.blocks[entry_block_index];
@@ -1991,6 +2000,28 @@ fn inject_float_statement(
     module.blocks[entry_block_index].statements.push(statement);
 }
 
+/// Builds a mapped fixed binary-float literal row for `scalar`/`type_id`.
+fn fixed_float_source(
+    module: &mut HirModule,
+    span: &Option<SourceSpan>,
+    scalar: FixedScalar,
+    type_id: TypeId,
+) -> HirValueId {
+    let entry_block_index = start_entry_block_index(module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let value = FixedScalarValue::binary_float(scalar, 1.5)
+        .expect("1.5 is exactly representable at every supported binary-float precision");
+    let expression_id = append_hir_expression(
+        module,
+        HirExpressionKind::FixedScalar(value),
+        type_id,
+        entry_region,
+        ValueKind::RValue,
+    );
+    module.side_table.map_value(*span, expression_id, *span);
+    expression_id
+}
+
 #[test]
 fn validator_accepts_format_float_trap() {
     let _path_fork = super::PathInternerFork::empty();
@@ -2000,13 +2031,13 @@ fn validator_accepts_format_float_trap() {
 
     inject_float_statement(
         &mut module,
-        &type_environment,
         &span,
         HirStatementKind::FormatFloat {
             source: HirValueId(0),
             failure_mode: NumericFailureMode::Trap,
             result: HirLocalDestination::Define(LocalId(0)),
         },
+        type_environment.builtins().float,
         string_type,
     );
 
@@ -2023,7 +2054,6 @@ fn validator_accepts_validate_float_trap() {
 
     inject_float_statement(
         &mut module,
-        &type_environment,
         &span,
         HirStatementKind::ValidateFloat {
             source: HirValueId(0),
@@ -2031,10 +2061,97 @@ fn validator_accepts_validate_float_trap() {
             result: HirLocalDestination::Define(LocalId(0)),
         },
         float_type,
+        float_type,
     );
 
     validate_module_for_tests(&module, &string_table, &type_environment)
         .expect("validator should accept ValidateFloat with Trap and Float result local");
+}
+
+#[test]
+fn validator_accepts_validate_float_with_exact_fixed_f64_type() {
+    let _path_fork = super::PathInternerFork::empty();
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let span = None;
+    let f64_type = fixed_type(FixedScalar::F64);
+    let source = fixed_float_source(&mut module, &span, FixedScalar::F64, f64_type);
+
+    inject_float_statement_with_source(
+        &mut module,
+        &span,
+        HirStatementKind::ValidateFloat {
+            source: HirValueId(0),
+            failure_mode: NumericFailureMode::Trap,
+            result: HirLocalDestination::Define(LocalId(0)),
+        },
+        source,
+        f64_type,
+    );
+
+    validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect("validator should accept ValidateFloat with an exact fixed F64 source and result");
+}
+
+#[test]
+fn validator_rejects_validate_float_result_type_mismatch() {
+    let _path_fork = super::PathInternerFork::empty();
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let span = None;
+    let f64_type = fixed_type(FixedScalar::F64);
+    let source = fixed_float_source(&mut module, &span, FixedScalar::F64, f64_type);
+
+    inject_float_statement_with_source(
+        &mut module,
+        &span,
+        HirStatementKind::ValidateFloat {
+            source: HirValueId(0),
+            failure_mode: NumericFailureMode::Trap,
+            result: HirLocalDestination::Define(LocalId(0)),
+        },
+        source,
+        type_environment.builtins().float,
+    );
+
+    let error = validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect_err("validator should reject a result local that erodes the validated type");
+
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+}
+
+#[test]
+fn validator_rejects_validate_float_with_non_float_source() {
+    let _path_fork = super::PathInternerFork::empty();
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let span = None;
+    let i32_type = fixed_type(FixedScalar::I32);
+    let entry_block_index = start_entry_block_index(&module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let i32_value = FixedScalarValue::signed(FixedScalar::I32, 41).expect("41 fits in I32");
+    let source = append_hir_expression(
+        &mut module,
+        HirExpressionKind::FixedScalar(i32_value),
+        i32_type,
+        entry_region,
+        ValueKind::RValue,
+    );
+    module.side_table.map_value(span, source, span);
+
+    inject_float_statement_with_source(
+        &mut module,
+        &span,
+        HirStatementKind::ValidateFloat {
+            source: HirValueId(0),
+            failure_mode: NumericFailureMode::Trap,
+            result: HirLocalDestination::Define(LocalId(0)),
+        },
+        source,
+        i32_type,
+    );
+
+    let error = validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect_err("validator should reject a non-float ValidateFloat source");
+
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
 }
 
 #[test]
@@ -2046,13 +2163,13 @@ fn validator_rejects_format_float_trap_with_non_string_result() {
 
     inject_float_statement(
         &mut module,
-        &type_environment,
         &span,
         HirStatementKind::FormatFloat {
             source: HirValueId(0),
             failure_mode: NumericFailureMode::Trap,
             result: HirLocalDestination::Define(LocalId(0)),
         },
+        float_type,
         float_type,
     );
 
@@ -2078,13 +2195,13 @@ fn validator_accepts_format_float_return_error_with_carrier() {
 
     inject_float_statement(
         &mut module,
-        &type_environment,
         &span,
         HirStatementKind::FormatFloat {
             source: HirValueId(0),
             failure_mode: NumericFailureMode::ReturnError,
             result: HirLocalDestination::Define(LocalId(0)),
         },
+        type_environment.builtins().float,
         carrier_type,
     );
 
@@ -2101,13 +2218,13 @@ fn validator_rejects_format_float_return_error_without_carrier() {
 
     inject_float_statement(
         &mut module,
-        &type_environment,
         &span,
         HirStatementKind::FormatFloat {
             source: HirValueId(0),
             failure_mode: NumericFailureMode::ReturnError,
             result: HirLocalDestination::Define(LocalId(0)),
         },
+        type_environment.builtins().float,
         string_type,
     );
 
@@ -2130,13 +2247,13 @@ fn validator_rejects_validate_float_return_error_without_carrier() {
 
     inject_float_statement(
         &mut module,
-        &type_environment,
         &span,
         HirStatementKind::ValidateFloat {
             source: HirValueId(0),
             failure_mode: NumericFailureMode::ReturnError,
             result: HirLocalDestination::Define(LocalId(0)),
         },
+        float_type,
         float_type,
     );
 
@@ -2179,11 +2296,12 @@ fn validator_rejects_discharged_mode_on_float_and_range_step_statements() {
     for (kind, expected_message) in float_cases {
         let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
         let span = None;
+        let float_type = type_environment.builtins().float;
         let success_type = match &kind {
             HirStatementKind::FormatFloat { .. } => type_environment.builtins().string,
-            _ => type_environment.builtins().float,
+            _ => float_type,
         };
-        inject_float_statement(&mut module, &type_environment, &span, kind, success_type);
+        inject_float_statement(&mut module, &span, kind, float_type, success_type);
 
         let error = validate_module_for_tests(&module, &string_table, &type_environment)
             .expect_err("validator should reject Infallible on float statements");

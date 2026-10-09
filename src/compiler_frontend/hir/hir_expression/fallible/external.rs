@@ -25,6 +25,7 @@ pub(crate) struct ExternalFallibleCallLoweringInput<'a> {
     pub(crate) id: crate::compiler_frontend::external_packages::ExternalFunctionId,
     pub(crate) args: &'a [CallArgument],
     pub(crate) result_type_ids: &'a [FrontendTypeId],
+    pub(crate) requires_external_float_validation: bool,
     pub(crate) error_type_id: FrontendTypeId,
     pub(crate) handling:
         &'a crate::compiler_frontend::ast::expressions::expression::FallibleExpressionHandling,
@@ -50,11 +51,17 @@ impl<'a> HirBuilder<'a> {
     }
 
     /// Emits an external fallible call carrier to the current block.
+    ///
+    /// WHAT: builds the carrier slots from the resolved success/error types and stores the
+    ///       producer's float-validation fact alongside the emitted call result.
+    /// WHY: only a raw successful binary-float payload may later be validated; the fact comes
+    ///      from AST call parsing, and the resolved success type must agree with it.
     pub(in crate::compiler_frontend::hir) fn emit_external_result_call_carrier_to_current_block(
         &mut self,
         id: crate::compiler_frontend::external_packages::ExternalFunctionId,
         args: &[CallArgument],
         result_type_ids: &[FrontendTypeId],
+        requires_external_float_validation: bool,
         error_type_id: FrontendTypeId,
         call_span: &Option<SourceSpan>,
     ) -> Result<EmittedFallibleCarrier, HirConstructionFailure> {
@@ -72,7 +79,8 @@ impl<'a> HirBuilder<'a> {
             carrier_type,
             ok_type,
             err_type,
-            validate_float_success: self.type_id_is_float(ok_type),
+            validate_float_success: requires_external_float_validation
+                && self.type_id_is_exact_binary_float(ok_type),
         })
     }
 }

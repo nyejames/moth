@@ -11,13 +11,9 @@ use super::support::*;
 use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-use crate::compiler_frontend::canonical_type_identity::{
-    CanonicalBuiltinType, CanonicalTypeIdentity,
-};
-use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
@@ -36,34 +32,6 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::hir::validate_hir_module;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::process::Command;
-
-/// The builtin `Error` type id, registered through the same canonical-identity dance the
-/// analysis invariants fixtures use, because `TypeEnvironment::new()` does not seed it.
-fn fixture_error_type(type_environment: &mut TypeEnvironment) -> TypeId {
-    let error_identity = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error);
-    if let Some(error_type_id) = type_environment.type_id_for_canonical_identity(&error_identity) {
-        return error_type_id;
-    }
-
-    let (_, error_type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
-        id: NominalTypeId(0),
-        path: PathId::ROOT,
-        fields: Box::new([]),
-        generic_parameters: None,
-        const_record: false,
-    });
-    type_environment
-        .register_canonical_identity(error_identity, error_type_id)
-        .expect("test builtin Error identity should register");
-    error_type_id
-}
-
-/// Interned internal fallible carrier carrying the builtin `Error` as its error payload,
-/// exactly like the carriers validated HIR gives ReturnError and CastOp result locals.
-fn fixture_carrier(type_environment: &mut TypeEnvironment, success: TypeId) -> TypeId {
-    let error_type = fixture_error_type(type_environment);
-    type_environment.intern_fallible_carrier(success, error_type)
-}
 
 /// A hand-built single-block numeric fixture body.
 struct NumericFixture {

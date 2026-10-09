@@ -35,19 +35,21 @@ use crate::return_hir_transformation_error;
 use super::LoweredExpression;
 
 impl<'a> HirBuilder<'a> {
-    /// Lowers an external function call whose success return is exactly one `Float`, emitting the
-    /// raw call and a `ValidateFloat` boundary check directly into the current block.
+    /// Lowers an external function call whose success return is exactly one binary float, emitting
+    /// the raw call and a `ValidateFloat` boundary check directly into the current block.
     ///
     /// WHAT: evaluates arguments, emits the external `Call` to the current block, then emits
-    ///       `ValidateFloat` on the raw result and returns the validated finite `Float`.
+    ///       `ValidateFloat` on the raw result and returns the validated finite value at its
+    ///       resolved exact type.
     /// WHY: `ValidateFloat` can branch, so it must not be hidden inside a passive expression prelude.
-    ///      This helper is used only when `expression_needs_current_block_lowering` has already opted
-    ///      the call into current-block lowering.
+    ///      This helper is used only when the producer's `requires_external_float_validation` fact has
+    ///      already opted the call into current-block lowering, and the raw/validated locals must use
+    ///      the resolved result type rather than re-deriving builtin `Float`.
     pub(crate) fn lower_validated_external_call_expression(
         &mut self,
         id: ExternalFunctionId,
         args: &[CallArgument],
-        _result_type_ids: &[FrontendTypeId],
+        result_type_ids: &[FrontendTypeId],
         span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
         let mut lowered_args = Vec::with_capacity(args.len());
@@ -60,8 +62,8 @@ impl<'a> HirBuilder<'a> {
             lowered_args.push(lowered.value);
         }
 
-        let float_type = self.lower_type_id(self.type_environment.builtins().float, span)?;
-        let result_local = self.allocate_temp_local(float_type, None)?;
+        let result_type = self.lower_call_result_type(result_type_ids, span)?;
+        let result_local = self.allocate_temp_local(result_type, None)?;
         let args = self
             .module
             .expressions
@@ -82,7 +84,7 @@ impl<'a> HirBuilder<'a> {
         let region = self.current_region_or_error(span)?;
         let no_span = None;
         let raw_value =
-            self.make_local_load_expression(result_local, float_type, &no_span, region)?;
+            self.make_local_load_expression(result_local, result_type, &no_span, region)?;
         let validated_value = self.emit_validated_float_value(raw_value, span)?;
 
         Ok(LoweredExpression {

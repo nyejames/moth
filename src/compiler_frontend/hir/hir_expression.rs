@@ -381,6 +381,7 @@ impl<'a> HirBuilder<'a> {
                 id,
                 args,
                 result_type_ids,
+                requires_external_float_validation,
                 error_type_id,
                 handling,
                 ..
@@ -391,6 +392,7 @@ impl<'a> HirBuilder<'a> {
                         id: *id,
                         args,
                         result_type_ids,
+                        requires_external_float_validation: *requires_external_float_validation,
                         error_type_id: *error_type_id,
                         handling,
                         call_span: &expr.span,
@@ -456,8 +458,9 @@ impl<'a> HirBuilder<'a> {
                 id: host_id,
                 args,
                 result_type_ids,
+                requires_external_float_validation,
             } => {
-                if self.result_type_ids_are_single_float(result_type_ids) {
+                if *requires_external_float_validation {
                     self.lower_validated_external_call_expression(
                         *host_id,
                         args,
@@ -856,10 +859,10 @@ impl<'a> HirBuilder<'a> {
                 .any(|arg| self.expression_needs_current_block_lowering(&arg.value)),
             ExpressionKind::HostFunctionCall {
                 args,
-                result_type_ids,
+                requires_external_float_validation,
                 ..
             } => {
-                self.result_type_ids_are_single_float(result_type_ids)
+                *requires_external_float_validation
                     || args
                         .iter()
                         .any(|arg| self.expression_needs_current_block_lowering(&arg.value))
@@ -939,19 +942,6 @@ impl<'a> HirBuilder<'a> {
             | ExpressionKind::NoValue
             | ExpressionKind::OptionNone => false,
         }
-    }
-
-    /// Returns true when an external call returns exactly one `Float` success value.
-    ///
-    /// WHAT: checks that the resolved success return list has one slot and that slot is the
-    ///       builtin `Float` type.
-    /// WHY: external/backend boundaries must validate a scalar `Float` before ordinary Moth
-    ///      code observes it; multi-success or non-Float returns are handled elsewhere.
-    fn result_type_ids_are_single_float(&self, result_type_ids: &[FrontendTypeId]) -> bool {
-        let [single] = result_type_ids else {
-            return false;
-        };
-        *single == self.type_environment.builtins().float
     }
 
     // -------------------------

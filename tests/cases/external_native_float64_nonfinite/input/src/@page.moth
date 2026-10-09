@@ -1,4 +1,8 @@
-@bad_float.js unsafe_float
+-- Plan section 5.2: the external binary-float boundary uses the resolved destination precision.
+-- Under the binary64 destination a finite high-range host value stays finite and is accepted
+-- unchanged, while raw NaN and both infinities are rejected with code 304 through the declared
+-- builtin Error! channel.
+@bad_float.js unsafe_float, float_payload
 
 load_code || -> Int, Error!:
     value = unsafe_float()
@@ -17,3 +21,50 @@ ignored = load_code() catch |err|:
 ;
 
 io.line([: external_native_float64_nonfinite code=[code]])
+
+payload_code |selector U32| -> U32, Error!:
+    value = float_payload(selector)
+    if value is 1.5:
+        return 1
+    ;
+    if value is 0.1:
+        return 2
+    ;
+    if value is 3.5e38:
+        return 3
+    ;
+    if value is 0.0:
+        return 4
+    ;
+    if value > 0.0:
+        return 5
+    ;
+    return 6
+;
+
+payload_class |selector U32| -> U32:
+    classified = payload_code(selector) catch:
+        then 0
+    ;
+    return classified
+;
+
+payload_failure |selector U32| -> U32:
+    failure ~U32 = 0
+    ignored = payload_code(selector) catch |err|:
+        failure = err.code
+        then 0
+    ;
+    return failure
+;
+
+nan_code = payload_failure(5)
+positive_inf_code = payload_failure(6)
+negative_inf_code = payload_failure(7)
+half_class = payload_class(1)
+tenth_class = payload_class(2)
+large_class = payload_class(3)
+maximum_class = payload_class(4)
+zero_class = payload_class(8)
+
+io.line([: external_native_float64_nonfinite raw-class=[half_class]/[tenth_class]/[large_class]/[maximum_class]/[zero_class] raw-codes=[nan_code]/[positive_inf_code]/[negative_inf_code]])

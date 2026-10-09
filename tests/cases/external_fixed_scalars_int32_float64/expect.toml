@@ -4,7 +4,7 @@ numeric_profile = "Int32/Float64"
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "fixed scalar zero=0 maximum=true loaded=true f32=true/true overflow=304 native=17/18/1.5"
+rendered_output_exact = "fixed scalar zero=0 maximum=true loaded=true f32=true/true overflow=304 native=17/18/1.5 raw=1/2/4/5/3 codes=304/304/304/304"
 
 [backends.html_wasm]
 mode = "failure"

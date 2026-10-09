@@ -120,6 +120,12 @@ impl Expression {
         )
     }
 
+    /// Builds an infallible external call whose result is never a validated float boundary.
+    ///
+    /// WHAT: these fixtures only carry non-float foreign results, so the
+    ///       `requires_external_float_validation` fact stays false.
+    /// WHY: guarded external float calls must go through the typed production constructor with
+    ///      the explicit fact, never through this convenience fixture.
     pub fn host_function_call(
         id: ExternalFunctionId,
         args: Vec<Expression>,
@@ -134,6 +140,7 @@ impl Expression {
         )
     }
 
+    /// Builds an infallible external call expression for non-float fixture results.
     pub fn host_function_call_with_arguments(
         id: ExternalFunctionId,
         args: Vec<CallArgument>,
@@ -145,6 +152,7 @@ impl Expression {
                 id,
                 args,
                 result_type_ids: result_type_ids.clone(),
+                requires_external_float_validation: false,
             },
             result_type_ids,
             span,

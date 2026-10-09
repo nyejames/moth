@@ -1,5 +1,7 @@
 -- Plan section 2: foreign value-contract violations keep existing validation.
--- No automatic recoverable adapter: the outer catch does not observe code 304.
+-- No automatic recoverable adapter: the outer catch does not observe code 304. The integrity
+-- guard halts the page, so the case asserts the terminal outcome category with no output
+-- fragments rather than pinning the guard message text.
 @external_float.js overflow_float
 
 read_raw || -> Float:

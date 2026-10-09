@@ -1,0 +1,15 @@
+-- Plan section 3B: the existing fatal versus source-declared Error! integrity routes, including
+-- synthetic start. A fallible external float whose successful payload is non-finite is a fatal
+-- integrity guard in the synthetic entry: the legally placed catch below recovers declared errors,
+-- not the guard, so page execution stops with no output. The binary64 destination delivers the
+-- NaN unchanged, so this is a directly delivered raw non-finite value rather than a rounded
+-- overflow. The run halts, so the case asserts the outcome category and the absence of any
+-- fallback output instead of pinning the guard message text.
+@nan_float.js fallible_nan
+
+code ~U32 = 0
+value = fallible_nan() catch |err|:
+    code = err.code
+    then 0.0
+;
+io.line([: external_native_float64_start_nonfinite code=[code]])

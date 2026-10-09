@@ -197,6 +197,7 @@ impl<'a> HirBuilder<'a> {
             id,
             args,
             result_type_ids,
+            requires_external_float_validation,
             error_type_id,
             handling,
             call_span,
@@ -213,6 +214,7 @@ impl<'a> HirBuilder<'a> {
                 id,
                 args,
                 result_type_ids,
+                requires_external_float_validation,
                 error_type_id,
                 call_span,
             )?;
@@ -243,6 +245,7 @@ impl<'a> HirBuilder<'a> {
             id,
             args,
             result_type_ids,
+            requires_external_float_validation,
             error_type_id,
             call_span,
         )?;

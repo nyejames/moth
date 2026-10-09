@@ -172,6 +172,70 @@ fn fixed_scalar_constants_keep_declared_identity_and_exact_value() {
     }
 }
 
+/// A finite binary64 constant whose value overflows every narrower binary-float precision keeps
+/// its exact scalar under a `Float32` profile, so consumer precision and canonical formatting
+/// stay binary64 instead of collapsing to the profile precision.
+#[test]
+fn max_finite_f64_constant_keeps_binary64_consumer_precision_under_float32_profile() {
+    use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+    use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+    use moth_lexical::numeric::format::format_finite_float;
+    use moth_lexical::numeric::precision::BinaryFloatPrecision;
+
+    let mut string_table = StringTable::new();
+    let value = FixedScalarValue::binary_float(FixedScalar::F64, f64::MAX)
+        .expect("f64::MAX is a finite, exactly representable binary64 value");
+    let definition = ExternalConstantDef {
+        name: "MAX_F64".to_owned(),
+        data_type: ExternalAbiType::Fixed(FixedScalar::F64).into(),
+        value: ExternalConstantValue::Fixed(value),
+    };
+
+    let projected = project_external_constant(
+        &definition,
+        string_table.intern("MAX_F64"),
+        None,
+        numeric_profile(FloatPrecision::Bits32),
+        ValueMode::ImmutableOwned,
+        &mut string_table,
+    )
+    .expect("a finite binary64 constant projects under a Float32 profile");
+
+    assert_eq!(
+        projected.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::F64)
+    );
+    let ExpressionKind::FixedScalar(projected_value) = projected.kind else {
+        panic!("an F64 constant must remain a fixed scalar expression");
+    };
+
+    // Consumer fact: the projected identity still resolves to binary64 precision even though
+    // the compilation profile selects binary32 for `Float`, so the value remains exactly
+    // representable at its own precision and round-trips through canonical formatting.
+    let environment = TypeEnvironment::new();
+    let precision = NumericScalar::from_type_id(projected.type_id, &environment)
+        .and_then(|scalar| scalar.binary_float_precision(numeric_profile(FloatPrecision::Bits32)))
+        .expect("a fixed F64 constant resolves to a binary-float scalar");
+    assert_eq!(precision, BinaryFloatPrecision::Binary64);
+
+    let projected_f64 = projected_value
+        .as_f64()
+        .expect("an F64 fixed value exposes its binary64 payload");
+    let text = format_finite_float(projected_f64, precision)
+        .expect("the maximum finite binary64 value must format at its own precision");
+    assert_eq!(
+        text.parse::<f64>().expect("formatted text parses"),
+        f64::MAX
+    );
+
+    // The profile precision cannot carry the constant, so keeping the resolved precision is
+    // load-bearing rather than an accidental wider width.
+    assert!(
+        format_finite_float(projected_f64, BinaryFloatPrecision::Binary32).is_err(),
+        "the maximum finite binary64 value must not collapse through binary32"
+    );
+}
+
 #[test]
 fn native_uint_constant_projects_exact_payload() {
     use crate::compiler_frontend::compiler_messages::DiagnosticPayload;

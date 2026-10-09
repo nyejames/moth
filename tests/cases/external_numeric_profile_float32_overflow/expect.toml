@@ -4,4 +4,12 @@ numeric_profile = "Int64/Float32"
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["external_native_float32 overflow-code=304"]
+rendered_output_contains = [
+    "external_native_float32 overflow-code=304",
+    "raw-class=1/2/4/5/3",
+    "raw-codes=304/304/304/304",
+    "host-calls=11 selectors=1",
+    "fallible=304/0/true/2",
+    "error=91/host rejected float payload",
+    "forwarding=0/304/true",
+]

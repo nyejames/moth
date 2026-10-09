@@ -1022,6 +1022,7 @@ fn expression_host_call_uses_variant_result_type_ids() {
         ExternalFunctionId::IoLine,
         vec![],
         vec![builtin_type_ids::INT],
+        false,
         &mut builder.type_environment,
         span,
     );
@@ -3606,6 +3607,7 @@ fn external_float_call_emits_validate_float_in_current_block() {
         ExternalFunctionId::Synthetic(0),
         vec![],
         vec![builtin_type_ids::FLOAT],
+        true,
         &mut builder.type_environment,
         span,
     );
@@ -3636,6 +3638,60 @@ fn external_float_call_emits_validate_float_in_current_block() {
 }
 
 #[test]
+fn external_fixed_f64_call_allocates_and_validates_its_exact_type() {
+    let mut path_fork = super::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let span = None;
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let f64_type_id =
+        builtin_type_ids::fixed_scalar(moth_lexical::numeric::fixed_scalar::FixedScalar::F64);
+    let f64_type = builder
+        .lower_type_id(f64_type_id, &span)
+        .expect("fixed F64 TypeId should lower in test context");
+
+    let call_expr = Expression::host_function_call_with_typed_arguments(
+        ExternalFunctionId::Synthetic(0),
+        vec![],
+        vec![f64_type_id],
+        true,
+        &mut builder.type_environment,
+        span,
+    );
+
+    let lowered = builder
+        .lower_expression_value_to_current_block(&call_expr)
+        .expect("raw fixed F64 external call should lower");
+
+    assert_eq!(
+        expression_row(&builder, lowered).ty,
+        f64_type,
+        "the validated value must keep the resolved fixed F64 type"
+    );
+
+    let validate_result_local = builder
+        .test_current_block_statements()
+        .iter()
+        .find_map(|statement| match &statement.kind {
+            HirStatementKind::ValidateFloat { result, .. } => Some(result.local()),
+            _ => None,
+        })
+        .expect("raw fixed F64 external call should emit ValidateFloat");
+
+    let result_local_type = builder
+        .module
+        .blocks
+        .iter()
+        .flat_map(|block| &block.locals)
+        .find(|local| local.id == validate_result_local)
+        .map(|local| local.ty)
+        .expect("ValidateFloat result local should be registered");
+    assert_eq!(
+        result_local_type, f64_type,
+        "the validated result local must use the resolved fixed F64 type, not builtin Float"
+    );
+}
+
+#[test]
 fn external_float_call_in_builtin_error_function_validates_with_return_error() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
@@ -3658,6 +3714,7 @@ fn external_float_call_in_builtin_error_function_validates_with_return_error() {
         ExternalFunctionId::Synthetic(1),
         vec![],
         vec![builtin_type_ids::FLOAT],
+        true,
         &mut builder.type_environment,
         span,
     );
@@ -3697,6 +3754,7 @@ fn external_int_call_does_not_emit_validate_float() {
         ExternalFunctionId::Synthetic(0),
         vec![],
         vec![builtin_type_ids::INT],
+        false,
         &mut builder.type_environment,
         span,
     );
@@ -3743,6 +3801,7 @@ fn external_fallible_float_call_propagation_validates_success() {
             id: ExternalFunctionId::Synthetic(1),
             args: vec![],
             result_type_ids: vec![builtin_type_ids::FLOAT],
+            requires_external_float_validation: true,
             error_type_id: error_type,
             handling: FallibleExpressionHandling::Propagate,
             span,
@@ -3802,6 +3861,7 @@ fn external_fallible_float_call_catch_validates_success() {
             id: ExternalFunctionId::Synthetic(2),
             args: vec![],
             result_type_ids: vec![builtin_type_ids::FLOAT],
+            requires_external_float_validation: true,
             error_type_id: error_type,
             handling: FallibleExpressionHandling::Propagate,
             span,

@@ -31,14 +31,18 @@ use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_t
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{
-    ExternalFunctionDef, ExternalFunctionId, ExternalSignatureType,
+    ExternalAbiType, ExternalFunctionDef, ExternalFunctionId, ExternalJsLowering,
+    ExternalSignatureType,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::profile::FloatPrecision;
 
 /// Input bundle for `parse_function_call` to avoid long argument lists.
@@ -75,6 +79,7 @@ struct ParsedExternalFunctionCall {
     id: ExternalFunctionId,
     args: Vec<CallArgument>,
     result_type_ids: Vec<TypeId>,
+    requires_external_float_validation: bool,
     error_return_type_id: Option<TypeId>,
     span: Option<SourceSpan>,
 }
@@ -433,10 +438,20 @@ fn parse_external_function_call_parts(
         None
     };
 
+    // The float-integrity fact is settled once here, where both the resolved success TypeId
+    // and the callee's lowering metadata are visible, so every later AST and HIR consumer
+    // carries one neutral boolean instead of re-deriving it from the success type.
+    let requires_external_float_validation = external_call_requires_float_validation(
+        external_function,
+        &result_type_ids,
+        type_interner.environment(),
+    );
+
     Ok(ParsedExternalFunctionCall {
         id: external_function_id,
         args,
         result_type_ids,
+        requires_external_float_validation,
         error_return_type_id,
         span: call_span,
     })
@@ -460,6 +475,7 @@ fn finish_external_function_call_expression(
         id,
         args,
         result_type_ids,
+        requires_external_float_validation,
         error_return_type_id,
         span,
     } = parsed_call;
@@ -469,6 +485,7 @@ fn finish_external_function_call_expression(
             name: id,
             args,
             result_type_ids,
+            requires_external_float_validation,
             error_type_id,
             call_span: span,
         };
@@ -495,6 +512,7 @@ fn finish_external_function_call_expression(
                     id: call.name,
                     args: call.args,
                     result_type_ids: call.result_type_ids,
+                    requires_external_float_validation: call.requires_external_float_validation,
                     error_type_id: call.error_type_id,
                     handling: FallibleExpressionHandling::Recover,
                     span: call.call_span,
@@ -519,9 +537,48 @@ fn finish_external_function_call_expression(
         id,
         args,
         result_type_ids,
+        requires_external_float_validation,
         type_interner.environment_mut_for_derived_types(),
         span,
     ))
+}
+
+/// Returns whether an external call's raw success value must pass HIR float validation.
+///
+/// WHAT: true when the resolved success channel is exactly one binary-float slot and the
+///       callee does not own a self-validating fixed-float JavaScript wrapper.
+/// WHY: raw external boundaries may hand back any value, so every binary-float result needs
+///      the HIR integrity guard at its resolved precision. Only the generated fixed
+///      `F32`/`F64` `ExternalModuleExport` wrapper rounds and rejects non-finite results
+///      itself; a raw Wasm lowering would bypass that wrapper, and every other scalar,
+///      arity, or lowering shape stays outside this fact.
+fn external_call_requires_float_validation(
+    external_function: &ExternalFunctionDef,
+    result_type_ids: &[TypeId],
+    type_environment: &TypeEnvironment,
+) -> bool {
+    let [single] = result_type_ids else {
+        return false;
+    };
+
+    if !NumericScalar::from_type_id(*single, type_environment)
+        .is_some_and(NumericScalar::is_binary_float)
+    {
+        return false;
+    }
+
+    let [slot] = external_function.returns.as_slice() else {
+        return false;
+    };
+    let self_validating_fixed_js_glue = matches!(
+        &slot.value_type,
+        ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::F32 | FixedScalar::F64))
+    ) && matches!(
+        &external_function.lowerings.js,
+        Some(ExternalJsLowering::ExternalModuleExport { .. })
+    ) && external_function.lowerings.wasm.is_none();
+
+    !self_validating_fixed_js_glue
 }
 
 /// Verifies that every declared return slot has a corresponding frontend-visible type.
@@ -619,3 +676,7 @@ fn validate_external_signature_type_is_registered(
 #[cfg(test)]
 #[path = "tests/cast_boundary_tests.rs"]
 mod cast_boundary_tests;
+
+#[cfg(test)]
+#[path = "tests/external_call_float_selection_tests.rs"]
+mod external_call_float_selection_tests;

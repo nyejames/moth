@@ -67,6 +67,7 @@ pub(crate) struct HandledFallibleHostCall {
     pub(crate) name: ExternalFunctionId,
     pub(crate) args: Vec<CallArgument>,
     pub(crate) result_type_ids: Vec<TypeId>,
+    pub(crate) requires_external_float_validation: bool,
     pub(crate) error_type_id: TypeId,
     pub(crate) call_span: Option<SourceSpan>,
 }
@@ -104,6 +105,7 @@ impl HandledFallibleHostCall {
                     id: self.name,
                     args: self.args,
                     result_type_ids: self.result_type_ids,
+                    requires_external_float_validation: self.requires_external_float_validation,
                     error_type_id: self.error_type_id,
                     handling: expression_handling,
                     span: self.call_span,

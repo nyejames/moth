@@ -2439,6 +2439,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                 test_source_location(2),
             )],
             result_type_ids: vec![builtin_type_ids::STRING, builtin_type_ids::STRING],
+            requires_external_float_validation: false,
             error_type_id: builtin_type_ids::STRING,
             handling: FallibleExpressionHandling::Propagate,
             span: None,

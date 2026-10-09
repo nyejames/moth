@@ -18,7 +18,7 @@ use crate::compiler_frontend::external_packages::{
 use crate::projects::html_project::external_js::runtime_glue::exports::ReferencedExport;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
+use moth_lexical::numeric::profile::{IntWidth, NumericProfile};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
@@ -182,7 +182,6 @@ enum ReturnAdapter {
     NativeInt64,
     NativeUint32,
     NativeUint64,
-    NativeFloat32,
     Fixed(FixedScalarAdapter),
 }
 
@@ -338,11 +337,10 @@ fn return_adapter_for_type(
         ExternalSignatureType::NativeUint if numeric_profile.int_width == IntWidth::Bits64 => {
             ReturnAdapter::NativeUint64
         }
-        ExternalSignatureType::NativeFloat
-            if numeric_profile.float_precision == FloatPrecision::Bits32 =>
-        {
-            ReturnAdapter::NativeFloat32
-        }
+        // Native floats cross as the raw foreign Number: the HIR Float boundary owns the single
+        // rounding and finite check at the resolved source precision, so glue must not round the
+        // success snapshot into a different value first.
+        ExternalSignatureType::NativeFloat => ReturnAdapter::Identity,
         ExternalSignatureType::Abi(ExternalAbiType::Fixed(scalar)) => ReturnAdapter::Fixed(
             FixedScalarAdapter::for_scalar(*scalar, numeric_profile)
                 .expect("validate_supported_signature rejects fixed scalars without an adapter"),
@@ -465,14 +463,6 @@ fn adapted_return_body(
     match adapter {
         ReturnAdapter::Identity => {
             format!("{indent}return {};", success_value(value_expression))
-        }
-        ReturnAdapter::NativeFloat32 => {
-            let raw_value = "__moth_external_float32_raw";
-            let adapted_value = "__moth_external_float32";
-            let returned_value = success_value(adapted_value);
-            format!(
-                "{indent}const {raw_value} = {value_expression};\n{indent}const {adapted_value} = typeof {raw_value} === \"number\" ? Math.fround({raw_value}) : Number.NaN;\n{indent}return {returned_value};"
-            )
         }
         // Native Int32, native Uint32 and exact-Number fixed integers share one value-gate shape,
         // not a semantic identity. Integer zero must be canonical before a later float

@@ -1,7 +1,7 @@
 //! Checked numeric helpers for the JavaScript runtime.
 //!
 //! WHAT: emits carrier-parameterised bounded integer and binary-float operation families, exact
-//!       scale-generic Number coefficient operations, profile-aware Float boundary checks and
+//!       scale-generic Number coefficient operations, exact-precision Float boundary validation and
 //!       canonical Float-to-String formatting for HTML-JS.
 //! WHY: HIR numeric statements already own operator domains and failure modes; this runtime only
 //!      enforces each selected domain's exact semantics at its operation boundary.
@@ -11,18 +11,13 @@
 
 use super::NumericRuntimeHelperUsage;
 use crate::backends::js::JsEmitter;
-use crate::backends::js::numeric_carrier::{JsNumericCarrier, binary_float_precision_bits};
+use crate::backends::js::numeric_carrier::binary_float_precision_bits;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
 
 impl<'hir> JsEmitter<'hir> {
     /// Emits only numeric helper families used by reachable HIR and cast statements.
     pub(crate) fn emit_runtime_numeric_helpers(&mut self, usage: NumericRuntimeHelperUsage) {
-        let float_precision =
-            JsNumericCarrier::for_scalar(NumericScalar::Float, self.config.numeric_profile)
-                .and_then(JsNumericCarrier::float_precision)
-                .expect("Float always has a JavaScript binary-float carrier");
         self.emit_numeric_trap_helper();
         if usage.binary_float_power {
             self.emit_javascript_source(include_str!("float_power.js"));
@@ -54,7 +49,7 @@ impl<'hir> JsEmitter<'hir> {
         }
 
         if usage.validate_float {
-            self.emit_float_validate_helper(float_precision);
+            self.emit_float_validate_helper();
         }
     }
 
@@ -438,17 +433,27 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
     }
 
-    fn emit_float_validate_helper(&mut self, precision: BinaryFloatPrecision) {
+    /// Emits the exact-precision finite-boundary validator for raw external float carriers.
+    ///
+    /// WHAT: rejects non-Number carriers, rounds at the caller-supplied binary precision, and
+    ///       reports the shared Float boundary failure (code 304) for non-finite results.
+    /// WHY: the caller owns the source's exact precision, so one helper serves every validated
+    ///      boundary. The `typeof` gate must precede rounding because JS rounding coerces
+    ///      numeric strings, booleans and objects into values that were never Moth Floats.
+    fn emit_float_validate_helper(&mut self) {
         let non_finite = self.error_result_call(BuiltinErrorCode::FloatBoundaryNonFinite);
-        self.emit_line("function __moth_float_validate(value) {");
+        self.emit_line("function __moth_float_validate(value, precision) {");
         self.with_indent(|emitter| {
-            if precision == BinaryFloatPrecision::Binary32 {
-                emitter.emit_line("value = Math.fround(value);");
-            }
-            emitter.emit_line("if (!Number.isFinite(value)) {");
+            emitter.emit_line("if (typeof value !== \"number\") {");
             emitter.with_indent(|em| em.emit_line(&non_finite));
             emitter.emit_line("}");
-            emitter.emit_line("return { tag: \"ok\", value };");
+            emitter.emit_line(
+                "const rounded = precision === 16 ? Math.f16round(value) : precision === 32 ? Math.fround(value) : value;",
+            );
+            emitter.emit_line("if (!Number.isFinite(rounded)) {");
+            emitter.with_indent(|em| em.emit_line(&non_finite));
+            emitter.emit_line("}");
+            emitter.emit_line("return { tag: \"ok\", value: rounded };");
         });
         self.emit_line("}");
         self.emit_line("");
