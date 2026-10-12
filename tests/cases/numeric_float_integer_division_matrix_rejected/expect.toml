@@ -1,0 +1,119 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 1
+path = "input/f16_f16_integer_divide/@mod.moth"
+line = 4
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 2
+path = "input/f16_f32_integer_divide/@mod.moth"
+line = 4
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 3
+path = "input/f16_f64_integer_divide/@mod.moth"
+line = 4
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 4
+path = "input/f32_f16_integer_divide/@mod.moth"
+line = 4
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 5
+path = "input/f32_f32_integer_divide/@mod.moth"
+line = 4
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 6
+path = "input/f32_f64_integer_divide/@mod.moth"
+line = 4
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 7
+path = "input/f64_f16_integer_divide/@mod.moth"
+line = 4
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 8
+path = "input/f64_f32_integer_divide/@mod.moth"
+line = 4
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 9
+path = "input/f64_f64_integer_divide/@mod.moth"
+line = 4
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 1
+path = "input/f16_f16_integer_divide/@mod.moth"
+line = 4
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 2
+path = "input/f16_f32_integer_divide/@mod.moth"
+line = 4
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 3
+path = "input/f16_f64_integer_divide/@mod.moth"
+line = 4
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 4
+path = "input/f32_f16_integer_divide/@mod.moth"
+line = 4
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 5
+path = "input/f32_f32_integer_divide/@mod.moth"
+line = 4
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 6
+path = "input/f32_f64_integer_divide/@mod.moth"
+line = 4
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 7
+path = "input/f64_f16_integer_divide/@mod.moth"
+line = 4
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 8
+path = "input/f64_f32_integer_divide/@mod.moth"
+line = 4
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 9
+path = "input/f64_f64_integer_divide/@mod.moth"
+line = 4

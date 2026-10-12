@@ -13,6 +13,7 @@ mod fold_final_view_tests;
 mod fold_view_tests;
 mod hir_handoff_tests;
 mod ids_tests;
+mod numeric_intake_tests;
 mod overlays_tests;
 mod preparation_tests;
 mod render_unit_tests;

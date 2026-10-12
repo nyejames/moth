@@ -16,6 +16,7 @@ use crate::compiler_frontend::ast::expressions::constructor_views::{
 };
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::numeric_known_shape::KnownShapeId;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidCallShapeReason, TypeMismatchContext,
@@ -23,7 +24,6 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use moth_lexical::numeric::profile::FloatPrecision;
 
 use crate::compiler_frontend::external_packages::{
     ExternalAccessKind, ExternalFunctionDef, ExternalParameter,
@@ -134,16 +134,26 @@ impl<'a> CallDiagnosticContext<'a> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub(crate) enum ExpectedAccessMode {
     Shared,
     Mutable,
 }
 
+#[derive(Debug, Clone)]
 pub(crate) enum ExpectedParameterType {
     Known(TypeId),
+    /// Construction-only numeric slot shape under a retained collection or map descriptor.
+    /// WHY: its canonical TypeId is decided at body-root completion, so it is materialised to
+    /// `Known` before any validation. It never reaches a completed call, signature, or HIR.
+    ConstructionShape(KnownShapeId),
+    /// Generic template parameter whose concrete type inference chooses later. Only parse-side
+    /// retention reads it; completed calls validate the instantiated signature.
+    GenericParameter(TypeId),
     UnknownExternal,
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct ParameterExpectation {
     pub name: Option<StringId>,
     /// Canonical type for the parameter, or `UnknownExternal` when the external
@@ -163,8 +173,6 @@ pub(crate) struct CallArgumentResolutionContext<'a> {
     pub(crate) type_environment: &'a TypeEnvironment,
     pub(crate) compatibility_cache: &'a mut TypeCompatibilityCache,
     pub(crate) path_fork: &'a PathInternerFork,
-    /// Boundary precision for contextual `Int -> Float` argument coercion.
-    pub(crate) float_precision: FloatPrecision,
 }
 
 struct CallArgumentPolicyContext<'a> {
@@ -172,7 +180,6 @@ struct CallArgumentPolicyContext<'a> {
     type_environment: &'a TypeEnvironment,
     type_validation: CallTypeValidation<'a>,
     path_fork: &'a PathInternerFork,
-    float_precision: FloatPrecision,
 }
 
 /// Builds one expectation per user-defined parameter declaration.
@@ -200,6 +207,26 @@ pub(crate) fn expectations_from_user_parameters(
             },
         })
         .collect()
+}
+
+/// Builds one expectation per generic template parameter declaration.
+///
+/// WHAT: a declared type that mentions a generic parameter becomes a `GenericParameter`
+///       expectation whose concrete type inference chooses later; other declared types stay `Known`.
+/// WHY: parse-side numeric retention must never treat the template's bare `T` as a concrete slot type.
+pub(crate) fn generic_template_expectations(
+    parameters: &[Declaration],
+    path_fork: &PathInternerFork,
+    type_environment: &TypeEnvironment,
+) -> Vec<ParameterExpectation> {
+    let mut expectations = expectations_from_user_parameters(parameters, path_fork);
+    for (expectation, parameter) in expectations.iter_mut().zip(parameters) {
+        if type_environment.contains_generic_parameter(parameter.value.type_id) {
+            expectation.expected_type =
+                ExpectedParameterType::GenericParameter(parameter.value.type_id);
+        }
+    }
+    expectations
 }
 
 /// Maps a single external parameter into the frontend's `ParameterExpectation`.
@@ -295,7 +322,6 @@ pub(crate) fn resolve_call_arguments(
             type_environment: context.type_environment,
             type_validation: CallTypeValidation::Validate(context.compatibility_cache),
             path_fork: context.path_fork,
-            float_precision: context.float_precision,
         },
     )
 }
@@ -309,10 +335,6 @@ pub(crate) fn resolve_call_arguments(
 /// WHY: the parser owns named/positional routing; this owner consumes those retained slots for
 /// arity, defaults and mutable-access rules while allowing generic-aware validation to supply
 /// its own type evidence.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "shape validation keeps diagnostics, arguments, expectations, span, mutable string state, type environment, path fork and boundary Float precision as separate borrows"
-)]
 pub(crate) fn resolve_call_arguments_shape_and_access(
     diagnostics: CallDiagnosticContext<'_>,
     args: &[CallArgument],
@@ -321,7 +343,6 @@ pub(crate) fn resolve_call_arguments_shape_and_access(
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
     path_fork: &PathInternerFork,
-    float_precision: FloatPrecision,
 ) -> Result<Vec<CallArgument>, CallValidationError> {
     resolve_call_arguments_with_type_policy(
         diagnostics,
@@ -333,7 +354,6 @@ pub(crate) fn resolve_call_arguments_shape_and_access(
             type_environment,
             type_validation: CallTypeValidation::Skip,
             path_fork,
-            float_precision,
         },
     )
 }
@@ -360,7 +380,6 @@ fn resolve_call_arguments_with_type_policy(
         type_environment,
         mut type_validation,
         path_fork,
-        float_precision,
     } = context;
 
     // Validation flow order is intentionally fixed:
@@ -450,6 +469,22 @@ fn resolve_call_arguments_with_type_policy(
 
         let expected_type_id = match expectation.expected_type {
             ExpectedParameterType::Known(type_id) => type_id,
+            ExpectedParameterType::ConstructionShape(_) => {
+                // WHY: construction-only shapes are materialised at body-root completion before
+                // completed call validation; reaching here is a compiler ordering bug.
+                return Err(CompilerError::compiler_error(
+                    "Construction-only numeric shape reached completed call validation.",
+                )
+                .into());
+            }
+            ExpectedParameterType::GenericParameter(_) => {
+                // WHY: a generic template expectation only drives parse-side retention; completed
+                // calls validate against the instantiated signature, never the template parameter.
+                return Err(CompilerError::compiler_error(
+                    "Generic parameter expectation reached completed call validation.",
+                )
+                .into());
+            }
             ExpectedParameterType::UnknownExternal => {
                 // Unknown external types skip compatibility checking.
                 ordered.push(normalized_argument);
@@ -460,7 +495,7 @@ fn resolve_call_arguments_with_type_policy(
 
         if let CallTypeValidation::Validate(compatibility_cache) = &mut type_validation
             && !is_call_argument_type_compatible(
-                expectation,
+                expected_type_id,
                 actual_type_id,
                 passing_mode,
                 type_environment,
@@ -490,7 +525,6 @@ fn resolve_call_arguments_with_type_policy(
             normalized_argument.value,
             expected_type_id,
             type_environment,
-            float_precision,
         );
 
         ordered.push(normalized_argument);
@@ -599,21 +633,14 @@ fn authored_marker_span(argument: &CallArgument) -> Option<SourceSpan> {
 }
 
 fn is_call_argument_type_compatible(
-    expectation: &ParameterExpectation,
+    expected_type_id: TypeId,
     actual_type_id: TypeId,
     passing_mode: CallPassingMode,
     type_environment: &TypeEnvironment,
     compatibility_cache: &mut TypeCompatibilityCache,
 ) -> bool {
-    let expected_type_id = match expectation.expected_type {
-        ExpectedParameterType::Known(type_id) => type_id,
-        ExpectedParameterType::UnknownExternal => {
-            // Unknown expected type (e.g. external Handle/Void): skip compatibility check.
-            return true;
-        }
-    };
-    // Known-type cache-call attempts include exact identity. UnknownExternal
-    // returns above; this is deliberately not the cache lookup/miss metric.
+    // Known-type cache-call attempts include exact identity. Unknown external
+    // slots never reach here; this is deliberately not the cache lookup/miss metric.
     #[cfg(feature = "benchmark_counters")]
     increment_frontend_counter(FrontendCounter::CensusCallKnownTypeCompatibilityAttempts);
 
@@ -675,6 +702,28 @@ fn classify_argument_source_state(
                 classify_argument_source_state(inner, path_fork)
             }
             Some(ExpressionRpnItem::Operator { .. }) => CallArgumentSourceState::Fresh,
+            // A retained origin reference is an existing place: its authored mode and copy
+            // spelling are exact facts that do not need the binding's selected type. A retained
+            // cast, call or expression-constructor result is a fresh rvalue, like its completed
+            // shape.
+            Some(ExpressionRpnItem::PendingNumericBinding {
+                value_mode,
+                is_copy,
+                ..
+            }) => {
+                if *is_copy {
+                    CallArgumentSourceState::Fresh
+                } else if value_mode.is_mutable() {
+                    CallArgumentSourceState::MutablePlace
+                } else {
+                    CallArgumentSourceState::ImmutablePlace { binding_name: None }
+                }
+            }
+            Some(
+                ExpressionRpnItem::PendingNumericCall { .. }
+                | ExpressionRpnItem::PendingNumericCast { .. }
+                | ExpressionRpnItem::PendingNumericExpression { .. },
+            ) => CallArgumentSourceState::Fresh,
             // Pending syntax never survives evaluation; flag it in debug builds so the invalid
             // boundary is visible instead of silently classifying it as a fresh value.
             Some(

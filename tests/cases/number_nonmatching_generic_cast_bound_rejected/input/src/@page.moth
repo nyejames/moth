@@ -1,6 +1,6 @@
-accept_int_cast type T is CASTABLE_TO_INT |value T| -> T:
+accept_i32_cast type T is CASTABLE_TO_I32 |value T| -> T:
     return value
 ;
 
 decimal_value Dec2 = 1.23
-result = accept_int_cast(decimal_value)
+result = accept_i32_cast(decimal_value)

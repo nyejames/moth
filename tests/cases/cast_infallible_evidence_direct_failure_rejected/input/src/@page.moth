@@ -1,0 +1,9 @@
+Count = |value U8|
+
+to_u8 |this Count| -> U8:
+    return this.value + this.value
+;
+
+Count must CASTABLE_TO_U8
+
+value U8 = cast Count(200) catch then 0

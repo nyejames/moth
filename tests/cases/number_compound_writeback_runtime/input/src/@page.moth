@@ -1,23 +1,23 @@
-next_number |calls ~Int, value Dec1| -> Dec1:
+next_number |calls ~I32, value Dec1| -> Dec1:
     calls += 1
     return value
 ;
-add_number_to_i8 |target ~I8, rhs_calls ~Int, value Dec1| -> I8, Error!:
+add_number_to_i8 |target ~I8, rhs_calls ~I32, value Dec1| -> I8, Error!:
     target += next_number(~rhs_calls, value)
     return target
 ;
 
-next_exponent |calls ~Int, value Int| -> Int:
+next_exponent |calls ~I32, value I32| -> I32:
     calls += 1
     return value
 ;
-power_number2 |target ~Dec2, rhs_calls ~Int, exponent Int| -> Dec2, Error!:
+power_number2 |target ~Dec2, rhs_calls ~I32, exponent I32| -> Dec2, Error!:
     target ^= next_exponent(~rhs_calls, exponent)
     return target
 ;
 
 range_target ~I8 = 100
-range_rhs_calls ~Int = 0
+range_rhs_calls ~I32 = 0
 range_error_code ~U32 = 0
 range_result = add_number_to_i8(~range_target, ~range_rhs_calls, 40.0) catch |range_error|:
     range_error_code = range_error.code
@@ -25,7 +25,7 @@ range_result = add_number_to_i8(~range_target, ~range_rhs_calls, 40.0) catch |ra
 ;
 
 fraction_target ~I8 = 10
-fraction_rhs_calls ~Int = 0
+fraction_rhs_calls ~I32 = 0
 fraction_error_code ~U32 = 0
 fraction_result = add_number_to_i8(~fraction_target, ~fraction_rhs_calls, 0.5) catch |fraction_error|:
     fraction_error_code = fraction_error.code
@@ -33,13 +33,13 @@ fraction_result = add_number_to_i8(~fraction_target, ~fraction_rhs_calls, 0.5) c
 ;
 
 power_target ~Dec2 = 1.50
-power_rhs_calls ~Int = 0
+power_rhs_calls ~I32 = 0
 power_result = power_number2(~power_target, ~power_rhs_calls, 3) catch:
     then 0.00
 ;
 
 converted_target ~I8 = 10
-converted_rhs_calls ~Int = 0
+converted_rhs_calls ~I32 = 0
 converted_result = add_number_to_i8(~converted_target, ~converted_rhs_calls, 2.0) catch:
     then 0
 ;

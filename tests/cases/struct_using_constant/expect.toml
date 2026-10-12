@@ -2,4 +2,4 @@
 mode = "success"
 warnings = "forbid"
 
-rendered_output_contains = ["Hello World!"]
+rendered_output_contains = ["Hello World! 18446744073709551615"]

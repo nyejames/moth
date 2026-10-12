@@ -194,11 +194,11 @@ large_template #= [:
 -- Runtime template construction
 TemplateConfig = |
     title String,
-    sections Int,
-    depth Int,
+    sections I32,
+    depth I32,
 |
 
-build_nested |depth Int| -> String:
+build_nested |depth I32| -> String:
     if depth is 0:
         return [: <span class="leaf">leaf</span> ]
     ;
@@ -206,7 +206,7 @@ build_nested |depth Int| -> String:
     return [: <div class="level-[depth]">[inner]</div> ]
 ;
 
-build_repeated_slots |count Int| -> String:
+build_repeated_slots |count I32| -> String:
     result ~= [: <div class="repeated">]
     
     loop 0 to count |i|:

@@ -1,0 +1,21 @@
+bounded_identity type T is CASTABLE_TO_F16 |value T| -> T:
+    return value
+;
+
+receive_u32 |value U32| -> String:
+    return cast value
+;
+
+receive_i64 |value I64| -> String:
+    return cast value
+;
+
+-- Neither cast targets nor the tempting I8/I16 trait evidence may pick T.
+-- The declared T -> T relation carries both incompatible exact receivers.
+origin = 1
+forwarded = bounded_identity(origin)
+converted F16 = cast forwarded
+first = receive_u32(forwarded)
+second = receive_i64(origin)
+
+[:unreachable]

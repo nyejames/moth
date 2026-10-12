@@ -11,7 +11,7 @@ rendered_output_contains = [
     "u64-parse code=201 message=Cannot parse U64 from",
     "f16-parse code=210 message=Cannot parse F16 from",
     "i64-to-i8 bang code=242 message=I64 -> I8 source 128 is out of I8 range",
-    "i64-overflow code=301 message=Int operation overflowed",
+    "i64-overflow code=301 message=Integer operation overflowed",
     "recovered=0",
 ]
 

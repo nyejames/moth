@@ -1,4 +1,4 @@
-non_negative |count Int| -> Int, Error!:
+non_negative |count I32| -> I32, Error!:
     if count < 0:
         return! Error("negative")
     ;
@@ -6,7 +6,7 @@ non_negative |count Int| -> Int, Error!:
 ;
 
 -- Sibling handlers in one function each own their binding.
-recover_pair |left Int, right Int| -> String:
+recover_pair |left I32, right I32| -> String:
     first = non_negative(left) catch |err|:
         io.line([:first=[err.message]])
         then 0

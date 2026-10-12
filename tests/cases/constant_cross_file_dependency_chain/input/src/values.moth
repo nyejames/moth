@@ -1,2 +1,2 @@
-base #Int = 31
-later #Int = base + 10
+base #I32 = 31
+later #I32 = base + 10

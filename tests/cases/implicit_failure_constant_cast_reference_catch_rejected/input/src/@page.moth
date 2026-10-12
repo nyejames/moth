@@ -1,0 +1,2 @@
+constant_text #String = cast 'Q'
+from_cast_constant = constant_text catch then ""

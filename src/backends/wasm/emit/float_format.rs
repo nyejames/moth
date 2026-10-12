@@ -261,8 +261,10 @@ const CANDIDATE_EXP: u32 = Q;
 
 fn table_offset(plan: &WasmEmitPlan) -> Result<u32, CompilerError> {
     plan.float_format_tables_offset.ok_or_else(|| {
-        CompilerError::compiler_error("Wasm Float formatter is missing its planned Ryu tables")
-            .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
+        CompilerError::compiler_error(
+            "Wasm binary-float formatter is missing its planned Ryu tables",
+        )
+        .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
     })
 }
 
@@ -1914,8 +1916,10 @@ pub(crate) fn emit_string_from_float(
         .get(&WasmRuntimeHelper::FloatToDecimal)
         .copied()
         .ok_or_else(|| {
-            CompilerError::compiler_error("Wasm Float formatter is missing rt_float_to_decimal")
-                .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
+            CompilerError::compiler_error(
+                "Wasm binary-float formatter is missing rt_float_to_decimal",
+            )
+            .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration))
         })?;
     let mut function = Function::new(vec![
         (11, ValType::I32),

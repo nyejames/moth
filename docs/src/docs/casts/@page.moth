@@ -31,12 +31,11 @@ page_head #= language_theme_head
 
     # Casts
 
-    A cast converts a value for an immediate typed destination. Moth doesn't use
-    constructor-like conversions such as `Int(value)`, and it doesn't infer a
-    target from distant code.
-
-    The receiving type names the target. `cast`, `cast!` or `catch` makes the
-    failure path visible beside the conversion.
+    `cast` converts a value for an immediate concrete typed destination. Its
+    target does not infer the source type, and constructor-like forms such as
+    `I32(value)` do not convert. Fallible casts follow ordinary error delivery;
+    `catch` handles a selected expression locally. See @../progress (Progress)
+    for current compiler and backend support.
 ]
 
 #[section:

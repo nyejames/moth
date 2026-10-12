@@ -6,7 +6,10 @@ use crate::compiler_frontend::ast::const_values::resolver::{
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
+use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_with_trailing_newline_policy;
+use crate::compiler_frontend::ast::expressions::parse_expression_input::{
+    ExpressionParseInput, ExpressionParseResources,
+};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -14,6 +17,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
+use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::rc::Rc;
@@ -32,16 +36,20 @@ fn create_expression_for_test(
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
-    create_expression(
-        token_stream,
-        context,
-        &mut type_interner,
-        expected_type,
-        value_mode,
+    let mut cast_target_context = CastTargetContext::None;
+    create_expression_with_trailing_newline_policy(ExpressionParseInput::ordinary(
+        ExpressionParseResources {
+            token_stream,
+            scope_context: context,
+            type_interner: &mut type_interner,
+            expected_type,
+            cast_target_context: &mut cast_target_context,
+            value_mode,
+            string_table,
+            path_fork,
+        },
         consume_closing_parenthesis,
-        string_table,
-        path_fork,
-    )
+    ))
 }
 
 #[test]

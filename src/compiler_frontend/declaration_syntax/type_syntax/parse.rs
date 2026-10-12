@@ -10,7 +10,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{DiagnosticToken, InvalidTypeAnnotationReason};
 use crate::compiler_frontend::datatypes::parsed::ParsedCollectionCapacity;
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
-use crate::compiler_frontend::numeric_text::parse::materialize_int;
+use crate::compiler_frontend::numeric_text::parse::materialize_fixed_scalar;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::{
@@ -18,8 +18,8 @@ use crate::compiler_frontend::tokenizer::tokens::{
     TokenRef, TokenTag, TokenViewError,
 };
 use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::grammar::{NumericLiteralKind, NumericLiteralSign};
-use moth_lexical::numeric::profile::IntWidth;
 
 /// Two-lane result for type-annotation parsing.
 ///
@@ -200,20 +200,6 @@ fn parse_type_atom(
     }
 
     match token_stream.current_tag() {
-        TokenTag::DATATYPE_INT => {
-            token_stream.advance();
-            Ok(ParsedTypeRef::BuiltinInt { span })
-        }
-        TokenTag::DATATYPE_UINT => {
-            token_stream.advance();
-            Ok(ParsedTypeRef::BuiltinUint { span })
-        }
-
-        TokenTag::DATATYPE_FLOAT => {
-            token_stream.advance();
-            Ok(ParsedTypeRef::BuiltinFloat { span })
-        }
-
         TokenTag::DATATYPE_BOOL => {
             token_stream.advance();
             Ok(ParsedTypeRef::BuiltinBool { span })
@@ -591,9 +577,9 @@ fn collect_collection_inner_range(
 ///       syntax site rather than a generic parse failure.
 /// WHY: the language only allows literal-or-bare-const capacity in type position;
 ///      named constants can still hold arithmetic before they are used in type annotations.
-///      Header parsing has no profile, so literals materialise at `Bits64` only as the
-///      widest lossless carrier; capacity folding owns the final boundary-`IntWidth`
-///      range check. Capacity must be a positive `Int` literal of the boundary width.
+///      Header parsing has no boundary scalar, so literals materialise at `I64`, the widest
+///      lossless signed carrier; capacity resolution owns the exact `I32` capacity bound.
+///      Capacity must be a positive integer literal.
 fn parsed_capacity(
     tokens: TypeTokenWindow<'_>,
     string_table: &mut StringTable,
@@ -637,14 +623,25 @@ fn parsed_capacity(
                     ));
                 }
 
-                let value = materialize_int(&numeric, numeric.sign, IntWidth::Bits64, string_table)
-                    .map_err(|reason| {
-                        HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_number_literal(
-                            numeric.source_text,
-                            reason,
-                            token_span,
-                        ))
-                    })?;
+                let value = materialize_fixed_scalar(
+                    &numeric,
+                    numeric.sign,
+                    FixedScalar::I64,
+                    string_table,
+                )
+                .map_err(|reason| {
+                    HeaderParseFailure::Diagnostic(CompilerDiagnostic::invalid_number_literal(
+                        numeric.source_text,
+                        reason,
+                        token_span,
+                    ))
+                })?
+                .as_i64()
+                .ok_or_else(|| {
+                    HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
+                        "capacity literal must materialise as a signed I64 carrier",
+                    ))
+                })?;
 
                 if numeric.sign == NumericLiteralSign::Negative {
                     return Err(HeaderParseFailure::Diagnostic(

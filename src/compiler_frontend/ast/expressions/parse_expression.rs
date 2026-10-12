@@ -4,10 +4,12 @@
 //! retain producer facts but do not gain a catch boundary; the root rejects typed producers
 //! still unhandled after its complete expression is known.
 
-use super::error::ExpressionParseError;
-use super::eval_expression::evaluate_expression;
+use super::call_arguments::ParsedCallArguments;
+use super::error::{ExpressionParseError, NumericDeferral};
+use super::eval_expression::{evaluate_expression, extract_expression_span};
 use super::expression::Expression;
 use super::expression_rpn::ExpressionRpnItem;
+use super::failure_facts::{ExpressionFailureFacts, FailureDisposition, TypedErrorProducer};
 use super::parse_expression_dispatch::{
     ExpressionDispatchState, ExpressionTokenStep, dispatch_expression_token,
 };
@@ -16,207 +18,38 @@ use super::parse_expression_input::{
 };
 use crate::ast_log;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::field_access::{
+    DeferredCallReceiver, GenericSuccessSlots, RetainedOperandContinuation, RetainedPostfixStep,
+    RetainedTerminalCall, retained_operand_numeric_origin_shape, retained_operand_result_shape,
+    retained_terminal_call,
+};
+use crate::compiler_frontend::ast::generic_functions::numeric_origins::GenericErrorReturn;
+use crate::compiler_frontend::ast::numeric_construction::{
+    ConstructionResult, DeferredCall, DeferredCallArgument, DeferredCallHandling,
+    DeferredExpression, DeferredExpressionSuffix, TypedErrorFact, deferred_numeric_expression,
+    register_direct_reference_witness, retained_known_shape, single_direct_pending_reference,
+};
+use crate::compiler_frontend::ast::numeric_known_shape::{KnownShapeId, register_shape_witness};
 use crate::compiler_frontend::ast::statements::fallible_handling::{
+    EXPRESSION_STAGE, FallibleSuccessContract, constrain_protected_by_fallbacks,
     parse_completed_expression_catch, parse_fallible_handling_suffix_for_expression,
+    parse_fragment_handling_suffix, raw_protected_result_shape, retain_pending_catch_handler,
     token_stream_starts_typed_propagation_suffix,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticToken, InvalidReturnShapeReason,
-};
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticToken};
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::type_coercion::parse_context::is_numeric_literal_destination_type_id;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
-use crate::compiler_frontend::type_coercion::parse_context::{
-    CastTargetContext, ExpectedType, cast_target_context_for_type_id, parse_expectation_for_type_id,
-};
 use crate::compiler_frontend::utilities::token_scan::ExpressionBoundaryDepth;
-use crate::compiler_frontend::value_mode::ValueMode;
-
-// WHAT: parses a comma-separated expression list against already-known expected result types.
-// WHY: function calls and multi-return contexts must preserve arity and per-slot type
-//      expectations while still sharing the normal expression parser.
-pub fn create_multiple_expressions(
-    token_stream: &mut AstCursor,
-    context: &ScopeContext,
-    type_interner: &mut AstTypeInterner<'_>,
-    _context_label: &str,
-    consume_closing_parenthesis: bool,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> Result<Vec<Expression>, ExpressionParseError> {
-    create_multiple_expressions_inner(
-        token_stream,
-        context,
-        type_interner,
-        consume_closing_parenthesis,
-        string_table,
-        path_fork,
-    )
-}
-
-fn create_multiple_expressions_inner(
-    token_stream: &mut AstCursor,
-    context: &ScopeContext,
-    type_interner: &mut AstTypeInterner<'_>,
-    consume_closing_parenthesis: bool,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> Result<Vec<Expression>, ExpressionParseError> {
-    let mut expressions: Vec<Expression> = Vec::new();
-
-    for (type_index, expected_type) in context.expected_result_type_ids.iter().enumerate() {
-        // Pass parse-time context only for context-sensitive literals. Other
-        // expressions resolve their natural type here, and callers own
-        // validation or coercion after this call returns.
-        let mut expression_type =
-            parse_expectation_for_type_id(*expected_type, type_interner.environment());
-        let mut cast_target_context = cast_target_context_for_type_id(
-            *expected_type,
-            type_interner.environment(),
-            string_table,
-            &*path_fork,
-        );
-        let input = ExpressionParseInput::new(
-            ExpressionParseResources {
-                token_stream,
-                scope_context: context,
-                type_interner,
-                expected_type: &mut expression_type,
-                cast_target_context: &mut cast_target_context,
-                value_mode: &ValueMode::ImmutableOwned,
-                string_table,
-                path_fork,
-            },
-            ExpressionTrailingPolicy {
-                consume_closing_parenthesis,
-                skip_trailing_newlines: false,
-                allow_boundary_catch: !consume_closing_parenthesis,
-                allow_expected_result_evidence: !consume_closing_parenthesis,
-            },
-        );
-        let expression = create_expression_with_trailing_newline_policy(input)?;
-
-        expressions.push(expression);
-
-        // Newlines are expression terminators almost everywhere else. Only normalize
-        // them here when we're inside a parenthesized list so multiline calls like
-        // `io.line(\n value\n)` leave us positioned on the comma or `)`.
-        if consume_closing_parenthesis && token_stream.current_tag() == TokenTag::NEWLINE {
-            token_stream.skip_newlines();
-        }
-
-        // Comma check: every slot except the last must be followed by a comma.
-        if type_index + 1 < context.expected_result_type_ids.len() {
-            if token_stream.current_tag() != TokenTag::COMMA {
-                return Err(CompilerDiagnostic::invalid_return_shape(
-                    InvalidReturnShapeReason::TooFewReturnValues {
-                        expected_count: context.expected_result_type_ids.len(),
-                        provided_count: expressions.len(),
-                    },
-                    Some(token_stream.current_span()),
-                )
-                .into());
-            }
-
-            token_stream.advance();
-        }
-    }
-
-    if consume_closing_parenthesis {
-        if token_stream.current_tag() != TokenTag::CLOSE_PARENTHESIS {
-            let found = token_stream
-                .current_diagnostic_token(string_table)
-                .map_err(|error| {
-                    CompilerDiagnostic::token_view_invariant_error(
-                        error,
-                        "expression closing-delimiter diagnostic",
-                    )
-                })?;
-            return Err(CompilerDiagnostic::expected_token_from_tags(
-                TokenTag::CLOSE_PARENTHESIS,
-                found,
-                Some(token_stream.current_span()),
-            )
-            .into());
-        }
-
-        token_stream.advance();
-    }
-
-    Ok(expressions)
-}
-
-// WHAT: parses one expression and evaluates the AST fragment into a typed expression node.
-// WHY: expression parsing is the choke point where token structure, place rules, and expected
-//      type information meet before later lowering stages.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "expression entry keeps the token stream, scope, mutable interner/expected-type/string/path state, value mode, and parenthesis policy as separate borrows"
-)]
-pub fn create_expression(
-    token_stream: &mut AstCursor,
-    context: &ScopeContext,
-    type_interner: &mut AstTypeInterner<'_>,
-    expected_type: &mut ExpectedType,
-    value_mode: &ValueMode,
-    consume_closing_parenthesis: bool,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> Result<Expression, ExpressionParseError> {
-    let mut cast_target_context = CastTargetContext::None;
-    let input = ExpressionParseInput::ordinary(
-        ExpressionParseResources {
-            token_stream,
-            scope_context: context,
-            type_interner,
-            expected_type,
-            cast_target_context: &mut cast_target_context,
-            value_mode,
-            string_table,
-            path_fork,
-        },
-        consume_closing_parenthesis,
-    );
-    create_expression_with_trailing_newline_policy(input)
-}
-
-// WHAT: parses a nested expression while preserving ordinary expression semantics.
-// WHY: `catch` is procedural recovery syntax, so nested expression positions must reject it even
-// when they reuse a function/body context that would allow `catch` at the outer statement boundary.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "nested expression entry keeps the token stream, scope, mutable interner/expected-type/string/path state, value mode, and parenthesis policy as separate borrows"
-)]
-pub(crate) fn create_expression_without_boundary_catch(
-    token_stream: &mut AstCursor,
-    context: &ScopeContext,
-    type_interner: &mut AstTypeInterner<'_>,
-    expected_type: &mut ExpectedType,
-    value_mode: &ValueMode,
-    consume_closing_parenthesis: bool,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> Result<Expression, ExpressionParseError> {
-    let mut cast_target_context = CastTargetContext::None;
-    let input = ExpressionParseInput::without_boundary_catch(
-        ExpressionParseResources {
-            token_stream,
-            scope_context: context,
-            type_interner,
-            expected_type,
-            cast_target_context: &mut cast_target_context,
-            value_mode,
-            string_table,
-            path_fork,
-        },
-        consume_closing_parenthesis,
-    );
-    create_expression_with_trailing_newline_policy(input)
-}
 
 // WHAT: shared expression parser entry with configurable trailing-newline behavior.
 // WHY: callers parsing comma-separated lists outside parentheses (for example
@@ -242,6 +75,8 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
             input.trailing_policy,
         );
         deferred_input.stop_at_named_entry = input.stop_at_named_entry;
+        deferred_input.numeric_deferral_owner = input.numeric_deferral_owner;
+        deferred_input.retain_pending_numeric_fragment = input.retain_pending_numeric_fragment;
         let expression = create_expression_with_trailing_newline_policy(deferred_input)?;
         validate_completed_typed_errors(&expression)?;
         return Ok(expression);
@@ -259,6 +94,42 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
         }
         ExpressionFragment::Nodes(nodes) => nodes,
     };
+
+    // A fragment containing origins that only body completion can resolve is retained instead of
+    // evaluated. The position's own receiving context travels with it so completion evaluates the
+    // exact authored syntax at the resolved destination. An eligible origin boundary additionally
+    // retains literal-only recipes, which a later exact receiver may still type.
+    let retained = if input.retain_pending_numeric_fragment {
+        crate::compiler_frontend::ast::numeric_construction::items_contain_pending(&nodes)
+    } else {
+        crate::compiler_frontend::ast::numeric_construction::items_contain_unresolvable_numeric(
+            &nodes,
+        )
+    };
+    if retained {
+        // A direct use of one pending origin at an exact receiving boundary is that origin's
+        // receiving constraint. A mention inside a computation is not: the boundary reaches only
+        // the literal leaves, and the named operands stay forward-only.
+        register_retained_fragment_witness(&input, &nodes)?;
+        // An authored `catch` protects the fragment's whole value. The value does not exist where
+        // the catch is authored, so the handler travels with the fragment and the body root
+        // rebuilds the pair through the owning catch constructor.
+        if input.token_stream.current_tag() == TokenTag::CATCH {
+            return Err(retain_pending_fragment_catch(&mut input, nodes)?);
+        }
+        let suffix = consume_deferred_expression_suffix(input.token_stream)?;
+        let span = extract_expression_span(&nodes).ok().flatten();
+        return Err(ExpressionParseError::NumericDeferral(Box::new(
+            NumericDeferral {
+                items: nodes,
+                expected: *input.expected_type,
+                value_mode: input.value_mode.to_owned(),
+                span,
+                suffix,
+                complete_fragment: input.numeric_deferral_owner,
+            },
+        )));
+    }
 
     let expression = evaluate_expression(
         input.scope_context,
@@ -284,6 +155,581 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
         input.token_stream.skip_newlines();
     }
     Ok(expression)
+}
+
+/// Register a retained fragment's exact receiving constraint on the origin it uses directly.
+///
+/// WHAT: the position's exact literal destination is the receiver. A position with no literal
+///       destination registers nothing here; a non-numeric known parameter is registered by its
+///       call argument owner through the same rule.
+/// WHY: a direct use constrains its origin before body-root defaults run, and a computed fragment
+///      never constrains its operands backwards.
+fn register_retained_fragment_witness(
+    input: &ExpressionParseInput<'_, '_, '_>,
+    nodes: &[ExpressionRpnItem],
+) -> ConstructionResult<()> {
+    let Some(expected_type_id) = input.expected_type.literal_destination_type_id() else {
+        return Ok(());
+    };
+    register_direct_receiver_witness(
+        input.scope_context,
+        input.type_interner.environment(),
+        nodes,
+        expected_type_id,
+        false,
+    )
+}
+
+/// Register the exact receiver a retained fragment's origin receives.
+///
+/// WHAT: a fragment that is exactly one pending binding reference registers its receiver on that
+///       binding, through its known shape or its scalar class. A fragment that is exactly one
+///       retained literal registers its receiver through the literal's known shape. A fragment that
+///       is exactly one retained operand with a known result shape (a projection, a field, a method
+///       result, or a catch-protected value) registers through that shape. A numeric receiver
+///       registers only through a numeric origin shape. Any other fragment, including named
+///       arithmetic, registers nothing.
+/// WHY: a receiving boundary is the single static type source for its origin's numeric leaves, so
+///      it must register before body-root defaults. `include_unhandled_success` says whether the
+///      operand's unhandled fallible step contributes its success shape. A call argument sets it,
+///      because its carrier leaves through the call's own error lane. This selects success metadata
+///      only; ordinary typed validation still owns the legality of the unhandled carrier.
+pub(crate) fn register_direct_receiver_witness(
+    scope_context: &ScopeContext,
+    environment: &TypeEnvironment,
+    items: &[ExpressionRpnItem],
+    receiver_type_id: TypeId,
+    include_unhandled_success: bool,
+) -> ConstructionResult<()> {
+    if let Some(reference) = single_direct_pending_reference(items) {
+        let mut state = scope_context.numeric_state_mut();
+        register_direct_reference_witness(&mut state, environment, &reference, receiver_type_id);
+        return Ok(());
+    }
+    // The operand shape is derived before the state borrow: a concrete result interns into that
+    // state, so deriving it while the borrow is held would double-borrow.
+    let shape = match retained_known_shape(items) {
+        Some(shape) => Some(shape),
+        None => receiver_operand_shape(
+            scope_context,
+            environment,
+            items,
+            receiver_type_id,
+            include_unhandled_success,
+        )?,
+    };
+    if let Some(shape) = shape {
+        let span = items.first().and_then(ExpressionRpnItem::source_span);
+        let mut state = scope_context.numeric_state_mut();
+        register_shape_witness(&mut state, environment, shape, receiver_type_id, span);
+    }
+    Ok(())
+}
+
+/// The operand shape a retained single-operand fragment constrains its receiver through.
+///
+/// WHAT: only a single operand with a known result shape qualifies. A non-numeric receiver takes
+///       any such shape; a numeric receiver takes only a numeric origin shape, which names its
+///       origin class and never a concrete result.
+/// WHY: operand shapes constrain aggregate receivers, and a numeric origin's class is the only
+///      shape a scalar destination can use. The scalar leaves of a computed operand stay
+///      forward-only.
+fn receiver_operand_shape(
+    scope_context: &ScopeContext,
+    environment: &TypeEnvironment,
+    items: &[ExpressionRpnItem],
+    receiver_type_id: TypeId,
+    include_unhandled_success: bool,
+) -> ConstructionResult<Option<KnownShapeId>> {
+    let [item] = items else {
+        return Ok(None);
+    };
+    if is_numeric_literal_destination_type_id(receiver_type_id, environment) {
+        return Ok(retained_operand_numeric_origin_shape(
+            item,
+            scope_context,
+            environment,
+            receiver_type_id,
+            include_unhandled_success,
+        ));
+    }
+    retained_operand_result_shape(item, scope_context, environment, include_unhandled_success)
+}
+
+/// Retain one deferred fragment whose authored `catch` suffix protects its whole value.
+///
+/// WHAT: parses the handler through the shared fallible-handling suffix entry, pairs it with the
+///       fragment as the protected value, and raises the deferral whose single item is the catch
+///       attachment rebuilt at the body root.
+/// WHY: the fragment's value does not exist where the catch is authored, so the handler cannot
+///      attach yet; it rebuilds through the existing catch constructor, using the same site facts
+///      the completed path derives — the trailing fallible pending call's signature when there is
+///      one, and the builtin Error boundary the completed path synthesises for a value that is
+///      infallible by authored shape otherwise.
+fn retain_pending_fragment_catch(
+    input: &mut ExpressionParseInput<'_, '_, '_>,
+    items: Vec<ExpressionRpnItem>,
+) -> Result<ExpressionParseError, ExpressionParseError> {
+    let catch_span = Some(input.token_stream.current_span());
+    let fragment_span = extract_expression_span(&items).ok().flatten();
+    let (fragment_success, error_return) = fragment_fallible_site(&items, input.scope_context);
+    // An authored destination is the protected value's exact type, so it is the immediate receiving
+    // type of the handler's single slot. It applies to a fragment with no resolved contract and to a
+    // single-slot generic call whose arity is fixed while its slot types resolve at completion; a
+    // later consumer of the value never supplies it.
+    let destination_type_id = match &fragment_success {
+        FragmentSuccess::Unresolved | FragmentSuccess::Pending { slot_count: 1 } => {
+            input.expected_type.literal_destination_type_id()
+        }
+        _ => None,
+    };
+    let success_contract = match destination_type_id.as_ref() {
+        Some(type_id) => FallibleSuccessContract::Known(std::slice::from_ref(type_id)),
+        None => fragment_success.contract(),
+    };
+    // The authored catch is recovery for the assignment (or mutation) whose right-hand side this
+    // fragment belongs to: the ordinary `catch` entry activates the pending target names before
+    // parsing the handler, so the retained suffix entry must see the same context or a read of the
+    // target inside the recovery is accepted instead of rejected.
+    let catch_context = input
+        .scope_context
+        .activate_pending_catch_assignment_targets();
+    let suffix = parse_fragment_handling_suffix(
+        input.token_stream,
+        &catch_context,
+        input.type_interner,
+        success_contract,
+        error_return,
+        true,
+        true,
+        fragment_span.or(catch_span),
+        EXPRESSION_STAGE,
+        input.trailing_policy.allow_boundary_catch,
+        None,
+        input.string_table,
+        input.path_fork,
+    )?;
+    let Some(suffix) = suffix else {
+        return Err(CompilerError::compiler_error(
+            "a retained fragment's authored `catch` suffix was classified as absent",
+        )
+        .into());
+    };
+    let protected_shape = raw_protected_result_shape(
+        &items,
+        *input.expected_type,
+        input.scope_context,
+        input.type_interner.environment_mut_for_derived_types(),
+    )?;
+    let handled = deferred_numeric_expression(
+        items,
+        *input.expected_type,
+        input.value_mode.to_owned(),
+        fragment_span,
+        DeferredExpressionSuffix::None,
+    );
+    let Some(payload) = retain_pending_catch_handler(handled, protected_shape, suffix) else {
+        return Err(CompilerError::compiler_error(
+            "a parsed `catch` suffix was classified as postfix propagation",
+        )
+        .into());
+    };
+    // The protected value's catch fallbacks join its numeric shape now, before body-root resolution
+    // defaults the origins they share: a raw literal's class, or a retained generic call's result
+    // slots.
+    constrain_protected_by_fallbacks(
+        &payload,
+        &mut input.scope_context.numeric_state_mut(),
+        input.type_interner.environment(),
+    );
+    Ok(ExpressionParseError::NumericDeferral(Box::new(
+        NumericDeferral {
+            items: vec![ExpressionRpnItem::PendingNumericExpression {
+                expression: Box::new(DeferredExpression::CatchHandler(Box::new(payload))),
+                span: catch_span,
+            }],
+            expected: *input.expected_type,
+            value_mode: input.value_mode.to_owned(),
+            span: fragment_span.or(catch_span),
+            suffix: DeferredExpressionSuffix::None,
+            complete_fragment: input.numeric_deferral_owner,
+        },
+    )))
+}
+
+/// The owned success contract of a retained fragment, read back through `contract` for the
+/// suffix parse.
+enum FragmentSuccess {
+    Known(Vec<TypeId>),
+    /// One concrete slot of a generic call, kept inline.
+    Single(TypeId),
+    /// A generic call whose slot types all resolve at completion, at its declared arity.
+    Pending {
+        slot_count: usize,
+    },
+    /// Per-slot types of a generic call with concrete and unresolved slots: `Some` for a concrete
+    /// declared slot and `None` for a slot whose type resolves at completion. Never all `Some`
+    /// (`Known`) or all `None` (`Pending`).
+    Partial(Vec<Option<TypeId>>),
+    Unresolved,
+}
+
+impl FragmentSuccess {
+    fn contract(&self) -> FallibleSuccessContract<'_> {
+        match self {
+            Self::Known(types) => FallibleSuccessContract::Known(types.as_slice()),
+            Self::Single(type_id) => FallibleSuccessContract::Known(std::slice::from_ref(type_id)),
+            Self::Pending { slot_count } => FallibleSuccessContract::Pending {
+                slot_count: *slot_count,
+            },
+            Self::Partial(slots) => FallibleSuccessContract::Partial(slots.as_slice()),
+            Self::Unresolved => FallibleSuccessContract::Unresolved,
+        }
+    }
+}
+
+/// The fallible contract the shared handler parser needs for one retained fragment.
+///
+/// WHAT: when the fragment is exactly one retained terminal call (groups transparent), that
+///       call's own signature supplies the success contract: `Known` for a concrete signature
+///       (possibly empty for zero success slots). A generic call classifies its slots: `Known` once
+///       all are concrete, `Pending` while all resolve at completion, `Partial` when some are
+///       concrete. A chained method call is a
+///       call too, once its operand and suffix are valid. Any other retained fragment has no
+///       resolved contract yet (`Unresolved`, never zero success values). The error type is the
+///       fragment's first typed producer in authored order, whether or not the terminal call
+///       declares one; `None` leaves the builtin Error boundary to the shared parser.
+/// WHY: the fragment is still infix at this boundary, so its result slots only exist after
+///      evaluation; a trailing-operand read would give `f(pending) + 10` an empty contract and
+///      `1 / f(pending)` the call's I32 instead of the fragment's F64 result. Success arity is
+///      independent of the typed error, so an error-free `pair(1 + 2)` keeps its declared slots.
+fn fragment_fallible_site(
+    items: &[ExpressionRpnItem],
+    scope_context: &ScopeContext,
+) -> (FragmentSuccess, Option<GenericErrorReturn>) {
+    let success = match items {
+        [item] => match retained_terminal_call(item) {
+            Some(terminal) => terminal_call_success(terminal, scope_context),
+            None => FragmentSuccess::Unresolved,
+        },
+        _ => FragmentSuccess::Unresolved,
+    };
+    (success, fragment_error_site(items))
+}
+
+/// The success contract of one retained terminal call, from its resolved or declared facts.
+///
+/// WHAT: a concrete signature gives its slot types, a declared-empty call is known to be empty, and
+///       a generic call reads each declared slot whose type is already concrete, leaving the rest
+///       unknown until completion.
+/// WHY: a generic call's success slots resolve at completion, but a concrete declared slot of
+///      the same signature is already a fixed receiving type. Reading only those concrete facts
+///      keeps the arity and the concrete slots without resolving any generic parameter early.
+fn terminal_call_success(
+    call: RetainedTerminalCall<'_>,
+    scope_context: &ScopeContext,
+) -> FragmentSuccess {
+    if let Some(types) = call.success_return_type_ids() {
+        return FragmentSuccess::Known(types);
+    }
+    match call.generic_success_slots(scope_context) {
+        GenericSuccessSlots::Single(type_id) => FragmentSuccess::Single(type_id),
+        GenericSuccessSlots::Concrete(types) => FragmentSuccess::Known(types),
+        GenericSuccessSlots::Unknown(slot_count) => FragmentSuccess::Pending { slot_count },
+        GenericSuccessSlots::Mixed(slots) => FragmentSuccess::Partial(slots),
+    }
+}
+
+/// The error slot of a larger retained fragment, from its own fallible calls.
+///
+/// WHAT: the first typed producer's error return in authored order, taken from the fragment's own
+///       retained call slots and retained child syntax plus the already-built failure summaries of
+///       Ready arguments and Ready receivers; `None` when the fragment carries no typed producer, so
+///       the shared parser's boundary error stays the owner of that synthesis. A numeric-dependent
+///       producer stays `Retained` until its shape completes. A second disagreeing producer keeps
+///       the first here and is diagnosed by the ordinary compatibility owner at completion.
+/// WHY: a Ready argument's `failure_facts` already carry its typed producer, and the completed
+///      call constructor merges exactly those summaries; reading them keeps the parse-time
+///      contract identical to the completed one, so `outer(g(), pending) catch |err| ...` binds
+///      g's custom error instead of a fabricated boundary type.
+fn fragment_error_site(items: &[ExpressionRpnItem]) -> Option<GenericErrorReturn> {
+    fragment_typed_error_summary(items)
+        .0
+        .map(|fact| match fact {
+            TypedErrorFact::Completed(producer) => {
+                GenericErrorReturn::Concrete(producer.error_type_id)
+            }
+            TypedErrorFact::Pending { error_return, .. } => {
+                GenericErrorReturn::Retained(error_return)
+            }
+        })
+}
+
+/// The first and first-disagreeing typed producers of one retained fragment.
+///
+/// WHAT: the ordered walk `fragment_error_site` reads, returning both producers instead of only the
+///       first error. A numeric-dependent producer is `Pending` with its error shape.
+/// WHY: a deferred call argument stores this summary when it registers as a forward producer, so
+///      its enclosing call replays the summary without the fragment's items.
+pub(crate) fn fragment_typed_error_summary(
+    items: &[ExpressionRpnItem],
+) -> (Option<TypedErrorFact>, Option<TypedErrorFact>) {
+    /// Two producers share one error only when both are concrete and equal, or both retain the
+    /// same shape. Any other pair stays a disagreement: a pending producer's type is not known
+    /// until its shape completes, and the completion owner decides whether it really conflicts.
+    fn known_same_error(left: TypedErrorFact, right: TypedErrorFact) -> bool {
+        match (left, right) {
+            (TypedErrorFact::Completed(left), TypedErrorFact::Completed(right)) => {
+                left.error_type_id == right.error_type_id
+            }
+            (
+                TypedErrorFact::Pending {
+                    error_return: left, ..
+                },
+                TypedErrorFact::Pending {
+                    error_return: right,
+                    ..
+                },
+            ) => left == right,
+            _ => false,
+        }
+    }
+
+    fn record(
+        fact: TypedErrorFact,
+        first: &mut Option<TypedErrorFact>,
+        conflicting: &mut Option<TypedErrorFact>,
+    ) {
+        match first {
+            None => *first = Some(fact),
+            Some(existing) if !known_same_error(*existing, fact) && conflicting.is_none() => {
+                *conflicting = Some(fact);
+            }
+            _ => {}
+        }
+    }
+
+    /// Merge one already-built expression's pending producers; a handled child contributes none.
+    fn collect_facts(
+        facts: &ExpressionFailureFacts,
+        first: &mut Option<TypedErrorFact>,
+        conflicting: &mut Option<TypedErrorFact>,
+    ) {
+        if facts.disposition != FailureDisposition::Pending {
+            return;
+        }
+        if let Some(producer) = facts.summary.first_typed {
+            record(TypedErrorFact::Completed(producer), first, conflicting);
+        }
+        if let Some(producer) = facts.summary.conflicting_typed {
+            record(TypedErrorFact::Completed(producer), first, conflicting);
+        }
+    }
+
+    fn collect(
+        items: &[ExpressionRpnItem],
+        first: &mut Option<TypedErrorFact>,
+        conflicting: &mut Option<TypedErrorFact>,
+    ) {
+        for item in items {
+            match item {
+                ExpressionRpnItem::PendingNumericCall { call, .. } => {
+                    collect_call(call, first, conflicting);
+                }
+                ExpressionRpnItem::PendingGroup { nodes, .. } => collect(nodes, first, conflicting),
+                // A completed sibling operand already carries the failure summary the completed
+                // call constructor merges, so an already-built typed producer must reach the
+                // fragment's handler contract; a handled one contributes none.
+                ExpressionRpnItem::Operand(expression) => {
+                    collect_facts(&expression.failure_facts, first, conflicting);
+                }
+                // A retained cast carries its own source fragment, so a fallible call inside the
+                // cast supplies its error to the enclosing fragment's handler contract.
+                ExpressionRpnItem::PendingNumericCast { source, .. } => {
+                    collect(source, first, conflicting);
+                }
+                // A retained operand continuation keeps its operand and postfix steps, so a
+                // pending method or builtin producer reaches the handler contract as the completed
+                // chain exposes it. Other deferred expression kinds are not walked here.
+                ExpressionRpnItem::PendingNumericExpression { expression, .. } => {
+                    if let DeferredExpression::OperandContinuation(continuation) =
+                        expression.as_ref()
+                    {
+                        collect_operand_continuation(continuation, first, conflicting);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Walk one retained operand continuation in authored order: its operand first, then each
+    /// postfix step. A method or builtin step owns a producer only while its authored handling is
+    /// unhandled, matching the completed step; field steps are never fallible. Each step's
+    /// arguments are walked before its own producer, matching the order its completed call is
+    /// built in.
+    fn collect_operand_continuation(
+        continuation: &RetainedOperandContinuation,
+        first: &mut Option<TypedErrorFact>,
+        conflicting: &mut Option<TypedErrorFact>,
+    ) {
+        collect(
+            std::slice::from_ref(&continuation.operand),
+            first,
+            conflicting,
+        );
+        for step in &continuation.steps {
+            match step {
+                // The chained receiver is the preceding step's completed value, so only the
+                // call's arguments and its own producer are new facts here.
+                RetainedPostfixStep::Method(call) => {
+                    collect_deferred_arguments(&call.arguments, first, conflicting);
+                    if matches!(call.authored_handling, DeferredCallHandling::Unhandled) {
+                        collect_error_return(
+                            call.error_return(),
+                            call.call_span,
+                            first,
+                            conflicting,
+                        );
+                    }
+                }
+                RetainedPostfixStep::Builtin(builtin) => {
+                    match &builtin.arguments {
+                        ParsedCallArguments::Ready(arguments) => {
+                            for argument in arguments {
+                                collect_facts(&argument.value.failure_facts, first, conflicting);
+                            }
+                        }
+                        ParsedCallArguments::Retained(arguments) => {
+                            collect_deferred_arguments(arguments, first, conflicting);
+                        }
+                    }
+                    if let Some(error_type_id) = builtin.error_return_type_id
+                        && matches!(builtin.authored_handling, DeferredCallHandling::Unhandled)
+                    {
+                        record(
+                            TypedErrorFact::Completed(TypedErrorProducer {
+                                span: builtin.member_span,
+                                error_type_id,
+                                builtin_name: Some(builtin.member_name),
+                            }),
+                            first,
+                            conflicting,
+                        );
+                    }
+                }
+                RetainedPostfixStep::Field(_) | RetainedPostfixStep::DeclaredField(_) => {}
+            }
+        }
+    }
+
+    /// Record one call's own producer: a concrete error is a completed producer, a retained one
+    /// stays pending until its shape completes.
+    fn collect_error_return(
+        error_return: Option<GenericErrorReturn>,
+        span: Option<SourceSpan>,
+        first: &mut Option<TypedErrorFact>,
+        conflicting: &mut Option<TypedErrorFact>,
+    ) {
+        if let Some(error_return) = error_return {
+            let fact = match error_return {
+                GenericErrorReturn::Concrete(error_type_id) => {
+                    TypedErrorFact::Completed(TypedErrorProducer {
+                        span,
+                        error_type_id,
+                        builtin_name: None,
+                    })
+                }
+                GenericErrorReturn::Retained(error_return) => {
+                    TypedErrorFact::Pending { span, error_return }
+                }
+            };
+            record(fact, first, conflicting);
+        }
+    }
+
+    /// Walk a call's argument list: ready arguments contribute their facts, retained arguments
+    /// their fragment items, and forwarded arguments the summary captured at registration.
+    fn collect_deferred_arguments(
+        arguments: &[DeferredCallArgument],
+        first: &mut Option<TypedErrorFact>,
+        conflicting: &mut Option<TypedErrorFact>,
+    ) {
+        for argument in arguments {
+            match argument {
+                DeferredCallArgument::Ready(ready) => {
+                    collect_facts(&ready.value.failure_facts, first, conflicting);
+                }
+                DeferredCallArgument::Retained { expression, .. } => {
+                    collect(&expression.items, first, conflicting);
+                }
+                // A registered forward argument keeps its fragment items in the registry, so its
+                // call replays the summary the fragment computed at registration.
+                DeferredCallArgument::Forward { typed_errors, .. } => {
+                    for fact in [typed_errors.0, typed_errors.1].into_iter().flatten() {
+                        record(fact, first, conflicting);
+                    }
+                }
+            }
+        }
+    }
+
+    fn collect_call(
+        call: &DeferredCall,
+        first: &mut Option<TypedErrorFact>,
+        conflicting: &mut Option<TypedErrorFact>,
+    ) {
+        collect_error_return(call.error_return(), call.call_span(), first, conflicting);
+        collect_deferred_arguments(deferred_call_arguments(call), first, conflicting);
+        if let DeferredCall::Receiver(deferred) = call
+            && let DeferredCallReceiver::Ready(receiver) = &deferred.receiver
+        {
+            collect_facts(&receiver.failure_facts, first, conflicting);
+        }
+    }
+
+    fn deferred_call_arguments(call: &DeferredCall) -> &[DeferredCallArgument] {
+        match call {
+            DeferredCall::Source(deferred) => &deferred.arguments,
+            DeferredCall::Receiver(deferred) => &deferred.arguments,
+            DeferredCall::External(deferred) => &deferred.arguments,
+            DeferredCall::Struct(deferred) => &deferred.arguments,
+            DeferredCall::Choice(deferred) => &deferred.arguments,
+            DeferredCall::Generic(deferred) => &deferred.arguments,
+            DeferredCall::GenericNominal(deferred) => &deferred.arguments,
+        }
+    }
+
+    let mut first = None;
+    let mut conflicting = None;
+    collect(items, &mut first, &mut conflicting);
+    (first, conflicting)
+}
+
+/// Consume the trailing handling that a deferred expression can carry.
+///
+/// WHAT: an authored postfix `!` is recorded on the retained expression; any other trailing
+///       recovery (`catch`, `?`) needs the resolved value's result shape, so it is reported as a
+///       precise unsupported position instead of being silently dropped.
+/// WHY: numeric resolution happens at the body root, after the authored suffix tokens have been
+///      consumed, so every suffix the resumed expression must apply has to be retained now.
+fn consume_deferred_expression_suffix(
+    token_stream: &mut AstCursor<'_>,
+) -> Result<DeferredExpressionSuffix, ExpressionParseError> {
+    match token_stream.current_tag() {
+        TokenTag::BANG => {
+            let span = Some(token_stream.current_span());
+            token_stream.advance();
+            Ok(DeferredExpressionSuffix::Propagate { span })
+        }
+        TokenTag::CATCH | TokenTag::QUESTION_MARK => Err(ExpressionParseError::Infrastructure(
+            Box::new(CompilerError::compiler_error(
+                "numeric-dependent expression followed by catch/option propagation cannot be \
+                     retained yet; the suffix needs the resolved result shape",
+            )),
+        )),
+        _ => Ok(DeferredExpressionSuffix::None),
+    }
 }
 
 /// Finish an existing expression at a receiving site without reparsing its primary.
@@ -333,7 +779,9 @@ pub(crate) fn complete_pending_expression(
     Ok(expression)
 }
 
-fn validate_completed_typed_errors(expression: &Expression) -> Result<(), ExpressionParseError> {
+pub(crate) fn validate_completed_typed_errors(
+    expression: &Expression,
+) -> Result<(), ExpressionParseError> {
     if let Some(diagnostic) = expression.unhandled_typed_error_diagnostic() {
         return Err(diagnostic.into());
     }
@@ -387,6 +835,7 @@ pub(super) fn collect_expression_fragment(
             allow_expected_result_evidence: input.trailing_policy.allow_expected_result_evidence,
             expression: &mut expression,
             next_number_negative: &mut next_number_negative,
+            retain_pending_numeric_fragment: input.retain_pending_numeric_fragment,
         };
         match dispatch_expression_token(
             token,
@@ -531,7 +980,7 @@ fn create_expression_until_with_policy(
     // without needing to copy the slice. The original limit is restored after parsing.
     let previous_limit = input.token_stream.set_limit(end_index)?;
 
-    let inner_input = ExpressionParseInput::new(
+    let mut inner_input = ExpressionParseInput::new(
         ExpressionParseResources {
             token_stream: input.token_stream,
             scope_context: input.scope_context,
@@ -549,6 +998,12 @@ fn create_expression_until_with_policy(
             allow_expected_result_evidence,
         },
     );
+    // The bounded window is the position's whole authored syntax, so the position's numeric
+    // retention ownership travels into the inner parse exactly like the unbounded path. Without
+    // this, a deferral raised inside a bounded parse would look like a swallowed sub-fragment and
+    // its consumer could never retain the complete position.
+    inner_input.numeric_deferral_owner = input.numeric_deferral_owner;
+    inner_input.retain_pending_numeric_fragment = input.retain_pending_numeric_fragment;
 
     let result = create_expression_with_trailing_newline_policy(inner_input);
 

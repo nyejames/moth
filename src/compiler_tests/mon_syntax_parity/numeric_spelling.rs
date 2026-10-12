@@ -227,8 +227,8 @@ fn numeric_spelling_fixtures() -> Vec<ParityFixture> {
         fixtures.push(rejected_number(
             name,
             spelling,
-            "Int",
-            SchemaType::Int,
+            "I32",
+            SchemaType::I32,
             source_type_mismatch(
                 TypeMismatchContext::ConstructorArgument,
                 in_literal(&literal, spelling, 1),

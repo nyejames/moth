@@ -27,9 +27,9 @@ choose type T |value T| -> Maybe of T:
     return item
 ;
 
-value Int = identity_copy(41)
-values {Int} = empty_values()
+value I32 = identity_copy(41)
+values {I32} = empty_values()
 box Box of String = wrap("leaf")
-choice Maybe of Int = choose(value)
+choice Maybe of I32 = choose(value)
 
 io.line([: generic_function_local_annotations_success [values.length()]])

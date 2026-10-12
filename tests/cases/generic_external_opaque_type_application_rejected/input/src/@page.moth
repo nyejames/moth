@@ -1,5 +1,5 @@
 @module.js Canvas
 
-use_canvas |canvas Canvas of Int|:
+use_canvas |canvas Canvas of I32|:
     return
 ;

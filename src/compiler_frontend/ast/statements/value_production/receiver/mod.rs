@@ -12,10 +12,12 @@ use crate::compiler_frontend::ast::ContextKind;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_until;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
+};
+use crate::compiler_frontend::ast::numeric_construction::{
+    StatementExpression, deferred_numeric_expression,
 };
 use crate::compiler_frontend::ast::statements::condition_validation::{
     ensure_if_statement_condition, if_condition_is_missing,
@@ -45,7 +47,10 @@ mod inline_if;
 mod inline_match;
 mod inline_then_else;
 mod result_type;
+mod retained;
 mod single_predicate;
+
+pub(crate) use retained::{DeferredValueBlock, RetainedValueBlock, complete_deferred_value_block};
 
 use inline_then_else::same_logical_line;
 
@@ -69,7 +74,7 @@ pub(super) struct ValueIfParseInput<'a, 'b, 'tokens> {
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
     pub(super) target: ActiveValueProductionTarget,
     pub(super) string_table: &'a mut StringTable,
-    pub(super) condition: Expression,
+    pub(super) condition: StatementExpression,
     pub(super) span: Option<SourceSpan>,
     pub(super) path_fork: &'a mut PathInternerFork,
 }
@@ -88,7 +93,7 @@ pub fn try_parse_value_block_at_receiver(
     receiver_kind: ValueReceiverKind,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Option<Result<Expression, ExpressionParseError>> {
+) -> Option<Result<ParsedReceiverValue, ExpressionParseError>> {
     try_parse_value_block_at_receiver_with_target(
         token_stream,
         context,
@@ -99,12 +104,12 @@ pub fn try_parse_value_block_at_receiver(
     )
     .map(|parsed| {
         parsed.map(|value| match value {
-            ParsedReceiverValue::Complete(expression) => expression,
             ParsedReceiverValue::NeedsSlotInference { .. } => {
                 unreachable!(
                     "known receivers must wrap a finished expression; mixed-slot parse results belong to multi-bind"
                 )
             }
+            value => value,
         })
     })
 }
@@ -270,10 +275,27 @@ fn parse_bool_value_if_after_condition(
         value_mode: &ValueMode::ImmutableOwned,
         string_table,
         path_fork,
-    });
-    let condition = create_expression_until(input, &[TokenTag::THEN, TokenTag::COLON])?;
-
-    ensure_if_statement_condition(&condition, type_interner.environment())?;
+    })
+    .with_numeric_deferral_owner();
+    let condition = match create_expression_until(input, &[TokenTag::THEN, TokenTag::COLON]) {
+        Ok(expression) => {
+            ensure_if_statement_condition(&expression, type_interner.environment())?;
+            StatementExpression::Built(expression)
+        }
+        // A pending origin keeps the condition authored as `Bool` for the enclosing body root,
+        // matching statement `if` headers. Only an owning deferral can be retained.
+        Err(error @ ExpressionParseError::NumericDeferral(_)) => {
+            let deferral = error.take_numeric_deferral("an if condition")?;
+            StatementExpression::Retained(deferred_numeric_expression(
+                deferral.items,
+                ExpectedType::Known(type_interner.environment().builtins().bool),
+                deferral.value_mode,
+                deferral.span,
+                deferral.suffix,
+            ))
+        }
+        Err(error) => return Err(error),
+    };
 
     if token_stream.current_tag() == TokenTag::THEN {
         if !same_logical_line(token_stream, header_index, token_stream.position()) {

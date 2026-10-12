@@ -1,0 +1,12 @@
+entry = "."
+
+# HTML-only by design: this fixture asserts exact runtime values through the
+# retained whole-fragment catch completion path. Typed runnable `Error!`
+# recovery has no observed Wasm success fixture under the capability
+# validation, so only the backend whose output is asserted is declared rather
+# than pinning an unobserved Wasm disposition.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "scalar fragment catch reversed=0/12 division=0/0.5 u64=0/42 fallback=2/2 known=2/2"

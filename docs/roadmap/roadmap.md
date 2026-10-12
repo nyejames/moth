@@ -21,22 +21,21 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 ## Sequenced work
 
-- [Exact numeric types, bounded inference and unified conversion](./plans/exact-numeric-types-and-bounded-inference-plan.md) - **ACTIVE.** Activated by the user; implementation has not started and will begin in a new session on the existing `expression-refactor` branch.
-- [Typed semantic expressions and dense compiler foundations](./plans/typed-semantic-expressions-plan.md) - **PAUSED after Phase 3.** Phases 0–3 implementation and review corrections are accepted. Template simplification preserves single-arm Bool/option inclusion, loops, laziness, structural no-output and slots/wrappers while removing fallback and template loop-control machinery. Independent cleanup/style and native-history reviews are accepted. Matched performance evidence and ten final native history recordings are retained with bounded attribution, layout and static-output qualifications in the benchmark report. Boracle and its differential campaign passed. Phase 3M closeout passed final integrated full validation. The committed package donor was rechecked clean at the shared reviewed checkpoint before integration. The exact numeric migration must complete before a fresh restart review reassesses owners, lifetimes, coverage and benchmarks; further expression implementation requires explicit user resumption after that review. The remaining phases deliver the coupled typed-expression/native-result cutover, reduced type/fold work, bounded Wire/Route foundation and trusted Core constant evaluation. Eligible package work stays active in parallel and consumes its specific merged prerequisites.
+- [Typed semantic expressions and dense compiler foundations](./plans/typed-semantic-expressions-plan.md) - **PAUSED after accepted Phase 3M closeout and the post-numeric restart reassessment.** Phases 0–3 implementation and review corrections are accepted. Template simplification preserves single-arm Bool/option inclusion, loops, laziness, structural no-output and slots/wrappers while removing fallback and template loop-control machinery. Independent cleanup/style and native-history reviews are accepted. Matched performance evidence and ten final native history recordings are retained with bounded attribution, layout and static-output qualifications in the benchmark report. Boracle and its differential campaign passed. Phase 3M closeout passed final integrated full validation. The committed package donor was rechecked clean at the shared reviewed checkpoint before integration. That evidence retains its historical checkpoint meaning. A fresh restart review of owners, lifetimes, coverage, dense HIR and comparable benchmarks against the delivered exact numeric construction, types, cast/failure facts and generic call completion is complete. Further expression implementation requires explicit user resumption. The remaining phases deliver the coupled typed-expression/native-result cutover, reduced type/fold work, bounded Wire/Route foundation and trusted Core constant evaluation. Eligible package work stays active in parallel and consumes its specific merged prerequisites.
 
-- [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Resume Phase 4 onward on `diagnostic-data-layout-changes` only after explicit reactivation. Consume merged MON/numeric prerequisites including Dec and Uint, compact typed expressions, dense HIR/native result channels, V1 retirement, the bounded Wiring foundation and Core constant evaluation. Run the fresh owner/lifetime inventory, verify transferred diagnostic capabilities and preserve the locked packed-span and diagnostic decisions. The plan's reactivation gate remains authoritative.
+- [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Resume Phase 4 onward on `diagnostic-data-layout-changes` only after explicit reactivation. Consume merged exact numeric and MON capabilities, compact typed expressions, dense HIR/native result channels, V1 retirement, the bounded Wiring foundation and Core constant evaluation. Run the fresh owner/lifetime inventory, verify transferred diagnostic capabilities and preserve the locked packed-span and diagnostic decisions. The plan's reactivation gate remains authoritative.
 
-- [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Paused until diagnostic layout completes. Native result arity and the narrow propagation-context work move into the earlier typed-expression cutover. Resume with a fresh inventory and the remaining catch-recovery diagnostics, without rebuilding those transferred fixes.
+- [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Paused until diagnostic layout completes. Consume delivered exact numeric conflict/default-range, narrow-operation and authored safety-catch diagnostics. Native result arity and narrow propagation-context work remain with the earlier typed-expression cutover. Resume with a fresh inventory and only the remaining catch-recovery presentation work, without rebuilding transferred fixes.
 
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
 
-- [General directives and project configuration](./plans/general-directives-and-project-config-plan.md) - Queued: consume the shared MON argument owner for general directives, explicit $config contracts and strict $project/$html_builder configuration
+- [General directives and project configuration](./plans/general-directives-and-project-config-plan.md) - Queued: consume the shared MON argument owner, all fixed numeric input types and delivered destination-aware command literal materialisation for general directives, explicit $config contracts and strict $project/$html_builder configuration
 
 - [HTML page directives and runtime title](./plans/html-page-directives-and-runtime-title-plan.md) - Queued: root-only $page, explicit root purposes, metadata cutover and browser title capability
 
 - [Constraints foundations and fast math](./plans/constraints-and-fast-math-plan.md) - Queued: compiler-owned `$fast_math`, transitive `$safe_math` and `$infallible`, a universal numeric backend contract V1, selected fast Core Math helpers and the corresponding documentation and optimisation work. Ordinary arithmetic remains checked. Fast arithmetic has specified wrapping and trapping while preserving numeric value invariants.
 
-- [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md) - Queued after shared MON syntax and unified numeric semantics, including fixed widths, Byte and Dec. Support recursive local anonymous records through ordinary hidden nominal structs, with explicit nominal children and transitive escape checks.
+- [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md) - Queued: consume delivered shared MON syntax, exact numeric types and bounded known-leaf inference. Wait for the required compact typed-expression and ordinary-struct construction capabilities. Support recursive local anonymous records through ordinary hidden nominal structs, with explicit nominal children and transitive escape checks.
 
 - [Never return contracts](./plans/never-return-contract-plan.md)
 
@@ -92,8 +91,9 @@ second MON parser, Moth-expression dependency for literal reading, explicit
 serialisation traits or second schema language. Compiler-owned `$mon`
 convenience remains accepted direction, but its exact invocation syntax stays
 undefined. Source typing, automatic schema extraction, backend operations and
-builder commands remain undelivered. Consume the fixed-width, profile-aware
-and exact Dec schema support without reimplementing numeric materialisation.
+builder commands remain undelivered. Consume explicit fixed-width schemas and
+lossless Integer/Decimal data without profile-selection APIs or a second
+numeric materialisation owner. The standalone exact API cutover is delivered.
 
 Preserve the accepted source parity decisions: `{=}` is an empty map, `{}` remains
 a collection even at a map receiving context, and `::Variant(...)` uses a known
@@ -104,6 +104,32 @@ portions rather than assuming support from the data reader.
 The static builder emits compile-time-known `.mon` assets through ordinary build output ownership. Evaluated runtime templates remain ordinary serialisable Strings for consuming builders. Templates acquire no hidden schema, wire, route or subscription. Resource-bearing strings require concrete builder-assigned characters before MON encoding. Applications own schema versions, migrations and resource interpretation.
 
 Dynamic schemas, streaming, public borrowed views and additional canonical byte representations wait for concrete use cases. Canonical bytes are a serialiser policy, not a restriction on MON semantics. Publish durable contracts in the language and compiler/build authorities, with Rust tooling, source integration and builder support tracked separately in the progress matrices.
+
+## Generics, type-parametric Core bindings and file-backed JS/WAT
+
+Queued design work, not yet an authored implementation plan. Preserve the normal programme order
+above and schedule this work explicitly when its activation requirements have been accepted.
+Consume the delivered D15 operator-domain table in
+`docs/src/docs/numbers/operators.mtf` and the bounded numeric-origin generic exception, not eager
+literal typing or callee-body inference. Equal types retain their width, mixed operands use the
+smallest supported common domain and narrow/F16 checks complete at each operation. Preserve
+fixed-integer `/ -> F64`, binary-float `//` rejection, unsigned/Byte negation rejection and Dec
+scale, integer-mixing and `I32` exponent exceptions.
+
+This owner must deliver explicit compiler-defined closed numeric bounds at all visibilities and
+forward an already-concrete expected type into a nested generic call. Neither capability landed
+with the numeric implementation. It also owns type-parametric Core bindings and file-backed
+JS/WAT design. Keep body-inferred capabilities, operator overloading and conditional error
+signatures outside this work. The permanent handoff lives under
+[Numeric and generic extensions](../src/docs/design-scope/deferred-and-outside-scope.mtf#numeric-and-generic-extensions).
+
+## Optional catch tooling advisory
+
+Future LSP tooling may offer an optional infallible-catch advisory after failure-summary
+convergence. Keep it separate from compiler warnings and source acceptance. Authored safety
+catches remain legal without an actual failure producer, and every handler still receives normal
+validation before unreachable executable work disappears. Consume the same
+[permanent tooling boundary](../src/docs/design-scope/deferred-and-outside-scope.mtf#numeric-and-generic-extensions).
 
 ## Collector-free memory implementation
 

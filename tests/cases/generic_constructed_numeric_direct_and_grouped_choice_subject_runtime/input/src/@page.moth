@@ -1,0 +1,28 @@
+Outcome type T ::
+    Some |value T, label String|,
+    Empty,
+;
+Delivery ::
+    Ready |value U64|,
+    Waiting,
+;
+read_u64 |value U64| -> String:
+    return cast value
+;
+direct_text String = if Outcome::Some(4294967309, "direct") is:
+    Some(value as payload, label as direct_label) => then read_u64(payload)
+    Empty => then "empty"
+;
+origin = Outcome::Some(4294967310, "grouped")
+grouped_text String = if (origin) is:
+    Some(value as payload, label as grouped_label) => then read_u64(payload)
+    Empty => then "empty"
+;
+label_text String = if origin is Some(value as payload, label as tag) then tag else "waiting"
+number = 4294967311
+delivery = Delivery::Ready(number)
+concrete_text String = if delivery is:
+    Ready(value as payload) => then read_u64(payload)
+    Waiting => then "waiting"
+;
+[:direct-choice-subject direct=[direct_text] grouped=[grouped_text] label=[label_text] concrete=[concrete_text]]

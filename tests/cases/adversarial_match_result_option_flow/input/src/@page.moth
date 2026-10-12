@@ -1,8 +1,8 @@
-pair_opt || -> String?, Int?:
+pair_opt || -> String?, I32?:
     return none, none
 ;
 
-step_value |idx Int| -> Int, Error!:
+step_value |idx I32| -> I32, Error!:
     if idx is 2:
         return! Error("boom")
     ;
@@ -14,7 +14,7 @@ i ~= 0
 sum ~= 0
 
 loop i < 4:
-    name String?, count Int? = pair_opt()
+    name String?, count I32? = pair_opt()
 
     value = step_value(i) catch:
 

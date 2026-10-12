@@ -1,0 +1,19 @@
+-- A whole-expression catch protects the retained get while later members use
+-- its known collection shape. A later exact receiver selects the nested leaves.
+
+receive_rows |rows {{U64}}| -> String, Error!:
+    first_row = rows.get(0)!
+    first = first_row.get(0)!
+    return cast first
+;
+
+render_chain || -> String, Error!:
+    rows = {{4_294_967_296, 23}, {33}}
+    missing = rows.get(9).length() catch then 0
+    present = rows.get(0).length() catch then 0
+    first = receive_rows(rows)!
+    return [:whole_chain_catch missing=[missing] present=[present] first=[first]]
+;
+
+result = render_chain() catch then "failed"
+[:[result]]

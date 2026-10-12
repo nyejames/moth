@@ -11,6 +11,17 @@ use crate::compiler_frontend::ast::templates::tir::ids::{
     ChildTemplateOccurrenceId, ExpressionSiteId, SlotOccurrenceId, TemplateIrNodeId,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+/// One exact `I32` range literal for builder fixtures.
+fn integer(value: i64) -> Expression {
+    Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+        None,
+        ValueMode::ImmutableOwned,
+    )
+}
 
 fn slot_occurrence_id(store: &TemplateIrStore, node_id: TemplateIrNodeId) -> SlotOccurrenceId {
     match &store
@@ -754,22 +765,10 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
                     index: None,
                 }),
                 range: Box::new(RangeLoopSpec {
-                    start: Expression::int(
-                        0,
-                        None,
-                        crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-                    ),
-                    end: Expression::int(
-                        10,
-                        None,
-                        crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-                    ),
+                    start: integer(0),
+                    end: integer(10),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
-                    step: Some(Expression::int(
-                        1,
-                        None,
-                        crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-                    )),
+                    step: Some(integer(1)),
                 }),
             },
             loop_body_b,
@@ -974,22 +973,10 @@ fn loop_range_header_assigns_start_end_and_optional_step_sites() {
                     index: None,
                 }),
                 range: Box::new(RangeLoopSpec {
-                    start: Expression::int(
-                        0,
-                        None,
-                        crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-                    ),
-                    end: Expression::int(
-                        10,
-                        None,
-                        crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-                    ),
+                    start: integer(0),
+                    end: integer(10),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
-                    step: Some(Expression::int(
-                        2,
-                        None,
-                        crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-                    )),
+                    step: Some(integer(2)),
                 }),
             },
             with_step_body,
@@ -1011,16 +998,8 @@ fn loop_range_header_assigns_start_end_and_optional_step_sites() {
                     index: None,
                 }),
                 range: Box::new(RangeLoopSpec {
-                    start: Expression::int(
-                        0,
-                        None,
-                        crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-                    ),
-                    end: Expression::int(
-                        10,
-                        None,
-                        crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-                    ),
+                    start: integer(0),
+                    end: integer(10),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
                     step: None,
                 }),
@@ -1117,22 +1096,10 @@ fn expression_sites_share_one_document_order_counter() {
                     index: None,
                 }),
                 range: Box::new(RangeLoopSpec {
-                    start: Expression::int(
-                        0,
-                        None,
-                        crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-                    ),
-                    end: Expression::int(
-                        10,
-                        None,
-                        crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-                    ),
+                    start: integer(0),
+                    end: integer(10),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
-                    step: Some(Expression::int(
-                        1,
-                        None,
-                        crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-                    )),
+                    step: Some(integer(1)),
                 }),
             },
             loop_body,

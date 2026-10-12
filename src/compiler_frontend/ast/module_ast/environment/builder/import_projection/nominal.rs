@@ -137,10 +137,7 @@ fn collect_folded_type_origins(value: &PublicFoldedValue, origins: &mut FxHashSe
             collect_folded_type_origins(end, origins);
         }
         PublicFoldedValue::OptionSome(value) => collect_folded_type_origins(value, origins),
-        PublicFoldedValue::Int(_)
-        | PublicFoldedValue::Uint(_)
-        | PublicFoldedValue::Number(_)
-        | PublicFoldedValue::Float(_)
+        PublicFoldedValue::Number(_)
         | PublicFoldedValue::FixedScalar(_)
         | PublicFoldedValue::Bool(_)
         | PublicFoldedValue::Char(_)

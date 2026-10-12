@@ -1,16 +1,16 @@
--- Task 4: the fallible Uint-to-Int statement cast recovers in HTML-JS but
+-- Task 4: the fallible U32-to-I32 statement cast recovers in HTML-JS but
 -- stays outside the Wasm capability boundary, which rejects statement-form
 -- casts with a structured diagnostic before lowering.
 
-to_int |value Uint| -> Int, Error!:
-    return cast! value
+to_int |value U32| -> I32, Error!:
+    return cast value
 ;
 
-top Uint = 4294967295 + 0
-top_to_int Int = to_int(top) catch:
+top U32 = 4294967295 + 0
+top_to_int I32 = to_int(top) catch:
     then -1
 ;
-small_to_int Int = to_int(7) catch:
+small_to_int I32 = to_int(7) catch:
     then -2
 ;
 

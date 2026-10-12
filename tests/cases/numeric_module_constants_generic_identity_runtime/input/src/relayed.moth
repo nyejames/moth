@@ -1,0 +1,8 @@
+@definitions limit, Box, identity
+
+relayed_box || -> Box of U64:
+    value = identity(18_446_744_073_709_551_615)
+    exact U64 = value
+    return Box(exact)
+;
+reexported_limit #U64 = limit

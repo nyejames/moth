@@ -1,0 +1,25 @@
+take |value I64|:
+;
+
+-- Independent later uses select I64 rather than either U32 cast receiver.
+immutable_source = 42
+mutable_source ~= 43
+immutable_value U32 = cast immutable_source catch then 101
+mutable_value U32 = cast mutable_source catch then 102
+take(immutable_source)
+take(mutable_source)
+
+-- Both retained conversions must recover the negative signed source.
+immutable_failure_source = -1
+mutable_failure_source ~= -1
+immutable_fallback U32 = cast immutable_failure_source catch then 201
+mutable_fallback U32 = cast mutable_failure_source catch then 202
+take(immutable_failure_source)
+take(mutable_failure_source)
+
+assert(immutable_value is 42)
+assert(mutable_value is 43)
+assert(immutable_fallback is 201)
+assert(mutable_fallback is 202)
+
+[:retained scalar cast success=[immutable_value]/[mutable_value] failure=[immutable_fallback]/[mutable_fallback]]

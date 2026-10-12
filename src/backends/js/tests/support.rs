@@ -11,12 +11,19 @@ pub(super) use crate::backends::js::test_symbol_helpers::{
 pub(super) use crate::backends::js::{JsLoweringConfig, lower_hir_to_js};
 pub(super) use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
-use crate::compiler_frontend::datatypes::definitions::ChoiceTypeDefinition;
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
+use crate::compiler_frontend::datatypes::definitions::{
+    ChoiceTypeDefinition, StructTypeDefinition,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::ids::{
     BuiltinTypeConstructor, NominalTypeId, TypeConstructor,
 };
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 pub(super) use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalFunctionId, IO_INPUT_EXTERNAL_TYPE_ID,
 };
@@ -35,9 +42,9 @@ use crate::compiler_frontend::hir::statements::{
 };
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 pub(super) use crate::compiler_frontend::tests::hir_fixture_support::{
-    bool_expression, expression, int_expression, string_expression, unit_expression,
+    bool_expression, expression, fixed_scalar_expression, string_expression, unit_expression,
 };
-pub(super) use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 pub(super) fn statement(id: u32, kind: HirStatementKind) -> HirStatement {
     HirStatement {
@@ -63,16 +70,18 @@ pub(super) use crate::compiler_frontend::symbols::string_interning::StringTable;
 #[derive(Clone, Copy)]
 pub(super) struct TypeIds {
     pub(super) unit: TypeId,
-    pub(super) int: TypeId,
+    /// The canonical I32 identity.
+    pub(super) i32: TypeId,
     pub(super) boolean: TypeId,
     pub(super) string: TypeId,
-    pub(super) float: TypeId,
-    pub(super) option_int: TypeId,
-    pub(super) fallible_int_string: TypeId,
+    /// The canonical F64 identity.
+    pub(super) f64: TypeId,
+    pub(super) option_i32: TypeId,
+    pub(super) fallible_i32_string: TypeId,
     pub(super) input_handle: TypeId,
     pub(super) choice_unit: TypeId,
-    pub(super) collection_int: TypeId,
-    pub(super) map_string_int: TypeId,
+    pub(super) collection_i32: TypeId,
+    pub(super) map_string_i32: TypeId,
 }
 
 /// Returns the source text of a single top-level JS helper function.
@@ -132,6 +141,40 @@ pub(super) fn helper_source<'a>(source: &'a str, name: &str) -> &'a str {
     panic!("helper {name} body is not closed");
 }
 
+/// Returns the builtin `Error` type id, registering it on first use.
+///
+/// WHAT: seeds the canonical `Error` identity the module environment does not seed, so fixtures
+///       can build the same `<success, Error>` carriers validated HIR gives boundary results.
+/// WHY: the internal fallible carrier carries the public builtin `Error`; a fixture-only carrier
+///      shape would diverge from every consumer that inspects the carrier's error slot.
+pub(super) fn fixture_error_type(type_environment: &mut TypeEnvironment) -> TypeId {
+    let error_identity = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error);
+    if let Some(error_type_id) = type_environment.type_id_for_canonical_identity(&error_identity) {
+        return error_type_id;
+    }
+
+    let (_, error_type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: PathId::ROOT,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+    type_environment
+        .register_canonical_identity(error_identity, error_type_id)
+        .expect("test builtin Error identity should register");
+    error_type_id
+}
+
+/// Interns the internal fallible carrier for one success type with the builtin `Error` payload.
+///
+/// WHY: ReturnError results must match the carriers validated HIR produces, so every backend
+///      fixture derives its carrier from the same seeded `Error` identity.
+pub(super) fn fixture_carrier(type_environment: &mut TypeEnvironment, success: TypeId) -> TypeId {
+    let error_type = fixture_error_type(type_environment);
+    type_environment.intern_fallible_carrier(success, error_type)
+}
+
 /// Registers the type surface this backend's tests exercise.
 ///
 /// Deliberately local to each backend: the JS lane registers option, choice, collection, map,
@@ -142,15 +185,15 @@ pub(super) fn build_type_environment() -> (TypeEnvironment, TypeIds) {
     let builtins = env.builtins();
 
     let unit = builtins.none;
-    let int = builtins.int;
+    let i32 = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let boolean = builtins.bool;
     let string = builtins.string;
 
-    let float = builtins.float;
+    let f64 = builtin_type_ids::fixed_scalar(FixedScalar::F64);
 
-    let option_int = env.intern_constructed(
+    let option_i32 = env.intern_constructed(
         TypeConstructor::Builtin(BuiltinTypeConstructor::Option),
-        Box::new([int]),
+        Box::new([i32]),
     );
 
     let choice_def = ChoiceTypeDefinition {
@@ -161,42 +204,55 @@ pub(super) fn build_type_environment() -> (TypeEnvironment, TypeIds) {
     };
     let (_, choice_unit) = env.register_nominal_choice(choice_def);
 
-    let collection_int = env.intern_collection(int, None);
-    let map_string_int = env.intern_map(string, int);
-    let fallible_int_string = env.intern_fallible_carrier(int, string);
+    let collection_i32 = env.intern_collection(i32, None);
+    let map_string_i32 = env.intern_map(string, i32);
+    let fallible_i32_string = env.intern_fallible_carrier(i32, string);
     let input_handle = env.intern_external(IO_INPUT_EXTERNAL_TYPE_ID);
 
     (
         env,
         TypeIds {
             unit,
-            int,
+            i32,
             boolean,
             string,
-            float,
-            option_int,
-            fallible_int_string,
+            f64,
+            option_i32,
+            fallible_i32_string,
             input_handle,
             choice_unit,
-            collection_int,
-            map_string_int,
+            collection_i32,
+            map_string_i32,
         },
     )
 }
 
-pub(super) fn float_expression(
+/// Builds one I32 HIR literal.
+///
+/// WHY: most JS fixtures carry the I32 integer type, the common test default.
+pub(super) fn i32_expression(
+    value: i32,
+    ty: TypeId,
+    region: RegionId,
+    expressions: &mut HirExpressionStore,
+) -> crate::compiler_frontend::hir::ids::HirValueId {
+    let value = FixedScalarValue::signed(FixedScalar::I32, i64::from(value))
+        .expect("an i32 value always fits I32");
+    fixed_scalar_expression(value, ty, region, expressions)
+}
+
+/// Builds one F64 HIR literal.
+///
+/// WHY: most JS fixtures carry the F64 binary float, the common test default.
+pub(super) fn f64_expression(
     value: f64,
     ty: TypeId,
     region: RegionId,
     expressions: &mut HirExpressionStore,
 ) -> crate::compiler_frontend::hir::ids::HirValueId {
-    expression(
-        HirExpressionKind::Float(value),
-        ty,
-        region,
-        ValueKind::Const,
-        expressions,
-    )
+    let value = FixedScalarValue::binary_float(FixedScalar::F64, value)
+        .expect("an f64 value always fits F64");
+    fixed_scalar_expression(value, ty, region, expressions)
 }
 
 pub(super) fn append_values(
@@ -346,7 +402,7 @@ pub(super) fn lower_minimal_map_module(function_name: &str) -> String {
     let mut expressions = HirExpressionStore::default();
 
     let map_key = string_expression("Priya", types.string, region, &mut expressions);
-    let map_value = int_expression(10, types.int, region, &mut expressions);
+    let map_value = i32_expression(10, types.i32, region, &mut expressions);
     let map_entries = append_map_entries(
         &[HirMapEntry {
             key: map_key,
@@ -356,7 +412,7 @@ pub(super) fn lower_minimal_map_module(function_name: &str) -> String {
     );
     let map_expression = expression(
         HirExpressionKind::MapLiteral(map_entries),
-        types.map_string_int,
+        types.map_string_i32,
         region,
         ValueKind::RValue,
         &mut expressions,
@@ -400,20 +456,19 @@ pub(super) fn lower_minimal_map_module(function_name: &str) -> String {
 }
 
 pub(super) fn default_config() -> JsLoweringConfig {
-    JsLoweringConfig::direct_js(false, NumericProfile::STANDARD)
+    JsLoweringConfig::direct_js(false)
 }
 
 /// Builds and lowers a minimal module with one numeric operation statement.
 ///
 /// WHY: helper-demand tests need focused numeric-op fixtures, but the
 /// module/function/lowering setup is identical for every op. Callers name only
-/// the op, failure mode, operands, result type, and numeric profile.
-pub(super) fn lower_minimal_module_with_numeric_op_for_profile(
+/// the op, failure mode, operands, and result type.
+pub(super) fn lower_minimal_module_with_numeric_op(
     op: crate::compiler_frontend::hir::numeric::HirNumericOp,
     failure_mode: crate::compiler_frontend::hir::numeric::NumericFailureMode,
     operands: crate::compiler_frontend::hir::numeric::HirNumericOperands,
     result_type: TypeId,
-    numeric_profile: NumericProfile,
     mut expressions: HirExpressionStore,
 ) -> String {
     let mut string_table = StringTable::new();
@@ -460,7 +515,7 @@ pub(super) fn lower_minimal_module_with_numeric_op_for_profile(
         &module,
         &NumericProofs::default(),
         &string_table,
-        JsLoweringConfig::direct_js(false, numeric_profile),
+        JsLoweringConfig::direct_js(false),
         &type_environment,
         &path_fork.snapshot_table(),
     )
@@ -471,12 +526,8 @@ pub(super) fn lower_minimal_module_with_numeric_op_for_profile(
 /// Emits the runtime cast helpers demanded by the given cast policies.
 ///
 /// WHY: demand-driven cast-helper tests name only policies; the emitter setup
-/// is identical every time. The profile selects the destination precision of
-/// profile-sensitive conversions.
-pub(super) fn emit_cast_helpers_for_profile(
-    policies: &[BuiltinCastPolicyId],
-    numeric_profile: NumericProfile,
-) -> String {
+/// is identical every time.
+pub(super) fn emit_cast_helpers(policies: &[BuiltinCastPolicyId]) -> String {
     let string_table = StringTable::new();
     let path_fork = PathInternerFork::empty();
     let path_table = path_fork.snapshot_table();
@@ -488,7 +539,7 @@ pub(super) fn emit_cast_helpers_for_profile(
         &numeric_proofs,
         &string_table,
         &path_table,
-        JsLoweringConfig::direct_js(false, numeric_profile),
+        JsLoweringConfig::direct_js(false),
         &type_environment,
     );
     for policy in policies {
@@ -568,22 +619,20 @@ fn lower_minimal_module_with_cast(
     .source
 }
 
-/// Builds and lowers a minimal module that performs a `String -> Int` cast at runtime.
+/// Builds and lowers a minimal module that performs a `String -> I32` cast at runtime.
 ///
 /// WHY: prelude-presence tests want to prove that demand-driven helper emission
 /// only emits the numeric parsing helpers when a numeric cast policy is reachable.
 pub(super) fn lower_minimal_module_with_string_int_cast(function_name: &str) -> String {
     lower_minimal_module_with_cast(
         function_name,
-        BuiltinCastPolicyId::StringToNumeric(
-            crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Int,
-        ),
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Fixed(FixedScalar::I32)),
         |types, region, expressions| string_expression("0", types.string, region, expressions),
-        |types| types.int,
+        |types| types.i32,
     )
 }
 
-/// Builds and lowers a minimal module that only performs an `Int -> Float` cast at runtime.
+/// Builds and lowers a minimal module that only performs an `I32 -> F64` cast at runtime.
 ///
 /// WHY: prelude-presence tests want to prove that identity casts do not drag the
 /// numeric parsing helpers into the prelude.
@@ -591,25 +640,23 @@ pub(super) fn lower_minimal_module_with_int_to_float_cast(function_name: &str) -
     lower_minimal_module_with_cast(
         function_name,
         BuiltinCastPolicyId::NumericConversion {
-            source: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Int,
-            target: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Float,
+            source: NumericScalar::Fixed(FixedScalar::I32),
+            target: NumericScalar::Fixed(FixedScalar::F64),
         },
-        |types, region, expressions| int_expression(0, types.int, region, expressions),
-        |types| types.float,
+        |types, region, expressions| i32_expression(0, types.i32, region, expressions),
+        |types| types.f64,
     )
 }
 
-/// Builds and lowers a minimal module that performs a `Float -> String` expression cast.
+/// Builds and lowers a minimal module that performs an `F64 -> String` expression cast.
 ///
-/// WHY: prelude demand tests need a runtime expression cast that exercises Float-to-String
+/// WHY: prelude demand tests need a runtime expression cast that exercises F64-to-String
 /// formatting.
 pub(super) fn lower_minimal_module_with_float_string_cast(function_name: &str) -> String {
     lower_minimal_module_with_cast(
         function_name,
-        BuiltinCastPolicyId::NumericToString(
-            crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Float,
-        ),
-        |types, region, expressions| float_expression(1.5, types.float, region, expressions),
+        BuiltinCastPolicyId::NumericToString(NumericScalar::Fixed(FixedScalar::F64)),
+        |types, region, expressions| f64_expression(1.5, types.f64, region, expressions),
         |types| types.string,
     )
 }

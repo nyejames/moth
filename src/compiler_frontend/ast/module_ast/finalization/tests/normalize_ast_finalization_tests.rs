@@ -1,6 +1,6 @@
 use super::*;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 #[test]
 fn finalization_fold_composed_tir_root_folds_view_text() {
@@ -19,7 +19,6 @@ fn finalization_fold_composed_tir_root_folds_view_text() {
             TemplateValueFinalizationInputs {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-                numeric_profile: NumericProfile::STANDARD,
                 template_ir_store: &template_ir_store,
             },
             TemplatePreparationMode::Value,
@@ -88,7 +87,6 @@ fn finalization_normalizes_dynamic_expression_payloads_into_expression_overlay()
 
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -161,7 +159,11 @@ fn finalization_merges_expression_overrides_without_duplicate_sites() {
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
         let dynamic_node = builder.push_dynamic_expression_node(
-            Expression::int(1, None, ValueMode::ImmutableOwned),
+            Expression::fixed_scalar(
+                FixedScalarValue::signed(FixedScalar::I32, 1).expect("1 fits I32"),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             TemplateSegmentOrigin::Body,
             None,
         );
@@ -189,7 +191,11 @@ fn finalization_merges_expression_overrides_without_duplicate_sites() {
         .allocate_expression_overlay(TirExpressionOverlay {
             overrides: vec![(
                 site_id,
-                Box::new(Expression::int(2, None, ValueMode::ImmutableOwned)),
+                Box::new(Expression::fixed_scalar(
+                    FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 fits I32"),
+                    None,
+                    ValueMode::ImmutableOwned,
+                )),
             )],
         })
         .expect("test overlay allocation");
@@ -209,7 +215,6 @@ fn finalization_merges_expression_overrides_without_duplicate_sites() {
 
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -231,7 +236,8 @@ fn finalization_merges_expression_overrides_without_duplicate_sites() {
     assert_eq!(overlay.overrides[0].0, site_id);
     assert!(matches!(
         overlay.overrides[0].1.kind,
-        ExpressionKind::Int(2)
+        ExpressionKind::FixedScalar(value)
+            if value == FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 fits I32")
     ));
 }
 
@@ -276,7 +282,6 @@ fn finalization_does_not_mark_parsed_expression_overlay_reference_finalized() {
 
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -308,7 +313,11 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
         let child_dynamic_node = {
             let mut builder = TemplateIrBuilder::new(&mut store);
             builder.push_dynamic_expression_node(
-                Expression::int(1, None, ValueMode::ImmutableOwned),
+                Expression::fixed_scalar(
+                    FixedScalarValue::signed(FixedScalar::I32, 1).expect("1 fits I32"),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
                 TemplateSegmentOrigin::Body,
                 None,
             )
@@ -332,7 +341,11 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
             .allocate_expression_overlay(TirExpressionOverlay {
                 overrides: vec![(
                     child_site_id,
-                    Box::new(Expression::int(2, None, ValueMode::ImmutableOwned)),
+                    Box::new(Expression::fixed_scalar(
+                        FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 fits I32"),
+                        None,
+                        ValueMode::ImmutableOwned,
+                    )),
                 )],
             })
             .expect("child expression overlay should allocate");
@@ -386,7 +399,6 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
 
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -408,7 +420,11 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
         .effective_expression_for_site(child_site_id)
         .expect("child expression site should remain valid")
         .expect("normalization should publish the descendant overlay");
-    assert!(matches!(effective_expression.kind, ExpressionKind::Int(2)));
+    assert!(matches!(
+        effective_expression.kind,
+        ExpressionKind::FixedScalar(value)
+            if value == FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 fits I32")
+    ));
 }
 
 #[test]
@@ -466,7 +482,6 @@ fn finalization_normalizes_conditional_selector_payloads_into_expression_overlay
 
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -580,7 +595,6 @@ fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
 
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -721,7 +735,6 @@ fn finalization_fold_uses_finalized_expression_overlay_view() {
             TemplateValueFinalizationInputs {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-                numeric_profile: NumericProfile::STANDARD,
                 template_ir_store: &template_ir_store,
             },
             TemplatePreparationMode::Value,
@@ -923,7 +936,6 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
             TemplateValueFinalizationInputs {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-                numeric_profile: NumericProfile::STANDARD,
                 template_ir_store: &template_ir_store,
             },
             TemplatePreparationMode::Value,
@@ -1054,7 +1066,6 @@ fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() 
             TemplateValueFinalizationInputs {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-                numeric_profile: NumericProfile::STANDARD,
                 template_ir_store: &template_ir_store,
             },
             TemplatePreparationMode::Value,
@@ -1080,7 +1091,6 @@ fn finalization_rejects_nested_runtime_wrapper_in_exact_wrapper_overlay() {
         TemplateValueFinalizationInputs {
             string_table: &mut string_table,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-            numeric_profile: NumericProfile::STANDARD,
             template_ir_store: &template_ir_store,
         },
         TemplatePreparationMode::Value,
@@ -1120,7 +1130,6 @@ fn finalization_keeps_valid_runtime_slot_plan_out_of_folded_string() {
         TemplateValueFinalizationInputs {
             string_table: &mut string_table,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-            numeric_profile: NumericProfile::STANDARD,
             template_ir_store: &template_ir_store,
         },
         TemplatePreparationMode::Value,
@@ -1167,7 +1176,6 @@ fn finalization_replaces_renderable_runtime_slot_plan_with_owned_handoff() {
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -1219,7 +1227,6 @@ fn runtime_handoff_shape_uses_root_slot_plan_not_preparation_reason() {
 
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -1283,7 +1290,6 @@ fn module_constant_normalization_rejects_runtime_slot_plan_with_structured_diagn
         &template_ir_store.borrow(),
         &mut string_table,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        NumericProfile::STANDARD,
         None,
     )
     .expect("a runtime slot plan must classify rather than fail preparation");
@@ -1317,7 +1323,6 @@ fn finalization_accepts_supported_nested_wrapper_exact_view() {
             TemplateValueFinalizationInputs {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-                numeric_profile: NumericProfile::STANDARD,
                 template_ir_store: &template_ir_store,
             },
             TemplatePreparationMode::Value,
@@ -1426,7 +1431,6 @@ fn finalization_fold_uses_resolved_slot_view_context() {
             TemplateValueFinalizationInputs {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-                numeric_profile: NumericProfile::STANDARD,
                 template_ir_store: &template_ir_store,
             },
             TemplatePreparationMode::Value,
@@ -1487,7 +1491,6 @@ fn finalization_fold_composed_root_with_unfilled_slot_emits_no_slot_output() {
             TemplateValueFinalizationInputs {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-                numeric_profile: NumericProfile::STANDARD,
                 template_ir_store: &template_ir_store,
             },
             TemplatePreparationMode::Value,
@@ -1554,7 +1557,6 @@ fn finalization_fold_formatted_root_with_unfilled_slot_emits_no_slot_output() {
             TemplateValueFinalizationInputs {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-                numeric_profile: NumericProfile::STANDARD,
                 template_ir_store: &template_ir_store,
             },
             TemplatePreparationMode::Value,

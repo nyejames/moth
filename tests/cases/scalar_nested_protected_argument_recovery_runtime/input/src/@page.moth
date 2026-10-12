@@ -1,0 +1,82 @@
+-- Nested protected call arguments.
+--
+-- A typed error raised inside a nested call argument belongs to the enclosing
+-- catch, for source calls and mutable receiver calls alike, because the
+-- protected fragment owns receiver evaluation, arguments and nested calls. The
+-- outer call must not run once its argument fails, which the zeroed counters
+-- observe, while the succeeding path still executes the outer call exactly once
+-- and forwards the fragment's result.
+--
+-- A Ready nested argument keeps its own typed producer: the handler's error
+-- binding must take that argument's custom error type, not the builtin Error,
+-- so the recovered error forwards to a receiver that requires the custom type.
+--
+-- `pending` and `dependent_amount` stay unannotated so both origins are
+-- genuinely pending until their exact I32 receivers resolve them.
+
+Counter = |
+    calls I32,
+|
+
+-- The outer source call is itself fallible and touches its counter only when it
+-- actually runs, so a premature nested producer diagnostic or an eager outer
+-- call changes the observed counts.
+count_call |value I32, seen ~Counter| -> I32, Error!:
+    seen.calls = seen.calls + 1
+    return value + 100
+;
+
+-- The receiver call increments the receiver's own counter, so the same nested
+-- failure must leave counter.calls at zero.
+bump |this ~Counter, value I32| -> I32, Error!:
+    this.calls = this.calls + 1
+    return value + 10
+;
+
+fail_argument |value I32| -> I32, Error!:
+    return! Error("argument failed")
+;
+
+succeed_argument |value I32| -> I32, Error!:
+    return value
+;
+
+CustomFailure = |
+    marker I32,
+|
+
+fail_custom || -> I32, CustomFailure!:
+    return! CustomFailure(7)
+;
+
+-- Infallible and free of checked arithmetic, so the retained outer call
+-- contributes no implicit failure of its own: the handler contract comes only
+-- from the Ready argument's custom producer.
+outer_infallible |value I32, amount I32| -> I32:
+    return value
+;
+
+recover_custom |err CustomFailure| -> I32:
+    return err.marker
+;
+
+pending = 1
+
+source_counter ~= Counter(0)
+source_recovered = count_call(fail_argument(pending), ~source_counter) catch then 0
+
+source_ok_counter ~= Counter(0)
+source_ok = count_call(succeed_argument(pending), ~source_ok_counter) catch then 0
+
+counter ~= Counter(0)
+receiver_recovered = ~counter.bump(fail_argument(pending)) catch then 0
+
+receiver_ok_counter ~= Counter(0)
+receiver_ok = ~receiver_ok_counter.bump(succeed_argument(pending)) catch then 0
+
+-- The outer call is retained only through its numeric-dependent second
+-- argument; the first argument is already built and carries CustomFailure.
+dependent_amount = 1
+custom_recovered = outer_infallible(fail_custom(), dependent_amount) catch |err| then recover_custom(err)
+
+[:scalar nested protected source=[source_recovered] source_calls=[source_counter.calls] source_ok=[source_ok] source_ok_calls=[source_ok_counter.calls] receiver=[receiver_recovered] receiver_calls=[counter.calls] receiver_ok=[receiver_ok] receiver_ok_calls=[receiver_ok_counter.calls] custom=[custom_recovered]]

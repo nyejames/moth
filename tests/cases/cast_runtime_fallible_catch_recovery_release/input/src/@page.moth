@@ -1,0 +1,52 @@
+try_float |text String| -> F64, Error!:
+    return cast text
+;
+
+code_for_float |text String| -> U32:
+    code ~U32 = 0
+    ignored F64 = cast text catch |err|:
+        code = err.code
+        then 0.0
+    ;
+    return code
+;
+
+capture_float_int_code |value F64| -> U32:
+    code ~U32 = 0
+    ignored I32 = cast value catch |err|:
+        code = err.code
+        then 0
+    ;
+    return code
+;
+
+code_for_char |text String| -> U32:
+    code ~U32 = 0
+    ignored Char = cast text catch |err|:
+        code = err.code
+        then ' '
+    ;
+    return code
+;
+
+code_for_int_char |value I32| -> U32:
+    code ~U32 = 0
+    ignored Char = cast value catch |err|:
+        code = err.code
+        then ' '
+    ;
+    return code
+;
+
+bad_float_fmt = code_for_float("not a number")
+
+big F64 = try_float("1e100") catch |err|:
+    then 0.0
+;
+oor_float = capture_float_int_code(big)
+
+bad_char = code_for_char("ab")
+
+bad_cp = code_for_int_char(1114112)
+
+[: runtime catch codes: [bad_float_fmt]|[oor_float]|[bad_char]|[bad_cp]]

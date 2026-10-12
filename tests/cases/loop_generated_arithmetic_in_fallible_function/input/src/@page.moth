@@ -6,7 +6,7 @@ LoopFault = |
     reason String,
 |
 
-sum_items |items {Int}| -> Int, Error!:
+sum_items |items {I32}| -> I32, Error!:
     total ~= 0
     loop items |item|:
         total = total + item
@@ -14,7 +14,7 @@ sum_items |items {Int}| -> Int, Error!:
     return total
 ;
 
-count_ascending |limit Int| -> Int, Error!:
+count_ascending |limit I32| -> I32, Error!:
     seen ~= 0
     loop 0 to limit |i|:
         seen = seen + 1
@@ -24,7 +24,7 @@ count_ascending |limit Int| -> Int, Error!:
 
 -- Negative `by` is normalised to a magnitude and then negated again for the descending
 -- direction. Both of those are generated checked subtractions.
-sum_descending || -> Int, Error!:
+sum_descending || -> I32, Error!:
     total ~= 0
     loop 10 to & 0 by -2 |i|:
         total = total + i
@@ -33,8 +33,8 @@ sum_descending || -> Int, Error!:
 ;
 
 -- The inclusive maximum endpoint is visited, then the loop exits without an overflowing
--- increment past Int::MAX.
-walk_to_int_max || -> Int, Error!:
+-- increment past I32::MAX.
+walk_to_int_max || -> I32, Error!:
     visited ~= 0
     loop 2147483645 to & 2147483647 |i|:
         visited = visited + 1
@@ -44,7 +44,7 @@ walk_to_int_max || -> Int, Error!:
 
 -- A custom error slot requires explicit mapping of the authored numeric failure.
 -- The collection loop still exercises its generated iteration update and success continuation.
-count_with_custom_error |items {Int}| -> Int, LoopFault!:
+count_with_custom_error |items {I32}| -> I32, LoopFault!:
     seen ~= 0
     loop items |item|:
         seen = seen + 1 catch:

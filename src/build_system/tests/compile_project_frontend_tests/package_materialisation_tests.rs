@@ -1,30 +1,34 @@
 use super::*;
 use crate::build_system::create_project_modules::compiled_boundary::ProjectFrontendCompilation;
+use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_messages::InvalidFallibleHandlingReason;
+use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureSource,
 };
 use crate::compiler_frontend::hir::numeric::NumericFailureMode;
-use crate::compiler_frontend::hir::reachability::collect_reachability_from_function_link_facts;
+use crate::compiler_frontend::hir::reachability::{
+    HirReachability, collect_reachability_from_function_link_facts,
+};
 use crate::compiler_frontend::public_interface::{
     PublicDeclarationSemantics, PublicFunctionCategory,
 };
 use crate::compiler_frontend::semantic_identity::OriginDeclarationId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::utilities::basic::portable_path_text;
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 #[test]
 fn source_package_invalid_numeric_default_retains_its_source_for_directory_and_single_file() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let default_line = "limit #Config of Int = 2147483648";
+    let default_line = "limit #Config of I32 = 2147483648";
     let package_source =
-        format!("{default_line}\nexport:\n    run || -> Int:\n        return 1\n    ;\n;\n");
+        format!("{default_line}\nexport:\n    run || -> I32:\n        return 1\n    ;\n;\n");
     let consumer_source = "@broken run\nvalue = run()\n";
 
     for (entry_mode, direct_file) in [("ordinary direct file", true), ("directory", false)] {
@@ -130,7 +134,7 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     .expect("should write project source contract");
     fs::write(
         package.join("@mod.moth"),
-        "enabled #Config of Bool\nexport:\n    helper || -> Int:\n        return 2\n    ;\n;\n",
+        "enabled #Config of Bool\nexport:\n    helper || -> I32:\n        return 2\n    ;\n;\n",
     )
     .expect("should write source-package contract");
 
@@ -159,7 +163,6 @@ fn source_package_config_inputs_are_isolated_from_project_inputs() {
     let result = compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
-        NumericProfile::STANDARD,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -253,12 +256,12 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
     fs::write(dir.join("@page.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         first_package.join("@mod.moth"),
-        "export:\n    first || -> Int:\n        return missing_first_package_value\n    ;\n;\n",
+        "export:\n    first || -> I32:\n        return missing_first_package_value\n    ;\n;\n",
     )
     .expect("should write first diagnosed package");
     fs::write(
         second_package.join("@mod.moth"),
-        "export:\n    second || -> Int:\n        return missing_second_package_value\n    ;\n;\n",
+        "export:\n    second || -> I32:\n        return missing_second_package_value\n    ;\n;\n",
     )
     .expect("should write second diagnosed package");
 
@@ -344,7 +347,7 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
         .expect("should write blocked project consumer");
     fs::write(
         package.join("@mod.moth"),
-        "export:\n    run || -> Int:\n        return missing_package_value\n    ;\n;\n",
+        "export:\n    run || -> I32:\n        return missing_package_value\n    ;\n;\n",
     )
     .expect("should write diagnosed source package");
 
@@ -392,6 +395,36 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
             0,
             "the project boundary itself should have no diagnostic"
         );
+        let package_boundary = &frontend
+            .source_packages
+            .get(0)
+            .expect("package boundary retained")
+            .boundary;
+        assert_eq!(
+            package_boundary
+                .successful_artefacts_in_module_id_order()
+                .count(),
+            0,
+            "a diagnosed source package must publish no partial module or public interface",
+        );
+        assert_eq!(
+            package_boundary.generated.sidecars().count(),
+            0,
+            "a diagnosed source package must publish no generated sidecars",
+        );
+        assert_eq!(
+            frontend
+                .project
+                .successful_artefacts_in_module_id_order()
+                .count(),
+            0,
+            "the blocked consumer must publish no partial module or public interface",
+        );
+        assert_eq!(
+            frontend.project.generated.sidecars().count(),
+            0,
+            "the blocked consumer must publish no generated sidecars",
+        );
 
         let project_source = frontend.project_source_database.take();
         let messages = frontend
@@ -421,7 +454,6 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
         );
         let result = crate::build_system::create_project_modules::compile_single_file_boracle(
             &config,
-            NumericProfile::STANDARD,
             &StyleDirectiveRegistry::built_ins(),
             &mut frontend_surface,
             &mut string_table,
@@ -516,21 +548,21 @@ fn generated_sidecar_refreshes_active_base_public_summary() {
     fs::write(
         dir.join("@page.moth"),
         r#"export:
-    public_helper |value ~Int| -> Int:
+    public_helper |value ~I32| -> I32:
         return seed_helper(~value, "seed")
     ;
 ;
 
-seed_helper type T |value ~Int, marker T| -> Int:
+seed_helper type T |value ~I32, marker T| -> I32:
     value = 2
     return value
 ;
 
-mutating_helper type T |value ~Int, marker T| -> Int:
+mutating_helper type T |value ~I32, marker T| -> I32:
     return public_helper(~value)
 ;
 
-caller type T |value ~Int, marker T| -> Int:
+caller type T |value ~I32, marker T| -> I32:
     return mutating_helper(~value, marker)
 ;
 
@@ -538,9 +570,9 @@ independent type T |value T| -> T:
     return value
 ;
 
-counter ~Int = 1
-result Int = caller(~counter, "seed")
-independent_result Int = independent(42)
+counter ~I32 = 1
+result I32 = caller(~counter, "seed")
+independent_result I32 = independent(42)
 "#,
     )
     .expect("should write active-base public fixture");
@@ -550,8 +582,7 @@ independent_result Int = independent(42)
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
-    let _counter_capture =
-        crate::compiler_frontend::instrumentation::capture_frontend_counters_for_test();
+    let _counter_capture = crate::compiler_frontend::instrumentation::capture_counters_for_test();
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     let _counter_guard = {
         crate::compiler_frontend::instrumentation::reset_frontend_counters();
@@ -692,11 +723,40 @@ fn assert_link_facts_match_final_cfg(
         .expect("published link facts should describe the final CFG");
 }
 
+/// Checks each published proof against a fresh analysis of the executable's final HIR and returns
+/// the published dispositions of its numeric operations in HIR order.
+#[track_caller]
+fn assert_published_numeric_proofs_match_final_hir(
+    module: &crate::compiler_frontend::module_compilation::Module,
+) -> Vec<bool> {
+    let executable = &module.executable;
+    let fresh = analyse_numeric_proofs(&executable.hir, &executable.type_environment);
+    executable
+        .hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .filter(|statement| matches!(statement.kind, HirStatementKind::NumericOp { .. }))
+        .map(|statement| {
+            let published = executable
+                .numeric_proofs
+                .integer_operation_is_safe(statement.id);
+            assert_eq!(
+                published,
+                fresh.integer_operation_is_safe(statement.id),
+                "published proof must match the final HIR"
+            );
+            published
+        })
+        .collect()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LaneFixture {
     InstallsLane,
     PrunesHandler,
     Unchanged,
+    RewritesSidecarProofs,
 }
 
 #[test]
@@ -707,24 +767,24 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
         // A fallible private chain gets a builtin-Error lane.
         (
             LaneFixture::InstallsLane,
-            "multiply |left Int, right Int| -> Int:\n    return left * right\n;\n\n\
-             safe_product |left Int, right Int| -> Int, Error!:\n    return multiply(left, right)\n;\n\n\
+            "multiply |left I32, right I32| -> I32:\n    return left * right\n;\n\n\
+             safe_product |left I32, right I32| -> I32, Error!:\n    return multiply(left, right)\n;\n\n\
              product = safe_product(6, 7) catch then 0\n\
-             same Int = identity(product)\n\
+             same I32 = identity(product)\n\
              [: product=[same]]\n",
             None,
         ),
-        // U8 + U8 into U32 is proven safe, so only the generic call keeps the catch. That call's
-        // failure stays provisional until materialisation proves `identity` infallible, which
-        // leaves the handler without an error edge for the installer to prune. Post-install HIR
-        // validation rejects an unpruned handler, and pruning compacts block ids, so stale link
-        // facts would no longer match. A non-generic callee is proven before HIR lowering and
-        // never reaches pruning.
+        // I8 + U8 into I16 has a full-domain contained result range, so it is proven safe without
+        // a value-range proof. Only the generic call keeps the catch. That call's failure stays
+        // provisional until materialisation proves `identity` infallible, which leaves the handler
+        // without an error edge for the installer to prune. Post-install HIR validation rejects an
+        // unpruned handler, and pruning compacts block ids, so stale link facts would no longer
+        // match. A non-generic callee is proven before HIR lowering and never reaches pruning.
         (
             LaneFixture::PrunesHandler,
-            "left U8 = 255\n\
+            "left I8 = -128\n\
              right U8 = 255\n\
-             same U32 = identity(left) + right catch then 0\n\
+             same I16 = identity(left) + right catch then 0\n\
              [: same=[same]]\n",
             None,
         ),
@@ -733,10 +793,21 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
         // no catch to record and no fallible private function to give a lane.
         (
             LaneFixture::Unchanged,
-            "@utils pass_through\nsame Int = pass_through(42)\n[: same=[same]]\n",
+            "@utils pass_through\nsame I32 = pass_through(42)\n[: same=[same]]\n",
             Some(
-                "export:\n    pass_through |value Int| -> Int:\n        return identity(value)\n    ;\n;\n",
+                "export:\n    pass_through |value I32| -> I32:\n        return identity(value)\n    ;\n;\n",
             ),
+        ),
+        // The sidecar's failure lane splits the block after `sum`. The second add then sits after
+        // an unwrapped write, so only the first sum keeps a proof. The published table must match
+        // the final HIR, not the table that existed before the rewrite.
+        (
+            LaneFixture::RewritesSidecarProofs,
+            "compute type T |value T| -> I32:\n    seed I32 = 3\n    sum I32 = seed + 1\n    doubled I32 = sum + sum\n    return doubled\n;\n\n\
+             marker I32 = 1\n\
+             result I32 = compute(marker) catch then 0\n\
+             [: result=[result]]\n",
+            None,
         ),
     ] {
         let _temp = tempfile::tempdir().expect("should create temp dir");
@@ -794,20 +865,443 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
                 "{fixture:?}"
             );
             assert_link_facts_match_final_cfg(&artefact.module);
+            assert_published_numeric_proofs_match_final_hir(&artefact.module);
+            if fixture == LaneFixture::PrunesHandler {
+                assert!(
+                    hir.catch_handlers.is_empty(),
+                    "the converged infallible generic call must leave no published handler",
+                );
+            }
             has_api_only_module |= hir.start_function.is_none();
         }
         assert_eq!(has_api_only_module, fixture == LaneFixture::Unchanged);
 
         let mut sidecar_count = 0;
+        let mut sidecar_proofs = Vec::new();
         for sidecar in frontend.project.generated.sidecars() {
             assert_link_facts_match_final_cfg(&sidecar.module);
+            sidecar_proofs.push(assert_published_numeric_proofs_match_final_hir(
+                &sidecar.module,
+            ));
             sidecar_count += 1;
         }
         assert_eq!(
             sidecar_count, 1,
-            "{fixture:?}: the identity request needs one sidecar"
+            "{fixture:?}: each fixture requests exactly one generated sidecar"
         );
+        if fixture == LaneFixture::RewritesSidecarProofs {
+            assert_eq!(
+                sidecar_proofs,
+                [vec![true, false]],
+                "{fixture:?}: only the first sum keeps its proof after the lane split"
+            );
+        }
     }
+}
+
+/// Compiles one single-page project and returns the frontend, or the diagnostics it produced.
+fn compile_single_page_project(page: &str) -> Result<ProjectFrontendCompilation, CompilerMessages> {
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+    fs::create_dir_all(dir.join("src")).expect("should create source root");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(dir.join("src/@page.moth"), page).expect("should write page");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut string_table,
+    )
+}
+
+/// Returns the runtime demand that a module's published link facts imply for its final HIR.
+fn published_runtime_demand(
+    module: &crate::compiler_frontend::module_compilation::Module,
+) -> HirReachability {
+    let all_functions = module
+        .executable
+        .hir
+        .functions
+        .iter()
+        .map(|function| function.id)
+        .collect::<Vec<_>>();
+    collect_reachability_from_function_link_facts(&module.link_facts.functions, &all_functions)
+        .expect("published link facts should cover every HIR function")
+}
+
+#[test]
+fn pruned_fallback_map_leaves_no_runtime_map_demand() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    // `1 + 2` cannot fail, so the catch fallback is unreachable and is removed before
+    // publication. Its map literal and `.length` must leave no map demand in the link facts.
+    let frontend = compile_single_page_project(
+        "value = 1 + 2 catch:\n    fallback_map = {1 = 2}\n    then fallback_map.length\n;\n[: value=[value]]\n",
+    )
+    .unwrap_or_else(|error| panic!("pruned fallback fixture should compile: {error:?}"));
+
+    let mut entry_count = 0;
+    for artefact in frontend.project.successful_artefacts_in_module_id_order() {
+        let reachability = published_runtime_demand(&artefact.module);
+        assert!(
+            reachability.reachable_map_uses.is_empty(),
+            "a pruned fallback must leave no map demand in the published link facts"
+        );
+        assert_link_facts_match_final_cfg(&artefact.module);
+        entry_count += usize::from(artefact.module.executable.hir.start_function.is_some());
+    }
+    assert_eq!(
+        entry_count, 1,
+        "the page should publish exactly one entry artefact"
+    );
+}
+
+#[test]
+fn live_fallback_map_demand_is_visible_to_the_published_probe() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    // `risky` declares `Error!`, so its catch keeps a live error edge. The same map demand must
+    // reach the probe, which shows that the pruned absence above is not an empty probe.
+    let frontend = compile_single_page_project(
+        "risky |value I32| -> I32, Error!:\n    return value\n;\n\n\
+         value = risky(1) catch:\n    fallback_map = {1 = 2}\n    then fallback_map.length\n;\n\
+         [: value=[value]]\n",
+    )
+    .unwrap_or_else(|error| panic!("live fallback fixture should compile: {error:?}"));
+
+    let mut saw_map_demand = false;
+    for artefact in frontend.project.successful_artefacts_in_module_id_order() {
+        let reachability = published_runtime_demand(&artefact.module);
+        saw_map_demand |= !reachability.reachable_map_uses.is_empty();
+        assert_link_facts_match_final_cfg(&artefact.module);
+    }
+    assert!(
+        saw_map_demand,
+        "a live fallback map must stay visible to the published probe"
+    );
+}
+
+#[test]
+fn pruned_catch_handler_publishes_no_materialisation_request_or_sidecar() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    // Reuse the integration scenario, but inspect publication: emitted helper absence alone
+    // cannot prove that the dead handler never requested a concrete generic instance.
+    let page = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/cases/cast_wasm_unreachable_cast_ignored/input/src/@page.moth"
+    ));
+    let frontend = compile_single_page_project(page)
+        .unwrap_or_else(|error| panic!("pruned handler fixture should compile: {error:?}"));
+
+    assert!(frontend.project.diagnosed.is_empty());
+    assert!(frontend.project.blocked.is_empty());
+    assert_eq!(frontend.project.generated.sidecars().count(), 0);
+    assert!(
+        !frontend
+            .project
+            .successful_module_views()
+            .flat_map(|module| module.link_facts.functions.direct_call_targets())
+            .any(|(_, target)| matches!(
+                target,
+                CallTarget::Generated(identity)
+                    if identity.declaration().defining_name() == "pruned_materialisation"
+            )),
+        "the pruned handler must leave no published materialisation demand"
+    );
+}
+
+#[test]
+fn static_if_duplicate_identity_request_publishes_one_canonical_sidecar() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+    fs::create_dir_all(dir.join("src")).expect("should create source root");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    // Static-if prunes the inactive `identity(1)` request before deduplication, so the two
+    // active requests must share one canonical `identity<U64>` sidecar.
+    fs::write(
+        dir.join("src/@page.moth"),
+        "enabled #= false\n\
+         identity type T |value T| -> T:\n    return value\n;\n\n\
+         read_u64 |value U64| -> U64:\n    return value\n;\n\n\
+         result ~U64 = 0\n\
+         if enabled:\n    inactive = identity(1)\n    result = read_u64(inactive)\n\
+         else\n    first = identity(2)\n    second = identity(3)\n    result = read_u64(first)\n    result = read_u64(second)\n;\n\
+         [: result=[result]]\n",
+    )
+    .expect("should write page");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let frontend = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut string_table,
+    )
+    .unwrap_or_else(|error| panic!("static-if duplicate fixture should compile: {error:?}"));
+
+    assert!(
+        frontend.project.diagnosed.is_empty(),
+        "the active duplicate request should compile without diagnosed modules"
+    );
+    assert!(
+        frontend.project.blocked.is_empty(),
+        "the active duplicate request should not block any module"
+    );
+
+    let artefacts: Vec<_> = frontend
+        .project
+        .successful_artefacts_in_module_id_order()
+        .collect();
+    assert_eq!(
+        artefacts.len(),
+        1,
+        "the entry module should publish one successful artefact"
+    );
+    let requester_hir = &artefacts[0].module.executable.hir;
+
+    let sidecars: Vec<_> = frontend.project.generated.sidecars().collect();
+    assert_eq!(
+        sidecars.len(),
+        1,
+        "the pruned inactive request must not add a second identity sidecar"
+    );
+    let sidecar = sidecars[0];
+    let identity = &sidecar.identity;
+    assert_eq!(
+        identity.declaration().defining_name(),
+        "identity",
+        "the sidecar should publish the identity template, not another generic"
+    );
+    let [argument] = identity.type_arguments() else {
+        panic!(
+            "identity<U64> should carry exactly one type argument: {:?}",
+            identity.type_arguments()
+        );
+    };
+    assert_eq!(
+        argument,
+        &CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(FixedScalar::U64)),
+        "both active requests should canonicalise their argument to fixed U64"
+    );
+    assert!(
+        sidecar
+            .module
+            .executable
+            .hir
+            .function_ids_by_generated
+            .contains_key(identity),
+        "the sidecar should resolve its canonical root under the generated identity"
+    );
+
+    let linked_calls = requester_hir
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .filter(|statement| {
+            matches!(
+                &statement.kind,
+                HirStatementKind::Call {
+                    target: CallTarget::Generated(target),
+                    ..
+                } if target == identity
+            )
+        })
+        .count();
+    assert_eq!(
+        linked_calls, 2,
+        "the entry module should keep exactly the two active calls linked to the one identity sidecar"
+    );
+}
+
+#[test]
+fn inactive_static_if_retained_method_on_concrete_field_publishes_no_request() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+    fs::create_dir_all(dir.join("src")).expect("should create source root");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    // The inactive `peek` call completes after its static-if range closed. Only the active
+    // `get` call may publish a request, so the pruned `peek` request must not survive.
+    fs::write(
+        dir.join("src/@page.moth"),
+        "enabled #= false\n\
+         Packet type T = | value T |\n\
+         Outer type T = | value T, packet Packet of I32 |\n\n\
+         get type A |this Packet of A| -> A:\n    return this.value\n;\n\n\
+         peek type A |this Packet of A| -> A:\n    return this.value\n;\n\n\
+         make_outer type T |value T| -> Outer of T:\n    packet Packet of I32 = Packet(7)\n    return Outer(value, packet)\n;\n\n\
+         active ~I32 = 0\n\
+         if enabled:\n    active = make_outer(1).packet.peek()\n\
+         else\n    active = make_outer(2).packet.get()\n;\n\
+         [: value=[active]]\n",
+    )
+    .expect("should write page");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let frontend = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut string_table,
+    )
+    .unwrap_or_else(|error| panic!("inactive retained method fixture should compile: {error:?}"));
+
+    assert!(
+        frontend.project.diagnosed.is_empty(),
+        "the inactive retained method fixture should compile without diagnosed modules"
+    );
+    assert!(
+        frontend.project.blocked.is_empty(),
+        "the inactive retained method fixture should not block any module"
+    );
+
+    let sidecars: Vec<_> = frontend.project.generated.sidecars().collect();
+    assert!(
+        sidecars
+            .iter()
+            .all(|sidecar| sidecar.identity.declaration().defining_name() != "peek"),
+        "the pruned inactive peek request must not publish a sidecar"
+    );
+    let get_sidecars: Vec<_> = sidecars
+        .iter()
+        .filter(|sidecar| sidecar.identity.declaration().defining_name() == "get")
+        .collect();
+    let [get_sidecar] = get_sidecars.as_slice() else {
+        panic!(
+            "the active get call should publish exactly one sidecar, found {}",
+            get_sidecars.len()
+        );
+    };
+    let [argument] = get_sidecar.identity.type_arguments() else {
+        panic!(
+            "get<I32> should carry exactly one type argument: {:?}",
+            get_sidecar.identity.type_arguments()
+        );
+    };
+    assert_eq!(
+        argument,
+        &CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(FixedScalar::I32)),
+        "the active get request should keep its I32 argument"
+    );
+    assert!(
+        get_sidecar
+            .module
+            .executable
+            .hir
+            .function_ids_by_generated
+            .contains_key(&get_sidecar.identity),
+        "the get sidecar should resolve its canonical root under the generated identity"
+    );
+}
+
+#[test]
+fn valid_identity_request_before_failed_concrete_body_publishes_nothing() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+    fs::create_dir_all(dir.join("src")).expect("should create source root");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    // `outer<U64>` passes a U64 into `inner`'s String parameter only in its concrete body, so the
+    // earlier valid `identity<U64>` request must roll back with the failed transaction.
+    fs::write(
+        dir.join("src/@page.moth"),
+        "identity type T |value T| -> T:\n    return value\n;\n\n\
+         inner type U |text String, result U| -> U:\n    return result\n;\n\n\
+         outer type T |value T| -> T:\n    return inner(value, value)\n;\n\n\
+         read_u64 |value U64| -> U64:\n    return value\n;\n\n\
+         ready = identity(4294967296)\n\
+         first = read_u64(ready)\n\
+         bad = outer(4294967297)\n\
+         second = read_u64(bad)\n\
+         [: second=[second]]\n",
+    )
+    .expect("should write page");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let frontend = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut string_table,
+    )
+    .unwrap_or_else(|error| {
+        panic!("failed concrete body should retain a diagnosed frontend outcome: {error:?}")
+    });
+
+    assert_eq!(
+        frontend.project.diagnosed.len(),
+        1,
+        "the failed concrete body should diagnose the single entry module"
+    );
+    assert!(
+        frontend.project.blocked.is_empty(),
+        "a failed concrete body should diagnose its module rather than block it"
+    );
+    assert_eq!(
+        frontend
+            .project
+            .successful_artefacts_in_module_id_order()
+            .count(),
+        0,
+        "a failed concrete body must publish no successful artefact"
+    );
+    assert_eq!(
+        frontend.project.generated.sidecars().count(),
+        0,
+        "the earlier valid identity request must not publish a sidecar after the failed transaction"
+    );
+
+    let diagnostics = frontend.project.diagnosed[0].diagnostics.diagnostics();
+    let type_mismatches: Vec<_> = diagnostics
+        .iter()
+        .filter(|diagnostic| matches!(&diagnostic.payload, DiagnosticPayload::TypeMismatch { .. }))
+        .collect();
+    assert_eq!(
+        type_mismatches.len(),
+        1,
+        "the concrete outer<U64> body should report exactly one type mismatch"
+    );
+    let mismatch = type_mismatches[0];
+    assert_eq!(mismatch.kind.code(), "MOTH-TYPE-0001");
+    assert!(
+        mismatch.labels.iter().any(
+            |label| label.message == Some(DiagnosticLabelMessage::GenericInstantiationBodySite)
+        ),
+        "the mismatch should keep the concrete generic body site label"
+    );
 }
 
 #[test]
@@ -912,9 +1406,9 @@ html #= ()\n",
     )
     .expect("should write config");
     let package_source = format!(
-        "{inner_name} type U |text String, result U| -> U:\n    return result\n;\n\nexport:\n    {function_name} type T |{parameter_name} T| -> Int:\n        if \"one\" is:\n            \"one\" => return 1\n            \"one\" => return 1\n            else => return 1\n        ;\n        return {inner_name}({parameter_name}, 1)\n    ;\n;\n",
+        "{inner_name} type U |text String, result U| -> U:\n    return result\n;\n\nexport:\n    {function_name} type T |{parameter_name} T| -> I32:\n        if \"one\" is:\n            \"one\" => return 1\n            \"one\" => return 1\n            else => return 1\n        ;\n        return {inner_name}({parameter_name}, 1)\n    ;\n;\n",
     );
-    let project_source = format!("@pkg {function_name}\nvalue Int = {function_name}(1)\n");
+    let project_source = format!("@pkg {function_name}\nvalue I32 = {function_name}(1)\n");
     fs::write(&package_path, &package_source).expect("should write package source");
     fs::write(&project_path, &project_source).expect("should write project source");
 
@@ -933,7 +1427,6 @@ html #= ()\n",
     let frontend = compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
-        NumericProfile::STANDARD,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -1124,7 +1617,7 @@ export:
 "#,
     )
     .expect("should write nested generic package source");
-    fs::write(&project_path, "@pkg outer\nvalue Int = outer(1)\n")
+    fs::write(&project_path, "@pkg outer\nvalue I32 = outer(1)\n")
         .expect("should write project source");
 
     let mut config = Config::new(dir.clone());
@@ -1142,7 +1635,6 @@ export:
     let frontend = compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
-        NumericProfile::STANDARD,
         None,
         &style_directives,
         &mut frontend_surface,
@@ -1254,8 +1746,8 @@ PrivateBox type T = |
     value T,
 |
 
-box Box of Int = Box(42)
-same_box Box of Int = forward(box)
+box Box of I32 = Box(42)
+same_box Box of I32 = forward(box)
 maybe Maybe of String = Maybe::Some("stable")
 same_maybe Maybe of String = forward(maybe)
 private_box PrivateBox of Bool = PrivateBox(true)
@@ -1336,7 +1828,10 @@ same_private_box PrivateBox of Bool = forward(private_box)
                         .map(|id| string_table.resolve(id)),
                     Some("value")
                 );
-                assert_eq!(fields[0].type_id, builtin_type_ids::INT);
+                assert_eq!(
+                    fields[0].type_id,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32)
+                );
             }
             "Maybe" => {
                 saw_maybe = true;
@@ -1403,10 +1898,10 @@ fn generated_sidecars_remap_inherited_nominals_after_multi_module_publication() 
         dir.join("provider/@mod.moth"),
         r#"export:
     RemoteMarker = |
-        value Int,
+        value I32,
     |
 
-    seed || -> Int:
+    seed || -> I32:
         return 1
     ;
 ;
@@ -1418,8 +1913,8 @@ fn generated_sidecars_remap_inherited_nominals_after_multi_module_publication() 
         r#"@provider seed, RemoteMarker as LocalMarker
 
 inner type T |marker LocalMarker, value T| -> T:
-    unused Int = seed()
-    marker_value Int = marker.value
+    unused I32 = seed()
+    marker_value I32 = marker.value
     return value
 ;
 
@@ -1539,7 +2034,7 @@ fn generated_sidecars_reconstruct_hidden_facade_nominal_closure() {
         dir.join("facade/provider/@mod.moth"),
         r#"export:
     Hidden = |
-        value Int,
+        value I32,
     |
 
     Wrapper = |
@@ -1626,7 +2121,10 @@ wrapped Wrapper = identity(make())
         .fields_for(wrapper_fields[0].type_id)
         .expect("facade-hidden provider nominal should retain its fields");
     assert_eq!(hidden_fields.len(), 1);
-    assert_eq!(hidden_fields[0].type_id, builtin_type_ids::INT);
+    assert_eq!(
+        hidden_fields[0].type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
 }
 
 #[test]
@@ -1642,13 +2140,13 @@ fn implicit_failure_generated_private_helper_facts_survive_materialisation_and_c
     ).expect("should write config");
     fs::write(
         src.join("@page.moth"),
-        "multiply |left Int, right Int| -> Int:\n    return left * right\n;\n\
-         product type T |marker T, left Int, right Int| -> Int:\n\
+        "multiply |left I32, right I32| -> I32:\n    return left * right\n;\n\
+         product type T |marker T, left I32, right I32| -> I32:\n\
              return multiply(left, right)\n;\n\
-         safe_product type T |marker T, left Int, right Int| -> Int, Error!:\n\
+         safe_product type T |marker T, left I32, right I32| -> I32, Error!:\n\
              return multiply(left, right)\n;\n\
-         use_product |left Int, right Int| -> Int:\n    return product(0, left, right)\n;\n\
-         use_safe_product |left Int, right Int| -> Int, Error!:\n\
+         use_product |left I32, right I32| -> I32:\n    return product(0, left, right)\n;\n\
+         use_safe_product |left I32, right I32| -> I32, Error!:\n\
              return safe_product(0, left, right)!\n;\n\
          result = use_product(2, 3)\n",
     )
@@ -1728,12 +2226,12 @@ fn implicit_failure_later_generated_request_reuses_converged_private_helper_summ
     .expect("should write config");
     fs::write(
         helper.join("@mod.moth"),
-        r#"multiply |left Int, right Int| -> Int:
+        r#"multiply |left I32, right I32| -> I32:
     return left * right
 ;
 
 export:
-    product type T |marker T, left Int, right Int| -> Int, Error!:
+    product type T |marker T, left I32, right I32| -> I32, Error!:
         return multiply(left, right)
     ;
 ;
@@ -1743,7 +2241,7 @@ export:
     fs::write(
         src.join("@page.moth"),
         "@helper product\n\
-         use_product || -> Int, Error!:\n    return product(0, 2, 3)!\n;\n\
+         use_product || -> I32, Error!:\n    return product(0, 2, 3)!\n;\n\
          result = use_product() catch then 0\n",
     )
     .expect("should write later generated requester");
@@ -1959,8 +2457,8 @@ fn assert_later_request_rejected(declaring_source: &str, requester_source: &str,
 fn implicit_failure_later_generated_request_rejects_exported_function_without_error_slot() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     assert_later_request_rejected(
-        "multiply |left Int, right Int| -> Int:\n    return left * right\n;\n\n\
-         export:\n    product type T |marker T, left Int, right Int| -> Int:\n        \
+        "multiply |left I32, right I32| -> I32:\n    return left * right\n;\n\n\
+         export:\n    product type T |marker T, left I32, right I32| -> I32:\n        \
          return multiply(left, right)\n    ;\n;\n",
         "@helper product\nresult = product(0, 2, 3)\n",
         "invalid_fallible_handling.unhandled_builtin_failure_in_exported_function",
@@ -1971,9 +2469,9 @@ fn implicit_failure_later_generated_request_rejects_exported_function_without_er
 fn implicit_failure_later_generated_request_rejects_custom_error_function() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     assert_later_request_rejected(
-        "multiply |left Int, right Int| -> Int:\n    return left * right\n;\n\n\
+        "multiply |left I32, right I32| -> I32:\n    return left * right\n;\n\n\
          export:\n    Failure = |\n        message String,\n    |\n\n    \
-         product type T |marker T, left Int, right Int| -> Int, Failure!:\n        \
+         product type T |marker T, left I32, right I32| -> I32, Failure!:\n        \
          return multiply(left, right)\n    ;\n;\n",
         "@helper product\nresult = product(0, 2, 3) catch then 0\n",
         "invalid_fallible_handling.unhandled_builtin_failure_in_custom_error_function",
@@ -2002,11 +2500,11 @@ fn implicit_failure_private_helper_infallible_to_fallible_changes_exported_calle
     // The export block is byte-identical in both versions: only the private helper
     // body changes. Every public signature text stays the same; only the private
     // helper's semantic failure summary widens from infallible to fallible.
-    const EXPORT_BLOCK: &str = "export:\n    product type T |marker T, left Int, right Int| -> Int:\n        return double(left)\n    ;\n;\n";
+    const EXPORT_BLOCK: &str = "export:\n    product type T |marker T, left I32, right I32| -> I32:\n        return double(left)\n    ;\n;\n";
     let infallible_source =
-        format!("double |value Int| -> Int:\n    return value\n;\n\n{EXPORT_BLOCK}");
+        format!("double |value I32| -> I32:\n    return value\n;\n\n{EXPORT_BLOCK}");
     let fallible_source =
-        format!("double |value Int| -> Int:\n    return value * value\n;\n\n{EXPORT_BLOCK}");
+        format!("double |value I32| -> I32:\n    return value * value\n;\n\n{EXPORT_BLOCK}");
     assert_ne!(infallible_source, fallible_source);
     assert_eq!(
         infallible_source.len() + " * value".len(),
@@ -2018,7 +2516,7 @@ fn implicit_failure_private_helper_infallible_to_fallible_changes_exported_calle
     fs::write(
         src.join("@page.moth"),
         "@helper product\n\
-         use_product || -> Int:\n    return product(0, 2, 3)\n;\n\
+         use_product || -> I32:\n    return product(0, 2, 3)\n;\n\
          result = use_product()\n",
     )
     .expect("should write requester");
@@ -2133,13 +2631,13 @@ fn exported_private_chain_witness_rendering_is_stable_across_repeated_compilatio
         "project #= (\n    name = \"implicit-failure\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
     )
     .expect("should write config");
-    const CHAIN_TAIL: &str = "multiply |left Int, right Int| -> Int:\n    return left * right\n;\n\
-         first |left Int, right Int| -> Int:\n    return multiply(left, right)\n;\n\
-         second |left Int, right Int| -> Int:\n    return first(left, right)\n;\n\
-         third |left Int, right Int| -> Int:\n    return second(left, right)\n;\n\
-         fourth |left Int, right Int| -> Int:\n    return third(left, right)\n;\n";
-    const UNRELATED_A: &str = "unrelated_a || -> Int:\n    return 1\n;\n";
-    const UNRELATED_B: &str = "unrelated_b || -> Int:\n    return 2\n;\n";
+    const CHAIN_TAIL: &str = "multiply |left I32, right I32| -> I32:\n    return left * right\n;\n\
+         first |left I32, right I32| -> I32:\n    return multiply(left, right)\n;\n\
+         second |left I32, right I32| -> I32:\n    return first(left, right)\n;\n\
+         third |left I32, right I32| -> I32:\n    return second(left, right)\n;\n\
+         fourth |left I32, right I32| -> I32:\n    return third(left, right)\n;\n";
+    const UNRELATED_A: &str = "unrelated_a || -> I32:\n    return 1\n;\n";
+    const UNRELATED_B: &str = "unrelated_b || -> I32:\n    return 2\n;\n";
     fn write_chain(src: &std::path::Path, unrelated_first: &str, unrelated_second: &str) {
         fs::write(
             src.join("chain.moth"),
@@ -2151,7 +2649,7 @@ fn exported_private_chain_witness_rendering_is_stable_across_repeated_compilatio
     fs::write(
         src.join("@page.moth"),
         "@chain fourth\n\
-         export:\n    product |left Int, right Int| -> Int:\n        return fourth(left, right)\n    ;\n;\n\
+         export:\n    product |left I32, right I32| -> I32:\n        return fourth(left, right)\n    ;\n;\n\
          result = product(2, 3)\n",
     )
     .expect("should write entry");
@@ -2423,7 +2921,7 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
     .expect("should write config");
 
     let project_text = "project_snapshot = 1\n";
-    let package_text = "package_snapshot Int = undefined_thing\n";
+    let package_text = "package_snapshot I32 = undefined_thing\n";
     fs::write(project_source_root.join("@mod.moth"), project_text)
         .expect("should write project module");
     fs::write(package_root.join("@mod.moth"), package_text).expect("should write package module");
@@ -2444,7 +2942,6 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
     let frontend = compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
-        NumericProfile::STANDARD,
         None,
         &style_directives,
         &mut frontend_surface,

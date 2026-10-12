@@ -8,6 +8,7 @@ use crate::compiler_frontend::ast::expressions::expression::{Expression, Express
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
     ExpressionRpn, ExpressionRpnItem,
 };
+use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{
@@ -605,10 +606,8 @@ fn pending_numeric_literal_is_a_final_validation_invariant() {
     let error = validate_expression(&expression, &context)
         .expect_err("an escaped pending literal must fail final type validation");
     assert!(
-        error
-            .msg
-            .contains("evaluate_expression must resolve it first"),
-        "unexpected invariant message: {error:?}"
+        matches!(error.error_type, ErrorType::Compiler),
+        "an escaped pending item must fail the compiler-invariant lane: {error:?}"
     );
 }
 
@@ -628,10 +627,243 @@ fn pending_group_is_a_final_validation_invariant() {
     let error = validate_expression(&expression, &context)
         .expect_err("an escaped pending group must fail final type validation");
     assert!(
-        error
-            .msg
-            .contains("evaluate_expression must resolve it first"),
-        "unexpected invariant message: {error:?}"
+        matches!(error.error_type, ErrorType::Compiler),
+        "an escaped pending item must fail the compiler-invariant lane: {error:?}"
+    );
+}
+
+/// One construction-only pending binding item for escaped-pending guard coverage.
+///
+/// WHAT: mints a real `NumericBindingId` through the construction owner instead of fabricating
+///       an ID, so the guard test exercises the exact carrier body parsing builds.
+fn pending_numeric_binding_item(
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> ExpressionRpnItem {
+    use crate::compiler_frontend::ast::module_ast::scope_context::ScopeArena;
+    use crate::compiler_frontend::ast::numeric_construction::{
+        NumericConstructionState, NumericFamily, NumericRecipe, PendingBindingRow,
+    };
+
+    let name = string_table.intern("pending_binding");
+    let path = path_fork
+        .try_intern_components(&[name])
+        .expect("test path fits")
+        .to_owned();
+    let mut state = NumericConstructionState::new();
+    let class = state.create_class().expect("test class allocation fits");
+    let frame = ScopeArena::new().alloc_root_frame_with_capacity(0);
+    let binding = state
+        .register_binding(PendingBindingRow {
+            name,
+            path,
+            span: None,
+            binding_span: None,
+            value_mode: ValueMode::ImmutableOwned,
+            mutable: false,
+            class,
+            recipe: Some(NumericRecipe::Raw {
+                items: Vec::new(),
+                family: NumericFamily::Whole,
+            }),
+            origin: Default::default(),
+            frame,
+        })
+        .expect("test binding allocation fits");
+
+    ExpressionRpnItem::PendingNumericBinding {
+        binding,
+        span: None,
+        value_mode: ValueMode::ImmutableOwned,
+        is_copy: false,
+    }
+}
+
+/// One construction-only pending cast item for escaped-pending guard coverage.
+fn pending_numeric_cast_item() -> ExpressionRpnItem {
+    use crate::compiler_frontend::builtins::casts::targets::BuiltinCastTarget;
+    use moth_lexical::numeric::fixed_scalar::FixedScalar;
+
+    ExpressionRpnItem::PendingNumericCast {
+        target_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        target: BuiltinCastTarget::Fixed(FixedScalar::I32),
+        requires_optional_wrap_after_cast: false,
+        handling: CastHandling::Implicit,
+        source: Vec::new(),
+        span: None,
+    }
+}
+
+/// One construction-only pending call item for escaped-pending guard coverage.
+fn pending_numeric_call_item(
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> ExpressionRpnItem {
+    use crate::compiler_frontend::ast::numeric_construction::{
+        DeferredCall, DeferredCallHandling, DeferredSourceCall,
+    };
+    use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+
+    let name = string_table.intern("pending_call");
+    let function_path = path_fork
+        .try_intern_components(&[name])
+        .expect("test path fits")
+        .to_owned();
+    let call = DeferredCall::Source(Box::new(DeferredSourceCall {
+        function_path,
+        signature: FunctionSignature {
+            parameters: Vec::new(),
+            returns: Vec::new(),
+        },
+        arguments: Vec::new(),
+        call_span: None,
+        authored_handling: DeferredCallHandling::Unhandled,
+    }));
+
+    ExpressionRpnItem::PendingNumericCall {
+        call: Box::new(call),
+        span: None,
+    }
+}
+
+#[test]
+fn pending_numeric_binding_is_a_final_validation_invariant() {
+    let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let expression =
+        pending_runtime_expression(pending_numeric_binding_item(&mut strings, &mut path_fork));
+    let type_environment = TypeEnvironment::new();
+    let store = TemplateIrStore::new();
+    let context = TypeValidationContext {
+        type_environment: &type_environment,
+        template_ir_store: &store,
+    };
+
+    let error = validate_expression(&expression, &context)
+        .expect_err("an escaped pending binding must fail final type validation");
+    assert!(
+        matches!(error.error_type, ErrorType::Compiler),
+        "an escaped pending item must fail the compiler-invariant lane: {error:?}"
+    );
+}
+
+#[test]
+fn pending_numeric_cast_is_a_final_validation_invariant() {
+    let expression = pending_runtime_expression(pending_numeric_cast_item());
+    let type_environment = TypeEnvironment::new();
+    let store = TemplateIrStore::new();
+    let context = TypeValidationContext {
+        type_environment: &type_environment,
+        template_ir_store: &store,
+    };
+
+    let error = validate_expression(&expression, &context)
+        .expect_err("an escaped pending cast must fail final type validation");
+    assert!(
+        matches!(error.error_type, ErrorType::Compiler),
+        "an escaped pending item must fail the compiler-invariant lane: {error:?}"
+    );
+}
+
+#[test]
+fn pending_numeric_call_is_a_final_validation_invariant() {
+    let mut strings = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let expression =
+        pending_runtime_expression(pending_numeric_call_item(&mut strings, &mut path_fork));
+    let type_environment = TypeEnvironment::new();
+    let store = TemplateIrStore::new();
+    let context = TypeValidationContext {
+        type_environment: &type_environment,
+        template_ir_store: &store,
+    };
+
+    let error = validate_expression(&expression, &context)
+        .expect_err("an escaped pending call must fail final type validation");
+    assert!(
+        matches!(error.error_type, ErrorType::Compiler),
+        "an escaped pending item must fail the compiler-invariant lane: {error:?}"
+    );
+}
+
+#[test]
+fn pending_numeric_operand_continuation_is_a_final_validation_invariant() {
+    use crate::compiler_frontend::ast::field_access::retain_operand_handling_suffix;
+    use crate::compiler_frontend::ast::numeric_construction::DeferredExpressionSuffix;
+    use crate::compiler_frontend::builtins::casts::targets::BuiltinCastTarget;
+    use crate::compiler_frontend::datatypes::ids::BuiltinTypeKey;
+    use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
+    use moth_lexical::numeric::fixed_scalar::FixedScalar;
+    use moth_lexical::numeric::grammar::{
+        NumericExponentSign, NumericLiteralKind, NumericLiteralSign,
+    };
+
+    let mut strings = StringTable::new();
+    let source_text = strings.intern("1");
+    let normalized_text = strings.intern("1");
+    let pending_source = ExpressionRpnItem::PendingNumericLiteral {
+        token: crate::compiler_frontend::numeric_text::token::NumericLiteralToken::new(
+            NumericLiteralSign::Positive,
+            source_text,
+            normalized_text,
+            NumericLiteralKind::WholeNumber,
+            1,
+            0,
+            0,
+            NumericExponentSign::None,
+        ),
+        span: None,
+        value_mode: ValueMode::ImmutableOwned,
+    };
+
+    let mut type_environment = TypeEnvironment::new();
+    let target_type_id =
+        type_environment.intern_builtin_key(BuiltinTypeKey::FixedScalar(FixedScalar::F32));
+
+    let mut retained_items = vec![ExpressionRpnItem::PendingNumericCast {
+        target_type_id,
+        target: BuiltinCastTarget::Fixed(FixedScalar::F32),
+        requires_optional_wrap_after_cast: true,
+        handling: CastHandling::Implicit,
+        source: vec![pending_source],
+        span: None,
+    }];
+    retain_operand_handling_suffix(
+        &mut retained_items,
+        DeferredExpressionSuffix::OptionalPropagate { span: None },
+        ExpectedType::Infer,
+        &ValueMode::ImmutableOwned,
+    )
+    .expect("the retained optional-propagation constructor accepts this pending cast");
+
+    let pending_item = retained_items
+        .pop()
+        .expect("retained operand construction produces one RPN item");
+    assert!(matches!(
+        &pending_item,
+        ExpressionRpnItem::PendingNumericExpression { .. }
+    ));
+
+    let expression = Expression::new(
+        ExpressionKind::Runtime(ExpressionRpn {
+            items: vec![pending_item],
+        }),
+        None,
+        target_type_id,
+        DataType::FixedScalar(FixedScalar::F32),
+        ValueMode::ImmutableOwned,
+    );
+    let store = TemplateIrStore::new();
+    let context = TypeValidationContext {
+        type_environment: &type_environment,
+        template_ir_store: &store,
+    };
+
+    let error = validate_expression(&expression, &context)
+        .expect_err("an escaped retained numeric continuation must fail final type validation");
+    assert!(
+        matches!(error.error_type, ErrorType::Compiler),
+        "an escaped pending expression must fail the compiler-invariant lane: {error:?}"
     );
 }
 

@@ -1,7 +1,7 @@
 //! The one owned, backend-neutral folded-value vocabulary and converter shared by public
 //! interface projection and the runtime-template handoff.
 //!
-//! WHAT: owns [`PublicFoldedValue`], [`PublicFoldedField`], [`FiniteFloat`], the shared owned
+//! WHAT: owns [`PublicFoldedValue`], [`PublicFoldedField`], the shared owned
 //! string vocabulary and the single recursive [`convert_expression_to_folded_value`] converter
 //! that translates a finalized, normalized compile-time expression into an owned stable value
 //! with no donor-local identity. The converter is shared by the constant folded-value join (R2b)
@@ -11,8 +11,6 @@
 //! WHY: public interfaces and runtime template handoffs both outlive donor-local AST and TIR
 //! storage. Keeping their portable string representation here prevents a second parallel piece
 //! enum or duplicate conversion implementation at either boundary.
-
-use std::hash::{Hash, Hasher};
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::store::{
@@ -156,56 +154,6 @@ fn owned_folded_string_from_pieces(
     Ok(OwnedFoldedString::Pieces(public_pieces))
 }
 
-/// A finite `f64` folded value with an equivalence relation consistent with Moth
-/// semantics.
-///
-/// WHAT: a narrow validated wrapper that rejects non-finite input (`NaN`, `+inf`, `-inf`) at
-/// construction and preserves the input value's exact IEEE-754 bits, including the sign of
-/// zero. Finiteness makes the manual `PartialEq` a total equivalence relation, so `Eq` is sound.
-/// WHY: the language authority defines `Float` as finite `f64`, supports ordinary `Float`
-/// equality and ordering, and normalizes `-0.0` to `0` only at the `Float -> String` formatting
-/// boundary. It does not declare both IEEE zero signs globally identical. Constant arithmetic,
-/// `String -> Float` parsing and `@core/math` helpers such as `atan2` can observe signed zero,
-/// so folded public values must retain exact finite bits. The numeric formatter remains the sole
-/// normalizer; this wrapper never normalizes.
-#[derive(Clone, Debug)]
-pub(crate) struct FiniteFloat(f64);
-
-impl FiniteFloat {
-    /// Construct a finite float, rejecting non-finite input and preserving exact bits.
-    pub(crate) fn new(value: f64) -> Result<Self, CompilerError> {
-        if !value.is_finite() {
-            return Err(CompilerError::compiler_error(format!(
-                "public-interface draft folded-value projection: a non-finite Float value ({}) reached \
-             conversion; the AST must not materialize non-finite constants, so this is an \
-             internal invariant violation",
-                value
-            )));
-        }
-        Ok(Self(value))
-    }
-
-    pub(crate) fn value(&self) -> f64 {
-        self.0
-    }
-}
-
-impl PartialEq for FiniteFloat {
-    /// Exact-bit equality: two finite floats are equal only when their IEEE-754 bit patterns
-    /// match, so `-0.0` and `0.0` are distinct.
-    fn eq(&self, other: &Self) -> bool {
-        self.0.to_bits() == other.0.to_bits()
-    }
-}
-
-impl Eq for FiniteFloat {}
-
-impl Hash for FiniteFloat {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.to_bits().hash(state);
-    }
-}
-
 /// The owned, backend-neutral, recursive folded value for one directly exported constant or
 /// retained default.
 ///
@@ -227,15 +175,11 @@ impl Hash for FiniteFloat {
 /// payloads, collection elements and option payloads all project through the same conversion.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum PublicFoldedValue {
-    Int(i64),
-    /// One profile-sized unsigned integer value; follows the selected `Int` width.
-    Uint(u64),
     /// An exact decimal coefficient paired with its canonical scale.
     ///
     /// `NumberValue` shares immutable coefficient storage, so cloning this owned interface value
     /// increments the backing reference count without copying arbitrary-precision limbs.
     Number(NumberValue),
-    Float(FiniteFloat),
     /// One materialised fixed-width scalar or `Byte` value with exact-bit identity.
     ///
     /// WHY: `FixedScalarValue` is `Copy` with exact-bit `Eq`/`Hash`, so `U64` maxima,
@@ -311,10 +255,7 @@ impl PublicFoldedValue {
                 end.visit_type_identities(visitor);
             }
             Self::OptionSome(value) => value.visit_type_identities(visitor),
-            Self::Int(_)
-            | Self::Uint(_)
-            | Self::Number(_)
-            | Self::Float(_)
+            Self::Number(_)
             | Self::FixedScalar(_)
             | Self::Bool(_)
             | Self::Char(_)
@@ -445,9 +386,6 @@ pub(crate) fn convert_expression_to_folded_value(
     increment_frontend_counter(FrontendCounter::PublicFoldedValueConversions);
 
     match &expression.kind {
-        ExpressionKind::Int(value) => Ok(PublicFoldedValue::Int(*value)),
-        ExpressionKind::Uint(value) => Ok(PublicFoldedValue::Uint(*value)),
-        ExpressionKind::Float(value) => Ok(PublicFoldedValue::Float(FiniteFloat::new(*value)?)),
         ExpressionKind::Number(value) => {
             project_number_value(value, expression.type_id, type_environment)
         }
@@ -595,9 +533,6 @@ pub(crate) fn convert_const_value_to_folded_value_with_provenance(
         increment_frontend_counter(FrontendCounter::PublicFoldedValueConversions);
 
         match visit {
-            ConstValueVisit::Int(value) => Ok(PublicFoldedValue::Int(value)),
-            ConstValueVisit::Uint(value) => Ok(PublicFoldedValue::Uint(value)),
-            ConstValueVisit::Float(value) => Ok(PublicFoldedValue::Float(FiniteFloat::new(value)?)),
             ConstValueVisit::Number(value) => {
                 project_number_value(value, metadata.type_id, type_environment)
             }

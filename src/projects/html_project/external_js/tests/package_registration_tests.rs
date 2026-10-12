@@ -8,25 +8,14 @@ use crate::projects::html_project::external_js::runtime_module_registry::Runtime
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 #[test]
-fn js_numeric_annotations_remain_native_moth_signatures() {
-    let opaque_types = HashMap::new();
-    for (name, expected) in [
-        ("Int", ExternalSignatureType::NativeInt),
-        ("Uint", ExternalSignatureType::NativeUint),
-        ("Float", ExternalSignatureType::NativeFloat),
-    ] {
-        assert_eq!(
-            parsed_type_to_signature_type(name, &opaque_types).expect("native annotation resolves"),
-            expected,
-        );
-    }
-}
-
-#[test]
 fn parsed_fixed_scalar_functions_register_canonical_parameter_and_result_types() {
-    for (scalar, native) in [
-        (FixedScalar::U32, ExternalSignatureType::NativeUint),
-        (FixedScalar::F32, ExternalSignatureType::NativeFloat),
+    for scalar in [
+        FixedScalar::I32,
+        FixedScalar::I64,
+        FixedScalar::U32,
+        FixedScalar::U64,
+        FixedScalar::F32,
+        FixedScalar::F64,
     ] {
         for error_slot in ["", ", Error!"] {
             let source = format!(
@@ -57,10 +46,6 @@ fn parsed_fixed_scalar_functions_register_canonical_parameter_and_result_types()
             assert_eq!(
                 fixed.to_parameter_type_id(&mut environment),
                 Some(builtin_type_ids::fixed_scalar(scalar))
-            );
-            assert_ne!(
-                fixed.to_parameter_type_id(&mut environment),
-                native.to_parameter_type_id(&mut environment)
             );
         }
     }
@@ -113,10 +98,6 @@ fn parsed_literal_constants_register_exact_fixed_u32_values_without_provider_cha
         assert_eq!(
             constant.data_type.to_parameter_type_id(&mut environment),
             Some(builtin_type_ids::fixed_scalar(FixedScalar::U32)),
-        );
-        assert_ne!(
-            constant.data_type.to_parameter_type_id(&mut environment),
-            ExternalSignatureType::NativeUint.to_parameter_type_id(&mut environment),
         );
     }
 }

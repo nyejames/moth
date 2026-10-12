@@ -8,6 +8,6 @@ format_timestamp |value String| -> String:
     return [: [value] UTC]
 ;
 
-format_currency |amount Float| -> String:
+format_currency |amount F64| -> String:
     return [: $[amount]]
 ;

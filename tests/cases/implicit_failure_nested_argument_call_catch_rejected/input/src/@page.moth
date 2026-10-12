@@ -1,0 +1,9 @@
+identity || -> I32:
+    return 1
+;
+
+forward |value I32| -> I32:
+    return value
+;
+
+nested_argument = forward((identity())) catch then 0

@@ -23,6 +23,7 @@ use crate::compiler_frontend::compiler_messages::{
     NonExhaustiveMatchReason, RuleDiagnosticKind, SyntaxDiagnosticKind, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
@@ -30,6 +31,15 @@ use crate::compiler_frontend::tests::parse_support::{
 };
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+/// One exact `I32` scalar value for match fixtures.
+///
+/// WHY: an unconstrained whole literal defaults to `I32`, so completed patterns and scrutinees
+///      carry the exact `I32` identity.
+fn i32_value(value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32")
+}
 
 #[test]
 fn parses_if_else_statements() {
@@ -318,21 +328,24 @@ fn parses_match_statements_with_else_arm() {
         panic!("expected match statement in start body");
     };
 
-    assert_eq!(scrutinee.diagnostic_type, DataType::Int);
+    assert_eq!(
+        ast.type_environment.fixed_scalar(scrutinee.type_id),
+        Some(FixedScalar::I32)
+    );
     assert_eq!(arms.len(), 2);
     assert!(matches!(
         arms[0].pattern,
         MatchPattern::Literal(Expression {
-            kind: ExpressionKind::Int(0),
+            kind: ExpressionKind::FixedScalar(value),
             ..
-        })
+        }) if value == i32_value(0)
     ));
     assert!(matches!(
         arms[1].pattern,
         MatchPattern::Literal(Expression {
-            kind: ExpressionKind::Int(42),
+            kind: ExpressionKind::FixedScalar(value),
             ..
-        })
+        }) if value == i32_value(42)
     ));
     assert_eq!(
         else_block.as_ref().map(Vec::len),
@@ -391,9 +404,9 @@ fn parses_negative_match_arm_with_multiline_boolean_guard() {
     assert!(matches!(
         arms[1].pattern,
         MatchPattern::Literal(Expression {
-            kind: ExpressionKind::Int(-42),
+            kind: ExpressionKind::FixedScalar(value),
             ..
-        })
+        }) if value == i32_value(-42)
     ));
     assert!(matches!(
         arms[1].guard.as_ref().map(|guard| &guard.kind),
@@ -403,7 +416,11 @@ fn parses_negative_match_arm_with_multiline_boolean_guard() {
 
 #[test]
 fn guarded_literal_coverage_only_tracks_unguarded_duplicates() {
-    let literal = MatchPattern::Literal(Expression::int(2, None, ValueMode::ImmutableOwned));
+    let literal = MatchPattern::Literal(Expression::fixed_scalar(
+        i32_value(2),
+        None,
+        ValueMode::ImmutableOwned,
+    ));
     let guard = Expression::bool(true, None, ValueMode::ImmutableOwned);
 
     let mut guarded_then_unguarded = MatchArmCoverageTracker::default();
@@ -648,7 +665,7 @@ fn rejects_guarded_choice_match_without_else() {
 #[test]
 fn parses_option_present_capture_statement_condition() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "value Int? = 42\nif value is |amount|:\n    io.line([: [amount]])\n;\n",
+        "value I32? = 42\nif value is |amount|:\n    io.line([: [amount]])\n;\n",
     );
 
     let body = start_function_body(&ast, &path_fork, &string_table);
@@ -664,8 +681,8 @@ fn parses_option_present_capture_statement_condition() {
 
     assert_eq!(
         ast.type_environment.option_inner_type(scrutinee.type_id),
-        Some(ast.type_environment.builtins().int),
-        "scrutinee should keep semantic Int? identity even when its diagnostic spelling is inferred"
+        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
+        "scrutinee should keep semantic I32? identity even when its diagnostic spelling is inferred"
     );
     assert_eq!(arms.len(), 1);
     assert!(
@@ -683,7 +700,7 @@ fn parses_option_present_capture_statement_condition() {
 #[test]
 fn parses_option_match_present_capture_guard_and_none_patterns() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "value Int? = 42\n\
+        "value I32? = 42\n\
      if value is:\n\
          |positive| if positive > 0 => io.line([: [positive]])\n\
          |fallback| => io.line([: [fallback]])\n\
@@ -993,7 +1010,7 @@ fn routes_missing_inline_else_at_assignment_boundary_through_value_if_missing_el
     // The assignment receiver keeps a real newline before the next statement,
     // so the absent `else` must be routed through the structured reason.
     assert_inline_control_flow_reason(
-        "choose |condition Bool| -> Int:\n    result ~= 0\n    result = if condition then 10\n    return result\n;\nvalue = choose(false)\n",
+        "choose |condition Bool| -> I32:\n    result ~= 0\n    result = if condition then 10\n    return result\n;\nvalue = choose(false)\n",
         InvalidControlFlowStatementReason::ValueIfMissingElse,
     );
 }
@@ -1003,7 +1020,7 @@ fn routes_missing_inline_else_at_return_boundary_through_value_if_missing_else()
     // The return receiver keeps a real newline before the block close, so the
     // absent `else` must be routed through the structured reason.
     assert_inline_control_flow_reason(
-        "choose |condition Bool| -> Int:\n    return if condition then 10\n;\nvalue = choose(false)\n",
+        "choose |condition Bool| -> I32:\n    return if condition then 10\n;\nvalue = choose(false)\n",
         InvalidControlFlowStatementReason::ValueIfMissingElse,
     );
 }
@@ -1013,11 +1030,11 @@ fn preserves_inline_multiline_when_newline_precedes_an_authored_else() {
     // A real newline before an authored `else` stays the multiline inline form
     // at both assignment and return receivers, not a missing-`else` diagnostic.
     assert_inline_control_flow_reason(
-        "choose |condition Bool| -> Int:\n    result ~= 0\n    result = if condition then 10\nelse 0\n    return result\n;\nvalue = choose(false)\n",
+        "choose |condition Bool| -> I32:\n    result ~= 0\n    result = if condition then 10\nelse 0\n    return result\n;\nvalue = choose(false)\n",
         InvalidControlFlowStatementReason::InlineValueIfMultiline,
     );
     assert_inline_control_flow_reason(
-        "choose |condition Bool| -> Int:\n    return if condition then 10\nelse 0\n;\nvalue = choose(false)\n",
+        "choose |condition Bool| -> I32:\n    return if condition then 10\nelse 0\n;\nvalue = choose(false)\n",
         InvalidControlFlowStatementReason::InlineValueIfMultiline,
     );
     assert_inline_control_flow_reason(
@@ -1040,7 +1057,7 @@ fn multiline_option_literal_predicate_stays_inline_value_if_multiline() {
 #[test]
 fn ignores_else_owned_by_a_later_statement() {
     assert_inline_control_flow_reason(
-        "choose |condition Bool| -> Int:\n    result ~= 0\n    result = if condition then 10\n    if condition:\n        result = 1\n    else\n        result = 2\n    ;\n    return result\n;\nvalue = choose(false)\n",
+        "choose |condition Bool| -> I32:\n    result ~= 0\n    result = if condition then 10\n    if condition:\n        result = 1\n    else\n        result = 2\n    ;\n    return result\n;\nvalue = choose(false)\n",
         InvalidControlFlowStatementReason::ValueIfMissingElse,
     );
 }

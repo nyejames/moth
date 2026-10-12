@@ -1,0 +1,26 @@
+-- A mixed ready/retained handler on a retained whole arithmetic fragment.
+--
+-- The protected `failing(pending) + 10` is retained through its unannotated
+-- argument, so the catch's I32 success slot is still provisional while the
+-- handler body parses. The handler keeps an infallible no-success call whose
+-- only argument is that same unresolved origin, so the body completes as a
+-- draft, while the concrete String fallback was parsed eagerly before the slot
+-- was known. Completion must validate the completed `then` group against the
+-- resolved I32 slot and report the ordinary authored type diagnostic
+-- (MOTH-TYPE-0001) instead of writing the String into the I32 result local.
+--
+-- `pending` stays unannotated so the origin is genuinely pending and the catch
+-- fragment is retained rather than a concrete equivalent.
+
+failing |value I32| -> I32, Error!:
+    return! Error("mixed handler")
+;
+
+noop |value I32|:
+;
+
+pending = 1
+value = failing(pending) + 10 catch:
+    noop(pending)
+    then "wrong"
+;

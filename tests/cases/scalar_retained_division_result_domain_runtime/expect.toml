@@ -1,0 +1,13 @@
+entry = "."
+
+# HTML-only by design: this fixture asserts exact runtime values through the
+# retained division completion path. The receiver-driven F16/F32
+# materialisation, the precision-widening casts and runtime division have no
+# observed Wasm success fixture under the capability validation, so only the
+# backend whose output is asserted is declared rather than pinning an
+# unobserved Wasm disposition.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "scalar retained division grouped=0.5 chained=0.16666666666666666 added=1.5 halves=0.5 f32=0.3333333432674408 f16=0.333251953125"

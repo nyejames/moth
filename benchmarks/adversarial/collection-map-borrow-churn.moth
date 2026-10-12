@@ -3,25 +3,25 @@
 -- repeated mutations, fallible get/remove/clear, and explicit mutable access.
 
 Counter = |
-    value Int,
+    value I32,
 |
 
 increment |this ~Counter|:
     this.value = this.value + 1
 ;
 
-add |this ~Counter, amount Int|:
+add |this ~Counter, amount I32|:
     this.value = this.value + amount
 ;
 
 Item = |
-    id Int,
+    id I32,
     label String,
 |
 
 -- Collection churn: build, mutate, and collapse.
-run_collection_churn || -> Int:
-    items ~{Int} = {}
+run_collection_churn || -> I32:
+    items ~{I32} = {}
     loop 0 to 50 |i|:
         ~items.push(i * 2)
     ;
@@ -29,7 +29,7 @@ run_collection_churn || -> Int:
     -- Remove stored indices in source order. Later indices may shift, which keeps
     -- the fallible recovery path active without turning the fixture into a
     -- diagnostic case.
-    to_remove ~{Int} = {}
+    to_remove ~{I32} = {}
     loop items |value, index|:
         if value % 10 is 0:
             ~to_remove.push(index)
@@ -51,7 +51,7 @@ run_collection_churn || -> Int:
 ;
 
 -- Map churn helper: reads and removes on a borrowed mutable map.
-map_read_remove |scores ~{String = Int}| -> Int:
+map_read_remove |scores ~{String = I32}| -> I32:
     initial_size = scores.length
     removed_beta = ~scores.remove("beta") catch:
         then 0
@@ -63,14 +63,14 @@ map_read_remove |scores ~{String = Int}| -> Int:
 ;
 
 -- Map churn helper: clears and reports final size.
-map_clear |scores ~{String = Int}| -> Int:
+map_clear |scores ~{String = I32}| -> I32:
     ~scores.clear()
     return scores.length
 ;
 
 -- Map churn: build a mutable map and exercise read/remove/clear.
-run_map_churn || -> Int:
-    scores ~{String = Int} = {}
+run_map_churn || -> I32:
+    scores ~{String = I32} = {}
     ~scores.set("alpha", 1) catch:
     ;
     ~scores.set("beta", 2) catch:
@@ -99,7 +99,7 @@ run_borrow_churn || -> String:
 ;
 
 -- Struct collection with mutable receiver churn.
-run_struct_collection_churn || -> Int:
+run_struct_collection_churn || -> I32:
     counters ~{Counter} = {}
     loop 0 to 20 |i|:
         ~counters.push(Counter(i))

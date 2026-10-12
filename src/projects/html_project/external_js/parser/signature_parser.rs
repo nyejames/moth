@@ -1,6 +1,6 @@
 //! Lightweight parser for `@moth.sig` signature bodies.
 //!
-//! WHAT: parses Moth parameter-list syntax such as `|this ~Canvas2d, x Float| -> Error!`
+//! WHAT: parses Moth parameter-list syntax such as `|this ~Canvas2d, x F64| -> Error!`
 //!       into structured `ParsedParameter` and `ParsedReturnType` values.
 //! WHY: the scanner should not embed full Moth parser dependency, but it must
 //!      understand enough of the signature shape to validate arity and detect
@@ -37,7 +37,7 @@ pub struct SignatureParseResult {
 ///
 /// Examples of valid input:
 /// - `|id String| -> CanvasElement, Error!`
-/// - `|ctx ~Canvas2d, x Float|`
+/// - `|ctx ~Canvas2d, x F64|`
 /// - `|| -> Error!`
 pub fn parse_signature(input: SignatureParseInput) -> SignatureParseResult {
     let mut scanner = SignatureScanner::new(input);

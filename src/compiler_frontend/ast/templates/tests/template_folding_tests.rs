@@ -24,8 +24,7 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    ConstRangeIterationValue, TemplateFoldBinding, build_collection_iteration_bindings,
-    build_range_iteration_bindings,
+    TemplateFoldBinding, build_collection_iteration_bindings, build_range_iteration_bindings,
 };
 use crate::compiler_frontend::ast::templates::template_folding::{
     FoldResolvedExpression, TirFoldContext, resolve_fold_bindings_in_expression,
@@ -44,7 +43,15 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+fn i32_value(value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32")
+}
+
+fn i32_expression(value: i64) -> Expression {
+    Expression::fixed_scalar(i32_value(value), None, ValueMode::ImmutableOwned)
+}
 
 #[test]
 fn const_loop_iteration_bindings_preserve_source_provenance() {
@@ -65,13 +72,13 @@ fn const_loop_iteration_bindings_preserve_source_provenance() {
     let bindings = LoopBindings {
         item: Some(Declaration {
             id: item_path,
-            value: Expression::int(0, None, ValueMode::ImmutableOwned),
+            value: i32_expression(0),
             binding_span: None,
             config_qualifier: None,
         }),
         index: Some(Declaration {
             id: index_path,
-            value: Expression::int(0, None, ValueMode::ImmutableOwned),
+            value: i32_expression(0),
             binding_span: None,
             config_qualifier: None,
         }),
@@ -79,8 +86,7 @@ fn const_loop_iteration_bindings_preserve_source_provenance() {
 
     let collection_bindings = build_collection_iteration_bindings(
         &bindings,
-        &Expression::int(1, None, ValueMode::ImmutableOwned)
-            .with_synthetic_interface_provenance(provenance.clone()),
+        &i32_expression(1).with_synthetic_interface_provenance(provenance.clone()),
         0,
         &provenance,
     );
@@ -88,8 +94,7 @@ fn const_loop_iteration_bindings_preserve_source_provenance() {
         binding.value.synthetic_interface_provenance.members() == [member.clone()]
     }));
 
-    let range_bindings =
-        build_range_iteration_bindings(&bindings, ConstRangeIterationValue::Int(1), 0, &provenance);
+    let range_bindings = build_range_iteration_bindings(&bindings, i32_value(1), 0, &provenance);
     assert!(range_bindings.iter().all(|binding| {
         binding.value.synthetic_interface_provenance.members() == [member.clone()]
     }));
@@ -106,7 +111,6 @@ fn bool_condition_with_no_bindings_returns_borrowed() {
     let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         source_scope: None,
         bindings: vec![],
     };
@@ -129,7 +133,6 @@ fn string_slice_with_no_bindings_returns_borrowed() {
     let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         source_scope: None,
         bindings: vec![],
     };
@@ -174,7 +177,6 @@ fn bool_condition_binding_substitution_returns_owned() {
     let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         source_scope: None,
         bindings,
     };
@@ -229,7 +231,6 @@ fn option_present_capture_substitution_returns_owned() {
     let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         source_scope: None,
         bindings,
     };
@@ -312,7 +313,6 @@ fn option_capture_scalar_payload_uses_ordinary_const_rules() {
     let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         source_scope: None,
         bindings: vec![TemplateFoldBinding {
             path: option_path,
@@ -377,7 +377,6 @@ fn assert_store_backed_option_capture(
     let mut fold_context = TirFoldContext {
         string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         source_scope: None,
         bindings: vec![TemplateFoldBinding {
             path: option_path,
@@ -420,7 +419,6 @@ fn coerced_expression_with_no_bindings_returns_borrowed() {
     let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         source_scope: None,
         bindings: vec![],
     };
@@ -474,7 +472,6 @@ fn coerced_template_with_no_bindings_returns_inner_template_borrow() {
     let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         source_scope: None,
         bindings: vec![],
     };
@@ -505,25 +502,24 @@ fn rpn_with_no_substitutable_operands_returns_borrowed() {
     let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         source_scope: None,
         bindings: vec![],
     };
 
     let rpn = ExpressionRpn {
         items: vec![
-            ExpressionRpnItem::Operand(Expression::int(1, None, ValueMode::ImmutableOwned)),
+            ExpressionRpnItem::Operand(i32_expression(1)),
             ExpressionRpnItem::Operator {
                 operator: Operator::Add,
                 span: None,
             },
-            ExpressionRpnItem::Operand(Expression::int(2, None, ValueMode::ImmutableOwned)),
+            ExpressionRpnItem::Operand(i32_expression(2)),
         ],
     };
     let runtime_expr = Expression::runtime_with_type_id(
         rpn,
-        DataType::Int,
-        builtin_type_ids::INT,
+        DataType::FixedScalar(FixedScalar::I32),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         None,
         ValueMode::ImmutableOwned,
     );
@@ -545,7 +541,7 @@ fn rpn_with_bound_reference_operand_returns_owned() {
         .try_intern_portable_path("counter", &mut string_table)
         .expect("test path fits");
 
-    let binding_value = Expression::int(5, None, ValueMode::ImmutableOwned);
+    let binding_value = i32_expression(5);
     let bindings = vec![TemplateFoldBinding {
         path,
         value: binding_value,
@@ -554,8 +550,8 @@ fn rpn_with_bound_reference_operand_returns_owned() {
         items: vec![
             ExpressionRpnItem::Operand(Expression::reference_with_type_id(
                 path,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 None,
                 ValueMode::ImmutableOwned,
                 ConstRecordState::RuntimeValue,
@@ -564,13 +560,13 @@ fn rpn_with_bound_reference_operand_returns_owned() {
                 operator: Operator::Add,
                 span: None,
             },
-            ExpressionRpnItem::Operand(Expression::int(1, None, ValueMode::ImmutableOwned)),
+            ExpressionRpnItem::Operand(i32_expression(1)),
         ],
     };
     let runtime_expr = Expression::runtime_with_type_id(
         rpn,
-        DataType::Int,
-        builtin_type_ids::INT,
+        DataType::FixedScalar(FixedScalar::I32),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         None,
         ValueMode::ImmutableOwned,
     );
@@ -578,7 +574,6 @@ fn rpn_with_bound_reference_operand_returns_owned() {
     let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         source_scope: None,
         bindings,
     };

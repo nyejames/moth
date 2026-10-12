@@ -1,0 +1,5 @@
+hidden ||:
+    left I8 = 2
+    right U64 = 2
+    value = left % right
+;

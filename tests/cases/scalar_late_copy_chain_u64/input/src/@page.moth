@@ -1,0 +1,12 @@
+receive_u64 |value U64| -> String:
+    return cast value
+;
+
+-- Only the final copy carries the direct U64 receiver. Reaching U64 for
+-- source and first proves the copy chain shares one numeric constraint set.
+source = 1
+first = copy source
+second = copy first
+received = receive_u64(second)
+
+[:scalar copy chain received=[received]]

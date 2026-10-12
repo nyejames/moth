@@ -1,0 +1,17 @@
+-- One direct generic constructor field cannot satisfy both an exact U64
+-- receiver and an exact I64 receiver. The later receiver is primary.
+
+Pair type T = |left T, right T|
+
+read_u64 |value U64| -> String:
+    return cast value
+;
+read_i64 |value I64| -> String:
+    return cast value
+;
+
+pair = Pair(4294967296, 1)
+first = read_u64(pair.left)
+second = read_i64(pair.right)
+
+[: [first] [second]]

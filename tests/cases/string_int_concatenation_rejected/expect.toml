@@ -2,4 +2,4 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-TYPE-0003"]
-message_contains = ["Operator `+` cannot concatenate `String` and `Int`. Use a template for mixed textual interpolation."]
+message_contains = ["Operator `+` cannot concatenate `String` and `I32`. Use a template for mixed textual interpolation."]

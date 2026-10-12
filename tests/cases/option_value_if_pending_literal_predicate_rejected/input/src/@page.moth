@@ -1,0 +1,5 @@
+wrap type T |value T| -> T?:
+    return value
+;
+origin = wrap(4294967326)
+label String = if origin is 4294967326 then "exact" else "other"

@@ -1,0 +1,5 @@
+identity || -> I32:
+    return 1
+;
+
+single_call = identity() catch then 0

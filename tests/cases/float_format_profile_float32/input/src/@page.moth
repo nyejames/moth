@@ -1,4 +1,4 @@
-format_float |value Float| -> String:
+format_float |value F32| -> String:
     return cast value
 ;
 

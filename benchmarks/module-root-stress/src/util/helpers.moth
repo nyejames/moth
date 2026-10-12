@@ -1,6 +1,6 @@
 @core/constants max_items
 
-clamp_page |page Int| -> Int:
+clamp_page |page I32| -> I32:
     if page < 0:
         return 0
     ;

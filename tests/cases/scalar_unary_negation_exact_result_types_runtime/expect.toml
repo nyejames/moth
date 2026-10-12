@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "exact unary I8=-3 I16=-3 I32=-3 I64=-3 F16=-3 F32=-3 F64=-3"

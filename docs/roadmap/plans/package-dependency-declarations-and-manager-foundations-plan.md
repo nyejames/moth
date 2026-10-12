@@ -45,7 +45,7 @@ Do not infer activation from the presence of this file.
 - canonical project/package graph and immutable artefact architecture
 - dependency-clause and path-syntax migration
 - delivered project configuration and typed build-input contracts from the activation tree, with immutable `@project`, recursive schemas and package-boundary isolation
-- unified numeric type identity, early NumericProfile selection and profile-compatible compiler/package inputs
+- delivered exact numeric identities, destination-aware input materialisation and exact compiler/package compatibility facts
 - stable package, module, public-interface and capability fingerprints
 - completed HTML mixed-target backend boundary where required by package compatibility policy
 
@@ -150,28 +150,25 @@ Each dependency compiles as a separate package boundary with its own:
 
 A dependency never sees the consuming project's `@project` or unqualified build inputs.
 
-### Numeric profile and ABI compatibility
+### Exact numeric and ABI compatibility
 
-The directly linked Moth graph shares one NumericProfile, selected before input
-materialisation and config compilation. Separate package input namespaces do not
-permit separate Int widths or Float precisions. Source dependencies compile for
-the selected profile. A precompiled dependency must match that profile or be
-rebuilt/rejected, never adapted silently at an import. This matters even when
-its exported types are explicit-width because private arithmetic and folded
-constants may use Int/Uint/Float.
+The directly linked Moth graph consumes exact canonical numeric identities and language-owned
+I32/F64 defaults. Separate package input namespaces cannot select semantic widths or precisions.
+Source dependencies compile under these same language contracts. Precompiled dependencies must
+match compiler language/artefact versions, exact semantic types and values, package identities
+and used capabilities, or rebuild/reject through the existing compatibility policy.
 
-Preserve the distinct canonical identities of Int/Uint/Float, fixed I*/U*/F* types,
-Byte and Dec scales through facade projection, generated requests and reuse.
-Include the profile in semantic artefact compatibility and the existing ABI,
-layout and physical-variant inputs. Error.code uses the delivered U32 contract,
-not a package-local signed-code adapter. Preserve source aliases independently
-of all these facts.
+Preserve fixed I*/U*/F* identities, distinct Byte and Dec scales through facade projection,
+generated requests and reuse. ABI, layout and physical-variant compatibility remain separate from
+semantic type identity. Error.code uses U32 without package-local signed-code adapters.
+Source aliases change none of these facts. Persistence remains deferred: when implemented,
+invalidate incompatible old-format artefacts rather than migrate removed profile data, repair
+aliases or perform best-effort deserialisation. Add no persistence framework in this plan.
 
-Foreign WIT/components retain explicit foreign widths and separate value
-conversion contracts. They do not inherit Moth's profile or replace the semantic
-interface of a Moth-source dependency. F16 and Byte need explicit foreign mapping
-contracts. Package compatibility does not authorise a WIT loader, new numeric
-conversions or a Wasm Dec runtime in this plan.
+Foreign WIT/components retain explicit widths and separate value-conversion contracts. They
+do not replace the semantic interface of a Moth-source dependency. F16 and Byte need explicit
+foreign mappings. Package compatibility does not authorise a WIT loader, new numeric conversions
+or a Wasm Dec runtime in this plan.
 
 ## Accepted preliminary rules
 
@@ -201,7 +198,7 @@ Before implementation, decide and document:
 8. lockfile identity, reproducibility and offline policy
 9. local path, Git and registry override policy
 10. alias collisions across package, child-module, support and synthetic namespaces
-11. capability compatibility across builders and targets, consuming the fixed numeric profile contract rather than redefining it
+11. capability compatibility across builders and targets, consuming exact numeric and physical ABI/layout contracts rather than redefining them
 12. security, provenance and dependency-count policy
 13. package-manager command boundaries
 14. persistent artefact and package-cache compatibility
@@ -217,7 +214,7 @@ Before design acceptance, only read-only audits and architecture-neutral cleanup
 - keep `PackageOrigin::Dependency` orthogonal to source or binding backing
 - ensure package boundary IDs never leak into project semantic identity
 - make package graph inputs explicit and deterministic
-- preserve immutable facade, numeric-profile and capability fingerprint contracts
+- preserve immutable facade, exact type/value and capability fingerprint contracts
 - keep package output-prefix encoding injective over full stable package identity
 - add no user syntax, resolver fallback, filesystem convention or placeholder registry
 
@@ -257,7 +254,7 @@ The resolver/catalog boundary owns:
 
 - declaration to canonical package resolution
 - source versus precompiled package input
-- compatibility and capability facts, including the already-selected numeric profile
+- compatibility and capability facts, including exact numeric types and values
 - package dependency metadata
 - structured missing, duplicate and incompatible package failures
 - future version and lockfile integration
@@ -296,7 +293,7 @@ Compiler and build orchestration consume resolved records only.
 - trace one hypothetical dependency from declaration through resolver, graph compilation, provider binding, generated sidecars and linking
 - trace alias ownership separately from canonical package identity
 - inspect package output-prefix requirements from the resource authority
-- verify where the selected numeric profile reaches source compilation and precompiled compatibility checks
+- verify exact numeric types/values and language/artefact versions in source compilation and precompiled compatibility checks
 - record every unresolved ownership question
 - produce no implementation code
 
@@ -317,7 +314,7 @@ Mandatory review: no parser or config implementation before acceptance.
 
 - define resolver/catalog input and result classes
 - define source and precompiled package descriptors
-- define compatibility and capability facts using the delivered numeric profile and canonical scalar identities
+- define compatibility and capability facts using delivered exact scalar identities, values and language/artefact versions
 - define the first supported resolution source
 - define future lockfile and package-manager ownership without implementing it
 - decide local development dependency policy
@@ -349,7 +346,7 @@ Mandatory review: implementation remains blocked until Phases 1 and 2 are accept
 
 - resolve each declaration exactly once
 - diagnose missing, duplicate, incompatible and unsupported packages before project source compilation
-- reject precompiled numeric-profile mismatches or select a matching source rebuild without implicit numeric adapters
+- reject incompatible precompiled artefacts or select a compatible source rebuild without implicit numeric adapters
 - perform no undeclared filesystem probing
 - keep package acquisition outside compiler semantics
 - retain resolved package identity beneath local aliases
@@ -360,7 +357,7 @@ Review gate: declaration, resolution and compilation must have separate owners.
 
 - compile dependencies in deterministic dependency order
 - give each package its own config, inputs, source index, graph, generated worklist and private `@project`
-- pass the same numeric profile to every directly linked Moth compilation service before numeric inputs or constants materialise
+- pass exact typed inputs to every compilation service and materialise retained command numeric literals directly at each validated exact contract
 - publish only immutable facade artefacts to consumers
 - preserve capability, interface and compatibility fingerprints
 - reject public or reachable executable dependence on private package project context
@@ -397,9 +394,9 @@ Review gate: declaration, resolution and compilation must have separate owners.
 - no resolver fallback path is probed
 - source and precompiled descriptors share one consumer boundary
 - package output identity does not depend on consumer alias
-- source packages share all four supported numeric-profile combinations with their consumer
-- an incompatible precompiled profile is rejected even when only private implementation arithmetic uses Int/Uint/Float
-- exported fixed widths, Byte, Dec scale, Uint and U32 Error.code preserve canonical identity beneath aliases
+- source packages preserve exact scalar identities and language-owned I32/F64 defaults with their consumer
+- incompatible precompiled old-format artefacts reject even when only private arithmetic or folded constants changed numeric semantics
+- exported fixed widths, Byte, Dec scales and U32 Error.code preserve canonical identity beneath aliases
 - foreign WIT projections remain distinct from Moth-native package interfaces
 
 ## Stop conditions
@@ -413,7 +410,7 @@ Stop and request review when:
 - resolver code starts probing fallback filesystem locations
 - package acquisition enters compiler semantics
 - one package boundary needs the consumer's project globals
-- compatibility policy requires backend-specific parser behavior or implicit numeric-profile adapters
+- compatibility policy requires backend-specific parser behaviour or implicit numeric adapters
 - an implementation phase crosses more than two unlisted stage boundaries
 
 ## Validation

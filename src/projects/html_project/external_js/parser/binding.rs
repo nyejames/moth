@@ -351,10 +351,16 @@ fn materialize_u32_constant(spelling: &str) -> Result<FixedScalarValue, String> 
     )
 }
 
+/// The delivered `@moth.sig` scalar subset: the exact fixed scalars the HTML JS glue carries
+/// (`I32`, `I64`, `U32`, `U64`, `F32`, `F64`), plus the non-numeric structural ABI types.
+///
+/// Every other spelling — including the retired `Int`, `Uint` and `Float` names, which gain no
+/// alias — is an ordinary unknown external type and reports the shared unknown-external-type
+/// diagnostic.
 fn is_builtin_signature_type(type_name: &str) -> bool {
     matches!(
         type_name,
-        "Int" | "Uint" | "Float" | "U32" | "F32" | "Bool" | "String" | "Char"
+        "I32" | "I64" | "U32" | "U64" | "F32" | "F64" | "Bool" | "String" | "Char"
     )
 }
 

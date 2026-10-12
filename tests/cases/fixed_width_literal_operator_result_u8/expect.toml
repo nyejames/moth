@@ -1,10 +1,6 @@
-[backends.html]
-mode = "failure"
-warnings = "forbid"
-diagnostic_codes = ["MOTH-TYPE-0001"]
+entry = "."
 
-[[backends.html.diagnostic_assertions]]
-code = "MOTH-TYPE-0001"
-path = "input/@page.moth"
-line = 2
-column = 12
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = " u8 literal operator result=3"

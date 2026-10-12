@@ -23,6 +23,7 @@ use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -361,6 +362,7 @@ fn tir_subtree_contains_aggregate_output(
     let node = store.get_node(node_id).expect("node should exist");
     match &node.kind {
         TemplateIrNodeKind::AggregateOutput => true,
+        TemplateIrNodeKind::RetainedNumericIntake(_) => false,
         TemplateIrNodeKind::Sequence { children } => children
             .iter()
             .any(|child_id| tir_subtree_contains_aggregate_output(*child_id, store)),
@@ -1082,7 +1084,11 @@ fn pure_direct_dynamic_formatter_template_records_formatted_tir_phase() {
         move |store, _string_table| {
             let mut builder = TemplateIrBuilder::new(store);
             let body_node = builder.push_dynamic_expression_node(
-                Expression::int(42, span, ValueMode::ImmutableOwned),
+                Expression::fixed_scalar(
+                    FixedScalarValue::signed(FixedScalar::I32, 42).expect("test literal fits I32"),
+                    span,
+                    ValueMode::ImmutableOwned,
+                ),
                 TemplateSegmentOrigin::Body,
                 span,
             );

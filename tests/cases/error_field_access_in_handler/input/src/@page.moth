@@ -1,10 +1,10 @@
 -- Tests accessing error fields inside a catch handler.
 
-can_error |name String| -> String, Float, Error!:
+can_error |name String| -> String, F64, Error!:
     return! Error("something went wrong")
 ;
 
-recover |name String| -> String, Float:
+recover |name String| -> String, F64:
     value, score = can_error(name) catch |err|:
         io.line([:handler-error-message=[err.message]])
         then "fallback", 0.0

@@ -29,9 +29,8 @@ fn identifier_shape_uses_unicode_alphabetic_and_alphanumeric_rules() {
 #[test]
 fn reserved_user_names_ignore_case_and_leading_underscores() {
     for reserved in [
-        "_true", "FALSE", "__LoOp", "Fn", "CONFIG", "_Config", "int", "INT", "u8", "_U8", "Byte",
-        "F64", "this", "THIS", "dec", "Dec0", "Dec2", "Dec256", "dec01", "DEC257", "_Dec9",
-        "__dEc2",
+        "_true", "FALSE", "__LoOp", "Fn", "CONFIG", "_Config", "u8", "_U8", "Byte", "F64", "this",
+        "THIS", "dec", "Dec0", "Dec2", "Dec256", "dec01", "DEC257", "_Dec9", "__dEc2",
     ] {
         assert!(
             is_reserved_user_name(reserved),
@@ -67,6 +66,18 @@ fn reserved_user_names_reject_whole_word_near_misses() {
         assert!(
             !is_reserved_user_name(ordinary),
             "{ordinary:?} should not be reserved"
+        );
+    }
+}
+
+#[test]
+fn removed_builtin_spellings_are_ordinary_names() {
+    for ordinary in [
+        "Int", "int", "INT", "Uint", "uint", "UINT", "Float", "float", "FLOAT", "_Int", "__Float",
+    ] {
+        assert!(
+            !is_reserved_user_name(ordinary),
+            "{ordinary:?} should be an ordinary name"
         );
     }
 }

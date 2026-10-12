@@ -80,7 +80,7 @@ fn prepared_module(source: &str, package: &str) -> PreparedModule {
 }
 
 const ALIAS_SOURCE: &str = concat!(
-    "Count as Int\n",
+    "Count as I32\n",
     "\n",
     "probe type T |value T| -> T:\n",
     "    seen Count = 1\n",

@@ -1,5 +1,5 @@
 FORMATTER must:
-    format |This, value Int| -> String
+    format |This, value I32| -> String
 ;
 
 Label = |

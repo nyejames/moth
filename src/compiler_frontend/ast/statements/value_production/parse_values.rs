@@ -6,21 +6,26 @@
 //! match, and catch share one arity/coercion path.
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::expressions::parse_expression::{
-    create_expression_with_trailing_newline_policy, create_multiple_expressions,
-};
+use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_with_trailing_newline_policy;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources, ExpressionTrailingPolicy,
 };
+use crate::compiler_frontend::ast::numeric_construction::{
+    DeferredExpressionCompletion, DeferredExpressionServices, StatementExpression,
+    deferred_numeric_expression,
+};
 use crate::compiler_frontend::ast::statements::value_production::types::{
-    ActiveValueProductionTarget, ValueReceiverKind,
+    ActiveValueProductionTarget, ProducedValues, ThenValueContinuation, ThenValueSlot,
+    ValueReceiverKind,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, InvalidFallibleHandlingReason, InvalidReturnShapeReason,
+    CompilerDiagnostic, InvalidFallibleHandlingReason, InvalidReturnShapeReason,
     TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -29,11 +34,12 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
-use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
+use crate::compiler_frontend::type_coercion::parse_context::{
+    CastTargetContext, ExpectedType, cast_target_context_for_type_id, parse_expectation_for_type_id,
+};
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::FloatPrecision;
 
-/// Input bundle for `parse_produced_values_typed`.
+/// Input bundle for `parse_retained_produced_values`.
 ///
 /// WHAT: avoids a long parameter list by grouping everything the parser needs.
 /// WHY: the caller already has all of these values on hand; a struct keeps call sites
@@ -43,7 +49,6 @@ pub struct ProducedValuesParseInput<'a, 'b, 'tokens> {
     pub context: &'a ScopeContext,
     pub type_interner: &'a mut AstTypeInterner<'b>,
     pub target: &'a ActiveValueProductionTarget,
-    pub label: &'a str,
     pub string_table: &'a mut StringTable,
     pub path_fork: &'a mut PathInternerFork,
 }
@@ -61,209 +66,57 @@ pub(crate) fn is_missing_produced_value_boundary(tag: TokenTag) -> bool {
     )
 }
 
-/// Parses a list of expressions that must match the target's expected type/arity.
+/// Parses a fixed number of `then` fallback values for their authored receiving contract.
 ///
-/// WHAT: reads one or more expressions after `then`, validates that the count matches
-/// `target.result_type_ids`, and applies contextual coercion per position.
-/// WHY: every value-producing site (value `if`, match and catch) needs identical
-/// arity and coercion validation.
-pub fn parse_produced_values_typed<'a, 'b, 'tokens>(
-    input: ProducedValuesParseInput<'a, 'b, 'tokens>,
-) -> Result<Vec<Expression>, ExpressionParseError> {
+/// WHAT: reads exactly the target's value count in expressions and returns them in slot order; a
+///       numeric-dependent value is retained as its authored fragment instead of materialising at
+///       the language default, and a fully built list is coerced at every slot whose receiver type
+///       is already known.
+/// WHY: every `then` position owns its numeric deferral, so a numeric-dependent fallback travels
+///      to the body root instead of escaping as a nested non-owning failure; a known slot keeps
+///      the ordinary receiver expectation and coercion, while an inferred slot stays unresolved
+///      for the site (or the owning block's result-type inference) that resolves it later.
+pub(crate) fn parse_retained_produced_values(
+    input: ProducedValuesParseInput<'_, '_, '_>,
+) -> Result<Vec<StatementExpression>, ExpressionParseError> {
     let ProducedValuesParseInput {
         token_stream,
         context,
         type_interner,
         target,
-        label,
         string_table,
         path_fork,
     } = input;
 
-    if target.result_type_ids.is_empty() {
-        if target.receiver_kind == ValueReceiverKind::Declaration {
-            return parse_single_inferred_declaration_value(
-                token_stream,
-                context,
-                type_interner,
-                string_table,
-                path_fork,
-            );
-        }
-
-        if let Some(arity) = target.expected_arity {
-            return parse_fixed_arity_inferred_values(
-                token_stream,
-                context,
-                type_interner,
-                arity,
-                string_table,
-                &target.known_slot_types,
-                target.receiver_kind,
-                path_fork,
-            );
-        }
-
-        return Err(CompilerDiagnostic::invalid_fallible_handling(
-            InvalidFallibleHandlingReason::FallbackValuesForErrorOnlyResult,
-            Some(token_stream.current_span()),
-        )
-        .into());
-    }
-
-    let expression_context = context.new_child_expression(target.result_type_ids.clone());
-    let produced_values = match create_multiple_expressions(
-        token_stream,
-        &expression_context,
-        type_interner,
-        label,
-        false,
-        string_table,
-        path_fork,
-    ) {
-        Ok(values) => values,
-
-        // If create_multiple_expressions reports TooFewReturnValues but the current token
-        // is actually the start of another expression, the value list has more tokens
-        // than the expected shape can consume. Report the clearer arity error at
-        // the first extra value.
-        Err(ExpressionParseError::Diagnostic(diagnostic)) => {
-            // Detect the "too many values disguised as too few" case:
-            // the parser stopped early because the extra value overflowed
-            // the expected shape, but the next token is clearly an expression.
-            if let DiagnosticPayload::InvalidReturnShape {
-                reason: InvalidReturnShapeReason::TooFewReturnValues { expected_count, .. },
-            } = &diagnostic.payload
-                && is_expression_start_tag(token_stream.current_tag())
-            {
-                return Err(CompilerDiagnostic::invalid_return_shape(
-                    InvalidReturnShapeReason::TooManyReturnValues {
-                        expected_count: *expected_count,
-                    },
-                    Some(token_stream.current_span()),
-                )
-                .into());
-            }
-            return Err(ExpressionParseError::Diagnostic(diagnostic));
-        }
-
-        Err(err) => return Err(err),
-    };
-
-    // Explicit too-many check: comma after the expected count means an extra value follows.
-    if token_stream.current_tag() == TokenTag::COMMA {
-        return Err(CompilerDiagnostic::invalid_return_shape(
-            InvalidReturnShapeReason::TooManyReturnValues {
-                expected_count: target.result_type_ids.len(),
-            },
-            Some(token_stream.current_span()),
-        )
-        .into());
-    }
-
-    // Defensive invariant: create_multiple_expressions should always return the expected count
-    // when it succeeds, but we verify locally so callers cannot silently miss arity errors.
-    if produced_values.len() != target.result_type_ids.len() {
-        return Err(CompilerDiagnostic::invalid_return_shape(
-            InvalidReturnShapeReason::TooFewReturnValues {
-                expected_count: target.result_type_ids.len(),
-                provided_count: produced_values.len(),
-            },
-            Some(token_stream.current_span()),
-        )
-        .into());
-    }
-
-    validate_and_coerce_produced_values(
-        produced_values,
-        &target.result_type_ids,
-        type_interner.environment(),
-        context.numeric_profile.float_precision,
-        target.receiver_kind,
-    )
-}
-
-// WHAT: parses a single inferred produced value when the receiver has no known type.
-// WHY: inferred declaration initializers such as `value = if condition: then 1 ...`
-//      only learn their type from the authored `then` values. Known and mixed
-//      multi-slot receivers keep per-slot expected types instead.
-fn parse_single_inferred_declaration_value(
-    token_stream: &mut AstCursor,
-    context: &ScopeContext,
-    type_interner: &mut AstTypeInterner<'_>,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> Result<Vec<Expression>, ExpressionParseError> {
-    let expression_context = context.new_child_expression(vec![]);
-    let mut expected_type = ExpectedType::Infer;
-    let mut none_cast_target = CastTargetContext::None;
-    let input = ExpressionParseInput::new(
-        ExpressionParseResources {
-            token_stream,
-            scope_context: &expression_context,
-            type_interner,
-            expected_type: &mut expected_type,
-            cast_target_context: &mut none_cast_target,
-            value_mode: &ValueMode::ImmutableOwned,
-            string_table,
-            path_fork,
-        },
-        ExpressionTrailingPolicy {
-            consume_closing_parenthesis: false,
-            skip_trailing_newlines: false,
-            allow_boundary_catch: true,
-            allow_expected_result_evidence: false,
-        },
-    );
-    let expression = create_expression_with_trailing_newline_policy(input)?;
-
-    if token_stream.current_tag() == TokenTag::COMMA {
-        return Err(CompilerDiagnostic::invalid_return_shape(
-            InvalidReturnShapeReason::TooManyReturnValues { expected_count: 1 },
-            Some(token_stream.current_span()),
-        )
-        .into());
-    }
-
-    Ok(vec![expression])
-}
-
-/// Parses a fixed number of expressions after `then` for mixed or fully inferred slots.
-///
-/// WHAT: reads exactly `arity` expressions. Known slots use their receiving type so
-/// forms such as `none` still parse; unknown slots stay inferred.
-/// WHY: mixed multi-bind must keep known-slot context at parse time even though
-/// unknown siblings are inferred later from every producing path.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "fixed-arity value parsing keeps the token stream, scope, mutable interner/string/path state, arity, slot types, and receiver kind as separate borrows"
-)]
-pub(crate) fn parse_fixed_arity_inferred_values(
-    token_stream: &mut AstCursor,
-    context: &ScopeContext,
-    type_interner: &mut AstTypeInterner<'_>,
-    arity: usize,
-    string_table: &mut StringTable,
-    slot_expected_types: &[Option<TypeId>],
-    receiver_kind: ValueReceiverKind,
-    path_fork: &mut PathInternerFork,
-) -> Result<Vec<Expression>, ExpressionParseError> {
+    let slot_expected_types = target.slot_expected_types();
+    let arity = target.expected_value_count();
     let expression_context = context.new_child_expression(vec![]);
     let mut values = Vec::with_capacity(arity);
 
     for index in 0..arity {
         let known_slot_type = slot_expected_types.get(index).copied().flatten();
-        let mut expected_type = known_slot_type
-            .map(ExpectedType::Known)
-            .unwrap_or(ExpectedType::Infer);
-        let mut none_cast_target = CastTargetContext::None;
-        let input = ExpressionParseInput::new(
+        let mut expected_type = match known_slot_type {
+            Some(slot_type_id) => {
+                parse_expectation_for_type_id(slot_type_id, type_interner.environment())
+            }
+            None => ExpectedType::Infer,
+        };
+        let mut slot_cast_target = match known_slot_type {
+            Some(slot_type_id) => cast_target_context_for_type_id(
+                slot_type_id,
+                type_interner.environment(),
+                string_table,
+                path_fork,
+            ),
+            None => CastTargetContext::None,
+        };
+        let mut input = ExpressionParseInput::new(
             ExpressionParseResources {
                 token_stream,
                 scope_context: &expression_context,
                 type_interner,
                 expected_type: &mut expected_type,
-                cast_target_context: &mut none_cast_target,
+                cast_target_context: &mut slot_cast_target,
                 value_mode: &ValueMode::ImmutableOwned,
                 string_table,
                 path_fork,
@@ -274,21 +127,45 @@ pub(crate) fn parse_fixed_arity_inferred_values(
                 allow_boundary_catch: true,
                 allow_expected_result_evidence: false,
             },
-        );
-        let mut expression = create_expression_with_trailing_newline_policy(input)?;
-        if let Some(expected_type_id) = known_slot_type {
-            expression = coerce_expression_to_explicit_type_boundary(
-                expression,
-                expected_type_id,
-                type_interner.environment(),
-                context.numeric_profile.float_precision,
-                mismatch_context_for_receiver(receiver_kind),
-            )?;
+        )
+        .with_numeric_deferral_owner();
+        if known_slot_type.is_none() {
+            // An unresolved slot has no destination yet, so a literal-only fallback must stay
+            // unresolved too; a known slot materialises it through its own expectation.
+            input = input.with_retained_pending_numeric_fragment();
         }
-        values.push(expression);
+        let value = match create_expression_with_trailing_newline_policy(input) {
+            Ok(expression) => StatementExpression::Built(expression),
+            Err(error) => {
+                let deferral = error.take_numeric_deferral(
+                    "a fallback value of a value-producing statement whose receiving site is not \
+                     resolved yet",
+                )?;
+                StatementExpression::Retained(deferred_numeric_expression(
+                    deferral.items,
+                    deferral.expected,
+                    deferral.value_mode,
+                    deferral.span,
+                    deferral.suffix,
+                ))
+            }
+        };
+        values.push(value);
 
         if index + 1 < arity {
             if token_stream.current_tag() != TokenTag::COMMA {
+                // An expression start here means the author wrote more values than the receiver
+                // accepts; the ordinary multi-value path reports the same reason for that shape.
+                if is_expression_start_tag(token_stream.current_tag()) {
+                    return Err(CompilerDiagnostic::invalid_return_shape(
+                        InvalidReturnShapeReason::TooManyReturnValues {
+                            expected_count: arity,
+                        },
+                        Some(token_stream.current_span()),
+                    )
+                    .into());
+                }
+
                 return Err(CompilerDiagnostic::invalid_return_shape(
                     InvalidReturnShapeReason::TooFewReturnValues {
                         expected_count: arity,
@@ -312,34 +189,234 @@ pub(crate) fn parse_fixed_arity_inferred_values(
         .into());
     }
 
+    if values
+        .iter()
+        .all(|value| matches!(value, StatementExpression::Built(_)))
+    {
+        // A fully built list keeps the ordinary eager path, including the per-slot receiver
+        // coercion this boundary always applied. A list holding a retained value resumes at the
+        // body root, where the receiver that resolves later coerces it.
+        let mut expressions = Vec::with_capacity(values.len());
+        for value in values {
+            let StatementExpression::Built(expression) = value else {
+                return Err(CompilerError::compiler_error(
+                    "a produced-value list reported ready while holding a retained fallback",
+                )
+                .into());
+            };
+            expressions.push(expression);
+        }
+
+        let coerced = coerce_built_values_at_known_slots(
+            expressions,
+            &slot_expected_types,
+            type_interner.environment(),
+            target.receiver_kind,
+        )?;
+        return Ok(coerced
+            .into_iter()
+            .map(StatementExpression::Built)
+            .collect());
+    }
+
     Ok(values)
 }
 
-fn validate_and_coerce_produced_values(
-    produced_values: Vec<Expression>,
-    expected_type_ids: &[TypeId],
+/// Applies the ordinary receiver coercion to each value whose slot type is already known.
+///
+/// WHAT: coerces a value at its known slot and leaves an inferred slot's value untouched.
+/// WHY: a known receiver must coerce or reject a concrete fallback exactly as the ordinary
+///      produced-values boundary does, while an inferred slot's value is typed by the site that
+///      resolves later and must not be forced into a default.
+fn coerce_built_values_at_known_slots(
+    values: Vec<Expression>,
+    slot_expected_types: &[Option<TypeId>],
     type_environment: &TypeEnvironment,
-    float_precision: FloatPrecision,
     receiver_kind: ValueReceiverKind,
 ) -> Result<Vec<Expression>, ExpressionParseError> {
-    let mut checked_values = Vec::with_capacity(produced_values.len());
     let mismatch_context = mismatch_context_for_receiver(receiver_kind);
+    let mut coerced = Vec::with_capacity(values.len());
 
-    // Validate each produced value against the corresponding expected type,
-    // coercing when compatible or reporting a mismatch when not.
-    for (produced_value, expected_type_id) in
-        produced_values.into_iter().zip(expected_type_ids.iter())
-    {
-        checked_values.push(coerce_expression_to_explicit_type_boundary(
-            produced_value,
-            *expected_type_id,
-            type_environment,
-            float_precision,
+    for (value, slot_type_id) in values.into_iter().zip(slot_expected_types.iter()) {
+        match slot_type_id {
+            Some(slot_type_id) => coerced.push(coerce_expression_to_explicit_type_boundary(
+                value,
+                *slot_type_id,
+                type_environment,
+                mismatch_context,
+            )?),
+            None => coerced.push(value),
+        }
+    }
+
+    Ok(coerced)
+}
+
+/// Rebuilds one retained `then` statement at the receiving site that resolved it.
+///
+/// WHAT: completes every retained fallback at its real receiver slot, applies the ordinary
+///       receiver validation and coercion, and returns the authored `then` node.
+/// WHY: the fallback was authored before its receiving contract existed, so it resumes here with
+///      the resolved slots for a provisional site or the authored contract for a known one —
+///      never a placeholder value, a defaulted literal, or a second parse.
+pub(crate) fn complete_retained_then_value<'env>(
+    continuation: ThenValueContinuation,
+    resolved_slot_type_ids: Option<&[TypeId]>,
+    completion: &mut impl DeferredExpressionCompletion<'env>,
+) -> Result<AstNode, ExpressionParseError> {
+    let ThenValueContinuation {
+        values,
+        slot_expected_types,
+        receiver_kind,
+        span,
+        scope,
+    } = continuation;
+
+    // A provisional site pushes the slots its protected value resolved to, and a resumed inferred
+    // value block pushes the slots its completed targets resolved to. A known site keeps the
+    // contract the statement was authored against. An empty override is a real error-only contract
+    // and is never conflated with an inferred slot.
+    let effective_slot_types: Vec<Option<TypeId>> = match resolved_slot_type_ids {
+        Some(resolved) => resolved.iter().copied().map(Some).collect(),
+        None => slot_expected_types,
+    };
+
+    if effective_slot_types.is_empty() {
+        // The contract carries no success values, so an authored fallback has nothing to produce:
+        // the reason the parse-time path reports for an error-only receiver.
+        return Err(CompilerDiagnostic::invalid_fallible_handling(
+            InvalidFallibleHandlingReason::FallbackValuesForErrorOnlyResult,
+            span,
+        )
+        .into());
+    }
+
+    if effective_slot_types.len() != values.len() {
+        return Err(CompilerDiagnostic::invalid_return_shape(
+            if values.len() < effective_slot_types.len() {
+                InvalidReturnShapeReason::TooFewReturnValues {
+                    expected_count: effective_slot_types.len(),
+                    provided_count: values.len(),
+                }
+            } else {
+                InvalidReturnShapeReason::TooManyReturnValues {
+                    expected_count: effective_slot_types.len(),
+                }
+            },
+            span,
+        )
+        .into());
+    }
+
+    let expectations: Vec<Option<ExpectedType>> = {
+        let services = completion.session_services();
+        effective_slot_types
+            .iter()
+            .map(|slot_type_id| {
+                slot_type_id.map(|slot_type_id| {
+                    parse_expectation_for_type_id(
+                        slot_type_id,
+                        services.type_interner.environment(),
+                    )
+                })
+            })
+            .collect()
+    };
+
+    let mut expressions = Vec::with_capacity(values.len());
+    for (value, expectation) in values.into_iter().zip(expectations) {
+        let value = match value {
+            ThenValueSlot::Pending(value) => match (value, expectation) {
+                (StatementExpression::Built(expression), _) => {
+                    StatementExpression::Built(expression)
+                }
+                (StatementExpression::Retained(mut retained), Some(expectation)) => {
+                    // The resolved or known slot is this fallback's destination, so it carries the
+                    // same expectation the ordinary value-production boundary derives for that
+                    // receiver. Completion then runs through the ordinary statement-expression
+                    // owner, which applies the authored suffix and closes the handler's own
+                    // typed-error boundary.
+                    retained.expected = expectation;
+                    StatementExpression::Retained(retained)
+                }
+                // A genuinely inferred slot keeps the expectation the fallback was authored with:
+                // its type comes from the completed body through the owning block's result-type
+                // inference, never from a fabricated contract.
+                (StatementExpression::Retained(retained), None) => {
+                    StatementExpression::Retained(retained)
+                }
+            },
+            ThenValueSlot::Completed(expression) => StatementExpression::Built(expression),
+            ThenValueSlot::Taken => {
+                return Err(CompilerError::compiler_error(
+                    "a retained `then` value reached completion while a multi-bind producer still owned it",
+                )
+                .into());
+            }
+        };
+        expressions.push(completion.resolve_statement_expression(value)?);
+    }
+
+    let expressions = {
+        let services = completion.session_services();
+        coerce_built_values_at_known_slots(
+            expressions,
+            &effective_slot_types,
+            services.type_interner.environment(),
+            receiver_kind,
+        )?
+    };
+
+    Ok(AstNode {
+        kind: NodeKind::ThenValue(ProducedValues { expressions, span }),
+        span,
+        scope,
+    })
+}
+
+/// Applies the ordinary receiving boundary to one completed `then` group.
+///
+/// WHAT: requires the exact slot count and coerces every value to the resolved slot type.
+/// WHY: a completed handler body can hold groups that were parsed before the protected slot was
+///      known (or while the handler was still provisional), so completion re-applies the
+///      boundary the authored site applies at parse time instead of letting a mismatched value
+///      reach HIR as a write into the wrong carrier.
+pub(crate) fn validate_and_coerce_completed_then_group(
+    produced: &mut ProducedValues,
+    slot_type_ids: &[TypeId],
+    receiver_kind: ValueReceiverKind,
+    services: &mut DeferredExpressionServices<'_, '_>,
+) -> Result<(), ExpressionParseError> {
+    if produced.expressions.len() != slot_type_ids.len() {
+        return Err(CompilerDiagnostic::invalid_return_shape(
+            if produced.expressions.len() < slot_type_ids.len() {
+                InvalidReturnShapeReason::TooFewReturnValues {
+                    expected_count: slot_type_ids.len(),
+                    provided_count: produced.expressions.len(),
+                }
+            } else {
+                InvalidReturnShapeReason::TooManyReturnValues {
+                    expected_count: slot_type_ids.len(),
+                }
+            },
+            produced.span,
+        )
+        .into());
+    }
+
+    let mismatch_context = mismatch_context_for_receiver(receiver_kind);
+    let mut coerced = Vec::with_capacity(produced.expressions.len());
+    for (value, slot_type_id) in produced.expressions.drain(..).zip(slot_type_ids.iter()) {
+        coerced.push(coerce_expression_to_explicit_type_boundary(
+            value,
+            *slot_type_id,
+            services.type_interner.environment(),
             mismatch_context,
         )?);
     }
+    produced.expressions = coerced;
 
-    Ok(checked_values)
+    Ok(())
 }
 
 fn mismatch_context_for_receiver(receiver_kind: ValueReceiverKind) -> TypeMismatchContext {
@@ -353,10 +430,10 @@ fn mismatch_context_for_receiver(receiver_kind: ValueReceiverKind) -> TypeMismat
 }
 
 // WHAT: identifies tokens that can begin a new expression.
-// WHY: when create_multiple_expressions reports TooFewReturnValues, the token at which it
-// stopped may actually be the start of an extra produced value (user forgot a comma).
-// Distinguishing expression starts from statement keywords or terminators lets us report
-// TooManyReturnValues instead of the misleading TooFewReturnValues.
+// WHY: when a fixed-arity value list stops early, the token at which it stopped may actually be
+// the start of an extra produced value (user forgot a comma). Distinguishing expression starts
+// from statement keywords or terminators lets us report TooManyReturnValues instead of the
+// misleading TooFewReturnValues.
 fn is_expression_start_tag(tag: TokenTag) -> bool {
     // Explicit-width scalars and `Byte` open a type-annotation expression attempt, matching the
     // builtin scalar spellings below.

@@ -28,6 +28,9 @@ use crate::compiler_frontend::ast::expressions::expression::{
 use crate::compiler_frontend::ast::{
     ResolvedPublicTypeRoot, ResolvedPublicTypeRootKind, ResolvedPublicTypeRootTable,
 };
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{
@@ -38,7 +41,7 @@ use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
-    FiniteFloat, OwnedFoldedString, PublicFoldedValue, owned_folded_string_from_const_string,
+    OwnedFoldedString, PublicFoldedValue, owned_folded_string_from_const_string,
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::resource_identity::{
@@ -85,6 +88,18 @@ fn constant_binding(name: &str) -> ExportBinding {
         name.to_owned(),
         OriginDeclarationId::Constant(constant_origin(name)),
     )
+}
+
+/// One materialised `I32` fixture value; panics when the fixture literal is out of range.
+fn i32_value(value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range")
+}
+
+/// One materialised `F64` fixture value; panics when the fixture literal is not exactly
+/// representable at `F64`.
+fn f64_value(value: f64) -> FixedScalarValue {
+    FixedScalarValue::binary_float(FixedScalar::F64, value)
+        .expect("F64 fixture literal is exactly representable")
 }
 
 /// Run the draft builder over constant-only roots and bindings, returning the projected
@@ -136,18 +151,18 @@ fn build_constant_records(
 // ---------------------------------------------------------------------------
 
 #[test]
-fn constant_record_owns_scalar_int_folded_value() {
+fn constant_record_owns_scalar_i32_folded_value() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let value_path = path_fork
         .try_intern_portable_path("value", &mut string_table)
         .expect("test path fits");
     let module_constants = vec![Declaration {
         id: value_path,
-        value: Expression::int(42, None, ValueMode::ImmutableOwned),
+        value: Expression::fixed_scalar(i32_value(42), None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
     }];
@@ -168,22 +183,29 @@ fn constant_record_owns_scalar_int_folded_value() {
     let PublicDeclarationSemantics::Constant(semantics) = &records[0].semantics else {
         panic!("expected constant semantics");
     };
-    assert_eq!(semantics.folded_value, PublicFoldedValue::Int(42));
+    assert_eq!(
+        semantics.folded_value,
+        PublicFoldedValue::FixedScalar(i32_value(42))
+    );
 }
 
 #[test]
-fn constant_record_owns_scalar_uint_folded_value_above_i64_max() {
+fn constant_record_owns_scalar_u64_folded_value_above_i64_max() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let uint_id = env.builtins().uint;
+    let uint_id = builtin_type_ids::fixed_scalar(FixedScalar::U64);
 
     let value_path = path_fork
         .try_intern_portable_path("value", &mut string_table)
         .expect("test path fits");
     let module_constants = vec![Declaration {
         id: value_path,
-        value: Expression::uint(u64::MAX, None, ValueMode::ImmutableOwned),
+        value: Expression::fixed_scalar(
+            FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64::MAX fits U64"),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
         binding_span: None,
         config_qualifier: None,
     }];
@@ -206,7 +228,12 @@ fn constant_record_owns_scalar_uint_folded_value_above_i64_max() {
     };
     // A value above `i64::MAX` survives the `ConstValueStore -> PublicFoldedValue`
     // projection with its exact u64 payload, never truncated to a signed carrier.
-    assert_eq!(semantics.folded_value, PublicFoldedValue::Uint(u64::MAX));
+    assert_eq!(
+        semantics.folded_value,
+        PublicFoldedValue::FixedScalar(
+            FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64::MAX fits U64")
+        )
+    );
 }
 
 #[test]
@@ -274,6 +301,11 @@ fn fixed_scalar_constants_project_with_exact_bits_and_scalar_identity() {
             panic!("expected constant semantics for {name}");
         };
         assert_eq!(
+            semantics.type_identity,
+            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(expected.scalar())),
+            "projection must publish the exact canonical {name} type, not a donor-local ID",
+        );
+        assert_eq!(
             semantics.folded_value,
             PublicFoldedValue::FixedScalar(*expected),
             "projection must keep the exact {name} bits with scalar identity",
@@ -314,7 +346,7 @@ fn public_constant_record_retains_project_context_provenance() {
     );
     let module_constants = vec![Declaration {
         id: value_path,
-        value: Expression::int(7, None, ValueMode::ImmutableOwned)
+        value: Expression::fixed_scalar(i32_value(7), None, ValueMode::ImmutableOwned)
             .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
                 member.clone(),
             )),
@@ -325,7 +357,7 @@ fn public_constant_record_retains_project_context_provenance() {
     let records = build_constant_records(
         vec![constant_root(
             "project_value",
-            env.builtins().int,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
             &mut string_table,
             &mut path_fork,
         )],
@@ -399,18 +431,18 @@ fn constant_record_owns_scalar_bool_and_char_folded_values() {
 }
 
 #[test]
-fn constant_record_owns_scalar_float_folded_value() {
+fn constant_record_owns_scalar_f64_folded_value() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let float_id = env.builtins().float;
+    let float_id = builtin_type_ids::fixed_scalar(FixedScalar::F64);
 
     let value_path = path_fork
         .try_intern_portable_path("pi", &mut string_table)
         .expect("test path fits");
     let module_constants = vec![Declaration {
         id: value_path,
-        value: Expression::float(3.5, None, ValueMode::ImmutableOwned),
+        value: Expression::fixed_scalar(f64_value(3.5), None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
     }];
@@ -432,7 +464,7 @@ fn constant_record_owns_scalar_float_folded_value() {
     };
     assert_eq!(
         semantics.folded_value,
-        PublicFoldedValue::Float(FiniteFloat::new(3.5).unwrap())
+        PublicFoldedValue::FixedScalar(f64_value(3.5))
     );
 }
 
@@ -441,14 +473,14 @@ fn constant_record_preserves_negative_zero_exact_bits() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let float_id = env.builtins().float;
+    let float_id = builtin_type_ids::fixed_scalar(FixedScalar::F64);
 
     let value_path = path_fork
         .try_intern_portable_path("zero", &mut string_table)
         .expect("test path fits");
     let module_constants = vec![Declaration {
         id: value_path,
-        value: Expression::float(-0.0, None, ValueMode::ImmutableOwned),
+        value: Expression::fixed_scalar(f64_value(-0.0), None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
     }];
@@ -472,50 +504,13 @@ fn constant_record_preserves_negative_zero_exact_bits() {
     // treats -0.0 == 0.0, so exact-bit identity must distinguish them.
     assert_ne!(
         semantics.folded_value,
-        PublicFoldedValue::Float(FiniteFloat::new(0.0).unwrap()),
+        PublicFoldedValue::FixedScalar(f64_value(0.0)),
         "negative zero must remain distinct from positive zero in folded-value identity"
     );
     assert_eq!(
         semantics.folded_value,
-        PublicFoldedValue::Float(FiniteFloat::new(-0.0).unwrap()),
+        PublicFoldedValue::FixedScalar(f64_value(-0.0)),
         "negative zero must survive folded-value projection with exact bits"
-    );
-}
-
-#[test]
-fn join_rejects_non_finite_float_value_as_internal_invariant() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let env = TypeEnvironment::new();
-    let float_id = env.builtins().float;
-
-    let value_path = path_fork
-        .try_intern_portable_path("bad", &mut string_table)
-        .expect("test path fits");
-    let module_constants = vec![Declaration {
-        id: value_path,
-        // The AST constructor accepts any f64; projection must reject non-finite input.
-        value: Expression::float(f64::NAN, None, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
-    }];
-
-    let root = constant_root("bad", float_id, &mut string_table, &mut path_fork);
-    let result = build_constant_records(
-        vec![root],
-        vec![constant_binding("bad")],
-        &module_constants,
-        &FxHashMap::default(),
-        &env,
-        &string_table,
-        &path_fork,
-    );
-
-    assert!(result.is_err());
-    let message = result.unwrap_err().msg.clone();
-    assert!(
-        message.contains("non-finite"),
-        "expected a non-finite-float diagnostic, got: {message}"
     );
 }
 
@@ -574,7 +569,7 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
         .try_intern_portable_path("Defaults", &mut string_table)
         .expect("test path fits");
     let string_id = env.builtins().string;
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let (_, struct_type_id) = register_struct(
         &mut env,
         &mut string_table,
@@ -609,7 +604,7 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
             id: path_fork
                 .try_intern_portable_path("year", &mut string_table)
                 .expect("test path fits"),
-            value: Expression::int(2026, None, ValueMode::ImmutableOwned),
+            value: Expression::fixed_scalar(i32_value(2026), None, ValueMode::ImmutableOwned),
             binding_span: None,
             config_qualifier: None,
         },
@@ -672,7 +667,10 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
         PublicFoldedValue::String(OwnedFoldedString::Text("Moth".to_owned()))
     );
     assert_eq!(fields[1].name, "year");
-    assert_eq!(fields[1].value, PublicFoldedValue::Int(2026));
+    assert_eq!(
+        fields[1].value,
+        PublicFoldedValue::FixedScalar(i32_value(2026))
+    );
 }
 
 #[test]
@@ -694,7 +692,7 @@ fn constant_record_owns_recursive_const_record_fields() {
         .try_intern_portable_path("Inner", &mut string_table)
         .expect("test path fits");
     let none_id = env.builtins().none;
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let (_, outer_type_id) = register_struct(
         &mut env,
         &mut string_table,
@@ -724,7 +722,7 @@ fn constant_record_owns_recursive_const_record_fields() {
         id: path_fork
             .try_intern_portable_path("depth", &mut string_table)
             .expect("test path fits"),
-        value: Expression::int(7, None, ValueMode::ImmutableOwned),
+        value: Expression::fixed_scalar(i32_value(7), None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
     }];
@@ -804,7 +802,10 @@ fn constant_record_owns_recursive_const_record_fields() {
     };
     assert_eq!(inner_fields.len(), 1);
     assert_eq!(inner_fields[0].name, "depth");
-    assert_eq!(inner_fields[0].value, PublicFoldedValue::Int(7));
+    assert_eq!(
+        inner_fields[0].value,
+        PublicFoldedValue::FixedScalar(i32_value(7))
+    );
 }
 
 #[test]
@@ -898,11 +899,12 @@ fn constant_record_owns_collection_of_folded_values() {
     let mut env = TypeEnvironment::new();
 
     let items = vec![
-        Expression::int(10, None, ValueMode::ImmutableOwned),
-        Expression::int(20, None, ValueMode::ImmutableOwned),
-        Expression::int(30, None, ValueMode::ImmutableOwned),
+        Expression::fixed_scalar(i32_value(10), None, ValueMode::ImmutableOwned),
+        Expression::fixed_scalar(i32_value(20), None, ValueMode::ImmutableOwned),
+        Expression::fixed_scalar(i32_value(30), None, ValueMode::ImmutableOwned),
     ];
-    let collection_type_id = env.intern_collection(env.builtins().int, None);
+    let collection_type_id =
+        env.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::I32), None);
     let collection_expr = Expression::new(
         ExpressionKind::Collection(items),
         None,
@@ -945,9 +947,9 @@ fn constant_record_owns_collection_of_folded_values() {
         panic!("expected a folded collection");
     };
     assert_eq!(values.len(), 3);
-    assert_eq!(values[0], PublicFoldedValue::Int(10));
-    assert_eq!(values[1], PublicFoldedValue::Int(20));
-    assert_eq!(values[2], PublicFoldedValue::Int(30));
+    assert_eq!(values[0], PublicFoldedValue::FixedScalar(i32_value(10)));
+    assert_eq!(values[1], PublicFoldedValue::FixedScalar(i32_value(20)));
+    assert_eq!(values[2], PublicFoldedValue::FixedScalar(i32_value(30)));
 }
 
 // ---------------------------------------------------------------------------
@@ -960,10 +962,10 @@ fn constant_record_owns_option_some_value() {
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let option_type_id = env.intern_option(int_id);
 
-    let inner = Expression::int(42, None, ValueMode::ImmutableOwned);
+    let inner = Expression::fixed_scalar(i32_value(42), None, ValueMode::ImmutableOwned);
     let coerced = Expression::coerced(inner, option_type_id);
 
     let value_path = path_fork
@@ -1002,7 +1004,10 @@ fn constant_record_owns_option_some_value() {
             semantics.folded_value
         );
     };
-    assert_eq!(inner.as_ref(), &PublicFoldedValue::Int(42));
+    assert_eq!(
+        inner.as_ref(),
+        &PublicFoldedValue::FixedScalar(i32_value(42))
+    );
 }
 
 #[test]
@@ -1011,11 +1016,11 @@ fn constant_record_owns_nested_option_some_value() {
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let inner_option_id = env.intern_option(int_id);
     let outer_option_id = env.intern_option(inner_option_id);
 
-    let inner = Expression::int(7, None, ValueMode::ImmutableOwned);
+    let inner = Expression::fixed_scalar(i32_value(7), None, ValueMode::ImmutableOwned);
     let inner_option = Expression::coerced(inner, inner_option_id);
     let outer_option = Expression::coerced(inner_option, outer_option_id);
 
@@ -1058,7 +1063,10 @@ fn constant_record_owns_nested_option_some_value() {
     let PublicFoldedValue::OptionSome(inner) = outer.as_ref() else {
         panic!("expected a folded inner OptionSome, got {:?}", outer);
     };
-    assert_eq!(inner.as_ref(), &PublicFoldedValue::Int(7));
+    assert_eq!(
+        inner.as_ref(),
+        &PublicFoldedValue::FixedScalar(i32_value(7))
+    );
 }
 
 #[test]
@@ -1067,13 +1075,18 @@ fn constant_record_projects_option_none_value() {
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
 
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let option_type_id = env.intern_option(int_id);
 
-    // `none` for `Int?`. The const classifier currently rejects a standalone `none` as a
+    // `none` for `I32?`. The const classifier currently rejects a standalone `none` as a
     // module constant initializer, so this exercises the projection arm directly through the
     // builder boundary rather than the full parser path.
-    let none_expr = Expression::option_none_with_type_id(int_id, DataType::Int, &mut env, None);
+    let none_expr = Expression::option_none_with_type_id(
+        int_id,
+        DataType::FixedScalar(FixedScalar::I32),
+        &mut env,
+        None,
+    );
 
     let value_path = path_fork
         .try_intern_portable_path("absent", &mut string_table)
@@ -1112,7 +1125,7 @@ fn join_allows_two_module_constants_sharing_a_leaf_name_with_distinct_paths() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     // Two module constants whose last path component is the same leaf name "value" but
     // whose exact defining paths differ in the parent component. The public constant root
@@ -1133,13 +1146,13 @@ fn join_allows_two_module_constants_sharing_a_leaf_name_with_distinct_paths() {
     let module_constants = vec![
         Declaration {
             id: public_path,
-            value: Expression::int(1, None, ValueMode::ImmutableOwned),
+            value: Expression::fixed_scalar(i32_value(1), None, ValueMode::ImmutableOwned),
             binding_span: None,
             config_qualifier: None,
         },
         Declaration {
             id: private_path,
-            value: Expression::int(2, None, ValueMode::ImmutableOwned),
+            value: Expression::fixed_scalar(i32_value(2), None, ValueMode::ImmutableOwned),
             binding_span: None,
             config_qualifier: None,
         },
@@ -1164,7 +1177,10 @@ fn join_allows_two_module_constants_sharing_a_leaf_name_with_distinct_paths() {
         panic!("expected constant semantics");
     };
     // The root selects the exact public path, so the value is 1, not 2.
-    assert_eq!(semantics.folded_value, PublicFoldedValue::Int(1));
+    assert_eq!(
+        semantics.folded_value,
+        PublicFoldedValue::FixedScalar(i32_value(1))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1176,7 +1192,7 @@ fn join_rejects_constant_binding_without_matching_module_constant() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     // A constant root whose defining path has no matching finalized module constant
     // declaration: the folded value cannot be projected.
@@ -1204,7 +1220,7 @@ fn join_rejects_duplicate_module_constant_defining_paths() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     // Two module constant declarations with the exact same defining path: a silent overwrite
     // must not happen.
@@ -1213,7 +1229,7 @@ fn join_rejects_duplicate_module_constant_defining_paths() {
         .expect("test path fits");
     let decl = Declaration {
         id: dup_path,
-        value: Expression::int(1, None, ValueMode::ImmutableOwned),
+        value: Expression::fixed_scalar(i32_value(1), None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
     };
@@ -1222,7 +1238,7 @@ fn join_rejects_duplicate_module_constant_defining_paths() {
         .expect("test path fits");
     let duplicate = Declaration {
         id: duplicate_path,
-        value: Expression::int(2, None, ValueMode::ImmutableOwned),
+        value: Expression::fixed_scalar(i32_value(2), None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
     };
@@ -1252,7 +1268,7 @@ fn join_rejects_extra_constant_root_without_export_binding() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     // A public constant root whose name has no export binding: an unconsumed public fact must
     // fail deterministically rather than leak silently.
@@ -1280,7 +1296,7 @@ fn join_rejects_unsupported_expression_shape_in_folded_value() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let reference_expr = Expression::new(
         ExpressionKind::Reference(
@@ -1290,7 +1306,7 @@ fn join_rejects_unsupported_expression_shape_in_folded_value() {
         ),
         None,
         int_id,
-        DataType::Int,
+        DataType::FixedScalar(FixedScalar::I32),
         ValueMode::ImmutableOwned,
     );
 
@@ -1414,7 +1430,7 @@ fn folded_record_fields_carry_type_identity_from_field_metadata() {
             id: path_fork
                 .try_intern_portable_path("year", &mut string_table)
                 .expect("test path fits"),
-            value: Expression::int(2026, None, ValueMode::ImmutableOwned),
+            value: Expression::fixed_scalar(i32_value(2026), None, ValueMode::ImmutableOwned),
             binding_span: None,
             config_qualifier: None,
         },
@@ -1478,7 +1494,7 @@ fn folded_record_fields_carry_type_identity_from_field_metadata() {
     assert_eq!(folded_fields[0].name, "year");
     assert_eq!(
         folded_fields[0].type_identity,
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(FixedScalar::I32))
     );
 
     // The nested anonymous record field projects to the payload-free marker identity.

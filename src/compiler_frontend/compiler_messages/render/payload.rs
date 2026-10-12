@@ -49,13 +49,13 @@ pub(crate) fn render_payload(
             ..
         } => {
             vec![
-                "Add a type annotation to the receiving declaration, for example `value Int = ...`."
+                "Add a type annotation to the receiving declaration, for example `value I32 = ...`."
                     .to_owned(),
             ]
         }
         DiagnosticPayload::EmptyCollectionTypeAmbiguity => {
             vec![
-                "Add an explicit type annotation, for example `scores {String = Int} = {}` for an empty map or `items {Int} = {}` for an empty collection.".to_owned(),
+                "Add an explicit type annotation, for example `scores {String = I32} = {}` for an empty map or `items {I32} = {}` for an empty collection.".to_owned(),
             ]
         }
         DiagnosticPayload::InvalidTemplateDirective {
@@ -493,11 +493,9 @@ fn render_payload_message(
         DiagnosticPayload::CompileTimeEvaluationError {
             reason,
             operation,
-            numeric_profile,
         } => compile_time_evaluation_error_message(
             *reason,
             *operation,
-            *numeric_profile,
             string_table,
         ),
         DiagnosticPayload::EmptyCollectionTypeAmbiguity => {
@@ -766,6 +764,12 @@ fn invalid_trait_conformance_message(
         } => {
             format!(
                 "'{target}' cannot conform{trait_text} because return {return_index} of '{}' uses a different return channel.",
+                string_table.resolve(*requirement_name)
+            )
+        }
+        InvalidTraitConformanceReason::InferredFailureInInfallibleCast { requirement_name } => {
+            format!(
+                "'{target}' cannot conform{trait_text} because method '{}' has escaping inferred failure, which violates the infallible cast evidence contract. Handle the failure locally or use the corresponding TRY_CASTABLE_TO_* trait with its try_to_* method and declared Error! return slot.",
                 string_table.resolve(*requirement_name)
             )
         }

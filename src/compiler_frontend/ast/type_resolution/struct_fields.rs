@@ -25,7 +25,6 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
-use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::FxHashSet;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -210,7 +209,6 @@ fn resolve_struct_field_defaults(
         declaration_table: type_resolution_context.declaration_table,
         visible_declaration_ids: type_resolution_context.visible_declaration_ids,
         declaring_file_id: type_resolution_context.declaring_file_id,
-        numeric_profile: type_resolution_context.numeric_profile,
         scope: *struct_path,
         path_fork,
     };
@@ -253,14 +251,13 @@ fn resolve_struct_field_defaults(
 /// The declaration surface one field default resolves against.
 ///
 /// WHAT: the visible declarations a reference may name, plus the identity of the file that
-/// owns them and the compilation boundary numeric widths field defaults fold under.
+/// owns them.
 /// WHY: inlining recurses through every nested expression shape, so these facts travel
 ///      together to the evaluation scope at the bottom rather than through each hop by hand.
 struct FieldDefaultScope<'a> {
     declaration_table: &'a Rc<TopLevelDeclarationTable>,
     visible_declaration_ids: Option<&'a Arc<FxHashSet<PathId>>>,
     declaring_file_id: SourceId,
-    numeric_profile: NumericProfile,
     scope: PathId,
     path_fork: &'a PathInternerFork,
 }
@@ -314,7 +311,6 @@ fn inline_visible_constant_references(
                 Arc::new(ExternalPackageRegistry::new()),
                 0,
                 Rc::clone(template_ir_store),
-                scope.numeric_profile,
             )
             .with_declaring_file_id(scope.declaring_file_id);
             // The visibility set arrives as the same handle the scope stores, so entering the
@@ -338,7 +334,6 @@ fn inline_visible_constant_references(
                     CompileTimeEvaluationErrorReason::StructFieldDefaultNotFoldable,
                     None,
                     expression.span,
-                    None,
                 )
             })
             .map_err(StructFieldResolutionError::from)
@@ -537,7 +532,11 @@ fn inline_visible_constant_references_in_rpn_item(
         // Pending syntax never survives evaluation; its presence here is a broken compiler
         // invariant, not an inlinable default position.
         ExpressionRpnItem::PendingNumericLiteral { .. }
-        | ExpressionRpnItem::PendingGroup { .. } => {
+        | ExpressionRpnItem::PendingGroup { .. }
+        | ExpressionRpnItem::PendingNumericBinding { .. }
+        | ExpressionRpnItem::PendingNumericCast { .. }
+        | ExpressionRpnItem::PendingNumericCall { .. }
+        | ExpressionRpnItem::PendingNumericExpression { .. } => {
             Err(pending_expression_item_bug("struct field default inlining").into())
         }
     }

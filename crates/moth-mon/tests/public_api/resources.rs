@@ -4,8 +4,8 @@ use super::*;
 
 #[test]
 fn max_safe_depth_accepts_decodes_and_drops_nested_records() {
-    let mut nested_type = SchemaType::Int;
-    let mut nested_value = Value::Int(7);
+    let mut nested_type = SchemaType::I32;
+    let mut nested_value = Value::I32(7);
     let mut nested_literal = "7".to_owned();
     for _ in 0..Limits::MAX_SAFE_DEPTH - 1 {
         nested_type = SchemaType::Record {
@@ -41,7 +41,7 @@ fn max_safe_depth_accepts_decodes_and_drops_nested_records() {
 }
 #[test]
 fn rejecting_a_deep_schema_releases_its_unvisited_tail_iteratively() {
-    let mut ty = SchemaType::Int;
+    let mut ty = SchemaType::I32;
     for _ in 0..20_000 {
         ty = SchemaType::Optional(Box::new(ty));
     }
@@ -54,7 +54,7 @@ fn rejecting_a_deep_schema_releases_its_unvisited_tail_iteratively() {
 
 #[test]
 fn rejecting_a_deep_default_releases_its_unvisited_tail_iteratively() {
-    let mut ty = SchemaType::Int;
+    let mut ty = SchemaType::I32;
     for _ in 0..32 {
         ty = SchemaType::Collection {
             element: Box::new(ty),
@@ -83,7 +83,7 @@ fn retained_numeric_scratch_respects_decoded_byte_budget() {
     let schema = Schema::record(vec![Field::required(
         "n",
         SchemaType::Collection {
-            element: Box::new(SchemaType::Int),
+            element: Box::new(SchemaType::I32),
         },
     )])
     .with_limits(Limits {
@@ -106,7 +106,7 @@ fn retained_numeric_scratch_respects_decoded_byte_budget() {
 fn malformed_numeric_scratch_is_budgeted_before_syntax() {
     use moth_mon::{Field, Limits, MonErrorCode, Schema, SchemaType, decode_document};
 
-    let schema = Schema::record(vec![Field::required("n", SchemaType::Int)])
+    let schema = Schema::record(vec![Field::required("n", SchemaType::I32)])
         .with_limits(Limits {
             max_decoded_bytes: 64,
             ..Limits::default()
@@ -227,7 +227,7 @@ fn compound_value_errors_project_defaults_and_preserve_supplied_categories() {
             ("name".into(), Value::String("second".into())),
         ]
     };
-    let unknown_fields = || vec![("extra".into(), Value::Int(1))];
+    let unknown_fields = || vec![("extra".into(), Value::I32(1))];
     for (ty, value, supplied_code, path) in [
         (
             choice_type(),
@@ -294,7 +294,7 @@ fn compound_value_errors_project_defaults_and_preserve_supplied_categories() {
 
 #[test]
 fn inexact_default_failure_releases_a_deep_unvisited_default_tail() {
-    let mut tail = Value::Int(1);
+    let mut tail = Value::I32(1);
     for _ in 0..20_000 {
         tail = Value::Collection(vec![tail]);
     }
@@ -304,7 +304,7 @@ fn inexact_default_failure_releases_a_deep_unvisited_default_tail() {
             SchemaType::Decimal { scale: 2 },
             Value::Decimal("1.239".into()),
         ),
-        Field::with_default("tail", SchemaType::Int, tail),
+        Field::with_default("tail", SchemaType::I32, tail),
     ])
     .prepare()
     .expect_err("the first inexact default rejects preparation before visiting the tail");
@@ -399,12 +399,12 @@ fn ordinary_error_boundary_retains_structured_failure_without_input() {
         Ok(decode_document(input, schema)?)
     }
 
-    let schema = Schema::record(vec![Field::required("count", SchemaType::Int)])
+    let schema = Schema::record(vec![Field::required("count", SchemaType::I32)])
         .prepare()
         .expect("the scalar schema prepares");
     let failure = {
         let input = String::from("count = 1.5");
-        load(&input, &schema).expect_err("decimal spelling cannot supply an Int")
+        load(&input, &schema).expect_err("decimal spelling cannot supply an I32")
     };
     let error = failure
         .downcast_ref::<moth_mon::MonError>()

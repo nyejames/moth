@@ -9,6 +9,7 @@ use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::parse_expression::complete_pending_expression;
 use crate::compiler_frontend::ast::expressions::parse_expression_places::place_expression_from_expression;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
@@ -24,20 +25,39 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use super::collection_builtin::parse_collection_builtin_member_typed;
 use super::field_member::{parse_field_member_access_typed, parse_member_name_typed};
 use super::map_builtin::parse_map_builtin_member_typed;
-use super::receiver_calls::parse_receiver_method_call_typed;
-use super::{MemberStepContext, PostfixChainAccess, ReceiverAccessMode};
+use super::receiver_calls::{ParsedReceiverMethodCall, parse_receiver_method_call_typed};
+use super::{MemberStepContext, ParsedBuiltinMemberCall, PostfixChainAccess, ReceiverAccessMode};
+
+/// One parsed postfix/member chain in an operand or place position.
+///
+/// WHAT: either the completed value, or the single pending receiver call the chain ended in.
+/// WHY: a receiver call whose numeric-dependent argument was retained has no value or type yet, so
+///      the chain hands its authored operand position the construction-only item instead of a
+///      fabricated value; the enclosing expression boundary then decides whether its own fragment
+///      completes at the site or defers to the body root with the item in place.
+pub(crate) enum ParsedPostfixExpression {
+    Value(Expression),
+    RetainedOperand(ExpressionRpnItem),
+}
+
+/// Internal chain result before a position converts it into an expression payload.
+enum ParsedPostfixChain {
+    Node(AstNode),
+    RetainedOperand(ExpressionRpnItem),
+}
 
 /// Read-only previous-token span through the AST cursor.
 ///
 /// WHAT: reports the span of the token immediately before the stream position.
 /// WHY: missing-member and receiver base-span diagnostics need the owning dot or
 /// base token without retaining a borrowed view.
-fn previous_token_span(token_stream: &AstCursor<'_>) -> Option<SourceSpan> {
+pub(super) fn previous_token_span(token_stream: &AstCursor<'_>) -> Option<SourceSpan> {
     token_stream.previous_span().or_else(|| {
         token_stream.position().checked_sub(1).and_then(|previous| {
             token_stream
@@ -47,7 +67,7 @@ fn previous_token_span(token_stream: &AstCursor<'_>) -> Option<SourceSpan> {
     })
 }
 
-fn current_token_span(token_stream: &AstCursor<'_>) -> Option<SourceSpan> {
+pub(super) fn current_token_span(token_stream: &AstCursor<'_>) -> Option<SourceSpan> {
     Some(token_stream.current_span())
 }
 
@@ -73,7 +93,7 @@ pub(crate) fn reference_expression_from_declaration(
     base_span: Option<SourceSpan>,
 ) -> Expression {
     if context.kind.is_constant_context() {
-        if reference_arg.is_unresolved_constant_placeholder() {
+        if context.is_unresolved_constant_placeholder(reference_arg) {
             let placeholder_type = context
                 .expected_result_type_ids
                 .first()
@@ -143,7 +163,7 @@ fn receiver_node_type_id(node: &AstNode) -> Result<TypeId, CompilerError> {
     node.expression_type_id()
 }
 
-fn type_id_is_external(type_id: TypeId, type_interner: &AstTypeInterner<'_>) -> bool {
+pub(super) fn type_id_is_external(type_id: TypeId, type_interner: &AstTypeInterner<'_>) -> bool {
     matches!(
         type_interner.environment().get(type_id),
         Some(TypeDefinition::External(..))
@@ -152,35 +172,44 @@ fn type_id_is_external(type_id: TypeId, type_interner: &AstTypeInterner<'_>) -> 
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "postfix chain parsing keeps the token stream, receiver expression and span, chain access, scope, and mutable interner/string/path state as separate borrows"
+    reason = "postfix chain parsing keeps the token stream, receiver expression and span, chain access, boundary catch permission, scope, and mutable interner/string/path state as separate borrows"
 )]
 pub(crate) fn parse_postfix_chain_expression(
     token_stream: &mut AstCursor<'_>,
     receiver_expression: Expression,
     receiver_span: Option<SourceSpan>,
     chain_access: PostfixChainAccess,
+    allow_boundary_catch: bool,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<ParsedPostfixExpression, ExpressionParseError> {
     let receiver_node = AstNode {
         kind: NodeKind::ExpressionStatement(receiver_expression),
         scope: context.scope.to_owned(),
         span: receiver_span,
     };
 
-    let postfix_node = parse_postfix_chain_typed(
+    let postfix = parse_postfix_chain_typed(
         token_stream,
         receiver_node,
         chain_access,
+        allow_boundary_catch,
         context,
         type_interner,
         string_table,
         path_fork,
     )?;
 
-    expression_from_postfix_node(&postfix_node)
+    match postfix {
+        ParsedPostfixChain::Node(node) => {
+            expression_from_postfix_node(&node).map(ParsedPostfixExpression::Value)
+        }
+        ParsedPostfixChain::RetainedOperand(item) => {
+            Ok(ParsedPostfixExpression::RetainedOperand(item))
+        }
+    }
 }
 
 pub(crate) fn expression_from_postfix_node(
@@ -196,15 +225,20 @@ pub(crate) fn expression_from_postfix_node(
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "postfix chain parsing keeps the token stream, receiver node, chain access, boundary catch permission, scope, and mutable interner/string/path state as separate borrows"
+)]
 fn parse_postfix_chain_typed(
     token_stream: &mut AstCursor<'_>,
     mut receiver_node: AstNode,
     chain_access: PostfixChainAccess,
+    allow_boundary_catch: bool,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<AstNode, ExpressionParseError> {
+) -> Result<ParsedPostfixChain, ExpressionParseError> {
     let receiver_access_mode = chain_access.mode;
     let authored_marker_span = chain_access.authored_marker_span;
     let mut encountered_receiver_call = false;
@@ -266,9 +300,28 @@ fn parse_postfix_chain_typed(
             string_table,
             path_fork,
         )? {
-            receiver_node = collection_builtin_call;
-            encountered_receiver_call = true;
-            continue;
+            match collection_builtin_call {
+                ParsedBuiltinMemberCall::Completed(node) => {
+                    receiver_node = node;
+                    encountered_receiver_call = true;
+                    continue;
+                }
+                // The operation and its result slots are already resolved, so every authored step
+                // that follows resolves against known receiver structure and travels with the
+                // operand, exactly as a retained receiver method does.
+                ParsedBuiltinMemberCall::RetainedOperand(item) => {
+                    let item = continue_retained_operand(
+                        item,
+                        token_stream,
+                        context,
+                        chain_access,
+                        type_interner,
+                        string_table,
+                        path_fork,
+                    )?;
+                    return Ok(ParsedPostfixChain::RetainedOperand(item));
+                }
+            }
         }
 
         if let Some(map_builtin_call) = parse_map_builtin_member_typed(
@@ -278,21 +331,58 @@ fn parse_postfix_chain_typed(
             string_table,
             path_fork,
         )? {
-            receiver_node = map_builtin_call;
-            encountered_receiver_call = true;
-            continue;
+            match map_builtin_call {
+                ParsedBuiltinMemberCall::Completed(node) => {
+                    receiver_node = node;
+                    encountered_receiver_call = true;
+                    continue;
+                }
+                ParsedBuiltinMemberCall::RetainedOperand(item) => {
+                    let item = continue_retained_operand(
+                        item,
+                        token_stream,
+                        context,
+                        chain_access,
+                        type_interner,
+                        string_table,
+                        path_fork,
+                    )?;
+                    return Ok(ParsedPostfixChain::RetainedOperand(item));
+                }
+            }
         }
 
         if let Some(receiver_method_call) = parse_receiver_method_call_typed(
             token_stream,
             member_context,
+            allow_boundary_catch,
             type_interner,
             string_table,
             path_fork,
         )? {
-            receiver_node = receiver_method_call;
-            encountered_receiver_call = true;
-            continue;
+            match receiver_method_call {
+                ParsedReceiverMethodCall::Value(node) => {
+                    receiver_node = node;
+                    encountered_receiver_call = true;
+                    continue;
+                }
+                // The call's declared success slots are already concrete, so every authored step
+                // that follows resolves against known receiver structure and travels with the
+                // operand; only a receiver with no known result shape keeps the ordinary member
+                // diagnostic at its authored dot.
+                ParsedReceiverMethodCall::RetainedOperand(item) => {
+                    let item = continue_retained_operand(
+                        item,
+                        token_stream,
+                        context,
+                        chain_access,
+                        type_interner,
+                        string_table,
+                        path_fork,
+                    )?;
+                    return Ok(ParsedPostfixChain::RetainedOperand(item));
+                }
+            }
         }
 
         // No handler matched. Preserve the user-facing distinction between
@@ -375,9 +465,56 @@ fn parse_postfix_chain_typed(
         .into());
     }
 
-    Ok(receiver_node)
+    Ok(ParsedPostfixChain::Node(receiver_node))
 }
 
+/// Continue a retained operand with the authored member steps that follow it.
+///
+/// WHAT: when the cursor sits on a dot, collects the authored steps through the retained-operand
+///       collector and returns the wrapper for that extended operand.
+/// WHY: every retained call — receiver method or compiler-owned builtin — keeps the same
+///      continuation policy at the chain boundary, so the operand's authored steps stay attached to
+///      the position whose value they resolve against.
+fn continue_retained_operand(
+    item: ExpressionRpnItem,
+    token_stream: &mut AstCursor<'_>,
+    context: &ScopeContext,
+    chain_access: PostfixChainAccess,
+    type_interner: &mut AstTypeInterner<'_>,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> Result<ExpressionRpnItem, ExpressionParseError> {
+    if token_stream.position() >= token_stream.length()
+        || token_stream.current_tag() != TokenTag::DOT
+    {
+        return Ok(item);
+    }
+
+    let mut expression = vec![item];
+    super::retained_postfix::retain_pending_operand_member_access(
+        token_stream,
+        &mut expression,
+        super::retained_postfix::RetainedOperandInput {
+            chain_access,
+            expected: ExpectedType::Infer,
+            value_mode: &ValueMode::ImmutableOwned,
+        },
+        context,
+        type_interner,
+        string_table,
+        path_fork,
+    )?;
+    Ok(expression
+        .pop()
+        .expect("a retained operand keeps its authored position"))
+}
+
+/// Parses a postfix/member chain rooted at one resolved declaration.
+///
+/// WHAT: returns the completed expression, or the pending receiver-call item the chain ended in.
+/// WHY: a call whose numeric-dependent argument was retained has no value yet; the statement and
+///      mutation owners decide from the exclusive outcome whether they have a value, a mutation
+///      target, or one deferred expression-statement position to record.
 pub fn parse_field_access(
     token_stream: &mut AstCursor<'_>,
     base_arg: &Declaration,
@@ -385,14 +522,14 @@ pub fn parse_field_access(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<ParsedPostfixExpression, ExpressionParseError> {
     // Operand errors stay pending until the receiving chain has completed. Assignment targets
     // still leave their operator for the mutation owner instead of entering expression completion.
     let deferred_context = (!context.defer_typed_error_validation)
         .then(|| context.new_pending_typed_error_expression_context());
     let parse_context = deferred_context.as_ref().unwrap_or(context);
 
-    let postfix_node = parse_field_access_with_receiver_access(
+    let postfix = parse_field_access_with_receiver_access(
         token_stream,
         base_arg,
         parse_context,
@@ -402,9 +539,16 @@ pub fn parse_field_access(
         path_fork,
     )?;
 
+    let postfix_node = match postfix {
+        ParsedPostfixChain::Node(node) => node,
+        ParsedPostfixChain::RetainedOperand(item) => {
+            return Ok(ParsedPostfixExpression::RetainedOperand(item));
+        }
+    };
+
     let expression = expression_from_postfix_node(&postfix_node)?;
     if token_stream.current_tag().is_assignment_operator() {
-        return Ok(expression);
+        return Ok(ParsedPostfixExpression::Value(expression));
     }
     complete_pending_expression(
         token_stream,
@@ -415,6 +559,7 @@ pub fn parse_field_access(
         string_table,
         path_fork,
     )
+    .map(ParsedPostfixExpression::Value)
 }
 
 fn parse_field_access_with_receiver_access(
@@ -425,13 +570,16 @@ fn parse_field_access_with_receiver_access(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<AstNode, ExpressionParseError> {
+) -> Result<ParsedPostfixChain, ExpressionParseError> {
     let base_span = previous_token_span(token_stream).or_else(|| current_token_span(token_stream));
 
+    // `parse_field_access` completes the chain at the expression-statement boundary, which allows
+    // an authored boundary catch there.
     parse_postfix_chain_typed(
         token_stream,
         receiver_reference_node(base_arg, context, type_interner, base_span),
         chain_access,
+        true,
         context,
         type_interner,
         string_table,
@@ -439,15 +587,20 @@ fn parse_field_access_with_receiver_access(
     )
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "entry keeps the token stream, base declaration, scope, chain access, boundary catch permission, and mutable interner/string/path state as separate borrows"
+)]
 pub(crate) fn parse_field_access_expression_with_receiver_access(
     token_stream: &mut AstCursor<'_>,
     base_arg: &Declaration,
     context: &ScopeContext,
     chain_access: PostfixChainAccess,
+    allow_boundary_catch: bool,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<ParsedPostfixExpression, ExpressionParseError> {
     let base_span = previous_token_span(token_stream).or_else(|| current_token_span(token_stream));
 
     let receiver_expression =
@@ -458,11 +611,68 @@ pub(crate) fn parse_field_access_expression_with_receiver_access(
         receiver_expression,
         base_span,
         chain_access,
+        allow_boundary_catch,
         context,
         type_interner,
         string_table,
         path_fork,
     )
+}
+
+/// Report the ordinary member diagnostic for a pending numeric receiver.
+///
+/// WHAT: consumes the authored member name after the dot and returns the ordinary
+///       unknown-member diagnostic with no receiver type.
+/// WHY: a pending numeric binding's selected type is always a scalar, so no member can exist on
+///      it, and member resolution must never search fields, methods or trait surfaces against a
+///      type that does not exist yet. The chain driver owns member-name parsing and the ordinary
+///      member diagnostic, so both stay here instead of becoming a second member-name convention
+///      in the expression files.
+///
+/// PRECONDITION: the cursor is positioned on the authored dot.
+pub(crate) fn pending_numeric_member_access_error(
+    token_stream: &mut AstCursor<'_>,
+    string_table: &mut StringTable,
+) -> ExpressionParseError {
+    if token_stream.position() < token_stream.length()
+        && token_stream.current_tag() == TokenTag::DOT
+    {
+        token_stream.advance();
+
+        // An access that ends immediately after the authored dot has no member name. The dot is
+        // the owning boundary, exactly like the concrete-receiver path above.
+        if token_stream.position() >= token_stream.length()
+            || token_stream.current_tag() == TokenTag::EOF
+        {
+            let dot_span = previous_token_span(token_stream);
+            return CompilerDiagnostic::invalid_field_access(
+                InvalidFieldAccessReason::ExpectedNameAfterDot,
+                None,
+                None,
+                Vec::new(),
+                dot_span,
+            )
+            .into();
+        }
+
+        let member_span = current_token_span(token_stream);
+        return match parse_member_name_typed(token_stream, string_table) {
+            Ok(member_name) => CompilerDiagnostic::invalid_field_access(
+                InvalidFieldAccessReason::UnknownMember,
+                Some(member_name),
+                None,
+                Vec::new(),
+                member_span,
+            )
+            .into(),
+            Err(error) => error,
+        };
+    }
+
+    CompilerError::compiler_error(
+        "a pending numeric receiver entered member parsing without an authored dot",
+    )
+    .into()
 }
 
 /// Collect known struct field names and choice variant names for a receiver type.
@@ -471,7 +681,7 @@ pub(crate) fn parse_field_access_expression_with_receiver_access(
 /// can offer a "did you mean?" suggestion when a name is misspelled.
 /// WHY: the most helpful thing a compiler can do for a typo'd field access is suggest the
 /// correct field name. The type environment already has this information.
-fn collect_known_member_names(
+pub(super) fn collect_known_member_names(
     receiver_type_id: TypeId,
     type_interner: &AstTypeInterner<'_>,
     path_fork: &PathInternerFork,

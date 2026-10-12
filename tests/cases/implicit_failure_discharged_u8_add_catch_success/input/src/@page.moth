@@ -1,4 +1,4 @@
-left U8 = 255
+left I8 = 127
 right U8 = 255
 result = left + right catch then 0
 

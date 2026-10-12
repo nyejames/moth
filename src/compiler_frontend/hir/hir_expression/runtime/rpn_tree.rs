@@ -82,7 +82,11 @@ impl<'a> HirBuilder<'a> {
                 }
                 // Evaluation removes pending expression syntax before this stage.
                 ExpressionRpnItem::PendingNumericLiteral { .. }
-                | ExpressionRpnItem::PendingGroup { .. } => {
+                | ExpressionRpnItem::PendingGroup { .. }
+                | ExpressionRpnItem::PendingNumericBinding { .. }
+                | ExpressionRpnItem::PendingNumericCast { .. }
+                | ExpressionRpnItem::PendingNumericCall { .. }
+                | ExpressionRpnItem::PendingNumericExpression { .. } => {
                     return_hir_transformation_error!(
                         "Pending expression item reached HIR lowering; evaluate_expression must resolve it first.",
                         self.hir_error_location(&item.source_span())

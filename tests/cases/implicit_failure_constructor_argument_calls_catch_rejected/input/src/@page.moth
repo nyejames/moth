@@ -1,0 +1,8 @@
+Point = |
+    left I32,
+    right I32,
+|
+identity || -> I32:
+    return 1
+;
+point = Point(identity(), identity()) catch then Point(0, 0)

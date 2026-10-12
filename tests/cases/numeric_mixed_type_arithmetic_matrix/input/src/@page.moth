@@ -1,0 +1,1287 @@
+-- Concrete operands and exact receivers prove both folded and runtime domains.
+
+check_i8_i16 |left I8, right I16| -> String:
+    add I16 = left + right
+    subtract I16 = left - right
+    multiply I16 = left * right
+    divide F64 = left / right
+    integer_divide I16 = left // right
+    remainder I16 = left % right
+    power I16 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i8_i16_left #I8 = 2
+i8_i16_right #I16 = 2
+i8_i16_add #I16 = i8_i16_left + i8_i16_right
+i8_i16_subtract #I16 = i8_i16_left - i8_i16_right
+i8_i16_multiply #I16 = i8_i16_left * i8_i16_right
+i8_i16_divide #F64 = i8_i16_left / i8_i16_right
+i8_i16_integer_divide #I16 = i8_i16_left // i8_i16_right
+i8_i16_remainder #I16 = i8_i16_left % i8_i16_right
+i8_i16_power #I16 = i8_i16_left ^ i8_i16_right
+i8_i16_folded #= [:[i8_i16_add]/[i8_i16_subtract]/[i8_i16_multiply]/[i8_i16_divide]/[i8_i16_integer_divide]/[i8_i16_remainder]/[i8_i16_power]]
+i8_i16_runtime = check_i8_i16(2, 2)
+i8_i16_matches = i8_i16_runtime is i8_i16_folded
+
+check_i8_i32 |left I8, right I32| -> String:
+    add I32 = left + right
+    subtract I32 = left - right
+    multiply I32 = left * right
+    divide F64 = left / right
+    integer_divide I32 = left // right
+    remainder I32 = left % right
+    power I32 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i8_i32_left #I8 = 2
+i8_i32_right #I32 = 2
+i8_i32_add #I32 = i8_i32_left + i8_i32_right
+i8_i32_subtract #I32 = i8_i32_left - i8_i32_right
+i8_i32_multiply #I32 = i8_i32_left * i8_i32_right
+i8_i32_divide #F64 = i8_i32_left / i8_i32_right
+i8_i32_integer_divide #I32 = i8_i32_left // i8_i32_right
+i8_i32_remainder #I32 = i8_i32_left % i8_i32_right
+i8_i32_power #I32 = i8_i32_left ^ i8_i32_right
+i8_i32_folded #= [:[i8_i32_add]/[i8_i32_subtract]/[i8_i32_multiply]/[i8_i32_divide]/[i8_i32_integer_divide]/[i8_i32_remainder]/[i8_i32_power]]
+i8_i32_runtime = check_i8_i32(2, 2)
+i8_i32_matches = i8_i32_runtime is i8_i32_folded
+
+check_i8_i64 |left I8, right I64| -> String:
+    add I64 = left + right
+    subtract I64 = left - right
+    multiply I64 = left * right
+    divide F64 = left / right
+    integer_divide I64 = left // right
+    remainder I64 = left % right
+    power I64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i8_i64_left #I8 = 2
+i8_i64_right #I64 = 2
+i8_i64_add #I64 = i8_i64_left + i8_i64_right
+i8_i64_subtract #I64 = i8_i64_left - i8_i64_right
+i8_i64_multiply #I64 = i8_i64_left * i8_i64_right
+i8_i64_divide #F64 = i8_i64_left / i8_i64_right
+i8_i64_integer_divide #I64 = i8_i64_left // i8_i64_right
+i8_i64_remainder #I64 = i8_i64_left % i8_i64_right
+i8_i64_power #I64 = i8_i64_left ^ i8_i64_right
+i8_i64_folded #= [:[i8_i64_add]/[i8_i64_subtract]/[i8_i64_multiply]/[i8_i64_divide]/[i8_i64_integer_divide]/[i8_i64_remainder]/[i8_i64_power]]
+i8_i64_runtime = check_i8_i64(2, 2)
+i8_i64_matches = i8_i64_runtime is i8_i64_folded
+
+check_i8_u8 |left I8, right U8| -> String:
+    add I16 = left + right
+    subtract I16 = left - right
+    multiply I16 = left * right
+    divide F64 = left / right
+    integer_divide I16 = left // right
+    remainder I16 = left % right
+    power I16 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i8_u8_left #I8 = 2
+i8_u8_right #U8 = 2
+i8_u8_add #I16 = i8_u8_left + i8_u8_right
+i8_u8_subtract #I16 = i8_u8_left - i8_u8_right
+i8_u8_multiply #I16 = i8_u8_left * i8_u8_right
+i8_u8_divide #F64 = i8_u8_left / i8_u8_right
+i8_u8_integer_divide #I16 = i8_u8_left // i8_u8_right
+i8_u8_remainder #I16 = i8_u8_left % i8_u8_right
+i8_u8_power #I16 = i8_u8_left ^ i8_u8_right
+i8_u8_folded #= [:[i8_u8_add]/[i8_u8_subtract]/[i8_u8_multiply]/[i8_u8_divide]/[i8_u8_integer_divide]/[i8_u8_remainder]/[i8_u8_power]]
+i8_u8_runtime = check_i8_u8(2, 2)
+i8_u8_matches = i8_u8_runtime is i8_u8_folded
+
+check_i8_u16 |left I8, right U16| -> String:
+    add I32 = left + right
+    subtract I32 = left - right
+    multiply I32 = left * right
+    divide F64 = left / right
+    integer_divide I32 = left // right
+    remainder I32 = left % right
+    power I32 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i8_u16_left #I8 = 2
+i8_u16_right #U16 = 2
+i8_u16_add #I32 = i8_u16_left + i8_u16_right
+i8_u16_subtract #I32 = i8_u16_left - i8_u16_right
+i8_u16_multiply #I32 = i8_u16_left * i8_u16_right
+i8_u16_divide #F64 = i8_u16_left / i8_u16_right
+i8_u16_integer_divide #I32 = i8_u16_left // i8_u16_right
+i8_u16_remainder #I32 = i8_u16_left % i8_u16_right
+i8_u16_power #I32 = i8_u16_left ^ i8_u16_right
+i8_u16_folded #= [:[i8_u16_add]/[i8_u16_subtract]/[i8_u16_multiply]/[i8_u16_divide]/[i8_u16_integer_divide]/[i8_u16_remainder]/[i8_u16_power]]
+i8_u16_runtime = check_i8_u16(2, 2)
+i8_u16_matches = i8_u16_runtime is i8_u16_folded
+
+check_i8_u32 |left I8, right U32| -> String:
+    add I64 = left + right
+    subtract I64 = left - right
+    multiply I64 = left * right
+    divide F64 = left / right
+    integer_divide I64 = left // right
+    remainder I64 = left % right
+    power I64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i8_u32_left #I8 = 2
+i8_u32_right #U32 = 2
+i8_u32_add #I64 = i8_u32_left + i8_u32_right
+i8_u32_subtract #I64 = i8_u32_left - i8_u32_right
+i8_u32_multiply #I64 = i8_u32_left * i8_u32_right
+i8_u32_divide #F64 = i8_u32_left / i8_u32_right
+i8_u32_integer_divide #I64 = i8_u32_left // i8_u32_right
+i8_u32_remainder #I64 = i8_u32_left % i8_u32_right
+i8_u32_power #I64 = i8_u32_left ^ i8_u32_right
+i8_u32_folded #= [:[i8_u32_add]/[i8_u32_subtract]/[i8_u32_multiply]/[i8_u32_divide]/[i8_u32_integer_divide]/[i8_u32_remainder]/[i8_u32_power]]
+i8_u32_runtime = check_i8_u32(2, 2)
+i8_u32_matches = i8_u32_runtime is i8_u32_folded
+
+check_i16_i8 |left I16, right I8| -> String:
+    add I16 = left + right
+    subtract I16 = left - right
+    multiply I16 = left * right
+    divide F64 = left / right
+    integer_divide I16 = left // right
+    remainder I16 = left % right
+    power I16 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i16_i8_left #I16 = 2
+i16_i8_right #I8 = 2
+i16_i8_add #I16 = i16_i8_left + i16_i8_right
+i16_i8_subtract #I16 = i16_i8_left - i16_i8_right
+i16_i8_multiply #I16 = i16_i8_left * i16_i8_right
+i16_i8_divide #F64 = i16_i8_left / i16_i8_right
+i16_i8_integer_divide #I16 = i16_i8_left // i16_i8_right
+i16_i8_remainder #I16 = i16_i8_left % i16_i8_right
+i16_i8_power #I16 = i16_i8_left ^ i16_i8_right
+i16_i8_folded #= [:[i16_i8_add]/[i16_i8_subtract]/[i16_i8_multiply]/[i16_i8_divide]/[i16_i8_integer_divide]/[i16_i8_remainder]/[i16_i8_power]]
+i16_i8_runtime = check_i16_i8(2, 2)
+i16_i8_matches = i16_i8_runtime is i16_i8_folded
+
+check_i16_i32 |left I16, right I32| -> String:
+    add I32 = left + right
+    subtract I32 = left - right
+    multiply I32 = left * right
+    divide F64 = left / right
+    integer_divide I32 = left // right
+    remainder I32 = left % right
+    power I32 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i16_i32_left #I16 = 2
+i16_i32_right #I32 = 2
+i16_i32_add #I32 = i16_i32_left + i16_i32_right
+i16_i32_subtract #I32 = i16_i32_left - i16_i32_right
+i16_i32_multiply #I32 = i16_i32_left * i16_i32_right
+i16_i32_divide #F64 = i16_i32_left / i16_i32_right
+i16_i32_integer_divide #I32 = i16_i32_left // i16_i32_right
+i16_i32_remainder #I32 = i16_i32_left % i16_i32_right
+i16_i32_power #I32 = i16_i32_left ^ i16_i32_right
+i16_i32_folded #= [:[i16_i32_add]/[i16_i32_subtract]/[i16_i32_multiply]/[i16_i32_divide]/[i16_i32_integer_divide]/[i16_i32_remainder]/[i16_i32_power]]
+i16_i32_runtime = check_i16_i32(2, 2)
+i16_i32_matches = i16_i32_runtime is i16_i32_folded
+
+check_i16_i64 |left I16, right I64| -> String:
+    add I64 = left + right
+    subtract I64 = left - right
+    multiply I64 = left * right
+    divide F64 = left / right
+    integer_divide I64 = left // right
+    remainder I64 = left % right
+    power I64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i16_i64_left #I16 = 2
+i16_i64_right #I64 = 2
+i16_i64_add #I64 = i16_i64_left + i16_i64_right
+i16_i64_subtract #I64 = i16_i64_left - i16_i64_right
+i16_i64_multiply #I64 = i16_i64_left * i16_i64_right
+i16_i64_divide #F64 = i16_i64_left / i16_i64_right
+i16_i64_integer_divide #I64 = i16_i64_left // i16_i64_right
+i16_i64_remainder #I64 = i16_i64_left % i16_i64_right
+i16_i64_power #I64 = i16_i64_left ^ i16_i64_right
+i16_i64_folded #= [:[i16_i64_add]/[i16_i64_subtract]/[i16_i64_multiply]/[i16_i64_divide]/[i16_i64_integer_divide]/[i16_i64_remainder]/[i16_i64_power]]
+i16_i64_runtime = check_i16_i64(2, 2)
+i16_i64_matches = i16_i64_runtime is i16_i64_folded
+
+check_i16_u8 |left I16, right U8| -> String:
+    add I16 = left + right
+    subtract I16 = left - right
+    multiply I16 = left * right
+    divide F64 = left / right
+    integer_divide I16 = left // right
+    remainder I16 = left % right
+    power I16 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i16_u8_left #I16 = 2
+i16_u8_right #U8 = 2
+i16_u8_add #I16 = i16_u8_left + i16_u8_right
+i16_u8_subtract #I16 = i16_u8_left - i16_u8_right
+i16_u8_multiply #I16 = i16_u8_left * i16_u8_right
+i16_u8_divide #F64 = i16_u8_left / i16_u8_right
+i16_u8_integer_divide #I16 = i16_u8_left // i16_u8_right
+i16_u8_remainder #I16 = i16_u8_left % i16_u8_right
+i16_u8_power #I16 = i16_u8_left ^ i16_u8_right
+i16_u8_folded #= [:[i16_u8_add]/[i16_u8_subtract]/[i16_u8_multiply]/[i16_u8_divide]/[i16_u8_integer_divide]/[i16_u8_remainder]/[i16_u8_power]]
+i16_u8_runtime = check_i16_u8(2, 2)
+i16_u8_matches = i16_u8_runtime is i16_u8_folded
+
+check_i16_u16 |left I16, right U16| -> String:
+    add I32 = left + right
+    subtract I32 = left - right
+    multiply I32 = left * right
+    divide F64 = left / right
+    integer_divide I32 = left // right
+    remainder I32 = left % right
+    power I32 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i16_u16_left #I16 = 2
+i16_u16_right #U16 = 2
+i16_u16_add #I32 = i16_u16_left + i16_u16_right
+i16_u16_subtract #I32 = i16_u16_left - i16_u16_right
+i16_u16_multiply #I32 = i16_u16_left * i16_u16_right
+i16_u16_divide #F64 = i16_u16_left / i16_u16_right
+i16_u16_integer_divide #I32 = i16_u16_left // i16_u16_right
+i16_u16_remainder #I32 = i16_u16_left % i16_u16_right
+i16_u16_power #I32 = i16_u16_left ^ i16_u16_right
+i16_u16_folded #= [:[i16_u16_add]/[i16_u16_subtract]/[i16_u16_multiply]/[i16_u16_divide]/[i16_u16_integer_divide]/[i16_u16_remainder]/[i16_u16_power]]
+i16_u16_runtime = check_i16_u16(2, 2)
+i16_u16_matches = i16_u16_runtime is i16_u16_folded
+
+check_i16_u32 |left I16, right U32| -> String:
+    add I64 = left + right
+    subtract I64 = left - right
+    multiply I64 = left * right
+    divide F64 = left / right
+    integer_divide I64 = left // right
+    remainder I64 = left % right
+    power I64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i16_u32_left #I16 = 2
+i16_u32_right #U32 = 2
+i16_u32_add #I64 = i16_u32_left + i16_u32_right
+i16_u32_subtract #I64 = i16_u32_left - i16_u32_right
+i16_u32_multiply #I64 = i16_u32_left * i16_u32_right
+i16_u32_divide #F64 = i16_u32_left / i16_u32_right
+i16_u32_integer_divide #I64 = i16_u32_left // i16_u32_right
+i16_u32_remainder #I64 = i16_u32_left % i16_u32_right
+i16_u32_power #I64 = i16_u32_left ^ i16_u32_right
+i16_u32_folded #= [:[i16_u32_add]/[i16_u32_subtract]/[i16_u32_multiply]/[i16_u32_divide]/[i16_u32_integer_divide]/[i16_u32_remainder]/[i16_u32_power]]
+i16_u32_runtime = check_i16_u32(2, 2)
+i16_u32_matches = i16_u32_runtime is i16_u32_folded
+
+check_i32_i8 |left I32, right I8| -> String:
+    add I32 = left + right
+    subtract I32 = left - right
+    multiply I32 = left * right
+    divide F64 = left / right
+    integer_divide I32 = left // right
+    remainder I32 = left % right
+    power I32 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i32_i8_left #I32 = 2
+i32_i8_right #I8 = 2
+i32_i8_add #I32 = i32_i8_left + i32_i8_right
+i32_i8_subtract #I32 = i32_i8_left - i32_i8_right
+i32_i8_multiply #I32 = i32_i8_left * i32_i8_right
+i32_i8_divide #F64 = i32_i8_left / i32_i8_right
+i32_i8_integer_divide #I32 = i32_i8_left // i32_i8_right
+i32_i8_remainder #I32 = i32_i8_left % i32_i8_right
+i32_i8_power #I32 = i32_i8_left ^ i32_i8_right
+i32_i8_folded #= [:[i32_i8_add]/[i32_i8_subtract]/[i32_i8_multiply]/[i32_i8_divide]/[i32_i8_integer_divide]/[i32_i8_remainder]/[i32_i8_power]]
+i32_i8_runtime = check_i32_i8(2, 2)
+i32_i8_matches = i32_i8_runtime is i32_i8_folded
+
+check_i32_i16 |left I32, right I16| -> String:
+    add I32 = left + right
+    subtract I32 = left - right
+    multiply I32 = left * right
+    divide F64 = left / right
+    integer_divide I32 = left // right
+    remainder I32 = left % right
+    power I32 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i32_i16_left #I32 = 2
+i32_i16_right #I16 = 2
+i32_i16_add #I32 = i32_i16_left + i32_i16_right
+i32_i16_subtract #I32 = i32_i16_left - i32_i16_right
+i32_i16_multiply #I32 = i32_i16_left * i32_i16_right
+i32_i16_divide #F64 = i32_i16_left / i32_i16_right
+i32_i16_integer_divide #I32 = i32_i16_left // i32_i16_right
+i32_i16_remainder #I32 = i32_i16_left % i32_i16_right
+i32_i16_power #I32 = i32_i16_left ^ i32_i16_right
+i32_i16_folded #= [:[i32_i16_add]/[i32_i16_subtract]/[i32_i16_multiply]/[i32_i16_divide]/[i32_i16_integer_divide]/[i32_i16_remainder]/[i32_i16_power]]
+i32_i16_runtime = check_i32_i16(2, 2)
+i32_i16_matches = i32_i16_runtime is i32_i16_folded
+
+check_i32_i64 |left I32, right I64| -> String:
+    add I64 = left + right
+    subtract I64 = left - right
+    multiply I64 = left * right
+    divide F64 = left / right
+    integer_divide I64 = left // right
+    remainder I64 = left % right
+    power I64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i32_i64_left #I32 = 2
+i32_i64_right #I64 = 2
+i32_i64_add #I64 = i32_i64_left + i32_i64_right
+i32_i64_subtract #I64 = i32_i64_left - i32_i64_right
+i32_i64_multiply #I64 = i32_i64_left * i32_i64_right
+i32_i64_divide #F64 = i32_i64_left / i32_i64_right
+i32_i64_integer_divide #I64 = i32_i64_left // i32_i64_right
+i32_i64_remainder #I64 = i32_i64_left % i32_i64_right
+i32_i64_power #I64 = i32_i64_left ^ i32_i64_right
+i32_i64_folded #= [:[i32_i64_add]/[i32_i64_subtract]/[i32_i64_multiply]/[i32_i64_divide]/[i32_i64_integer_divide]/[i32_i64_remainder]/[i32_i64_power]]
+i32_i64_runtime = check_i32_i64(2, 2)
+i32_i64_matches = i32_i64_runtime is i32_i64_folded
+
+check_i32_u8 |left I32, right U8| -> String:
+    add I32 = left + right
+    subtract I32 = left - right
+    multiply I32 = left * right
+    divide F64 = left / right
+    integer_divide I32 = left // right
+    remainder I32 = left % right
+    power I32 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i32_u8_left #I32 = 2
+i32_u8_right #U8 = 2
+i32_u8_add #I32 = i32_u8_left + i32_u8_right
+i32_u8_subtract #I32 = i32_u8_left - i32_u8_right
+i32_u8_multiply #I32 = i32_u8_left * i32_u8_right
+i32_u8_divide #F64 = i32_u8_left / i32_u8_right
+i32_u8_integer_divide #I32 = i32_u8_left // i32_u8_right
+i32_u8_remainder #I32 = i32_u8_left % i32_u8_right
+i32_u8_power #I32 = i32_u8_left ^ i32_u8_right
+i32_u8_folded #= [:[i32_u8_add]/[i32_u8_subtract]/[i32_u8_multiply]/[i32_u8_divide]/[i32_u8_integer_divide]/[i32_u8_remainder]/[i32_u8_power]]
+i32_u8_runtime = check_i32_u8(2, 2)
+i32_u8_matches = i32_u8_runtime is i32_u8_folded
+
+check_i32_u16 |left I32, right U16| -> String:
+    add I32 = left + right
+    subtract I32 = left - right
+    multiply I32 = left * right
+    divide F64 = left / right
+    integer_divide I32 = left // right
+    remainder I32 = left % right
+    power I32 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i32_u16_left #I32 = 2
+i32_u16_right #U16 = 2
+i32_u16_add #I32 = i32_u16_left + i32_u16_right
+i32_u16_subtract #I32 = i32_u16_left - i32_u16_right
+i32_u16_multiply #I32 = i32_u16_left * i32_u16_right
+i32_u16_divide #F64 = i32_u16_left / i32_u16_right
+i32_u16_integer_divide #I32 = i32_u16_left // i32_u16_right
+i32_u16_remainder #I32 = i32_u16_left % i32_u16_right
+i32_u16_power #I32 = i32_u16_left ^ i32_u16_right
+i32_u16_folded #= [:[i32_u16_add]/[i32_u16_subtract]/[i32_u16_multiply]/[i32_u16_divide]/[i32_u16_integer_divide]/[i32_u16_remainder]/[i32_u16_power]]
+i32_u16_runtime = check_i32_u16(2, 2)
+i32_u16_matches = i32_u16_runtime is i32_u16_folded
+
+check_i32_u32 |left I32, right U32| -> String:
+    add I64 = left + right
+    subtract I64 = left - right
+    multiply I64 = left * right
+    divide F64 = left / right
+    integer_divide I64 = left // right
+    remainder I64 = left % right
+    power I64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i32_u32_left #I32 = 2
+i32_u32_right #U32 = 2
+i32_u32_add #I64 = i32_u32_left + i32_u32_right
+i32_u32_subtract #I64 = i32_u32_left - i32_u32_right
+i32_u32_multiply #I64 = i32_u32_left * i32_u32_right
+i32_u32_divide #F64 = i32_u32_left / i32_u32_right
+i32_u32_integer_divide #I64 = i32_u32_left // i32_u32_right
+i32_u32_remainder #I64 = i32_u32_left % i32_u32_right
+i32_u32_power #I64 = i32_u32_left ^ i32_u32_right
+i32_u32_folded #= [:[i32_u32_add]/[i32_u32_subtract]/[i32_u32_multiply]/[i32_u32_divide]/[i32_u32_integer_divide]/[i32_u32_remainder]/[i32_u32_power]]
+i32_u32_runtime = check_i32_u32(2, 2)
+i32_u32_matches = i32_u32_runtime is i32_u32_folded
+
+check_i64_i8 |left I64, right I8| -> String:
+    add I64 = left + right
+    subtract I64 = left - right
+    multiply I64 = left * right
+    divide F64 = left / right
+    integer_divide I64 = left // right
+    remainder I64 = left % right
+    power I64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i64_i8_left #I64 = 2
+i64_i8_right #I8 = 2
+i64_i8_add #I64 = i64_i8_left + i64_i8_right
+i64_i8_subtract #I64 = i64_i8_left - i64_i8_right
+i64_i8_multiply #I64 = i64_i8_left * i64_i8_right
+i64_i8_divide #F64 = i64_i8_left / i64_i8_right
+i64_i8_integer_divide #I64 = i64_i8_left // i64_i8_right
+i64_i8_remainder #I64 = i64_i8_left % i64_i8_right
+i64_i8_power #I64 = i64_i8_left ^ i64_i8_right
+i64_i8_folded #= [:[i64_i8_add]/[i64_i8_subtract]/[i64_i8_multiply]/[i64_i8_divide]/[i64_i8_integer_divide]/[i64_i8_remainder]/[i64_i8_power]]
+i64_i8_runtime = check_i64_i8(2, 2)
+i64_i8_matches = i64_i8_runtime is i64_i8_folded
+
+check_i64_i16 |left I64, right I16| -> String:
+    add I64 = left + right
+    subtract I64 = left - right
+    multiply I64 = left * right
+    divide F64 = left / right
+    integer_divide I64 = left // right
+    remainder I64 = left % right
+    power I64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i64_i16_left #I64 = 2
+i64_i16_right #I16 = 2
+i64_i16_add #I64 = i64_i16_left + i64_i16_right
+i64_i16_subtract #I64 = i64_i16_left - i64_i16_right
+i64_i16_multiply #I64 = i64_i16_left * i64_i16_right
+i64_i16_divide #F64 = i64_i16_left / i64_i16_right
+i64_i16_integer_divide #I64 = i64_i16_left // i64_i16_right
+i64_i16_remainder #I64 = i64_i16_left % i64_i16_right
+i64_i16_power #I64 = i64_i16_left ^ i64_i16_right
+i64_i16_folded #= [:[i64_i16_add]/[i64_i16_subtract]/[i64_i16_multiply]/[i64_i16_divide]/[i64_i16_integer_divide]/[i64_i16_remainder]/[i64_i16_power]]
+i64_i16_runtime = check_i64_i16(2, 2)
+i64_i16_matches = i64_i16_runtime is i64_i16_folded
+
+check_i64_i32 |left I64, right I32| -> String:
+    add I64 = left + right
+    subtract I64 = left - right
+    multiply I64 = left * right
+    divide F64 = left / right
+    integer_divide I64 = left // right
+    remainder I64 = left % right
+    power I64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i64_i32_left #I64 = 2
+i64_i32_right #I32 = 2
+i64_i32_add #I64 = i64_i32_left + i64_i32_right
+i64_i32_subtract #I64 = i64_i32_left - i64_i32_right
+i64_i32_multiply #I64 = i64_i32_left * i64_i32_right
+i64_i32_divide #F64 = i64_i32_left / i64_i32_right
+i64_i32_integer_divide #I64 = i64_i32_left // i64_i32_right
+i64_i32_remainder #I64 = i64_i32_left % i64_i32_right
+i64_i32_power #I64 = i64_i32_left ^ i64_i32_right
+i64_i32_folded #= [:[i64_i32_add]/[i64_i32_subtract]/[i64_i32_multiply]/[i64_i32_divide]/[i64_i32_integer_divide]/[i64_i32_remainder]/[i64_i32_power]]
+i64_i32_runtime = check_i64_i32(2, 2)
+i64_i32_matches = i64_i32_runtime is i64_i32_folded
+
+check_i64_u8 |left I64, right U8| -> String:
+    add I64 = left + right
+    subtract I64 = left - right
+    multiply I64 = left * right
+    divide F64 = left / right
+    integer_divide I64 = left // right
+    remainder I64 = left % right
+    power I64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i64_u8_left #I64 = 2
+i64_u8_right #U8 = 2
+i64_u8_add #I64 = i64_u8_left + i64_u8_right
+i64_u8_subtract #I64 = i64_u8_left - i64_u8_right
+i64_u8_multiply #I64 = i64_u8_left * i64_u8_right
+i64_u8_divide #F64 = i64_u8_left / i64_u8_right
+i64_u8_integer_divide #I64 = i64_u8_left // i64_u8_right
+i64_u8_remainder #I64 = i64_u8_left % i64_u8_right
+i64_u8_power #I64 = i64_u8_left ^ i64_u8_right
+i64_u8_folded #= [:[i64_u8_add]/[i64_u8_subtract]/[i64_u8_multiply]/[i64_u8_divide]/[i64_u8_integer_divide]/[i64_u8_remainder]/[i64_u8_power]]
+i64_u8_runtime = check_i64_u8(2, 2)
+i64_u8_matches = i64_u8_runtime is i64_u8_folded
+
+check_i64_u16 |left I64, right U16| -> String:
+    add I64 = left + right
+    subtract I64 = left - right
+    multiply I64 = left * right
+    divide F64 = left / right
+    integer_divide I64 = left // right
+    remainder I64 = left % right
+    power I64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i64_u16_left #I64 = 2
+i64_u16_right #U16 = 2
+i64_u16_add #I64 = i64_u16_left + i64_u16_right
+i64_u16_subtract #I64 = i64_u16_left - i64_u16_right
+i64_u16_multiply #I64 = i64_u16_left * i64_u16_right
+i64_u16_divide #F64 = i64_u16_left / i64_u16_right
+i64_u16_integer_divide #I64 = i64_u16_left // i64_u16_right
+i64_u16_remainder #I64 = i64_u16_left % i64_u16_right
+i64_u16_power #I64 = i64_u16_left ^ i64_u16_right
+i64_u16_folded #= [:[i64_u16_add]/[i64_u16_subtract]/[i64_u16_multiply]/[i64_u16_divide]/[i64_u16_integer_divide]/[i64_u16_remainder]/[i64_u16_power]]
+i64_u16_runtime = check_i64_u16(2, 2)
+i64_u16_matches = i64_u16_runtime is i64_u16_folded
+
+check_i64_u32 |left I64, right U32| -> String:
+    add I64 = left + right
+    subtract I64 = left - right
+    multiply I64 = left * right
+    divide F64 = left / right
+    integer_divide I64 = left // right
+    remainder I64 = left % right
+    power I64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+i64_u32_left #I64 = 2
+i64_u32_right #U32 = 2
+i64_u32_add #I64 = i64_u32_left + i64_u32_right
+i64_u32_subtract #I64 = i64_u32_left - i64_u32_right
+i64_u32_multiply #I64 = i64_u32_left * i64_u32_right
+i64_u32_divide #F64 = i64_u32_left / i64_u32_right
+i64_u32_integer_divide #I64 = i64_u32_left // i64_u32_right
+i64_u32_remainder #I64 = i64_u32_left % i64_u32_right
+i64_u32_power #I64 = i64_u32_left ^ i64_u32_right
+i64_u32_folded #= [:[i64_u32_add]/[i64_u32_subtract]/[i64_u32_multiply]/[i64_u32_divide]/[i64_u32_integer_divide]/[i64_u32_remainder]/[i64_u32_power]]
+i64_u32_runtime = check_i64_u32(2, 2)
+i64_u32_matches = i64_u32_runtime is i64_u32_folded
+
+check_u8_i8 |left U8, right I8| -> String:
+    add I16 = left + right
+    subtract I16 = left - right
+    multiply I16 = left * right
+    divide F64 = left / right
+    integer_divide I16 = left // right
+    remainder I16 = left % right
+    power I16 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u8_i8_left #U8 = 2
+u8_i8_right #I8 = 2
+u8_i8_add #I16 = u8_i8_left + u8_i8_right
+u8_i8_subtract #I16 = u8_i8_left - u8_i8_right
+u8_i8_multiply #I16 = u8_i8_left * u8_i8_right
+u8_i8_divide #F64 = u8_i8_left / u8_i8_right
+u8_i8_integer_divide #I16 = u8_i8_left // u8_i8_right
+u8_i8_remainder #I16 = u8_i8_left % u8_i8_right
+u8_i8_power #I16 = u8_i8_left ^ u8_i8_right
+u8_i8_folded #= [:[u8_i8_add]/[u8_i8_subtract]/[u8_i8_multiply]/[u8_i8_divide]/[u8_i8_integer_divide]/[u8_i8_remainder]/[u8_i8_power]]
+u8_i8_runtime = check_u8_i8(2, 2)
+u8_i8_matches = u8_i8_runtime is u8_i8_folded
+
+check_u8_i16 |left U8, right I16| -> String:
+    add I16 = left + right
+    subtract I16 = left - right
+    multiply I16 = left * right
+    divide F64 = left / right
+    integer_divide I16 = left // right
+    remainder I16 = left % right
+    power I16 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u8_i16_left #U8 = 2
+u8_i16_right #I16 = 2
+u8_i16_add #I16 = u8_i16_left + u8_i16_right
+u8_i16_subtract #I16 = u8_i16_left - u8_i16_right
+u8_i16_multiply #I16 = u8_i16_left * u8_i16_right
+u8_i16_divide #F64 = u8_i16_left / u8_i16_right
+u8_i16_integer_divide #I16 = u8_i16_left // u8_i16_right
+u8_i16_remainder #I16 = u8_i16_left % u8_i16_right
+u8_i16_power #I16 = u8_i16_left ^ u8_i16_right
+u8_i16_folded #= [:[u8_i16_add]/[u8_i16_subtract]/[u8_i16_multiply]/[u8_i16_divide]/[u8_i16_integer_divide]/[u8_i16_remainder]/[u8_i16_power]]
+u8_i16_runtime = check_u8_i16(2, 2)
+u8_i16_matches = u8_i16_runtime is u8_i16_folded
+
+check_u8_i32 |left U8, right I32| -> String:
+    add I32 = left + right
+    subtract I32 = left - right
+    multiply I32 = left * right
+    divide F64 = left / right
+    integer_divide I32 = left // right
+    remainder I32 = left % right
+    power I32 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u8_i32_left #U8 = 2
+u8_i32_right #I32 = 2
+u8_i32_add #I32 = u8_i32_left + u8_i32_right
+u8_i32_subtract #I32 = u8_i32_left - u8_i32_right
+u8_i32_multiply #I32 = u8_i32_left * u8_i32_right
+u8_i32_divide #F64 = u8_i32_left / u8_i32_right
+u8_i32_integer_divide #I32 = u8_i32_left // u8_i32_right
+u8_i32_remainder #I32 = u8_i32_left % u8_i32_right
+u8_i32_power #I32 = u8_i32_left ^ u8_i32_right
+u8_i32_folded #= [:[u8_i32_add]/[u8_i32_subtract]/[u8_i32_multiply]/[u8_i32_divide]/[u8_i32_integer_divide]/[u8_i32_remainder]/[u8_i32_power]]
+u8_i32_runtime = check_u8_i32(2, 2)
+u8_i32_matches = u8_i32_runtime is u8_i32_folded
+
+check_u8_i64 |left U8, right I64| -> String:
+    add I64 = left + right
+    subtract I64 = left - right
+    multiply I64 = left * right
+    divide F64 = left / right
+    integer_divide I64 = left // right
+    remainder I64 = left % right
+    power I64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u8_i64_left #U8 = 2
+u8_i64_right #I64 = 2
+u8_i64_add #I64 = u8_i64_left + u8_i64_right
+u8_i64_subtract #I64 = u8_i64_left - u8_i64_right
+u8_i64_multiply #I64 = u8_i64_left * u8_i64_right
+u8_i64_divide #F64 = u8_i64_left / u8_i64_right
+u8_i64_integer_divide #I64 = u8_i64_left // u8_i64_right
+u8_i64_remainder #I64 = u8_i64_left % u8_i64_right
+u8_i64_power #I64 = u8_i64_left ^ u8_i64_right
+u8_i64_folded #= [:[u8_i64_add]/[u8_i64_subtract]/[u8_i64_multiply]/[u8_i64_divide]/[u8_i64_integer_divide]/[u8_i64_remainder]/[u8_i64_power]]
+u8_i64_runtime = check_u8_i64(2, 2)
+u8_i64_matches = u8_i64_runtime is u8_i64_folded
+
+check_u8_u16 |left U8, right U16| -> String:
+    add U16 = left + right
+    subtract U16 = left - right
+    multiply U16 = left * right
+    divide F64 = left / right
+    integer_divide U16 = left // right
+    remainder U16 = left % right
+    power U16 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u8_u16_left #U8 = 2
+u8_u16_right #U16 = 2
+u8_u16_add #U16 = u8_u16_left + u8_u16_right
+u8_u16_subtract #U16 = u8_u16_left - u8_u16_right
+u8_u16_multiply #U16 = u8_u16_left * u8_u16_right
+u8_u16_divide #F64 = u8_u16_left / u8_u16_right
+u8_u16_integer_divide #U16 = u8_u16_left // u8_u16_right
+u8_u16_remainder #U16 = u8_u16_left % u8_u16_right
+u8_u16_power #U16 = u8_u16_left ^ u8_u16_right
+u8_u16_folded #= [:[u8_u16_add]/[u8_u16_subtract]/[u8_u16_multiply]/[u8_u16_divide]/[u8_u16_integer_divide]/[u8_u16_remainder]/[u8_u16_power]]
+u8_u16_runtime = check_u8_u16(2, 2)
+u8_u16_matches = u8_u16_runtime is u8_u16_folded
+
+check_u8_u32 |left U8, right U32| -> String:
+    add U32 = left + right
+    subtract U32 = left - right
+    multiply U32 = left * right
+    divide F64 = left / right
+    integer_divide U32 = left // right
+    remainder U32 = left % right
+    power U32 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u8_u32_left #U8 = 2
+u8_u32_right #U32 = 2
+u8_u32_add #U32 = u8_u32_left + u8_u32_right
+u8_u32_subtract #U32 = u8_u32_left - u8_u32_right
+u8_u32_multiply #U32 = u8_u32_left * u8_u32_right
+u8_u32_divide #F64 = u8_u32_left / u8_u32_right
+u8_u32_integer_divide #U32 = u8_u32_left // u8_u32_right
+u8_u32_remainder #U32 = u8_u32_left % u8_u32_right
+u8_u32_power #U32 = u8_u32_left ^ u8_u32_right
+u8_u32_folded #= [:[u8_u32_add]/[u8_u32_subtract]/[u8_u32_multiply]/[u8_u32_divide]/[u8_u32_integer_divide]/[u8_u32_remainder]/[u8_u32_power]]
+u8_u32_runtime = check_u8_u32(2, 2)
+u8_u32_matches = u8_u32_runtime is u8_u32_folded
+
+check_u8_u64 |left U8, right U64| -> String:
+    add U64 = left + right
+    subtract U64 = left - right
+    multiply U64 = left * right
+    divide F64 = left / right
+    integer_divide U64 = left // right
+    remainder U64 = left % right
+    power U64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u8_u64_left #U8 = 2
+u8_u64_right #U64 = 2
+u8_u64_add #U64 = u8_u64_left + u8_u64_right
+u8_u64_subtract #U64 = u8_u64_left - u8_u64_right
+u8_u64_multiply #U64 = u8_u64_left * u8_u64_right
+u8_u64_divide #F64 = u8_u64_left / u8_u64_right
+u8_u64_integer_divide #U64 = u8_u64_left // u8_u64_right
+u8_u64_remainder #U64 = u8_u64_left % u8_u64_right
+u8_u64_power #U64 = u8_u64_left ^ u8_u64_right
+u8_u64_folded #= [:[u8_u64_add]/[u8_u64_subtract]/[u8_u64_multiply]/[u8_u64_divide]/[u8_u64_integer_divide]/[u8_u64_remainder]/[u8_u64_power]]
+u8_u64_runtime = check_u8_u64(2, 2)
+u8_u64_matches = u8_u64_runtime is u8_u64_folded
+
+check_u16_i8 |left U16, right I8| -> String:
+    add I32 = left + right
+    subtract I32 = left - right
+    multiply I32 = left * right
+    divide F64 = left / right
+    integer_divide I32 = left // right
+    remainder I32 = left % right
+    power I32 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u16_i8_left #U16 = 2
+u16_i8_right #I8 = 2
+u16_i8_add #I32 = u16_i8_left + u16_i8_right
+u16_i8_subtract #I32 = u16_i8_left - u16_i8_right
+u16_i8_multiply #I32 = u16_i8_left * u16_i8_right
+u16_i8_divide #F64 = u16_i8_left / u16_i8_right
+u16_i8_integer_divide #I32 = u16_i8_left // u16_i8_right
+u16_i8_remainder #I32 = u16_i8_left % u16_i8_right
+u16_i8_power #I32 = u16_i8_left ^ u16_i8_right
+u16_i8_folded #= [:[u16_i8_add]/[u16_i8_subtract]/[u16_i8_multiply]/[u16_i8_divide]/[u16_i8_integer_divide]/[u16_i8_remainder]/[u16_i8_power]]
+u16_i8_runtime = check_u16_i8(2, 2)
+u16_i8_matches = u16_i8_runtime is u16_i8_folded
+
+check_u16_i16 |left U16, right I16| -> String:
+    add I32 = left + right
+    subtract I32 = left - right
+    multiply I32 = left * right
+    divide F64 = left / right
+    integer_divide I32 = left // right
+    remainder I32 = left % right
+    power I32 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u16_i16_left #U16 = 2
+u16_i16_right #I16 = 2
+u16_i16_add #I32 = u16_i16_left + u16_i16_right
+u16_i16_subtract #I32 = u16_i16_left - u16_i16_right
+u16_i16_multiply #I32 = u16_i16_left * u16_i16_right
+u16_i16_divide #F64 = u16_i16_left / u16_i16_right
+u16_i16_integer_divide #I32 = u16_i16_left // u16_i16_right
+u16_i16_remainder #I32 = u16_i16_left % u16_i16_right
+u16_i16_power #I32 = u16_i16_left ^ u16_i16_right
+u16_i16_folded #= [:[u16_i16_add]/[u16_i16_subtract]/[u16_i16_multiply]/[u16_i16_divide]/[u16_i16_integer_divide]/[u16_i16_remainder]/[u16_i16_power]]
+u16_i16_runtime = check_u16_i16(2, 2)
+u16_i16_matches = u16_i16_runtime is u16_i16_folded
+
+check_u16_i32 |left U16, right I32| -> String:
+    add I32 = left + right
+    subtract I32 = left - right
+    multiply I32 = left * right
+    divide F64 = left / right
+    integer_divide I32 = left // right
+    remainder I32 = left % right
+    power I32 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u16_i32_left #U16 = 2
+u16_i32_right #I32 = 2
+u16_i32_add #I32 = u16_i32_left + u16_i32_right
+u16_i32_subtract #I32 = u16_i32_left - u16_i32_right
+u16_i32_multiply #I32 = u16_i32_left * u16_i32_right
+u16_i32_divide #F64 = u16_i32_left / u16_i32_right
+u16_i32_integer_divide #I32 = u16_i32_left // u16_i32_right
+u16_i32_remainder #I32 = u16_i32_left % u16_i32_right
+u16_i32_power #I32 = u16_i32_left ^ u16_i32_right
+u16_i32_folded #= [:[u16_i32_add]/[u16_i32_subtract]/[u16_i32_multiply]/[u16_i32_divide]/[u16_i32_integer_divide]/[u16_i32_remainder]/[u16_i32_power]]
+u16_i32_runtime = check_u16_i32(2, 2)
+u16_i32_matches = u16_i32_runtime is u16_i32_folded
+
+check_u16_i64 |left U16, right I64| -> String:
+    add I64 = left + right
+    subtract I64 = left - right
+    multiply I64 = left * right
+    divide F64 = left / right
+    integer_divide I64 = left // right
+    remainder I64 = left % right
+    power I64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u16_i64_left #U16 = 2
+u16_i64_right #I64 = 2
+u16_i64_add #I64 = u16_i64_left + u16_i64_right
+u16_i64_subtract #I64 = u16_i64_left - u16_i64_right
+u16_i64_multiply #I64 = u16_i64_left * u16_i64_right
+u16_i64_divide #F64 = u16_i64_left / u16_i64_right
+u16_i64_integer_divide #I64 = u16_i64_left // u16_i64_right
+u16_i64_remainder #I64 = u16_i64_left % u16_i64_right
+u16_i64_power #I64 = u16_i64_left ^ u16_i64_right
+u16_i64_folded #= [:[u16_i64_add]/[u16_i64_subtract]/[u16_i64_multiply]/[u16_i64_divide]/[u16_i64_integer_divide]/[u16_i64_remainder]/[u16_i64_power]]
+u16_i64_runtime = check_u16_i64(2, 2)
+u16_i64_matches = u16_i64_runtime is u16_i64_folded
+
+check_u16_u8 |left U16, right U8| -> String:
+    add U16 = left + right
+    subtract U16 = left - right
+    multiply U16 = left * right
+    divide F64 = left / right
+    integer_divide U16 = left // right
+    remainder U16 = left % right
+    power U16 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u16_u8_left #U16 = 2
+u16_u8_right #U8 = 2
+u16_u8_add #U16 = u16_u8_left + u16_u8_right
+u16_u8_subtract #U16 = u16_u8_left - u16_u8_right
+u16_u8_multiply #U16 = u16_u8_left * u16_u8_right
+u16_u8_divide #F64 = u16_u8_left / u16_u8_right
+u16_u8_integer_divide #U16 = u16_u8_left // u16_u8_right
+u16_u8_remainder #U16 = u16_u8_left % u16_u8_right
+u16_u8_power #U16 = u16_u8_left ^ u16_u8_right
+u16_u8_folded #= [:[u16_u8_add]/[u16_u8_subtract]/[u16_u8_multiply]/[u16_u8_divide]/[u16_u8_integer_divide]/[u16_u8_remainder]/[u16_u8_power]]
+u16_u8_runtime = check_u16_u8(2, 2)
+u16_u8_matches = u16_u8_runtime is u16_u8_folded
+
+check_u16_u32 |left U16, right U32| -> String:
+    add U32 = left + right
+    subtract U32 = left - right
+    multiply U32 = left * right
+    divide F64 = left / right
+    integer_divide U32 = left // right
+    remainder U32 = left % right
+    power U32 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u16_u32_left #U16 = 2
+u16_u32_right #U32 = 2
+u16_u32_add #U32 = u16_u32_left + u16_u32_right
+u16_u32_subtract #U32 = u16_u32_left - u16_u32_right
+u16_u32_multiply #U32 = u16_u32_left * u16_u32_right
+u16_u32_divide #F64 = u16_u32_left / u16_u32_right
+u16_u32_integer_divide #U32 = u16_u32_left // u16_u32_right
+u16_u32_remainder #U32 = u16_u32_left % u16_u32_right
+u16_u32_power #U32 = u16_u32_left ^ u16_u32_right
+u16_u32_folded #= [:[u16_u32_add]/[u16_u32_subtract]/[u16_u32_multiply]/[u16_u32_divide]/[u16_u32_integer_divide]/[u16_u32_remainder]/[u16_u32_power]]
+u16_u32_runtime = check_u16_u32(2, 2)
+u16_u32_matches = u16_u32_runtime is u16_u32_folded
+
+check_u16_u64 |left U16, right U64| -> String:
+    add U64 = left + right
+    subtract U64 = left - right
+    multiply U64 = left * right
+    divide F64 = left / right
+    integer_divide U64 = left // right
+    remainder U64 = left % right
+    power U64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u16_u64_left #U16 = 2
+u16_u64_right #U64 = 2
+u16_u64_add #U64 = u16_u64_left + u16_u64_right
+u16_u64_subtract #U64 = u16_u64_left - u16_u64_right
+u16_u64_multiply #U64 = u16_u64_left * u16_u64_right
+u16_u64_divide #F64 = u16_u64_left / u16_u64_right
+u16_u64_integer_divide #U64 = u16_u64_left // u16_u64_right
+u16_u64_remainder #U64 = u16_u64_left % u16_u64_right
+u16_u64_power #U64 = u16_u64_left ^ u16_u64_right
+u16_u64_folded #= [:[u16_u64_add]/[u16_u64_subtract]/[u16_u64_multiply]/[u16_u64_divide]/[u16_u64_integer_divide]/[u16_u64_remainder]/[u16_u64_power]]
+u16_u64_runtime = check_u16_u64(2, 2)
+u16_u64_matches = u16_u64_runtime is u16_u64_folded
+
+check_u32_i8 |left U32, right I8| -> String:
+    add I64 = left + right
+    subtract I64 = left - right
+    multiply I64 = left * right
+    divide F64 = left / right
+    integer_divide I64 = left // right
+    remainder I64 = left % right
+    power I64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u32_i8_left #U32 = 2
+u32_i8_right #I8 = 2
+u32_i8_add #I64 = u32_i8_left + u32_i8_right
+u32_i8_subtract #I64 = u32_i8_left - u32_i8_right
+u32_i8_multiply #I64 = u32_i8_left * u32_i8_right
+u32_i8_divide #F64 = u32_i8_left / u32_i8_right
+u32_i8_integer_divide #I64 = u32_i8_left // u32_i8_right
+u32_i8_remainder #I64 = u32_i8_left % u32_i8_right
+u32_i8_power #I64 = u32_i8_left ^ u32_i8_right
+u32_i8_folded #= [:[u32_i8_add]/[u32_i8_subtract]/[u32_i8_multiply]/[u32_i8_divide]/[u32_i8_integer_divide]/[u32_i8_remainder]/[u32_i8_power]]
+u32_i8_runtime = check_u32_i8(2, 2)
+u32_i8_matches = u32_i8_runtime is u32_i8_folded
+
+check_u32_i16 |left U32, right I16| -> String:
+    add I64 = left + right
+    subtract I64 = left - right
+    multiply I64 = left * right
+    divide F64 = left / right
+    integer_divide I64 = left // right
+    remainder I64 = left % right
+    power I64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u32_i16_left #U32 = 2
+u32_i16_right #I16 = 2
+u32_i16_add #I64 = u32_i16_left + u32_i16_right
+u32_i16_subtract #I64 = u32_i16_left - u32_i16_right
+u32_i16_multiply #I64 = u32_i16_left * u32_i16_right
+u32_i16_divide #F64 = u32_i16_left / u32_i16_right
+u32_i16_integer_divide #I64 = u32_i16_left // u32_i16_right
+u32_i16_remainder #I64 = u32_i16_left % u32_i16_right
+u32_i16_power #I64 = u32_i16_left ^ u32_i16_right
+u32_i16_folded #= [:[u32_i16_add]/[u32_i16_subtract]/[u32_i16_multiply]/[u32_i16_divide]/[u32_i16_integer_divide]/[u32_i16_remainder]/[u32_i16_power]]
+u32_i16_runtime = check_u32_i16(2, 2)
+u32_i16_matches = u32_i16_runtime is u32_i16_folded
+
+check_u32_i32 |left U32, right I32| -> String:
+    add I64 = left + right
+    subtract I64 = left - right
+    multiply I64 = left * right
+    divide F64 = left / right
+    integer_divide I64 = left // right
+    remainder I64 = left % right
+    power I64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u32_i32_left #U32 = 2
+u32_i32_right #I32 = 2
+u32_i32_add #I64 = u32_i32_left + u32_i32_right
+u32_i32_subtract #I64 = u32_i32_left - u32_i32_right
+u32_i32_multiply #I64 = u32_i32_left * u32_i32_right
+u32_i32_divide #F64 = u32_i32_left / u32_i32_right
+u32_i32_integer_divide #I64 = u32_i32_left // u32_i32_right
+u32_i32_remainder #I64 = u32_i32_left % u32_i32_right
+u32_i32_power #I64 = u32_i32_left ^ u32_i32_right
+u32_i32_folded #= [:[u32_i32_add]/[u32_i32_subtract]/[u32_i32_multiply]/[u32_i32_divide]/[u32_i32_integer_divide]/[u32_i32_remainder]/[u32_i32_power]]
+u32_i32_runtime = check_u32_i32(2, 2)
+u32_i32_matches = u32_i32_runtime is u32_i32_folded
+
+check_u32_i64 |left U32, right I64| -> String:
+    add I64 = left + right
+    subtract I64 = left - right
+    multiply I64 = left * right
+    divide F64 = left / right
+    integer_divide I64 = left // right
+    remainder I64 = left % right
+    power I64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u32_i64_left #U32 = 2
+u32_i64_right #I64 = 2
+u32_i64_add #I64 = u32_i64_left + u32_i64_right
+u32_i64_subtract #I64 = u32_i64_left - u32_i64_right
+u32_i64_multiply #I64 = u32_i64_left * u32_i64_right
+u32_i64_divide #F64 = u32_i64_left / u32_i64_right
+u32_i64_integer_divide #I64 = u32_i64_left // u32_i64_right
+u32_i64_remainder #I64 = u32_i64_left % u32_i64_right
+u32_i64_power #I64 = u32_i64_left ^ u32_i64_right
+u32_i64_folded #= [:[u32_i64_add]/[u32_i64_subtract]/[u32_i64_multiply]/[u32_i64_divide]/[u32_i64_integer_divide]/[u32_i64_remainder]/[u32_i64_power]]
+u32_i64_runtime = check_u32_i64(2, 2)
+u32_i64_matches = u32_i64_runtime is u32_i64_folded
+
+check_u32_u8 |left U32, right U8| -> String:
+    add U32 = left + right
+    subtract U32 = left - right
+    multiply U32 = left * right
+    divide F64 = left / right
+    integer_divide U32 = left // right
+    remainder U32 = left % right
+    power U32 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u32_u8_left #U32 = 2
+u32_u8_right #U8 = 2
+u32_u8_add #U32 = u32_u8_left + u32_u8_right
+u32_u8_subtract #U32 = u32_u8_left - u32_u8_right
+u32_u8_multiply #U32 = u32_u8_left * u32_u8_right
+u32_u8_divide #F64 = u32_u8_left / u32_u8_right
+u32_u8_integer_divide #U32 = u32_u8_left // u32_u8_right
+u32_u8_remainder #U32 = u32_u8_left % u32_u8_right
+u32_u8_power #U32 = u32_u8_left ^ u32_u8_right
+u32_u8_folded #= [:[u32_u8_add]/[u32_u8_subtract]/[u32_u8_multiply]/[u32_u8_divide]/[u32_u8_integer_divide]/[u32_u8_remainder]/[u32_u8_power]]
+u32_u8_runtime = check_u32_u8(2, 2)
+u32_u8_matches = u32_u8_runtime is u32_u8_folded
+
+check_u32_u16 |left U32, right U16| -> String:
+    add U32 = left + right
+    subtract U32 = left - right
+    multiply U32 = left * right
+    divide F64 = left / right
+    integer_divide U32 = left // right
+    remainder U32 = left % right
+    power U32 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u32_u16_left #U32 = 2
+u32_u16_right #U16 = 2
+u32_u16_add #U32 = u32_u16_left + u32_u16_right
+u32_u16_subtract #U32 = u32_u16_left - u32_u16_right
+u32_u16_multiply #U32 = u32_u16_left * u32_u16_right
+u32_u16_divide #F64 = u32_u16_left / u32_u16_right
+u32_u16_integer_divide #U32 = u32_u16_left // u32_u16_right
+u32_u16_remainder #U32 = u32_u16_left % u32_u16_right
+u32_u16_power #U32 = u32_u16_left ^ u32_u16_right
+u32_u16_folded #= [:[u32_u16_add]/[u32_u16_subtract]/[u32_u16_multiply]/[u32_u16_divide]/[u32_u16_integer_divide]/[u32_u16_remainder]/[u32_u16_power]]
+u32_u16_runtime = check_u32_u16(2, 2)
+u32_u16_matches = u32_u16_runtime is u32_u16_folded
+
+check_u32_u64 |left U32, right U64| -> String:
+    add U64 = left + right
+    subtract U64 = left - right
+    multiply U64 = left * right
+    divide F64 = left / right
+    integer_divide U64 = left // right
+    remainder U64 = left % right
+    power U64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u32_u64_left #U32 = 2
+u32_u64_right #U64 = 2
+u32_u64_add #U64 = u32_u64_left + u32_u64_right
+u32_u64_subtract #U64 = u32_u64_left - u32_u64_right
+u32_u64_multiply #U64 = u32_u64_left * u32_u64_right
+u32_u64_divide #F64 = u32_u64_left / u32_u64_right
+u32_u64_integer_divide #U64 = u32_u64_left // u32_u64_right
+u32_u64_remainder #U64 = u32_u64_left % u32_u64_right
+u32_u64_power #U64 = u32_u64_left ^ u32_u64_right
+u32_u64_folded #= [:[u32_u64_add]/[u32_u64_subtract]/[u32_u64_multiply]/[u32_u64_divide]/[u32_u64_integer_divide]/[u32_u64_remainder]/[u32_u64_power]]
+u32_u64_runtime = check_u32_u64(2, 2)
+u32_u64_matches = u32_u64_runtime is u32_u64_folded
+
+check_u64_u8 |left U64, right U8| -> String:
+    add U64 = left + right
+    subtract U64 = left - right
+    multiply U64 = left * right
+    divide F64 = left / right
+    integer_divide U64 = left // right
+    remainder U64 = left % right
+    power U64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u64_u8_left #U64 = 2
+u64_u8_right #U8 = 2
+u64_u8_add #U64 = u64_u8_left + u64_u8_right
+u64_u8_subtract #U64 = u64_u8_left - u64_u8_right
+u64_u8_multiply #U64 = u64_u8_left * u64_u8_right
+u64_u8_divide #F64 = u64_u8_left / u64_u8_right
+u64_u8_integer_divide #U64 = u64_u8_left // u64_u8_right
+u64_u8_remainder #U64 = u64_u8_left % u64_u8_right
+u64_u8_power #U64 = u64_u8_left ^ u64_u8_right
+u64_u8_folded #= [:[u64_u8_add]/[u64_u8_subtract]/[u64_u8_multiply]/[u64_u8_divide]/[u64_u8_integer_divide]/[u64_u8_remainder]/[u64_u8_power]]
+u64_u8_runtime = check_u64_u8(2, 2)
+u64_u8_matches = u64_u8_runtime is u64_u8_folded
+
+check_u64_u16 |left U64, right U16| -> String:
+    add U64 = left + right
+    subtract U64 = left - right
+    multiply U64 = left * right
+    divide F64 = left / right
+    integer_divide U64 = left // right
+    remainder U64 = left % right
+    power U64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u64_u16_left #U64 = 2
+u64_u16_right #U16 = 2
+u64_u16_add #U64 = u64_u16_left + u64_u16_right
+u64_u16_subtract #U64 = u64_u16_left - u64_u16_right
+u64_u16_multiply #U64 = u64_u16_left * u64_u16_right
+u64_u16_divide #F64 = u64_u16_left / u64_u16_right
+u64_u16_integer_divide #U64 = u64_u16_left // u64_u16_right
+u64_u16_remainder #U64 = u64_u16_left % u64_u16_right
+u64_u16_power #U64 = u64_u16_left ^ u64_u16_right
+u64_u16_folded #= [:[u64_u16_add]/[u64_u16_subtract]/[u64_u16_multiply]/[u64_u16_divide]/[u64_u16_integer_divide]/[u64_u16_remainder]/[u64_u16_power]]
+u64_u16_runtime = check_u64_u16(2, 2)
+u64_u16_matches = u64_u16_runtime is u64_u16_folded
+
+check_u64_u32 |left U64, right U32| -> String:
+    add U64 = left + right
+    subtract U64 = left - right
+    multiply U64 = left * right
+    divide F64 = left / right
+    integer_divide U64 = left // right
+    remainder U64 = left % right
+    power U64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[integer_divide]/[remainder]/[power]]
+;
+
+u64_u32_left #U64 = 2
+u64_u32_right #U32 = 2
+u64_u32_add #U64 = u64_u32_left + u64_u32_right
+u64_u32_subtract #U64 = u64_u32_left - u64_u32_right
+u64_u32_multiply #U64 = u64_u32_left * u64_u32_right
+u64_u32_divide #F64 = u64_u32_left / u64_u32_right
+u64_u32_integer_divide #U64 = u64_u32_left // u64_u32_right
+u64_u32_remainder #U64 = u64_u32_left % u64_u32_right
+u64_u32_power #U64 = u64_u32_left ^ u64_u32_right
+u64_u32_folded #= [:[u64_u32_add]/[u64_u32_subtract]/[u64_u32_multiply]/[u64_u32_divide]/[u64_u32_integer_divide]/[u64_u32_remainder]/[u64_u32_power]]
+u64_u32_runtime = check_u64_u32(2, 2)
+u64_u32_matches = u64_u32_runtime is u64_u32_folded
+
+check_f16_f32 |left F16, right F32| -> String:
+    add F32 = left + right
+    subtract F32 = left - right
+    multiply F32 = left * right
+    divide F32 = left / right
+    remainder F32 = left % right
+    power F32 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[remainder]/[power]]
+;
+
+f16_f32_left #F16 = 2
+f16_f32_right #F32 = 2
+f16_f32_add #F32 = f16_f32_left + f16_f32_right
+f16_f32_subtract #F32 = f16_f32_left - f16_f32_right
+f16_f32_multiply #F32 = f16_f32_left * f16_f32_right
+f16_f32_divide #F32 = f16_f32_left / f16_f32_right
+f16_f32_remainder #F32 = f16_f32_left % f16_f32_right
+f16_f32_power #F32 = f16_f32_left ^ f16_f32_right
+f16_f32_folded #= [:[f16_f32_add]/[f16_f32_subtract]/[f16_f32_multiply]/[f16_f32_divide]/[f16_f32_remainder]/[f16_f32_power]]
+f16_f32_runtime = check_f16_f32(2, 2)
+f16_f32_matches = f16_f32_runtime is f16_f32_folded
+
+check_f16_f64 |left F16, right F64| -> String:
+    add F64 = left + right
+    subtract F64 = left - right
+    multiply F64 = left * right
+    divide F64 = left / right
+    remainder F64 = left % right
+    power F64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[remainder]/[power]]
+;
+
+f16_f64_left #F16 = 2
+f16_f64_right #F64 = 2
+f16_f64_add #F64 = f16_f64_left + f16_f64_right
+f16_f64_subtract #F64 = f16_f64_left - f16_f64_right
+f16_f64_multiply #F64 = f16_f64_left * f16_f64_right
+f16_f64_divide #F64 = f16_f64_left / f16_f64_right
+f16_f64_remainder #F64 = f16_f64_left % f16_f64_right
+f16_f64_power #F64 = f16_f64_left ^ f16_f64_right
+f16_f64_folded #= [:[f16_f64_add]/[f16_f64_subtract]/[f16_f64_multiply]/[f16_f64_divide]/[f16_f64_remainder]/[f16_f64_power]]
+f16_f64_runtime = check_f16_f64(2, 2)
+f16_f64_matches = f16_f64_runtime is f16_f64_folded
+
+check_f32_f16 |left F32, right F16| -> String:
+    add F32 = left + right
+    subtract F32 = left - right
+    multiply F32 = left * right
+    divide F32 = left / right
+    remainder F32 = left % right
+    power F32 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[remainder]/[power]]
+;
+
+f32_f16_left #F32 = 2
+f32_f16_right #F16 = 2
+f32_f16_add #F32 = f32_f16_left + f32_f16_right
+f32_f16_subtract #F32 = f32_f16_left - f32_f16_right
+f32_f16_multiply #F32 = f32_f16_left * f32_f16_right
+f32_f16_divide #F32 = f32_f16_left / f32_f16_right
+f32_f16_remainder #F32 = f32_f16_left % f32_f16_right
+f32_f16_power #F32 = f32_f16_left ^ f32_f16_right
+f32_f16_folded #= [:[f32_f16_add]/[f32_f16_subtract]/[f32_f16_multiply]/[f32_f16_divide]/[f32_f16_remainder]/[f32_f16_power]]
+f32_f16_runtime = check_f32_f16(2, 2)
+f32_f16_matches = f32_f16_runtime is f32_f16_folded
+
+check_f32_f64 |left F32, right F64| -> String:
+    add F64 = left + right
+    subtract F64 = left - right
+    multiply F64 = left * right
+    divide F64 = left / right
+    remainder F64 = left % right
+    power F64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[remainder]/[power]]
+;
+
+f32_f64_left #F32 = 2
+f32_f64_right #F64 = 2
+f32_f64_add #F64 = f32_f64_left + f32_f64_right
+f32_f64_subtract #F64 = f32_f64_left - f32_f64_right
+f32_f64_multiply #F64 = f32_f64_left * f32_f64_right
+f32_f64_divide #F64 = f32_f64_left / f32_f64_right
+f32_f64_remainder #F64 = f32_f64_left % f32_f64_right
+f32_f64_power #F64 = f32_f64_left ^ f32_f64_right
+f32_f64_folded #= [:[f32_f64_add]/[f32_f64_subtract]/[f32_f64_multiply]/[f32_f64_divide]/[f32_f64_remainder]/[f32_f64_power]]
+f32_f64_runtime = check_f32_f64(2, 2)
+f32_f64_matches = f32_f64_runtime is f32_f64_folded
+
+check_f64_f16 |left F64, right F16| -> String:
+    add F64 = left + right
+    subtract F64 = left - right
+    multiply F64 = left * right
+    divide F64 = left / right
+    remainder F64 = left % right
+    power F64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[remainder]/[power]]
+;
+
+f64_f16_left #F64 = 2
+f64_f16_right #F16 = 2
+f64_f16_add #F64 = f64_f16_left + f64_f16_right
+f64_f16_subtract #F64 = f64_f16_left - f64_f16_right
+f64_f16_multiply #F64 = f64_f16_left * f64_f16_right
+f64_f16_divide #F64 = f64_f16_left / f64_f16_right
+f64_f16_remainder #F64 = f64_f16_left % f64_f16_right
+f64_f16_power #F64 = f64_f16_left ^ f64_f16_right
+f64_f16_folded #= [:[f64_f16_add]/[f64_f16_subtract]/[f64_f16_multiply]/[f64_f16_divide]/[f64_f16_remainder]/[f64_f16_power]]
+f64_f16_runtime = check_f64_f16(2, 2)
+f64_f16_matches = f64_f16_runtime is f64_f16_folded
+
+check_f64_f32 |left F64, right F32| -> String:
+    add F64 = left + right
+    subtract F64 = left - right
+    multiply F64 = left * right
+    divide F64 = left / right
+    remainder F64 = left % right
+    power F64 = left ^ right
+    return [:[add]/[subtract]/[multiply]/[divide]/[remainder]/[power]]
+;
+
+f64_f32_left #F64 = 2
+f64_f32_right #F32 = 2
+f64_f32_add #F64 = f64_f32_left + f64_f32_right
+f64_f32_subtract #F64 = f64_f32_left - f64_f32_right
+f64_f32_multiply #F64 = f64_f32_left * f64_f32_right
+f64_f32_divide #F64 = f64_f32_left / f64_f32_right
+f64_f32_remainder #F64 = f64_f32_left % f64_f32_right
+f64_f32_power #F64 = f64_f32_left ^ f64_f32_right
+f64_f32_folded #= [:[f64_f32_add]/[f64_f32_subtract]/[f64_f32_multiply]/[f64_f32_divide]/[f64_f32_remainder]/[f64_f32_power]]
+f64_f32_runtime = check_f64_f32(2, 2)
+f64_f32_matches = f64_f32_runtime is f64_f32_folded
+
+[:i8_i16=[i8_i16_runtime]/[i8_i16_matches] i8_i32=[i8_i32_runtime]/[i8_i32_matches] i8_i64=[i8_i64_runtime]/[i8_i64_matches] i8_u8=[i8_u8_runtime]/[i8_u8_matches] i8_u16=[i8_u16_runtime]/[i8_u16_matches] i8_u32=[i8_u32_runtime]/[i8_u32_matches] i16_i8=[i16_i8_runtime]/[i16_i8_matches] i16_i32=[i16_i32_runtime]/[i16_i32_matches] i16_i64=[i16_i64_runtime]/[i16_i64_matches] i16_u8=[i16_u8_runtime]/[i16_u8_matches] i16_u16=[i16_u16_runtime]/[i16_u16_matches] i16_u32=[i16_u32_runtime]/[i16_u32_matches] i32_i8=[i32_i8_runtime]/[i32_i8_matches] i32_i16=[i32_i16_runtime]/[i32_i16_matches] i32_i64=[i32_i64_runtime]/[i32_i64_matches] i32_u8=[i32_u8_runtime]/[i32_u8_matches] i32_u16=[i32_u16_runtime]/[i32_u16_matches] i32_u32=[i32_u32_runtime]/[i32_u32_matches] i64_i8=[i64_i8_runtime]/[i64_i8_matches] i64_i16=[i64_i16_runtime]/[i64_i16_matches] i64_i32=[i64_i32_runtime]/[i64_i32_matches] i64_u8=[i64_u8_runtime]/[i64_u8_matches] i64_u16=[i64_u16_runtime]/[i64_u16_matches] i64_u32=[i64_u32_runtime]/[i64_u32_matches] u8_i8=[u8_i8_runtime]/[u8_i8_matches] u8_i16=[u8_i16_runtime]/[u8_i16_matches] u8_i32=[u8_i32_runtime]/[u8_i32_matches] u8_i64=[u8_i64_runtime]/[u8_i64_matches] u8_u16=[u8_u16_runtime]/[u8_u16_matches] u8_u32=[u8_u32_runtime]/[u8_u32_matches] u8_u64=[u8_u64_runtime]/[u8_u64_matches] u16_i8=[u16_i8_runtime]/[u16_i8_matches] u16_i16=[u16_i16_runtime]/[u16_i16_matches] u16_i32=[u16_i32_runtime]/[u16_i32_matches] u16_i64=[u16_i64_runtime]/[u16_i64_matches] u16_u8=[u16_u8_runtime]/[u16_u8_matches] u16_u32=[u16_u32_runtime]/[u16_u32_matches] u16_u64=[u16_u64_runtime]/[u16_u64_matches] u32_i8=[u32_i8_runtime]/[u32_i8_matches] u32_i16=[u32_i16_runtime]/[u32_i16_matches] u32_i32=[u32_i32_runtime]/[u32_i32_matches] u32_i64=[u32_i64_runtime]/[u32_i64_matches] u32_u8=[u32_u8_runtime]/[u32_u8_matches] u32_u16=[u32_u16_runtime]/[u32_u16_matches] u32_u64=[u32_u64_runtime]/[u32_u64_matches] u64_u8=[u64_u8_runtime]/[u64_u8_matches] u64_u16=[u64_u16_runtime]/[u64_u16_matches] u64_u32=[u64_u32_runtime]/[u64_u32_matches] f16_f32=[f16_f32_runtime]/[f16_f32_matches] f16_f64=[f16_f64_runtime]/[f16_f64_matches] f32_f16=[f32_f16_runtime]/[f32_f16_matches] f32_f64=[f32_f64_runtime]/[f32_f64_matches] f64_f16=[f64_f16_runtime]/[f64_f16_matches] f64_f32=[f64_f32_runtime]/[f64_f32_matches]]

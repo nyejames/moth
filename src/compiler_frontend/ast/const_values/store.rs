@@ -174,10 +174,6 @@ pub(crate) enum ConstStringPiece {
 /// Payload variants stored in the module-local value graph.
 #[derive(Clone, Debug)]
 pub(crate) enum ConstValuePayload {
-    Int(i64),
-    /// One profile-sized unsigned integer value; follows the selected `Int` width.
-    Uint(u64),
-    Float(f64),
     /// One exact arbitrary-precision decimal value, retaining its canonical scale.
     Number(NumberValue),
     /// One materialised fixed-width scalar or `Byte` value with exact-bit identity.
@@ -217,9 +213,6 @@ pub(crate) struct ConstValue {
 /// The store owns recursion.  Consumers only map this already traversed shape to their own
 /// boundary vocabulary, so they cannot independently walk and reinterpret AST expressions.
 pub(crate) enum ConstValueVisit<'a, T> {
-    Int(i64),
-    Uint(u64),
-    Float(f64),
     /// Borrowed exact decimal leaf; visitors clone only when ownership crosses their boundary.
     Number(&'a NumberValue),
     FixedScalar(FixedScalarValue),
@@ -455,24 +448,6 @@ impl ConstValueStore {
         }
 
         let (payload, value_kind, hir_visible, provenance) = match &expression.kind {
-            ExpressionKind::Int(value) => (
-                ConstValuePayload::Int(*value),
-                ConstValueKind::Literal,
-                true,
-                None,
-            ),
-            ExpressionKind::Uint(value) => (
-                ConstValuePayload::Uint(*value),
-                ConstValueKind::Literal,
-                true,
-                None,
-            ),
-            ExpressionKind::Float(value) => (
-                ConstValuePayload::Float(*value),
-                ConstValueKind::Literal,
-                true,
-                None,
-            ),
             ExpressionKind::Number(value) => {
                 if type_environment.number_scale(expression.type_id) != Some(value.scale()) {
                     return Err(CompilerError::compiler_error(format!(
@@ -777,15 +752,6 @@ impl ConstValueStore {
         })?;
 
         match &value.payload {
-            ConstValuePayload::Int(scalar) => {
-                visitor(&value.metadata, ConstValueVisit::Int(*scalar))
-            }
-            ConstValuePayload::Uint(scalar) => {
-                visitor(&value.metadata, ConstValueVisit::Uint(*scalar))
-            }
-            ConstValuePayload::Float(scalar) => {
-                visitor(&value.metadata, ConstValueVisit::Float(*scalar))
-            }
             ConstValuePayload::Number(scalar) => {
                 visitor(&value.metadata, ConstValueVisit::Number(scalar))
             }
@@ -922,9 +888,6 @@ impl ConstValueStore {
             )
         })?;
         let kind = match &value.payload {
-            ConstValuePayload::Int(value) => ExpressionKind::Int(*value),
-            ConstValuePayload::Uint(value) => ExpressionKind::Uint(*value),
-            ConstValuePayload::Float(value) => ExpressionKind::Float(*value),
             ConstValuePayload::Number(number) => ExpressionKind::Number(number.clone()),
             ConstValuePayload::FixedScalar(value) => ExpressionKind::FixedScalar(*value),
             ConstValuePayload::Bool(value) => ExpressionKind::Bool(*value),

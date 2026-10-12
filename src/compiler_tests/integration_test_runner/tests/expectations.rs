@@ -9,7 +9,6 @@ use super::super::types::{
     DiagnosticMatchMode, ExactWarningExpectation, SuccessContract, WarningExpectation,
 };
 use super::super::{EXPECT_FILE_NAME, ExpectedOutcome, GOLDEN_DIR_NAME, INPUT_DIR_NAME};
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 use std::fs;
 use std::path::PathBuf;
 
@@ -34,7 +33,6 @@ fn accepts_explicit_acceptance_only_and_retains_typed_intent() {
 
     let cases = load_canonical_case_specs(&case_root, None)
         .expect("explicit acceptance-only fixture should be accepted");
-    assert_eq!(cases[0].numeric_profile, NumericProfile::STANDARD);
     let ExpectedOutcome::Success(expectation) = &cases[0].expected else {
         panic!("case should have a success expectation");
     };
@@ -45,7 +43,7 @@ fn accepts_explicit_acceptance_only_and_retains_typed_intent() {
 }
 
 #[test]
-fn numeric_profile_key_parses_exact_spelling_and_rejects_unknown_values() {
+fn retired_numeric_profile_key_is_an_unknown_field() {
     let (_root, case_root) = write_fixture(
         "numeric_profile",
         "numeric_profile = \"Int64/Float32\"\n\
@@ -55,46 +53,19 @@ fn numeric_profile_key_parses_exact_spelling_and_rejects_unknown_values() {
          rendered_output_contains = [\"ok\"]\n",
     );
 
-    let cases = load_canonical_case_specs(&case_root, None)
-        .expect("Int64/Float32 numeric profile spelling should be accepted");
-    assert_eq!(
-        cases[0].numeric_profile,
-        NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits32,
-        }
-    );
-
-    fs::write(
-        case_root.join(EXPECT_FILE_NAME),
-        "numeric_profile = \"Int32/float64\"\n\
-         [backends.html]\n\
-         mode = \"success\"\n\
-         warnings = \"forbid\"\n\
-         rendered_output_contains = [\"ok\"]\n",
-    )
-    .expect("should replace the expectation file");
-
     let Err(error) = parse_expectation_file(&case_root.join(EXPECT_FILE_NAME)) else {
-        panic!("unknown numeric profile spelling should be rejected");
+        panic!("the retired numeric_profile key must be rejected");
     };
     assert_eq!(
         error.kind,
-        super::super::errors::FixtureLoadErrorKind::ExpectationContract,
+        super::super::errors::FixtureLoadErrorKind::ExpectationParse,
         "unexpected kind: {:?} ({error})",
         error.kind
     );
-    for spelling in [
-        "Int32/Float32",
-        "Int32/Float64",
-        "Int64/Float32",
-        "Int64/Float64",
-    ] {
-        assert!(
-            error.message.contains(spelling),
-            "accepted spelling {spelling:?} missing from error: {error}"
-        );
-    }
+    assert!(
+        error.message.contains("numeric_profile"),
+        "the rejection must name the retired key: {error}"
+    );
 }
 
 #[test]
@@ -1164,7 +1135,7 @@ fn runtime_error_contains_is_accepted_for_html_and_html_wasm_success_modes() {
                     "mode = \"success\"\n",
                     "warnings = \"forbid\"\n",
                     "rendered_output_exact = \"before overflow\"\n",
-                    "runtime_error_contains = [\"Int operation\", \"overflowed\"]\n"
+                    "runtime_error_contains = [\"Integer operation\", \"overflowed\"]\n"
                 ),
                 backend
             ),
@@ -1181,7 +1152,7 @@ fn runtime_error_contains_is_accepted_for_html_and_html_wasm_success_modes() {
         );
         assert_eq!(
             expectation.rendered_output.runtime_error_contains,
-            vec!["Int operation", "overflowed"]
+            vec!["Integer operation", "overflowed"]
         );
         assert!(expectation.rendered_output.is_present());
     }

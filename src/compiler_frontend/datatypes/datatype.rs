@@ -77,10 +77,6 @@ pub enum DataType {
 
     // Scalar/runtime-leaf types.
     Bool,
-    Int,
-    /// Profile-sized unsigned integer: `Uint32` under `Int32`, `Uint64` under `Int64`.
-    Uint,
-    Float,
     /// Diagnostic spelling for one arbitrary-precision `Dec` scale identity.
     ///
     /// `Dec` and `Dec0` share scale zero; `Dec1`..`Dec256` carry their scale.
@@ -90,7 +86,6 @@ pub enum DataType {
     Char,
     /// Explicit-width builtin scalar or the `Byte` octet type.
     ///
-    /// These are nominally distinct from `Int`/`Float` even when a profile width matches, and
     /// `Byte` is distinct from `U8`, `I8` and `Char`.
     FixedScalar(FixedScalar),
 
@@ -198,9 +193,6 @@ impl DataType {
                 generic_instance_key: None,
                 ..
             } => Some(ReceiverKey::Choice(*nominal_path)),
-            DataType::Int => Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Int)),
-            DataType::Uint => Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Uint)),
-            DataType::Float => Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Float)),
             DataType::Bool => Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Bool)),
             DataType::StringSlice => {
                 Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::String))
@@ -252,24 +244,6 @@ impl DataType {
         }
     }
 
-    /// Test-only diagnostic spelling query for collection fixtures.
-    #[cfg(test)]
-    pub fn is_collection(&self) -> bool {
-        self.is_builtin_generic_collection()
-    }
-
-    /// Test-only implementation shared by collection fixture queries.
-    #[cfg(test)]
-    pub fn is_builtin_generic_collection(&self) -> bool {
-        matches!(
-            self,
-            DataType::GenericInstance {
-                base: GenericBaseType::Builtin(BuiltinGenericType::Collection { .. }),
-                arguments,
-            } if arguments.len() == 1
-        )
-    }
-
     // -----------------
     //  Display
     // -----------------
@@ -293,9 +267,6 @@ impl DataType {
             DataType::StringSlice => "String".to_string(),
             DataType::Char => "Char".to_string(),
             DataType::FixedScalar(scalar) => scalar.name().to_string(),
-            DataType::Float => "Float".to_string(),
-            DataType::Int => "Int".to_string(),
-            DataType::Uint => "Uint".to_string(),
             DataType::Number(scale) => scale.to_string(),
             DataType::Parameters(args) => {
                 let mut arg_str = String::new();
@@ -520,9 +491,6 @@ impl PartialEq for DataType {
             (DataType::StringSlice, DataType::StringSlice) => true,
             (DataType::Char, DataType::Char) => true,
             (DataType::FixedScalar(left), DataType::FixedScalar(right)) => left == right,
-            (DataType::Float, DataType::Float) => true,
-            (DataType::Int, DataType::Int) => true,
-            (DataType::Uint, DataType::Uint) => true,
             (DataType::Number(left), DataType::Number(right)) => left == right,
             (
                 DataType::FallibleCarrier {
@@ -654,9 +622,6 @@ fn type_id_to_data_type(type_id: ids::TypeId, type_environment: &TypeEnvironment
     match type_environment.get(type_id) {
         Some(TypeDefinition::Builtin(builtin)) => match builtin.key {
             ids::BuiltinTypeKey::Bool => DataType::Bool,
-            ids::BuiltinTypeKey::Int => DataType::Int,
-            ids::BuiltinTypeKey::Uint => DataType::Uint,
-            ids::BuiltinTypeKey::Float => DataType::Float,
             ids::BuiltinTypeKey::Number(scale) => DataType::Number(scale),
             ids::BuiltinTypeKey::String => DataType::StringSlice,
             ids::BuiltinTypeKey::Char => DataType::Char,

@@ -39,6 +39,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ReceiverKey;
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
     StructTypeDefinition,
@@ -63,6 +64,7 @@ use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::traits::ids::TraitId;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
@@ -1228,7 +1230,7 @@ fn project_free_function_with_parameter(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> crate::compiler_frontend::public_interface::PublicFunctionSemantics {
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let signature = free_function_signature(vec![parameter], vec![int_id]);
     let root = function_root("render", signature, None, string_table, path_fork);
     let binding = export_binding(
@@ -1257,7 +1259,7 @@ fn shared_free_function_parameter_projects_shared_access() {
     let env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let function = project_free_function_with_parameter(
         param_declaration("value", int_id, &mut string_table, &mut path_fork),
@@ -1282,7 +1284,7 @@ fn mutable_free_function_parameter_projects_mutable_access() {
     let env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let function = project_free_function_with_parameter(
         mutable_param_declaration("value", int_id, &mut string_table, &mut path_fork),
@@ -1367,7 +1369,7 @@ fn projects_nested_collection_and_option_types() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let collection_id = env.intern_collection(int_id, None);
     let option_id = env.intern_option(collection_id);
@@ -1406,7 +1408,9 @@ fn projects_nested_collection_and_option_types() {
     assert_eq!(
         &function.parameters[0].type_identity,
         &CanonicalTypeIdentity::Option(Box::new(CanonicalTypeIdentity::Collection {
-            element: Box::new(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)),
+            element: Box::new(CanonicalTypeIdentity::Builtin(
+                CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+            )),
             fixed_capacity: None,
         })),
         "nested option(collection(int)) must project recursively"
@@ -1414,7 +1418,9 @@ fn projects_nested_collection_and_option_types() {
     assert_eq!(
         &function.returns[0].type_identity,
         &CanonicalTypeIdentity::Collection {
-            element: Box::new(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)),
+            element: Box::new(CanonicalTypeIdentity::Builtin(
+                CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+            )),
             fixed_capacity: None,
         }
     );
@@ -1586,7 +1592,7 @@ fn missing_nominal_origin_is_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let fields = Box::new([field_def("x", int_id, &mut string_table, &mut path_fork)]);
     let (_nominal_id, type_id) = register_struct(
@@ -1632,7 +1638,7 @@ fn missing_signature_slot_type_id_is_compiler_error() {
     let env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let param = param_declaration("value", int_id, &mut string_table, &mut path_fork);
     let signature = FunctionSignature {
@@ -1806,7 +1812,7 @@ fn unmatched_extra_root_is_compiler_error() {
     let env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     // A root with no matching export binding.
     let root = constant_root("extra", int_id, &mut string_table, &mut path_fork);
@@ -2002,7 +2008,7 @@ fn receiver_methods_join_by_exact_origin_not_rendered_name() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     // Two same-named nominals "Counter" in different modules, with distinct canonical paths.
     let shapes_path = module_path("shapes", "Counter", &mut string_table, &mut path_fork);
@@ -2100,7 +2106,7 @@ fn duplicate_receiver_method_entry_is_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let receiver_path = path("Counter", &mut string_table, &mut path_fork);
     let (_nominal_id, _) = register_struct(
@@ -2161,7 +2167,7 @@ fn duplicate_exact_seed_path_with_distinct_origins_is_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     // Two receivers with distinct origins, but the method entries share the same function_path.
     // Same-named methods on distinct receivers must have distinct declaration paths; a shared
@@ -2227,7 +2233,7 @@ fn struct_receiver_key_with_choice_origin_is_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let receiver_path = path("Counter", &mut string_table, &mut path_fork);
     // The nominal is registered as a struct so the TypeEnvironment can resolve its path, but the
@@ -2279,7 +2285,7 @@ fn choice_receiver_key_with_struct_origin_is_compiler_error() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let receiver_path = path("Counter", &mut string_table, &mut path_fork);
     // The nominal is registered as a choice so the TypeEnvironment can resolve its path, but the
@@ -2387,7 +2393,7 @@ fn struct_record_rejects_field_count_mismatch() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let bool_id = env.builtins().bool;
 
     let field_definitions = Box::new([
@@ -2418,7 +2424,7 @@ fn struct_record_rejects_field_name_or_order_mismatch() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let bool_id = env.builtins().bool;
 
     let field_definitions = Box::new([
@@ -2447,7 +2453,7 @@ fn struct_record_rejects_field_type_id_mismatch() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let string_id = env.builtins().string;
 
     let field_definitions = Box::new([field_def("x", int_id, &mut string_table, &mut path_fork)]);
@@ -2481,7 +2487,7 @@ fn struct_record_rejects_duplicate_canonical_field_name() {
     let mut env = TypeEnvironment::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let bool_id = env.builtins().bool;
 
     let field_definitions = Box::new([

@@ -2,7 +2,7 @@ Box type T = |
     value T,
 |
 
-IntBox as Box of Int
+IntBox as Box of I32
 
 make_box || -> IntBox:
     return Box(1)

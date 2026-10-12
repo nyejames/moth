@@ -560,7 +560,6 @@ impl<'a> CompilerFrontend<'a> {
                 root_role,
                 entry_dir,
                 build_profile,
-                numeric_profile: self.options.numeric_profile,
                 file_value_resolution,
                 config_resolution: None,
                 build_config_values,

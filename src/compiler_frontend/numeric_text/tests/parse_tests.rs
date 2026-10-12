@@ -7,13 +7,16 @@
 use super::*;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use moth_lexical::numeric::grammar::{NumericExponentSign, NumericLiteralKind, NumericLiteralSign};
 use moth_lexical::numeric::parse::{NumberLiteralErrorReason, parse_numeric_literal};
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth};
+
+fn signed_value(scalar: FixedScalar, value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(scalar, value).expect("test value fits the scalar")
+}
 
 #[test]
-fn materialize_int_accepts_bits32_boundary_values() {
+fn materialize_fixed_scalar_accepts_i32_boundary_values() {
     let mut string_table = StringTable::new();
 
     let max_token = whole_number_token(
@@ -22,8 +25,9 @@ fn materialize_int_accepts_bits32_boundary_values() {
         &mut string_table,
     );
     assert_eq!(
-        materialize_int(&max_token, max_token.sign, IntWidth::Bits32, &string_table).unwrap(),
-        i64::from(i32::MAX)
+        materialize_fixed_scalar(&max_token, max_token.sign, FixedScalar::I32, &string_table)
+            .unwrap(),
+        signed_value(FixedScalar::I32, i64::from(i32::MAX))
     );
 
     let min_token = whole_number_token(
@@ -32,13 +36,14 @@ fn materialize_int_accepts_bits32_boundary_values() {
         &mut string_table,
     );
     assert_eq!(
-        materialize_int(&min_token, min_token.sign, IntWidth::Bits32, &string_table).unwrap(),
-        i64::from(i32::MIN)
+        materialize_fixed_scalar(&min_token, min_token.sign, FixedScalar::I32, &string_table)
+            .unwrap(),
+        signed_value(FixedScalar::I32, i64::from(i32::MIN))
     );
 }
 
 #[test]
-fn materialize_int_rejects_bits32_out_of_range_values() {
+fn materialize_fixed_scalar_rejects_i32_out_of_range_values() {
     let mut string_table = StringTable::new();
 
     let too_large = whole_number_token(
@@ -47,8 +52,9 @@ fn materialize_int_rejects_bits32_out_of_range_values() {
         &mut string_table,
     );
     assert_eq!(
-        materialize_int(&too_large, too_large.sign, IntWidth::Bits32, &string_table).unwrap_err(),
-        NumberLiteralErrorReason::OutsideIntRange
+        materialize_fixed_scalar(&too_large, too_large.sign, FixedScalar::I32, &string_table)
+            .unwrap_err(),
+        NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32)
     );
 
     let too_negative = whole_number_token(
@@ -57,19 +63,19 @@ fn materialize_int_rejects_bits32_out_of_range_values() {
         &mut string_table,
     );
     assert_eq!(
-        materialize_int(
+        materialize_fixed_scalar(
             &too_negative,
             too_negative.sign,
-            IntWidth::Bits32,
+            FixedScalar::I32,
             &string_table
         )
         .unwrap_err(),
-        NumberLiteralErrorReason::OutsideIntRange
+        NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32)
     );
 }
 
 #[test]
-fn materialize_int_with_sign_override_allows_negative_fallback_boundary() {
+fn materialize_fixed_scalar_with_sign_override_allows_negative_fallback_boundary() {
     let mut string_table = StringTable::new();
 
     let positive_token = whole_number_token(
@@ -78,19 +84,19 @@ fn materialize_int_with_sign_override_allows_negative_fallback_boundary() {
         &mut string_table,
     );
     assert_eq!(
-        materialize_int(
+        materialize_fixed_scalar(
             &positive_token,
             NumericLiteralSign::Negative,
-            IntWidth::Bits32,
+            FixedScalar::I32,
             &string_table
         )
         .unwrap(),
-        i64::from(i32::MIN)
+        signed_value(FixedScalar::I32, i64::from(i32::MIN))
     );
 }
 
 #[test]
-fn materialize_int_accepts_bits64_boundaries() {
+fn materialize_fixed_scalar_accepts_i64_boundaries() {
     let mut string_table = StringTable::new();
 
     let max_token = whole_number_token(
@@ -99,8 +105,9 @@ fn materialize_int_accepts_bits64_boundaries() {
         &mut string_table,
     );
     assert_eq!(
-        materialize_int(&max_token, max_token.sign, IntWidth::Bits64, &string_table).unwrap(),
-        i64::MAX
+        materialize_fixed_scalar(&max_token, max_token.sign, FixedScalar::I64, &string_table)
+            .unwrap(),
+        signed_value(FixedScalar::I64, i64::MAX)
     );
 
     let min_token = whole_number_token(
@@ -109,237 +116,119 @@ fn materialize_int_accepts_bits64_boundaries() {
         &mut string_table,
     );
     assert_eq!(
-        materialize_int(&min_token, min_token.sign, IntWidth::Bits64, &string_table).unwrap(),
-        i64::MIN
+        materialize_fixed_scalar(&min_token, min_token.sign, FixedScalar::I64, &string_table)
+            .unwrap(),
+        signed_value(FixedScalar::I64, i64::MIN)
     );
 }
 
 #[test]
-fn materialize_int_rejects_bits64_out_of_range_values() {
+fn materialize_fixed_scalar_rejects_i64_out_of_range_values() {
     let mut string_table = StringTable::new();
 
-    // Positive 2^63 exceeds the Bits64 maximum.
+    // Positive 2^63 exceeds the I64 maximum.
     let too_large = whole_number_token(
         "9223372036854775808",
         NumericLiteralSign::Positive,
         &mut string_table,
     );
     assert_eq!(
-        materialize_int(&too_large, too_large.sign, IntWidth::Bits64, &string_table).unwrap_err(),
-        NumberLiteralErrorReason::OutsideIntRange
+        materialize_fixed_scalar(&too_large, too_large.sign, FixedScalar::I64, &string_table)
+            .unwrap_err(),
+        NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I64)
     );
 
-    // One below the Bits64 minimum.
+    // One below the I64 minimum.
     let too_negative = whole_number_token(
         "9223372036854775809",
         NumericLiteralSign::Negative,
         &mut string_table,
     );
     assert_eq!(
-        materialize_int(
+        materialize_fixed_scalar(
             &too_negative,
             too_negative.sign,
-            IntWidth::Bits64,
+            FixedScalar::I64,
             &string_table
         )
         .unwrap_err(),
-        NumberLiteralErrorReason::OutsideIntRange
+        NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I64)
     );
 }
 
 #[test]
-fn materialize_int_accepts_wider_values_under_bits64() {
+fn materialize_fixed_scalar_distinguishes_i32_and_i64_ranges() {
     let mut string_table = StringTable::new();
 
-    // 2^31 fits under Bits64 but not under Bits32.
+    // 2^31 fits I64 but not I32.
     let wider_token = whole_number_token(
         "2147483648",
         NumericLiteralSign::Positive,
         &mut string_table,
     );
     assert_eq!(
-        materialize_int(
+        materialize_fixed_scalar(
             &wider_token,
             wider_token.sign,
-            IntWidth::Bits64,
+            FixedScalar::I64,
             &string_table
         )
         .unwrap(),
-        2_147_483_648_i64
+        signed_value(FixedScalar::I64, 2_147_483_648)
     );
     assert_eq!(
-        materialize_int(
+        materialize_fixed_scalar(
             &wider_token,
             wider_token.sign,
-            IntWidth::Bits32,
+            FixedScalar::I32,
             &string_table
         )
         .unwrap_err(),
-        NumberLiteralErrorReason::OutsideIntRange
+        NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32)
     );
 }
 
 #[test]
-fn materialize_uint_accepts_both_unsigned_maxima() {
+fn materialize_fixed_scalar_rejects_non_finite_f64_spelling() {
     let mut string_table = StringTable::new();
 
-    let max32 = whole_number_token(
-        "4294967295",
-        NumericLiteralSign::Positive,
-        &mut string_table,
-    );
-    assert_eq!(
-        materialize_uint(&max32, max32.sign, IntWidth::Bits32, &string_table).unwrap(),
-        u32::MAX as u64
-    );
+    let token = literal_token("1e309", NumericLiteralSign::Positive, &mut string_table);
 
-    let max64 = whole_number_token(
-        "18446744073709551615",
-        NumericLiteralSign::Positive,
-        &mut string_table,
-    );
     assert_eq!(
-        materialize_uint(&max64, max64.sign, IntWidth::Bits64, &string_table).unwrap(),
-        u64::MAX
+        materialize_fixed_scalar(&token, token.sign, FixedScalar::F64, &string_table).unwrap_err(),
+        NumberLiteralErrorReason::NonFiniteFixedFloat(FixedScalar::F64)
     );
 }
 
 #[test]
-fn materialize_uint_keeps_values_above_signed_max_exact() {
+fn materialize_fixed_scalar_applies_negative_sign_to_binary_float() {
     let mut string_table = StringTable::new();
 
-    let above_signed = whole_number_token(
-        "9223372036854775808",
-        NumericLiteralSign::Positive,
-        &mut string_table,
-    );
+    let token = literal_token("1.5e2", NumericLiteralSign::Negative, &mut string_table);
+
     assert_eq!(
-        materialize_uint(
-            &above_signed,
-            above_signed.sign,
-            IntWidth::Bits64,
-            &string_table
-        )
-        .unwrap(),
-        i64::MAX as u64 + 1
+        materialize_fixed_scalar(&token, token.sign, FixedScalar::F64, &string_table)
+            .unwrap()
+            .as_f64(),
+        Some(-150.0)
     );
 }
 
 #[test]
-fn materialize_uint_rejects_out_of_range_and_negative_spellings() {
+fn materialize_fixed_scalar_rejects_f32_overflow_while_f64_stays_finite() {
     let mut string_table = StringTable::new();
 
-    let too_large = whole_number_token(
-        "4294967296",
-        NumericLiteralSign::Positive,
-        &mut string_table,
-    );
-    assert_eq!(
-        materialize_uint(&too_large, too_large.sign, IntWidth::Bits32, &string_table).unwrap_err(),
-        NumberLiteralErrorReason::OutsideUintRange(IntWidth::Bits32)
-    );
-
-    let minus_zero = whole_number_token("0", NumericLiteralSign::Negative, &mut string_table);
-    assert_eq!(
-        materialize_uint(
-            &minus_zero,
-            minus_zero.sign,
-            IntWidth::Bits32,
-            &string_table
-        )
-        .unwrap_err(),
-        NumberLiteralErrorReason::NegativeUintLiteral(IntWidth::Bits32)
-    );
-}
-
-#[test]
-fn materialize_float_rejects_non_finite_values() {
-    let mut string_table = StringTable::new();
-
-    let token = NumericLiteralToken::new(
-        NumericLiteralSign::Positive,
-        string_table.intern("1e309"),
-        string_table.intern("1e309"),
-        NumericLiteralKind::Exponent,
-        2,
-        0,
-        3,
-        NumericExponentSign::Positive,
-    );
+    // 3.5e38 fits in f64 but overflows f32, so the destination decides finiteness.
+    let token = literal_token("3.5e38", NumericLiteralSign::Positive, &mut string_table);
 
     assert_eq!(
-        materialize_float(&token, FloatPrecision::Bits64, &string_table).unwrap_err(),
-        NumberLiteralErrorReason::NonFiniteFloat
-    );
-}
-
-#[test]
-fn materialize_float_applies_negative_sign() {
-    let mut string_table = StringTable::new();
-
-    let token = NumericLiteralToken::new(
-        NumericLiteralSign::Negative,
-        string_table.intern("-1.5e2"),
-        string_table.intern("1.5e2"),
-        NumericLiteralKind::Exponent,
-        3,
-        1,
-        2,
-        NumericExponentSign::Positive,
-    );
-
-    assert_eq!(
-        materialize_float(&token, FloatPrecision::Bits64, &string_table).unwrap(),
-        -150.0
-    );
-}
-
-#[test]
-fn materialize_float_rounds_directly_at_bits32() {
-    let mut string_table = StringTable::new();
-
-    // 0.1 is inexact in binary; Bits32 must equal the single f32 rounding.
-    let text = "0.1";
-    let token = NumericLiteralToken::new(
-        NumericLiteralSign::Positive,
-        string_table.intern(text),
-        string_table.intern(text),
-        NumericLiteralKind::DecimalPoint,
-        2,
-        1,
-        0,
-        NumericExponentSign::None,
-    );
-
-    assert_eq!(
-        materialize_float(&token, FloatPrecision::Bits32, &string_table).unwrap(),
-        f64::from(0.1f32)
-    );
-}
-
-#[test]
-fn materialize_float_rejects_bits32_overflow_as_non_finite() {
-    let mut string_table = StringTable::new();
-
-    // 3.5e38 fits in f64 but overflows f32.
-    let text = "3.5e38";
-    let token = NumericLiteralToken::new(
-        NumericLiteralSign::Positive,
-        string_table.intern(text),
-        string_table.intern(text),
-        NumericLiteralKind::Exponent,
-        2,
-        0,
-        2,
-        NumericExponentSign::None,
-    );
-
-    assert_eq!(
-        materialize_float(&token, FloatPrecision::Bits32, &string_table).unwrap_err(),
-        NumberLiteralErrorReason::NonFiniteFloat
+        materialize_fixed_scalar(&token, token.sign, FixedScalar::F32, &string_table).unwrap_err(),
+        NumberLiteralErrorReason::NonFiniteFixedFloat(FixedScalar::F32)
     );
     assert!(
-        materialize_float(&token, FloatPrecision::Bits64, &string_table)
+        materialize_fixed_scalar(&token, token.sign, FixedScalar::F64, &string_table)
+            .unwrap()
+            .as_f64()
             .unwrap()
             .is_finite()
     );
@@ -350,7 +239,7 @@ fn materialize_fixed_scalar_accepts_signed_endpoint_values() {
     let mut string_table = StringTable::new();
 
     // A signed width accepts its exact minimum from the negative magnitude, so the magnitude one
-    // above its maximum must materialise without an `Int` intermediate rejecting it first.
+    // above its maximum must materialise without a narrower signed intermediate rejecting it first.
     let minima = [
         (FixedScalar::I8, "128", -128_i64),
         (FixedScalar::I16, "32768", -32768),

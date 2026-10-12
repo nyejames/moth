@@ -1,0 +1,17 @@
+Packet type T = |value T|
+wrap_packet type T |value T| -> Packet of T:
+    return Packet(value)
+;
+get_values type T |this Packet of T| -> {T}:
+    return {this.value}
+;
+read_u64 |value U64| -> String:
+    return cast value
+;
+read_item || -> String, Error!:
+    packet = wrap_packet(4294967351)
+    verified = read_u64(packet.value)
+    return packet.get_values().missing!
+;
+text = read_item() catch then "failed"
+[:[text]]

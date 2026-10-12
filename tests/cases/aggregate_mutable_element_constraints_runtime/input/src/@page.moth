@@ -1,0 +1,28 @@
+-- Inferred mutable collection elements take U64 from later push and set arguments.
+-- Plain get returns shared access under the canonical contract. The first get's
+-- last use is the explicit String cast, which happens before items is mutated.
+
+render_mutable_element_constraints || -> String:
+    big U64 = 18_446_744_073_709_551_615
+    items ~= {1, 2}
+    before = items.get(0) catch:
+        then 0
+    ;
+    before_text String = cast before
+    ~items.push(big)
+    ~items.set(0, 18_446_744_073_709_551_614) catch:
+    ;
+    removed = ~items.remove(1) catch:
+        then 0
+    ;
+    first = items.get(0) catch:
+        then 0
+    ;
+    last = items.get(1) catch:
+        then 0
+    ;
+    len = items.length()
+    return [:mutable_element before=[before_text] removed=[removed] first=[first] last=[last] len=[len]]
+;
+
+[:[render_mutable_element_constraints()]]

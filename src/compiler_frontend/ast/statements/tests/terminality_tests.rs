@@ -17,16 +17,22 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
     fresh_success_returns, node, test_if_branch_metadata, test_source_location,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+/// One exact `I32` literal expression for terminality fixtures.
+///
+/// WHY: an unconstrained whole literal defaults to `I32`, so fixtures model the completed
+///      expression their authored source produces.
+fn int_expr(value: i64) -> Expression {
+    Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+        None,
+        ValueMode::ImmutableOwned,
+    )
+}
 
 fn int_return(line: i32) -> AstNode {
-    node(
-        NodeKind::Return(vec![Expression::int(
-            i64::from(line),
-            test_source_location(line),
-            ValueMode::ImmutableOwned,
-        )]),
-        None,
-    )
+    node(NodeKind::Return(vec![int_expr(i64::from(line))]), None)
 }
 
 fn assert_bool(condition: bool, _line: i32) -> AstNode {
@@ -43,11 +49,7 @@ fn assert_bool(condition: bool, _line: i32) -> AstNode {
 
 fn expression_statement(line: i32) -> AstNode {
     node(
-        NodeKind::ExpressionStatement(Expression::int(
-            i64::from(line),
-            None,
-            ValueMode::ImmutableOwned,
-        )),
+        NodeKind::ExpressionStatement(int_expr(i64::from(line))),
         None,
     )
 }
@@ -55,7 +57,7 @@ fn expression_statement(line: i32) -> AstNode {
 fn non_unit_signature() -> FunctionSignature {
     FunctionSignature {
         parameters: vec![],
-        returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+        returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
     }
 }
 
@@ -232,13 +234,9 @@ fn if_requires_both_branches_to_terminate() {
 fn match_requires_all_arms_and_default_to_terminate() {
     let terminal_match = node(
         NodeKind::Match {
-            scrutinee: Expression::int(1, None, ValueMode::ImmutableOwned),
+            scrutinee: int_expr(1),
             arms: vec![MatchArm {
-                pattern: MatchPattern::Literal(Expression::int(
-                    1,
-                    test_source_location(2),
-                    ValueMode::ImmutableOwned,
-                )),
+                pattern: MatchPattern::Literal(int_expr(1)),
                 guard: None,
                 body: vec![int_return(3)],
             }],
@@ -250,13 +248,9 @@ fn match_requires_all_arms_and_default_to_terminate() {
 
     let non_terminal_default = node(
         NodeKind::Match {
-            scrutinee: Expression::int(1, None, ValueMode::ImmutableOwned),
+            scrutinee: int_expr(1),
             arms: vec![MatchArm {
-                pattern: MatchPattern::Literal(Expression::int(
-                    1,
-                    test_source_location(6),
-                    ValueMode::ImmutableOwned,
-                )),
+                pattern: MatchPattern::Literal(int_expr(1)),
                 guard: None,
                 body: vec![int_return(7)],
             }],
@@ -289,13 +283,9 @@ fn match_requires_all_arms_and_default_to_terminate() {
 fn exhaustive_choice_match_does_not_require_default() {
     let terminal_match = node(
         NodeKind::Match {
-            scrutinee: Expression::int(1, None, ValueMode::ImmutableOwned),
+            scrutinee: int_expr(1),
             arms: vec![MatchArm {
-                pattern: MatchPattern::Literal(Expression::int(
-                    1,
-                    test_source_location(2),
-                    ValueMode::ImmutableOwned,
-                )),
+                pattern: MatchPattern::Literal(int_expr(1)),
                 guard: None,
                 body: vec![int_return(3)],
             }],
@@ -319,13 +309,9 @@ fn exhaustive_choice_match_does_not_require_default() {
 fn match_marked_has_default_without_default_body_is_not_terminal() {
     let malformed_match = node(
         NodeKind::Match {
-            scrutinee: Expression::int(1, None, ValueMode::ImmutableOwned),
+            scrutinee: int_expr(1),
             arms: vec![MatchArm {
-                pattern: MatchPattern::Literal(Expression::int(
-                    1,
-                    test_source_location(2),
-                    ValueMode::ImmutableOwned,
-                )),
+                pattern: MatchPattern::Literal(int_expr(1)),
                 guard: None,
                 body: vec![int_return(3)],
             }],

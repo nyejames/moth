@@ -301,6 +301,116 @@ pub(crate) enum TemplateIrNodeKind {
         plan: TemplateSlotPlanId,
         source: RuntimeSlotContributionSourceId,
     },
+
+    /// Payload-free position of one numeric-dependent template position.
+    ///
+    /// WHAT: marks where a retained numeric intake belongs, carrying the payload shape this
+    ///       position completes into and the sites/routes that shape needs.
+    /// WHY: a non-constraining formatting consumer states no numeric expectation, and a pending
+    ///      numeric origin has no selected type, so parse-time TIR must not hold a payload (or a
+    ///      fabricated type) for the position. Carrying the position as a node keeps the
+    ///      completed value in authored document order through render-unit preparation,
+    ///      head-chain composition, formatting and subtree copies, and body-root completion
+    ///      replaces this node with the exact payload shape its role names.
+    RetainedNumericIntake(RetainedNumericIntakeRole),
+}
+
+// -------------------------
+//  Retained Numeric Intake Positions
+// -------------------------
+
+/// Prepared render-unit shape retained until a numeric control-flow header completes.
+///
+/// The role owns its body root. This enum marks a prepared conditional body or
+/// carries the loop's aggregate wrapper without duplicating that body identity.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum RetainedControlFlowRenderUnit {
+    /// The retained role's body was composed as a conditional render unit.
+    Conditional,
+    /// The retained role's loop body was formatted and has this aggregate wrapper.
+    Loop { aggregate_wrapper: TemplateIrNodeId },
+}
+
+/// Payload shape of one retained numeric intake position.
+///
+/// WHAT: the shape the position completes into, together with the document-order expression
+///       sites and routes that shape needs at completion time.
+/// WHY: the retained fragment itself stays in the store's intake table (untyped scratch), so the
+///      position needs no type and no expression while it waits for completion; whatever the
+///      completed node cannot be built without travels here instead of in a payload.
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum RetainedNumericIntakeRole {
+    /// A head-origin expression splice: completion installs a `DynamicExpression` at the
+    /// position's reserved expression site.
+    HeadExpression { expression_site: ExpressionSiteId },
+
+    /// A conditional loop header whose boolean condition is retained: completion installs the
+    /// whole `Loop` node in place, so the position keeps the allocated header site and its current
+    /// body root. Shared render preparation may replace that root with the formatted render unit.
+    ConditionalLoopCondition {
+        header_sites: TemplateLoopHeaderExpressionSites,
+        body: TemplateIrNodeId,
+        render_unit: Option<RetainedControlFlowRenderUnit>,
+    },
+
+    /// A range loop header with at least one retained operand: each retained operand completes
+    /// through its own intake record (or, for a bound counter, through the counter's own recipe),
+    /// and the owning body root installs the finished `RangeLoopSpec` once. The position keeps the
+    /// allocated header sites and its current body root; the bindings, range end kind and any
+    /// capture pattern live in store rows, so no AST payload waits inside TIR. Shared render
+    /// preparation may replace that root with the formatted render unit.
+    LoopRange {
+        header_sites: TemplateLoopHeaderExpressionSites,
+        body: TemplateIrNodeId,
+        render_unit: Option<RetainedControlFlowRenderUnit>,
+    },
+
+    /// A collection loop header whose iterable expression is retained: completion installs the
+    /// whole `Loop` node in place, so the position keeps the allocated iterable expression site
+    /// and its current body root. The concrete loop bindings live in a store row, so no AST payload
+    /// waits inside TIR; shared render preparation may replace that root with the formatted unit.
+    LoopCollection {
+        header_sites: TemplateLoopHeaderExpressionSites,
+        body: TemplateIrNodeId,
+        render_unit: Option<RetainedControlFlowRenderUnit>,
+    },
+
+    /// A conditional branch whose selector is retained: completion installs the `Conditional` node
+    /// in place, so the position keeps the allocated selector site, the branch shape and its
+    /// current body root. Shared render preparation may replace that root with the composed unit.
+    ConditionalSelector {
+        selector_site_id: ExpressionSiteId,
+        body: TemplateIrNodeId,
+        kind: TemplateBranchSelectorKind,
+        render_unit: Option<RetainedControlFlowRenderUnit>,
+    },
+}
+
+/// Which branch selector shape one retained conditional position completes into.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TemplateBranchSelectorKind {
+    /// A boolean condition.
+    Bool,
+    /// An option-present capture: the parsed pattern travels in the store's selector row.
+    OptionPresent,
+}
+
+impl RetainedNumericIntakeRole {
+    /// Whether this position completes into a control-flow owner node.
+    ///
+    /// WHY: placement readers (template root selection, head-prefix extraction, contribution shape)
+    ///      must treat a retained control-flow position exactly like the `Loop`/`Conditional` node
+    ///      it becomes, before body-root completion installs that node.
+    pub(crate) fn completes_into_control_flow(&self) -> bool {
+        matches!(
+            self,
+            Self::ConditionalLoopCondition { .. }
+                | Self::LoopRange { .. }
+                | Self::LoopCollection { .. }
+                | Self::ConditionalSelector { .. }
+        )
+    }
 }
 
 // -------------------------

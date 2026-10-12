@@ -1,0 +1,20 @@
+-- Get results and fallbacks share the inferred element leaf. A later U64 receiver
+-- must select that leaf rather than an early I32 default.
+
+read_u64 |value U64| -> String:
+    return [:[value]]
+;
+
+render_get_result_late_u64 || -> String:
+    values = {4_294_967_296}
+    got = values.get(0) catch:
+        then 0
+    ;
+    fallback = values.get(9) catch:
+        then 7
+    ;
+    len = values.length()
+    return [:get_result value=[read_u64(got)] fallback=[read_u64(fallback)] len=[len]]
+;
+
+[:[render_get_result_late_u64()]]

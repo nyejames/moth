@@ -32,7 +32,7 @@ struct ReservedTraitKeywordCase {
 
 #[test]
 fn reports_missing_signature_colon() {
-    let diagnostic = parse_single_file_ast_diagnostic("f|| -> Int\n;\n");
+    let diagnostic = parse_single_file_ast_diagnostic("f|| -> I32\n;\n");
 
     assert_eq!(
         diagnostic.kind,
@@ -120,7 +120,7 @@ fn reports_unterminated_match_scope_at_end_of_file() {
 #[test]
 fn reports_multi_bind_malformed_comma_sequence() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "pair || -> Int, Int:\n    return 1, 2\n;\n\na, , b = pair()\n",
+        "pair || -> I32, I32:\n    return 1, 2\n;\n\na, , b = pair()\n",
     );
 
     assert_eq!(
@@ -139,7 +139,7 @@ fn reports_multi_bind_malformed_comma_sequence() {
 #[test]
 fn reports_string_literal_as_invalid_multi_bind_target() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "pair || -> Int, Int:\n    return 1, 2\n;\n\na, \"b\" = pair()\n",
+        "pair || -> I32, I32:\n    return 1, 2\n;\n\na, \"b\" = pair()\n",
     );
 
     assert!(matches!(
@@ -153,13 +153,13 @@ fn reports_string_literal_as_invalid_multi_bind_target() {
 
 #[test]
 fn parses_multi_bind_targets_across_comma_continuation_newline() {
-    parse_single_file_ast("pair || -> Int, Int:\n    return 1, 2\n;\n\na,\n    b = pair()\n");
+    parse_single_file_ast("pair || -> I32, I32:\n    return 1, 2\n;\n\na,\n    b = pair()\n");
 }
 
 #[test]
 fn reports_multi_bind_trailing_comma_at_the_comma() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "pair || -> Int, Int:\n    return 1, 2\n;\n\na,\n    = pair()\n",
+        "pair || -> I32, I32:\n    return 1, 2\n;\n\na,\n    = pair()\n",
     );
 
     assert_eq!(
@@ -174,7 +174,7 @@ fn reports_multi_bind_trailing_comma_at_the_comma() {
 #[test]
 fn reports_multi_bind_mutable_target_without_explicit_type() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "pair || -> Int, Int:\n    return 1, 2\n;\n\na, b ~= pair()\n",
+        "pair || -> I32, I32:\n    return 1, 2\n;\n\na, b ~= pair()\n",
     );
 
     assert_eq!(
@@ -207,7 +207,7 @@ fn reports_multi_bind_with_unsupported_rhs_forms_rejected() {
         },
         MultiBindUnsupportedRhsCase {
             name: "field access",
-            source: "Thing = |\n    x Int,\n    y Int,\n|\nthing ~= Thing(1, 2)\na, b = thing.x\n",
+            source: "Thing = |\n    x I32,\n    y I32,\n|\nthing ~= Thing(1, 2)\na, b = thing.x\n",
         },
     ];
 
@@ -262,12 +262,12 @@ fn reports_reserved_trait_keywords_outside_trait_syntax() {
         },
         ReservedTraitKeywordCase {
             name: "must signature parameter",
-            source: "sum|must Int| -> Int:\n    return 1\n;\n",
+            source: "sum|must I32| -> I32:\n    return 1\n;\n",
             expected_reason: InvalidTraitKeywordUsageReason::MustOutsideTraitSyntax,
         },
         ReservedTraitKeywordCase {
             name: "must postfix member",
-            source: "Point = |\n    value Int = 1,\n|\n\npoint ~= Point()\nvalue = point.must\n",
+            source: "Point = |\n    value I32 = 1,\n|\n\npoint ~= Point()\nvalue = point.must\n",
             expected_reason: InvalidTraitKeywordUsageReason::MustOutsideTraitSyntax,
         },
     ];

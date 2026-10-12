@@ -17,10 +17,10 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 fn evaluation_diagnostic(reason: CompileTimeEvaluationErrorReason) -> CompilerDiagnostic {
-    CompilerDiagnostic::compile_time_evaluation_error(reason, None, None, None)
+    CompilerDiagnostic::compile_time_evaluation_error(reason, None, None)
 }
 
 fn diagnostic_reason(error: ExpressionParseError) -> CompileTimeEvaluationErrorReason {
@@ -38,8 +38,8 @@ fn escaped_pending_fold_stays_on_the_infrastructure_lane() {
     let mut string_table = StringTable::new();
     let fold = constant_fold(
         vec![
-            ExpressionRpnItem::Operand(Expression::int(
-                2,
+            ExpressionRpnItem::Operand(Expression::fixed_scalar(
+                FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 fits I32"),
                 Default::default(),
                 ValueMode::ImmutableOwned,
             )),
@@ -53,7 +53,6 @@ fn escaped_pending_fold_stays_on_the_infrastructure_lane() {
             },
         ],
         &mut string_table,
-        NumericProfile::STANDARD,
         None,
     );
 

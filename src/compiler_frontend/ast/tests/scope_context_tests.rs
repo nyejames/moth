@@ -13,8 +13,9 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use rustc_hash::FxHashSet;
 use std::rc::Rc;
 
@@ -85,8 +86,8 @@ fn add_var_extends_visibility_gate_when_gate_is_set() {
         value: Expression::new(
             ExpressionKind::NoValue,
             None,
-            builtin_type_ids::INT,
-            DataType::Int,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            DataType::FixedScalar(FixedScalar::I32),
             ValueMode::ImmutableOwned,
         ),
         binding_span: None,
@@ -140,8 +141,8 @@ fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
         value: Expression::new(
             ExpressionKind::NoValue,
             None,
-            builtin_type_ids::INT,
-            DataType::Int,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            DataType::FixedScalar(FixedScalar::I32),
             ValueMode::ImmutableOwned,
         ),
         binding_span: None,
@@ -161,7 +162,11 @@ fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
         .get_reference(&constant_name)
         .expect("compile-time local must resolve after insertion");
     assert!(
-        context.is_explicit_compile_time_constant(reference.as_declaration()),
+        context.is_explicit_compile_time_constant(
+            reference
+                .ready_declaration()
+                .expect("compile-time local reference must be a ready declaration")
+        ),
         "compile-time local must retain its explicit # declaration fact"
     );
 }
@@ -355,8 +360,8 @@ fn parent_frame_lookup_finds_ancestor_declaration() {
             value: Expression::new(
                 ExpressionKind::NoValue,
                 None,
-                builtin_type_ids::INT,
-                DataType::Int,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                DataType::FixedScalar(FixedScalar::I32),
                 ValueMode::ImmutableOwned,
             ),
             binding_span: None,
@@ -412,8 +417,8 @@ fn child_frame_declaration_is_not_visible_to_parent() {
             value: Expression::new(
                 ExpressionKind::NoValue,
                 None,
-                builtin_type_ids::INT,
-                DataType::Int,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                DataType::FixedScalar(FixedScalar::I32),
                 ValueMode::ImmutableOwned,
             ),
             binding_span: None,
@@ -471,8 +476,8 @@ fn child_function_frame_does_not_capture_parent_locals() {
             value: Expression::new(
                 ExpressionKind::NoValue,
                 None,
-                builtin_type_ids::INT,
-                DataType::Int,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                DataType::FixedScalar(FixedScalar::I32),
                 ValueMode::ImmutableOwned,
             ),
             binding_span: None,
@@ -535,8 +540,8 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
             value: Expression::new(
                 ExpressionKind::NoValue,
                 None,
-                builtin_type_ids::INT,
-                DataType::Int,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                DataType::FixedScalar(FixedScalar::I32),
                 ValueMode::ImmutableOwned,
             ),
             binding_span: None,
@@ -551,8 +556,8 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
             value: Expression::new(
                 ExpressionKind::NoValue,
                 None,
-                builtin_type_ids::INT,
-                DataType::Int,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                DataType::FixedScalar(FixedScalar::I32),
                 ValueMode::ImmutableOwned,
             ),
             binding_span: None,
@@ -566,7 +571,11 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
         .get_reference(&name)
         .expect("same-frame name must resolve");
     assert_eq!(
-        resolved.id, second_path,
+        resolved
+            .ready_declaration()
+            .expect("same-frame name must resolve to a ready declaration")
+            .id,
+        second_path,
         "lookup must return the latest declaration in the same frame"
     );
 }
@@ -602,8 +611,8 @@ fn no_shadowing_across_ancestor_frames() {
             value: Expression::new(
                 ExpressionKind::NoValue,
                 None,
-                builtin_type_ids::INT,
-                DataType::Int,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                DataType::FixedScalar(FixedScalar::I32),
                 ValueMode::ImmutableOwned,
             ),
             binding_span: None,
@@ -695,8 +704,8 @@ fn child_scope_local_does_not_leak_into_the_shared_visibility_gate() {
         value: Expression::new(
             ExpressionKind::NoValue,
             None,
-            builtin_type_ids::INT,
-            DataType::Int,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            DataType::FixedScalar(FixedScalar::I32),
             ValueMode::ImmutableOwned,
         ),
         binding_span: None,
@@ -797,8 +806,8 @@ fn cloned_context_does_not_share_current_frame() {
             value: Expression::new(
                 ExpressionKind::NoValue,
                 None,
-                builtin_type_ids::INT,
-                DataType::Int,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                DataType::FixedScalar(FixedScalar::I32),
                 ValueMode::ImmutableOwned,
             ),
             binding_span: None,
@@ -849,8 +858,8 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
             value: Expression::new(
                 ExpressionKind::NoValue,
                 None,
-                builtin_type_ids::INT,
-                DataType::Int,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                DataType::FixedScalar(FixedScalar::I32),
                 ValueMode::ImmutableOwned,
             ),
             binding_span: None,
@@ -872,8 +881,8 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
             value: Expression::new(
                 ExpressionKind::NoValue,
                 None,
-                builtin_type_ids::INT,
-                DataType::Int,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                DataType::FixedScalar(FixedScalar::I32),
                 ValueMode::ImmutableOwned,
             ),
             binding_span: None,
@@ -898,5 +907,196 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
     assert!(
         child.get_reference(&child_name).is_some(),
         "child must see its own frame declarations"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// pending numeric bindings
+// ---------------------------------------------------------------------------
+
+/// Insert one pending numeric binding into the context's current frame.
+///
+/// WHAT: declares a real binding through the context's body-owned construction domain and
+///       installs the pending slot in the frame name index, exactly as body parsing does before
+///       the binding's type is selected.
+/// WHY: `ScopeDeclarationRef::PendingNumeric` must be reachable from lookup without a fabricated
+///      `Declaration`, and the slot's domain must be the live context domain so the dense row the
+///      ID indexes actually exists.
+fn insert_pending_binding(
+    context: &ScopeContext,
+    name: StringId,
+    path_fork: &mut PathInternerFork,
+) -> crate::compiler_frontend::ast::numeric_construction::NumericBindingId {
+    use crate::compiler_frontend::ast::module_ast::scope_context::AuthoredBindingFacts;
+    use crate::compiler_frontend::ast::numeric_construction::{NumericFamily, NumericRecipe};
+    use crate::compiler_frontend::value_mode::ValueMode;
+
+    let binding_path = path_fork
+        .try_intern_components(&[name])
+        .expect("test path fits")
+        .to_owned();
+    context
+        .declare_pending_numeric_binding(
+            AuthoredBindingFacts {
+                name,
+                path: binding_path,
+                span: None,
+                binding_span: None,
+                value_mode: ValueMode::ImmutableOwned,
+                mutable: false,
+            },
+            NumericRecipe::Raw {
+                items: Vec::new(),
+                family: NumericFamily::Whole,
+            },
+        )
+        .expect("test pending binding allocation fits")
+}
+
+#[test]
+fn numeric_expression_policy_scopes_do_not_copy_body_declarations() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let scope = empty_scope(&mut path_fork, &mut string_table);
+    let context = ScopeContext::new_for_tests(
+        ContextKind::Function,
+        scope,
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
+        Arc::new(ExternalPackageRegistry::new()),
+        0,
+    );
+    let names: Vec<_> = (0..128)
+        .map(|index| {
+            let name = string_table.intern(&format!("pending_{index}"));
+            insert_pending_binding(&context, name, &mut path_fork);
+            name
+        })
+        .collect();
+
+    let deferred = context.new_pending_typed_error_expression_context();
+    let mutation = context.with_pending_catch_assignment_targets(&names[..1]);
+    let handler = mutation.activate_pending_catch_assignment_targets();
+    for policy in [&deferred, &mutation, &handler] {
+        assert!(policy.local_declarations().is_empty());
+        assert_eq!(policy.kind, context.kind);
+        assert!(!policy.numeric_body_root);
+        for name in &names {
+            assert!(policy.get_reference(name).is_some());
+        }
+    }
+    assert!(deferred.defer_typed_error_validation);
+    assert!(!context.defer_typed_error_validation);
+    assert!(handler.is_assignment_target_unavailable(names[0]));
+    assert!(!context.is_assignment_target_unavailable(names[0]));
+    assert!(!mutation.is_assignment_target_unavailable(names[0]));
+}
+
+#[test]
+fn pending_numeric_binding_is_visible_without_a_ready_declaration() {
+    use crate::compiler_frontend::ast::module_ast::scope_context::ScopeDeclarationRef;
+
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let scope = empty_scope(&mut path_fork, &mut string_table);
+    let context = ScopeContext::new_for_tests(
+        ContextKind::Function,
+        scope,
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
+        Arc::new(ExternalPackageRegistry::new()),
+        0,
+    );
+
+    let name = string_table.intern("pending_value");
+    let binding = insert_pending_binding(&context, name, &mut path_fork);
+
+    let reference = context
+        .get_reference(&name)
+        .expect("a pending numeric binding must stay visible to lookup, never read as unknown");
+    assert!(
+        matches!(
+            &reference,
+            ScopeDeclarationRef::PendingNumeric {
+                binding: found,
+                ..
+            } if *found == binding
+        ),
+        "lookup must expose the pending binding arm, not a placeholder declaration"
+    );
+    assert!(
+        reference.ready_declaration().is_none(),
+        "a pending numeric binding has no ready declaration and must not fake one"
+    );
+    assert_eq!(reference.pending_binding(), Some(binding));
+    assert!(reference.binding_span().is_none());
+}
+
+#[test]
+fn pending_numeric_binding_upgrades_in_place_and_keeps_its_name() {
+    use crate::compiler_frontend::ast::ast_nodes::Declaration;
+    use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+    use crate::compiler_frontend::value_mode::ValueMode;
+
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let scope = empty_scope(&mut path_fork, &mut string_table);
+    let context = ScopeContext::new_for_tests(
+        ContextKind::Function,
+        scope,
+        Rc::new(TopLevelDeclarationTable::new(
+            vec![],
+            &PathInternerFork::empty(),
+        )),
+        Arc::new(ExternalPackageRegistry::new()),
+        0,
+    );
+
+    let name = string_table.intern("pending_value");
+    let binding = insert_pending_binding(&context, name, &mut path_fork);
+    let binding_path = path_fork
+        .try_intern_components(&[name])
+        .expect("test path fits")
+        .to_owned();
+    let declaration = Declaration {
+        id: binding_path.to_owned(),
+        value: Expression::new(
+            ExpressionKind::NoValue,
+            None,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            DataType::FixedScalar(FixedScalar::I32),
+            ValueMode::ImmutableOwned,
+        ),
+        binding_span: None,
+        config_qualifier: None,
+    };
+
+    let upgraded = context
+        .arena
+        .borrow_mut()
+        .frame_mut(context.current_frame_id)
+        .upgrade_pending_numeric_var(name, context.numeric_domain_id(), binding, declaration);
+    assert!(upgraded, "the pending slot must upgrade in place");
+
+    let reference = context
+        .get_reference(&name)
+        .expect("the upgraded name must keep resolving");
+    assert_eq!(
+        reference
+            .ready_declaration()
+            .expect("upgraded slot must be ready")
+            .id,
+        binding_path,
+        "in-place upgrade must preserve the authored binding identity"
+    );
+    assert_eq!(reference.pending_binding(), None);
+    assert_eq!(
+        context.local_declarations().len(),
+        1,
+        "upgrade must replace the slot without adding a second name entry"
     );
 }

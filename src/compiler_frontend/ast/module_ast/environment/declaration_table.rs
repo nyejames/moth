@@ -11,11 +11,10 @@
 //! materialisation never copies or mutates requester rows.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-#[cfg(test)]
-use crate::compiler_frontend::headers::module_symbols::OrderedSemanticDeclarationKind;
 use crate::compiler_frontend::headers::module_symbols::{
-    DeclarationId, OrderedSemanticDeclaration,
+    DeclarationId, OrderedSemanticDeclaration, OrderedSemanticDeclarationKind,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -81,6 +80,13 @@ pub(crate) struct TopLevelDeclarationTable {
     ///
     /// Multiple declarations may share a name (overloads or different paths).
     by_name: FxHashMap<StringId, Vec<DeclarationId>>,
+    /// Top-level constant headers indexed by their Stage 3 semantic slot.
+    ///
+    /// WHAT: records the header role that makes a `NoValue` placeholder a pending constant.
+    /// WHY: a placeholder's declared type cannot carry that role. A typed constant can share a
+    ///     nominal shell's type id, and the old `Inferred` marker conflated completion with type.
+    /// Dense identity matches `ResolvedConstantSet`; ids beyond the vector are not constants.
+    constant_headers: Vec<bool>,
 }
 
 impl Clone for TopLevelDeclarationTable {
@@ -102,6 +108,7 @@ impl Clone for TopLevelDeclarationTable {
             replacements: self.replacements.clone(),
             by_path: self.by_path.clone(),
             by_name: self.by_name.clone(),
+            constant_headers: self.constant_headers.clone(),
         }
     }
 }
@@ -115,6 +122,7 @@ impl TopLevelDeclarationTable {
             replacements: FxHashMap::default(),
             by_path: FxHashMap::default(),
             by_name: FxHashMap::default(),
+            constant_headers: Vec::new(),
         }
     }
 
@@ -143,6 +151,7 @@ impl TopLevelDeclarationTable {
     ) -> Result<Self, CompilerError> {
         let mut by_path = FxHashMap::default();
         let mut by_name: FxHashMap<StringId, Vec<DeclarationId>> = FxHashMap::default();
+        let mut constant_headers: Vec<bool> = Vec::new();
         let mut declaration_slots =
             Vec::with_capacity(ordered_declarations.len() + compiler_owned_declarations.len());
 
@@ -154,6 +163,12 @@ impl TopLevelDeclarationTable {
             }
             let declaration_id = ordered.declaration_id;
             let path = ordered.path;
+            if ordered.kind == OrderedSemanticDeclarationKind::Constant {
+                if constant_headers.len() <= declaration_id.index() {
+                    constant_headers.resize(declaration_id.index() + 1, false);
+                }
+                constant_headers[declaration_id.index()] = true;
+            }
             if let Some(name) = path_fork.component(path) {
                 by_name.entry(name).or_default().push(declaration_id);
             }
@@ -201,6 +216,7 @@ impl TopLevelDeclarationTable {
             replacements: FxHashMap::default(),
             by_path,
             by_name,
+            constant_headers,
         })
     }
 
@@ -214,6 +230,7 @@ impl TopLevelDeclarationTable {
             replacements: FxHashMap::default(),
             by_path: FxHashMap::default(),
             by_name: FxHashMap::default(),
+            constant_headers: Vec::new(),
         }
     }
 
@@ -285,7 +302,7 @@ impl TopLevelDeclarationTable {
         visible: Option<&FxHashSet<PathId>>,
     ) -> Option<&Declaration> {
         let declaration = self.get_by_path(path)?;
-        if declaration.is_unresolved_constant_placeholder() {
+        if self.is_unresolved_constant_placeholder(declaration) {
             return None;
         }
         if let Some(visible) = visible
@@ -303,7 +320,7 @@ impl TopLevelDeclarationTable {
         visible: Option<&FxHashSet<PathId>>,
     ) -> Option<&Declaration> {
         self.find_visible_by_name(name, visible, |declaration| {
-            !declaration.is_unresolved_constant_placeholder()
+            !self.is_unresolved_constant_placeholder(declaration)
         })
     }
 
@@ -377,6 +394,34 @@ impl TopLevelDeclarationTable {
                 .as_ref()
                 .and_then(|base| base.declaration_id_by_path(path))
         })
+    }
+
+    /// Whether a declaration ID names a top-level constant header, including inherited rows.
+    fn is_constant_header(&self, declaration_id: DeclarationId) -> bool {
+        match &self.base {
+            Some(base) if declaration_id.index() < self.inherited_len => {
+                base.is_constant_header(declaration_id)
+            }
+            _ => self
+                .constant_headers
+                .get(declaration_id.index())
+                .copied()
+                .unwrap_or(false),
+        }
+    }
+
+    /// Whether a top-level placeholder is a constant header whose value has not been folded yet.
+    ///
+    /// WHAT: a constant header keeps a `NoValue` placeholder until constant resolution replaces it
+    ///     with the folded value.
+    /// WHY: the header role is the constant fact. A declared type cannot carry it, because a
+    ///     typed constant may share a type id with a nominal shell, and `Inferred` conflated
+    ///     completion state with type.
+    pub(crate) fn is_unresolved_constant_placeholder(&self, declaration: &Declaration) -> bool {
+        matches!(declaration.value.kind, ExpressionKind::NoValue)
+            && self
+                .declaration_id_by_path(&declaration.id)
+                .is_some_and(|declaration_id| self.is_constant_header(declaration_id))
     }
 
     fn declaration_ids_by_name(

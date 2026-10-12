@@ -313,14 +313,15 @@ timing_metrics! {
     FrontendBorrowInitial, "frontend.borrow.initial", Basic, Accumulated, Module, Universal, Frontend,
         Some(TimingParent::SummaryGroup(TimingSummaryGroup::BorrowValidation)), TimingAccountingRole::Evidence;
 // `frontend.borrow.converge`: repeated direct call-summary borrow
-// convergence.
+// convergence, including the borrow refresh after private failure lanes install.
     FrontendBorrowConverge, "frontend.borrow.converge", Basic, Accumulated, Module, Universal, Frontend,
         Some(TimingParent::SummaryGroup(TimingSummaryGroup::BorrowValidation)), TimingAccountingRole::Evidence;
 // `frontend.generated.materialise`: generated-function materialisation.
     FrontendGeneratedMaterialise,
         "frontend.generated.materialise", Basic, Accumulated, Module, Universal, Frontend,
         Some(TimingParent::SummaryGroup(TimingSummaryGroup::GeneratedFunctions)), TimingAccountingRole::Evidence;
-// `frontend.generated.borrow_recheck`: generated sidecar borrow rechecks.
+// `frontend.generated.borrow_recheck`: generated sidecar borrow rechecks and
+// their private failure lane refreshes.
     FrontendGeneratedBorrowRecheck,
         "frontend.generated.borrow_recheck", Basic, Accumulated, Module, Universal, Frontend,
         Some(TimingParent::SummaryGroup(TimingSummaryGroup::GeneratedFunctions)), TimingAccountingRole::Evidence;

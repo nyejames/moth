@@ -3,4 +3,4 @@ Pair type Left, Right = |
     second {Right},
 |
 
-bad Pair of Int, String = Pair(first = 1, second = "oops")
+bad Pair of I32, String = Pair(first = 1, second = "oops")

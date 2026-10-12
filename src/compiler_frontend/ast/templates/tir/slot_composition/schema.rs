@@ -278,6 +278,10 @@ fn expand_tir_slot_placeholders_from_node(
         TemplateIrNodeKind::AggregateOutput => Ok(node_id),
         TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(node_id),
+
+        // A retained position is a leaf for slot expansion: its value does not exist yet, so it
+        // carries no slot placeholders and stays at its authored position.
+        TemplateIrNodeKind::RetainedNumericIntake(_) => Ok(node_id),
     }
 }
 

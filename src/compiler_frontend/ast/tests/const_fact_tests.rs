@@ -189,7 +189,7 @@ fn body_local_arithmetic_over_a_module_constant_is_collected() {
     let source = r#"
 base_width #= 40
 
-layout || -> Int:
+layout || -> I32:
     padded = base_width + 2
     return padded
 ;
@@ -241,7 +241,7 @@ fn mutable_declaration_is_not_a_fact() {
 #[test]
 fn body_local_mutable_declaration_is_not_a_fact() {
     let source = r#"
-greet || -> Int:
+greet || -> I32:
     value ~= 1
     return value
 ;

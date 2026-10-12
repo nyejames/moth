@@ -1,4 +1,4 @@
-parse_number |text String| -> Int, Error!:
+parse_number |text String| -> I32, Error!:
     return! Error(text)
 ;
 

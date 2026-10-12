@@ -1,0 +1,4 @@
+value = 1 + 2 catch:
+    broken #I8 = 127 + 1
+    then 0
+;

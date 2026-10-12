@@ -644,9 +644,6 @@ impl<'a> HirDisplayContext<'a> {
         expressions: &HirExpressionStore,
     ) -> String {
         match kind {
-            HirExpressionKind::Uint(value) => value.to_string(),
-            HirExpressionKind::Int(value) => value.to_string(),
-            HirExpressionKind::Float(value) => value.to_string(),
             HirExpressionKind::FixedScalar(value) => value.to_string(),
             // `HirExpressionKind::Number` literals render through the canonical
             // exact-value Display.
@@ -957,9 +954,6 @@ impl<'a> HirDisplayContext<'a> {
         match definition {
             TypeDefinition::Builtin(BuiltinTypeDefinition { key }) => match key {
                 BuiltinTypeKey::Bool => "Bool".to_owned(),
-                BuiltinTypeKey::Int => "Int".to_owned(),
-                BuiltinTypeKey::Uint => "Uint".to_owned(),
-                BuiltinTypeKey::Float => "Float".to_owned(),
                 BuiltinTypeKey::Number(scale) => scale.to_string(),
                 BuiltinTypeKey::Char => "Char".to_owned(),
                 BuiltinTypeKey::String => "String".to_owned(),

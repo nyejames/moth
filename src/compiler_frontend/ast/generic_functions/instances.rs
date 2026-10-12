@@ -104,3 +104,35 @@ pub(crate) struct IfGenericRequestRanges {
     pub(crate) then_branch: GenericRequestRange,
     pub(crate) else_branch: GenericRequestRange,
 }
+
+/// One position in the body-local ordered generic-request ledger.
+///
+/// WHAT: a call whose numeric-dependent arguments are retained is reserved as `Pending` when it
+///       is parsed. Its completion replaces the slot in place with `Concrete` only after exact
+///       types and bound evidence validate. Inactive work is marked `Dropped`.
+/// WHY: slots are never removed or reused, so checkpoints, static-if ranges and pending tickets
+///      keep one meaning for the whole body. An inactive continuation can only mark its own
+///      tombstone and therefore cannot publish into a later call's slot.
+// `Concrete` keeps its request inline: the ledger is a `Vec` of slots, so boxing the payload would
+// add one heap allocation per generic request. `Pending` and `Dropped` carry no payload.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+pub(crate) enum GenericRequestSlot {
+    Pending,
+    Concrete(GenericFunctionInstantiationRequest),
+    Dropped,
+}
+
+/// Stable index of a `Pending` slot in the ordered generic-request ledger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct GenericRequestTicket(usize);
+
+impl GenericRequestTicket {
+    pub(crate) fn new(index: usize) -> Self {
+        Self(index)
+    }
+
+    pub(crate) fn index(self) -> usize {
+        self.0
+    }
+}

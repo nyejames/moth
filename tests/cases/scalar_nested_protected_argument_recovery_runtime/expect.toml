@@ -1,0 +1,12 @@
+entry = "."
+
+# HTML-only by design: this fixture asserts exact runtime values through the
+# nested protected-argument recovery path. Typed runnable `Error!` recovery and
+# mutable receiver parameters have no observed Wasm success fixture under the
+# capability validation, so only the backend whose output is asserted is
+# declared rather than pinning an unobserved Wasm disposition.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "scalar nested protected source=0 source_calls=0 source_ok=101 source_ok_calls=1 receiver=0 receiver_calls=0 receiver_ok=11 receiver_ok_calls=1 custom=7"

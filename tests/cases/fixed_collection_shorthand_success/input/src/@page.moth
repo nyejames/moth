@@ -1,5 +1,5 @@
 render_shorthand || -> String:
-    capacity #Int = 4
+    capacity #I32 = 4
     names {capacity} = {"a", "b"}
     first = names.get(0) catch:
         then ""

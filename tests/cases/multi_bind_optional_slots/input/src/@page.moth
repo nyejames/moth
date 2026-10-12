@@ -2,17 +2,17 @@
 -- through a call that takes and returns the same optional slots. Each slot is
 -- reported as present or absent so a silently dropped slot cannot pass.
 
-pair_opt || -> String?, Int?:
+pair_opt || -> String?, I32?:
     return none, none
 ;
 
-consume_pair |name String?, count Int?| -> String?, Int?:
+consume_pair |name String?, count I32?| -> String?, I32?:
     return name, count
 ;
 
 render_optional_slots || -> String:
-    name String?, count Int? = pair_opt()
-    echoed_name String?, echoed_count Int? = consume_pair(name, count)
+    name String?, count I32? = pair_opt()
+    echoed_name String?, echoed_count I32? = consume_pair(name, count)
 
     name_state ~= "present"
     if echoed_name is none:

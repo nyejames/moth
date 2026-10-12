@@ -25,8 +25,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-/// The builder every check test compiles under; its numeric profile is the standard
-/// `Int32`/`Float64` one these fixtures were authored against.
+/// The builder every check test compiles under.
 fn test_project_builder() -> ProjectBuilder {
     ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()))
 }
@@ -186,12 +185,12 @@ fn check_compiles_unselected_same_module_source_closure() {
     fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write page source");
     fs::write(
         source_root.join("orphan.moth"),
-        "@helper identity\nconsume |value Int| -> Int:\n    return identity(value)\n;\n",
+        "@helper identity\nconsume |value I32| -> I32:\n    return identity(value)\n;\n",
     )
     .expect("should write unselected consumer source");
     fs::write(
         source_root.join("helper.moth"),
-        "identity |value Int| -> Int:\n    return value\n;\n",
+        "identity |value I32| -> I32:\n    return value\n;\n",
     )
     .expect("should write unselected provider source");
 
@@ -312,7 +311,7 @@ fn check_retains_source_package_warning() {
     fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         package.join("+package.moth"),
-        "export:\n    run || -> Int:\n        value ~= \"hello\"\n        result ~= \"unset\"\n\n        if value is:\n            \"one\" => result = \"one\"\n            \"one\" => result = \"one\"\n            else => result = \"other\"\n        ;\n        return 1\n    ;\n;\n",
+        "export:\n    run || -> I32:\n        value ~= \"hello\"\n        result ~= \"unset\"\n\n        if value is:\n            \"one\" => result = \"one\"\n            \"one\" => result = \"one\"\n            else => result = \"other\"\n        ;\n        return 1\n    ;\n;\n",
     )
     .expect("should write warning package root");
 
@@ -590,7 +589,7 @@ if value is:
     // Missing mutable call access has a compiler-owned reason key and is rejected by the shared
     // frontend before backend lowering.
     let error_source = "\
-increment |value ~Int|:
+increment |value ~I32|:
     value += 1
 ;
 
@@ -773,15 +772,40 @@ const NESTED_CONDITIONAL_DEPTH: usize = 9;
 
 #[test]
 fn nested_conditionals_check_within_the_default_windows_main_thread_stack() {
+    run_stack_budgeted_check_test(
+        "nested_conditionals_check_within_the_default_windows_main_thread_stack",
+        || nested_conditional_source(NESTED_CONDITIONAL_DEPTH),
+        "nested conditionals",
+    );
+}
+
+/// Grouped numeric origins remain unresolved until the later return supplies their exact type.
+/// This depth overflowed before grouped parsing stopped retaining unrelated dispatch scratch.
+const NESTED_NUMERIC_GROUP_DEPTH: usize = 64;
+
+#[test]
+fn nested_numeric_groups_check_within_the_default_windows_main_thread_stack() {
+    run_stack_budgeted_check_test(
+        "nested_numeric_groups_check_within_the_default_windows_main_thread_stack",
+        || nested_numeric_group_source(NESTED_NUMERIC_GROUP_DEPTH),
+        "nested numeric groups with a late receiver",
+    );
+}
+
+fn run_stack_budgeted_check_test(
+    test_suffix: &str,
+    source: impl FnOnce() -> String,
+    description: &str,
+) {
     if std::env::var_os(STACK_BUDGET_CHILD_ENV).is_some() {
-        check_nested_conditionals_on_budgeted_thread();
+        check_source_on_budgeted_thread(source(), description);
         return;
     }
 
     // A native stack overflow aborts the whole process, so the budgeted check runs in a child
     // copy of this test binary and an overflow becomes this test's failure.
     let test_name = format!(
-        "{}::nested_conditionals_check_within_the_default_windows_main_thread_stack",
+        "{}::{test_suffix}",
         module_path!()
             .split_once("::")
             .expect("test module path should include the crate name")
@@ -799,7 +823,7 @@ fn nested_conditionals_check_within_the_default_windows_main_thread_stack() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "checking {NESTED_CONDITIONAL_DEPTH} nested conditionals must fit a \
+        "checking {description} must fit a \
          {WINDOWS_MAIN_THREAD_STACK_BYTES}-byte stack ({}):\n{stdout}\n{stderr}",
         output.status
     );
@@ -810,14 +834,10 @@ fn nested_conditionals_check_within_the_default_windows_main_thread_stack() {
     );
 }
 
-fn check_nested_conditionals_on_budgeted_thread() {
+fn check_source_on_budgeted_thread(source: String, description: &str) {
     let temp = tempfile::tempdir().expect("should create temp dir");
     let entry_file = temp.path().join("main.moth");
-    fs::write(
-        &entry_file,
-        nested_conditional_source(NESTED_CONDITIONAL_DEPTH),
-    )
-    .expect("should write source file");
+    fs::write(&entry_file, source).expect("should write source file");
 
     let worker = std::thread::Builder::new()
         .name("stack-budgeted-check".to_owned())
@@ -840,12 +860,12 @@ fn check_nested_conditionals_on_budgeted_thread() {
     let (error_count, warning_count) = worker
         .join()
         .expect("stack-budgeted check thread should not panic");
-    assert_eq!(error_count, 0, "nested conditionals should check cleanly");
-    assert_eq!(warning_count, 0, "nested conditionals should not warn");
+    assert_eq!(error_count, 0, "{description} should check cleanly");
+    assert_eq!(warning_count, 0, "{description} should not warn");
 }
 
 fn nested_conditional_source(depth: usize) -> String {
-    let mut source = String::from("nested |seed Int| -> Int:\n");
+    let mut source = String::from("nested |seed I32| -> I32:\n");
     for level in 1..=depth {
         source.push_str(&format!("{}if seed > 0:\n", "    ".repeat(level)));
     }
@@ -855,4 +875,12 @@ fn nested_conditional_source(depth: usize) -> String {
     }
     source.push_str("    return seed\n;\n\nio.line([nested(1)])\n");
     source
+}
+
+fn nested_numeric_group_source(depth: usize) -> String {
+    let mut expression = String::from("1");
+    for _ in 0..depth {
+        expression = format!("({expression} + 1)");
+    }
+    format!("grouped || -> U64:\n    value = {expression}\n    return value\n;\n")
 }

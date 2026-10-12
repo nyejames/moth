@@ -1,0 +1,12 @@
+receive_i64 |value I64| -> String:
+    return cast value
+;
+receive_u32 |value U32| -> String:
+    return cast value
+;
+
+value = 1
+first = receive_i64(value)
+second = receive_u32(value)
+
+[:unreachable]

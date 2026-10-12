@@ -1,25 +1,25 @@
-multiply |left Int, right Int| -> Int:
+multiply |left I32, right I32| -> I32:
     return left * right
 ;
 
-first |left Int, right Int| -> Int:
+first |left I32, right I32| -> I32:
     return multiply(left, right)
 ;
 
-second |left Int, right Int| -> Int:
+second |left I32, right I32| -> I32:
     return first(left, right)
 ;
 
-third |left Int, right Int| -> Int:
+third |left I32, right I32| -> I32:
     return second(left, right)
 ;
 
-fourth |left Int, right Int| -> Int:
+fourth |left I32, right I32| -> I32:
     return third(left, right)
 ;
 
 export:
-    product |left Int, right Int| -> Int:
+    product |left I32, right I32| -> I32:
         return fourth(left, right)
     ;
 ;

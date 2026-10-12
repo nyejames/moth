@@ -8,6 +8,7 @@
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{
@@ -33,8 +34,9 @@ pub(crate) struct EmittedFallibleCarrier {
     pub(crate) carrier_type: TypeId,
     pub(crate) ok_type: TypeId,
     pub(crate) err_type: TypeId,
-    /// True when the success payload is a `Float` entering from an external/backend boundary
-    /// and must be validated before ordinary Moth code observes it.
+    /// True when the success payload is a raw binary float entering from an external/backend
+    /// boundary and must be validated at its resolved exact precision before ordinary Moth
+    /// code observes it.
     pub(crate) validate_float_success: bool,
 }
 
@@ -48,12 +50,15 @@ pub(super) struct FallibleCarrierBranch {
 }
 
 impl<'a> HirBuilder<'a> {
-    /// Returns true when the given type is the builtin `Float` type.
+    /// Returns true when the given type is an exact binary-float scalar.
     ///
-    /// WHAT: compares the type id against the registered builtin `Float` id.
-    /// WHY: external/backend boundary Float success values need explicit validation before use.
-    pub(crate) fn type_id_is_float(&self, type_id: TypeId) -> bool {
-        type_id == self.type_environment.builtins().float
+    /// WHAT: resolves the type through the shared numeric-scalar owner, which admits every fixed
+    ///       `F16`/`F32`/`F64` identity.
+    /// WHY: external/backend boundary binary-float success values need explicit validation, and
+    ///      the decision must follow the resolved exact scalar.
+    pub(crate) fn type_id_is_exact_binary_float(&self, type_id: TypeId) -> bool {
+        NumericScalar::from_type_id(type_id, &self.type_environment)
+            .is_some_and(NumericScalar::is_binary_float)
     }
 
     /// Emits a plain call to the current block and stores its result in a temporary local.
@@ -170,8 +175,8 @@ impl<'a> HirBuilder<'a> {
     ///
     /// WHAT: branches on the carrier, emitting a runtime failure terminator for trap mode or
     ///       delegating to ordinary fallible propagation for builtin `Error!`.
-    /// WHY: implicit compound-store conversions use the same enclosing-function policy as checked
-    ///      arithmetic while remaining distinct from a user-authored `cast!` expression.
+    /// WHY: compound-store conversions use the enclosing-function policy while remaining
+    ///      distinct from an authored cast's failure boundary.
     pub(crate) fn lower_store_conversion_carrier_to_success_value(
         &mut self,
         result_carrier: EmittedFallibleCarrier,
@@ -221,6 +226,55 @@ impl<'a> HirBuilder<'a> {
         )
     }
 
+    /// Delivers a fallible source cast through a catch, builtin `Error!` slot, or private lane.
+    pub(crate) fn lower_implicit_cast_carrier_to_success_value(
+        &mut self,
+        result_carrier: EmittedFallibleCarrier,
+        failure_mode: NumericFailureMode,
+        span: &Option<SourceSpan>,
+    ) -> Result<HirValueId, HirConstructionFailure> {
+        if failure_mode == NumericFailureMode::ReturnError {
+            return self.lower_fallible_carrier_to_success_value(result_carrier, span);
+        }
+
+        let branch = self.emit_result_carrier_branch(
+            result_carrier.result_local,
+            result_carrier.carrier_type,
+            span,
+            *span,
+            "cast-conversion-ok",
+            "cast-conversion-err",
+        )?;
+        self.emit_terminator_with_span(
+            branch.error_block,
+            HirTerminator::RuntimeFailure {
+                message: "Cast conversion failed".to_owned(),
+                cause: Some(RuntimeFailureCause::AuthoredCastConversion {
+                    carrier: result_carrier.result_local,
+                }),
+            },
+            span,
+            *span,
+        )?;
+
+        self.set_current_block(branch.success_block, span)?;
+        let success_region = self.current_region_or_error(span)?;
+        let success_result = self.make_local_load_expression(
+            result_carrier.result_local,
+            result_carrier.carrier_type,
+            &None,
+            success_region,
+        )?;
+        self.make_expression(
+            &None,
+            HirExpressionKind::FallibleUnwrapSuccess {
+                result: success_result,
+            },
+            result_carrier.ok_type,
+            ValueKind::RValue,
+            success_region,
+        )
+    }
     pub(super) fn emit_result_carrier_branch(
         &mut self,
         result_local: LocalId,

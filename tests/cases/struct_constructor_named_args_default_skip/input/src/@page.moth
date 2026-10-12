@@ -1,6 +1,6 @@
 CountBox = |
-    height Int = 100,
-    width Int,
+    height I32 = 100,
+    width I32,
 |
 
 -- Skip 'height' (uses default 100), provide only 'width' by name

@@ -1,0 +1,15 @@
+-- An explicit I32 generic result is a concrete barrier. A later U64 receiver
+-- cannot reach back through the call to retype the generic argument.
+
+barrier type T |value T| -> I32:
+    return 0
+;
+
+read_u64 |value U64| -> String:
+    return [: [value]]
+;
+
+value = barrier(7)
+received = read_u64(value)
+
+[: [received]]

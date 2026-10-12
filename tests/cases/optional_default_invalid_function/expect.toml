@@ -2,7 +2,7 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-TYPE-0001"]
-message_contains = ["String?", "Int"]
+message_contains = ["String?", "I32"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"

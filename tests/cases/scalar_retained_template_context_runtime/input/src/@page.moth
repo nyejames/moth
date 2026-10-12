@@ -1,0 +1,22 @@
+identity |value I32| -> I32:
+    return value
+;
+
+list = [:<ul>[$children([:<li>[$slot]</li>]):[$slot]]</ul>]
+
+range_limit = 2
+empty_limit = 0
+show_condition = 1
+skip_condition = 2
+loop_limit = 2
+
+rendered_range = [list:[loop 0 to identity(range_limit) |range_item|:[:range-[range_item]]]]
+
+rendered_empty_range = [list:[loop 0 to identity(empty_limit) |empty_range_item|:[:empty-range-should-not-appear]]]
+
+rendered_conditional = [$children([:<b>[$slot]</b>]), if identity(show_condition) < 2:[:conditional-selected]]
+rendered_skipped_conditional = [$children([:<b>[$slot]</b>]), if identity(skip_condition) < 2:[:conditional-no-output]]
+rendered_loop = [$children([:<i>[$slot]</i>]), loop 0 to identity(loop_limit) |loop_item|:[:loop-[loop_item]]]
+rendered_empty_loop = [$children([:<i>[$slot]</i>]), loop 0 to identity(empty_limit) |empty_loop_item|:[:loop-no-output]]
+
+[:[rendered_range][rendered_empty_range][rendered_conditional][rendered_skipped_conditional][rendered_loop][rendered_empty_loop]]

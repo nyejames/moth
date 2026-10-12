@@ -1,0 +1,11 @@
+-- The completed addition over named operands is already I32. The later U64
+-- receiver cannot push a constraint back through base or twice.
+receive_u64 |value U64| -> String:
+    return cast value
+;
+
+base = 1
+twice = base + base
+received = receive_u64(twice)
+
+[:unreachable]

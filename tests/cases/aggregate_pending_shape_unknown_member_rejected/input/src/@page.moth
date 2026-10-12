@@ -1,0 +1,9 @@
+-- Pending map shape unknown member rejected.
+--
+-- `entries` is an untyped map literal whose key and value numeric origins stay
+-- pending. `unsupported()` is not a map member, so the known map shape reports
+-- the ordinary unknown-member diagnostic at the member name without resolving or
+-- defaulting the pending origins first.
+
+entries = {1 = 2}
+entries.unsupported()

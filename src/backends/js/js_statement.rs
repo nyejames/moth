@@ -92,7 +92,7 @@ impl<'hir> JsEmitter<'hir> {
             } => {
                 // WHAT: dispatch a checked operation through the helper family selected from its
                 //       semantic result domain.
-                // WHY: the profile's carrier determines both JS arithmetic and domain bounds.
+                // WHY: the domain's carrier determines both JS arithmetic and the domain bounds.
                 self.emit_numeric_op_statement(
                     *op,
                     *failure_mode,
@@ -138,10 +138,10 @@ impl<'hir> JsEmitter<'hir> {
                 failure_mode,
                 result,
             } => {
-                // WHAT: dispatch a finite-Float formatting operation to the JS runtime helper that
+                // WHAT: dispatch a finite binary-float formatting operation to the JS runtime helper that
                 //       implements Moth's formatting contract, then either wrap the carrier for
                 //       trap mode or assign the carrier directly for builtin-Error recovery mode.
-                // WHY: Float formatting is a language builtin with an explicit failure mode; the
+                // WHY: binary-float formatting is a language builtin with an explicit failure mode; the
                 //      backend must map it to the helper that normalizes JS number text to the
                 //      Moth contract instead of using target-native stringification directly.
                 self.emit_format_float_statement(*failure_mode, *source, *result)?;
@@ -152,8 +152,8 @@ impl<'hir> JsEmitter<'hir> {
                 failure_mode,
                 result,
             } => {
-                // WHAT: validates a finite Float at its selected profile precision.
-                // WHY: external values enter the same finite, rounded carrier as every other Float.
+                // WHAT: validates a finite binary-float at its exact binary precision.
+                // WHY: external values enter the same finite, rounded carrier as other binary floats.
                 self.emit_validate_float_statement(*failure_mode, *source, *result)?;
             }
 
@@ -244,7 +244,7 @@ impl<'hir> JsEmitter<'hir> {
         Ok(())
     }
 
-    /// Lower a checked HIR numeric operation through its profile-selected carrier family.
+    /// Lower a checked HIR numeric operation through its domain-selected carrier family.
     ///
     /// WHAT: validates HIR arity, lowers operands, selects the operation helper and appends
     ///       semantic integer bounds when that family uses an integer carrier.
@@ -275,13 +275,12 @@ impl<'hir> JsEmitter<'hir> {
             }
         };
 
-        let carrier = JsNumericCarrier::for_scalar(op.domain, self.config.numeric_profile)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "JS backend has no numeric carrier for {:?}",
-                    op.domain
-                ))
-            })?;
+        let carrier = JsNumericCarrier::for_scalar(op.domain).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "JS backend has no numeric carrier for {:?}",
+                op.domain
+            ))
+        })?;
 
         // WHAT: proven-safe integer operations skip the checked helper and its runtime range
         //       predicate entirely. Trap mode assigns the raw scalar result; ReturnError mode
@@ -290,9 +289,7 @@ impl<'hir> JsEmitter<'hir> {
         // WHY: the numeric proof table guarantees every relevant failure is impossible, so the
         //       checked machinery would be unreachable at runtime while the carrier itself stays
         //       required for recovery-mode consumers.
-        if self
-            .numeric_proofs
-            .integer_operation_is_safe(statement, self.config.numeric_profile)
+        if self.numeric_proofs.integer_operation_is_safe(statement)
             && let Some(proven_expression) =
                 self.proven_integer_operation_expression(op, &carrier, &lowered_args)
         {
@@ -306,7 +303,7 @@ impl<'hir> JsEmitter<'hir> {
             return Ok(());
         }
 
-        let (helper_name, bounds) = js_numeric_helper_for_op(op, self.config.numeric_profile)?;
+        let (helper_name, bounds) = js_numeric_helper_for_op(op)?;
         if let NumericScalar::Number(scale) = op.domain
             && matches!(
                 op.operator,
@@ -408,7 +405,7 @@ impl<'hir> JsEmitter<'hir> {
             return Ok(proven_expression);
         }
 
-        js_cast_expression_for_policy(policy, value, self.config.numeric_profile)
+        js_cast_expression_for_policy(policy, value)
     }
 
     /// Renders the carrier-only conversion for one proven-safe fallible integer narrowing.
@@ -433,9 +430,9 @@ impl<'hir> JsEmitter<'hir> {
         let BuiltinCastPolicyId::NumericConversion { source, target } = policy else {
             return Ok(None);
         };
-        let conversion = JsNumericConversion::classify(source, target, self.config.numeric_profile)
+        let conversion = JsNumericConversion::classify(source, target)
             .expect("proven narrowing policy must classify");
-        let source_carrier = JsNumericCarrier::for_scalar(source, self.config.numeric_profile)
+        let source_carrier = JsNumericCarrier::for_scalar(source)
             .expect("classified narrowing source has a JS carrier");
         let proven = conversion
             .proven_safe_integer_narrowing(source_carrier)
@@ -461,9 +458,7 @@ impl<'hir> JsEmitter<'hir> {
         let BuiltinCastPolicyId::NumericConversion { source, target } = policy else {
             return false;
         };
-        let Ok(conversion) =
-            JsNumericConversion::classify(source, target, self.config.numeric_profile)
-        else {
+        let Ok(conversion) = JsNumericConversion::classify(source, target) else {
             return false;
         };
         if !matches!(
@@ -473,8 +468,7 @@ impl<'hir> JsEmitter<'hir> {
             return false;
         }
 
-        self.numeric_proofs
-            .integer_narrowing_is_safe(statement, self.config.numeric_profile)
+        self.numeric_proofs.integer_narrowing_is_safe(statement)
     }
 
     /// Emit the range candidate into JS-local scratch, then commit only a finite in-bound value.
@@ -492,13 +486,11 @@ impl<'hir> JsEmitter<'hir> {
         let step_expr = self.lower_expr(step)?;
         let end_expr = self.lower_expr(end)?;
         let ascending_expr = self.lower_expr(ascending)?;
-        let precision = domain
-            .binary_float_precision(self.config.numeric_profile)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "JS backend received a non-float range candidate domain {domain:?}"
-                ))
-            })?;
+        let precision = domain.binary_float_precision().ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "JS backend received a non-float range candidate domain {domain:?}"
+            ))
+        })?;
 
         let direction_name = self.next_temp_identifier("__float_range_ascending");
         let candidate_name = self.next_temp_identifier("__float_range_candidate");
@@ -506,14 +498,12 @@ impl<'hir> JsEmitter<'hir> {
         let unrounded_candidate = format!(
             "({direction_name} ? ({current_expr} + {step_expr}) : ({current_expr} - {step_expr}))"
         );
+        // D15: an F16 range step completes at F16 at each candidate, so the selected domain
+        // keeps its precision instead of widening to F32.
         let candidate_expr = match precision {
+            BinaryFloatPrecision::Binary16 => format!("Math.f16round({unrounded_candidate})"),
             BinaryFloatPrecision::Binary32 => format!("Math.fround({unrounded_candidate})"),
             BinaryFloatPrecision::Binary64 => unrounded_candidate,
-            BinaryFloatPrecision::Binary16 => {
-                return Err(CompilerError::compiler_error(
-                    "JS backend does not support F16 range candidates",
-                ));
-            }
         };
         let (ascending_comparison, descending_comparison) =
             if inclusive { ("<=", ">=") } else { ("<", ">") };
@@ -538,11 +528,13 @@ impl<'hir> JsEmitter<'hir> {
         Ok(())
     }
 
-    /// Lower a `HirStatementKind::FormatFloat` into the profile-precision binary-float formatter.
+    /// Lower a `HirStatementKind::FormatFloat` into the exact-precision binary-float formatter.
     ///
-    /// WHAT: emits `__moth_format_float(source, precision, "Float")` and assigns either the scalar
+    /// WHAT: derives the formatted source's own precision and canonical scalar name, then emits
+    ///       `__moth_format_float(source, precision, "<scalar>")` and assigns either the scalar
     ///       formatted string (trap mode) or the fallible carrier (return-error mode).
-    /// WHY: template and cast formatting share one precision-aware helper and result contract.
+    /// WHY: template and cast formatting share one precision-aware helper and result contract,
+    ///      and the source row owns the resolved precision.
     fn emit_format_float_statement(
         &mut self,
         failure_mode: NumericFailureMode,
@@ -550,13 +542,20 @@ impl<'hir> JsEmitter<'hir> {
         result: HirLocalDestination,
     ) -> Result<(), CompilerError> {
         let source_expr = self.lower_expr(source)?;
-        let precision =
-            binary_float_precision_bits(self.config.numeric_profile.float_precision.into());
-        let helper_call = format!("__moth_format_float({source_expr}, {precision}, \"Float\")");
+        let (scalar, precision) = self.float_source_scalar(source, "FormatFloat")?;
+        let helper_call = format!(
+            "__moth_format_float({source_expr}, {}, \"{scalar}\")",
+            binary_float_precision_bits(precision)
+        );
         self.emit_numeric_carrier_assignment(helper_call, failure_mode, result)
     }
 
-    /// Lower a `HirStatementKind::ValidateFloat` into the profile-aware finite-Float helper call.
+    /// Lower a `HirStatementKind::ValidateFloat` into the exact-precision finite binary-float helper.
+    ///
+    /// WHAT: derives the validated source's own binary-float precision and emits it as the
+    ///       helper's precision argument.
+    /// WHY: a validated boundary value carries a fixed `F16`/`F32`/`F64` type, so the exact
+    ///      source type owns the rounding step.
     fn emit_validate_float_statement(
         &mut self,
         failure_mode: NumericFailureMode,
@@ -564,8 +563,40 @@ impl<'hir> JsEmitter<'hir> {
         result: HirLocalDestination,
     ) -> Result<(), CompilerError> {
         let source_expr = self.lower_expr(source)?;
-        let helper_call = format!("__moth_float_validate({source_expr})");
+        let (_scalar, precision) = self.float_source_scalar(source, "binary-float validation")?;
+        let helper_call = format!(
+            "__moth_float_validate({source_expr}, {})",
+            binary_float_precision_bits(precision)
+        );
         self.emit_numeric_carrier_assignment(helper_call, failure_mode, result)
+    }
+
+    /// The exact binary-float domain and precision of one float statement's source expression.
+    ///
+    /// WHAT: derives the domain from the source row's own type through the canonical
+    ///       `TypeId`-to-domain owner.
+    /// WHY: FormatFloat, ValidateFloat and the prelude demand scan must agree on one precision
+    ///      source, and an exact `F16`/`F32`/`F64` value is never rounded to another precision.
+    pub(crate) fn float_source_scalar(
+        &self,
+        source: HirValueId,
+        statement_name: &'static str,
+    ) -> Result<(NumericScalar, BinaryFloatPrecision), CompilerError> {
+        let source_type = self.hir.expressions.expression(source).ty;
+        let scalar = NumericScalar::from_type_id(source_type, self.type_environment).ok_or_else(
+            || {
+                CompilerError::compiler_error(format!(
+                    "JS backend received {statement_name} source with non-binary-float type {source_type:?}"
+                ))
+            },
+        )?;
+        let precision = scalar.binary_float_precision().ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "JS backend received {statement_name} source with non-binary-float type {source_type:?}"
+            ))
+        })?;
+
+        Ok((scalar, precision))
     }
 
     /// Emit the result assignment shared by checked numeric helper calls.
@@ -1088,9 +1119,8 @@ impl<'hir> JsEmitter<'hir> {
 /// Selects the checked JS helper family and domain bounds for one HIR numeric operation.
 fn js_numeric_helper_for_op(
     op: HirNumericOp,
-    numeric_profile: moth_lexical::numeric::profile::NumericProfile,
 ) -> Result<(String, Option<(String, String)>), CompilerError> {
-    let carrier = JsNumericCarrier::for_scalar(op.domain, numeric_profile).ok_or_else(|| {
+    let carrier = JsNumericCarrier::for_scalar(op.domain).ok_or_else(|| {
         CompilerError::compiler_error(format!(
             "JS backend has no numeric carrier for {:?}",
             op.domain

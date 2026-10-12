@@ -1,4 +1,4 @@
-recover |seen ~String, left Int, right Int, offset Int| -> Int:
+recover |seen ~String, left I32, right I32, offset I32| -> I32:
     value = left * right + offset catch |err|:
         seen = [: [err.code] [err.message]]
         then 0

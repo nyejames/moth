@@ -1,0 +1,5 @@
+project #= (
+    name = "int_promotion_to_float_receiver_rejected",
+    entry_root = "src",
+)
+html #= ()

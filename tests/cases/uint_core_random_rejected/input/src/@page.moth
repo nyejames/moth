@@ -1,9 +1,9 @@
--- Task 5A: Core random_int keeps its Int signature; Uint bounds are
+-- Task 5A: Core random_int keeps its I32 signature; U32 bounds are
 -- rejected rather than silently accepted.
 
 @core/random random_int
 
-lo Uint = 1
-hi Uint = 6
+lo U32 = 1
+hi U32 = 6
 bad = random_int(lo, hi)
 io.line([: [bad]])

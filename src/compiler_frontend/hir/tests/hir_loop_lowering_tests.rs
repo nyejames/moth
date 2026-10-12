@@ -13,6 +13,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{function_node, node};
 
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 
@@ -27,7 +28,11 @@ fn lowers_while_to_header_body_exit_shape() {
         NodeKind::WhileLoop(
             Expression::bool(false, None, ValueMode::ImmutableOwned),
             vec![node(
-                NodeKind::ExpressionStatement(Expression::int(10, None, ValueMode::ImmutableOwned)),
+                NodeKind::ExpressionStatement(Expression::fixed_scalar(
+                    FixedScalarValue::signed(FixedScalar::I32, 10).expect("test literal fits I32"),
+                    None,
+                    ValueMode::ImmutableOwned,
+                )),
                 None,
             )],
         ),

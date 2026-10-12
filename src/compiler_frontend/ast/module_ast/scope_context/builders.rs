@@ -23,13 +23,11 @@ impl ScopeContext {
     /// WHAT: adopts an empty `TemplateIrStore` as the fresh module store so the
     ///       context satisfies the required-store constructor invariant of
     ///       `ScopeContext::new` without borrowing a production module store.
-    /// WHY: `ScopeContext::new` requires the shared module TIR store and an explicit
-    ///      boundary numeric profile; tests that exercise non-template scope
-    ///      behaviour need an isolated store and the STANDARD default without assembling
-    ///      either inline at every call site. Profile-sensitive tests override the
-    ///      profile afterwards with `with_numeric_profile`, and tests that must share a
-    ///      specific store should build that store explicitly and pass it to
-    ///      `ScopeContext::new`, or swap it in with `with_template_ir_store`.
+    /// WHY: `ScopeContext::new` requires the shared module TIR store; tests that exercise
+    ///      non-template scope behaviour need an isolated store without assembling it inline
+    ///      at every call site. Tests that must share a specific store should build that
+    ///      store explicitly and pass it to `ScopeContext::new`, or swap it in with
+    ///      `with_template_ir_store`.
     pub(crate) fn new_for_tests(
         kind: ContextKind,
         scope: PathId,
@@ -45,7 +43,6 @@ impl ScopeContext {
             external_package_registry,
             scope_frame_capacity,
             template_ir_store,
-            NumericProfile::STANDARD,
         )
     }
 }
@@ -278,13 +275,6 @@ impl ScopeContext {
         self
     }
 
-    /// Set the compilation boundary's numeric widths for child scopes.
-    #[cfg(test)]
-    pub(crate) fn with_numeric_profile(mut self, profile: NumericProfile) -> ScopeContext {
-        Rc::make_mut(&mut self.shared).numeric_profile = profile;
-        self
-    }
-
     // --------------------------
     //  Generic function tracking
     // --------------------------
@@ -295,7 +285,7 @@ impl ScopeContext {
     /// bodies. Consumed by `AstEmitter` after body parsing completes.
     pub(crate) fn with_generic_function_instantiation_sink(
         mut self,
-        sink: Rc<RefCell<Vec<GenericFunctionInstantiationRequest>>>,
+        sink: Rc<RefCell<Vec<GenericRequestSlot>>>,
     ) -> ScopeContext {
         Rc::make_mut(&mut self.shared).generic_function_instantiation_requests = sink;
         self

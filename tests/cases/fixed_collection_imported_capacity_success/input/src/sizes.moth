@@ -1,1 +1,1 @@
-capacity #Int = 4
+capacity #I32 = 4

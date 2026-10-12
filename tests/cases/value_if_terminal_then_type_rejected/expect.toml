@@ -1,0 +1,19 @@
+entry = "."
+
+# The true branch's first `then 1, 2` produces values, so the following
+# `then "bad", 2` is dead. Its String must still be checked against the I32
+# receiver for `first` (line 4, column 14). TYPE0001 carries no stable reason
+# key, so the expected/found pair is asserted through message_contains.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]
+message_contains = ["expected I32, found String"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+path = "input/@page.moth"
+line = 4
+column = 14
+count = 1

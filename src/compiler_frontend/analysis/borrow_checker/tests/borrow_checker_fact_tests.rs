@@ -36,6 +36,7 @@ use crate::compiler_frontend::hir::statements::{
 };
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, function_node, make_test_variable, node, param_with_datatype,
@@ -51,9 +52,18 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
     build_ast_with_registered_types, lower_ast, runtime_expr, runtime_operand_item,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use rustc_hash::FxHashSet;
 use std::collections::VecDeque;
 use std::sync::Arc;
+
+fn i32_expression(value: i64, span: Option<SourceSpan>, mode: ValueMode) -> Expression {
+    Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range"),
+        span,
+        mode,
+    )
+}
 
 #[test]
 fn shared_value_fact_merge_is_conservative_and_deterministic() {
@@ -334,14 +344,14 @@ fn statement_terminator_and_value_facts_are_populated() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                    i32_expression(1, test_source_location(1), ValueMode::MutableOwned),
                 )),
                 test_source_location(1),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
-                    Expression::int(0, test_source_location(2), ValueMode::ImmutableOwned),
+                    i32_expression(0, test_source_location(2), ValueMode::ImmutableOwned),
                 )),
                 test_source_location(2),
             ),
@@ -361,11 +371,11 @@ fn statement_terminator_and_value_facts_are_populated() {
                         NodeKind::Assignment {
                             target: assignment_target(
                                 x,
-                                DataType::Int,
-                                builtin_type_ids::INT,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(4),
                             ),
-                            value: Expression::int(
+                            value: i32_expression(
                                 2,
                                 test_source_location(4),
                                 ValueMode::ImmutableOwned,
@@ -377,11 +387,11 @@ fn statement_terminator_and_value_facts_are_populated() {
                         NodeKind::Assignment {
                             target: assignment_target(
                                 x,
-                                DataType::Int,
-                                builtin_type_ids::INT,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(5),
                             ),
-                            value: Expression::int(
+                            value: i32_expression(
                                 3,
                                 test_source_location(5),
                                 ValueMode::ImmutableOwned,
@@ -486,7 +496,7 @@ fn drop_statement_produces_statement_fact() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 value,
-                Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                i32_expression(1, test_source_location(1), ValueMode::MutableOwned),
             )),
             test_source_location(1),
         )],
@@ -556,7 +566,7 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
         node(
             NodeKind::VariableDeclaration(make_test_variable(
                 data,
-                Expression::int(7, test_source_location(1), ValueMode::MutableOwned),
+                i32_expression(7, test_source_location(1), ValueMode::MutableOwned),
             )),
             test_source_location(1),
         ),
@@ -565,8 +575,8 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
                 first_ref,
                 Expression::reference_with_type_id(
                     data,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(2),
                     ValueMode::MutableReference,
                     crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
@@ -579,8 +589,8 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
                 sink,
                 reference_expr_with_datatype(
                     first_ref,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(3),
                 ),
             )),
@@ -591,8 +601,8 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
                 second_ref,
                 Expression::reference_with_type_id(
                     data,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(4),
                     ValueMode::MutableReference,
                     crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
@@ -655,7 +665,7 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
         node(
             NodeKind::VariableDeclaration(make_test_variable(
                 source,
-                Expression::int(7, test_source_location(10), ValueMode::MutableOwned),
+                i32_expression(7, test_source_location(10), ValueMode::MutableOwned),
             )),
             test_source_location(10),
         ),
@@ -664,8 +674,8 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
                 target,
                 Expression::reference_with_type_id(
                     source,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(11),
                     ValueMode::MutableOwned,
                     crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
@@ -676,7 +686,7 @@ fn optional_assignment_transfer_keeps_source_state_and_records_advisory_fact() {
         node(
             NodeKind::VariableDeclaration(make_test_variable(
                 sentinel,
-                Expression::int(0, test_source_location(12), ValueMode::ImmutableOwned),
+                i32_expression(0, test_source_location(12), ValueMode::ImmutableOwned),
             )),
             test_source_location(12),
         ),
@@ -1093,7 +1103,7 @@ fn check_unequal_path_alias_activity(
         bool_expression, expression, statement,
     };
 
-    let source = "scores ~{String = Int} = {\"Priya\" = 10}\nresult = scores\n";
+    let source = "scores ~{String = I32} = {\"Priya\" = 10}\nresult = scores\n";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
@@ -1277,7 +1287,7 @@ fn map_get_operation_result_alias_retains_receiver_root() {
     //      handling transfers the success value.
     // WHY: later conflict analysis reads this alias state; integration only sees the
     //      resulting conflict, not which root the get binding aliases.
-    let source = r#"scores ~{String = Int} = {"Priya" = 10}
+    let source = r#"scores ~{String = I32} = {"Priya" = 10}
 score = scores.get("Priya") catch:
 then 0
 ;
@@ -2281,7 +2291,7 @@ fn transparent_fallible_success_projection_preserves_retained_alias_root() {
     //      creates a self-conflict and
     //      can lose the root needed by the retained-result state.
     let source = r#"User = |
-score Int,
+score I32,
 |
 
 identity |value User| -> User:
@@ -2439,6 +2449,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                 test_source_location(2),
             )],
             result_type_ids: vec![builtin_type_ids::STRING, builtin_type_ids::STRING],
+            requires_external_float_validation: false,
             error_type_id: builtin_type_ids::STRING,
             handling: FallibleExpressionHandling::Propagate,
             span: None,
@@ -2539,7 +2550,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     sentinel_name,
-                    Expression::int(0, test_source_location(7), ValueMode::ImmutableOwned),
+                    i32_expression(0, test_source_location(7), ValueMode::ImmutableOwned),
                 )),
                 test_source_location(7),
             ),
@@ -2971,9 +2982,6 @@ fn collect_expression_values(
             collect_expression_values(expressions, *source, out);
         }
         HirExpressionKind::Number(_)
-        | HirExpressionKind::Int(_)
-        | HirExpressionKind::Uint(_)
-        | HirExpressionKind::Float(_)
         | HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)
@@ -2990,8 +2998,8 @@ fn catch_failed_argument_releases_earlier_shared_and_mutable_call_borrows() {
         let access = if parameter == "~String" { "~" } else { "" };
         let source = format!(
             "identity |input {parameter}| -> String:\nreturn input\n;\n\
-             combine |text String, count Int| -> String:\nreturn text\n;\n\
-             probe |trigger Int| -> String:\n\
+             combine |text String, count I32| -> String:\nreturn text\n;\n\
+             probe |trigger I32| -> String:\n\
              data ~= \"before\"\n\
              return combine(identity({access}data), trigger + 2147483647) catch:\n\
                  data = \"handler\"\n\
@@ -3061,8 +3069,8 @@ fn catch_failed_argument_keeps_optional_transfer_consistent_with_handler_use() {
     ] {
         let source = format!(
             "produce |input String| -> String:\nreturn \"fresh\"\n;\n\
-             combine |text String, count Int| -> String:\nreturn text\n;\n\
-             probe |data ~String, trigger Int| -> String:\n\
+             combine |text String, count I32| -> String:\nreturn text\n;\n\
+             probe |data ~String, trigger I32| -> String:\n\
              return combine(produce(data), trigger + 2147483647) catch then {handler_value}\n;\n"
         );
         let (ast, mut path_fork, mut string_table) = parse_single_file_ast(&source);
@@ -3122,8 +3130,8 @@ fn catch_failed_argument_keeps_optional_transfer_consistent_with_handler_use() {
 #[test]
 fn catch_handler_numeric_failure_returns_outward_without_success_local() {
     let source = "identity |input String| -> String:\nreturn input\n;\n\
-                  combine |text String, count Int| -> String:\nreturn text\n;\n\
-                  probe |input String, trigger Int| -> String, Error!:\n\
+                  combine |text String, count I32| -> String:\nreturn text\n;\n\
+                  probe |input String, trigger I32| -> String, Error!:\n\
                   return combine(identity(input), trigger + 2147483647) catch:\n\
                       handler_local = \"handler\"\n\
                       count = trigger + 2147483647\n\
@@ -3183,8 +3191,8 @@ fn catch_handler_cannot_load_never_initialised_success_call_result() {
     use crate::compiler_frontend::compiler_messages::BorrowDiagnosticKind;
 
     let source = "identity |input String| -> String:\nreturn input\n;\n\
-                  combine |text String, count Int| -> String:\nreturn text\n;\n\
-                  probe |input String, trigger Int| -> String:\n\
+                  combine |text String, count I32| -> String:\nreturn text\n;\n\
+                  probe |input String, trigger I32| -> String:\n\
                   return combine(identity(input), trigger + 2147483647) catch then \"fallback\"\n;\n";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);
@@ -3254,8 +3262,8 @@ fn equal_depth_diamond_merges_both_roots_in_one_merge_visit() {
         bool_expression, expression, statement,
     };
 
-    let source = "left ~{String = Int} = {\"Priya\" = 10}\n\
-                  right ~{String = Int} = {\"Rob\" = 20}\n\
+    let source = "left ~{String = I32} = {\"Priya\" = 10}\n\
+                  right ~{String = I32} = {\"Rob\" = 20}\n\
                   view = left\n";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let mut hir = lower_hir(ast, &mut string_table, &mut path_fork);

@@ -1339,9 +1339,6 @@ fn collect_expression_loaded_locals(
             collect_expression_loaded_locals(expressions, *result, visitor);
         }
         HirExpressionKind::Number(_)
-        | HirExpressionKind::Uint(_)
-        | HirExpressionKind::Int(_)
-        | HirExpressionKind::Float(_)
         | HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)

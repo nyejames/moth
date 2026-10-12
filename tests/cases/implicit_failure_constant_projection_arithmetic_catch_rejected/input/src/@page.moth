@@ -1,0 +1,8 @@
+sum #= 1 + 2
+point #= (
+    from_arithmetic = sum,
+)
+
+compare_projected_arithmetic |value I32| -> Bool:
+    return point.from_arithmetic is value catch then false
+;

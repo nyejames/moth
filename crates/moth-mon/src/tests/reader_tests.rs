@@ -1,6 +1,5 @@
 use super::*;
 use crate::{Field, Limits, Schema, SchemaType, Variant};
-use moth_lexical::numeric::profile::NumericProfile;
 
 fn schema(fields: Vec<Field>) -> PreparedSchema {
     Schema::record(fields)
@@ -13,11 +12,11 @@ fn schema(fields: Vec<Field>) -> PreparedSchema {
 fn decodes_implicit_and_explicit_roots() {
     let root_schema = schema(vec![
         Field::required("title", SchemaType::String),
-        Field::required("count", SchemaType::Int),
+        Field::required("count", SchemaType::I32),
     ]);
     let expected = Value::Record(vec![
         ("title".into(), Value::String("x".into())),
-        ("count".into(), Value::Int(2)),
+        ("count".into(), Value::I32(2)),
     ]);
     assert_eq!(
         decode_document("title = \"x\", count = 2", &root_schema),
@@ -45,7 +44,7 @@ fn decodes_implicit_and_explicit_roots() {
 }
 #[test]
 fn rejects_nonliteral_names_and_missing_commas() {
-    let schema = schema(vec![Field::required("value", SchemaType::Int)]);
+    let schema = schema(vec![Field::required("value", SchemaType::I32)]);
     assert_eq!(
         decode_document("value = other", &schema).unwrap_err().code,
         MonErrorCode::UnexpectedToken
@@ -128,7 +127,7 @@ fn preserves_parser_paths_and_charges_exact_numbers_before_copying() {
         "scores",
         SchemaType::Map {
             key: Box::new(SchemaType::String),
-            value: Box::new(SchemaType::Int),
+            value: Box::new(SchemaType::I32),
         },
     )]);
     let map_error = decode_document(r#"scores = {"x" ="#, &map_schema)
@@ -221,7 +220,7 @@ fn preserves_parser_paths_and_charges_exact_numbers_before_copying() {
     );
 
     // A rejected qualifier never enters the path, but its detail still copies the spelling.
-    let qualifier_schema = Schema::record(vec![Field::required("v", SchemaType::Int)])
+    let qualifier_schema = Schema::record(vec![Field::required("v", SchemaType::I32)])
         .with_limits(Limits {
             max_decoded_bytes: 1,
             ..Limits::default()
@@ -247,9 +246,9 @@ fn preserves_parser_paths_and_charges_exact_numbers_before_copying() {
 #[test]
 fn preserves_float_sign_and_decimal_text_until_conversion() {
     let numeric_schema = schema(vec![
-        Field::required("real", SchemaType::Float),
+        Field::required("real", SchemaType::F64),
         Field::required("decimal", SchemaType::Decimal { scale: 2 }),
-        Field::required("whole", SchemaType::Int),
+        Field::required("whole", SchemaType::I32),
     ]);
     let value = decode_document("real = -0.0, decimal = 1.2300, whole = 7", &numeric_schema)
         .expect("finite float and lossless decimal should decode");
@@ -261,7 +260,7 @@ fn preserves_float_sign_and_decimal_text_until_conversion() {
         .find(|(name, _)| name == "real")
         .map(|(_, value)| value)
         .expect("float field");
-    assert!(matches!(float, Value::Float(value) if value.to_bits() == (-0.0f64).to_bits()));
+    assert!(matches!(float, Value::F64(value) if value.to_bits() == (-0.0f64).to_bits()));
     assert_eq!(
         fields
             .iter()
@@ -269,7 +268,7 @@ fn preserves_float_sign_and_decimal_text_until_conversion() {
             .map(|(_, value)| value),
         Some(&Value::Decimal("1.2300".into()))
     );
-    let int_schema = schema(vec![Field::required("whole", SchemaType::Int)]);
+    let int_schema = schema(vec![Field::required("whole", SchemaType::I32)]);
     assert_eq!(
         decode_document("whole = 2147483648", &int_schema)
             .unwrap_err()
@@ -291,23 +290,23 @@ fn decodes_defaults_containers_choices_and_comments() {
             SchemaType::Struct {
                 name: "Layout".into(),
                 fields: vec![
-                    Field::required("width", SchemaType::Int),
-                    Field::with_default("height", SchemaType::Int, Value::Int(720)),
+                    Field::required("width", SchemaType::I32),
+                    Field::with_default("height", SchemaType::I32, Value::I32(720)),
                 ],
             },
-            Value::Record(vec![("width".into(), Value::Int(1280))]),
+            Value::Record(vec![("width".into(), Value::I32(1280))]),
         ),
         Field::required(
             "items",
             SchemaType::Collection {
-                element: Box::new(SchemaType::Int),
+                element: Box::new(SchemaType::I32),
             },
         ),
         Field::required(
             "scores",
             SchemaType::Map {
                 key: Box::new(SchemaType::String),
-                value: Box::new(SchemaType::Int),
+                value: Box::new(SchemaType::I32),
             },
         ),
         Field::required(
@@ -335,19 +334,19 @@ fn decodes_defaults_containers_choices_and_comments() {
             (
                 "layout".into(),
                 Value::Record(vec![
-                    ("width".into(), Value::Int(1280)),
-                    ("height".into(), Value::Int(720)),
+                    ("width".into(), Value::I32(1280)),
+                    ("height".into(), Value::I32(720)),
                 ]),
             ),
             (
                 "items".into(),
-                Value::Collection(vec![Value::Int(1), Value::Int(2)]),
+                Value::Collection(vec![Value::I32(1), Value::I32(2)]),
             ),
             (
                 "scores".into(),
                 Value::Map(vec![
-                    (Value::String("Priya".into()), Value::Int(10)),
-                    (Value::String("Rob".into()), Value::Int(12)),
+                    (Value::String("Priya".into()), Value::I32(10)),
+                    (Value::String("Rob".into()), Value::I32(12)),
                 ]),
             ),
             (
@@ -375,13 +374,13 @@ fn decodes_defaults_containers_choices_and_comments() {
         "layout",
         SchemaType::Record {
             fields: vec![
-                Field::required("width", SchemaType::Int),
-                Field::required("height", SchemaType::Int),
+                Field::required("width", SchemaType::I32),
+                Field::required("height", SchemaType::I32),
             ],
         },
         Value::Record(vec![
-            ("width".into(), Value::Int(1)),
-            ("height".into(), Value::Int(2)),
+            ("width".into(), Value::I32(1)),
+            ("height".into(), Value::I32(2)),
         ]),
     )]);
     assert_eq!(
@@ -394,7 +393,7 @@ fn decodes_defaults_containers_choices_and_comments() {
 
 #[test]
 fn rejects_numeric_categories_and_container_kind_changes() {
-    let int_schema = schema(vec![Field::required("value", SchemaType::Int)]);
+    let int_schema = schema(vec![Field::required("value", SchemaType::I32)]);
     assert_eq!(
         decode_document("1", &int_schema).unwrap_err().code,
         MonErrorCode::RootNotRecord
@@ -422,7 +421,7 @@ fn rejects_numeric_categories_and_container_kind_changes() {
         "value",
         SchemaType::Map {
             key: Box::new(SchemaType::String),
-            value: Box::new(SchemaType::Int),
+            value: Box::new(SchemaType::I32),
         },
     )]);
     assert_eq!(
@@ -433,7 +432,7 @@ fn rejects_numeric_categories_and_container_kind_changes() {
     let collection_schema = schema(vec![Field::required(
         "value",
         SchemaType::Collection {
-            element: Box::new(SchemaType::Int),
+            element: Box::new(SchemaType::I32),
         },
     )]);
     assert_eq!(
@@ -450,8 +449,8 @@ fn accepts_horizontal_whitespace_before_constructor_payloads_but_not_around_sepa
         SchemaType::Struct {
             name: "Size".into(),
             fields: vec![
-                Field::required("width", SchemaType::Int),
-                Field::required("height", SchemaType::Int),
+                Field::required("width", SchemaType::I32),
+                Field::required("height", SchemaType::I32),
             ],
         },
     )]);
@@ -460,8 +459,8 @@ fn accepts_horizontal_whitespace_before_constructor_payloads_but_not_around_sepa
         Ok(Value::Record(vec![(
             "size".into(),
             Value::Record(vec![
-                ("width".into(), Value::Int(1)),
-                ("height".into(), Value::Int(2)),
+                ("width".into(), Value::I32(1)),
+                ("height".into(), Value::I32(2)),
             ]),
         )]))
     );
@@ -540,8 +539,8 @@ fn typed_map_keys_keep_distinctions_and_first_duplicate_wins() {
     let int_key_schema = schema(vec![Field::required(
         "counts",
         SchemaType::Map {
-            key: Box::new(SchemaType::Int),
-            value: Box::new(SchemaType::Int),
+            key: Box::new(SchemaType::I32),
+            value: Box::new(SchemaType::I32),
         },
     )]);
     assert_eq!(
@@ -549,8 +548,8 @@ fn typed_map_keys_keep_distinctions_and_first_duplicate_wins() {
         Ok(Value::Record(vec![(
             "counts".into(),
             Value::Map(vec![
-                (Value::Int(1), Value::Int(10)),
-                (Value::Int(2), Value::Int(20)),
+                (Value::I32(1), Value::I32(10)),
+                (Value::I32(2), Value::I32(20)),
             ]),
         )]))
     );
@@ -576,16 +575,12 @@ fn typed_map_keys_keep_distinctions_and_first_duplicate_wins() {
     let tight_schema = schema(vec![Field::required(
         "counts",
         SchemaType::Map {
-            key: Box::new(SchemaType::Int),
-            value: Box::new(SchemaType::Int),
+            key: Box::new(SchemaType::I32),
+            value: Box::new(SchemaType::I32),
         },
     )]);
-    let map_key = PreparedType::Int {
-        width: IntWidth::Bits32,
-    };
-    let map_value = PreparedType::Int {
-        width: IntWidth::Bits32,
-    };
+    let map_key = PreparedType::Fixed(FixedScalar::I32);
+    let map_value = PreparedType::Fixed(FixedScalar::I32);
     let mut budget = BudgetState::new(tight_schema.limits());
     budget
         .charge_nodes(tight_schema.limits().max_nodes, None)
@@ -626,8 +621,8 @@ fn routes_qualified_struct_arguments_and_preserves_nested_map_paths() {
         SchemaType::Struct {
             name: "Size".into(),
             fields: vec![
-                Field::required("width", SchemaType::Int),
-                Field::required("height", SchemaType::Int),
+                Field::required("width", SchemaType::I32),
+                Field::required("height", SchemaType::I32),
             ],
         },
     )]);
@@ -636,8 +631,8 @@ fn routes_qualified_struct_arguments_and_preserves_nested_map_paths() {
         Ok(Value::Record(vec![(
             "size".into(),
             Value::Record(vec![
-                ("width".into(), Value::Int(1280)),
-                ("height".into(), Value::Int(720)),
+                ("width".into(), Value::I32(1280)),
+                ("height".into(), Value::I32(720)),
             ]),
         )]))
     );
@@ -655,7 +650,7 @@ fn routes_qualified_struct_arguments_and_preserves_nested_map_paths() {
                 "scores",
                 SchemaType::Map {
                     key: Box::new(SchemaType::String),
-                    value: Box::new(SchemaType::Int),
+                    value: Box::new(SchemaType::I32),
                 },
             )],
         },
@@ -691,7 +686,7 @@ fn rejects_duplicate_keys_and_invalid_unicode_at_their_spans() {
         "scores",
         SchemaType::Map {
             key: Box::new(SchemaType::String),
-            value: Box::new(SchemaType::Int),
+            value: Box::new(SchemaType::I32),
         },
     )]);
     let duplicate = decode_document(r#"scores = {"x" = 1, "x" = 2}"#, &map_schema)
@@ -732,7 +727,7 @@ break", letter = '\u{1F600}'"#,
 
 #[test]
 fn enforces_decoder_budgets_and_schema_eligibility() {
-    let numeric_schema = Schema::record(vec![Field::required("value", SchemaType::Int)])
+    let numeric_schema = Schema::record(vec![Field::required("value", SchemaType::I32)])
         .with_limits(Limits {
             max_numeric_digits: 2,
             ..Limits::default()
@@ -746,7 +741,7 @@ fn enforces_decoder_budgets_and_schema_eligibility() {
         MonErrorCode::NumericBudget
     );
 
-    let depth_schema = Schema::record(vec![Field::required("value", SchemaType::Int)])
+    let depth_schema = Schema::record(vec![Field::required("value", SchemaType::I32)])
         .with_limits(Limits {
             max_depth: 1,
             ..Limits::default()
@@ -762,8 +757,8 @@ fn enforces_decoder_budgets_and_schema_eligibility() {
 
     let default_schema = Schema::record(vec![Field::with_default(
         "value",
-        SchemaType::Int,
-        Value::Int(1),
+        SchemaType::I32,
+        Value::I32(1),
     )])
     .with_limits(Limits {
         max_default_expansions: 0,
@@ -789,7 +784,7 @@ fn enforces_decoder_budgets_and_schema_eligibility() {
     assert_eq!(unsupported.code, MonErrorCode::UnsupportedSchema);
 
     let depth_limited_schema = Schema::value(SchemaType::Collection {
-        element: Box::new(SchemaType::Int),
+        element: Box::new(SchemaType::I32),
     })
     .with_limits(Limits {
         max_depth: 0,
@@ -808,7 +803,7 @@ fn enforces_decoder_budgets_and_schema_eligibility() {
         .expect_err("prepared schema nodes must be bounded");
     assert_eq!(node_limited_schema.code, MonErrorCode::NodeBudget);
 
-    let name_budget_schema = Schema::record(vec![Field::required("long_name", SchemaType::Int)])
+    let name_budget_schema = Schema::record(vec![Field::required("long_name", SchemaType::I32)])
         .with_limits(Limits {
             max_decoded_bytes: 4,
             ..Limits::default()
@@ -822,8 +817,8 @@ fn enforces_decoder_budgets_and_schema_eligibility() {
         SchemaType::Record {
             fields: vec![Field::with_default(
                 "height",
-                SchemaType::Int,
-                Value::Int(720),
+                SchemaType::I32,
+                Value::I32(720),
             )],
         },
         Value::Record(Vec::new()),
@@ -869,7 +864,7 @@ fn enforces_decoder_budgets_and_schema_eligibility() {
     assert_eq!(numeric_default_budget.code, MonErrorCode::NumericBudget);
     let nested_optional = Schema::record(vec![Field::required(
         "value",
-        SchemaType::Optional(Box::new(SchemaType::Optional(Box::new(SchemaType::Int)))),
+        SchemaType::Optional(Box::new(SchemaType::Optional(Box::new(SchemaType::I32)))),
     )])
     .prepare()
     .expect_err("nested optional schemas must be rejected");
@@ -929,8 +924,8 @@ fn rejects_expressions_in_nested_literal_contexts() {
         );
     }
 
-    let int_schema = schema(vec![Field::required("value", SchemaType::Int)]);
-    for source in ["value = 1 + 2", "value = 1 as Int"] {
+    let int_schema = schema(vec![Field::required("value", SchemaType::I32)]);
+    for source in ["value = 1 + 2", "value = 1 as I32"] {
         assert_eq!(
             decode_document(source, &int_schema).unwrap_err().code,
             MonErrorCode::MissingComma,
@@ -941,20 +936,20 @@ fn rejects_expressions_in_nested_literal_contexts() {
     let record_schema = schema(vec![Field::required(
         "record",
         SchemaType::Record {
-            fields: vec![Field::required("value", SchemaType::Int)],
+            fields: vec![Field::required("value", SchemaType::I32)],
         },
     )]);
     let collection_schema = schema(vec![Field::required(
         "items",
         SchemaType::Collection {
-            element: Box::new(SchemaType::Int),
+            element: Box::new(SchemaType::I32),
         },
     )]);
     let map_schema = schema(vec![Field::required(
         "lookup",
         SchemaType::Map {
-            key: Box::new(SchemaType::Int),
-            value: Box::new(SchemaType::Int),
+            key: Box::new(SchemaType::I32),
+            value: Box::new(SchemaType::I32),
         },
     )]);
     let choice_schema = schema(vec![Field::required(
@@ -963,7 +958,7 @@ fn rejects_expressions_in_nested_literal_contexts() {
             name: "Theme".into(),
             variants: vec![Variant::payload(
                 "Payload",
-                vec![Field::required("value", SchemaType::Int)],
+                vec![Field::required("value", SchemaType::I32)],
             )],
         },
     )]);
@@ -973,7 +968,7 @@ fn rejects_expressions_in_nested_literal_contexts() {
         ("constant_reference", MonErrorCode::UnexpectedToken),
         ("1 + 2", MonErrorCode::MissingComma),
         ("foldable_call()", MonErrorCode::TypeMismatch),
-        ("1 as Int", MonErrorCode::MissingComma),
+        ("1 as I32", MonErrorCode::MissingComma),
         ("$\"template\"", MonErrorCode::UnexpectedToken),
         ("module.value", MonErrorCode::UnexpectedToken),
     ] {
@@ -1010,7 +1005,7 @@ fn duplicate_map_keys_compare_decoded_string_and_integer_values() {
         "values",
         SchemaType::Map {
             key: Box::new(SchemaType::String),
-            value: Box::new(SchemaType::Int),
+            value: Box::new(SchemaType::I32),
         },
     )]);
     let escaped_duplicate = decode_document(r#"values = {"x" = 1, "\u{78}" = 2}"#, &string_schema)
@@ -1020,8 +1015,8 @@ fn duplicate_map_keys_compare_decoded_string_and_integer_values() {
     let integer_schema = schema(vec![Field::required(
         "values",
         SchemaType::Map {
-            key: Box::new(SchemaType::Int),
-            value: Box::new(SchemaType::Int),
+            key: Box::new(SchemaType::I32),
+            value: Box::new(SchemaType::I32),
         },
     )]);
     let separated_duplicate = decode_document("values = {1000 = 1, 1_000 = 2}", &integer_schema)
@@ -1069,8 +1064,8 @@ fn wide_unique_map_decodes_in_insertion_order() {
     let schema = schema(vec![Field::required(
         "values",
         SchemaType::Map {
-            key: Box::new(SchemaType::Int),
-            value: Box::new(SchemaType::Int),
+            key: Box::new(SchemaType::I32),
+            value: Box::new(SchemaType::I32),
         },
     )]);
     let entries = (0..ENTRY_COUNT)
@@ -1086,12 +1081,12 @@ fn wide_unique_map_decodes_in_insertion_order() {
         panic!("values field is a map");
     };
     assert_eq!(entries.len(), ENTRY_COUNT);
-    assert_eq!(entries.first(), Some(&(Value::Int(0), Value::Int(0))));
+    assert_eq!(entries.first(), Some(&(Value::I32(0), Value::I32(0))));
     assert_eq!(
         entries.last(),
         Some(&(
-            Value::Int((ENTRY_COUNT - 1) as i64),
-            Value::Int((ENTRY_COUNT - 1) as i64),
+            Value::I32((ENTRY_COUNT - 1) as i32),
+            Value::I32((ENTRY_COUNT - 1) as i32),
         )),
     );
 }
@@ -1099,8 +1094,8 @@ fn wide_unique_map_decodes_in_insertion_order() {
 fn rejects_trailing_roots_and_closed_record_violations() {
     let schema = schema(vec![Field::with_default(
         "setting",
-        SchemaType::Int,
-        Value::Int(0),
+        SchemaType::I32,
+        Value::I32(0),
     )]);
 
     let trailing = decode_document("(setting = 1) (setting = 2)", &schema).unwrap_err();
@@ -1122,7 +1117,7 @@ fn rejects_bare_names_as_map_keys() {
         "scores",
         SchemaType::Map {
             key: Box::new(SchemaType::String),
-            value: Box::new(SchemaType::Int),
+            value: Box::new(SchemaType::I32),
         },
     )]);
     let error = decode_document("scores = {player = 10}", &schema)
@@ -1274,23 +1269,15 @@ fn fixed_binary_floats_round_once_and_keep_signed_zero() {
 }
 
 #[test]
-fn numeric_profile_selects_int_range_and_float_rounding() {
-    let int64_profile = NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: FloatPrecision::Bits64,
-    };
-    let int64 = Schema::record(vec![Field::required("value", SchemaType::Int)])
-        .with_profile(int64_profile)
-        .prepare()
-        .expect("Int64 profile schema prepares");
-    assert_eq!(int64.profile(), int64_profile);
+fn exact_scalar_selects_integer_range_and_float_rounding() {
+    let int64 = schema(vec![Field::required("value", SchemaType::I64)]);
     assert_eq!(
         decode_document("value = 9223372036854775807", &int64),
-        Ok(Value::Record(vec![("value".into(), Value::Int(i64::MAX),)]))
+        Ok(Value::Record(vec![("value".into(), Value::I64(i64::MAX),)]))
     );
     assert_eq!(
         decode_document("value = -9223372036854775808", &int64),
-        Ok(Value::Record(vec![("value".into(), Value::Int(i64::MIN),)]))
+        Ok(Value::Record(vec![("value".into(), Value::I64(i64::MIN),)]))
     );
     assert_eq!(
         decode_document("value = 9223372036854775808", &int64)
@@ -1299,29 +1286,21 @@ fn numeric_profile_selects_int_range_and_float_rounding() {
         MonErrorCode::NumericRange
     );
 
-    // The delivered default stays the Int32/Float64 boundary for standalone Rust consumers.
-    let standard = schema(vec![Field::required("value", SchemaType::Int)]);
-    assert_eq!(standard.profile(), NumericProfile::STANDARD);
+    // The I32 carrier rejects the value that the I64 carrier above accepts.
+    let int32 = schema(vec![Field::required("value", SchemaType::I32)]);
     assert_eq!(
-        decode_document("value = 2147483648", &standard)
+        decode_document("value = 2147483648", &int32)
             .unwrap_err()
             .code,
         MonErrorCode::NumericRange
     );
 
-    let float32_profile = NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: FloatPrecision::Bits32,
-    };
-    let float32 = Schema::record(vec![Field::required("value", SchemaType::Float)])
-        .with_profile(float32_profile)
-        .prepare()
-        .expect("Float32 profile schema prepares");
+    let float32 = schema(vec![Field::required("value", SchemaType::F32)]);
     assert_eq!(
         decode_document("value = 0.1", &float32),
         Ok(Value::Record(vec![(
             "value".into(),
-            Value::Float(f64::from(0.1f32)),
+            Value::F32(f64::from(0.1f32)),
         )]))
     );
     assert_eq!(
@@ -1331,19 +1310,13 @@ fn numeric_profile_selects_int_range_and_float_rounding() {
         MonErrorCode::NonFiniteFloat
     );
 
-    // Explicit-width members ignore the captured profile in both directions.
-    let explicit_under_float32 = Schema::record(vec![
+    // Explicit fixed members decode at their own exact widths.
+    let explicit = schema(vec![
         Field::required("fixed", SchemaType::F64),
         Field::required("wide", SchemaType::I64),
-    ])
-    .with_profile(float32_profile)
-    .prepare()
-    .expect("explicit widths prepare under any profile");
+    ]);
     assert_eq!(
-        decode_document(
-            "fixed = 0.1, wide = 9223372036854775807",
-            &explicit_under_float32
-        ),
+        decode_document("fixed = 0.1, wide = 9223372036854775807", &explicit),
         Ok(Value::Record(vec![
             ("fixed".into(), Value::F64(0.1)),
             ("wide".into(), Value::I64(i64::MAX)),
@@ -1357,7 +1330,7 @@ fn fixed_width_and_byte_map_keys_keep_distinct_families() {
         "values",
         SchemaType::Map {
             key: Box::new(SchemaType::Byte),
-            value: Box::new(SchemaType::Int),
+            value: Box::new(SchemaType::I32),
         },
     )]);
     assert_eq!(
@@ -1365,8 +1338,8 @@ fn fixed_width_and_byte_map_keys_keep_distinct_families() {
         Ok(Value::Record(vec![(
             "values".into(),
             Value::Map(vec![
-                (Value::Byte(0), Value::Int(1)),
-                (Value::Byte(255), Value::Int(2)),
+                (Value::Byte(0), Value::I32(1)),
+                (Value::Byte(255), Value::I32(2)),
             ]),
         )]))
     );
@@ -1419,13 +1392,13 @@ fn homogeneous_map_keys_reject_mismatched_decoded_literals() {
         (SchemaType::String, "values = {1 = 10}"),
         (SchemaType::Bool, "values = {1 = 10}"),
         (SchemaType::Char, r#"values = {"a" = 10}"#),
-        (SchemaType::Int, "values = {true = 10}"),
+        (SchemaType::I32, "values = {true = 10}"),
     ] {
         let schema = schema(vec![Field::required(
             "values",
             SchemaType::Map {
                 key: Box::new(key_type.clone()),
-                value: Box::new(SchemaType::Int),
+                value: Box::new(SchemaType::I32),
             },
         )]);
         let error = decode_document(source, &schema)
@@ -1502,7 +1475,7 @@ fn explicit_width_numerics_keep_the_existing_budgets() {
     );
 
     // The field label costs one byte at preparation; the literal's retained magnitude scratch is
-    // then charged before it is reserved, exactly as it is for the profile numerics.
+    // then charged before it is reserved, exactly as it is for every other numeric literal.
     let byte_limited = Schema::record(vec![Field::required("v", SchemaType::F16)])
         .with_limits(Limits {
             max_decoded_bytes: 1,
@@ -1551,7 +1524,7 @@ fn reserved_name_error(source: &str, name: &str, path: Vec<PathSegment>, schema:
 
 #[test]
 fn rejects_reserved_labels_qualifiers_and_variants_but_keeps_literal_data() {
-    let scalar_schema = schema(vec![Field::required("value", SchemaType::Int)]);
+    let scalar_schema = schema(vec![Field::required("value", SchemaType::I32)]);
     let reserved_names = [
         "if", "__LoOp", "_U64", "dec01", "dec257", "true", "false", "none",
     ];
@@ -1570,7 +1543,7 @@ fn rejects_reserved_labels_qualifiers_and_variants_but_keeps_literal_data() {
         "value",
         SchemaType::Struct {
             name: "Box".into(),
-            fields: vec![Field::required("inner", SchemaType::Int)],
+            fields: vec![Field::required("inner", SchemaType::I32)],
         },
     )]);
     for name in reserved_names {
@@ -1617,7 +1590,7 @@ fn rejects_reserved_labels_qualifiers_and_variants_but_keeps_literal_data() {
             "lookup",
             SchemaType::Map {
                 key: Box::new(SchemaType::String),
-                value: Box::new(SchemaType::Int),
+                value: Box::new(SchemaType::I32),
             },
         ),
     ]);
@@ -1631,17 +1604,17 @@ fn rejects_reserved_labels_qualifiers_and_variants_but_keeps_literal_data() {
             (
                 "lookup".into(),
                 Value::Map(vec![
-                    (Value::String("true".into()), Value::Int(1)),
-                    (Value::String("if".into()), Value::Int(2)),
+                    (Value::String("true".into()), Value::I32(1)),
+                    (Value::String("if".into()), Value::I32(2)),
                 ]),
             ),
         ]))
     );
 
     let ordinary_schema = schema(vec![
-        Field::required("DecBox", SchemaType::Int),
-        Field::required("configuration", SchemaType::Int),
-        Field::required("_configuration", SchemaType::Int),
+        Field::required("DecBox", SchemaType::I32),
+        Field::required("configuration", SchemaType::I32),
+        Field::required("_configuration", SchemaType::I32),
     ]);
     assert_eq!(
         decode_document(
@@ -1649,9 +1622,9 @@ fn rejects_reserved_labels_qualifiers_and_variants_but_keeps_literal_data() {
             &ordinary_schema
         ),
         Ok(Value::Record(vec![
-            ("DecBox".into(), Value::Int(1)),
-            ("configuration".into(), Value::Int(2)),
-            ("_configuration".into(), Value::Int(3)),
+            ("DecBox".into(), Value::I32(1)),
+            ("configuration".into(), Value::I32(2)),
+            ("_configuration".into(), Value::I32(3)),
         ]))
     );
 }
@@ -1659,10 +1632,10 @@ fn rejects_reserved_labels_qualifiers_and_variants_but_keeps_literal_data() {
 #[test]
 fn named_entries_reject_a_line_break_before_equals_and_accept_other_layout() {
     let fields_schema = schema(vec![
-        Field::required("first", SchemaType::Int),
-        Field::required("later", SchemaType::Int),
+        Field::required("first", SchemaType::I32),
+        Field::required("later", SchemaType::I32),
     ]);
-    let first_schema = schema(vec![Field::required("first", SchemaType::Int)]);
+    let first_schema = schema(vec![Field::required("first", SchemaType::I32)]);
 
     for source in [
         "first\n = 1",
@@ -1684,7 +1657,7 @@ fn named_entries_reject_a_line_break_before_equals_and_accept_other_layout() {
     let nested_schema = schema(vec![Field::required(
         "outer",
         SchemaType::Record {
-            fields: vec![Field::required("inner", SchemaType::Int)],
+            fields: vec![Field::required("inner", SchemaType::I32)],
         },
     )]);
     let nested_source = "outer = (inner\n = 1)";
@@ -1704,7 +1677,7 @@ fn named_entries_reject_a_line_break_before_equals_and_accept_other_layout() {
         "box",
         SchemaType::Struct {
             name: "Box".into(),
-            fields: vec![Field::required("inner", SchemaType::Int)],
+            fields: vec![Field::required("inner", SchemaType::I32)],
         },
     )]);
     let payload_source = "box = Box(inner\r\n = 1)";
@@ -1724,23 +1697,23 @@ fn named_entries_reject_a_line_break_before_equals_and_accept_other_layout() {
     assert_eq!(
         decode_document(source, &fields_schema),
         Ok(Value::Record(vec![
-            ("first".into(), Value::Int(1)),
-            ("later".into(), Value::Int(2)),
+            ("first".into(), Value::I32(1)),
+            ("later".into(), Value::I32(2)),
         ]))
     );
     let source = "(\nfirst = 1,\nlater \t= \n2,\n)";
     assert_eq!(
         decode_document(source, &fields_schema),
         Ok(Value::Record(vec![
-            ("first".into(), Value::Int(1)),
-            ("later".into(), Value::Int(2)),
+            ("first".into(), Value::I32(1)),
+            ("later".into(), Value::I32(2)),
         ]))
     );
 }
 
 #[test]
 fn named_entries_accept_all_horizontal_whitespace_before_equals() {
-    let first_schema = schema(vec![Field::required("first", SchemaType::Int)]);
+    let first_schema = schema(vec![Field::required("first", SchemaType::I32)]);
 
     for whitespace in [
         "\t", "\u{000b}", "\u{000c}", "\u{0085}", "\u{2028}", "\u{2029}",
@@ -1748,7 +1721,7 @@ fn named_entries_accept_all_horizontal_whitespace_before_equals() {
         let source = format!("first{whitespace}= 1");
         assert_eq!(
             decode_document(&source, &first_schema),
-            Ok(Value::Record(vec![("first".into(), Value::Int(1))])),
+            Ok(Value::Record(vec![("first".into(), Value::I32(1))])),
             "{source:?}"
         );
     }
@@ -1756,7 +1729,7 @@ fn named_entries_accept_all_horizontal_whitespace_before_equals() {
 
 #[test]
 fn equals_spacing_errors_report_missing_sides_at_equals() {
-    let named_schema = schema(vec![Field::required("first", SchemaType::Int)]);
+    let named_schema = schema(vec![Field::required("first", SchemaType::I32)]);
     let named_cases = [
         ("first= 1", "before"),
         ("first =1", "after"),
@@ -1790,7 +1763,7 @@ fn equals_spacing_errors_report_missing_sides_at_equals() {
         "items",
         SchemaType::Map {
             key: Box::new(SchemaType::String),
-            value: Box::new(SchemaType::Int),
+            value: Box::new(SchemaType::I32),
         },
     )]);
     let map_cases = [
@@ -1844,12 +1817,12 @@ fn constructor_payload_heads_only_accept_horizontal_whitespace() {
         "box",
         SchemaType::Struct {
             name: "Box".into(),
-            fields: vec![Field::required("inner", SchemaType::Int)],
+            fields: vec![Field::required("inner", SchemaType::I32)],
         },
     )]);
     let expected_nominal = Value::Record(vec![(
         "box".into(),
-        Value::Record(vec![("inner".into(), Value::Int(1))]),
+        Value::Record(vec![("inner".into(), Value::I32(1))]),
     )]);
 
     for whitespace in [
@@ -1882,7 +1855,7 @@ fn constructor_payload_heads_only_accept_horizontal_whitespace() {
             name: "Theme".into(),
             variants: vec![
                 Variant::unit("Ready"),
-                Variant::payload("Pair", vec![Field::required("inner", SchemaType::Int)]),
+                Variant::payload("Pair", vec![Field::required("inner", SchemaType::I32)]),
             ],
         },
     )]);
@@ -1891,7 +1864,7 @@ fn constructor_payload_heads_only_accept_horizontal_whitespace() {
         Value::Choice {
             qualifier: Some("Theme".into()),
             variant: "Pair".into(),
-            fields: vec![("inner".into(), Value::Int(1))],
+            fields: vec![("inner".into(), Value::I32(1))],
         },
     )]);
 
@@ -1927,7 +1900,7 @@ fn constructor_payload_heads_only_accept_horizontal_whitespace() {
 
 #[test]
 fn named_entries_reject_lf_cr_and_crlf_before_equals() {
-    let first_schema = schema(vec![Field::required("first", SchemaType::Int)]);
+    let first_schema = schema(vec![Field::required("first", SchemaType::I32)]);
 
     for line_break in ["\n", "\r", "\r\n"] {
         let source = format!("first{line_break} = 1");
@@ -1945,7 +1918,7 @@ fn named_entries_reject_lf_cr_and_crlf_before_equals() {
 
 #[test]
 fn literal_and_constructor_error_spans_end_at_their_syntax() {
-    let integer_schema = schema(vec![Field::required("value", SchemaType::Int)]);
+    let integer_schema = schema(vec![Field::required("value", SchemaType::I32)]);
     for (separator, suffix) in [
         (" ", ","),
         ("\t", ","),
@@ -1960,7 +1933,7 @@ fn literal_and_constructor_error_spans_end_at_their_syntax() {
             format!("(value = Theme::Ready{separator})")
         };
         let error =
-            decode_document(&source, &integer_schema).expect_err("choice cannot inhabit Int");
+            decode_document(&source, &integer_schema).expect_err("choice cannot inhabit I32");
         assert_eq!(error.code, MonErrorCode::TypeMismatch, "{source:?}");
         assert_eq!(
             error.span,
@@ -1977,7 +1950,7 @@ fn literal_and_constructor_error_spans_end_at_their_syntax() {
         "value = Box (inner = 1),",
     ] {
         let error =
-            decode_document(source, &integer_schema).expect_err("constructor cannot inhabit Int");
+            decode_document(source, &integer_schema).expect_err("constructor cannot inhabit I32");
         assert_eq!(error.code, MonErrorCode::TypeMismatch, "{source:?}");
         let start = source
             .find("Theme::Pair")

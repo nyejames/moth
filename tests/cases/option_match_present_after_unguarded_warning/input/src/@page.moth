@@ -1,4 +1,4 @@
-value Int? = 5
+value I32? = 5
 result ~= "unset"
 
 if value is:

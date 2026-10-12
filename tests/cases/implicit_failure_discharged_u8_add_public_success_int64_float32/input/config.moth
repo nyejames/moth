@@ -1,5 +1,0 @@
-project #= (
-    name = "implicit_failure_discharged_u8_add_public_success_int64_float32",
-    entry_root = "src",
-)
-html #= ()

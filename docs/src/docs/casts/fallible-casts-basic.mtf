@@ -1,26 +1,13 @@
-Some conversions can fail. Text might not contain a number and a `Float` might
-not fit inside `Int`.
+Some conversions fail. Text may not contain a valid number, an integer may
+not fit its target and a rounded binary-float result may not stay finite.
 
-Use `cast!` with a compatible builtin `Error!` return path:
-
-[codeblock, $code("moth"):
-    parse_count |text String| -> Int, Error!:
-        return cast! text
-    ;
-]
-
-Use `catch` when this part of the program has a sensible fallback:
+Use `catch` when this expression needs a local fallback:
 
 [codeblock, $code("moth"):
-    count Int = cast text catch:
-        then 0
-    ;
+    count I32 = cast text catch then 0
 ]
 
-Choose one path. A cast cannot use `!` and `catch` at the same time.
-
-The handler covers both the conversion and evaluation of its operand. Arithmetic
-and builtin `Error!` calls inside that operand can share the handler:
+The handler protects the conversion and evaluation of its operand:
 
 [codeblock, $code("moth"):
     narrow |left U32, right U32| -> U8:
@@ -29,16 +16,16 @@ and builtin `Error!` calls inside that operand can share the handler:
     ;
 ]
 
-This recovers addition overflow as well as a result that does not fit `U8`.
-Parentheses are not required. A bound error name has type `Error`; typed errors
-keep their original message and code. Custom errors cannot mix with these
-built-in failures.
+This catches `U32` addition overflow and failure to convert the result to
+`U8`. A conversion failure follows the ordinary implicit or typed error path
+when no local handler catches it. A custom error slot never receives built-in
+failure without explicit mapping.
 
-A catch does not make an unsupported conversion valid. Numeric work known to
-be invalid still produces a compile-time diagnostic. See @../progress (Progress)
-for current support.
+Precision loss alone does not fail binary-float narrowing. The conversion
+rounds directly to the destination and fails only if that rounded result is
+non-finite. Binary-float-to-integer conversion truncates towards zero, then checks
+the target range.
 
-Converting to a narrower binary float is not automatically a failure. It fails
-only when the rounded result is not finite, so losing precision is not an error
-by itself. Converting a float to an integer is different: it truncates toward
-zero and then checks the integer's range, so a value outside that range fails.
+A catch cannot legalise an unsupported conversion or statically invalid
+numeric work. See @./#fallible-casts (Fallible casts) for evidence and
+compatibility rules.

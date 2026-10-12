@@ -234,6 +234,7 @@ mod tests {
     };
     use crate::compiler_frontend::semantic_identity::ModuleRootRole;
     use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
+    use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
     fn span(byte_offset: i32) -> Option<SourceSpan> {
         let mut extended = ExtendedSpanBuilder::default();
@@ -250,8 +251,11 @@ mod tests {
         );
         ProjectGlobalsFieldInput::new(
             name,
-            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
-            PublicFoldedValue::Int(i64::from(line)),
+            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(FixedScalar::I32)),
+            PublicFoldedValue::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, i64::from(line))
+                    .expect("test project-global line fits I32"),
+            ),
             span(line),
             BuildConfigFingerprint(fingerprint),
             SyntheticInterfaceProvenance::single(member),

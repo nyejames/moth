@@ -18,8 +18,15 @@ fraction F32 = identity_f32(0.1)
 rounded F32 = load_f32() catch:
     then 0.0
 ;
+-- The glue forwards the raw host payload, so the shared float guard needs a declared builtin
+-- `Error!` receiving boundary: this helper owns the guard's recoverable 304 delivery, while the
+-- synthetic entry's own float integrity guard stays trap-only.
+overflow_boundary || -> F32, Error!:
+    return overflow_f32()!
+;
+
 boundary_code ~U32 = 0
-recovered F32 = overflow_f32() catch |boundary_error|:
+recovered F32 = overflow_boundary() catch |boundary_error|:
     boundary_code = boundary_error.code
     then 0.0
 ;
@@ -27,7 +34,7 @@ maximum_matches = is_max_u32(maximum)
 loaded_matches = is_max_u32(loaded)
 fraction_matches = is_tenth_f32(fraction)
 rounded_matches = is_tenth_f32(rounded)
-native_int Int = identity_int(17)
-native_uint Uint = identity_uint(18)
-native_float Float = identity_float(1.5)
+native_int I64 = identity_int(17)
+native_uint U64 = identity_uint(18)
+native_float F32 = identity_float(1.5)
 [:fixed scalar zero=[zero] maximum=[maximum_matches] loaded=[loaded_matches] f32=[fraction_matches]/[rounded_matches] overflow=[boundary_code] native=[native_int]/[native_uint]/[native_float]]

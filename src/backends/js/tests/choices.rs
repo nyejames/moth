@@ -382,18 +382,18 @@ fn relational_match_patterns_emit_correct_js_operators() {
         HirBlock {
             id: BlockId(0),
             region: RegionId(0),
-            locals: vec![local(0, types.int, RegionId(0))],
+            locals: vec![local(0, types.i32, RegionId(0))],
             statements: vec![statement(
                 1,
                 HirStatementKind::Write {
                     target: HirWriteTarget::DefineLocal(LocalId(0)),
-                    value: int_expression(5, types.int, RegionId(0), &mut expressions),
+                    value: i32_expression(5, types.i32, RegionId(0), &mut expressions),
                 },
             )],
             terminator: HirTerminator::Match {
                 scrutinee: expression(
                     HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-                    types.int,
+                    types.i32,
                     RegionId(0),
                     ValueKind::Place,
                     &mut expressions,
@@ -402,7 +402,7 @@ fn relational_match_patterns_emit_correct_js_operators() {
                     HirMatchArm {
                         pattern: HirPattern::Relational {
                             op: HirRelationalPatternOp::LessThan,
-                            value: int_expression(10, types.int, RegionId(0), &mut expressions),
+                            value: i32_expression(10, types.i32, RegionId(0), &mut expressions),
                         },
                         guard: None,
                         body: BlockId(1),
@@ -410,7 +410,7 @@ fn relational_match_patterns_emit_correct_js_operators() {
                     HirMatchArm {
                         pattern: HirPattern::Relational {
                             op: HirRelationalPatternOp::LessThanOrEqual,
-                            value: int_expression(20, types.int, RegionId(0), &mut expressions),
+                            value: i32_expression(20, types.i32, RegionId(0), &mut expressions),
                         },
                         guard: None,
                         body: BlockId(2),
@@ -418,7 +418,7 @@ fn relational_match_patterns_emit_correct_js_operators() {
                     HirMatchArm {
                         pattern: HirPattern::Relational {
                             op: HirRelationalPatternOp::GreaterThan,
-                            value: int_expression(30, types.int, RegionId(0), &mut expressions),
+                            value: i32_expression(30, types.i32, RegionId(0), &mut expressions),
                         },
                         guard: None,
                         body: BlockId(3),
@@ -426,7 +426,7 @@ fn relational_match_patterns_emit_correct_js_operators() {
                     HirMatchArm {
                         pattern: HirPattern::Relational {
                             op: HirRelationalPatternOp::GreaterThanOrEqual,
-                            value: int_expression(40, types.int, RegionId(0), &mut expressions),
+                            value: i32_expression(40, types.i32, RegionId(0), &mut expressions),
                         },
                         guard: None,
                         body: BlockId(4),

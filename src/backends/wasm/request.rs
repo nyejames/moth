@@ -7,7 +7,6 @@ use crate::backends::structural_string::StructuralStringUrlMap;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::hir::reachability::HirBackendSelection;
-use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 #[derive(Debug, Clone, Default)]
@@ -32,10 +31,6 @@ pub(crate) struct WasmBackendRequest {
     /// Builder-rendered text for structural strings in this physical output variant.
     pub(crate) structural_string_urls: Option<Arc<StructuralStringUrlMap>>,
     pub function_emission_policy: WasmFunctionEmissionPolicy,
-    /// Compiler-owned numeric widths for this compilation boundary.
-    ///
-    /// WHY: scalar carriers and conversions consume the boundary profile selected before typing.
-    pub numeric_profile: NumericProfile,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

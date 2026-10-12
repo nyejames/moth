@@ -1,0 +1,37 @@
+-- Every independent natural producer fact must settle before the cycle default.
+
+read_u64 |value U64| -> U64:
+    return value
+;
+
+render_late || -> String, Error!:
+    left = 4_294_967_296
+    right = 1
+    values ~= {1}
+    ~values.push(values.get(0)! + 1)
+    ~values.push(left + right)
+    left_text String = cast read_u64(left)
+    right_text String = cast read_u64(right)
+    first = values.get(0)!
+    second = values.get(1)!
+    third = values.get(2)!
+    return [:first=[first] second=[second] third=[third] left=[left_text] right=[right_text]]
+;
+
+render_early || -> String, Error!:
+    left = 4_294_967_296
+    right = 1
+    values ~= {1}
+    ~values.push(left + right)
+    ~values.push(values.get(0)! + 1)
+    left_text String = cast read_u64(left)
+    right_text String = cast read_u64(right)
+    first = values.get(0)!
+    second = values.get(1)!
+    third = values.get(2)!
+    return [:first=[first] second=[second] third=[third] left=[left_text] right=[right_text]]
+;
+
+late_text = render_late() catch then "failed"
+early_text = render_early() catch then "failed"
+[:cyclic_producer_order late=[late_text] early=[early_text]]

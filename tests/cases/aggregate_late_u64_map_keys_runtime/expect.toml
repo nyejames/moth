@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "late_u64_map top=9 below=7 len=2 top_found=true lower_found=false"

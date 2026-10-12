@@ -1,5 +1,5 @@
 @nominal_provider limits
 
-consume || -> Int:
+consume || -> I32:
     return copy limits.inner.maximum + 1
 ;

@@ -1,0 +1,48 @@
+-- Optional scalar storage keeps annotated, aliased and directed payloads exact.
+-- Pending literal origins take their I32 or U64 type from the annotation or
+-- receiver that reaches them. Presence and payload are read by full match.
+
+wrap type T |value T| -> T?:
+    return value
+;
+read_i32 |value I32| -> String:
+    return cast value
+;
+read_u64 |value U64| -> String:
+    return cast value
+;
+read_optional_i32 |value I32?| -> String:
+    return if value is:
+        |present| => then read_i32(present)
+        none => then "none"
+    ;
+;
+read_optional_u64 |value U64?| -> String:
+    return if value is:
+        |present| => then read_u64(present)
+        none => then "none"
+    ;
+;
+
+annotated I32? = 21
+annotated_text = read_optional_i32(annotated)
+
+alias_origin = 22
+alias_scalar I32? = alias_origin
+alias_text = read_optional_i32(alias_scalar)
+
+origin = 22
+directed I32? = origin + 1
+directed_text = read_optional_i32(directed)
+directed_capture String = if directed is |present| then read_i32(present) else "none"
+
+absent_scalar I32? = none
+absent_text = read_optional_i32(absent_scalar)
+
+raw_wide U64? = 4294967335
+raw_wide_text = read_optional_u64(raw_wide)
+wide_origin = 4294967334
+wide_alias U64? = wide_origin
+wide_alias_text = read_optional_u64(wide_alias)
+
+[:optional-scalar-storage annotated=[annotated_text] alias=[alias_text] directed=[directed_text] directed_capture=[directed_capture] absent=[absent_text] raw_wide=[raw_wide_text] wide_alias=[wide_alias_text]]

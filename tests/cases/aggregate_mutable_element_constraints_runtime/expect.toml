@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "mutable_element before=1 removed=2 first=18446744073709551614 last=18446744073709551615 len=2"

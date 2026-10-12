@@ -1,0 +1,12 @@
+retain_u8 |value U8| -> U8:
+    return value
+;
+
+-- The U8 parameter constrains the named binding. Each wider receiver reaches
+-- its raw 300 leaf through grouping without changing that named operand.
+small = 200
+narrow = retain_u8(small)
+left U16 = (small + 300)
+right U16 = (300 + small)
+
+[:scalar literal receiver overrides peer narrow=[narrow] sums=[left]/[right]]

@@ -1,0 +1,43 @@
+wrap type T |value T| -> T?:
+    return value
+;
+read_u64 |value U64| -> String:
+    return cast value
+;
+inline_origin = wrap(4294967312)
+inline_text String = if inline_origin is |payload| then read_u64(payload) else "none"
+block_origin = wrap(4294967313)
+block_text String = if block_origin is |payload|:
+    then read_u64(payload)
+else
+    then "none"
+;
+full_origin = wrap(4294967314)
+full_text String = if full_origin is:
+    |payload| => then read_u64(payload)
+    none => then "none"
+;
+statement_origin = wrap(4294967315)
+statement_text ~= "none"
+if statement_origin is |payload|:
+    statement_text = read_u64(payload)
+;
+template_origin = wrap(4294967316)
+template_text = [:
+    [if template_origin is |payload|:
+        [read_u64(payload)]
+    ]
+]
+exact_origin = wrap(4294967317)
+exact_text String = if exact_origin is:
+    4294967317 => then "equal"
+    |payload| => then read_u64(payload)
+    none => then "none"
+;
+relational_origin = wrap(4294967318)
+relational_text String = if relational_origin is:
+    < 4294967319 => then "less"
+    |payload| => then read_u64(payload)
+    none => then "none"
+;
+[:retained-optional-subject inline=[inline_text] block=[block_text] full=[full_text] statement=[statement_text] template=[template_text] exactequal=[exact_text] relational=[relational_text]]

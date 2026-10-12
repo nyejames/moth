@@ -1,5 +1,5 @@
 MEASURABLE must:
-    measure |This| -> Int
+    measure |This| -> I32
 ;
 
 Label = |

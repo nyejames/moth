@@ -33,6 +33,7 @@ use crate::compiler_frontend::ast::templates::top_level_templates::{
 use crate::compiler_frontend::ast::{
     Ast, AstBuildResult, AstChoiceDefinition, AstPublicInterfaceProjectionInput,
 };
+use crate::compiler_frontend::builtins::casts::targets::BuiltinCastFallibility;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
@@ -44,8 +45,11 @@ use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::traits::environment::CoreTraitKind;
+use crate::compiler_frontend::traits::evidence::environment::InfallibleCastEvidenceContract;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use crate::timing_scope_attributed_opt;
+use rustc_hash::FxHashMap;
 use std::rc::Rc;
 
 #[cfg(debug_assertions)]
@@ -114,7 +118,6 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             &mut emitted.ast,
             string_table,
             self.context.template_const_loop_iteration_limit,
-            self.context.numeric_profile,
             Rc::clone(&self.context.template_ir_store),
         )
         .map_err(TemplateNormalizationError::from)
@@ -215,7 +218,6 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             &const_values,
             Rc::clone(&self.context.template_ir_store),
             string_table,
-            self.context.numeric_profile,
         )
         .map_err(|error| {
             self.template_normalization_error_messages(error, &emitted.warnings, string_table)
@@ -288,14 +290,14 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             &const_values,
             Rc::clone(&self.context.template_ir_store),
             string_table,
-            self.context.numeric_profile,
         )
         .map_err(|error| {
             self.template_normalization_error_messages(error, &emitted.warnings, string_table)
         })?;
         specialization.merge(template_specialization);
-        emitted.deferred_generic_requests =
-            specialization.commit_active_generic_requests(emitted.deferred_generic_requests);
+        let deferred_generic_requests = specialization
+            .commit_active_generic_requests(std::mem::take(&mut emitted.deferred_generic_requests))
+            .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
         self.validate_specialized_function_terminality(
             &emitted.ast,
             start_function_path,
@@ -308,9 +310,13 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             &emitted.warnings,
             string_table,
         )?;
+        let infallible_cast_evidence = self
+            .collect_infallible_cast_evidence(&emitted.ast)
+            .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
         self.validate_generic_builtin_failure_boundaries(
             &emitted.validated_generic_template_bodies,
             &emitted.ast,
+            &infallible_cast_evidence,
             &emitted.warnings,
             string_table,
         )?;
@@ -336,7 +342,6 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             string_table,
             &const_values,
             Rc::clone(&self.context.template_ir_store),
-            self.context.numeric_profile,
         )
         .collect(&const_values, &emitted.ast, start_function_path.as_ref())
         .map_err(|error| {
@@ -386,7 +391,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         let retain_materialisation_context = match materialisation_retention {
             MaterialisationContextRetention::Always => true,
             MaterialisationContextRetention::ForDeferredRequests => {
-                !emitted.deferred_generic_requests.is_empty()
+                !deferred_generic_requests.is_empty()
             }
         };
         let materialisation_context = if retain_materialisation_context {
@@ -420,7 +425,6 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                         .as_ref()
                         .map(|services| Rc::clone(&services.module_resources)),
                     string_table,
-                    numeric_profile: self.context.numeric_profile,
                     template_const_loop_iteration_limit: self
                         .context
                         .template_const_loop_iteration_limit,
@@ -501,12 +505,13 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 type_environment,
                 const_facts,
                 imported_functions_by_local_path: owned_lookups.imported_functions_by_local_path,
+                infallible_cast_evidence,
                 static_if_function_provenance,
             },
             module_resources,
             public_interface_projection_input,
             materialisation_context,
-            deferred_generic_requests: emitted.deferred_generic_requests,
+            deferred_generic_requests,
         })
     }
 
@@ -566,12 +571,89 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         }
     }
 
-    /// Validate dormant contracts against the closed facts of every retained local typed body.
-    /// Template verdicts remain AST-local; concrete instances still undergo HIR convergence.
+    /// Evidence owns the requirement method identity. Generic instances are direct children of
+    /// their retained template path, including generated sidecars' `__generated_instance`.
+    fn collect_infallible_cast_evidence(
+        &self,
+        concrete_nodes: &[crate::compiler_frontend::ast::ast_nodes::AstNode],
+    ) -> Result<FxHashMap<PathId, InfallibleCastEvidenceContract>, CompilerError> {
+        let lookups = &self.environment.lookups;
+        let mut contracts = FxHashMap::default();
+        for evidence in lookups.trait_evidence_environment.canonical_evidence() {
+            if !matches!(
+                lookups.trait_environment.core_trait_kind(evidence.trait_id),
+                Some(CoreTraitKind::Castable {
+                    fallibility: BuiltinCastFallibility::Infallible,
+                    ..
+                })
+            ) {
+                continue;
+            }
+            let definition = lookups
+                .trait_environment
+                .get(evidence.trait_id)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error("Canonical cast evidence has no resolved trait.")
+                })?;
+            let target_name = self
+                .environment
+                .type_environment
+                .nominal_path(evidence.target_type_id)
+                .and_then(|path| self.path_fork.component(*path))
+                .ok_or_else(|| {
+                    CompilerError::compiler_error("Canonical cast evidence has no nominal name.")
+                })?;
+            for mapping in &evidence.requirements {
+                let requirement = definition
+                    .requirements
+                    .iter()
+                    .find(|requirement| requirement.id == mapping.requirement_id)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Canonical cast evidence has no resolved requirement.",
+                        )
+                    })?;
+                contracts.insert(
+                    mapping.method_path,
+                    InfallibleCastEvidenceContract {
+                        target_name,
+                        trait_name: definition.name,
+                        requirement_name: requirement.name,
+                        span: evidence.declaration_span,
+                    },
+                );
+            }
+        }
+        // Generated evidence can still name the template. Carry its obligation onto each
+        // emitted concrete instance without replacing any directly selected method mapping.
+        for node in concrete_nodes {
+            let NodeKind::Function(path, _, _) = &node.kind else {
+                continue;
+            };
+            let Some(template_path) = self.path_fork.parent(*path) else {
+                continue;
+            };
+            if !lookups
+                .generic_function_templates_by_path
+                .contains_key(&template_path)
+            {
+                continue;
+            }
+            if let Some(contract) = contracts.get(&template_path).copied() {
+                contracts.entry(*path).or_insert(contract);
+            }
+        }
+        Ok(contracts)
+    }
+
+    /// Validate dormant contracts after AST-local call and catch dependencies reach closure.
+    /// Empty provisional facts cannot discharge evidence or prune recovery. Concrete instances
+    /// still undergo HIR convergence independently of these retained template verdicts.
     fn validate_generic_builtin_failure_boundaries(
         &self,
         nodes: &[crate::compiler_frontend::ast::ast_nodes::AstNode],
         concrete_nodes: &[crate::compiler_frontend::ast::ast_nodes::AstNode],
+        infallible_cast_evidence: &FxHashMap<PathId, InfallibleCastEvidenceContract>,
         warnings: &[CompilerDiagnostic],
         string_table: &StringTable,
     ) -> Result<(), CompilerMessages> {
@@ -596,6 +678,17 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             let Some(pending) = summaries.function_facts(*path) else {
                 continue;
             };
+            if let Some(contract) = infallible_cast_evidence.get(path)
+                && let Some(contributor) = summaries.first_active(&pending.body.implicit)
+            {
+                let witness = summaries.witness(contributor);
+                return Err(CompilerMessages::from_diagnostic_with_warnings(
+                    CompilerDiagnostic::infallible_cast_evidence_failure(contract, &witness),
+                    warnings.to_owned(),
+                    string_table,
+                )
+                .with_type_context_for_all_diagnostics(self.environment.type_environment.clone()));
+            }
             for check in &pending.body.deferred_custom_catches {
                 let candidate = check
                     .candidates

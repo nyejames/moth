@@ -1,4 +1,4 @@
-non_negative |count Int| -> Int, Error!:
+non_negative |count I32| -> I32, Error!:
     if count < 0:
         return! Error("negative")
     ;

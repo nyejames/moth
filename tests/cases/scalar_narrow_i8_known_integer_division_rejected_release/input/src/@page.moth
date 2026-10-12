@@ -1,0 +1,10 @@
+-- Known invalid narrow work diagnoses at compile time: I8 minimum // -1
+-- overflows at the selected I8 width. The explicit #I8 bindings are source
+-- constants, so the division folds and diagnoses at the authored operation.
+-- The paired remainder stays zero and is covered at runtime by
+-- scalar_narrow_i8_runtime_checked_failures.
+minimum #I8 = -128
+minus_one #I8 = -1
+quotient #I8 = minimum // minus_one
+
+[:unreachable]

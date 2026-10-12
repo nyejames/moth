@@ -13,7 +13,7 @@ bound_value = 1 + 2 catch |err|:
     then 0
 ;
 
-three |left Int, right Int| -> Int, DomainError!:
+three |left I32, right I32| -> I32, DomainError!:
     value = 1 + 2 catch:
         then left * right
     ;

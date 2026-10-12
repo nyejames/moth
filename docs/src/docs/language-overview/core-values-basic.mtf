@@ -1,4 +1,4 @@
-Moth can usually work out a value's type from the value itself.
+Moth can usually work out a value's type from its initializer.
 
 [codeblock, $code("moth"):
     enabled = true
@@ -8,20 +8,31 @@ Moth can usually work out a value's type from the value itself.
     name = "Moth"
 ]
 
-You can write the type when it helps the reader or gives the compiler needed
+You can write a type when it helps the reader or gives the compiler needed
 context:
 
 [codeblock, $code("moth"):
-    count Int = 42
-    ratio Float = 0.5
+    count I32 = 42
+    ratio F64 = 0.5
     name String = "Moth"
 ]
 
-The most common core types are:
+Direct typed receiving contexts can give raw numeric literals an exact type.
+Later direct exact uses in the same function body can also constrain a retained
+numeric literal origin. Copies and writes connect to that same origin. This
+doesn't infer arbitrary values from later uses or work backwards through named
+arithmetic.
+
+Without an exact constraint, whole-number literals default to `I32` and
+decimal/exponent literals default to `F64`. See
+@../numbers/#numeric-literals (Numeric literals) for the receiving contexts and
+@../numbers (Numbers) for the numeric types.
+
+The core types include:
 
 - `Bool` for `true` and `false`
-- `Int` for whole numbers
-- `Float` for decimal numbers
+- the exact signed and unsigned integer types
+- the exact binary-float types
 - `Char` for one character
 - `String` for text
 

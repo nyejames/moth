@@ -1052,6 +1052,7 @@ function __moth_collection_set(collection, index, value) {
 }
 
 function __moth_collection_push_growable(collection, value) {
+    if (collection.length >= 2147483647) throw new RangeError("Collection length exceeds the I32 length carrier");
     collection.push(value);
 }
 

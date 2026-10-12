@@ -1,0 +1,9 @@
+entry = "."
+
+# HTML owns the exact numeric, mixed-slot and terminal-then runtime output asserted here.
+# This case does not claim a Wasm disposition.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "numeric=4294967296/7/4294967297/8 mixed=ready/4294967296/waiting/4294967297 terminal=1"

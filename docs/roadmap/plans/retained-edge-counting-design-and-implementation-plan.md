@@ -452,7 +452,7 @@ A package consumer instantiates these summaries into its project topology. Strat
 
 Builtin fixed and growable collections are the trusted dynamic-storage substrate.
 
-Their memory effects are compiler-known. Each stored value contributes a complete retained-edge summary. A scalar such as `Int` may contribute zero obligations, a direct heap-backed value may contribute one, and an inline aggregate that physically stores several handles may contribute several direct obligations. A summary may also describe nested retention so the compiler knows what a value structurally contains.
+Their memory effects are compiler-known. Each stored value contributes a complete retained-edge summary. A scalar such as `I32` may contribute zero obligations, a direct heap-backed value may contribute one, and an inline aggregate that physically stores several handles may contribute several direct obligations. A summary may also describe nested retention so the compiler knows what a value structurally contains.
 
 **Nested or transitive retention summaries are analysis descriptions. REC obligations count actual direct persistent edges between the final allocation families and retention domains. Reachability through a separately allocated child is never counted again.**
 

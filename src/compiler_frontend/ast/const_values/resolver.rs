@@ -29,7 +29,6 @@ use crate::compiler_frontend::ast::templates::tir::{
 #[cfg(test)]
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
@@ -160,7 +159,6 @@ pub struct ConstValueResolver<'a> {
     string_table: &'a mut StringTable,
     const_values: &'a ConstValueStore,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
-    numeric_profile: NumericProfile,
 }
 
 impl<'a> ConstValueResolver<'a> {
@@ -171,19 +169,15 @@ impl<'a> ConstValueResolver<'a> {
     /// WHY: const-fact collection runs after template normalization and must
     ///      classify each template through its exact module-local view, including
     ///      its overlay identity.
-    ///      The boundary profile travels with the resolver so substituted RPN
-    ///      folds under the same `Int` width and `Float` precision as parsing.
     pub fn new(
         string_table: &'a mut StringTable,
         const_values: &'a ConstValueStore,
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
-        numeric_profile: NumericProfile,
     ) -> Self {
         Self {
             string_table,
             const_values,
             template_ir_store,
-            numeric_profile,
         }
     }
 
@@ -341,7 +335,11 @@ impl<'a> ConstValueResolver<'a> {
                 // (which swallow every other variant) propagate the broken invariant instead
                 // of recording it as an ordinary non-const fact.
                 ExpressionRpnItem::PendingNumericLiteral { .. }
-                | ExpressionRpnItem::PendingGroup { .. } => {
+                | ExpressionRpnItem::PendingGroup { .. }
+                | ExpressionRpnItem::PendingNumericBinding { .. }
+                | ExpressionRpnItem::PendingNumericCast { .. }
+                | ExpressionRpnItem::PendingNumericCall { .. }
+                | ExpressionRpnItem::PendingNumericExpression { .. } => {
                     return Err(ConstResolutionError::TemplateClassification(
                         TemplateError::Infrastructure(Box::new(pending_expression_item_bug(
                             "const resolution",
@@ -352,21 +350,20 @@ impl<'a> ConstValueResolver<'a> {
             substituted.push(new_item);
         }
 
-        let mut stack =
-            match constant_fold(substituted, self.string_table, self.numeric_profile, None) {
-                Ok(ConstantFoldOutcome::Folded(stack)) => stack,
-                Ok(ConstantFoldOutcome::NotConstant(_)) => {
-                    return Err(ConstResolutionError::NonFoldableRuntimeExpression);
-                }
-                // Const fact collection deliberately skips non-const resolution, so this refusal
-                // cannot reach a user-facing diagnostic at this advisory boundary.
-                Ok(ConstantFoldOutcome::TextUnavailable { .. }) => {
-                    return Err(ConstResolutionError::NonFoldableRuntimeExpression);
-                }
-                // Fold errors are advisory here: fact collection skips the declaration
-                // rather than reporting a user-facing diagnostic at this boundary.
-                Err(_) => return Err(ConstResolutionError::NonFoldableRuntimeExpression),
-            };
+        let mut stack = match constant_fold(substituted, self.string_table, None) {
+            Ok(ConstantFoldOutcome::Folded(stack)) => stack,
+            Ok(ConstantFoldOutcome::NotConstant(_)) => {
+                return Err(ConstResolutionError::NonFoldableRuntimeExpression);
+            }
+            // Const fact collection deliberately skips non-const resolution, so this refusal
+            // cannot reach a user-facing diagnostic at this advisory boundary.
+            Ok(ConstantFoldOutcome::TextUnavailable { .. }) => {
+                return Err(ConstResolutionError::NonFoldableRuntimeExpression);
+            }
+            // Fold errors are advisory here: fact collection skips the declaration
+            // rather than reporting a user-facing diagnostic at this boundary.
+            Err(_) => return Err(ConstResolutionError::NonFoldableRuntimeExpression),
+        };
 
         if stack.len() == 1
             && let Some(ExpressionRpnItem::Operand(expression)) = stack.pop()

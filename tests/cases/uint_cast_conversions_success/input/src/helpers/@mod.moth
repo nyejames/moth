@@ -1,5 +1,5 @@
 export:
-    to_int type T is TRY_CASTABLE_TO_INT |value T| -> Int, Error!:
-        return cast! value
+    try_to_i32 type T is TRY_CASTABLE_TO_I32 |value T| -> I32, Error!:
+        return cast value
     ;
 ;

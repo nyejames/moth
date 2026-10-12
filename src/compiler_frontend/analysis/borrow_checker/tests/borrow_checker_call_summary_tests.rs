@@ -58,7 +58,7 @@ use crate::compiler_frontend::tests::external_package_support::{
 use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
-use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::sync::Arc;
@@ -67,6 +67,14 @@ use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
     PublicCallTransferEffect,
 };
+
+fn i32_expression(value: i64, span: Option<SourceSpan>, mode: ValueMode) -> Expression {
+    Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range"),
+        span,
+        mode,
+    )
+}
 
 fn function_call_node(
     name: PathId,
@@ -119,22 +127,22 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
             parameters: vec![
                 param_with_datatype(
                     shared_parameter,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     false,
                     test_source_location(1),
                 ),
                 param_with_datatype(
                     mutable_parameter,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
                 ),
                 param_with_datatype(
                     untouched_mutable_parameter,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
                 ),
@@ -145,11 +153,11 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
             NodeKind::Assignment {
                 target: assignment_target(
                     mutable_parameter,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(2),
                 ),
-                value: Expression::int(2, test_source_location(2), ValueMode::ImmutableOwned),
+                value: i32_expression(2, test_source_location(2), ValueMode::ImmutableOwned),
             },
             test_source_location(2),
         )],
@@ -300,8 +308,8 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
         FunctionSignature {
             parameters: vec![param_with_datatype(
                 symbol("input", &mut path_fork, &mut string_table),
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 true,
                 test_source_location(1),
             )],
@@ -315,8 +323,8 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
         FunctionSignature {
             parameters: vec![param_with_datatype(
                 parameter_name,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 true,
                 test_source_location(2),
             )],
@@ -328,8 +336,8 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
                 vec![CallArgument::positional(
                     reference_expr_with_datatype(
                         parameter_name,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(3),
                     ),
                     CallAccessMode::Mutable,
@@ -382,10 +390,10 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
 
 #[test]
 fn public_call_summary_tracks_mixed_argument_access_by_position() {
-    let source = r#"mutator |shared Int, mutable ~Int|:
+    let source = r#"mutator |shared I32, mutable ~I32|:
 ;
 
-wrapper |shared Int, mutable ~Int|:
+wrapper |shared I32, mutable ~I32|:
 mutator(shared, ~mutable)
 ;"#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
@@ -428,8 +436,8 @@ fn local_call_mutation_summary_in_order(
     callee_body: &str,
     callee_declared_first: bool,
 ) -> (PublicCallMutationEffect, PublicCallMutationEffect) {
-    let callee = format!("mutator |input ~Int|:\n{callee_body}\n;\n");
-    let wrapper = "wrapper |value ~Int|:\n    mutator(~value)\n;\n";
+    let callee = format!("mutator |input ~I32|:\n{callee_body}\n;\n");
+    let wrapper = "wrapper |value ~I32|:\n    mutator(~value)\n;\n";
     let source = if callee_declared_first {
         format!("{callee}\n{wrapper}")
     } else {
@@ -566,8 +574,8 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
         FunctionSignature {
             parameters: vec![param_with_datatype(
                 symbol("input", &mut path_fork, &mut string_table),
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 false,
                 test_source_location(1),
             )],
@@ -586,7 +594,7 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     value_name,
-                    Expression::int(1, test_source_location(2), ValueMode::ImmutableOwned),
+                    i32_expression(1, test_source_location(2), ValueMode::ImmutableOwned),
                 )),
                 test_source_location(2),
             ),
@@ -596,8 +604,8 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
                     vec![CallArgument::positional(
                         reference_expr_with_datatype(
                             value_name,
-                            DataType::Int,
-                            builtin_type_ids::INT,
+                            DataType::FixedScalar(FixedScalar::I32),
+                            builtin_type_ids::fixed_scalar(FixedScalar::I32),
                             test_source_location(3),
                         ),
                         CallAccessMode::Shared,
@@ -781,22 +789,22 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
         FunctionSignature {
             parameters: vec![param_with_datatype(
                 p,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 false,
                 test_source_location(1),
             )],
             returns: vec![ReturnSlot {
-                value: DataType::Int,
-                type_id: Some(builtin_type_ids::INT),
+                value: DataType::FixedScalar(FixedScalar::I32),
+                type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                 channel: ReturnChannel::Success,
             }],
         },
         vec![node(
             NodeKind::Return(vec![reference_expr_with_datatype(
                 p,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 test_source_location(2),
             )]),
             test_source_location(2),
@@ -814,7 +822,7 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -825,11 +833,11 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
                         alias_fn,
                         vec![reference_expr_with_datatype(
                             x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
+                            DataType::FixedScalar(FixedScalar::I32),
+                            builtin_type_ids::fixed_scalar(FixedScalar::I32),
                             test_source_location(11),
                         )],
-                        vec![builtin_type_ids::INT],
+                        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
                         test_source_location(11),
                     ),
                 )),
@@ -839,11 +847,11 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
                 NodeKind::Assignment {
                     target: assignment_target(
                         x,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(12),
                     ),
-                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
+                    value: i32_expression(2, test_source_location(12), ValueMode::ImmutableOwned),
                 },
                 test_source_location(12),
             ),
@@ -863,7 +871,7 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
 #[test]
 fn slot_backed_alias_result_rebinding_to_another_alias_detaches_old_root() {
     let source = r#"Point = |
-x Int,
+x I32,
 |
 
 identity |value Point| -> Point:
@@ -1070,15 +1078,15 @@ fn fresh_user_return_does_not_alias_caller_roots() {
         FunctionSignature {
             parameters: vec![param_with_datatype(
                 p,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 false,
                 test_source_location(1),
             )],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
         },
         vec![node(
-            NodeKind::Return(vec![Expression::int(
+            NodeKind::Return(vec![i32_expression(
                 42,
                 test_source_location(2),
                 ValueMode::ImmutableOwned,
@@ -1098,7 +1106,7 @@ fn fresh_user_return_does_not_alias_caller_roots() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -1109,11 +1117,11 @@ fn fresh_user_return_does_not_alias_caller_roots() {
                         fresh_fn,
                         vec![reference_expr_with_datatype(
                             x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
+                            DataType::FixedScalar(FixedScalar::I32),
+                            builtin_type_ids::fixed_scalar(FixedScalar::I32),
                             test_source_location(11),
                         )],
-                        vec![builtin_type_ids::INT],
+                        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
                         test_source_location(11),
                     ),
                 )),
@@ -1123,11 +1131,11 @@ fn fresh_user_return_does_not_alias_caller_roots() {
                 NodeKind::Assignment {
                     target: assignment_target(
                         x,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(12),
                     ),
-                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
+                    value: i32_expression(2, test_source_location(12), ValueMode::ImmutableOwned),
                 },
                 test_source_location(12),
             ),
@@ -1191,8 +1199,12 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
             HandledFallibleHostFunctionCallInput {
                 id: external_id,
                 args: vec![],
-                result_type_ids: vec![builtin_type_ids::INT, builtin_type_ids::INT],
-                error_type_id: builtin_type_ids::INT,
+                result_type_ids: vec![
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                ],
+                requires_external_float_validation: false,
+                error_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 handling: FallibleExpressionHandling::Propagate,
                 span: None,
             },
@@ -1204,18 +1216,18 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
             parameters: vec![],
             returns: vec![
                 ReturnSlot {
-                    value: DataType::Int,
-                    type_id: Some(builtin_type_ids::INT),
+                    value: DataType::FixedScalar(FixedScalar::I32),
+                    type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::Int,
-                    type_id: Some(builtin_type_ids::INT),
+                    value: DataType::FixedScalar(FixedScalar::I32),
+                    type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::Int,
-                    type_id: Some(builtin_type_ids::INT),
+                    value: DataType::FixedScalar(FixedScalar::I32),
+                    type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                     channel: ReturnChannel::Error,
                 },
             ],
@@ -1235,7 +1247,10 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
     let forwarded_call = Expression::handled_fallible_function_call_with_typed_arguments(
         imprecise_return_name,
         vec![],
-        vec![builtin_type_ids::INT, builtin_type_ids::INT],
+        vec![
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        ],
         FallibleExpressionHandling::Propagate,
         &mut forward_expression_types,
         None,
@@ -1246,18 +1261,18 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
             parameters: vec![],
             returns: vec![
                 ReturnSlot {
-                    value: DataType::Int,
-                    type_id: Some(builtin_type_ids::INT),
+                    value: DataType::FixedScalar(FixedScalar::I32),
+                    type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::Int,
-                    type_id: Some(builtin_type_ids::INT),
+                    value: DataType::FixedScalar(FixedScalar::I32),
+                    type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::Int,
-                    type_id: Some(builtin_type_ids::INT),
+                    value: DataType::FixedScalar(FixedScalar::I32),
+                    type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                     channel: ReturnChannel::Error,
                 },
             ],
@@ -1319,7 +1334,7 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
 #[test]
 fn checked_numeric_return_local_retains_fresh_alias_summary() {
     let source = r#"
-increment |input Int| -> Int, Error!:
+increment |input I32| -> I32, Error!:
 return input + 1
 ;
 "#;
@@ -1392,7 +1407,7 @@ return ~scores.remove("key")!
 fn multi_return_alias_summary_conservatively_unions_returned_elements() {
     let source = r#"
 Point = |
-x Int,
+x I32,
 |
 
 pair |left Point, right Point| -> Point, Point:
@@ -1453,7 +1468,7 @@ return value, copy value
 #[test]
 fn recursive_return_summary_stays_unknown() {
     let source = r#"
-recursive |value Int| -> Int:
+recursive |value I32| -> I32:
 return recursive(value)
 ;
 "#;
@@ -1506,12 +1521,12 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
         FunctionSignature {
             parameters: vec![param_with_datatype(
                 p,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 false,
                 test_source_location(1),
             )],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
         },
         vec![
             node(
@@ -1519,8 +1534,8 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
                     q,
                     reference_expr_with_datatype(
                         p,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(2),
                     ),
                 )),
@@ -1529,8 +1544,8 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
             node(
                 NodeKind::Return(vec![reference_expr_with_datatype(
                     q,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(3),
                 )]),
                 test_source_location(3),
@@ -1549,7 +1564,7 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -1560,11 +1575,11 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
                         unknown_fn,
                         vec![reference_expr_with_datatype(
                             x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
+                            DataType::FixedScalar(FixedScalar::I32),
+                            builtin_type_ids::fixed_scalar(FixedScalar::I32),
                             test_source_location(11),
                         )],
-                        vec![builtin_type_ids::INT],
+                        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
                         test_source_location(11),
                     ),
                 )),
@@ -1574,11 +1589,11 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
                 NodeKind::Assignment {
                     target: assignment_target(
                         x,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(12),
                     ),
-                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
+                    value: i32_expression(2, test_source_location(12), ValueMode::ImmutableOwned),
                 },
                 test_source_location(12),
             ),
@@ -1611,8 +1626,8 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
         FunctionSignature {
             parameters: vec![param_with_datatype(
                 p,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 true,
                 test_source_location(1),
             )],
@@ -1632,7 +1647,7 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -1642,8 +1657,8 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
                     vec![CallArgument::positional(
                         reference_expr_with_datatype(
                             x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
+                            DataType::FixedScalar(FixedScalar::I32),
+                            builtin_type_ids::fixed_scalar(FixedScalar::I32),
                             test_source_location(11),
                         ),
                         CallAccessMode::Shared,
@@ -1670,11 +1685,11 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
 #[test]
 fn mutable_call_uses_rvalue_backed_binding_as_its_access_actor() {
     let source = r#"
-make_values || -> {Int}:
+make_values || -> {I32}:
 return {1}
 ;
 
-mutate |values ~{Int}|:
+mutate |values ~{I32}|:
 ~values.push(2)
 ;
 
@@ -1727,15 +1742,15 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
             parameters: vec![
                 param_with_datatype(
                     a,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
                 ),
                 param_with_datatype(
                     b,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
                 ),
@@ -1756,7 +1771,7 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -1767,15 +1782,15 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
                         CallArgument::positional(
                             reference_expr_with_datatype(
                                 x,
-                                DataType::Int,
-                                builtin_type_ids::INT,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(11),
                             ),
                             CallAccessMode::Shared,
                             test_source_location(11),
                         ),
                         CallArgument::positional(
-                            Expression::int(2, test_source_location(11), ValueMode::ImmutableOwned),
+                            i32_expression(2, test_source_location(11), ValueMode::ImmutableOwned),
                             CallAccessMode::Shared,
                             test_source_location(11),
                         )
@@ -1825,7 +1840,7 @@ fn host_mutable_parameter_requires_mutable_access() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(1), ValueMode::ImmutableOwned),
+                    i32_expression(1, test_source_location(1), ValueMode::ImmutableOwned),
                 )),
                 test_source_location(1),
             ),
@@ -1835,8 +1850,8 @@ fn host_mutable_parameter_requires_mutable_access() {
                     vec![CallArgument::positional(
                         reference_expr_with_datatype(
                             x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
+                            DataType::FixedScalar(FixedScalar::I32),
+                            builtin_type_ids::fixed_scalar(FixedScalar::I32),
                             test_source_location(2),
                         ),
                         CallAccessMode::Shared,
@@ -1886,7 +1901,7 @@ fn host_mutable_parameter_accepts_mutable_local_argument() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                    i32_expression(1, test_source_location(1), ValueMode::MutableOwned),
                 )),
                 test_source_location(1),
             ),
@@ -1896,8 +1911,8 @@ fn host_mutable_parameter_accepts_mutable_local_argument() {
                     vec![CallArgument::positional(
                         reference_expr_with_datatype(
                             x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
+                            DataType::FixedScalar(FixedScalar::I32),
+                            builtin_type_ids::fixed_scalar(FixedScalar::I32),
                             test_source_location(2),
                         ),
                         CallAccessMode::Shared,
@@ -1946,7 +1961,7 @@ fn host_shared_parameter_is_shared_only() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(1), ValueMode::ImmutableOwned),
+                    i32_expression(1, test_source_location(1), ValueMode::ImmutableOwned),
                 )),
                 test_source_location(1),
             ),
@@ -1956,8 +1971,8 @@ fn host_shared_parameter_is_shared_only() {
                     vec![CallArgument::positional(
                         reference_expr_with_datatype(
                             x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
+                            DataType::FixedScalar(FixedScalar::I32),
+                            builtin_type_ids::fixed_scalar(FixedScalar::I32),
                             test_source_location(2),
                         ),
                         CallAccessMode::Shared,
@@ -2000,15 +2015,15 @@ fn two_mutable_args_to_same_root_are_rejected() {
             parameters: vec![
                 param_with_datatype(
                     a,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
                 ),
                 param_with_datatype(
                     b,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
                 ),
@@ -2029,7 +2044,7 @@ fn two_mutable_args_to_same_root_are_rejected() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -2040,8 +2055,8 @@ fn two_mutable_args_to_same_root_are_rejected() {
                         CallArgument::positional(
                             reference_expr_with_datatype(
                                 x,
-                                DataType::Int,
-                                builtin_type_ids::INT,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(11),
                             ),
                             CallAccessMode::Shared,
@@ -2050,8 +2065,8 @@ fn two_mutable_args_to_same_root_are_rejected() {
                         CallArgument::positional(
                             reference_expr_with_datatype(
                                 x,
-                                DataType::Int,
-                                builtin_type_ids::INT,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(11),
                             ),
                             CallAccessMode::Shared,
@@ -2068,8 +2083,8 @@ fn two_mutable_args_to_same_root_are_rejected() {
                     y,
                     reference_expr_with_datatype(
                         x,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(12),
                     ),
                 )),
@@ -2107,15 +2122,15 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
             parameters: vec![
                 param_with_datatype(
                     read,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     false,
                     test_source_location(1),
                 ),
                 param_with_datatype(
                     mutate,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
                 ),
@@ -2136,7 +2151,7 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -2147,8 +2162,8 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
                         CallArgument::positional(
                             reference_expr_with_datatype(
                                 x,
-                                DataType::Int,
-                                builtin_type_ids::INT,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(11),
                             ),
                             CallAccessMode::Shared,
@@ -2157,8 +2172,8 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
                         CallArgument::positional(
                             reference_expr_with_datatype(
                                 x,
-                                DataType::Int,
-                                builtin_type_ids::INT,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(11),
                             ),
                             CallAccessMode::Shared,
@@ -2207,7 +2222,7 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
         "alias_arg_result",
         vec![ExternalAccessKind::Shared],
         ExternalReturnAlias::AliasArgs(vec![0]),
-        ExternalReturnType::NativeInt,
+        ExternalReturnType::Fixed(FixedScalar::I32),
     );
     let original = symbol("original", &mut path_fork, &mut string_table);
     let returned = symbol("returned", &mut path_fork, &mut string_table);
@@ -2217,14 +2232,14 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
         vec![CallArgument::positional(
             reference_expr_with_datatype(
                 original,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 test_source_location(11),
             ),
             CallAccessMode::Shared,
             test_source_location(11),
         )],
-        vec![builtin_type_ids::INT],
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
         None,
     );
 
@@ -2238,7 +2253,7 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     original,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -2250,11 +2265,11 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
                 NodeKind::Assignment {
                     target: assignment_target(
                         returned,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(12),
                     ),
-                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
+                    value: i32_expression(2, test_source_location(12), ValueMode::ImmutableOwned),
                 },
                 test_source_location(12),
             ),
@@ -2262,11 +2277,11 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
                 NodeKind::Assignment {
                     target: assignment_target(
                         original,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(13),
                     ),
-                    value: Expression::int(3, test_source_location(13), ValueMode::ImmutableOwned),
+                    value: i32_expression(3, test_source_location(13), ValueMode::ImmutableOwned),
                 },
                 test_source_location(13),
             ),
@@ -2510,8 +2525,8 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
         FunctionSignature {
             parameters: vec![param_with_datatype(
                 p,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 true,
                 test_source_location(1),
             )],
@@ -2531,7 +2546,7 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::ImmutableOwned),
+                    i32_expression(1, test_source_location(10), ValueMode::ImmutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -2541,8 +2556,8 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
                     vec![CallArgument::positional(
                         reference_expr_with_datatype(
                             x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
+                            DataType::FixedScalar(FixedScalar::I32),
+                            builtin_type_ids::fixed_scalar(FixedScalar::I32),
                             test_source_location(11),
                         ),
                         CallAccessMode::Shared,
@@ -2558,8 +2573,8 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
                     y,
                     reference_expr_with_datatype(
                         x,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(12),
                     ),
                 )),
@@ -2590,7 +2605,7 @@ fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
         "bad_alias_host",
         vec![ExternalAccessKind::Shared],
         ExternalReturnAlias::AliasArgs(vec![1]),
-        ExternalReturnType::NativeInt,
+        ExternalReturnType::Fixed(FixedScalar::I32),
     );
     let x = symbol("x", &mut path_fork, &mut string_table);
 
@@ -2604,7 +2619,7 @@ fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -2614,8 +2629,8 @@ fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
                     vec![CallArgument::positional(
                         reference_expr_with_datatype(
                             x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
+                            DataType::FixedScalar(FixedScalar::I32),
+                            builtin_type_ids::fixed_scalar(FixedScalar::I32),
                             test_source_location(11),
                         ),
                         CallAccessMode::Shared,
@@ -2662,8 +2677,8 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
         FunctionSignature {
             parameters: vec![param_with_datatype(
                 p,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 true,
                 test_source_location(1),
             )],
@@ -2686,7 +2701,7 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(1, test_source_location(10), ValueMode::MutableOwned),
                 )),
                 test_source_location(10),
             ),
@@ -2696,8 +2711,8 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
                     vec![CallArgument::positional(
                         reference_expr_with_datatype(
                             x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
+                            DataType::FixedScalar(FixedScalar::I32),
+                            builtin_type_ids::fixed_scalar(FixedScalar::I32),
                             same_line,
                         ),
                         CallAccessMode::Shared,
@@ -2713,8 +2728,8 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
                     y,
                     reference_expr_with_datatype(
                         x,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         same_line,
                     ),
                 )),
@@ -2753,8 +2768,8 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
     FunctionSignature {
         parameters: vec![param_with_datatype(
             param_calls,
-            DataType::Int,
-            builtin_type_ids::INT,
+            DataType::FixedScalar(FixedScalar::I32),
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
             true,
             test_source_location(1),
         )],
@@ -2765,8 +2780,8 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
             NodeKind::Assignment {
                 target: assignment_target(
                     param_calls,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(2),
                 ),
                 value: Expression::runtime(
@@ -2774,13 +2789,13 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
                         items: vec![
                             ExpressionRpnItem::Operand(Expression::reference_with_type_id(
                                 param_calls,
-                                DataType::Int,
-                                builtin_type_ids::INT,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(2),
                                 ValueMode::MutableOwned,
                                 crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
                             )),
-                            ExpressionRpnItem::Operand(Expression::int(
+                            ExpressionRpnItem::Operand(i32_expression(
                                 1,
                                 test_source_location(2),
                                 ValueMode::ImmutableOwned,
@@ -2791,7 +2806,7 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
                             },
                         ],
                     },
-                    DataType::Int,
+                    DataType::FixedScalar(FixedScalar::I32),
                     test_source_location(2),
                     ValueMode::MutableOwned,
                 ),
@@ -2825,8 +2840,8 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
                 rhs_name,
                 vec![Expression::reference_with_type_id(
                     calls,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(11),
                     ValueMode::MutableOwned,
                     crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
@@ -2866,7 +2881,7 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
         node(
             NodeKind::VariableDeclaration(make_test_variable(
                 calls,
-                Expression::int(0, test_source_location(10), ValueMode::MutableOwned),
+                i32_expression(0, test_source_location(10), ValueMode::MutableOwned),
             )),
             test_source_location(10),
         ),
@@ -2879,8 +2894,8 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
                 sink,
                 Expression::reference_with_type_id(
                     calls,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(12),
                     ValueMode::ImmutableReference,
                     crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
@@ -2903,10 +2918,10 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
 
 #[test]
 fn catch_private_call_return_alias_unions_success_and_parameter_derived_handler() {
-    let source = "load |value String, trigger Int| -> String:\n\
+    let source = "load |value String, trigger I32| -> String:\n\
                   numeric_result = trigger + 2147483647\n\
                   return value\n;\n\
-                  recover |fallback String, success String, trigger Int| -> String:\n\
+                  recover |fallback String, success String, trigger I32| -> String:\n\
                   return load(success, trigger) catch:\n\
                       return fallback\n\
                   ;\n;\n";

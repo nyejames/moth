@@ -1,0 +1,19 @@
+@definitions limit, Box, identity
+@definitions limit as facade_limit, identity as facade_identity
+@definitions direct_box
+@relayed relayed_box, reexported_limit
+
+read_u64 |value U64| -> String:
+    return cast value
+;
+read_box |value Box of U64| -> String:
+    return read_u64(value.value)
+;
+
+first = direct_box()
+second = relayed_box()
+local = identity(18_446_744_073_709_551_615)
+relayed = facade_identity(18_446_744_073_709_551_615)
+local_text = read_u64(local)
+relayed_text = read_u64(relayed)
+[:numeric_module direct=[read_u64(limit)] facade=[read_u64(facade_limit)] constant=[read_u64(reexported_limit)] first=[read_box(first)] second=[read_box(second)] local=[local_text] relayed=[relayed_text] equal=[first.value is second.value]]

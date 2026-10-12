@@ -1,0 +1,40 @@
+-- Raw U32 keys and U64 values keep separate map leaves while a mutable alias writes through.
+-- The later exact {U32 = U64} receiver checks that the key and value widths stayed independent.
+
+read_scores |scores {U32 = U64}| -> String:
+    top = scores.get(4_294_967_295) catch:
+        then 0
+    ;
+    len = scores.length
+    return [:exact_receiver top=[top] len=[len]]
+;
+
+render_independent_map_leaf_alias || -> String:
+    scores ~= {4_294_967_295 = 18_446_744_073_709_551_615, 4_294_967_294 = 7}
+    top_key U32 = 4_294_967_295
+    lower_key U32 = 4_294_967_294
+    replacement U64 = 18_446_744_073_709_551_613
+
+    -- The shared get result's last use is the String cast, which happens before the alias is created.
+    before = scores.get(top_key) catch:
+        then 0
+    ;
+    before_text String = cast before
+
+    alias ~= scores
+    ~alias.set(top_key, replacement) catch:
+    ;
+
+    after = scores.get(top_key) catch:
+        then 0
+    ;
+    lower = scores.get(lower_key) catch:
+        then 0
+    ;
+    top_found = scores.contains(top_key)
+    len = scores.length
+    later_text = read_scores(scores)
+    return [:independent_map_leaf_alias before=[before_text] after=[after] lower=[lower] top_found=[top_found] len=[len] later=[later_text]]
+;
+
+[:[render_independent_map_leaf_alias()]]

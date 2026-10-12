@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["fixed_collection_struct_field_default_success length=1 value=1"]
+rendered_output_contains = ["fixed_collection_struct_field_default_success length=1 value=1 named_length=4"]

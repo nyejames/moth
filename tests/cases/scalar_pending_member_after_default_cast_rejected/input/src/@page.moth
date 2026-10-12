@@ -1,0 +1,7 @@
+-- Formatting and a cast destination are not independent numeric receivers.
+-- With no eligible constraint the method diagnostic must name default I32.
+origin = 1
+converted F16 = cast origin
+origin.unsupported()
+
+[:unreachable]

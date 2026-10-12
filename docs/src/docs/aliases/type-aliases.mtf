@@ -3,7 +3,7 @@ A type alias is a compile-time name for an existing type. It introduces no runti
 ### Type alias syntax
 
 [codeblock, $code("moth"):
-    UserId as Int
+    UserId as I32
     Names as {String}
     MaybeName as String?
     StringBox as Box of String
@@ -25,12 +25,12 @@ The syntax is `AliasName as ExistingType`. Alias names follow type-name casing. 
 
 An alias target may be:
 
-- a builtin scalar such as `Int`, `Uint`, `Float`, `Bool`, `Char` or `String`
+- a builtin scalar such as `I32`, `U32`, `F64`, `Bool`, `Char` or `String`
 - a struct or choice declared in the same file
 - an option such as `String?`
 - a growable collection such as `{String}`
-- a fixed collection such as `{4 Int}`
-- a hashmap such as `{String = Int}`
+- a fixed collection such as `{4 I32}`
+- a hashmap such as `{String = I32}`
 - a fully concrete generic instance such as `Box of String`
 - a dependency-bound type, dependency-bound type alias or external package type
 
@@ -39,30 +39,30 @@ Concrete generic aliases are supported. Parameterized aliases and partial generi
 ### Transparency
 
 [codeblock, $code("moth"):
-    UserId as Int
+    UserId as I32
 
     id UserId = 42
-    raw Int = id
+    raw I32 = id
 ]
 
-Because `UserId` is transparent, assigning a `UserId` value to an `Int` binding is valid. The reverse is also valid: an `Int` value can be used where `UserId` is expected.
+Because `UserId` is transparent, assigning a `UserId` value to an `I32` binding is valid. The reverse is also valid: an `I32` value can be used where `UserId` is expected.
 
 ### Contrast with a struct
 
 [codeblock, $code("moth"):
-    UserId as Int
+    UserId as I32
 
     User = |
-        id Int,
+        id I32,
     |
 ]
 
-`UserId` is another name for `Int`. `User` is a distinct nominal struct type with its own constructor and fields. Use a struct when the domain concept needs its own identity. Use an alias when only the annotation name matters.
+`UserId` is another name for `I32`. `User` is a distinct nominal struct type with its own constructor and fields. Use a struct when the domain concept needs its own identity. Use an alias when only the annotation name matters.
 
 ### Alias versus nominal domain type
 
 An alias improves spelling and readability, but it doesn't isolate a domain
-value from its target type. `UserId as Int` still allows an ordinary `Int`
+value from its target type. `UserId as I32` still allows an ordinary `I32`
 where `UserId` is expected. Use a wrapper struct today when distinct nominal
 identity matters.
 

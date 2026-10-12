@@ -1,5 +1,5 @@
-items ~{Int} = {1, 2, 3}
-other ~{Int} = {4, 5}
+items ~{I32} = {1, 2, 3}
+other ~{I32} = {4, 5}
 copied ~= copy items
 
 loop items |item|:

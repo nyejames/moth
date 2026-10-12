@@ -35,6 +35,13 @@ use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+fn i32_literal(value: i64) -> HirExpressionKind {
+    HirExpressionKind::FixedScalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range"),
+    )
+}
 
 #[test]
 fn boracle_provenance_copy_keeps_source_and_result_origins_independent() {
@@ -784,12 +791,8 @@ fn hir_shared_subset(kind: SharedSubsetKind) -> (HirModule, HirFunction) {
     let source = LocalId(0);
     let result = LocalId(1);
     let mut module = HirModule::new();
-    let initial_value = append_hir_expression(
-        &mut module,
-        HirExpressionKind::Int(1),
-        ValueKind::RValue,
-        region,
-    );
+    let initial_value =
+        append_hir_expression(&mut module, i32_literal(1), ValueKind::RValue, region);
     let copied_or_loaded_value = append_hir_expression(
         &mut module,
         match kind {
@@ -837,7 +840,7 @@ fn hir_shared_subset(kind: SharedSubsetKind) -> (HirModule, HirFunction) {
         id: FunctionId(0),
         entry: HirBlockId(0),
         params: Vec::new(),
-        return_type: builtin_type_ids::INT,
+        return_type: builtin_type_ids::fixed_scalar(FixedScalar::I32),
     };
     (module, function)
 }
@@ -2676,18 +2679,10 @@ fn hir_distinct_projection_problem() -> BorrowProblem {
     let source = LocalId(0);
     let result = LocalId(1);
     let mut module = HirModule::new();
-    let first_element = append_hir_expression(
-        &mut module,
-        HirExpressionKind::Int(1),
-        ValueKind::RValue,
-        region,
-    );
-    let second_element = append_hir_expression(
-        &mut module,
-        HirExpressionKind::Int(2),
-        ValueKind::RValue,
-        region,
-    );
+    let first_element =
+        append_hir_expression(&mut module, i32_literal(1), ValueKind::RValue, region);
+    let second_element =
+        append_hir_expression(&mut module, i32_literal(2), ValueKind::RValue, region);
     let tuple_elements = module
         .expressions
         .append_values(&[first_element, second_element], None)
@@ -2762,7 +2757,7 @@ fn hir_distinct_projection_problem() -> BorrowProblem {
         id: FunctionId(0),
         entry: HirBlockId(0),
         params: Vec::new(),
-        return_type: builtin_type_ids::INT,
+        return_type: builtin_type_ids::fixed_scalar(FixedScalar::I32),
     };
     super::super::problem::from_hir(&module, &function, None, None)
         .expect("distinct HIR projection should extract")
@@ -2773,12 +2768,8 @@ fn hir_aggregate_rebinding_problem() -> BorrowProblem {
     let source = LocalId(0);
     let result = LocalId(1);
     let mut module = HirModule::new();
-    let first_element = append_hir_expression(
-        &mut module,
-        HirExpressionKind::Int(1),
-        ValueKind::RValue,
-        region,
-    );
+    let first_element =
+        append_hir_expression(&mut module, i32_literal(1), ValueKind::RValue, region);
     let first_elements = module
         .expressions
         .append_values(&[first_element], None)
@@ -2791,12 +2782,8 @@ fn hir_aggregate_rebinding_problem() -> BorrowProblem {
         ValueKind::RValue,
         region,
     );
-    let second_element = append_hir_expression(
-        &mut module,
-        HirExpressionKind::Int(2),
-        ValueKind::RValue,
-        region,
-    );
+    let second_element =
+        append_hir_expression(&mut module, i32_literal(2), ValueKind::RValue, region);
     let second_elements = module
         .expressions
         .append_values(&[second_element], None)
@@ -2867,7 +2854,7 @@ fn hir_aggregate_rebinding_problem() -> BorrowProblem {
         id: FunctionId(0),
         entry: HirBlockId(0),
         params: Vec::new(),
-        return_type: builtin_type_ids::INT,
+        return_type: builtin_type_ids::fixed_scalar(FixedScalar::I32),
     };
     super::super::problem::from_hir(&module, &function, None, None)
         .expect("aggregate rebinding HIR should extract")
@@ -2876,7 +2863,7 @@ fn hir_aggregate_rebinding_problem() -> BorrowProblem {
 fn hir_local(id: LocalId, region: RegionId) -> HirLocal {
     HirLocal {
         id,
-        ty: builtin_type_ids::INT,
+        ty: builtin_type_ids::fixed_scalar(FixedScalar::I32),
         mutable: true,
         region,
         span: None,
@@ -2891,7 +2878,7 @@ fn append_hir_expression(
 ) -> HirValueId {
     crate::compiler_frontend::tests::hir_fixture_support::expression(
         kind,
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         region,
         value_kind,
         &mut module.expressions,

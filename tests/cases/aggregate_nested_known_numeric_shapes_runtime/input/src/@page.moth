@@ -1,0 +1,40 @@
+-- Known nested collection, map, and optional fields keep their concrete shape while
+-- numeric leaves in the unannotated bindings receive U64 from the Packet field types.
+
+Packet = |
+    rows {{U64}},
+    names {String = U64},
+    maybe {U64}?,
+|
+
+read_packet |packet Packet| -> String:
+    first_row = packet.rows.get(0) catch:
+        then {0}
+    ;
+    row_value = first_row.get(0) catch:
+        then 0
+    ;
+    name_value = packet.names.get("max") catch:
+        then 0
+    ;
+    maybe_count = if packet.maybe is:
+        |items| => then items.length()
+        none => then 0
+    ;
+    row_count = packet.rows.length()
+    name_count = packet.names.length
+    return [:row=[row_value] rows=[row_count] name=[name_value] names=[name_count] maybe=[maybe_count]]
+;
+
+render_nested_known_numeric_shapes || -> String:
+    full_rows = {{18_446_744_073_709_551_615, 2}, {3}}
+    full_names = {"max" = 18_446_744_073_709_551_614}
+    full_maybe = {7, 8}
+    full = Packet(full_rows, full_names, full_maybe)
+    sparse_rows = {{5}}
+    sparse_names = {"low" = 4}
+    sparse = Packet(sparse_rows, sparse_names, none)
+    return [:nested_known_numeric full=[read_packet(full)] sparse=[read_packet(sparse)]]
+;
+
+[:[render_nested_known_numeric_shapes()]]

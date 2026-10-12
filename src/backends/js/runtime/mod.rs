@@ -47,6 +47,7 @@ pub(crate) struct NumericRuntimeHelperUsage {
     pub(crate) number_integer_ops: bool,
     pub(crate) big_integer_ops: bool,
     pub(crate) number_decimal_ops: bool,
+    pub(crate) binary16_ops: bool,
     pub(crate) binary32_ops: bool,
     pub(crate) binary64_ops: bool,
     pub(crate) binary_float_power: bool,
@@ -79,6 +80,7 @@ impl NumericRuntimeHelperUsage {
         self.number_integer_ops
             || self.big_integer_ops
             || self.number_decimal_ops
+            || self.binary16_ops
             || self.binary32_ops
             || self.binary64_ops
             || self.binary_float_power
@@ -107,10 +109,10 @@ impl<'hir> JsEmitter<'hir> {
     ///   map helpers             — guarded get/set/remove and infallible contains/clear/length for ordered maps
     ///   string helpers          — generic value-to-string conversion
     ///   cast helpers            — numeric and string casting with Result-typed errors
-    ///   numeric helpers         — checked Number/BigInt integer and profile-precision Float arithmetic
+    ///   numeric helpers         — checked Number/BigInt integer and exact-precision binary-float arithmetic
     ///   choice helpers          — structural equality for nominal choice carriers
     ///
-    /// Most groups use hoisted JS `function` declarations. Float power also initialises
+    /// Most groups use hoisted JS `function` declarations. Binary-float power also initialises
     /// top-level constants, so the complete prelude must precede emitted user functions and start.
     pub(crate) fn emit_runtime_prelude(
         &mut self,

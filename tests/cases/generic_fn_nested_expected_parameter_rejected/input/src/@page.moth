@@ -2,8 +2,8 @@ empty_values type T || -> {T}:
     return {}
 ;
 
-keep_values |values {Int}| -> {Int}:
+keep_values |values {I32}| -> {I32}:
     return values
 ;
 
-values {Int} = keep_values(empty_values())
+values {I32} = keep_values(empty_values())

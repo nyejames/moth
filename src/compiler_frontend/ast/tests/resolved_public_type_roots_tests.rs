@@ -29,7 +29,9 @@ use crate::compiler_frontend::datatypes::definitions::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
-use crate::compiler_frontend::datatypes::ids::{GenericParameterListId, NominalTypeId, TypeId};
+use crate::compiler_frontend::datatypes::ids::{
+    GenericParameterListId, NominalTypeId, TypeId, builtin_type_ids,
+};
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
@@ -45,6 +47,7 @@ use crate::compiler_frontend::traits::environment::{CoreTraitKind, TraitEnvironm
 use crate::compiler_frontend::traits::ids::TraitId;
 use crate::compiler_frontend::value_mode::ValueMode;
 
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 fn path(name: &str, string_table: &mut StringTable, path_fork: &mut PathInternerFork) -> PathId {
@@ -123,14 +126,14 @@ fn resolved_free_signature(int_type_id: TypeId) -> ResolvedFunctionSignature {
         id: PathId::ROOT,
         value: Expression::no_value_with_type_id(
             None,
-            DataType::Int,
+            DataType::FixedScalar(FixedScalar::I32),
             int_type_id,
             ValueMode::default(),
         ),
         binding_span: None,
         config_qualifier: None,
     };
-    let mut return_slot = ReturnSlot::success(DataType::Int);
+    let mut return_slot = ReturnSlot::success(DataType::FixedScalar(FixedScalar::I32));
     return_slot.type_id = Some(int_type_id);
     ResolvedFunctionSignature {
         receiver: None,
@@ -146,7 +149,7 @@ fn receiver_signature(int_type_id: TypeId) -> FunctionSignature {
         id: PathId::ROOT,
         value: Expression::no_value_with_type_id(
             None,
-            DataType::Int,
+            DataType::FixedScalar(FixedScalar::I32),
             int_type_id,
             ValueMode::default(),
         ),
@@ -172,7 +175,7 @@ fn constant_declaration(type_id: TypeId, decl_path: PathId) -> Declaration {
         id: decl_path,
         value: Expression::no_value_with_type_id(
             None,
-            DataType::Int,
+            DataType::FixedScalar(FixedScalar::I32),
             type_id,
             ValueMode::default(),
         ),
@@ -236,7 +239,7 @@ fn retains_every_public_root_category_in_sorted_header_order() {
     let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let func_path = path("free_func", &mut string_table, &mut path_fork);
     let struct_path = path("public_struct", &mut string_table, &mut path_fork);
@@ -380,7 +383,7 @@ fn excludes_imported_root_private_and_non_declaration_headers() {
     let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let imported_struct = path("imported_struct", &mut string_table, &mut path_fork);
     let private_func = path("private_func", &mut string_table, &mut path_fork);
@@ -462,7 +465,7 @@ fn retains_private_receiver_methods_for_public_nominal_receivers_in_order_indepe
     let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let public_struct = path("public_struct", &mut string_table, &mut path_fork);
     let private_struct = path("private_struct", &mut string_table, &mut path_fork);
@@ -769,7 +772,7 @@ fn missing_receiver_catalog_entry_is_internal_error() {
     let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let public_struct = path("public_struct", &mut string_table, &mut path_fork);
     let method_path = path("orphan_method", &mut string_table, &mut path_fork);
@@ -836,7 +839,7 @@ fn missing_active_root_function_signature_in_method_pass_is_internal_error() {
     let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let public_struct = path("public_struct", &mut string_table, &mut path_fork);
     let method_path = path("orphan_method", &mut string_table, &mut path_fork);
@@ -962,7 +965,7 @@ fn retains_source_trait_fact_for_generic_struct_bound() {
     let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let source_trait_id = register_source_trait(
         &mut trait_environment,

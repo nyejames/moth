@@ -17,7 +17,7 @@ A lowerer receives explicit records:
 - external boundary classifications
 - builder lifecycle/runtime plan
 - per-function link facts
-- paired profile-aware numeric-proof facts for check elision only; they do not change source legality or mutate HIR
+- paired numeric-proof facts for check elision only; they do not change source legality or mutate HIR
 - selected-function, import, export and capability plans, plus the semantic layout identities the target needs
 
 A lowerer does **not**:
@@ -102,14 +102,25 @@ For the walkthrough, target-labelled `start`, `greet` and template work arrive r
 
 The JS backend speaks host values and functions. It leans on the host GC for reachability. Runtime helpers implement language operations the surface syntax made look primitive: checked numerics, certain casts, template runtime pieces, error plumbing.
 
-`greet` in JavaScript form is ordinary host code that preserves Moth contracts. A more permissive JS primitive must not silently weaken checked arithmetic, finite-Float rules or error propagation.
+`greet` in JavaScript form preserves Moth contracts. A more permissive JS
+primitive cannot weaken checked arithmetic, finite `F16`/`F32`/`F64` values
+or error propagation. Each float operation rounds and checks finiteness at
+its selected precision before a later operation consumes it.
 
-`NumericProofs` lets JS replace a proven-safe checked integer operation with native carrier arithmetic and omit only the impossible checks; for a proven narrowing it omits only the range predicate. Operands still lower once, in source order. Check elision is independent of failure delivery. Recoverable operations preserve their success branch and `{tag, value}` carrier. Narrowings retain their Number/BigInt carrier conversion and success branch/carrier. JavaScript's exact-integer `Number` carrier canonicalises zero to `+0`, while BigInt operations remain exact. The Moth `Dec` domain, `Float`, binary floats, `Byte` and `Power` stay on checked paths.
+`NumericProofs` lets JS replace a proven-safe checked integer operation with
+native carrier arithmetic and omit only impossible checks. For a proven
+narrowing it omits only the range predicate. Operands still lower once, in
+source order. Check elision stays independent of failure delivery. Recoverable
+operations retain their success branch and `{tag, value}` carrier. Narrowings
+retain their Number/BigInt conversion and success carrier. JavaScript's
+exact-integer `Number` carrier canonicalises zero to `+0`, while BigInt
+operations remain exact. `Dec`, binary floats, `Byte` and `Power` receive
+no integer-proof elision.
 
-Emitted F16 values call native `Math.f16round`, so a JavaScript host executing F16 code must
-provide it built in. The compiler's integration test harness uses Node, which requires Node 24 or
-newer. It selects the `node` executable and asserts this prerequisite once as an infrastructure
-failure that names the executable and its version.
+Emitted `F16` values call native `Math.f16round`, so JavaScript hosts executing
+`F16` code provide it built in. The Node integration harness requires Node 24
+or newer and reports a missing prerequisite as an infrastructure failure that
+names the selected executable and its version.
 
 ## Wasm lowering
 
@@ -128,7 +139,31 @@ In plain terms:
 - **layouts** describe how composite values sit in memory
 - **runtime imports** pull helpers the module refuses to reimplement alone
 
-Dispatcher-loop LIR, the `moth_start` bootstrap, the `i64` Int bridge and per-module memory all still exist in the Wasm backend today. Read them as **migration debt, not architecture**. The final design replaces them with structured LIR, no `moth_start`, an imported page-local memory and no `i64` bridge, and `html_project_backend_wasm_final_implementation_plan.md` owns that removal.
+The structured path excludes dispatcher-loop LIR and the `moth_start`
+bootstrap. Moth-linked variants import page-local memory. Exact `I64`/`U64`
+values use ordinary `i64` carriers where appropriate, not a convenience-integer
+bridge that changes semantic type identity.
+
+## Scalar metadata and carriers
+
+Lowerers distinguish canonical semantic type, scalar storage and computation
+carrier. Ordinary Wasm storage uses one byte for `I8`/`U8`/`Byte`, two for
+`I16`/`U16` and four for `I32`/`U32`, all with `i32` carriers. `I64`/`U64`
+use eight bytes and `i64` carriers. `F16` uses two bytes with an `f32` carrier,
+`F32` four bytes with `f32` and `F64` eight bytes with `f64`.
+
+Natural alignment and scalar-collection stride follow scalar byte size.
+Narrow loads preserve signedness and stores preserve the checked selected
+domain. An `i32` carrier does not widen `I8 + I8 -> I8`. An `f32` carrier
+does not delay `F16` rounding or finite checks until storage.
+
+Source-visible counts and positional indices use `I32`. Physical byte products,
+offsets, alignment and addresses use checked physical-size representations,
+not a requirement that every byte size fit `I32`. Scalar metadata creates no
+allocation family and moves no aggregate-layout or cleanup authority from
+`ValidatedMemoryPlan`. The @../../memory-management/runtime-and-backend-lowering
+(Runtime and backend memory lowering) reference owns the complete scalar
+storage contract.
 
 ## Shared runtime and wrappers
 
@@ -148,7 +183,10 @@ What the lowerer emits follows the plan exactly. Where the plan chose a GC-nativ
 
 Numeric proof elision is independent of failure delivery. Wasm marks a proven statement with explicit `ProvenSafe`; it does not infer safety from missing scratch. The emitter uses native integer opcodes and omits only the proven-impossible predicates while preserving the operation's required success and failure continuations. `Power` remains checked. A proven-safe 32-bit multiply needs no widened check-only product scratch, and a destination that aliases an input needs no temporary because the opcode reads its inputs before `local.set`.
 
-Current Wasm proof elision covers `Trap` and semantically discharged `Infallible` integer operations only. Its `CastOp`, `ReturnError` and `Dec` capability gates remain; fallible casts and narrowing have no Wasm proof-elision path. These are backend coverage limits, not the language's failure-delivery rule. See the @../../../docs/progress (Progress matrix).
+Each target consumes only the proof classes its lowerer supports. Missing proof
+retains checks, and proof elision never grants a missing cast, decimal or
+recoverable-failure capability. The @../../../docs/progress (Progress matrix)
+records backend coverage and genuine deferred lowering gaps.
 
 Every backend answers to the same validation, and optimisation must preserve observable behaviour and the same accepted program set.
 
@@ -175,9 +213,8 @@ Target validation must diagnose user-facing target failures before lowering star
 ## Roadmap and current status
 
 - **Accepted design:** backend-neutral frontend, structured Wasm path and central output records.
-- **Current implementation:** progress rows and experimental backend status where still labelled.
-- **Queued work:** `html_project_backend_wasm_final_implementation_plan.md`.
-- **Deferred or removed in the final design:** the old bootstrap and dispatcher paths are current experimental implementation debt queued for deletion, not history.
+- **Implementation coverage:** the @../../../docs/progress (Progress matrix) owns target coverage and experimental backend status.
+- **Deferred backend work:** the Wasm implementation plan owns genuine remaining structured-control-flow, shared-runtime and memory-lowering gaps. These do not select numeric identities or permit weaker numeric semantics.
 
 ## Exit state
 

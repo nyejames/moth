@@ -1,20 +1,18 @@
--- Regression coverage for the ExpressionKind::Coerced runtime path.
+-- Explicit conversion of a non-constant I32 call result exercises runtime casting.
 --
--- The result of pass_through(4) is a non-constant Int expression (a function
--- call return value), so it cannot be constant-folded to a Float literal at
--- parse time. Instead the frontend must wrap it in a Coerced node and lower
--- it through HIR to a runtime conversion. The body stays trap-free so the
--- same source also covers the Wasm backend. The coerced Float binding is a
--- copy: reassigning the mutable Int afterwards leaves the snapshot unchanged.
+-- pass_through(4) arrives through a function call rather than a folded literal.
+-- The body stays trap-free so the same source also covers the Wasm backend.
+-- The converted F64 binding is a copy: reassigning the mutable I32 afterwards
+-- leaves the snapshot unchanged.
 
-pass_through |value Int| -> Int:
+pass_through |value I32| -> I32:
     return value
 ;
 
-result Float = pass_through(4)
+result F64 = cast pass_through(4)
 
-counter ~Int = 5
-snapshot Float = counter
+counter ~I32 = 5
+snapshot F64 = cast counter
 counter = 7
 
 [:coerced call=[result] snapshot=[snapshot] reassigned=[counter]]

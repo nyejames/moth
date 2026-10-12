@@ -218,13 +218,13 @@ Each behavior should have one primary owner. Secondary coverage is justified onl
 `crates/moth-lexical/src/tests/` and `crates/moth-lexical/src/numeric/tests/`
 own shared identifier, word and numeric leaf invariants.
 `crates/moth-mon/src/tests/` owns codec-local invariants.
-`crates/moth-mon/tests/` owns the public standalone API, numeric profiles,
-defaults, limits and errors. The compiler keeps only focused convenience
+`crates/moth-mon/tests/` owns the public standalone API, exact numeric schemas,
+raw numeric data, limits and errors. The compiler keeps only focused convenience
 re-export identity coverage rather than a second copy of the public codec suite.
 
 The cross-parser harness at `src/compiler_tests/mon_syntax_parity/` tokenises
 and parses real Moth source and independently reads MON with equivalent
-receiving types/schemas and the same numeric profile. Common accepted cases
+receiving types/schemas. Common accepted cases
 assert expected typed values in both parsers before comparing them. Common
 invalid cases assert each parser's intended rejection reason and source span.
 Do not substitute fabricated source tokens or helper-return comparisons.
@@ -637,7 +637,6 @@ Use one `expect.toml` per case with backend-specific assertion blocks.
 
 [codeblock, $code("toml"):
     entry = "."
-    numeric_profile = "Int32/Float64"
 
     [backends.html]
     mode = "success"
@@ -655,24 +654,14 @@ Use one `expect.toml` per case with backend-specific assertion blocks.
     must_export = ["memory", "moth_str_ptr", "moth_str_len", "moth_release"]
 ]
 
-The optional top-level `numeric_profile` selects the compiler-boundary `Int` width and `Float`
-precision reported by the case's builder for every backend block. Its exact accepted values are
-`Int32/Float32`, `Int32/Float64`, `Int64/Float32` and `Int64/Float64`; omitting the key selects the
-default `Int32/Float64`. This is builder-owned selection, not a source or command-line setting.
-
-The paired `html_wasm` profile matrix covers supported scalar paths in all four numeric profiles:
-values, comparisons, F16 scalar conversion and supported infallible numeric expression casts,
-including `Byte -> U8` and `U8 -> Byte`. Checked integer arithmetic cases pair HTML-JS success
-with the structured Wasm recoverable-numeric rejection; semantically discharged arithmetic, such
-as `U8 + U8 -> U32`, succeeds on both. A paired `NumericToString` expression-cast case covers profile `Int` and
-fixed signed/unsigned integers in the `Int32/Float32` profile only; generated-Wasm UTF-8
-helper tests cover signed and unsigned output. Separate paired cases exercise trap-mode
-`Float`/`F16`/`F32`/`F64` text at the default and `Int32/Float32` profiles.
-Recoverable numeric `Error!` paths and reachable `ReturnError` `FormatFloat` and
-`ValidateFloat` remain target-gated, as do fallible conversions, other defined
-conversions involving `Bool`, `Char`, `Error` or `String` (including `Char -> Int` and
-String-to-numeric parsing), and statement-form casts. Fixed-scalar aggregates and
-source-level external finite-value validation retain separate target gates.
+Pair HTML-JS and `html_wasm` cases for supported exact scalar values, comparisons
+and casts. Use @../../docs/numbers/#numeric-types (Numeric types) and
+@../../docs/numbers/#operators (Operators) for semantic expectations, not a
+profile matrix or a minimum arithmetic width. Keep numeric failures within the
+ordinary diagnostic, recovered-output or returned-entry assertion contracts.
+Assert the intended target rejection for unsupported paths. The
+@../../docs/progress (Progress matrix) owns current backend support, including
+the remaining Wasm gates.
 
 - Use backend-specific blocks within one case.
 - `entry = "."` is the one supported current-directory sentinel and selects the case's `input/`

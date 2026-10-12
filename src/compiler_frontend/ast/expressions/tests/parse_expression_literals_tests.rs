@@ -21,20 +21,13 @@ use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCac
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::grammar::{NumericExponentSign, NumericLiteralKind, NumericLiteralSign};
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 use std::rc::Rc;
 use std::sync::Arc;
 
 #[test]
 fn parse_literal_expression_defers_signed_i32_min_token() {
-    let outcome = parse_whole_number_token(
-        NumericLiteralSign::Negative,
-        "2147483648",
-        10,
-        false,
-        NumericProfile::STANDARD,
-    )
-    .expect("signed i32 minimum boundary should parse");
+    let outcome = parse_whole_number_token(NumericLiteralSign::Negative, "2147483648", 10, false)
+        .expect("signed i32 minimum boundary should parse");
 
     assert!(!outcome.next_number_negative);
     assert_eq!(outcome.expression.len(), 1);
@@ -48,14 +41,8 @@ fn parse_literal_expression_defers_signed_i32_min_token() {
 
 #[test]
 fn parse_literal_expression_defers_positive_i32_overflow() {
-    let outcome = parse_whole_number_token(
-        NumericLiteralSign::Positive,
-        "2147483648",
-        10,
-        false,
-        NumericProfile::STANDARD,
-    )
-    .expect("over-range literal should defer range checks to evaluation");
+    let outcome = parse_whole_number_token(NumericLiteralSign::Positive, "2147483648", 10, false)
+        .expect("over-range literal should defer range checks to evaluation");
 
     assert_eq!(outcome.expression.len(), 1);
 
@@ -68,14 +55,8 @@ fn parse_literal_expression_defers_positive_i32_overflow() {
 
 #[test]
 fn parse_literal_expression_folds_effective_negative_sign_into_pending_token() {
-    let outcome = parse_whole_number_token(
-        NumericLiteralSign::Positive,
-        "2147483648",
-        10,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect("parser-owned negation should fold into the pending sign");
+    let outcome = parse_whole_number_token(NumericLiteralSign::Positive, "2147483648", 10, true)
+        .expect("parser-owned negation should fold into the pending sign");
 
     assert!(!outcome.next_number_negative);
     assert_eq!(outcome.expression.len(), 1);
@@ -89,14 +70,8 @@ fn parse_literal_expression_folds_effective_negative_sign_into_pending_token() {
 
 #[test]
 fn parse_literal_expression_defers_effective_negative_underflow() {
-    let outcome = parse_whole_number_token(
-        NumericLiteralSign::Positive,
-        "2147483649",
-        10,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect("under-range literal should defer range checks to evaluation");
+    let outcome = parse_whole_number_token(NumericLiteralSign::Positive, "2147483649", 10, true)
+        .expect("under-range literal should defer range checks to evaluation");
 
     let ExpressionRpnItem::PendingNumericLiteral { token, .. } = &outcome.expression[0] else {
         panic!("literal should defer to a pending item");
@@ -106,35 +81,19 @@ fn parse_literal_expression_defers_effective_negative_underflow() {
 }
 
 #[test]
-fn parse_literal_expression_defers_int32_overflow_at_either_width() {
-    for profile in [
-        NumericProfile {
-            int_width: IntWidth::Bits32,
-            float_precision: FloatPrecision::Bits64,
-        },
-        NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits64,
-        },
-    ] {
-        let outcome = parse_whole_number_token(
-            NumericLiteralSign::Positive,
-            "3000000000",
-            10,
-            false,
-            profile,
-        )
+fn parse_literal_expression_defers_int32_overflow() {
+    let outcome = parse_whole_number_token(NumericLiteralSign::Positive, "3000000000", 10, false)
         .expect("range checks belong to evaluation, not the literal parser");
 
-        assert_eq!(outcome.expression.len(), 1);
+    assert_eq!(outcome.expression.len(), 1);
 
-        let ExpressionRpnItem::PendingNumericLiteral { token, .. } = &outcome.expression[0] else {
-            panic!("literal should defer to a pending item");
-        };
-        assert_eq!(token.sign, NumericLiteralSign::Positive);
-        assert_eq!(token.kind, NumericLiteralKind::WholeNumber);
-    }
+    let ExpressionRpnItem::PendingNumericLiteral { token, .. } = &outcome.expression[0] else {
+        panic!("literal should defer to a pending item");
+    };
+    assert_eq!(token.sign, NumericLiteralSign::Positive);
+    assert_eq!(token.kind, NumericLiteralKind::WholeNumber);
 }
+
 #[test]
 fn parse_literal_expression_folds_effective_negative_sign_for_i64_min() {
     let outcome = parse_whole_number_token(
@@ -142,10 +101,6 @@ fn parse_literal_expression_folds_effective_negative_sign_for_i64_min() {
         "9223372036854775808",
         19,
         true,
-        NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits64,
-        },
     )
     .expect("parser-owned negation should fold into the pending sign");
 
@@ -165,10 +120,6 @@ fn parse_literal_expression_defers_positive_i64_overflow() {
         "9223372036854775808",
         19,
         false,
-        NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits64,
-        },
     )
     .expect("positive 2^63 should defer range checks to evaluation");
 
@@ -181,24 +132,14 @@ fn parse_literal_expression_defers_positive_i64_overflow() {
 
 #[test]
 fn parse_literal_expression_defers_float_pending_item() {
-    for precision in [FloatPrecision::Bits32, FloatPrecision::Bits64] {
-        let outcome = parse_float_token(
-            "0.1",
-            2,
-            1,
-            NumericProfile {
-                int_width: IntWidth::Bits32,
-                float_precision: precision,
-            },
-        )
+    let outcome = parse_float_token("0.1", 2, 1)
         .expect("float precision applies at evaluation, not the literal parser");
 
-        let ExpressionRpnItem::PendingNumericLiteral { token, .. } = &outcome.expression[0] else {
-            panic!("literal should defer to a pending item");
-        };
-        assert_eq!(token.sign, NumericLiteralSign::Positive);
-        assert_eq!(token.kind, NumericLiteralKind::DecimalPoint);
-    }
+    let ExpressionRpnItem::PendingNumericLiteral { token, .. } = &outcome.expression[0] else {
+        panic!("literal should defer to a pending item");
+    };
+    assert_eq!(token.sign, NumericLiteralSign::Positive);
+    assert_eq!(token.kind, NumericLiteralKind::DecimalPoint);
 }
 
 #[derive(Debug)]
@@ -212,7 +153,6 @@ fn parse_whole_number_token(
     normalized_text: &str,
     digit_count: u32,
     next_number_negative: bool,
-    profile: NumericProfile,
 ) -> Result<LiteralParseOutcome, ExpressionParseError> {
     parse_numeric_token(
         sign,
@@ -221,7 +161,6 @@ fn parse_whole_number_token(
         digit_count,
         0,
         next_number_negative,
-        profile,
     )
 }
 
@@ -229,7 +168,6 @@ fn parse_float_token(
     normalized_text: &str,
     digit_count: u32,
     fractional_digit_count: u32,
-    profile: NumericProfile,
 ) -> Result<LiteralParseOutcome, ExpressionParseError> {
     parse_numeric_token(
         NumericLiteralSign::Positive,
@@ -238,12 +176,11 @@ fn parse_float_token(
         digit_count,
         fractional_digit_count,
         false,
-        profile,
     )
 }
 
-/// Parse one numeric token fixture while the profile under test reaches the parser
-/// only through the scope context.
+/// Parse one numeric token fixture through the literal parser. Range and precision checks
+/// are deferred to evaluation, so the fixture needs only the scope context.
 fn parse_numeric_token(
     sign: NumericLiteralSign,
     kind: NumericLiteralKind,
@@ -251,7 +188,6 @@ fn parse_numeric_token(
     digit_count: u32,
     fractional_digit_count: u32,
     next_number_negative: bool,
-    profile: NumericProfile,
 ) -> Result<LiteralParseOutcome, ExpressionParseError> {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -267,8 +203,7 @@ fn parse_numeric_token(
         )),
         Arc::new(ExternalPackageRegistry::new()),
         0,
-    )
-    .with_numeric_profile(profile);
+    );
 
     let min_text = string_table.intern(normalized_text);
     // For signed tokens the source_text includes the sign prefix.

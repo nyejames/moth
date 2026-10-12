@@ -1,9 +1,9 @@
 Counter = |
-    count Int,
+    count I32,
 |
 
 -- "count" is already a field on Counter
-count |this Counter| -> Int:
+count |this Counter| -> I32:
     return this.count
 ;
 

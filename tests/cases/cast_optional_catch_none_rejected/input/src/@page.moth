@@ -1,4 +1,4 @@
-maybe Int? = cast "not a number" catch:
+maybe I32? = cast "42" catch:
     then none
 ;
 

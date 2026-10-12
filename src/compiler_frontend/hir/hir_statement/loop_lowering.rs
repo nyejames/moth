@@ -97,11 +97,14 @@ struct RangeLoopRuntime {
     types: RangeLoopTypes,
 }
 
+/// Whether this range-loop domain steps through the dedicated binary-float candidate path.
+///
+/// WHAT: every exact binary-float domain (`F16`/`F32`/`F64`) uses endpoint/non-progress candidate
+///       stepping.
+/// WHY: candidate stepping must finish at the selected precision, so an `F16` counter keeps its
+///      exact domain instead of an F32 floor or an ordinary numeric-add overflow check.
 fn uses_float_range_candidate(domain: NumericScalar) -> bool {
-    matches!(
-        domain,
-        NumericScalar::Float | NumericScalar::Fixed(FixedScalar::F32 | FixedScalar::F64)
-    )
+    domain.is_binary_float()
 }
 
 impl<'a> HirBuilder<'a> {
@@ -394,7 +397,9 @@ impl<'a> HirBuilder<'a> {
             binding,
             domain,
             bool_type: builtin_type_ids::BOOL,
-            int_type: builtin_type_ids::INT,
+            // The automatically supplied iteration index uses the language's exact I32
+            // positional-index identity; it never follows the range counter's domain.
+            int_type: builtin_type_ids::fixed_scalar(FixedScalar::I32),
         })
     }
 
@@ -526,7 +531,10 @@ impl<'a> HirBuilder<'a> {
         let pre_header_region = self.current_region_or_error(span_ref)?;
         let zero_index = self.make_expression(
             span_ref,
-            HirExpressionKind::Int(0),
+            HirExpressionKind::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, 0)
+                    .expect("zero is representable in I32"),
+            ),
             types.int_type,
             ValueKind::Const,
             pre_header_region,
@@ -970,7 +978,9 @@ impl<'a> HirBuilder<'a> {
         )?;
         let index_delta = self.make_expression(
             span_ref,
-            HirExpressionKind::Int(1),
+            HirExpressionKind::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, 1).expect("one is representable in I32"),
+            ),
             types.int_type,
             ValueKind::Const,
             commit_region,
@@ -979,7 +989,7 @@ impl<'a> HirBuilder<'a> {
             HirLocalDestination::Update(locals.iteration_index),
             HirNumericOp {
                 operator: NumericOperator::Add,
-                domain: NumericScalar::Int,
+                domain: NumericScalar::Fixed(FixedScalar::I32),
             },
             index_current,
             index_delta,
@@ -1142,7 +1152,7 @@ impl<'a> HirBuilder<'a> {
         )?;
         let in_range_result = locals.candidate_in_range.ok_or_else(|| {
             CompilerError::compiler_error(
-                "Float range candidate lowering is missing its Bool result local",
+                "Binary-float range candidate lowering is missing its Bool result local",
             )
         })?;
 
@@ -1232,9 +1242,10 @@ impl<'a> HirBuilder<'a> {
 
         self.set_current_block(block, span_ref)?;
         let region = self.current_region_or_error(span_ref)?;
-        let crosses_zero = if matches!(types.domain, NumericScalar::Fixed(scalar) if scalar.class() == FixedScalarClass::UnsignedInteger)
-            || matches!(types.domain, NumericScalar::Uint)
-        {
+        let crosses_zero = if matches!(
+            types.domain,
+            NumericScalar::Fixed(scalar) if scalar.class() == FixedScalarClass::UnsignedInteger
+        ) {
             self.make_expression(
                 span_ref,
                 HirExpressionKind::Bool(false),
@@ -1491,9 +1502,6 @@ impl<'a> HirBuilder<'a> {
         region: RegionId,
     ) -> Result<HirValueId, HirConstructionFailure> {
         let kind = match types.domain {
-            NumericScalar::Int => HirExpressionKind::Int(0),
-            NumericScalar::Uint => HirExpressionKind::Uint(0),
-            NumericScalar::Float => HirExpressionKind::Float(0.0),
             NumericScalar::Fixed(scalar) => {
                 let zero = match scalar.class() {
                     FixedScalarClass::SignedInteger => FixedScalarValue::signed(scalar, 0),
@@ -1518,9 +1526,6 @@ impl<'a> HirBuilder<'a> {
         region: RegionId,
     ) -> Result<HirValueId, HirConstructionFailure> {
         let kind = match types.domain {
-            NumericScalar::Int => HirExpressionKind::Int(1),
-            NumericScalar::Uint => HirExpressionKind::Uint(1),
-            NumericScalar::Float => HirExpressionKind::Float(1.0),
             NumericScalar::Fixed(scalar) => {
                 let one = match scalar.class() {
                     FixedScalarClass::SignedInteger => FixedScalarValue::signed(scalar, 1),
@@ -1595,7 +1600,8 @@ impl<'a> HirBuilder<'a> {
         let (iterable_type, element_type) = self.collection_iteration_types(iterable, span_ref)?;
 
         let bool_ty = builtin_type_ids::BOOL;
-        let int_ty: TypeId = builtin_type_ids::INT;
+        // Collection lengths and positional indices use the language's exact I32 identity.
+        let int_ty: TypeId = builtin_type_ids::fixed_scalar(FixedScalar::I32);
         let iterable_local = self.allocate_temp_local(iterable_type, None)?;
         let length_local = self.allocate_temp_local(int_ty, None)?;
         let iteration_index_local = self.allocate_temp_local(int_ty, None)?;
@@ -1612,7 +1618,10 @@ impl<'a> HirBuilder<'a> {
         let pre_header_region = self.current_region_or_error(span_ref)?;
         let zero_index = self.make_expression(
             span_ref,
-            HirExpressionKind::Int(0),
+            HirExpressionKind::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, 0)
+                    .expect("zero is representable in I32"),
+            ),
             int_ty,
             ValueKind::Const,
             pre_header_region,
@@ -1773,7 +1782,9 @@ impl<'a> HirBuilder<'a> {
         )?;
         let step_delta = self.make_expression(
             span_ref,
-            HirExpressionKind::Int(1),
+            HirExpressionKind::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, 1).expect("one is representable in I32"),
+            ),
             int_ty,
             ValueKind::Const,
             step_region,
@@ -1782,7 +1793,7 @@ impl<'a> HirBuilder<'a> {
             HirLocalDestination::Update(iteration_index_local),
             HirNumericOp {
                 operator: NumericOperator::Add,
-                domain: NumericScalar::Int,
+                domain: NumericScalar::Fixed(FixedScalar::I32),
             },
             step_current,
             step_delta,

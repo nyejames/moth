@@ -1,4 +1,4 @@
 -- Test that trailing commas in function returns are rejected
-compute |x Int| -> Int, String,:
+compute |x I32| -> I32, String,:
     return 42, "result"
 ;

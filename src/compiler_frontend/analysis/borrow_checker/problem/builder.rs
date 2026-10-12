@@ -717,9 +717,6 @@ impl<'a> FunctionProblemBuilder<'a> {
             | HirExpressionKind::VariantConstruct { .. }
             | HirExpressionKind::MapLiteral(_) => ExpressionPlan::Aggregate,
             HirExpressionKind::Number(_)
-            | HirExpressionKind::Uint(_)
-            | HirExpressionKind::Int(_)
-            | HirExpressionKind::Float(_)
             | HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
@@ -769,9 +766,6 @@ impl<'a> FunctionProblemBuilder<'a> {
             HirExpressionKind::Load(_)
             | HirExpressionKind::Copy(_)
             | HirExpressionKind::Number(_)
-            | HirExpressionKind::Uint(_)
-            | HirExpressionKind::Int(_)
-            | HirExpressionKind::Float(_)
             | HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
@@ -1559,7 +1553,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 HirProjection::Field(field) => ProjectionElem::Field(field.0),
                 HirProjection::Index(index_id) => {
                     let fixed_index = match &self.module.expressions.expression(index_id).kind {
-                        HirExpressionKind::Int(value) => Some(*value),
+                        HirExpressionKind::FixedScalar(value) => value.as_i64(),
                         _ => None,
                     };
                     match fixed_index {

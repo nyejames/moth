@@ -2,11 +2,11 @@ DomainError ::
     Missing,
 ;
 
-multiply |left Int, right Int| -> Int:
+multiply |left I32, right I32| -> I32:
     return left * right
 ;
 
-as_domain_value |value Int| -> Int, DomainError!:
+as_domain_value |value I32| -> I32, DomainError!:
     return value
 ;
 

@@ -3,10 +3,10 @@
 -- Valid String
 io.line("hello")
 
--- Valid Int
+-- Valid I32
 io.line([: [42]])
 
--- Valid Float
+-- Valid F64
 io.line([: [3.14]])
 
 -- Valid Bool
@@ -22,8 +22,8 @@ io.line([: [message]])
 
 -- Invalid struct should fail while the above compiled fine
 Point = |
-    x Int,
-    y Int,
+    x I32,
+    y I32,
 |
 
 point = Point(1, 2)

@@ -1,64 +1,33 @@
-A whole number with no typed destination is an `Int` value:
+Unconstrained whole-number spelling defaults to `I32`. Decimal-point and
+exponent spelling defaults to `F64`:
 
 [codeblock, $code("moth"):
     score = 42
-]
-
-A number with a decimal point is a `Float` value:
-
-[codeblock, $code("moth"):
-    progress = 0.5
-]
-
-Large and tiny values can use lowercase `e` notation:
-
-[codeblock, $code("moth"):
+    ratio = 0.5
     population = 1e6
-    tolerance = 1e-6
-]
-
-Keep a minus sign attached to the value:
-
-[codeblock, $code("moth"):
     temperature = -5
-    opposite = -count
 ]
 
-`1E6`, `+1` and `- count` are not valid numeric forms.
+The grammar uses lowercase `e`, has no suffixes or radix forms and rejects
+unary `+` and spaced `- count`. Small values do not infer narrow types.
 
-### Typed destinations
-
-A literal takes its type from the type it is received into, so explicit-width
-and exact values need no intermediate `Int` or `Float`:
+An exact receiver materialises a literal directly:
 
 [codeblock, $code("moth"):
     small U8 = 200
     large U64 = 18_000_000_000
-    count Uint = 1 + 2
     half F16 = 0.5
-    raw Byte = 255
     price Dec2 = 12.50
 ]
 
-A `Dec` receiver also types literal arithmetic, not just lone literals.
-A `Uint` receiver does the same for whole-number arithmetic, while a `Uint`
-power exponent keeps `Uint` context where a `Dec` exponent stays `Int`:
+An exact receiver can also type unresolved literal arithmetic:
 
 [codeblock, $code("moth"):
-    whole Dec4 = 1 + 1
-    fraction Dec4 = 0.1 + 0.2
-    total Uint = 1 + 2
+    total U8 = 1 + 2
+    money Dec4 = 0.1 + 0.2
 ]
 
-Whole literals can also initialise binary floats. Decimal or exponent spelling
-never initialises a fixed integer, `Int`, `Uint` or `Byte` merely because its value is
-whole, and a literal that does not fit its destination is rejected. Small values
-never infer a narrow type by size. See @./#numeric-literals (Numeric literals)
-for the complete receiving and peer rules.
-
-**Current versus accepted.** The frontend materialises fixed-width, `Uint`, `Byte` and
-exact `Dec` literals with destination-aware range checks. HTML-JS executes
-fixed-width numeric, `Uint`, `Byte` and `Dec` runtime values. Experimental HTML-Wasm
-executes fixed integers, `Uint` scalars through `U32`/`U64` carriers in trap-mode-supported paths, `Byte`, `F16`, `F32` and `F64` values. `F16` uses a finite
-`F32` computation carrier and compact two-byte storage. Wasm rejects reachable
-`Dec` values. See @../progress (Progress) for current support.
+The `U8` operation checks its own narrow result. A bound value keeps its type:
+receiving context can type a raw literal beside it, but cannot retype that
+named value or a completed operation. See @./#numeric-literals (Numeric
+literals) for body-local inference, peer priority and barriers.

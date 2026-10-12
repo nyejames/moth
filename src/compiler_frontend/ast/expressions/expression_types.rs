@@ -96,26 +96,16 @@ pub(crate) enum ResolvedCastEvidence {
     },
 }
 
-/// Handling form recorded on a resolved cast.
-#[derive(Clone, Debug)]
+/// Delivery context for a resolved cast; pair fallibility is selected independently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CastHandling {
-    /// Plain `cast expression` — requires infallible evidence.
-    Infallible,
+    /// A plain source cast. Failures use the ordinary implicit delivery path.
+    Implicit,
 
-    /// `cast! expression` — propagates cast failure through the error-return slot.
-    Propagate,
-
-    /// `cast expression catch:` / `cast expression catch |err|:` — local recovery.
-    ///
-    /// WHAT: records only that the cast recovers locally. The handler body is owned by
-    /// `ValueCatchBlock` so expression variants stay bodyless.
+    /// Local recovery in the selected expression's catch context.
     Recover,
 
-    /// Compiler-inserted checked conversion at a compound-assignment store.
-    ///
-    /// WHAT: converts the promoted arithmetic result back to the destination numeric scalar.
-    /// WHY: failure follows the enclosing function's numeric failure mode (builtin `Error!`
-    ///      returns it, otherwise it traps); this is not a user-visible `cast!` expression.
+    /// Compiler-inserted conversion at a compound-assignment store.
     StoreConversion,
 }
 

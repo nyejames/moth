@@ -2,201 +2,209 @@
 
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpn;
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticPayload, TypeMismatchContext,
+};
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_declared_type;
+use crate::compiler_frontend::type_coercion::contextual::{
+    coerce_expression_to_declared_type, coerce_expression_to_explicit_type_boundary,
+};
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::{FloatPrecision, NumericProfile};
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
-fn int_literal(value: i64) -> Expression {
-    Expression::int(value, None, ValueMode::ImmutableOwned)
+fn fixed_scalar_id(scalar: FixedScalar) -> TypeId {
+    builtin_type_ids::fixed_scalar(scalar)
 }
 
-fn uint_literal(value: u64) -> Expression {
-    Expression::uint(value, None, ValueMode::ImmutableOwned)
+fn signed_value(scalar: FixedScalar, value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(scalar, value).expect("test signed value fits its fixed scalar")
 }
 
-fn float_literal(value: f64) -> Expression {
-    Expression::float(value, None, ValueMode::ImmutableOwned)
+fn unsigned_value(scalar: FixedScalar, value: u64) -> FixedScalarValue {
+    FixedScalarValue::unsigned(scalar, value).expect("test unsigned value fits its fixed scalar")
+}
+
+fn float_value(scalar: FixedScalar, value: f64) -> FixedScalarValue {
+    FixedScalarValue::binary_float(scalar, value)
+        .expect("test float value is finite at its fixed precision")
+}
+
+fn fixed_expression(value: FixedScalarValue) -> Expression {
+    Expression::fixed_scalar(value, None, ValueMode::ImmutableOwned)
+}
+
+fn assert_type_mismatch(diagnostic: CompilerDiagnostic, expected: TypeId, found: TypeId) {
+    match diagnostic.payload {
+        DiagnosticPayload::TypeMismatch {
+            expected: expected_id,
+            found: found_id,
+            context,
+        } => {
+            assert_eq!(expected_id, expected);
+            assert_eq!(found_id, found);
+            assert_eq!(context, TypeMismatchContext::Declaration);
+        }
+        other => panic!("expected a TypeMismatch diagnostic, got {other:?}"),
+    }
 }
 
 #[test]
-fn float_declaration_from_int_literal_becomes_float() {
+fn same_type_integer_declaration_is_unchanged() {
     let env = TypeEnvironment::new();
-    let expr = int_literal(1);
     let result = coerce_expression_to_declared_type(
-        expr,
-        env.builtins().float,
+        fixed_expression(signed_value(FixedScalar::I32, 42)),
+        fixed_scalar_id(FixedScalar::I32),
         &env,
-        NumericProfile::STANDARD.float_precision,
     );
-    assert_eq!(result.type_id, builtin_type_ids::FLOAT);
-    assert!(
-        matches!(result.kind, ExpressionKind::Float(v) if (v - 1.0).abs() < f64::EPSILON),
-        "constant int should fold to float literal"
-    );
+
+    assert_eq!(result.type_id, fixed_scalar_id(FixedScalar::I32));
+    let ExpressionKind::FixedScalar(value) = result.kind else {
+        panic!("an exactly typed integer must not be wrapped or retyped");
+    };
+    assert_eq!(value, signed_value(FixedScalar::I32, 42));
 }
 
 #[test]
-fn float_declaration_from_int_expression_becomes_coerced() {
-    // Simulate a runtime Int expression (non-constant)
+fn same_type_binary_float_declaration_is_unchanged() {
     let env = TypeEnvironment::new();
-    let runtime_expr = Expression::new(
-        ExpressionKind::Runtime(ExpressionRpn::empty()),
-        None,
-        builtin_type_ids::INT,
-        DataType::Int,
-        ValueMode::ImmutableOwned,
-    );
     let result = coerce_expression_to_declared_type(
-        runtime_expr,
-        env.builtins().float,
+        fixed_expression(float_value(FixedScalar::F64, 1.5)),
+        fixed_scalar_id(FixedScalar::F64),
         &env,
-        NumericProfile::STANDARD.float_precision,
     );
-    assert_eq!(result.type_id, builtin_type_ids::FLOAT);
-    assert!(
-        matches!(
-            result.kind,
-            ExpressionKind::Coerced {
-                to_type,
-                ..
-            } if to_type == builtin_type_ids::FLOAT
-        ),
-        "runtime int should become Coerced node with canonical Float TypeId"
-    );
+
+    assert_eq!(result.type_id, fixed_scalar_id(FixedScalar::F64));
+    let ExpressionKind::FixedScalar(value) = result.kind else {
+        panic!("an exactly typed float must not be wrapped or retyped");
+    };
+    assert_eq!(value, float_value(FixedScalar::F64, 1.5));
 }
 
 #[test]
-fn float_declaration_from_float_is_unchanged() {
+fn numeric_declarations_never_convert_implicitly() {
     let env = TypeEnvironment::new();
-    let expr = float_literal(1.5);
+
+    // An `I32` value stays `I32` in an `F64` declaration. The literal keeps its exact integer
+    // value; only an explicit `cast` converts it.
     let result = coerce_expression_to_declared_type(
-        expr,
-        env.builtins().float,
+        fixed_expression(signed_value(FixedScalar::I32, 16_777_217)),
+        fixed_scalar_id(FixedScalar::F64),
         &env,
-        NumericProfile::STANDARD.float_precision,
     );
-    assert_eq!(result.type_id, builtin_type_ids::FLOAT);
-    assert!(
-        matches!(result.kind, ExpressionKind::Float(_)),
-        "float should not be wrapped in Coerced"
-    );
-}
+    assert_eq!(result.type_id, fixed_scalar_id(FixedScalar::I32));
+    let ExpressionKind::FixedScalar(value) = result.kind else {
+        panic!("a binary-float declaration must not rewrite an integer value");
+    };
+    assert_eq!(value, signed_value(FixedScalar::I32, 16_777_217));
 
-#[test]
-fn int_declaration_from_int_is_unchanged() {
-    let env = TypeEnvironment::new();
-    let expr = int_literal(42);
+    // An `F64` value stays exact in an `F32` declaration; the destination never rounds it
+    // implicitly.
     let result = coerce_expression_to_declared_type(
-        expr,
-        env.builtins().int,
+        fixed_expression(float_value(FixedScalar::F64, 16_777_217.0)),
+        fixed_scalar_id(FixedScalar::F32),
         &env,
-        NumericProfile::STANDARD.float_precision,
     );
-    assert_eq!(result.type_id, builtin_type_ids::INT);
-    assert!(matches!(result.kind, ExpressionKind::Int(42)));
-}
+    assert_eq!(result.type_id, fixed_scalar_id(FixedScalar::F64));
+    let ExpressionKind::FixedScalar(value) = result.kind else {
+        panic!("a narrower float declaration must not rewrite an F64 value");
+    };
+    assert_eq!(value, float_value(FixedScalar::F64, 16_777_217.0));
 
-#[test]
-fn float_declaration_rejects_bool_unchanged() {
-    // Bool → Float is not coercible; the expression should be returned unchanged.
-    let env = TypeEnvironment::new();
-    let expr = Expression::bool(true, None, ValueMode::ImmutableOwned);
+    // A `U64` value stays `U64` in an `I32` declaration: integer receivers never search for a
+    // compatible signed or unsigned domain.
     let result = coerce_expression_to_declared_type(
-        expr,
-        env.builtins().float,
+        fixed_expression(unsigned_value(FixedScalar::U64, 9_007_199_791_611_905)),
+        fixed_scalar_id(FixedScalar::I32),
         &env,
-        NumericProfile::STANDARD.float_precision,
     );
-    // No coercion applied — type stays Bool.
-    assert_eq!(result.type_id, builtin_type_ids::BOOL);
-}
-
-#[test]
-fn int_to_float_coercion_rounds_at_the_profile_precision() {
-    let env = TypeEnvironment::new();
-
-    let float32_result = coerce_expression_to_declared_type(
-        int_literal(16777217),
-        env.builtins().float,
-        &env,
-        FloatPrecision::Bits32,
-    );
-    assert_eq!(float32_result.type_id, builtin_type_ids::FLOAT);
-    assert!(
-        matches!(float32_result.kind, ExpressionKind::Float(v) if v == 16777216.0),
-        "Int -> Float32 must round 16777217 to its nearest Float32 value"
-    );
-
-    let float64_result = coerce_expression_to_declared_type(
-        int_literal(16777217),
-        env.builtins().float,
-        &env,
-        FloatPrecision::Bits64,
-    );
-    assert_eq!(float64_result.type_id, builtin_type_ids::FLOAT);
-    assert!(
-        matches!(float64_result.kind, ExpressionKind::Float(v) if v == 16777217.0),
-        "Int -> Float64 must keep 16777217 exactly"
-    );
-}
-
-#[test]
-fn uint_to_float_coercion_rounds_directly_at_the_profile_precision() {
-    let env = TypeEnvironment::new();
-
-    let small = coerce_expression_to_declared_type(
-        uint_literal(3),
-        env.builtins().float,
-        &env,
-        NumericProfile::STANDARD.float_precision,
-    );
-    assert_eq!(small.type_id, builtin_type_ids::FLOAT);
-    assert!(
-        matches!(small.kind, ExpressionKind::Float(v) if v == 3.0),
-        "small Uint values convert exactly"
-    );
-
-    // `9007199791611905` must round directly to Float32 bits `0x5a000001`
-    // (exact integer value `9007200328482816`), never through an f64 intermediate
-    // which would double-round to `0x5a000000`.
-    let direct = coerce_expression_to_declared_type(
-        uint_literal(9_007_199_791_611_905),
-        env.builtins().float,
-        &env,
-        FloatPrecision::Bits32,
-    );
-    assert_eq!(direct.type_id, builtin_type_ids::FLOAT);
-    let ExpressionKind::Float(bits) = direct.kind else {
-        panic!("Uint -> Float32 must produce a Float literal");
+    assert_eq!(result.type_id, fixed_scalar_id(FixedScalar::U64));
+    let ExpressionKind::FixedScalar(value) = result.kind else {
+        panic!("an integer declaration must not rewrite an unsigned value");
     };
     assert_eq!(
-        (bits as f32).to_bits(),
-        0x5a00_0001_u32,
-        "Uint64 9007199791611905 must round directly to Float32 bits 0x5a000001"
+        value,
+        unsigned_value(FixedScalar::U64, 9_007_199_791_611_905)
     );
 }
 
 #[test]
-fn uint_to_float_coercion_rejects_transitive_int_compatibility() {
+fn bool_into_binary_float_declaration_is_unchanged() {
+    // Bool → binary float is not coercible; the expression is returned unchanged.
     let env = TypeEnvironment::new();
-
-    // A Uint expression into an Int declaration stays incompatible even though
-    // both convert to Float: there is no search through Float.
-    let into_int = coerce_expression_to_declared_type(
-        uint_literal(3),
-        env.builtins().int,
+    let result = coerce_expression_to_declared_type(
+        Expression::bool(true, None, ValueMode::ImmutableOwned),
+        fixed_scalar_id(FixedScalar::F64),
         &env,
-        NumericProfile::STANDARD.float_precision,
     );
-    assert_eq!(into_int.type_id, builtin_type_ids::UINT);
-    assert!(
-        matches!(into_int.kind, ExpressionKind::Uint(3)),
-        "Uint into Int must stay unconverted"
-    );
+
+    assert_eq!(result.type_id, builtin_type_ids::BOOL);
+    assert!(matches!(result.kind, ExpressionKind::Bool(true)));
+}
+
+#[test]
+fn numeric_explicit_type_boundary_rejects_implicit_conversion() {
+    let env = TypeEnvironment::new();
+    let i32_id = fixed_scalar_id(FixedScalar::I32);
+    let u32_id = fixed_scalar_id(FixedScalar::U32);
+    let u64_id = fixed_scalar_id(FixedScalar::U64);
+    let f32_id = fixed_scalar_id(FixedScalar::F32);
+    let f64_id = fixed_scalar_id(FixedScalar::F64);
+
+    // Constant and runtime values, unsigned values and floats all require an explicit `cast` at
+    // an exact receiver: the removed implicit promotions, integer-domain searches and implicit
+    // destination rounding must not reappear.
+    let cases = [
+        (
+            fixed_expression(signed_value(FixedScalar::I32, 1)),
+            f64_id,
+            i32_id,
+        ),
+        (
+            Expression::new(
+                ExpressionKind::Runtime(ExpressionRpn::empty()),
+                None,
+                i32_id,
+                DataType::FixedScalar(FixedScalar::I32),
+                ValueMode::ImmutableOwned,
+            ),
+            f64_id,
+            i32_id,
+        ),
+        (
+            fixed_expression(unsigned_value(FixedScalar::U32, 1)),
+            f64_id,
+            u32_id,
+        ),
+        (
+            fixed_expression(unsigned_value(FixedScalar::U64, 1)),
+            f64_id,
+            u64_id,
+        ),
+        (
+            fixed_expression(unsigned_value(FixedScalar::U64, 1)),
+            i32_id,
+            u64_id,
+        ),
+        (
+            fixed_expression(float_value(FixedScalar::F64, 16_777_217.0)),
+            f32_id,
+            f64_id,
+        ),
+    ];
+
+    for (expression, expected, found) in cases {
+        let error = coerce_expression_to_explicit_type_boundary(
+            expression,
+            expected,
+            &env,
+            TypeMismatchContext::Declaration,
+        )
+        .expect_err("a numeric value must not cross to another exact type implicitly");
+        assert_type_mismatch(error, expected, found);
+    }
 }
 
 #[test]
@@ -207,12 +215,7 @@ fn option_declaration_from_inner_expression_becomes_coerced() {
     let expr =
         Expression::string_slice(string_table.intern("Ana"), None, ValueMode::ImmutableOwned);
 
-    let result = coerce_expression_to_declared_type(
-        expr,
-        option_string,
-        &env,
-        NumericProfile::STANDARD.float_precision,
-    );
+    let result = coerce_expression_to_declared_type(expr, option_string, &env);
 
     assert_eq!(result.type_id, option_string);
     assert!(
@@ -235,12 +238,7 @@ fn option_declaration_from_option_expression_is_unchanged() {
     let expr =
         Expression::option_none_with_type_id(string_type, DataType::StringSlice, &mut env, None);
 
-    let result = coerce_expression_to_declared_type(
-        expr,
-        option_string,
-        &env,
-        NumericProfile::STANDARD.float_precision,
-    );
+    let result = coerce_expression_to_declared_type(expr, option_string, &env);
 
     assert_eq!(result.type_id, option_string);
     assert!(matches!(result.kind, ExpressionKind::OptionNone));

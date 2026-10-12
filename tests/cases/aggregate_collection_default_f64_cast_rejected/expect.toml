@@ -1,0 +1,15 @@
+entry = "."
+
+# The element source keeps the language default F64 because no cast destination
+# constrains it, so the final F64 cast is same-type and invalid.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0083"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+reason = "invalid_cast.same_source_and_target"
+path = "input/@page.moth"
+line = 13

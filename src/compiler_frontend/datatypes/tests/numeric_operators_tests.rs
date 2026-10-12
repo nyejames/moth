@@ -1,4 +1,9 @@
-//! Numeric operator promotion policy tests.
+//! D15 exact-width numeric operator domain, failure-discharge and failure-code policy tests.
+//!
+//! The scalar rows below are the D15 regression oracle: equal fixed types keep their own type,
+//! mixed fixed types use the smallest supported domain covering both complete operand ranges,
+//! and failure discharge is judged against the selected result domain. `Dec`, `Byte` and
+//! mixed-family rejection keep their explicit negative rows.
 
 use crate::compiler_frontend::datatypes::numeric_operators::{
     NumericOperator, binary_operation_domain, common_fixed_integer, comparison_supported,
@@ -7,7 +12,6 @@ use crate::compiler_frontend::datatypes::numeric_operators::{
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass};
-use moth_lexical::numeric::profile::NumericProfile;
 
 use FixedScalar::*;
 
@@ -32,19 +36,41 @@ fn number(scale: u16) -> NumericScalar {
     NumericScalar::Number(NumberScale::new(scale).expect("test Dec scale is valid"))
 }
 
+/// Complete inclusive value range of one fixed integer scalar, read from the scalar's own
+/// canonical range facts rather than any promotion or carrier.
 fn range(scalar: FixedScalar) -> (i128, i128) {
-    fixed(scalar)
-        .integer_range(NumericProfile::STANDARD)
-        .expect("fixed integers have a range")
+    match scalar.class() {
+        FixedScalarClass::SignedInteger => {
+            let (min, max) = scalar.signed_range().expect("signed scalars have a range");
+            (i128::from(min), i128::from(max))
+        }
+        FixedScalarClass::UnsignedInteger => (
+            0,
+            i128::from(
+                scalar
+                    .unsigned_max()
+                    .expect("unsigned scalars have a maximum"),
+            ),
+        ),
+        FixedScalarClass::BinaryFloat | FixedScalarClass::Octet => {
+            panic!("the common-integer oracle takes fixed integer scalars")
+        }
+    }
 }
 
-/// Independent oracle: the narrowest candidate of at least 32 bits, signed whenever either input
-/// is signed, whose range covers both input ranges.
+/// Independent oracle: the narrowest supported type of the required signedness whose complete
+/// range covers both complete operand ranges. Equal operands keep their own type, same-signedness
+/// operands take the wider width, and mixed signedness always selects a signed type (none exists
+/// for any signed operand paired with `U64`).
 fn expected_common_integer(left: FixedScalar, right: FixedScalar) -> Option<FixedScalar> {
     let signed = [left, right]
         .iter()
         .any(|scalar| scalar.class() == FixedScalarClass::SignedInteger);
-    let candidates: &[FixedScalar] = if signed { &[I32, I64] } else { &[U32, U64] };
+    let candidates: &[FixedScalar] = if signed {
+        &[I8, I16, I32, I64]
+    } else {
+        &[U8, U16, U32, U64]
+    };
     let (left_min, left_max) = range(left);
     let (right_min, right_max) = range(right);
 
@@ -68,13 +94,19 @@ fn common_fixed_integer_matches_the_complete_range_rule_for_every_pair() {
 }
 
 #[test]
-fn common_fixed_integer_matches_the_published_examples() {
+fn common_fixed_integer_matches_the_published_d15_examples() {
     let cases = [
-        (U8, U8, Some(U32)),
-        (U8, U16, Some(U32)),
+        (I8, I8, Some(I8)),
+        (I16, I16, Some(I16)),
+        (I8, I16, Some(I16)),
+        (U8, U8, Some(U8)),
+        (U16, U16, Some(U16)),
+        (U8, U16, Some(U16)),
         (U32, U64, Some(U64)),
         (I32, I64, Some(I64)),
-        (I8, I16, Some(I32)),
+        (I8, U8, Some(I16)),
+        (I16, U8, Some(I16)),
+        (I8, U16, Some(I32)),
         (I16, U16, Some(I32)),
         (I32, U32, Some(I64)),
         (I64, U32, Some(I64)),
@@ -120,9 +152,10 @@ fn fixed_integer_operators_compute_in_the_common_type_and_divide_in_f64() {
 }
 
 #[test]
-fn fixed_float_operators_use_the_wider_precision_with_an_f32_minimum() {
+fn fixed_float_operators_preserve_the_wider_precision_without_an_f32_floor() {
+    // D15: equal precisions keep their own type and `F16` has no minimum `F32` semantic domain.
     let cases = [
-        (F16, F16, F32),
+        (F16, F16, F16),
         (F16, F32, F32),
         (F32, F32, F32),
         (F16, F64, F64),
@@ -146,31 +179,6 @@ fn fixed_float_operators_use_the_wider_precision_with_an_f32_minimum() {
 }
 
 #[test]
-fn convenience_int_and_float_rules_are_unchanged() {
-    use NumericScalar::{Float, Int};
-
-    for operator in BINARY_OPERATORS {
-        let int_result = match operator {
-            NumericOperator::Divide => Float,
-            _ => Int,
-        };
-        assert_eq!(
-            binary_operation_domain(operator, Int, Int),
-            Some(int_result)
-        );
-
-        let float_result = (operator != NumericOperator::IntegerDivide).then_some(Float);
-        for (left, right) in [(Float, Float), (Int, Float), (Float, Int)] {
-            assert_eq!(
-                binary_operation_domain(operator, left, right),
-                float_result,
-                "{left:?} {operator:?} {right:?}"
-            );
-        }
-    }
-}
-
-#[test]
 fn number_arithmetic_keeps_its_scale_and_rejects_invalid_scale_operators() {
     let scale_zero = number(0);
     let scale_three = number(3);
@@ -186,10 +194,7 @@ fn number_arithmetic_keeps_its_scale_and_rejects_invalid_scale_operators() {
             binary_operation_domain(operator, scale_three, scale_three),
             Some(scale_three)
         );
-        for integer in [NumericScalar::Int]
-            .into_iter()
-            .chain(FIXED_INTEGERS.into_iter().map(fixed))
-        {
+        for integer in FIXED_INTEGERS.into_iter().map(fixed) {
             assert_eq!(
                 binary_operation_domain(operator, scale_three, integer),
                 Some(scale_three)
@@ -228,29 +233,34 @@ fn number_arithmetic_keeps_its_scale_and_rejects_invalid_scale_operators() {
 }
 
 #[test]
-fn number_power_accepts_only_a_profile_int_exponent() {
+fn number_power_accepts_only_an_exact_i32_exponent() {
     let number_scale = number(2);
+
+    // D15/D05: the exponent is the exact I32 identity.
     assert_eq!(
-        binary_operation_domain(NumericOperator::Power, number_scale, NumericScalar::Int),
+        binary_operation_domain(NumericOperator::Power, number_scale, fixed(I32)),
         Some(number_scale)
     );
 
-    for exponent in FIXED_INTEGERS.into_iter().map(fixed) {
+    for exponent in FIXED_INTEGERS
+        .into_iter()
+        .filter(|scalar| *scalar != I32)
+        .map(fixed)
+    {
         assert_eq!(
             binary_operation_domain(NumericOperator::Power, number_scale, exponent),
-            None
+            None,
+            "{exponent:?} is not the I32 exponent"
         );
     }
     assert_eq!(
         binary_operation_domain(NumericOperator::Power, number_scale, number_scale),
         None
     );
+    // `Dec` may be a base but is never an exponent: a fixed integer base with a `Dec`
+    // exponent rejects, exactly like every non-`I32` exponent above.
     assert_eq!(
-        binary_operation_domain(NumericOperator::Power, number_scale, NumericScalar::Uint),
-        None
-    );
-    assert_eq!(
-        binary_operation_domain(NumericOperator::Power, NumericScalar::Int, number_scale),
+        binary_operation_domain(NumericOperator::Power, fixed(I32), number_scale),
         None
     );
 }
@@ -258,23 +268,14 @@ fn number_power_accepts_only_a_profile_int_exponent() {
 #[test]
 fn number_mixes_only_with_integer_domains_for_arithmetic_and_comparison() {
     let number_domain = number(2);
-    for integer in [NumericScalar::Int, NumericScalar::Uint]
-        .into_iter()
-        .chain(FIXED_INTEGERS.into_iter().map(fixed))
-    {
+    for integer in FIXED_INTEGERS.into_iter().map(fixed) {
         assert!(comparison_supported(number_domain, integer));
         assert!(comparison_supported(integer, number_domain));
     }
 
     assert!(comparison_supported(number_domain, number_domain));
     assert!(!comparison_supported(number_domain, number(3)));
-    for other in [
-        NumericScalar::Float,
-        fixed(F16),
-        fixed(F32),
-        fixed(F64),
-        fixed(Byte),
-    ] {
+    for other in [fixed(F16), fixed(F32), fixed(F64), fixed(Byte)] {
         assert!(!comparison_supported(number_domain, other));
         assert!(!comparison_supported(other, number_domain));
         assert_eq!(
@@ -285,179 +286,55 @@ fn number_mixes_only_with_integer_domains_for_arithmetic_and_comparison() {
 }
 
 #[test]
-fn families_never_mix_implicitly() {
-    let convenience = [NumericScalar::Int, NumericScalar::Float];
-
+fn fixed_integer_and_binary_float_families_never_mix_implicitly() {
     for operator in BINARY_OPERATORS {
-        for scalar in FIXED_INTEGERS.into_iter().chain(FIXED_FLOATS) {
-            for other in convenience {
-                assert_eq!(
-                    binary_operation_domain(operator, fixed(scalar), other),
-                    None
-                );
-                assert_eq!(
-                    binary_operation_domain(operator, other, fixed(scalar)),
-                    None
-                );
-                assert!(!comparison_supported(fixed(scalar), other));
-                assert!(!comparison_supported(other, fixed(scalar)));
-            }
-        }
-
         for integer in FIXED_INTEGERS {
             for float in FIXED_FLOATS {
                 assert_eq!(
                     binary_operation_domain(operator, fixed(integer), fixed(float)),
-                    None
+                    None,
+                    "{integer:?} {operator:?} {float:?}"
                 );
                 assert_eq!(
                     binary_operation_domain(operator, fixed(float), fixed(integer)),
-                    None
+                    None,
+                    "{float:?} {operator:?} {integer:?}"
                 );
                 assert!(!comparison_supported(fixed(integer), fixed(float)));
+                assert!(!comparison_supported(fixed(float), fixed(integer)));
             }
         }
     }
-}
-
-#[test]
-fn uint_arithmetic_selects_checked_uint_or_direct_float() {
-    use NumericScalar::{Float, Int, Uint};
-
-    for operator in [
-        NumericOperator::Add,
-        NumericOperator::Subtract,
-        NumericOperator::Multiply,
-        NumericOperator::IntegerDivide,
-        NumericOperator::Remainder,
-        NumericOperator::Power,
-    ] {
-        assert_eq!(
-            binary_operation_domain(operator, Uint, Uint),
-            Some(Uint),
-            "{operator:?} on Uint"
-        );
-    }
-    assert_eq!(
-        binary_operation_domain(NumericOperator::Divide, Uint, Uint),
-        Some(Float)
-    );
-
-    // Mixed Uint/Float arithmetic computes in Float, except `//` which is invalid.
-    for operator in [
-        NumericOperator::Add,
-        NumericOperator::Subtract,
-        NumericOperator::Multiply,
-        NumericOperator::Divide,
-        NumericOperator::Remainder,
-        NumericOperator::Power,
-    ] {
-        assert_eq!(
-            binary_operation_domain(operator, Uint, Float),
-            Some(Float),
-            "{operator:?} on Uint/Float"
-        );
-        assert_eq!(
-            binary_operation_domain(operator, Float, Uint),
-            Some(Float),
-            "{operator:?} on Float/Uint"
-        );
-    }
-    assert_eq!(
-        binary_operation_domain(NumericOperator::IntegerDivide, Uint, Float),
-        None
-    );
-    assert_eq!(
-        binary_operation_domain(NumericOperator::IntegerDivide, Float, Uint),
-        None
-    );
-
-    // Uint never mixes with Int or fixed widths: no transitive compatibility through Float.
-    // Dec mixes with Uint through the shared exact rule; that pair is asserted separately.
-    for operator in BINARY_OPERATORS {
-        assert_eq!(
-            binary_operation_domain(operator, Uint, Int),
-            None,
-            "{operator:?} on Uint/Int"
-        );
-        assert_eq!(
-            binary_operation_domain(operator, Int, Uint),
-            None,
-            "{operator:?} on Int/Uint"
-        );
-        for scalar in FIXED_INTEGERS.into_iter().chain(FIXED_FLOATS) {
-            assert_eq!(
-                binary_operation_domain(operator, Uint, fixed(scalar)),
-                None,
-                "{operator:?} on Uint/{scalar:?}"
-            );
-            assert_eq!(
-                binary_operation_domain(operator, fixed(scalar), Uint),
-                None,
-                "{operator:?} on {scalar:?}/Uint"
-            );
-        }
-    }
-    // Dec power keeps its own exponent rule: Int stays, Uint never becomes the exponent.
-    assert_eq!(
-        binary_operation_domain(NumericOperator::Power, number(2), Int),
-        Some(number(2))
-    );
-}
-
-#[test]
-fn uint_comparison_is_exact_with_int_and_float() {
-    use NumericScalar::{Float, Int, Uint};
-
-    assert!(comparison_supported(Uint, Uint));
-    assert!(comparison_supported(Uint, Int));
-    assert!(comparison_supported(Int, Uint));
-    assert!(comparison_supported(Uint, Float));
-    assert!(comparison_supported(Float, Uint));
-
-    for scalar in FIXED_INTEGERS.into_iter().chain(FIXED_FLOATS) {
-        assert!(
-            !comparison_supported(Uint, fixed(scalar)),
-            "Uint must not compare with {scalar:?}"
-        );
-        assert!(
-            !comparison_supported(fixed(scalar), Uint),
-            "{scalar:?} must not compare with Uint"
-        );
-    }
-    assert!(!comparison_supported(Uint, fixed(Byte)));
-    assert!(!comparison_supported(fixed(Byte), Uint));
 }
 
 #[test]
 fn negate_is_never_a_binary_operation() {
     assert_eq!(
-        binary_operation_domain(
-            NumericOperator::Negate,
-            NumericScalar::Int,
-            NumericScalar::Int
-        ),
+        binary_operation_domain(NumericOperator::Negate, fixed(I8), fixed(I8)),
         None
     );
 }
 
 #[test]
-fn negation_rejects_every_unsigned_type_and_widens_narrow_operands() {
+fn negation_preserves_signed_and_float_width_and_rejects_unsigned_and_byte() {
+    // D15: a fixed signed integer or binary float keeps its own type under unary minus, so
+    // negating a signed minimum fails in that narrow type. Unsigned types and `Byte` stay
+    // invalid.
     let cases = [
-        (NumericScalar::Int, Some(NumericScalar::Int)),
-        (number(7), Some(number(7))),
-        (NumericScalar::Float, Some(NumericScalar::Float)),
-        (fixed(I8), Some(fixed(I32))),
-        (fixed(I16), Some(fixed(I32))),
+        (fixed(I8), Some(fixed(I8))),
+        (fixed(I16), Some(fixed(I16))),
         (fixed(I32), Some(fixed(I32))),
         (fixed(I64), Some(fixed(I64))),
         (fixed(U8), None),
         (fixed(U16), None),
         (fixed(U32), None),
         (fixed(U64), None),
-        (fixed(F16), Some(fixed(F32))),
+        (fixed(Byte), None),
+        (fixed(F16), Some(fixed(F16))),
         (fixed(F32), Some(fixed(F32))),
         (fixed(F64), Some(fixed(F64))),
+        // `Dec` keeps its own scale; fixed unsigned and `Byte` stay rejected above.
+        (number(7), Some(number(7))),
     ];
 
     for (operand, expected) in cases {
@@ -484,30 +361,37 @@ fn every_fixed_integer_pair_compares_including_i64_with_u64() {
             );
         }
     }
-
-    assert!(comparison_supported(
-        NumericScalar::Int,
-        NumericScalar::Float
-    ));
 }
 
 #[test]
 fn discharge_proves_only_range_contained_fixed_integer_add_sub_mul_negate() {
     use NumericOperator as Op;
-    // (operator, left, right, domain, expected): domains mirror `binary_operation_domain` /
-    // `negation_domain` outputs so the table pins the predicate's contract inputs.
+    // (operator, left, right, domain, expected): domains are the D15 domains the policy must
+    // select, so the table pins the predicate's contract inputs.
     let cases = [
-        // Contract true table.
-        (Op::Add, fixed(U8), Some(fixed(U8)), fixed(U32), true),
-        (Op::Multiply, fixed(U8), Some(fixed(U8)), fixed(U32), true),
-        (Op::Multiply, fixed(U16), Some(fixed(U16)), fixed(U32), true),
-        (Op::Add, fixed(I8), Some(fixed(I8)), fixed(I32), true),
-        (Op::Subtract, fixed(I8), Some(fixed(I8)), fixed(I32), true),
-        (Op::Negate, fixed(I8), None, fixed(I32), true),
-        // Mixed signedness promotes to the computed common domain.
-        (Op::Add, fixed(U8), Some(fixed(I8)), fixed(I32), true),
-        // Contract false table.
-        (Op::Subtract, fixed(U8), Some(fixed(U8)), fixed(U32), false),
+        // True table: the selected result domain contains the complete mathematical result
+        // range of the operation.
+        (Op::Add, fixed(U8), Some(fixed(I8)), fixed(I16), true),
+        (Op::Subtract, fixed(U8), Some(fixed(I8)), fixed(I16), true),
+        (Op::Multiply, fixed(U8), Some(fixed(I8)), fixed(I16), true),
+        (Op::Add, fixed(I8), Some(fixed(U8)), fixed(I16), true),
+        // False table: equal narrow operands keep their own result domain, so the complete
+        // result range exceeds it. `U8` plus `U8` can overflow `U8` and is no longer proven safe.
+        (Op::Add, fixed(U8), Some(fixed(U8)), fixed(U8), false),
+        (Op::Multiply, fixed(U8), Some(fixed(U8)), fixed(U8), false),
+        (
+            Op::Multiply,
+            fixed(U16),
+            Some(fixed(U16)),
+            fixed(U16),
+            false,
+        ),
+        (Op::Add, fixed(I8), Some(fixed(I8)), fixed(I8), false),
+        (Op::Subtract, fixed(I8), Some(fixed(I8)), fixed(I8), false),
+        // Negation keeps the operand type, so negating a signed minimum always overflows it.
+        (Op::Negate, fixed(I8), None, fixed(I8), false),
+        (Op::Negate, fixed(I16), None, fixed(I16), false),
+        (Op::Subtract, fixed(U8), Some(fixed(U8)), fixed(U8), false),
         (Op::Add, fixed(U32), Some(fixed(U32)), fixed(U32), false),
         (Op::Add, fixed(U64), Some(fixed(U64)), fixed(U64), false),
         (
@@ -519,51 +403,7 @@ fn discharge_proves_only_range_contained_fixed_integer_add_sub_mul_negate() {
         ),
         (Op::Negate, fixed(I32), None, fixed(I32), false),
         (Op::Negate, fixed(I64), None, fixed(I64), false),
-        (
-            Op::Add,
-            NumericScalar::Int,
-            Some(NumericScalar::Int),
-            NumericScalar::Int,
-            false,
-        ),
-        (
-            Op::Add,
-            fixed(I32),
-            Some(NumericScalar::Int),
-            NumericScalar::Float,
-            false,
-        ),
         (Op::Divide, fixed(U8), Some(fixed(U8)), fixed(F64), false),
-        (
-            Op::Divide,
-            NumericScalar::Int,
-            Some(NumericScalar::Int),
-            NumericScalar::Float,
-            false,
-        ),
-        // Uint stays outside the profile-free discharge even though its
-        // range is bounded — only fixed-width scalars discharge.
-        (
-            Op::Add,
-            NumericScalar::Uint,
-            Some(NumericScalar::Uint),
-            NumericScalar::Uint,
-            false,
-        ),
-        (
-            Op::Multiply,
-            NumericScalar::Uint,
-            Some(NumericScalar::Uint),
-            NumericScalar::Uint,
-            false,
-        ),
-        (
-            Op::Negate,
-            NumericScalar::Uint,
-            None,
-            NumericScalar::Uint,
-            false,
-        ),
         (
             Op::IntegerDivide,
             fixed(I32),
@@ -578,14 +418,7 @@ fn discharge_proves_only_range_contained_fixed_integer_add_sub_mul_negate() {
             fixed(U32),
             false,
         ),
-        (Op::Power, fixed(U8), Some(fixed(U8)), fixed(U32), false),
-        (
-            Op::Add,
-            NumericScalar::Float,
-            Some(NumericScalar::Float),
-            NumericScalar::Float,
-            false,
-        ),
+        (Op::Power, fixed(U8), Some(fixed(U8)), fixed(U8), false),
         (Op::Add, fixed(F32), Some(fixed(F32)), fixed(F32), false),
         (Op::Add, number(2), Some(number(2)), number(2), false),
     ];
@@ -598,24 +431,19 @@ fn discharge_proves_only_range_contained_fixed_integer_add_sub_mul_negate() {
         );
     }
 
-    // The mixed-signedness and negation rows above use the domains the promotion table
-    // actually computes, pinned here so a promotion change fails loudly.
+    // The rows above pin the D15 domains the policy must select for those operations: equal
+    // narrow operands keep their own narrow domain, mixed signedness uses the smallest signed
+    // type containing both complete ranges, and negation preserves the signed width.
+    assert_eq!(
+        binary_operation_domain(Op::Add, fixed(U8), fixed(U8)),
+        Some(fixed(U8))
+    );
     assert_eq!(
         binary_operation_domain(Op::Add, fixed(U8), fixed(I8)),
-        Some(fixed(I32))
+        Some(fixed(I16))
     );
-    assert_eq!(negation_domain(fixed(I32)), Some(fixed(I32)));
-    assert_eq!(negation_domain(fixed(I64)), Some(fixed(I64)));
-
-    // Byte never participates: it has no `NumericScalar` domain, so model it as rejected by
-    // asserting the predicate refuses a non-integer fixed domain (F32 here stands in for any
-    // non-integer domain, including Byte's absence from the scalar vocabulary).
-    assert!(!numeric_operation_cannot_fail(
-        Op::Add,
-        fixed(F32),
-        Some(fixed(F32)),
-        fixed(F32)
-    ));
+    assert_eq!(negation_domain(fixed(I8)), Some(fixed(I8)));
+    assert_eq!(negation_domain(fixed(I16)), Some(fixed(I16)));
 }
 
 #[test]
@@ -623,19 +451,27 @@ fn failure_codes_leave_exact_float_negation_and_dec_arithmetic_without_a_failure
     use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
     use NumericOperator as Op;
 
-    // `Float` negation is exact, so it carries no codes while every other `Float`
+    // Binary-float negation is exact, so it carries no codes while every other binary-float
     // operation keeps its non-finite guard.
-    assert!(numeric_failure_codes(Op::Negate, NumericScalar::Float).is_empty());
+    assert!(numeric_failure_codes(Op::Negate, fixed(F32)).is_empty());
     assert_eq!(
-        numeric_failure_codes(Op::Add, NumericScalar::Float),
+        numeric_failure_codes(Op::Add, fixed(F32)),
         &[BuiltinErrorCode::FloatNonFinite]
     );
     assert_eq!(
-        numeric_failure_codes(Op::Divide, NumericScalar::Float),
+        numeric_failure_codes(Op::Divide, fixed(F32)),
         &[
             BuiltinErrorCode::DivideByZero,
             BuiltinErrorCode::FloatNonFinite
         ]
+    );
+
+    // `F16` keeps its own float semantic domain, so it retains the same finite-value guard and
+    // exact negation rather than being computed and failed at `F32`.
+    assert!(numeric_failure_codes(Op::Negate, fixed(F16)).is_empty());
+    assert_eq!(
+        numeric_failure_codes(Op::Add, fixed(F16)),
+        &[BuiltinErrorCode::FloatNonFinite]
     );
 
     // Exact `Dec` arithmetic is exact at its scale; only dividing operations and power
@@ -659,51 +495,81 @@ fn failure_codes_leave_exact_float_negation_and_dec_arithmetic_without_a_failure
     // still prove fixed-width cases unable to fail.
     for operator in BINARY_OPERATORS {
         assert!(
-            !numeric_failure_codes(operator, NumericScalar::Int).is_empty(),
-            "{operator:?} on Int must retain failure codes"
+            !numeric_failure_codes(operator, fixed(I32)).is_empty(),
+            "{operator:?} on I32 must retain failure codes"
         );
     }
+    // Unary integer negation keeps its overflow edge: negating a signed minimum fails.
+    assert_eq!(
+        numeric_failure_codes(Op::Negate, fixed(I8)),
+        &[BuiltinErrorCode::IntOverflow]
+    );
 }
 
 #[test]
-fn range_iteration_selects_float_for_any_float_operand_with_int_or_uint_peers() {
-    use NumericScalar as Scalar;
-
-    // The audit repro: a `Float` step rescues an otherwise-invalid `Uint`/`Int` pair.
-    assert_eq!(
-        range_iteration_domain(Scalar::Uint, Scalar::Int, Some(Scalar::Float)),
-        Some(Scalar::Float)
-    );
-    assert_eq!(
-        range_iteration_domain(Scalar::Uint, Scalar::Float, Some(Scalar::Uint)),
-        Some(Scalar::Float)
-    );
-    assert_eq!(
-        range_iteration_domain(Scalar::Int, Scalar::Float, None),
-        Some(Scalar::Float)
-    );
-
-    // Without a `Float` peer the existing pairwise table still governs.
-    assert_eq!(
-        range_iteration_domain(Scalar::Uint, Scalar::Uint, Some(Scalar::Uint)),
-        Some(Scalar::Uint)
-    );
-    assert_eq!(
-        range_iteration_domain(Scalar::Uint, Scalar::Int, Some(Scalar::Uint)),
-        None
-    );
-    assert_eq!(
-        range_iteration_domain(Scalar::Uint, Scalar::Int, None),
-        None
-    );
-
+fn range_iteration_uses_the_fixed_pairwise_table_and_rejects_dec() {
     // Fixed-width operands keep the pairwise table, including mixed-width promotion.
     assert_eq!(
         range_iteration_domain(fixed(I8), fixed(U16), Some(fixed(U16))),
         Some(fixed(I32))
     );
+    // D15: an equal narrow fixed type keeps its own counter domain instead of a wider floor.
     assert_eq!(
-        range_iteration_domain(Scalar::Float, fixed(U16), Some(Scalar::Float)),
+        range_iteration_domain(fixed(U8), fixed(U8), Some(fixed(U8))),
+        Some(fixed(U8))
+    );
+    assert_eq!(
+        range_iteration_domain(fixed(I8), fixed(I8), None),
+        Some(fixed(I8))
+    );
+
+    // Binary floats promote by precision, but an integer/float mixture stays rejected:
+    // a float step cannot rescue it.
+    assert_eq!(
+        range_iteration_domain(fixed(F16), fixed(F32), None),
+        Some(fixed(F32))
+    );
+    assert_eq!(
+        range_iteration_domain(fixed(F16), fixed(U16), Some(fixed(F32))),
         None
     );
+
+    // `Dec` operands never form a range counter.
+    assert_eq!(range_iteration_domain(number(2), number(2), None), None);
+    assert_eq!(
+        range_iteration_domain(fixed(I8), number(2), Some(fixed(I8))),
+        None
+    );
+}
+
+#[test]
+fn byte_is_outside_every_numeric_operator_domain() {
+    let byte = fixed(Byte);
+
+    for operator in BINARY_OPERATORS {
+        assert_eq!(binary_operation_domain(operator, byte, byte), None);
+        for scalar in FIXED_INTEGERS.into_iter().chain(FIXED_FLOATS) {
+            assert_eq!(
+                binary_operation_domain(operator, byte, fixed(scalar)),
+                None,
+                "Byte {operator:?} {scalar:?}"
+            );
+            assert_eq!(
+                binary_operation_domain(operator, fixed(scalar), byte),
+                None,
+                "{scalar:?} {operator:?} Byte"
+            );
+            assert!(!comparison_supported(byte, fixed(scalar)));
+            assert!(!comparison_supported(fixed(scalar), byte));
+        }
+    }
+
+    assert!(!comparison_supported(byte, byte));
+    assert_eq!(range_iteration_domain(byte, byte, None), None);
+    assert!(!numeric_operation_cannot_fail(
+        NumericOperator::Add,
+        byte,
+        Some(byte),
+        byte
+    ));
 }

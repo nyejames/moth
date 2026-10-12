@@ -31,7 +31,6 @@ use crate::compiler_frontend::instrumentation::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::FxHashMap;
 
 use super::normalize_ast::TemplateNormalizationError;
@@ -54,15 +53,9 @@ impl<'a> ConstFactCollector<'a> {
         string_table: &'a mut StringTable,
         const_values: &'a ConstValueStore,
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
-        numeric_profile: NumericProfile,
     ) -> Self {
         Self {
-            resolver: ConstValueResolver::new(
-                string_table,
-                const_values,
-                template_ir_store,
-                numeric_profile,
-            ),
+            resolver: ConstValueResolver::new(string_table, const_values, template_ir_store),
             facts: AstConstFacts::default(),
             module_explicit_env: ConstValueEnvironment::default(),
         }
@@ -491,7 +484,11 @@ impl<'a> ConstFactCollector<'a> {
                         // Pending syntax never survives evaluation; its presence here is a broken
                         // compiler invariant, not a skipped non-const fact.
                         ExpressionRpnItem::PendingNumericLiteral { .. }
-                        | ExpressionRpnItem::PendingGroup { .. } => {
+                        | ExpressionRpnItem::PendingGroup { .. }
+                        | ExpressionRpnItem::PendingNumericBinding { .. }
+                        | ExpressionRpnItem::PendingNumericCast { .. }
+                        | ExpressionRpnItem::PendingNumericCall { .. }
+                        | ExpressionRpnItem::PendingNumericExpression { .. } => {
                             return Err(pending_expression_item_bug("const fact collection").into());
                         }
                     }
@@ -608,9 +605,6 @@ impl<'a> ConstFactCollector<'a> {
 
             ExpressionKind::NoValue
             | ExpressionKind::OptionNone
-            | ExpressionKind::Uint(_)
-            | ExpressionKind::Int(_)
-            | ExpressionKind::Float(_)
             | ExpressionKind::FixedScalar(_)
             | ExpressionKind::Number(_)
             | ExpressionKind::StringSlice(_)

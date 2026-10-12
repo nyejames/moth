@@ -335,7 +335,11 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
         id: path_fork
             .try_intern_portable_path("count", &mut producer_string_table)
             .expect("test path fits"),
-        value: Expression::int(7, None, ValueMode::ImmutableOwned),
+        value: Expression::fixed_scalar(
+            FixedScalarValue::signed(FixedScalar::I32, 7).expect("7 fits I32"),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
         binding_span: None,
         config_qualifier: None,
     };
@@ -351,7 +355,11 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
             id: path_fork
                 .try_intern_portable_path("year", &mut producer_string_table)
                 .expect("test path fits"),
-            value: Expression::int(2026, None, ValueMode::ImmutableOwned),
+            value: Expression::fixed_scalar(
+                FixedScalarValue::signed(FixedScalar::I32, 2026).expect("2026 fits I32"),
+                None,
+                ValueMode::ImmutableOwned,
+            ),
             binding_span: None,
             config_qualifier: None,
         },
@@ -458,7 +466,7 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
     assert_eq!(exported_field_names, ["year", "enabled", "nested"]);
     assert_eq!(
         exported_fields[0].type_identity,
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(FixedScalar::I32))
     );
     assert_eq!(
         exported_fields[2].type_identity,
@@ -505,10 +513,14 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
         vec![Some("year"), Some("enabled"), Some("nested")]
     );
 
-    assert_eq!(imported_fields[0].value.type_id, builtin_type_ids::INT);
+    assert_eq!(
+        imported_fields[0].value.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
     assert!(matches!(
         imported_fields[0].value.kind,
-        ExpressionKind::Int(2026)
+        ExpressionKind::FixedScalar(value)
+            if value == FixedScalarValue::signed(FixedScalar::I32, 2026).expect("2026 fits I32")
     ));
     assert!(matches!(
         imported_fields[1].value.kind,
@@ -537,7 +549,8 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
     );
     assert!(matches!(
         imported_nested_fields[0].value.kind,
-        ExpressionKind::Int(7)
+        ExpressionKind::FixedScalar(value)
+            if value == FixedScalarValue::signed(FixedScalar::I32, 7).expect("7 fits I32")
     ));
 }
 
@@ -546,7 +559,7 @@ fn fixed_scalar_round_trips_through_import_materialisation_with_identity() {
     let mut consumer_materialiser = ConsumerFoldedValueMaterialiser::new();
     let mut consumer_string_table = StringTable::new();
 
-    // U64::MAX cannot pass through `Int`: the import path must carry the exact bits.
+    // `U64::MAX` must keep its exact bits: a narrower carrier cannot represent it.
     let u64_max =
         FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64::MAX fits U64");
     let u64_type = builtin_type_ids::fixed_scalar(FixedScalar::U64);
@@ -614,6 +627,54 @@ fn fixed_scalar_round_trips_through_import_materialisation_with_identity() {
 }
 
 #[test]
+fn folded_range_import_preserves_each_endpoint_type_and_value() {
+    let mut consumer_materialiser = ConsumerFoldedValueMaterialiser::new();
+    let mut consumer_string_table = StringTable::new();
+    let cases = [
+        (
+            FixedScalarValue::unsigned(FixedScalar::U16, u64::from(u16::MAX))
+                .expect("U16 maximum fits U16"),
+            FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64 maximum fits U64"),
+        ),
+        (
+            FixedScalarValue::binary_float(FixedScalar::F16, -0.0)
+                .expect("negative zero is finite"),
+            FixedScalarValue::binary_float(FixedScalar::F32, f64::from(f32::from_bits(1)))
+                .expect("smallest F32 subnormal is finite"),
+        ),
+    ];
+
+    for (start, end) in cases {
+        let folded = PublicFoldedValue::Range {
+            start: Box::new(PublicFoldedValue::FixedScalar(start)),
+            end: Box::new(PublicFoldedValue::FixedScalar(end)),
+        };
+        let imported = materialize_public_folded_value(
+            &mut consumer_materialiser,
+            &folded,
+            builtin_type_ids::RANGE,
+            &mut consumer_string_table,
+            None,
+        )
+        .expect("folded numeric range should import");
+        let ExpressionKind::Range(imported_start, imported_end) = imported.kind else {
+            panic!("range import must preserve its endpoint expressions");
+        };
+
+        for (endpoint, expected) in [(imported_start, start), (imported_end, end)] {
+            assert_eq!(
+                endpoint.type_id,
+                builtin_type_ids::fixed_scalar(expected.scalar())
+            );
+            assert!(matches!(
+                endpoint.kind,
+                ExpressionKind::FixedScalar(value) if value == expected
+            ));
+        }
+    }
+}
+
+#[test]
 fn named_struct_record_import_keeps_the_struct_instance_path() {
     let mut consumer_string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -639,7 +700,7 @@ fn named_struct_record_import_keeps_the_struct_instance_path() {
                 },
                 FieldDefinition {
                     name: year_path,
-                    type_id: builtin_type_ids::INT,
+                    type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     span: None,
                 },
             ]),
@@ -655,8 +716,12 @@ fn named_struct_record_import_keeps_the_struct_instance_path() {
         },
         PublicFoldedField {
             name: "year".to_owned(),
-            type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
-            value: PublicFoldedValue::Int(2026),
+            type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(
+                FixedScalar::I32,
+            )),
+            value: PublicFoldedValue::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, 2026).expect("2026 fits I32"),
+            ),
         },
     ]);
     let mut consumer_materialiser = ConsumerFoldedValueMaterialiser {
@@ -697,7 +762,11 @@ fn named_struct_record_import_keeps_the_struct_instance_path() {
             .map(|id| consumer_string_table.resolve(id)),
         Some("year")
     );
-    assert!(matches!(fields[1].value.kind, ExpressionKind::Int(2026)));
+    assert!(matches!(
+        fields[1].value.kind,
+        ExpressionKind::FixedScalar(value)
+            if value == FixedScalarValue::signed(FixedScalar::I32, 2026).expect("2026 fits I32")
+    ));
 }
 
 fn metadata_record(

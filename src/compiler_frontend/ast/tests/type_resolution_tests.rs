@@ -46,7 +46,7 @@ use crate::compiler_frontend::tests::parse_support::{
 };
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::{IntWidth, NumericProfile};
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -63,7 +63,7 @@ fn expected_source_span(source: &str, text: &str) -> SourceSpan {
 
 #[test]
 fn signature_member_ast_diagnostic_retains_exact_member_anchor() {
-    let source = "bad |items {Float = Int}|:\n;\n";
+    let source = "bad |items {F64 = I32}|:\n;\n";
     let diagnostic = parse_single_file_ast_diagnostic(source);
 
     assert!(
@@ -77,7 +77,7 @@ fn signature_member_ast_diagnostic_retains_exact_member_anchor() {
 
 #[test]
 fn choice_variant_ast_diagnostic_retains_exact_variant_anchor() {
-    let source = "Status :: WithValue |value {Float = Int}|;\n";
+    let source = "Status :: WithValue |value {F64 = I32}|;\n";
     let diagnostic = parse_single_file_ast_diagnostic(source);
 
     assert!(
@@ -93,7 +93,7 @@ fn choice_variant_ast_diagnostic_retains_exact_variant_anchor() {
 fn ast_generic_parameter_collision_retains_exact_multibyte_offset() {
     let source = "-- é🦋\n\
 Existing = |\n\
-    value Int,\n\
+    value I32,\n\
 |\n\
 \n\
 Box type Existing = |\n\
@@ -231,11 +231,14 @@ fn optional_conversion_returns_some_for_resolved_builtin() {
     let mut type_environment =
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new();
 
-    let result = resolve_diagnostic_type_to_type_id_opt(&DataType::Int, &mut type_environment);
+    let result = resolve_diagnostic_type_to_type_id_opt(
+        &DataType::FixedScalar(FixedScalar::I32),
+        &mut type_environment,
+    );
 
     assert_eq!(
         result,
-        Some(builtin_type_ids::INT),
+        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
         "optional conversion must return Some for resolved builtin"
     );
 }
@@ -257,7 +260,10 @@ fn literal_capacity_resolves_to_fixed_collection() {
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
     let parsed = ParsedTypeRef::Collection {
-        element: Box::new(ParsedTypeRef::BuiltinInt { span: None }),
+        element: Box::new(ParsedTypeRef::BuiltinFixedScalar {
+            scalar: FixedScalar::I32,
+            span: None,
+        }),
         span: None,
         fixed_capacity: Some(ParsedCollectionCapacity::Literal {
             value: 64,
@@ -310,11 +316,9 @@ fn constant_capacity_resolves_to_fixed_collection() {
         id: path_fork
             .try_intern_components(&[capacity_name])
             .expect("test path fits"),
-        value: Expression::new(
-            ExpressionKind::Int(42),
+        value: Expression::fixed_scalar(
+            FixedScalarValue::signed(FixedScalar::I32, 42).expect("42 fits I32"),
             None,
-            builtin_type_ids::INT,
-            DataType::Int,
             ValueMode::ImmutableOwned,
         ),
         binding_span: None,
@@ -323,7 +327,10 @@ fn constant_capacity_resolves_to_fixed_collection() {
     scope_context.add_compile_time_var(constant_declaration, None, &path_fork);
 
     let parsed = ParsedTypeRef::Collection {
-        element: Box::new(ParsedTypeRef::BuiltinInt { span: None }),
+        element: Box::new(ParsedTypeRef::BuiltinFixedScalar {
+            scalar: FixedScalar::I32,
+            span: None,
+        }),
         span: None,
         fixed_capacity: Some(ParsedCollectionCapacity::BareConstant {
             name: capacity_name,
@@ -363,7 +370,10 @@ fn nested_fixed_collections_fold_both_capacities() {
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
     let inner = ParsedTypeRef::Collection {
-        element: Box::new(ParsedTypeRef::BuiltinInt { span: None }),
+        element: Box::new(ParsedTypeRef::BuiltinFixedScalar {
+            scalar: FixedScalar::I32,
+            span: None,
+        }),
         span: None,
         fixed_capacity: Some(ParsedCollectionCapacity::Literal {
             value: 4,
@@ -414,7 +424,7 @@ fn nested_fixed_collections_fold_both_capacities() {
 #[test]
 fn struct_field_alias_bare_capacity_constant_folds_after_constants() {
     let source = r#"
-capacity #Int = 4
+capacity #I32 = 4
 Names as {capacity String}
 
 Buffer = |
@@ -550,21 +560,26 @@ fn struct_field_constant_inlining_preserves_surrounding_provenance() {
         SyntheticInterfaceMemberIdentity::new(SyntheticInterfaceClass::Builder, "assets", "bundle");
     let constant = Declaration {
         id: constant_path,
-        value: Expression::int(7, None, ValueMode::ImmutableOwned)
-            .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
-                project_member.clone(),
-            )),
+        value: Expression::fixed_scalar(
+            FixedScalarValue::signed(FixedScalar::I32, 7).expect("7 fits I32"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
+            project_member.clone(),
+        )),
         binding_span: None,
         config_qualifier: None,
     };
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(vec![constant], &path_fork));
-    let collection_type_id = type_environment.intern_collection(builtin_type_ids::INT, None);
+    let collection_type_id =
+        type_environment.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::I32), None);
     let collection = Expression::collection_with_type_id(
         vec![
             Expression::reference_with_type_id(
                 constant_path,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 None,
                 ValueMode::ImmutableReference,
                 crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
@@ -574,8 +589,8 @@ fn struct_field_constant_inlining_preserves_surrounding_provenance() {
             )),
         ],
         CollectionExpressionType {
-            element_type_id: builtin_type_ids::INT,
-            element_diagnostic_type: DataType::Int,
+            element_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            element_diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
             fixed_capacity: None,
             collection_type_id: Some(collection_type_id),
         },
@@ -629,9 +644,9 @@ fn struct_field_constant_inlining_preserves_surrounding_provenance() {
 #[test]
 fn function_return_bare_capacity_constant_folds_to_type_id() {
     let source = r#"
-capacity #Int = 3
+capacity #I32 = 3
 
-make || -> {capacity Int}:
+make || -> {capacity I32}:
     assert(false, "signature only")
 ;
 "#;
@@ -735,7 +750,7 @@ fn assert_source_invalid_map_type(
 #[test]
 fn map_type_syntax_resolves_across_source_type_surfaces() {
     let source = r#"
-StringScores as {String = Int}
+StringScores as {String = I32}
 NestedScores as {String = StringScores}
 
 User = |
@@ -747,12 +762,13 @@ Payload ::
     WithMap | values NestedScores |
 ;
 
-use_maps |scores StringScores, direct {Bool = {String = Int}}| -> {Char = StringScores}:
+use_maps |scores StringScores, direct {Bool = {String = I32}}| -> {Char = StringScores}:
     assert(false, "signature only")
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let builtins = *ast.type_environment.builtins();
+    let i32_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let user_type_id = nominal_type_id(&ast, &mut string_table, &mut path_fork, "User");
     let scores_name = string_table.intern("scores");
@@ -761,7 +777,7 @@ use_maps |scores StringScores, direct {Bool = {String = Int}}| -> {Char = String
         .field_for(user_type_id, scores_name, &path_fork)
         .expect("User.scores should be registered")
         .type_id;
-    assert_map_shape(&ast, scores_type_id, builtins.string, builtins.int);
+    assert_map_shape(&ast, scores_type_id, builtins.string, i32_type_id);
 
     let grouped_name = string_table.intern("grouped");
     let grouped_type_id = ast
@@ -774,7 +790,7 @@ use_maps |scores StringScores, direct {Bool = {String = Int}}| -> {Char = String
         &ast,
         map_value_type(&ast, grouped_type_id),
         builtins.string,
-        builtins.int,
+        i32_type_id,
     );
 
     let function_path = page_path("use_maps", &mut string_table, &mut path_fork);
@@ -790,7 +806,7 @@ use_maps |scores StringScores, direct {Bool = {String = Int}}| -> {Char = String
         &ast,
         signature.parameters[0].value.type_id,
         builtins.string,
-        builtins.int,
+        i32_type_id,
     );
     assert_map_shape(
         &ast,
@@ -832,27 +848,27 @@ use_maps |scores StringScores, direct {Bool = {String = Int}}| -> {Char = String
 #[test]
 fn map_type_syntax_rejects_invalid_source_key_types() {
     assert_source_invalid_map_type(
-        "bad |items {Float = Int}|:\n;\n",
+        "bad |items {F64 = I32}|:\n;\n",
         |reason| matches!(reason, InvalidMapTypeReason::UnsupportedKeyType { .. }),
-        "UnsupportedKeyType for Float keys",
+        "UnsupportedKeyType for F64 keys",
     );
     assert_source_invalid_map_type(
-        "User = |\n    id Int,\n|\n\nbad |items {User = Int}|:\n;\n",
+        "User = |\n    id I32,\n|\n\nbad |items {User = I32}|:\n;\n",
         |reason| matches!(reason, InvalidMapTypeReason::UnsupportedKeyType { .. }),
         "UnsupportedKeyType for struct keys",
     );
     assert_source_invalid_map_type(
-        "bad |items {{String} = Int}|:\n;\n",
+        "bad |items {{String} = I32}|:\n;\n",
         |reason| matches!(reason, InvalidMapTypeReason::UnsupportedKeyType { .. }),
         "UnsupportedKeyType for collection keys",
     );
     assert_source_invalid_map_type(
-        "bad |items {{String = Int} = Int}|:\n;\n",
+        "bad |items {{String = I32} = I32}|:\n;\n",
         |reason| matches!(reason, InvalidMapTypeReason::UnsupportedKeyType { .. }),
         "UnsupportedKeyType for map keys",
     );
     assert_source_invalid_map_type(
-        "bad |items {String = {String = {String = Int}}}|:\n;\n",
+        "bad |items {String = {String = {String = I32}}}|:\n;\n",
         |reason| {
             matches!(
                 reason,
@@ -862,7 +878,7 @@ fn map_type_syntax_rejects_invalid_source_key_types() {
         "ExcessiveInlineNesting for depth-three inline maps",
     );
     assert_source_invalid_map_type(
-        "Holder type Key = |\n    values {Key = Int},\n|\n",
+        "Holder type Key = |\n    values {Key = I32},\n|\n",
         |reason| matches!(reason, InvalidMapTypeReason::UnsupportedKeyType { .. }),
         "UnsupportedKeyType for generic map keys",
     );
@@ -882,7 +898,10 @@ fn map_type_resolves_for_supported_key() {
 
     let parsed = ParsedTypeRef::Map {
         key: Box::new(ParsedTypeRef::BuiltinString { span: None }),
-        value: Box::new(ParsedTypeRef::BuiltinInt { span: None }),
+        value: Box::new(ParsedTypeRef::BuiltinFixedScalar {
+            scalar: FixedScalar::I32,
+            span: None,
+        }),
         span: None,
     };
 
@@ -907,7 +926,7 @@ fn map_type_resolves_for_supported_key() {
     );
     assert_eq!(
         shape.value_type,
-        resolution_context.type_environment.builtins().int
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
     );
 }
 
@@ -924,8 +943,14 @@ fn map_type_rejects_unsupported_key() {
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
     let parsed = ParsedTypeRef::Map {
-        key: Box::new(ParsedTypeRef::BuiltinFloat { span: None }),
-        value: Box::new(ParsedTypeRef::BuiltinInt { span: None }),
+        key: Box::new(ParsedTypeRef::BuiltinFixedScalar {
+            scalar: FixedScalar::F64,
+            span: None,
+        }),
+        value: Box::new(ParsedTypeRef::BuiltinFixedScalar {
+            scalar: FixedScalar::I32,
+            span: None,
+        }),
         span: None,
     };
 
@@ -936,7 +961,7 @@ fn map_type_rejects_unsupported_key() {
         &mut string_table,
         None,
     )
-    .expect_err("Float key should be rejected");
+    .expect_err("F64 key should be rejected");
 
     assert!(
         matches!(
@@ -987,14 +1012,17 @@ fn map_type_rejects_excessive_inline_nesting() {
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
-    // {String = {String = {String = Int}}} is depth 3 and should be rejected
+    // {String = {String = {String = I32}}} is depth 3 and should be rejected
     let parsed = ParsedTypeRef::Map {
         key: Box::new(ParsedTypeRef::BuiltinString { span: None }),
         value: Box::new(ParsedTypeRef::Map {
             key: Box::new(ParsedTypeRef::BuiltinString { span: None }),
             value: Box::new(ParsedTypeRef::Map {
                 key: Box::new(ParsedTypeRef::BuiltinString { span: None }),
-                value: Box::new(ParsedTypeRef::BuiltinInt { span: None }),
+                value: Box::new(ParsedTypeRef::BuiltinFixedScalar {
+                    scalar: FixedScalar::I32,
+                    span: None,
+                }),
                 span: None,
             }),
             span: None,
@@ -1036,12 +1064,15 @@ fn map_type_allows_two_level_nesting() {
     let mut resolution_context =
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
-    // {String = {String = Int}} is depth 2 and should be allowed
+    // {String = {String = I32}} is depth 2 and should be allowed
     let parsed = ParsedTypeRef::Map {
         key: Box::new(ParsedTypeRef::BuiltinString { span: None }),
         value: Box::new(ParsedTypeRef::Map {
             key: Box::new(ParsedTypeRef::BuiltinString { span: None }),
-            value: Box::new(ParsedTypeRef::BuiltinInt { span: None }),
+            value: Box::new(ParsedTypeRef::BuiltinFixedScalar {
+                scalar: FixedScalar::I32,
+                span: None,
+            }),
             span: None,
         }),
         span: None,
@@ -1071,7 +1102,12 @@ fn struct_field_default_folds_above_i32_range_under_int64() {
         .expect("test path fits");
     let limit_declaration = Declaration {
         id: limit_path,
-        value: Expression::int(2_000_000_000, None, ValueMode::ImmutableOwned),
+        value: Expression::fixed_scalar(
+            FixedScalarValue::signed(FixedScalar::I64, 2_000_000_000)
+                .expect("2_000_000_000 fits I64"),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
         binding_span: None,
         config_qualifier: None,
     };
@@ -1080,11 +1116,7 @@ fn struct_field_default_folds_above_i32_range_under_int64() {
         &path_fork,
     ));
     let mut resolution_context =
-        TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment)
-            .with_numeric_profile(NumericProfile {
-                int_width: IntWidth::Bits64,
-                ..NumericProfile::STANDARD
-            });
+        TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
     let struct_path = path_fork
         .try_intern_portable_path("Holder", &mut string_table)
         .expect("test path fits");
@@ -1097,16 +1129,16 @@ fn struct_field_default_folds_above_i32_range_under_int64() {
                 items: vec![
                     ExpressionRpnItem::Operand(Expression::reference_with_type_id(
                         limit_path,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I64),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I64),
                         None,
                         ValueMode::ImmutableReference,
                         crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
                     )),
                     ExpressionRpnItem::Operand(Expression::reference_with_type_id(
                         limit_path,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I64),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I64),
                         None,
                         ValueMode::ImmutableReference,
                         crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
@@ -1117,8 +1149,8 @@ fn struct_field_default_folds_above_i32_range_under_int64() {
                     },
                 ],
             },
-            DataType::Int,
-            builtin_type_ids::INT,
+            DataType::FixedScalar(FixedScalar::I64),
+            builtin_type_ids::fixed_scalar(FixedScalar::I64),
             None,
             ValueMode::ImmutableOwned,
         ),
@@ -1134,12 +1166,15 @@ fn struct_field_default_folds_above_i32_range_under_int64() {
         &mut string_table,
         &path_fork,
     )
-    .unwrap_or_else(|_| panic!("Int64 field default above the i32 range should fold"));
+    .unwrap_or_else(|_| panic!("an I64 field default above the i32 range should fold"));
 
     assert!(
         matches!(
             resolved_fields[0].value.kind,
-            ExpressionKind::Int(4_000_000_000)
+            ExpressionKind::FixedScalar(value)
+                if value
+                    == FixedScalarValue::signed(FixedScalar::I64, 4_000_000_000)
+                        .expect("4_000_000_000 fits I64")
         ),
         "LIMIT + LIMIT should fold to 4_000_000_000, got {:?}",
         resolved_fields[0].value.kind
@@ -1147,33 +1182,54 @@ fn struct_field_default_folds_above_i32_range_under_int64() {
 }
 
 #[test]
-fn standard_capacity_rejects_literal_above_i32_range_while_int64_accepts() {
+fn capacity_i32_boundary_is_rejected_above_range() {
     let mut string_table = StringTable::new();
     let path_fork = PathInternerFork::empty();
     let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &path_fork));
-    let over_i32_max = i64::from(i32::MAX) + 1;
-    let parsed = || ParsedTypeRef::Collection {
-        element: Box::new(ParsedTypeRef::BuiltinInt { span: None }),
-        span: None,
-        fixed_capacity: Some(ParsedCollectionCapacity::Literal {
-            value: over_i32_max,
+    let parsed = |value: i64| ParsedTypeRef::Collection {
+        element: Box::new(ParsedTypeRef::BuiltinFixedScalar {
+            scalar: FixedScalar::I32,
             span: None,
         }),
+        span: None,
+        fixed_capacity: Some(ParsedCollectionCapacity::Literal { value, span: None }),
     };
 
-    let mut standard_environment = TypeEnvironment::new();
-    let mut standard_context = TypeResolutionContext::from_declaration_table(
+    // Capacity is an exact `I32` value, so the boundary itself resolves and the first value
+    // above it is rejected.
+    let mut boundary_environment = TypeEnvironment::new();
+    let mut boundary_context = TypeResolutionContext::from_declaration_table(
         &declaration_table,
-        &mut standard_environment,
+        &mut boundary_environment,
     );
-    let error = resolve_parsed_type_annotation(
-        parsed(),
+    let resolved = resolve_parsed_type_annotation(
+        parsed(i64::from(i32::MAX)),
         None,
-        &mut standard_context,
+        &mut boundary_context,
         &mut string_table,
         None,
     )
-    .expect_err("STANDARD capacity above i32::MAX should be rejected");
+    .expect("an I32 capacity at the exact boundary should resolve");
+    let type_id = resolved.type_id.expect("should have a type id");
+    assert_eq!(
+        boundary_context
+            .type_environment
+            .collection_fixed_capacity(type_id),
+        usize::try_from(i32::MAX).ok(),
+        "the boundary capacity should fold to the exact I32 maximum"
+    );
+
+    let mut environment = TypeEnvironment::new();
+    let mut context =
+        TypeResolutionContext::from_declaration_table(&declaration_table, &mut environment);
+    let error = resolve_parsed_type_annotation(
+        parsed(i64::from(i32::MAX) + 1),
+        None,
+        &mut context,
+        &mut string_table,
+        None,
+    )
+    .expect_err("capacity above i32::MAX should be rejected");
     assert!(
         matches!(
             error.payload,
@@ -1184,24 +1240,5 @@ fn standard_capacity_rejects_literal_above_i32_range_while_int64_accepts() {
         ),
         "expected CapacityOverflow, got {:?}",
         error.payload
-    );
-
-    let mut wide_environment = TypeEnvironment::new();
-    let mut wide_context =
-        TypeResolutionContext::from_declaration_table(&declaration_table, &mut wide_environment)
-            .with_numeric_profile(NumericProfile {
-                int_width: IntWidth::Bits64,
-                ..NumericProfile::STANDARD
-            });
-    let resolved =
-        resolve_parsed_type_annotation(parsed(), None, &mut wide_context, &mut string_table, None)
-            .expect("Int64 capacity above i32::MAX should resolve");
-    let type_id = resolved.type_id.expect("should have a type id");
-    assert_eq!(
-        wide_context
-            .type_environment
-            .collection_fixed_capacity(type_id),
-        usize::try_from(over_i32_max).ok(),
-        "Int64 capacity should fold to its literal value"
     );
 }

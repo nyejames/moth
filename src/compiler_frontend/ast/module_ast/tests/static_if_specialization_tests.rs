@@ -8,7 +8,7 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 #[test]
 fn terminating_value_body_lift_uses_explicit_branch_scope() {
@@ -24,7 +24,11 @@ fn terminating_value_body_lift_uses_explicit_branch_scope() {
     let nested_terminal = AstNode {
         kind: NodeKind::LexicalScope {
             body: vec![AstNode {
-                kind: NodeKind::Return(vec![Expression::int(1, span, ValueMode::ImmutableOwned)]),
+                kind: NodeKind::Return(vec![Expression::fixed_scalar(
+                    FixedScalarValue::signed(FixedScalar::I32, 1).expect("1 fits I32"),
+                    span,
+                    ValueMode::ImmutableOwned,
+                )]),
                 span,
                 scope: nested_scope,
             }],
@@ -37,12 +41,12 @@ fn terminating_value_body_lift_uses_explicit_branch_scope() {
             block: Box::new(ValueBlock::LexicalScope(ValueLexicalScope {
                 body: vec![nested_terminal],
                 scope: branch_scope,
-                result_type_ids: vec![builtin_type_ids::INT],
+                result_type_ids: vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
             })),
         },
         span,
-        builtin_type_ids::INT,
-        DataType::Int,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        DataType::FixedScalar(FixedScalar::I32),
         ValueMode::ImmutableOwned,
     );
     let mut receiver = NodeKind::Return(vec![value]);
@@ -126,7 +130,6 @@ fn inactive_static_branch_drops_nested_provenance() {
         &ConstValueStore::default(),
         Rc::new(RefCell::new(TemplateIrStore::new())),
         &mut string_table,
-        NumericProfile::STANDARD,
     )
     .expect("static literal conditions should specialize");
 

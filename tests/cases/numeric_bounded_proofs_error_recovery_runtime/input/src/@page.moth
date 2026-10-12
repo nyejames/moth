@@ -6,42 +6,42 @@
 -- reset is owned by the analysis unit tests. HTML-Wasm rejects this surface, so
 -- its block expects the existing structured rejection.
 
-u8_sum |left U8, right U8| -> U32:
+u8_sum |left U8, right I8| -> I16:
     return left + right
 ;
 
-grow_then_fail |target ~Int| -> Int, Error!:
+grow_then_fail |target ~I32| -> I32, Error!:
     target += 10
     target += 2147483647
     return target
 ;
 
-divide_zero |value Int, divisor Int| -> Int, Error!:
+divide_zero |value I32, divisor I32| -> I32, Error!:
     return value // divisor
 ;
 
-first_failure |huge Int, divisor Int| -> Int, Error!:
+first_failure |huge I32, divisor I32| -> I32, Error!:
     overflowed = huge + 1
     divided = huge // divisor
     return overflowed + divided
 ;
 
 narrow_down |value U32| -> U8, Error!:
-    return cast! value
+    return cast value
 ;
 
 narrow_round_trip |value U32| -> U32, Error!:
     wide U64 = cast value
-    return cast! wide
+    return cast wide
 ;
 
 double_narrow |value U32| -> U32, Error!:
     wide U64 = cast value
     doubled = wide + wide
-    return cast! doubled
+    return cast doubled
 ;
 
-record_once |calls ~Int, marker U8| -> U8:
+record_once |calls ~I32, marker U8| -> U8:
     calls += 1
     return marker
 ;
@@ -64,7 +64,7 @@ rebound |value U32| -> U32, Error!:
     return small + 1
 ;
 
-holder ~Int = 1
+holder ~I32 = 1
 mutation_code ~U32 = 0
 mutation_result = grow_then_fail(~holder) catch |holder_error|:
     mutation_code = copy holder_error.code
@@ -119,7 +119,7 @@ rebound_result = rebound(4294967295) catch |rebound_error|:
     then 0
 ;
 
-left_calls ~Int = 0
+left_calls ~I32 = 0
 once_sum = u8_sum(record_once(~left_calls, 200), 55)
 
 [:bounded recovery codes=[pinned_code]/[rebound_code]/[mutation_code]/[order_code]/[zero_code]/[narrow_fail_code]/[double_overflow_code] results=[pinned_result]/[rebound_result]/[mutation_result]/[order_result]/[zero_result]/[narrow_rejected]/[double_rejected] holder=[holder] narrow-ok=[narrow_ok] round-trip=[round_trip] double=[double_small] once=[once_sum]/[left_calls]]

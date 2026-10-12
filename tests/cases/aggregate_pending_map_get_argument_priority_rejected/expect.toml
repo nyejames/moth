@@ -1,0 +1,15 @@
+entry = "."
+
+# Ordinary argument validation rejects the bool key before the static map get
+# assignment target and the unparsed right-hand side are considered.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+path = "input/@page.moth"
+line = 2
+column = 12

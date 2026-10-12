@@ -1,9 +1,9 @@
 //! Expression result-type resolution for AST evaluation.
 //!
 //! Indexes authored RPN structure before materialising literals. Iterative resolution lets Dec
-//! and Uint receivers and local peers reach literal-only arithmetic without natural-type
-//! intermediates. Operator policy remains canonical, and failure facts are recorded afterwards
-//! in RPN order.
+//! and exact fixed-scalar receivers and local peers reach literal-only arithmetic without
+//! natural-type intermediates. Operator policy remains canonical, and failure facts are recorded
+//! afterwards in RPN order.
 
 use super::evaluator::{
     PendingLiteralDestination, materialize_pending_literal, pending_expression_item_bug,
@@ -11,7 +11,6 @@ use super::evaluator::{
 };
 use super::operator_policy::{resolve_binary_operator_type, resolve_unary_operator_type};
 use super::typing_error::ExpressionTypingError;
-use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::failure_facts::ExpressionFailureFacts;
@@ -36,7 +35,6 @@ pub(super) fn resolve_expression_result_type(
     output_queue: &mut [ExpressionRpnItem],
     expression_span: Option<SourceSpan>,
     literal_destination: Option<PendingLiteralDestination>,
-    context: &ScopeContext,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
     path_fork: &PathInternerFork,
@@ -57,7 +55,6 @@ pub(super) fn resolve_expression_result_type(
             &mut nodes,
             root,
             destination,
-            context,
             string_table,
             type_environment,
             path_fork,
@@ -114,7 +111,11 @@ fn index_expression_nodes(
                 literal_only: true,
                 type_id: None,
             },
-            ExpressionRpnItem::PendingGroup { .. } => {
+            ExpressionRpnItem::PendingGroup { .. }
+            | ExpressionRpnItem::PendingNumericBinding { .. }
+            | ExpressionRpnItem::PendingNumericCall { .. }
+            | ExpressionRpnItem::PendingNumericCast { .. }
+            | ExpressionRpnItem::PendingNumericExpression { .. } => {
                 return Err(pending_expression_item_bug("expression result typing").into());
             }
             ExpressionRpnItem::Operator { operator, span } => match operator.required_values() {
@@ -210,7 +211,6 @@ fn resolve_indexed_expression(
     nodes: &mut [IndexedExpressionNode],
     root: usize,
     destination: Option<PendingLiteralDestination>,
-    context: &ScopeContext,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
     path_fork: &PathInternerFork,
@@ -230,11 +230,16 @@ fn resolve_indexed_expression(
                         items,
                         index,
                         destination,
-                        context,
                         string_table,
                     )?);
                 }
-                ExpressionRpnItem::PendingGroup { .. } => {
+                ExpressionRpnItem::PendingGroup { .. }
+                | ExpressionRpnItem::PendingNumericBinding { .. }
+                | ExpressionRpnItem::PendingNumericCall { .. }
+                | ExpressionRpnItem::PendingNumericCast { .. }
+                | ExpressionRpnItem::PendingNumericExpression { .. } => {
+                    // Construction-only items are replaced by body completion before typed
+                    // evaluation; any later stage reports their presence as a broken invariant.
                     return Err(pending_expression_item_bug("expression result typing").into());
                 }
                 ExpressionRpnItem::Operator { operator, .. } => {
@@ -250,21 +255,16 @@ fn resolve_indexed_expression(
                         }),
                         ExpressionChildren::Binary { left, right } => {
                             let exponent = matches!(operator, Operator::Exponent);
-                            if matches!(
-                                destination,
-                                Some(
-                                    PendingLiteralDestination::Number { .. }
-                                        | PendingLiteralDestination::Uint
-                                )
-                            ) && operator.numeric_operator().is_some()
-                            {
-                                // Uint exponents share the Uint domain, while a Dec exponent
-                                // stays in profile Int. A Dec receiver cannot decide the
-                                // exponent edge from its destination alone: a typed Uint
-                                // base must route its exponent through Uint context so the
-                                // power stays a Uint input to the exact Dec mixed rule.
-                                // Resolve the base first, then route a lone or literal-only
-                                // exponent through the peer path; a Dec base keeps Int.
+                            // Any eligible exact numeric destination types raw literal leaves
+                            // through unresolved arithmetic and grouping. A named operand
+                            // keeps its identity; a completed result is never retagged.
+                            if destination.is_some() && operator.numeric_operator().is_some() {
+                                // A Dec exponent stays in I32: the exact exponent contract is
+                                // `DecN ^ I32 -> DecN`. A typed fixed-integer base routes its
+                                // exponent through that same integer context so the power stays a
+                                // fixed-integer input to the exact Dec mixed rule. Resolve the
+                                // base first, then route a lone or literal-only exponent through
+                                // the peer path; a Dec base keeps the I32 exponent edge.
                                 let on_dec_exponent_edge = exponent
                                     && matches!(
                                         destination,
@@ -359,8 +359,8 @@ fn resolve_indexed_expression(
                     Some(PendingLiteralDestination::Number { .. })
                 );
                 // Baseline immediate-peer rule: any numeric peer selects a lone literal, except
-                // a Dec peer on the power exponent edge which keeps profile Int. A Uint peer
-                // types its exponent the same as any other operand.
+                // a Dec peer on the power exponent edge which keeps the I32 exponent contract.
+                // Every other numeric peer types its exponent the same as any other operand.
                 let destination = if exponent_edge && peer_is_dec {
                     None
                 } else {
@@ -376,15 +376,10 @@ fn resolve_indexed_expression(
                 let peer_type = resolved_type(nodes, peer)?;
                 let peer_destination =
                     pending_literal_destination_for_type_id(peer_type, type_environment);
-                // Compound literal-only subtrees take context only from a Dec or Uint peer,
-                // except on the Dec power exponent edge. Uint exponents share the Uint domain,
-                // so only a Dec peer drops context there. Other peers resolve naturally.
-                let peer_supplies_arithmetic_context = matches!(
-                    peer_destination,
-                    Some(
-                        PendingLiteralDestination::Number { .. } | PendingLiteralDestination::Uint
-                    )
-                );
+                // Compound literal-only subtrees take context from any exact numeric peer,
+                // except on the Dec power exponent edge, which keeps the I32 exponent contract.
+                // Other peers resolve naturally.
+                let peer_supplies_arithmetic_context = peer_destination.is_some();
                 let on_dec_exponent_edge = exponent_edge
                     && matches!(
                         peer_destination,
@@ -399,9 +394,9 @@ fn resolve_indexed_expression(
             }
             ResolutionFrame::VisitReceiverExponent { base, exponent } => {
                 // The base resolved first under the receiver destination, so the
-                // exponent edge follows the base type: a Uint base routes the
-                // exponent through the Uint peer path, while any other base
-                // (Dec included) keeps the profile-Int exponent edge. The
+                // exponent edge follows the base type: a fixed-integer base routes the
+                // exponent through the fixed-integer peer path, while any other base
+                // (Dec included) keeps the I32 exponent edge. The
                 // operator's own CompleteOperator frame is already queued
                 // beneath this one, so only the children are scheduled here.
                 // A resolved peer is never re-queued: the base visit queued by
@@ -550,10 +545,10 @@ fn operator_accepts_peer_literal(operator: &Operator) -> bool {
 ///
 /// A lone `PendingNumericLiteral` always reads its peer through the baseline immediate-peer
 /// rule: the peer side resolves first with no destination, so a compound literal-only peer
-/// infers its natural type (for example Float) before the lone literal materialises. A
+/// infers its natural type (for example F64) before the lone literal materialises. A
 /// compound literal-only subtree against a typed operand resolves operand-first, letting the
-/// compound frame apply Dec or Uint context before folding. Every other shape resolves
-/// naturally.
+/// compound frame apply Dec or exact fixed-scalar context before folding. Every other shape
+/// resolves naturally.
 fn literal_peer_shape(
     nodes: &[IndexedExpressionNode],
     items: &[ExpressionRpnItem],

@@ -7,7 +7,9 @@
 
 use super::error::ExpressionParseError;
 use super::expression_rpn::ExpressionRpnItem;
-use super::function_calls::{FunctionCallParseInput, parse_function_call_expression};
+use super::function_calls::{
+    FunctionCallParseInput, ParsedFunctionCallExpression, parse_function_call_expression,
+};
 use super::parse_expression_dispatch::push_expression_operand;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::cursor::AstCursor;
@@ -140,22 +142,31 @@ pub(super) fn parse_source_callable_member(
             path_fork,
         };
 
-        let function_call_expression = if context.generic_template_validation {
+        let parsed_call = if context.generic_template_validation {
             validate_generic_function_template_call_expression(generic_call_input)
         } else {
             parse_generic_function_call_expression(generic_call_input)
         }?;
 
-        push_expression_operand(
-            token_stream,
-            context,
-            type_interner,
-            string_table,
-            expression,
-            allow_boundary_catch,
-            function_call_expression,
-            path_fork,
-        )?;
+        match parsed_call {
+            ParsedFunctionCallExpression::Value(function_call_expression) => {
+                push_expression_operand(
+                    token_stream,
+                    context,
+                    type_interner,
+                    string_table,
+                    expression,
+                    allow_boundary_catch,
+                    function_call_expression,
+                    path_fork,
+                )?;
+            }
+            // Retained generic calls take their authored operand position exactly like retained
+            // non-generic calls; see the non-generic branch below.
+            ParsedFunctionCallExpression::RetainedOperand(item) => {
+                expression.push(item);
+            }
+        }
 
         return Ok(());
     }
@@ -165,7 +176,7 @@ pub(super) fn parse_source_callable_member(
     // ------------------------
     token_stream.advance();
 
-    let function_call_expression = parse_function_call_expression(FunctionCallParseInput {
+    let parsed_call = parse_function_call_expression(FunctionCallParseInput {
         token_stream,
         id: function_path,
         call_span,
@@ -179,16 +190,27 @@ pub(super) fn parse_source_callable_member(
         path_fork,
     })?;
 
-    push_expression_operand(
-        token_stream,
-        context,
-        type_interner,
-        string_table,
-        expression,
-        allow_boundary_catch,
-        function_call_expression,
-        path_fork,
-    )?;
+    match parsed_call {
+        ParsedFunctionCallExpression::Value(function_call_expression) => {
+            push_expression_operand(
+                token_stream,
+                context,
+                type_interner,
+                string_table,
+                expression,
+                allow_boundary_catch,
+                function_call_expression,
+                path_fork,
+            )?;
+        }
+        // A call whose numeric-dependent arguments were retained takes its authored operand
+        // position as one pending item; the enclosing fragment either completes where it was
+        // parsed (when its own receiving boundary can) or defers to the body root with this item
+        // in place, so the call resumes exactly once at its original position.
+        ParsedFunctionCallExpression::RetainedOperand(item) => {
+            expression.push(item);
+        }
+    }
 
     Ok(())
 }

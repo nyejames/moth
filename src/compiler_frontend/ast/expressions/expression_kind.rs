@@ -22,7 +22,9 @@ use crate::compiler_frontend::ast::templates::runtime_handoff::{
 };
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
-use crate::compiler_frontend::builtins::casts::targets::BuiltinCastTarget;
+use crate::compiler_frontend::builtins::casts::targets::{
+    BuiltinCastFallibility, BuiltinCastTarget,
+};
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::number::NumberValue;
@@ -61,6 +63,7 @@ pub struct ResolvedCastExpression {
     pub(crate) target_type_id: TypeId,
     pub(crate) target: BuiltinCastTarget,
     pub(crate) requires_optional_wrap_after_cast: bool,
+    pub(crate) fallibility: BuiltinCastFallibility,
     pub(crate) evidence: ResolvedCastEvidence,
     pub(crate) handling: CastHandling,
     pub(crate) span: Option<SourceSpan>,
@@ -82,22 +85,18 @@ pub enum ExpressionKind {
     /// WHY: operands are `Expression` values, not general `AstNode` fragments, so runtime
     ///      RPN cannot smuggle statement bodies into value contexts.
     Runtime(ExpressionRpn),
-    Int(i64),
-    /// One profile-sized unsigned integer value; follows the selected `Int` width.
-    Uint(u64),
-    Float(f64),
     /// One materialised fixed-width scalar or `Byte` value.
     ///
     /// WHAT: carries the scalar identity plus the exact-bit payload from
     ///       `FixedScalarValue`, so `U64` values above `i64::MAX` and signed zero
-    ///       survive without an `Int`/`Float` intermediate.
+    ///       survive without a lossy intermediate.
     /// WHY: literal materialisation owns destination-aware rounding and range checks;
     ///      later stages consume the already-materialised value through this one variant.
     FixedScalar(FixedScalarValue),
     /// One exact decimal `Dec` value at its receiving scale.
     ///
     /// WHAT: retains the arbitrary-precision coefficient and canonical scale as one immutable
-    ///       value instead of routing it through `Int` or `Float`.
+    ///       value instead of routing it through an integer or binary float.
     /// WHY: exact decimal literals stay lossless from AST materialisation through constant
     ///      folding and HIR lowering.
     Number(NumberValue),
@@ -189,13 +188,20 @@ pub enum ExpressionKind {
         id: ExternalFunctionId,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
+        /// Whether HIR must validate the raw success payload as an exact binary float.
+        ///
+        /// WHAT: settled once at external-call parsing from the resolved success slot.
+        /// WHY: a raw external boundary may hand back any value, so every binary-float result
+        ///      needs the HIR integrity guard at its resolved precision; the neutral boolean
+        ///      keeps HIR from re-deriving the fact from the success type alone.
+        requires_external_float_validation: bool,
         error_type_id: TypeId,
         handling: FallibleExpressionHandling,
         /// Authored postfix `!` span, kept separate from the host-call span.
         propagation_span: Option<SourceSpan>,
     },
 
-    /// Explicit `cast` / `cast!` expression resolved at an explicit typed boundary.
+    /// Explicit `cast` expression resolved at an explicit typed boundary.
     ///
     /// WHAT: carries the resolved source, target, evidence, and handling form.
     /// WHY: the cast surface models builtin and user-defined evidence, fallibility
@@ -236,6 +242,13 @@ pub enum ExpressionKind {
         id: ExternalFunctionId,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
+        /// Whether HIR must validate the raw single binary-float success value.
+        ///
+        /// WHAT: settled once at external-call parsing from the resolved success slot.
+        /// WHY: a raw external boundary may hand back any value, so every binary-float result
+        ///      needs the HIR integrity guard at its resolved precision; the neutral boolean
+        ///      keeps HIR from re-deriving the fact from the success type alone.
+        requires_external_float_validation: bool,
     },
 
     /// Equivalent to a string when folded at compile time.
@@ -243,20 +256,18 @@ pub enum ExpressionKind {
 
     /// Final AST-owned handoff for an ordinary runtime template.
     ///
-    /// WHAT: carries the neutral owned runtime-template payload that HIR will consume after the
-    /// Phase 11 cutover. The payload contains no TIR store, view, registry, overlay, or reference
-    /// identity.
+    /// WHAT: carries the neutral owned runtime-template payload for HIR. The payload contains
+    /// no TIR store, view, registry, overlay, or reference identity.
     /// WHY: final AST expressions should own runtime template data directly instead of asking HIR
-    /// to inspect `Template` internals. Current consumers remain on `Template` until the cutover
-    /// slice wires this variant through lowering.
+    /// to inspect `Template` internals.
     RuntimeTemplateHandoff(Box<OwnedRuntimeTemplateHandoff>),
 
     /// Final AST-owned handoff for a runtime slot application.
     ///
     /// WHAT: carries the neutral owned slot-application payload that preserves routed wrapper,
     /// contribution-source, and slot-site render data without exposing TIR IDs.
-    /// WHY: slot applications need a distinct expression shape so the later HIR cutover can
-    /// preserve the current dispatch rule without reading `Template::runtime_slot_handoff`.
+    /// WHY: slot applications need a distinct expression shape to preserve their dispatch rule
+    /// without reading `Template::runtime_slot_handoff`.
     RuntimeSlotApplicationHandoff(Box<OwnedRuntimeSlotApplicationHandoff>),
 
     /// Homogeneous collection literal.
@@ -295,10 +306,9 @@ pub enum ExpressionKind {
     /// `to_type` records the canonical promoted target so lowering stages can
     /// emit the correct conversion.
     ///
-    /// WHY a separate variant: silent type pretending (e.g. storing an `Int`
-    /// expression but calling it `Float`, or passing `String` where `String?`
-    /// is expected) makes later lowering fragile. An explicit `Coerced` node
-    /// makes the coercion visible and auditable.
+    /// WHY a separate variant: passing a `String` expression where `String?`
+    /// is expected without representing optional wrapping makes later lowering fragile.
+    /// An explicit `Coerced` node makes the coercion visible and auditable.
     Coerced {
         value: Box<Expression>,
         to_type: TypeId,
@@ -333,10 +343,7 @@ impl ExpressionKind {
     pub fn is_foldable(&self) -> bool {
         if matches!(
             self,
-            ExpressionKind::Int(_)
-                | ExpressionKind::Uint(_)
-                | ExpressionKind::Float(_)
-                | ExpressionKind::FixedScalar(_)
+            ExpressionKind::FixedScalar(_)
                 | ExpressionKind::Number(_)
                 | ExpressionKind::Bool(_)
                 | ExpressionKind::StringSlice(_)

@@ -20,6 +20,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -73,7 +74,7 @@ fn lookup_receiver_method_prefers_exact_source_file_before_catalog_fallback() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let method_name = string_table.intern("reset");
-    let receiver = ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Int);
+    let receiver = ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Char);
     let key = (receiver.to_owned(), method_name);
     let local_source = interned_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
     let package_source = interned_path(&["lib", "shared.moth"], &mut string_table, &mut path_fork);
@@ -286,8 +287,8 @@ fn non_recursive_runtime_structs_are_allowed() {
             value: Expression::new(
                 ExpressionKind::NoValue,
                 None,
-                builtin_type_ids::INT,
-                DataType::Int,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                DataType::FixedScalar(FixedScalar::I32),
                 ValueMode::ImmutableOwned,
             ),
             binding_span: None,

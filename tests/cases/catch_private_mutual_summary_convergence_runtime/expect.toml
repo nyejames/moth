@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "private=-7/200/42/0 builtin=-8/200 custom=-9/43"

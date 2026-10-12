@@ -128,10 +128,6 @@ pub enum HirExpressionKind {
     // -------------------------
     //  Literals
     // -------------------------
-    /// One unsigned 64-bit integer literal.
-    Uint(u64),
-    Int(i64),
-    Float(f64),
     /// One materialised fixed-width scalar or `Byte` value with exact-bit identity.
     ///
     /// WHY: HTML-JS lowers the value through `JsNumericCarrier::fixed_literal`, while HTML-Wasm

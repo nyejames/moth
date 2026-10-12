@@ -2,53 +2,55 @@ DomainError ::
     Missing,
 ;
 
-three || -> Int:
+three || -> I32:
     return 1 + 2
 ;
 
-literal_three || -> Int:
+literal_three || -> I32:
     return 3
 ;
 
-recursive_three |again Bool| -> Int:
+recursive_three |again Bool| -> I32:
     if again:
         return recursive_three(false)
     ;
     return 3
 ;
 
-as_domain_value |value Int| -> Int, DomainError!:
+as_domain_value |value I32| -> I32, DomainError!:
     return value
 ;
 
-recover_folded_after || -> Int:
+recover_folded_after || -> I32:
     return as_domain_value(three_after()) catch then 0
 ;
 
-recover_literal_after || -> Int:
+recover_literal_after || -> I32:
     return as_domain_value(literal_three_after()) catch then 0
 ;
 
-recover_recursive_after || -> Int:
+recover_recursive_after || -> I32:
     return as_domain_value(recursive_three_after(true)) catch then 0
 ;
 
 folded_before = as_domain_value(three()) catch then 0
 literal_before = as_domain_value(literal_three()) catch then 0
 recursive_before = as_domain_value(recursive_three(true)) catch then 0
+safe_arithmetic_argument = as_domain_value(1 + 2) catch |safe_error| then 0
+assert(safe_arithmetic_argument is 3)
 folded_after = recover_folded_after()
 literal_after = recover_literal_after()
 recursive_after = recover_recursive_after()
 
-three_after || -> Int:
+three_after || -> I32:
     return 1 + 2
 ;
 
-literal_three_after || -> Int:
+literal_three_after || -> I32:
     return 3
 ;
 
-recursive_three_after |again Bool| -> Int:
+recursive_three_after |again Bool| -> I32:
     if again:
         return recursive_three_after(false)
     ;

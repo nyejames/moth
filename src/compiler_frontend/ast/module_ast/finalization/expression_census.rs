@@ -259,6 +259,18 @@ impl Census<'_> {
                         ExpressionRpnItem::PendingNumericLiteral { .. } => {
                             increment_ast_counter(AstCounter::CensusPendingNumericLiterals)
                         }
+                        ExpressionRpnItem::PendingNumericBinding { .. } => {
+                            increment_ast_counter(AstCounter::CensusPendingNumericBindings)
+                        }
+                        ExpressionRpnItem::PendingNumericCast { .. } => {
+                            increment_ast_counter(AstCounter::CensusPendingNumericCasts)
+                        }
+                        ExpressionRpnItem::PendingNumericCall { .. } => {
+                            increment_ast_counter(AstCounter::CensusPendingNumericCalls)
+                        }
+                        ExpressionRpnItem::PendingNumericExpression { .. } => {
+                            increment_ast_counter(AstCounter::CensusPendingNumericExpressions)
+                        }
                         ExpressionRpnItem::PendingGroup { .. } => {
                             increment_ast_counter(AstCounter::CensusPendingGroups)
                         }
@@ -438,9 +450,6 @@ impl Census<'_> {
             }
             ExpressionKind::NoValue
             | ExpressionKind::OptionNone
-            | ExpressionKind::Int(_)
-            | ExpressionKind::Uint(_)
-            | ExpressionKind::Float(_)
             | ExpressionKind::FixedScalar(_)
             | ExpressionKind::Number(_)
             | ExpressionKind::StringSlice(_)
@@ -477,9 +486,6 @@ impl Census<'_> {
             | DataType::Range
             | DataType::Template
             | DataType::Bool
-            | DataType::Int
-            | DataType::Uint
-            | DataType::Float
             | DataType::Number(_)
             | DataType::StringSlice
             | DataType::Char
@@ -602,6 +608,11 @@ impl Census<'_> {
                         let root = child.root_template()?.root;
                         pending.push((child, root));
                     }
+                }
+                TemplateIrNodeKind::RetainedNumericIntake(_) => {
+                    return Err(CompilerError::compiler_error(
+                        "retained numeric intake reached the published expression census",
+                    ));
                 }
                 TemplateIrNodeKind::DynamicExpression { .. }
                 | TemplateIrNodeKind::Text { .. }
@@ -737,9 +748,6 @@ fn record_kind(kind: &ExpressionKind) {
         ExpressionKind::NoValue => AstCounter::CensusKindNoValue,
         ExpressionKind::OptionNone => AstCounter::CensusKindOptionNone,
         ExpressionKind::Runtime(..) => AstCounter::CensusKindRuntime,
-        ExpressionKind::Int(..) => AstCounter::CensusKindInt,
-        ExpressionKind::Uint(..) => AstCounter::CensusKindUint,
-        ExpressionKind::Float(..) => AstCounter::CensusKindFloat,
         ExpressionKind::FixedScalar(..) => AstCounter::CensusKindFixedScalar,
         ExpressionKind::Number(..) => AstCounter::CensusKindNumber,
         ExpressionKind::StringSlice(..) => AstCounter::CensusKindStringSlice,

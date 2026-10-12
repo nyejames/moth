@@ -19,7 +19,9 @@ use crate::compiler_frontend::ast::templates::tir::expression_constness::{
 use crate::compiler_frontend::ast::templates::tir::ids::{
     TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId, TemplateWrapperSetId,
 };
-use crate::compiler_frontend::ast::templates::tir::node::{TemplateIrNodeKind, TirSlotPlaceholder};
+use crate::compiler_frontend::ast::templates::tir::node::{
+    RetainedNumericIntakeRole, TemplateBranchSelectorKind, TemplateIrNodeKind, TirSlotPlaceholder,
+};
 use crate::compiler_frontend::ast::templates::tir::overlays::{
     TemplateViewContext, TirSlotResolutionKind,
 };
@@ -697,6 +699,47 @@ impl PreparationWalk<'_> {
                         Ok(facts)
                     }
                 }
+                // A retained position holds no value yet: body-root completion installs the
+                // selected numeric value, so preparation must treat it as runtime rather than
+                // reading a payload that does not exist. A pending numeric value is a runtime
+                // body-local, so a const-required template rejects it with the reason its
+                // position's ready form would report.
+                TemplateIrNodeKind::RetainedNumericIntake(intake_role) => {
+                    let mut facts = PreparationFacts::default();
+                    self.record_role_runtime(
+                        &mut facts,
+                        role,
+                        RuntimeTemplateReason::RuntimeExpression,
+                    );
+                    if matches!(self.mode, TemplatePreparationMode::ConstRequired) {
+                        let reason = match intake_role {
+                            RetainedNumericIntakeRole::HeadExpression { .. } => {
+                                InvalidTemplateStructureReason::RuntimeValueInConstTemplateHead
+                            }
+                            RetainedNumericIntakeRole::ConditionalLoopCondition { .. } => {
+                                InvalidTemplateStructureReason::TemplateLoopConditionNotConst
+                            }
+                            RetainedNumericIntakeRole::LoopRange { .. } => {
+                                InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst
+                            }
+                            RetainedNumericIntakeRole::LoopCollection { .. } => {
+                                InvalidTemplateStructureReason::TemplateLoopSourceNotConst
+                            }
+                            RetainedNumericIntakeRole::ConditionalSelector {
+                                kind: TemplateBranchSelectorKind::Bool,
+                                ..
+                            } => InvalidTemplateStructureReason::TemplateIfConditionNotConst,
+                            RetainedNumericIntakeRole::ConditionalSelector {
+                                kind: TemplateBranchSelectorKind::OptionPresent,
+                                ..
+                            } => InvalidTemplateStructureReason::TemplateOptionCaptureConstDeferred,
+                        };
+                        self.record_const_diagnostic(
+                            CompilerDiagnostic::invalid_template_structure(reason, node.span),
+                        );
+                    }
+                    Ok(facts)
+                }
             }
         })();
 
@@ -1150,6 +1193,12 @@ fn collect_source_constant_paths(
                         collect_source_constant_paths(operand, source_scope, paths);
                     }
                     ExpressionRpnItem::Operator { .. } => {}
+                    // A retained numeric recipe holds no source-constant path; body
+                    // completion replaces it before publication.
+                    ExpressionRpnItem::PendingNumericBinding { .. }
+                    | ExpressionRpnItem::PendingNumericCast { .. }
+                    | ExpressionRpnItem::PendingNumericCall { .. }
+                    | ExpressionRpnItem::PendingNumericExpression { .. } => {}
                     // Pending syntax never survives evaluation; flag it in debug builds so the
                     // invalid boundary is visible instead of silently collecting no paths.
                     ExpressionRpnItem::PendingNumericLiteral { .. }

@@ -28,7 +28,7 @@ fn emits_structured_if_without_dispatcher() {
         1,
         HirStatementKind::Write {
             target: HirWriteTarget::DefineLocal(LocalId(0)),
-            value: int_expression(2, types.int, RegionId(0), &mut expressions),
+            value: i32_expression(2, types.i32, RegionId(0), &mut expressions),
         },
     );
 
@@ -36,7 +36,7 @@ fn emits_structured_if_without_dispatcher() {
         2,
         HirStatementKind::Write {
             target: HirWriteTarget::DefineLocal(LocalId(0)),
-            value: int_expression(3, types.int, RegionId(0), &mut expressions),
+            value: i32_expression(3, types.i32, RegionId(0), &mut expressions),
         },
     );
 
@@ -55,7 +55,7 @@ fn emits_structured_if_without_dispatcher() {
         HirBlock {
             id: BlockId(1),
             region: RegionId(0),
-            locals: vec![local(0, types.int, RegionId(0))],
+            locals: vec![local(0, types.i32, RegionId(0))],
             statements: vec![assign_then],
             terminator: HirTerminator::Jump {
                 target: BlockId(3),
@@ -68,7 +68,7 @@ fn emits_structured_if_without_dispatcher() {
         HirBlock {
             id: BlockId(2),
             region: RegionId(0),
-            locals: vec![local(1, types.int, RegionId(0))],
+            locals: vec![local(1, types.i32, RegionId(0))],
             statements: vec![assign_else],
             terminator: HirTerminator::Jump {
                 target: BlockId(3),
@@ -81,7 +81,7 @@ fn emits_structured_if_without_dispatcher() {
         HirBlock {
             id: BlockId(3),
             region: RegionId(0),
-            locals: vec![local(2, types.int, RegionId(0))],
+            locals: vec![local(2, types.i32, RegionId(0))],
             statements: vec![],
             terminator: HirTerminator::Return(unit_expression(
                 types.unit,
@@ -161,7 +161,7 @@ fn nested_diamond_preserves_transport_and_dispatcher_fallback() {
             NestedBranch::Fallible
             | NestedBranch::SharedError
             | NestedBranch::SharedContinuationError => HirTerminator::FallibleBranch {
-                result: load(&mut expressions, LocalId(1), types.fallible_int_string),
+                result: load(&mut expressions, LocalId(1), types.fallible_i32_string),
                 success_block: BlockId(3),
                 error_block: BlockId(4),
             },
@@ -174,10 +174,10 @@ fn nested_diamond_preserves_transport_and_dispatcher_fallback() {
                 region,
                 locals: vec![
                     local(0, types.boolean, region),
-                    local(1, types.fallible_int_string, region),
-                    local(3, types.int, region),
-                    local(4, types.int, region),
-                    local(5, types.int, region),
+                    local(1, types.fallible_i32_string, region),
+                    local(3, types.i32, region),
+                    local(4, types.i32, region),
+                    local(5, types.i32, region),
                     local(7, types.boolean, region),
                 ],
                 statements: vec![
@@ -185,14 +185,14 @@ fn nested_diamond_preserves_transport_and_dispatcher_fallback() {
                         1,
                         HirStatementKind::Write {
                             target: HirWriteTarget::DefineLocal(LocalId(4)),
-                            value: int_expression(10, types.int, region, &mut expressions),
+                            value: i32_expression(10, types.i32, region, &mut expressions),
                         },
                     ),
                     statement(
                         2,
                         HirStatementKind::Write {
                             target: HirWriteTarget::DefineLocal(LocalId(5)),
-                            value: int_expression(99, types.int, region, &mut expressions),
+                            value: i32_expression(99, types.i32, region, &mut expressions),
                         },
                     ),
                 ],
@@ -205,12 +205,12 @@ fn nested_diamond_preserves_transport_and_dispatcher_fallback() {
             HirBlock {
                 id: BlockId(1),
                 region,
-                locals: vec![local(2, types.int, region)],
+                locals: vec![local(2, types.i32, region)],
                 statements: vec![statement(
                     3,
                     HirStatementKind::Write {
                         target: HirWriteTarget::AssignPlace(HirPlace::local(LocalId(2))),
-                        value: int_expression(1, types.int, region, &mut expressions),
+                        value: i32_expression(1, types.i32, region, &mut expressions),
                     },
                 )],
                 terminator: nested_terminator,
@@ -247,10 +247,10 @@ fn nested_diamond_preserves_transport_and_dispatcher_fallback() {
                                 result: load(
                                     &mut expressions,
                                     LocalId(1),
-                                    types.fallible_int_string,
+                                    types.fallible_i32_string,
                                 ),
                             },
-                            types.int,
+                            types.i32,
                             region,
                             ValueKind::RValue,
                             &mut expressions,
@@ -278,7 +278,7 @@ fn nested_diamond_preserves_transport_and_dispatcher_fallback() {
                 statements: vec![],
                 terminator: HirTerminator::ReturnError(expression(
                     HirExpressionKind::FallibleUnwrapError {
-                        result: load(&mut expressions, LocalId(1), types.fallible_int_string),
+                        result: load(&mut expressions, LocalId(1), types.fallible_i32_string),
                     },
                     types.string,
                     region,
@@ -289,22 +289,22 @@ fn nested_diamond_preserves_transport_and_dispatcher_fallback() {
             HirBlock {
                 id: BlockId(5),
                 region,
-                locals: vec![local(6, types.int, region), local(8, types.int, region)],
+                locals: vec![local(6, types.i32, region), local(8, types.i32, region)],
                 statements: vec![statement(
                     5,
                     HirStatementKind::Write {
                         target: HirWriteTarget::AssignPlace(HirPlace::local(LocalId(3))),
-                        value: load(&mut expressions, LocalId(8), types.int),
+                        value: load(&mut expressions, LocalId(8), types.i32),
                     },
                 )],
                 terminator: if shared_continuation_error {
                     HirTerminator::FallibleBranch {
-                        result: load(&mut expressions, LocalId(1), types.fallible_int_string),
+                        result: load(&mut expressions, LocalId(1), types.fallible_i32_string),
                         success_block: BlockId(6),
                         error_block: BlockId(4),
                     }
                 } else {
-                    HirTerminator::ReturnSuccess(load(&mut expressions, LocalId(6), types.int))
+                    HirTerminator::ReturnSuccess(load(&mut expressions, LocalId(6), types.i32))
                 },
             },
             HirBlock {
@@ -315,7 +315,7 @@ fn nested_diamond_preserves_transport_and_dispatcher_fallback() {
                 terminator: HirTerminator::ReturnSuccess(load(
                     &mut expressions,
                     LocalId(6),
-                    types.int,
+                    types.i32,
                 )),
             },
         ];
@@ -323,7 +323,7 @@ fn nested_diamond_preserves_transport_and_dispatcher_fallback() {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![LocalId(0), LocalId(1), LocalId(2), LocalId(3), LocalId(7)],
-            return_type: types.fallible_int_string,
+            return_type: types.fallible_i32_string,
         };
         let module = build_module(
             expressions,
@@ -445,27 +445,27 @@ fn emits_structured_match_without_inlining_synthetic_merge_arm() {
         HirBlock {
             id: BlockId(0),
             region: RegionId(0),
-            locals: vec![local(0, types.int, RegionId(0))],
+            locals: vec![local(0, types.i32, RegionId(0))],
             statements: vec![statement(
                 1,
                 HirStatementKind::Write {
                     target: HirWriteTarget::DefineLocal(LocalId(0)),
-                    value: int_expression(1, types.int, RegionId(0), &mut expressions),
+                    value: i32_expression(1, types.i32, RegionId(0), &mut expressions),
                 },
             )],
             terminator: HirTerminator::Match {
                 scrutinee: expression(
                     HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-                    types.int,
+                    types.i32,
                     RegionId(0),
                     ValueKind::RValue,
                     &mut expressions,
                 ),
                 arms: vec![
                     HirMatchArm {
-                        pattern: HirPattern::Literal(int_expression(
+                        pattern: HirPattern::Literal(i32_expression(
                             0,
-                            types.int,
+                            types.i32,
                             RegionId(0),
                             &mut expressions,
                         )),
@@ -473,9 +473,9 @@ fn emits_structured_match_without_inlining_synthetic_merge_arm() {
                         body: BlockId(1),
                     },
                     HirMatchArm {
-                        pattern: HirPattern::Literal(int_expression(
+                        pattern: HirPattern::Literal(i32_expression(
                             1,
-                            types.int,
+                            types.i32,
                             RegionId(0),
                             &mut expressions,
                         )),
@@ -567,27 +567,27 @@ fn literal_match_uses_structured_lowering_when_cfg_is_acyclic() {
         HirBlock {
             id: BlockId(0),
             region: RegionId(0),
-            locals: vec![local(0, types.int, RegionId(0))],
+            locals: vec![local(0, types.i32, RegionId(0))],
             statements: vec![statement(
                 1,
                 HirStatementKind::Write {
                     target: HirWriteTarget::DefineLocal(LocalId(0)),
-                    value: int_expression(2, types.int, RegionId(0), &mut expressions),
+                    value: i32_expression(2, types.i32, RegionId(0), &mut expressions),
                 },
             )],
             terminator: HirTerminator::Match {
                 scrutinee: expression(
                     HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-                    types.int,
+                    types.i32,
                     RegionId(0),
                     ValueKind::RValue,
                     &mut expressions,
                 ),
                 arms: vec![
                     HirMatchArm {
-                        pattern: HirPattern::Literal(int_expression(
+                        pattern: HirPattern::Literal(i32_expression(
                             1,
-                            types.int,
+                            types.i32,
                             RegionId(0),
                             &mut expressions,
                         )),
@@ -595,9 +595,9 @@ fn literal_match_uses_structured_lowering_when_cfg_is_acyclic() {
                         body: BlockId(1),
                     },
                     HirMatchArm {
-                        pattern: HirPattern::Literal(int_expression(
+                        pattern: HirPattern::Literal(i32_expression(
                             2,
-                            types.int,
+                            types.i32,
                             RegionId(0),
                             &mut expressions,
                         )),
@@ -707,12 +707,12 @@ fn option_present_match_checks_some_tag_without_payload_comparison() {
             fields: append_variant_fields(
                 &[HirVariantField {
                     name: Some(value_name),
-                    value: int_expression(10, types.int, RegionId(0), &mut expressions),
+                    value: i32_expression(10, types.i32, RegionId(0), &mut expressions),
                 }],
                 &mut expressions,
             ),
         },
-        types.option_int,
+        types.option_i32,
         RegionId(0),
         ValueKind::RValue,
         &mut expressions,
@@ -722,7 +722,7 @@ fn option_present_match_checks_some_tag_without_payload_comparison() {
         HirBlock {
             id: BlockId(0),
             region: RegionId(0),
-            locals: vec![local(0, types.option_int, RegionId(0))],
+            locals: vec![local(0, types.option_i32, RegionId(0))],
             statements: vec![statement(
                 1,
                 HirStatementKind::Write {
@@ -733,7 +733,7 @@ fn option_present_match_checks_some_tag_without_payload_comparison() {
             terminator: HirTerminator::Match {
                 scrutinee: expression(
                     HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-                    types.option_int,
+                    types.option_i32,
                     RegionId(0),
                     ValueKind::RValue,
                     &mut expressions,
@@ -834,12 +834,12 @@ fn literal_match_uses_dispatcher_when_cfg_contains_cycle() {
         HirBlock {
             id: BlockId(0),
             region: RegionId(0),
-            locals: vec![local(0, types.int, RegionId(0))],
+            locals: vec![local(0, types.i32, RegionId(0))],
             statements: vec![statement(
                 1,
                 HirStatementKind::Write {
                     target: HirWriteTarget::DefineLocal(LocalId(0)),
-                    value: int_expression(0, types.int, RegionId(0), &mut expressions),
+                    value: i32_expression(0, types.i32, RegionId(0), &mut expressions),
                 },
             )],
             terminator: HirTerminator::Jump {
@@ -855,16 +855,16 @@ fn literal_match_uses_dispatcher_when_cfg_contains_cycle() {
             terminator: HirTerminator::Match {
                 scrutinee: expression(
                     HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-                    types.int,
+                    types.i32,
                     RegionId(0),
                     ValueKind::RValue,
                     &mut expressions,
                 ),
                 arms: vec![
                     HirMatchArm {
-                        pattern: HirPattern::Literal(int_expression(
+                        pattern: HirPattern::Literal(i32_expression(
                             0,
-                            types.int,
+                            types.i32,
                             RegionId(0),
                             &mut expressions,
                         )),
@@ -872,9 +872,9 @@ fn literal_match_uses_dispatcher_when_cfg_contains_cycle() {
                         body: BlockId(2),
                     },
                     HirMatchArm {
-                        pattern: HirPattern::Literal(int_expression(
+                        pattern: HirPattern::Literal(i32_expression(
                             1,
-                            types.int,
+                            types.i32,
                             RegionId(0),
                             &mut expressions,
                         )),
@@ -964,21 +964,21 @@ fn structured_match_merge_convergence_lowers_jump_arguments() {
         1,
         HirStatementKind::Write {
             target: HirWriteTarget::DefineLocal(LocalId(1)),
-            value: int_expression(10, types.int, RegionId(0), &mut expressions),
+            value: i32_expression(10, types.i32, RegionId(0), &mut expressions),
         },
     );
     let assign_arm1 = statement(
         2,
         HirStatementKind::Write {
             target: HirWriteTarget::DefineLocal(LocalId(2)),
-            value: int_expression(20, types.int, RegionId(0), &mut expressions),
+            value: i32_expression(20, types.i32, RegionId(0), &mut expressions),
         },
     );
     let assign_default = statement(
         3,
         HirStatementKind::Write {
             target: HirWriteTarget::DefineLocal(LocalId(3)),
-            value: int_expression(30, types.int, RegionId(0), &mut expressions),
+            value: i32_expression(30, types.i32, RegionId(0), &mut expressions),
         },
     );
 
@@ -986,27 +986,27 @@ fn structured_match_merge_convergence_lowers_jump_arguments() {
         HirBlock {
             id: BlockId(0),
             region: RegionId(0),
-            locals: vec![local(0, types.int, RegionId(0))],
+            locals: vec![local(0, types.i32, RegionId(0))],
             statements: vec![statement(
                 4,
                 HirStatementKind::Write {
                     target: HirWriteTarget::DefineLocal(LocalId(0)),
-                    value: int_expression(1, types.int, RegionId(0), &mut expressions),
+                    value: i32_expression(1, types.i32, RegionId(0), &mut expressions),
                 },
             )],
             terminator: HirTerminator::Match {
                 scrutinee: expression(
                     HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-                    types.int,
+                    types.i32,
                     RegionId(0),
                     ValueKind::RValue,
                     &mut expressions,
                 ),
                 arms: vec![
                     HirMatchArm {
-                        pattern: HirPattern::Literal(int_expression(
+                        pattern: HirPattern::Literal(i32_expression(
                             0,
-                            types.int,
+                            types.i32,
                             RegionId(0),
                             &mut expressions,
                         )),
@@ -1014,9 +1014,9 @@ fn structured_match_merge_convergence_lowers_jump_arguments() {
                         body: BlockId(1),
                     },
                     HirMatchArm {
-                        pattern: HirPattern::Literal(int_expression(
+                        pattern: HirPattern::Literal(i32_expression(
                             1,
-                            types.int,
+                            types.i32,
                             RegionId(0),
                             &mut expressions,
                         )),
@@ -1034,7 +1034,7 @@ fn structured_match_merge_convergence_lowers_jump_arguments() {
         HirBlock {
             id: BlockId(1),
             region: RegionId(0),
-            locals: vec![local(1, types.int, RegionId(0))],
+            locals: vec![local(1, types.i32, RegionId(0))],
             statements: vec![assign_arm0],
             terminator: HirTerminator::Jump {
                 target: BlockId(4),
@@ -1047,7 +1047,7 @@ fn structured_match_merge_convergence_lowers_jump_arguments() {
         HirBlock {
             id: BlockId(2),
             region: RegionId(0),
-            locals: vec![local(2, types.int, RegionId(0))],
+            locals: vec![local(2, types.i32, RegionId(0))],
             statements: vec![assign_arm1],
             terminator: HirTerminator::Jump {
                 target: BlockId(4),
@@ -1060,7 +1060,7 @@ fn structured_match_merge_convergence_lowers_jump_arguments() {
         HirBlock {
             id: BlockId(3),
             region: RegionId(0),
-            locals: vec![local(3, types.int, RegionId(0))],
+            locals: vec![local(3, types.i32, RegionId(0))],
             statements: vec![assign_default],
             terminator: HirTerminator::Jump {
                 target: BlockId(4),
@@ -1073,7 +1073,7 @@ fn structured_match_merge_convergence_lowers_jump_arguments() {
         HirBlock {
             id: BlockId(4),
             region: RegionId(0),
-            locals: vec![local(4, types.int, RegionId(0))],
+            locals: vec![local(4, types.i32, RegionId(0))],
             statements: vec![],
             terminator: HirTerminator::Return(unit_expression(
                 types.unit,
@@ -1148,12 +1148,12 @@ fn dispatcher_match_merge_convergence_lowers_jump_arguments() {
         HirBlock {
             id: BlockId(0),
             region: RegionId(0),
-            locals: vec![local(0, types.int, RegionId(0))],
+            locals: vec![local(0, types.i32, RegionId(0))],
             statements: vec![statement(
                 1,
                 HirStatementKind::Write {
                     target: HirWriteTarget::DefineLocal(LocalId(0)),
-                    value: int_expression(0, types.int, RegionId(0), &mut expressions),
+                    value: i32_expression(0, types.i32, RegionId(0), &mut expressions),
                 },
             )],
             terminator: HirTerminator::Jump {
@@ -1169,16 +1169,16 @@ fn dispatcher_match_merge_convergence_lowers_jump_arguments() {
             terminator: HirTerminator::Match {
                 scrutinee: expression(
                     HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-                    types.int,
+                    types.i32,
                     RegionId(0),
                     ValueKind::RValue,
                     &mut expressions,
                 ),
                 arms: vec![
                     HirMatchArm {
-                        pattern: HirPattern::Literal(int_expression(
+                        pattern: HirPattern::Literal(i32_expression(
                             0,
-                            types.int,
+                            types.i32,
                             RegionId(0),
                             &mut expressions,
                         )),
@@ -1186,9 +1186,9 @@ fn dispatcher_match_merge_convergence_lowers_jump_arguments() {
                         body: BlockId(2),
                     },
                     HirMatchArm {
-                        pattern: HirPattern::Literal(int_expression(
+                        pattern: HirPattern::Literal(i32_expression(
                             1,
-                            types.int,
+                            types.i32,
                             RegionId(0),
                             &mut expressions,
                         )),
@@ -1206,12 +1206,12 @@ fn dispatcher_match_merge_convergence_lowers_jump_arguments() {
         HirBlock {
             id: BlockId(2),
             region: RegionId(0),
-            locals: vec![local(1, types.int, RegionId(0))],
+            locals: vec![local(1, types.i32, RegionId(0))],
             statements: vec![statement(
                 5,
                 HirStatementKind::Write {
                     target: HirWriteTarget::DefineLocal(LocalId(1)),
-                    value: int_expression(10, types.int, RegionId(0), &mut expressions),
+                    value: i32_expression(10, types.i32, RegionId(0), &mut expressions),
                 },
             )],
             terminator: HirTerminator::Jump {
@@ -1225,12 +1225,12 @@ fn dispatcher_match_merge_convergence_lowers_jump_arguments() {
         HirBlock {
             id: BlockId(3),
             region: RegionId(0),
-            locals: vec![local(2, types.int, RegionId(0))],
+            locals: vec![local(2, types.i32, RegionId(0))],
             statements: vec![statement(
                 6,
                 HirStatementKind::Write {
                     target: HirWriteTarget::DefineLocal(LocalId(2)),
-                    value: int_expression(20, types.int, RegionId(0), &mut expressions),
+                    value: i32_expression(20, types.i32, RegionId(0), &mut expressions),
                 },
             )],
             terminator: HirTerminator::Jump {
@@ -1244,12 +1244,12 @@ fn dispatcher_match_merge_convergence_lowers_jump_arguments() {
         HirBlock {
             id: BlockId(4),
             region: RegionId(0),
-            locals: vec![local(3, types.int, RegionId(0))],
+            locals: vec![local(3, types.i32, RegionId(0))],
             statements: vec![statement(
                 7,
                 HirStatementKind::Write {
                     target: HirWriteTarget::DefineLocal(LocalId(3)),
-                    value: int_expression(30, types.int, RegionId(0), &mut expressions),
+                    value: i32_expression(30, types.i32, RegionId(0), &mut expressions),
                 },
             )],
             terminator: HirTerminator::Jump {
@@ -1263,7 +1263,7 @@ fn dispatcher_match_merge_convergence_lowers_jump_arguments() {
         HirBlock {
             id: BlockId(5),
             region: RegionId(0),
-            locals: vec![local(4, types.int, RegionId(0))],
+            locals: vec![local(4, types.i32, RegionId(0))],
             statements: vec![],
             terminator: HirTerminator::Jump {
                 target: BlockId(1),
@@ -1337,7 +1337,7 @@ fn match_guard_condition_emits_pattern_and_guard_conjunction() {
             id: BlockId(0),
             region: RegionId(0),
             locals: vec![
-                local(0, types.int, RegionId(0)),
+                local(0, types.i32, RegionId(0)),
                 local(1, types.boolean, RegionId(0)),
             ],
             statements: vec![
@@ -1345,7 +1345,7 @@ fn match_guard_condition_emits_pattern_and_guard_conjunction() {
                     1,
                     HirStatementKind::Write {
                         target: HirWriteTarget::DefineLocal(LocalId(0)),
-                        value: int_expression(1, types.int, RegionId(0), &mut expressions),
+                        value: i32_expression(1, types.i32, RegionId(0), &mut expressions),
                     },
                 ),
                 statement(
@@ -1359,16 +1359,16 @@ fn match_guard_condition_emits_pattern_and_guard_conjunction() {
             terminator: HirTerminator::Match {
                 scrutinee: expression(
                     HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-                    types.int,
+                    types.i32,
                     RegionId(0),
                     ValueKind::RValue,
                     &mut expressions,
                 ),
                 arms: vec![
                     HirMatchArm {
-                        pattern: HirPattern::Literal(int_expression(
+                        pattern: HirPattern::Literal(i32_expression(
                             1,
-                            types.int,
+                            types.i32,
                             RegionId(0),
                             &mut expressions,
                         )),
@@ -1461,12 +1461,12 @@ fn dispatcher_match_without_selected_arm_emits_no_arm_selected_fallback() {
         HirBlock {
             id: BlockId(0),
             region: RegionId(0),
-            locals: vec![local(0, types.int, RegionId(0))],
+            locals: vec![local(0, types.i32, RegionId(0))],
             statements: vec![statement(
                 1,
                 HirStatementKind::Write {
                     target: HirWriteTarget::DefineLocal(LocalId(0)),
-                    value: int_expression(0, types.int, RegionId(0), &mut expressions),
+                    value: i32_expression(0, types.i32, RegionId(0), &mut expressions),
                 },
             )],
             terminator: HirTerminator::Jump {
@@ -1482,15 +1482,15 @@ fn dispatcher_match_without_selected_arm_emits_no_arm_selected_fallback() {
             terminator: HirTerminator::Match {
                 scrutinee: expression(
                     HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-                    types.int,
+                    types.i32,
                     RegionId(0),
                     ValueKind::RValue,
                     &mut expressions,
                 ),
                 arms: vec![HirMatchArm {
-                    pattern: HirPattern::Literal(int_expression(
+                    pattern: HirPattern::Literal(i32_expression(
                         0,
-                        types.int,
+                        types.i32,
                         RegionId(0),
                         &mut expressions,
                     )),
@@ -1567,7 +1567,7 @@ fn falls_back_to_dispatcher_for_cfg_cycle() {
         1,
         HirStatementKind::Write {
             target: HirWriteTarget::DefineLocal(LocalId(0)),
-            value: int_expression(1, types.int, RegionId(0), &mut expressions),
+            value: i32_expression(1, types.i32, RegionId(0), &mut expressions),
         },
     );
 
@@ -1596,7 +1596,7 @@ fn falls_back_to_dispatcher_for_cfg_cycle() {
         HirBlock {
             id: BlockId(2),
             region: RegionId(0),
-            locals: vec![local(0, types.int, RegionId(0))],
+            locals: vec![local(0, types.i32, RegionId(0))],
             statements: vec![loop_assign],
             terminator: HirTerminator::Jump {
                 target: BlockId(1),
@@ -1747,7 +1747,7 @@ fn jump_args_lower_block_to_block_value_transfer() {
         1,
         HirStatementKind::Write {
             target: HirWriteTarget::DefineLocal(LocalId(0)),
-            value: int_expression(7, types.int, RegionId(0), &mut expressions),
+            value: i32_expression(7, types.i32, RegionId(0), &mut expressions),
         },
     );
 
@@ -1755,7 +1755,7 @@ fn jump_args_lower_block_to_block_value_transfer() {
         HirBlock {
             id: BlockId(0),
             region: RegionId(0),
-            locals: vec![local(0, types.int, RegionId(0))],
+            locals: vec![local(0, types.i32, RegionId(0))],
             statements: vec![assign_source],
             terminator: HirTerminator::Jump {
                 target: BlockId(1),
@@ -1768,7 +1768,7 @@ fn jump_args_lower_block_to_block_value_transfer() {
         HirBlock {
             id: BlockId(1),
             region: RegionId(0),
-            locals: vec![local(1, types.int, RegionId(0))],
+            locals: vec![local(1, types.i32, RegionId(0))],
             statements: vec![],
             terminator: HirTerminator::Return(unit_expression(
                 types.unit,
@@ -1842,14 +1842,14 @@ fn structured_branch_merge_lowers_jump_arguments() {
         1,
         HirStatementKind::Write {
             target: HirWriteTarget::DefineLocal(LocalId(0)),
-            value: int_expression(10, types.int, RegionId(0), &mut expressions),
+            value: i32_expression(10, types.i32, RegionId(0), &mut expressions),
         },
     );
     let assign_else = statement(
         2,
         HirStatementKind::Write {
             target: HirWriteTarget::DefineLocal(LocalId(1)),
-            value: int_expression(20, types.int, RegionId(0), &mut expressions),
+            value: i32_expression(20, types.i32, RegionId(0), &mut expressions),
         },
     );
 
@@ -1868,7 +1868,7 @@ fn structured_branch_merge_lowers_jump_arguments() {
         HirBlock {
             id: BlockId(1),
             region: RegionId(0),
-            locals: vec![local(0, types.int, RegionId(0))],
+            locals: vec![local(0, types.i32, RegionId(0))],
             statements: vec![assign_then],
             terminator: HirTerminator::Jump {
                 target: BlockId(3),
@@ -1881,7 +1881,7 @@ fn structured_branch_merge_lowers_jump_arguments() {
         HirBlock {
             id: BlockId(2),
             region: RegionId(0),
-            locals: vec![local(1, types.int, RegionId(0))],
+            locals: vec![local(1, types.i32, RegionId(0))],
             statements: vec![assign_else],
             terminator: HirTerminator::Jump {
                 target: BlockId(3),
@@ -1894,7 +1894,7 @@ fn structured_branch_merge_lowers_jump_arguments() {
         HirBlock {
             id: BlockId(3),
             region: RegionId(0),
-            locals: vec![local(2, types.int, RegionId(0))],
+            locals: vec![local(2, types.i32, RegionId(0))],
             statements: vec![],
             terminator: HirTerminator::Return(unit_expression(
                 types.unit,
@@ -1968,14 +1968,14 @@ fn dispatcher_loop_back_edge_lowers_jump_arguments() {
         1,
         HirStatementKind::Write {
             target: HirWriteTarget::DefineLocal(LocalId(0)),
-            value: int_expression(1, types.int, RegionId(0), &mut expressions),
+            value: i32_expression(1, types.i32, RegionId(0), &mut expressions),
         },
     );
     let assign_back_edge = statement(
         2,
         HirStatementKind::Write {
             target: HirWriteTarget::DefineLocal(LocalId(2)),
-            value: int_expression(2, types.int, RegionId(0), &mut expressions),
+            value: i32_expression(2, types.i32, RegionId(0), &mut expressions),
         },
     );
 
@@ -1983,7 +1983,7 @@ fn dispatcher_loop_back_edge_lowers_jump_arguments() {
         HirBlock {
             id: BlockId(0),
             region: RegionId(0),
-            locals: vec![local(0, types.int, RegionId(0))],
+            locals: vec![local(0, types.i32, RegionId(0))],
             statements: vec![assign_entry],
             terminator: HirTerminator::Jump {
                 target: BlockId(1),
@@ -1996,7 +1996,7 @@ fn dispatcher_loop_back_edge_lowers_jump_arguments() {
         HirBlock {
             id: BlockId(1),
             region: RegionId(0),
-            locals: vec![local(1, types.int, RegionId(0))],
+            locals: vec![local(1, types.i32, RegionId(0))],
             statements: vec![],
             terminator: HirTerminator::If {
                 condition: bool_expression(true, types.boolean, RegionId(0), &mut expressions),
@@ -2007,7 +2007,7 @@ fn dispatcher_loop_back_edge_lowers_jump_arguments() {
         HirBlock {
             id: BlockId(2),
             region: RegionId(0),
-            locals: vec![local(2, types.int, RegionId(0))],
+            locals: vec![local(2, types.i32, RegionId(0))],
             statements: vec![assign_back_edge],
             terminator: HirTerminator::Jump {
                 target: BlockId(1),
@@ -2092,7 +2092,7 @@ fn jump_args_define_explicit_destination_binding() {
         1,
         HirStatementKind::Write {
             target: HirWriteTarget::DefineLocal(LocalId(0)),
-            value: int_expression(42, types.int, RegionId(0), &mut expressions),
+            value: i32_expression(42, types.i32, RegionId(0), &mut expressions),
         },
     );
 
@@ -2100,7 +2100,7 @@ fn jump_args_define_explicit_destination_binding() {
         HirBlock {
             id: BlockId(0),
             region: RegionId(0),
-            locals: vec![local(0, types.int, RegionId(0))],
+            locals: vec![local(0, types.i32, RegionId(0))],
             statements: vec![assign_source],
             terminator: HirTerminator::Jump {
                 target: BlockId(1),
@@ -2113,7 +2113,7 @@ fn jump_args_define_explicit_destination_binding() {
         HirBlock {
             id: BlockId(1),
             region: RegionId(0),
-            locals: vec![local(1, types.int, RegionId(0))],
+            locals: vec![local(1, types.i32, RegionId(0))],
             statements: vec![],
             terminator: HirTerminator::Return(unit_expression(
                 types.unit,

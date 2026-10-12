@@ -1,12 +1,12 @@
 -- Runtime template assertion messages are evaluated on the failure edge for JS.
 
-count Int = 1
+count I32 = 1
 
 make_flag |value Bool| -> Bool:
     return value
 ;
 
-check_count |value Int| -> String, Error!:
+check_count |value I32| -> String, Error!:
     assert(make_flag(false), [:message [value]])
     return "unreachable"
 ;

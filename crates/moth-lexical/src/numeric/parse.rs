@@ -14,7 +14,6 @@ use super::grammar::{
     is_exponent_marker, is_exponent_sign, is_numeric_digit,
 };
 use super::precision::BinaryFloatPrecision;
-use super::profile::{FloatPrecision, IntWidth};
 /// Structured reasons shared by numeric parsing and compiler diagnostics.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum NumberLiteralErrorReason {
@@ -27,18 +26,12 @@ pub enum NumberLiteralErrorReason {
     MissingExponentDigits,
     InvalidExponentSignPlacement,
     InvalidSeparatorPlacement,
-    OutsideIntRange,
-    /// A literal is outside the inclusive range of the profile `Uint` width it initialises.
-    OutsideUintRange(IntWidth),
-    /// A negative literal cannot initialise the profile `Uint` width.
-    NegativeUintLiteral(IntWidth),
     /// A literal is outside the inclusive range of the fixed scalar it initialises.
     OutsideFixedScalarRange(FixedScalar),
     /// A negative literal cannot initialise an unsigned fixed scalar or `Byte`.
     NegativeUnsignedLiteral(FixedScalar),
     /// A fixed binary float literal rounded to a non-finite value at its destination.
     NonFiniteFixedFloat(FixedScalar),
-    NonFiniteFloat,
     /// A literal's exact decimal value does not fit the receiving `Dec` scale.
     ///
     /// WHAT: the literal's smallest exact scale exceeds the destination scale, so a checked
@@ -272,292 +265,6 @@ pub fn parse_numeric_literal(
     })
 }
 
-/// Shared signed whole-number materialization for one `Int` width.
-///
-/// WHY: source literals, normalized MON facts and `String -> Int` casts share one
-///      boundary policy. Positive magnitudes parse directly as `i64` and are
-///      range-checked; negative magnitudes parse as `u64` so the exact minimum
-///      (whose magnitude exceeds the maximum by one) is accepted without overflow.
-fn materialize_int_text_with_sign(
-    text: &str,
-    sign: NumericLiteralSign,
-    width: IntWidth,
-) -> Result<i64, NumberLiteralErrorReason> {
-    match sign {
-        NumericLiteralSign::Positive => {
-            let value = text
-                .parse::<i64>()
-                .map_err(|_| NumberLiteralErrorReason::OutsideIntRange)?;
-
-            if width.contains(value) {
-                Ok(value)
-            } else {
-                Err(NumberLiteralErrorReason::OutsideIntRange)
-            }
-        }
-
-        NumericLiteralSign::Negative => {
-            let magnitude = text
-                .parse::<u64>()
-                .map_err(|_| NumberLiteralErrorReason::OutsideIntRange)?;
-
-            if magnitude == 0 {
-                return Ok(0);
-            }
-
-            // The range check below guarantees the negation cannot overflow: the
-            // accepted magnitudes are exactly `1..=max+1`, and `max+1` maps to the
-            // width minimum.
-            let max_magnitude = (width.max_value() as u64) + 1;
-            if magnitude > max_magnitude {
-                return Err(NumberLiteralErrorReason::OutsideIntRange);
-            }
-
-            if magnitude == max_magnitude {
-                Ok(width.min_value())
-            } else {
-                Ok(-(magnitude as i64))
-            }
-        }
-    }
-}
-
-/// Materialize already validated normalized whole-number text at one `Int` width.
-///
-/// WHAT: reuses the shared signed-width boundary policy without reparsing the literal
-///       grammar. MON has already validated separators, kind and digit counts through
-///       `parse_numeric_literal`.
-/// WHY: MON `Int` retains normalized facts from its single parse; reparsing the original
-///      text would normalize the same literal twice.
-///
-/// # Input contract
-///
-/// `normalized` must be the unsigned, separator-free `normalized_text` produced by
-/// [`parse_numeric_literal`] with [`NumericLiteralKind::WholeNumber`]. Retained parser facts may
-/// provide the same text and kind. This low-level operation does not validate the grammar again;
-/// use [`parse_numeric_text_to_int`] for unchecked text.
-pub fn materialize_normalized_int(
-    normalized: &str,
-    negative: bool,
-    width: IntWidth,
-) -> Result<i64, NumberLiteralErrorReason> {
-    let sign = if negative {
-        NumericLiteralSign::Negative
-    } else {
-        NumericLiteralSign::Positive
-    };
-    materialize_int_text_with_sign(normalized, sign, width)
-}
-
-/// Materialize already validated normalized whole-number text at one `Uint` width.
-///
-/// WHAT: reuses the shared unsigned-width boundary policy without reparsing the literal
-///       grammar.
-/// WHY: retained normalized facts reach this destination without a second normalization pass.
-///
-/// # Input contract
-///
-/// `normalized` must be the unsigned, separator-free `normalized_text` produced by
-/// [`parse_numeric_literal`] with [`NumericLiteralKind::WholeNumber`]. This low-level
-/// operation does not validate the grammar again; use [`parse_numeric_text_to_uint`]
-/// for unchecked text.
-pub fn materialize_normalized_uint(
-    normalized: &str,
-    negative: bool,
-    width: IntWidth,
-) -> Result<u64, NumberLiteralErrorReason> {
-    let sign = if negative {
-        NumericLiteralSign::Negative
-    } else {
-        NumericLiteralSign::Positive
-    };
-    materialize_uint_text_with_sign(normalized, sign, width)
-}
-
-/// Shared unsigned whole-number materialization for one `Uint` width.
-///
-/// WHAT: any literal carrying a negative sign is rejected, including `-0`; accepted
-///       magnitudes parse as `u64` and range-check against the width's unsigned maximum.
-/// WHY: negative values cannot initialise `Uint`, and parsing as `u64` keeps `Uint64`
-///      values above `i64::MAX` exact instead of narrowing them through a signed type.
-fn materialize_uint_text_with_sign(
-    text: &str,
-    sign: NumericLiteralSign,
-    width: IntWidth,
-) -> Result<u64, NumberLiteralErrorReason> {
-    // The sign is part of the literal spelling, so `-0` is refused like any other negative
-    // literal rather than being normalised away.
-    if sign == NumericLiteralSign::Negative {
-        return Err(NumberLiteralErrorReason::NegativeUintLiteral(width));
-    }
-
-    let value = text
-        .parse::<u64>()
-        .map_err(|_| NumberLiteralErrorReason::OutsideUintRange(width))?;
-
-    if value <= width.unsigned_max_value() {
-        Ok(value)
-    } else {
-        Err(NumberLiteralErrorReason::OutsideUintRange(width))
-    }
-}
-
-/// Parse unsigned numeric text into a `Uint` at one width using the Moth whole-number grammar.
-///
-/// WHAT: applies the shared numeric text grammar to an entire input string, including
-///       an optional leading `-`, rejects non-whole-number forms, then materializes
-///       the unsigned value through the same width boundary helper as source literals.
-/// WHY: `String -> Uint` casts must agree with source literal range and separator rules
-///      without reimplementing sign/range policy in the cast subsystem.
-pub fn parse_numeric_text_to_uint(
-    source: &str,
-    width: IntWidth,
-) -> Result<u64, NumberLiteralErrorReason> {
-    if source.is_empty() {
-        return Err(NumberLiteralErrorReason::InvalidSeparatorPlacement);
-    }
-
-    let (sign, unsigned) = if let Some(rest) = source.strip_prefix('-') {
-        (NumericLiteralSign::Negative, rest)
-    } else if source.starts_with('+') {
-        return Err(NumberLiteralErrorReason::InvalidSeparatorPlacement);
-    } else {
-        (NumericLiteralSign::Positive, source)
-    };
-
-    if unsigned.is_empty() {
-        return Err(NumberLiteralErrorReason::InvalidSeparatorPlacement);
-    }
-
-    let parsed = parse_numeric_literal(unsigned)?;
-    if parsed.kind != NumericLiteralKind::WholeNumber {
-        return Err(NumberLiteralErrorReason::InvalidSeparatorPlacement);
-    }
-
-    materialize_uint_text_with_sign(&parsed.normalized_text, sign, width)
-}
-
-/// Shared float materialization for one `Float` precision.
-///
-/// WHAT: parses the unsigned normalized text directly at the destination precision
-///       (`parse::<f32>` under `Bits32`, `parse::<f64>` under `Bits64`), then applies
-///       the token sign by negation so no signed intermediate string is allocated.
-/// WHY: binary float literals round directly to their destination with round-to-nearest,
-///      ties-to-even. Parsing at the destination precision avoids double rounding through
-///      an `f64` intermediate; a non-finite rounded result is rejected with the existing
-///      reasons. Signed zero and subnormals are preserved because the parse handles them.
-fn materialize_float_text_with_sign(
-    normalized: &str,
-    negative: bool,
-    precision: FloatPrecision,
-) -> Result<f64, NumberLiteralErrorReason> {
-    let magnitude = match precision {
-        FloatPrecision::Bits64 => normalized
-            .parse::<f64>()
-            .map_err(|_| NumberLiteralErrorReason::ParseOverflow)?,
-        FloatPrecision::Bits32 => {
-            let rounded = normalized
-                .parse::<f32>()
-                .map_err(|_| NumberLiteralErrorReason::ParseOverflow)?;
-            f64::from(rounded)
-        }
-    };
-
-    if !magnitude.is_finite() {
-        return Err(NumberLiteralErrorReason::NonFiniteFloat);
-    }
-
-    Ok(if negative { -magnitude } else { magnitude })
-}
-
-/// Parse signed numeric text into an `Int` at one width using the Moth whole-number grammar.
-///
-/// WHAT: applies the shared numeric text grammar to an entire input string, including
-///       an optional leading `-`, rejects non-whole-number forms, then materializes
-///       the signed value through the same width boundary helper as source literals.
-/// WHY: `String -> Int` casts must agree with source literal range and separator rules
-///      without reimplementing sign/range policy in the cast subsystem.
-pub fn parse_numeric_text_to_int(
-    source: &str,
-    width: IntWidth,
-) -> Result<i64, NumberLiteralErrorReason> {
-    if source.is_empty() {
-        return Err(NumberLiteralErrorReason::InvalidSeparatorPlacement);
-    }
-
-    let (sign, unsigned) = if let Some(rest) = source.strip_prefix('-') {
-        (NumericLiteralSign::Negative, rest)
-    } else if source.starts_with('+') {
-        return Err(NumberLiteralErrorReason::InvalidSeparatorPlacement);
-    } else {
-        (NumericLiteralSign::Positive, source)
-    };
-
-    if unsigned.is_empty() {
-        return Err(NumberLiteralErrorReason::InvalidSeparatorPlacement);
-    }
-
-    let parsed = parse_numeric_literal(unsigned)?;
-    if parsed.kind != NumericLiteralKind::WholeNumber {
-        return Err(NumberLiteralErrorReason::InvalidSeparatorPlacement);
-    }
-
-    materialize_int_text_with_sign(&parsed.normalized_text, sign, width)
-}
-
-/// Materialize already validated normalized numeric text to a finite `Float` at one precision.
-///
-/// WHAT: parses the unsigned normalized text once at the destination precision, then
-///       applies the token sign by negation so no signed intermediate string is allocated.
-/// WHY: MON `Float` retains normalized facts from its single parse; rebuilding a signed
-///      string would allocate a duplicate scratch buffer.
-///
-/// # Input contract
-///
-/// `normalized` must be the unsigned, separator-free `normalized_text` produced by
-/// [`parse_numeric_literal`], or equivalent retained parser facts. This low-level operation does
-/// not validate the grammar again; use [`parse_numeric_text_to_float`] for unchecked text.
-pub fn materialize_normalized_float(
-    normalized: &str,
-    negative: bool,
-    precision: FloatPrecision,
-) -> Result<f64, NumberLiteralErrorReason> {
-    materialize_float_text_with_sign(normalized, negative, precision)
-}
-
-/// Parse a signed numeric text string into a finite `Float` at one precision.
-///
-/// WHAT: applies the shared Moth numeric text grammar to an entire input
-///       string, including an optional leading `-`, parses directly at the destination
-///       precision, then checks that the resulting `f64` is finite.
-/// WHY: `String -> Float` casts must agree with source numeric literals on
-///      separator, exponent, sign, and whitespace rules without duplicating
-///      grammar logic in the cast policy or backend runtime.
-pub fn parse_numeric_text_to_float(
-    source: &str,
-    precision: FloatPrecision,
-) -> Result<f64, NumberLiteralErrorReason> {
-    if source.is_empty() {
-        return Err(NumberLiteralErrorReason::InvalidSeparatorPlacement);
-    }
-
-    let (negative, unsigned) = if let Some(rest) = source.strip_prefix('-') {
-        (true, rest)
-    } else if source.starts_with('+') {
-        return Err(NumberLiteralErrorReason::InvalidSeparatorPlacement);
-    } else {
-        (false, source)
-    };
-
-    if unsigned.is_empty() {
-        return Err(NumberLiteralErrorReason::InvalidSeparatorPlacement);
-    }
-
-    let parsed = parse_numeric_literal(unsigned)?;
-
-    materialize_float_text_with_sign(&parsed.normalized_text, negative, precision)
-}
-
 /// Parse signed numeric text into one fixed scalar using the Moth whole-string grammar.
 ///
 /// WHAT: applies the shared numeric text grammar to an entire input string, including an optional
@@ -567,7 +274,7 @@ pub fn parse_numeric_text_to_float(
 ///       accept a whole number or a decimal/exponent and round once at their own precision.
 /// WHY: `String -> U8` and the other fixed text conversions must agree with source literals on
 ///      separator, sign, and whitespace rules, and must stay exact above `2^53` rather than
-///      passing through an `Int` or `Float` intermediate.
+///      passing through a binary-float intermediate.
 pub fn parse_numeric_text_to_fixed_scalar(
     source: &str,
     scalar: FixedScalar,
@@ -626,8 +333,8 @@ pub fn parse_numeric_text_to_fixed_scalar(
 /// WHY:  destination-aware materialisation must not turn integral decimal spelling such as `1.0`
 ///       into an integer or `Byte`, while a whole literal may still initialise a binary float.
 ///
-/// When this returns `false` the caller keeps the default `Float` materialisation and the receiving
-/// boundary reports the ordinary type mismatch.
+/// When this returns `false` the caller keeps the literal's default materialisation and the
+/// receiving boundary reports the ordinary type mismatch.
 pub fn literal_kind_initialises(kind: NumericLiteralKind, scalar: FixedScalar) -> bool {
     match kind {
         NumericLiteralKind::WholeNumber => true,
@@ -683,8 +390,8 @@ pub fn materialize_normalized_fixed_scalar(
 /// WHAT: positive magnitudes parse as `i64`, and negative magnitudes parse as `u64` and negate by
 ///       wrapping so the exact minimum (whose magnitude exceeds the maximum by one) is accepted
 ///       without overflow; the constructor then applies the scalar's own inclusive range.
-/// WHY:  `I8`..`I64` literals must not be range-checked against the profile `Int` width first, and
-///       `-0` must materialise as a plain zero.
+/// WHY:  each `I*` literal is checked only against its own scalar range, and `-0` must materialise
+///       as a plain zero.
 fn materialize_signed_fixed_scalar(
     text: &str,
     sign: NumericLiteralSign,
@@ -742,7 +449,7 @@ fn materialize_unsigned_fixed_scalar(
 /// Materialise a literal magnitude into one binary float scalar.
 ///
 /// WHAT: `F16` rounds through the binary16 owner, which owns its double-rounding guard, while `F32`
-///       and `F64` parse once at their own precision through the shared profile-precision parser.
+///       and `F64` parse once at their own precision and apply the sign to the finite result.
 /// WHY:  each binary float literal must round exactly once, at its destination precision, so no
 ///       value is produced through a wider intermediate; a non-finite rounded result is rejected
 ///       instead of entering the `FixedScalarValue` carrier.
@@ -752,30 +459,41 @@ fn materialize_binary_float_fixed_scalar(
     scalar: FixedScalar,
 ) -> Result<FixedScalarValue, NumberLiteralErrorReason> {
     let negative = sign == NumericLiteralSign::Negative;
+    let non_finite = NumberLiteralErrorReason::NonFiniteFixedFloat(scalar);
 
-    let precision = scalar
-        .binary_float_precision()
-        .ok_or(NumberLiteralErrorReason::NonFiniteFixedFloat(scalar))?;
+    let precision = scalar.binary_float_precision().ok_or(non_finite)?;
     let magnitude = match precision {
-        BinaryFloatPrecision::Binary16 => decimal_to_f16(text, negative)
-            .ok_or(NumberLiteralErrorReason::NonFiniteFixedFloat(scalar)),
-        BinaryFloatPrecision::Binary32 => {
-            materialize_float_text_with_sign(text, negative, FloatPrecision::Bits32)
-        }
-        BinaryFloatPrecision::Binary64 => {
-            materialize_float_text_with_sign(text, negative, FloatPrecision::Bits64)
-        }
-    }
-    .map_err(|reason| {
-        if reason == NumberLiteralErrorReason::NonFiniteFloat {
-            NumberLiteralErrorReason::NonFiniteFixedFloat(scalar)
-        } else {
-            reason
-        }
-    })?;
+        BinaryFloatPrecision::Binary16 => decimal_to_f16(text, negative).ok_or(non_finite)?,
+        BinaryFloatPrecision::Binary32 => parse_binary_float_text::<f32>(text, negative, scalar)?,
+        BinaryFloatPrecision::Binary64 => parse_binary_float_text::<f64>(text, negative, scalar)?,
+    };
 
-    FixedScalarValue::binary_float(scalar, magnitude)
-        .ok_or(NumberLiteralErrorReason::NonFiniteFixedFloat(scalar))
+    FixedScalarValue::binary_float(scalar, magnitude).ok_or(non_finite)
+}
+
+/// Parse unsigned normalized text once at one binary float type, then apply the token sign.
+///
+/// WHAT: `str::parse` rounds once to nearest, ties-to-even, at `T`. Widening to `f64` is exact, and
+///       negation is applied last so signed zero and subnormals survive.
+/// WHY:  parsing at the destination precision avoids double rounding through a wider intermediate.
+fn parse_binary_float_text<T>(
+    text: &str,
+    negative: bool,
+    scalar: FixedScalar,
+) -> Result<f64, NumberLiteralErrorReason>
+where
+    T: std::str::FromStr + Into<f64>,
+{
+    let magnitude: f64 = text
+        .parse::<T>()
+        .map_err(|_| NumberLiteralErrorReason::ParseOverflow)?
+        .into();
+
+    if !magnitude.is_finite() {
+        return Err(NumberLiteralErrorReason::NonFiniteFixedFloat(scalar));
+    }
+
+    Ok(if negative { -magnitude } else { magnitude })
 }
 
 #[cfg(test)]

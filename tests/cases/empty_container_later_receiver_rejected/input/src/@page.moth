@@ -1,0 +1,7 @@
+read_values |values {U64}| -> I32:
+    return values.length()
+;
+
+values ~= {}
+count = read_values(values)
+[:[count]]

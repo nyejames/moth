@@ -1,4 +1,4 @@
-walk_fixed |step I32, flag ~Int| -> Int:
+walk_fixed |step I32, flag ~I32| -> I32:
     lower I32 = 0
     upper I32 = 10
     loop lower to upper by step:
@@ -6,7 +6,7 @@ walk_fixed |step I32, flag ~Int| -> Int:
     ;
     return flag
 ;
-safe_walk |step I32, flag ~Int| -> Int, Error!:
+safe_walk |step I32, flag ~I32| -> I32, Error!:
     return walk_fixed(step, ~flag)
 ;
 flag ~= 0

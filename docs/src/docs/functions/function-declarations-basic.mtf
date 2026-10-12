@@ -19,7 +19,7 @@ Use `||` when there are no parameters:
 Add an arrow when the function returns a value:
 
 [codeblock, $code("moth"):
-    double |value Int| -> Int:
+    double |value I32| -> I32:
         return value * 2
     ;
 ]

@@ -1,0 +1,92 @@
+-- Collection loops over an unannotated numeric literal. Each loop item shares the
+-- literal's element class, which a typed {U64} consumer fixes. The first five forms
+-- each isolate one source-order position of that consumer: a receiver before the
+-- loop, a receiver after the loop, a template loop-body read, a statement loop-body
+-- read, and a receiver before a wrapped runtime loop. The last two forms cover an
+-- inline literal loop source and a nested collection projected by get, whose inner
+-- leaf is read by the U64 receiver. Values include 4294967296, which exceeds I32 and
+-- U32 range. Loop indices are I32.
+
+read_u64 |value U64| -> String:
+    return cast value
+;
+
+receive_u64_list |values {U64}| -> String:
+    len = values.length()
+    return [:len=[len]]
+;
+
+list_shell #= [:<ul>[$slot]</ul>]
+
+before_receiver || -> String:
+    values = {4294967296, 2}
+    received = receive_u64_list(values)
+    return [:before [received] items=[loop values |item, index|:[index]=[item];]]
+;
+
+after_receiver || -> String:
+    values = {4294967296, 2}
+    rendered = [:after items=[loop values |item, index|:[index]=[item];]]
+    received = receive_u64_list(values)
+    return [:[rendered] [received]]
+;
+
+body_receiver || -> String:
+    values = {4294967296, 2}
+    return [:body items=[loop values |item, index|:[index]=[read_u64(item)];]]
+;
+
+statement_receiver || -> String:
+    values = {4294967296, 2}
+    last ~= ""
+    last_index ~= 0
+    loop values |item, index|:
+        last = read_u64(item)
+        last_index = copy index
+    ;
+    return [:statement last=[last] last_index=[last_index]]
+;
+
+wrapped_receiver || -> String:
+    values = {4294967296, 2}
+    received = receive_u64_list(values)
+    return [:wrapped [received] [list_shell, loop values |item, index|:[index]=[item];]]
+;
+
+-- An inline literal loop source has no binding to share, so the loop body read alone
+-- fixes its element class.
+inline_source_receiver || -> String:
+    return [:inline_source items=[loop {4294967296, 2} |item, index|:[index]=[read_u64(item)];]]
+;
+
+-- The direct projected loop source keeps the get call in the template header. The
+-- second row checks that get selects the first row and not a neighbouring one.
+nested_projection_receiver || -> String, Error!:
+    grid = {{4294967296, 2}, {3}}
+    return [:nested_projection row=[loop grid.get(0)! |item, index|:[index]=[read_u64(item)];]]
+;
+
+read_f32 |value F32| -> F32:
+    return value
+;
+
+typed_float_source || -> String:
+    values {F32} = {1}
+    return [:typed_float=[loop values |item|:[read_f32(item)];]]
+;
+
+raw_mixed_float_source || -> String:
+    return [:mixed_float=[loop {1, 2.5} |item|:[read_f32(item)];]]
+;
+
+explicit_cast_source || -> String:
+    loop {1} |item|:
+        converted F32 = cast item
+        return [:converted=[converted]]
+    ;
+    return "empty"
+;
+
+nested_text = nested_projection_receiver() catch then "missing"
+
+[:collection_loop_leaf [before_receiver()] [after_receiver()] [body_receiver()] [statement_receiver()] [wrapped_receiver()] [inline_source_receiver()] [nested_text] [typed_float_source()] [raw_mixed_float_source()] [explicit_cast_source()]]

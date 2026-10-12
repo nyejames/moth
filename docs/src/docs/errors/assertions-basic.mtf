@@ -11,9 +11,9 @@ It is still fully checked and normalized when the condition is the literal
 `true`. The message is normalized through the ordinary AST template path before
 it is discarded after final AST type/TIR validation, so its temporary AST-local
 TIR is removed with the message and no TIR reference, runtime handoff, generated
-function or other runtime fact survives. Active messages
-are evaluated only on the failure edge. See @../progress (Progress) for current
-compiler and backend support.
+function or other runtime fact survives. Active messages are evaluated only on
+the failure edge. The Progress matrix owns current compiler and backend
+support: @../progress (Progress).
 
 Message construction must not escape through `!`, `?`, `return`, `break` or
 `continue`, or through escaping implicit or typed failure. Handle fallible work

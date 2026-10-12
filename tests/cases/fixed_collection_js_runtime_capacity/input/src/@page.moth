@@ -1,5 +1,5 @@
 render_fixed_runtime || -> String:
-    items ~{2 Int} = {}
+    items ~{2 I32} = {}
     initial_length = items.length()
 
     ~items.push(1) catch:

@@ -1,4 +1,4 @@
-increment_int |value Int| -> Int:
+increment_int |value I64| -> I64:
     return value + 1
 ;
 

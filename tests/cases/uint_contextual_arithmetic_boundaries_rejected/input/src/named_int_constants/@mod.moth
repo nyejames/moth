@@ -1,6 +1,6 @@
 reject_named_int_constants || -> String:
-    left #Int = 1
-    right #Int = 2
-    result Uint = left + right
+    left #I32 = 1
+    right #I32 = 2
+    result U32 = left + right
     return [result]
 ;

@@ -10,7 +10,7 @@ kind = "html"
 must_contain = [
     "__moth_float_validate",
     "function __moth_float_validate(",
-    "Float boundary",
+    "External floating-point boundary produced a non-finite value",
 ]
 [backends.html_wasm]
 mode = "failure"

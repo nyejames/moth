@@ -9,6 +9,7 @@
 //!       request, no builder and no filesystem.
 
 use super::{FoldedMothTemplate, MothTemplateCompilationRequest, compile_moth_template_source};
+use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareOutput, HeaderParseOptions, SourcePreparationDelta,
@@ -34,7 +35,8 @@ use crate::compiler_frontend::{
     CompilerFrontend, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
 };
-use moth_lexical::numeric::profile::{FloatPrecision, NumericProfile};
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -48,7 +50,6 @@ fn plain_text_content_uses_the_text_fast_path_and_moves_owned_text() {
 
     let folded = compile_moth_template_source(
         MothTemplateCompilationRequest {
-            numeric_profile: NumericProfile::STANDARD,
             source_path: Path::new("/templates/intro.mtf"),
             source_code: Some(String::from("# Intro")),
             style_directives: &style_directives,
@@ -104,7 +105,6 @@ fn standalone_preparation_diagnostic_retains_source_snapshot_context() {
 
     let messages = match compile_moth_template_source(
         MothTemplateCompilationRequest {
-            numeric_profile: NumericProfile::STANDARD,
             source_path,
             source_code: Some(source_code.to_owned()),
             style_directives: &style_directives,
@@ -131,43 +131,60 @@ fn standalone_preparation_diagnostic_retains_source_snapshot_context() {
 }
 
 #[test]
-fn float_interpolation_renders_at_the_boundary_float_precision() {
-    // The sum is inexact at both precisions, so the interpolated text is decided by the boundary
-    // `Float` precision this service was handed rather than by the literal digits.
+fn float_interpolation_renders_the_exact_f64_sum() {
+    // Untyped decimal literals materialise at the exact default precision, so the interpolated
+    // text is decided by the F64 digits.
     let source_code = "[:[0.1 + 0.2]]";
     let style_directives = StyleDirectiveRegistry::built_ins();
 
-    let render = |numeric_profile: NumericProfile| {
-        let folded = compile_moth_template_source(
-            MothTemplateCompilationRequest {
-                numeric_profile,
-                source_path: Path::new("/templates/float.mtf"),
-                source_code: Some(source_code.to_owned()),
-                style_directives: &style_directives,
-                file_value_resolution: None,
-            },
-            &mut StringTable::new(),
-        )
-        .expect("a Float interpolation should fold under every boundary precision");
-        folded
-            .content
-            .into_text()
-            .expect("a single Float interpolation should fold to owned text")
-    };
-
-    let narrow = render(NumericProfile {
-        float_precision: FloatPrecision::Bits32,
-        ..NumericProfile::STANDARD
-    });
-    let standard = render(NumericProfile::STANDARD);
+    let folded = compile_moth_template_source(
+        MothTemplateCompilationRequest {
+            source_path: Path::new("/templates/float.mtf"),
+            source_code: Some(source_code.to_owned()),
+            style_directives: &style_directives,
+            file_value_resolution: None,
+        },
+        &mut StringTable::new(),
+    )
+    .expect("an F64 interpolation should fold");
+    let rendered = folded
+        .content
+        .into_text()
+        .expect("a single F64 interpolation should fold to owned text");
 
     assert_eq!(
-        narrow, "0.3",
-        "a Float32 boundary must render the shortest f32 text of the sum",
+        rendered, "0.30000000000000004",
+        "the exact f64 sum must render its full digits",
     );
-    assert_eq!(
-        standard, "0.30000000000000004",
-        "a Float64 boundary must render the exact f64 sum",
+}
+
+#[test]
+fn whole_interpolation_above_the_i32_default_is_diagnosed_not_folded() {
+    // An untyped whole literal materialises at the exact I32 default, so the direct service must
+    // diagnose the out-of-range value instead of returning a folded template with a pending width.
+    let style_directives = StyleDirectiveRegistry::built_ins();
+
+    let messages = compile_moth_template_source(
+        MothTemplateCompilationRequest {
+            source_path: Path::new("/templates/wide.mtf"),
+            source_code: Some(String::from("[:[3_000_000_000]]")),
+            style_directives: &style_directives,
+            file_value_resolution: None,
+        },
+        &mut StringTable::new(),
+    )
+    .err()
+    .expect("an out-of-range untyped interpolation must not fold");
+
+    assert!(
+        messages.diagnostics().any(|diagnostic| matches!(
+            &diagnostic.payload,
+            DiagnosticPayload::InvalidNumberLiteral {
+                reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
+                ..
+            }
+        )),
+        "the I32 default must diagnose the out-of-range interpolation literal",
     );
 }
 
@@ -280,7 +297,6 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
         source_database,
     } = compile_moth_template_source(
         MothTemplateCompilationRequest {
-            numeric_profile: NumericProfile::STANDARD,
             source_path: template_path,
             source_code: None,
             style_directives: &style_directives,

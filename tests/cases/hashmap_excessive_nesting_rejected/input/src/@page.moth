@@ -1,2 +1,2 @@
-bad {String = {Int = {Bool = {Char = String}}}} = {}
+bad {String = {I32 = {Bool = {Char = String}}}} = {}
 [:test]

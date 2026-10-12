@@ -8,7 +8,7 @@
 //!       generated HIR or reruns generated borrow analysis.
 
 use crate::compiler_frontend::CompilerFrontend;
-use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
+use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::ast::AstBuildResult;
 use crate::compiler_frontend::ast::generic_functions::{
     MaterialisedGenericAst, ModuleMaterialisationInput, ModuleMaterialisationPreparation,
@@ -239,7 +239,6 @@ fn materialise_generated_request_inner<'build>(
                         external_package_registry: context.external_packages.as_ref(),
                         style_directives: context.style_directives,
                         build_profile: context.build_profile,
-                        numeric_profile: context.options.numeric_profile,
                         template_const_loop_iteration_limit: context
                             .options
                             .template_const_loop_iteration_limit,
@@ -259,7 +258,6 @@ fn materialise_generated_request_inner<'build>(
                         external_package_registry: context.external_packages.as_ref(),
                         style_directives: context.style_directives,
                         build_profile: context.build_profile,
-                        numeric_profile: context.options.numeric_profile,
                         template_const_loop_iteration_limit: context
                             .options
                             .template_const_loop_iteration_limit,
@@ -453,20 +451,15 @@ fn materialise_generated_request_inner<'build>(
             context.external_dependency_resolution_table,
             context.builder_runtime_packages,
         );
-        // The generated sidecar computes its own proof table from its own HIR after borrow
-        // validation, so its executable carries the exact paired facts it publishes.
-        let numeric_proofs = analyse_numeric_proofs(
-            &hir_module,
-            &type_environment,
-            context.options.numeric_profile,
-        );
+        // The publication owner in convergence computes the paired table from the final HIR.
+        // Nothing reads this empty table before then, and an empty table retains every check.
         Ok(Module {
             executable: ModuleExecutable {
                 hir: hir_module,
                 resource_table,
                 type_environment,
                 borrow_analysis,
-                numeric_proofs,
+                numeric_proofs: NumericProofs::default(),
                 path_table: Arc::new(
                     crate::compiler_frontend::symbols::path_interner::PathInternerBuilder::new()
                         .freeze(),

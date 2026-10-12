@@ -1,4 +1,4 @@
-unused_overflow |value Int| -> Int:
+unused_overflow |value I32| -> I32:
     x = 2147483647
     return x + value
 ;

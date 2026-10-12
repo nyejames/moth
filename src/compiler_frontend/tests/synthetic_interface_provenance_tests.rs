@@ -17,7 +17,9 @@ use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExp
 use crate::compiler_frontend::ast::expressions::expression_types::{
     CastHandling, ResolvedCastEvidence,
 };
-use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
+use crate::compiler_frontend::builtins::casts::targets::{
+    BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget,
+};
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -27,7 +29,7 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 fn member(
     class: SyntheticInterfaceClass,
@@ -35,6 +37,11 @@ fn member(
     member_name: &str,
 ) -> SyntheticInterfaceMemberIdentity {
     SyntheticInterfaceMemberIdentity::new(class, interface, member_name)
+}
+
+/// One materialised `I32` fixture value; panics when the fixture literal is out of range.
+fn i32_value(value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range")
 }
 
 #[test]
@@ -117,52 +124,39 @@ fn identity_is_self_contained_and_deterministic() {
 }
 
 #[test]
-fn provenance_preserved_through_coercion() {
-    // The `coerced` constructor must preserve the inner value's synthetic-interface provenance
-    // because coercion keeps the value's semantic meaning.
-    let member_identity = member(SyntheticInterfaceClass::ProjectContext, "render", "html");
-    let provenance = SyntheticInterfaceProvenance::single(member_identity);
-
-    let inner = Expression::int(42, None, ValueMode::ImmutableOwned)
-        .with_synthetic_interface_provenance(provenance);
-
-    let coerced = Expression::coerced(inner, builtin_type_ids::FLOAT);
-
-    assert_eq!(
-        coerced.synthetic_interface_provenance.members(),
-        &[member(
-            SyntheticInterfaceClass::ProjectContext,
-            "render",
-            "html"
-        )]
-    );
-}
-
-#[test]
 fn provenance_preserved_through_cast() {
     let member_identity = member(SyntheticInterfaceClass::ProjectContext, "render", "html");
-    let source = Expression::int(42, None, ValueMode::ImmutableOwned)
+    let source = Expression::fixed_scalar(i32_value(42), None, ValueMode::ImmutableOwned)
         .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
             member_identity.clone(),
         ));
     let type_environment = TypeEnvironment::new();
     let cast = ResolvedCastExpression {
         source: Box::new(source),
-        source_type_id: builtin_type_ids::INT,
-        target_type_id: builtin_type_ids::FLOAT,
-        target: BuiltinCastTarget::Float,
+        source_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        target_type_id: builtin_type_ids::fixed_scalar(FixedScalar::F64),
+        target: BuiltinCastTarget::Fixed(FixedScalar::F64),
         requires_optional_wrap_after_cast: false,
+        fallibility: BuiltinCastFallibility::Infallible,
         evidence: ResolvedCastEvidence::Builtin {
             policy: BuiltinCastPolicyId::NumericConversion {
-                source: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Int,
-                target: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Float,
+                source: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Fixed(
+                    FixedScalar::I32,
+                ),
+                target: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Fixed(
+                    FixedScalar::F64,
+                ),
             },
         },
-        handling: CastHandling::Infallible,
+        handling: CastHandling::Implicit,
         span: None,
     };
 
-    let cast_expression = Expression::cast(cast, builtin_type_ids::FLOAT, &type_environment);
+    let cast_expression = Expression::cast(
+        cast,
+        builtin_type_ids::fixed_scalar(FixedScalar::F64),
+        &type_environment,
+    );
 
     assert_eq!(
         cast_expression.synthetic_interface_provenance.members(),
@@ -181,14 +175,14 @@ fn aggregate_value_constructors_union_child_provenance() {
     let mut type_environment = TypeEnvironment::new();
     let collection = Expression::collection_with_type_id(
         vec![
-            Expression::int(1, span, ValueMode::ImmutableOwned)
+            Expression::fixed_scalar(i32_value(1), span, ValueMode::ImmutableOwned)
                 .with_synthetic_interface_provenance(project_provenance.clone()),
-            Expression::int(2, span, ValueMode::ImmutableOwned)
+            Expression::fixed_scalar(i32_value(2), span, ValueMode::ImmutableOwned)
                 .with_synthetic_interface_provenance(project_provenance.clone()),
         ],
         CollectionExpressionType {
-            element_type_id: builtin_type_ids::INT,
-            element_diagnostic_type: DataType::Int,
+            element_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            element_diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
             fixed_capacity: None,
             collection_type_id: None,
         },
@@ -203,16 +197,16 @@ fn aggregate_value_constructors_union_child_provenance() {
 
     let map = Expression::map_literal_with_type_id(
         vec![MapLiteralEntry {
-            key: Expression::int(1, span, ValueMode::ImmutableOwned)
+            key: Expression::fixed_scalar(i32_value(1), span, ValueMode::ImmutableOwned)
                 .with_synthetic_interface_provenance(project_provenance.clone()),
-            value: Expression::int(2, span, ValueMode::ImmutableOwned)
+            value: Expression::fixed_scalar(i32_value(2), span, ValueMode::ImmutableOwned)
                 .with_synthetic_interface_provenance(builder_provenance.clone()),
         }],
         MapLiteralExpressionType {
-            key_type_id: builtin_type_ids::INT,
-            value_type_id: builtin_type_ids::INT,
-            key_diagnostic_type: DataType::Int,
-            value_diagnostic_type: DataType::Int,
+            key_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            value_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            key_diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            value_diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
             map_type_id: None,
         },
         &mut type_environment,
@@ -230,7 +224,7 @@ fn aggregate_value_constructors_union_child_provenance() {
         id: path_fork
             .try_intern_portable_path("first", &mut string_table)
             .expect("test path fits"),
-        value: Expression::int(3, span, ValueMode::ImmutableOwned)
+        value: Expression::fixed_scalar(i32_value(3), span, ValueMode::ImmutableOwned)
             .with_synthetic_interface_provenance(project_provenance.clone()),
         binding_span: None,
         config_qualifier: None,
@@ -239,7 +233,7 @@ fn aggregate_value_constructors_union_child_provenance() {
         id: path_fork
             .try_intern_portable_path("second", &mut string_table)
             .expect("test path fits"),
-        value: Expression::int(4, span, ValueMode::ImmutableOwned)
+        value: Expression::fixed_scalar(i32_value(4), span, ValueMode::ImmutableOwned)
             .with_synthetic_interface_provenance(builder_provenance.clone()),
         binding_span: None,
         config_qualifier: None,
@@ -253,7 +247,7 @@ fn aggregate_value_constructors_union_child_provenance() {
         ValueMode::ImmutableOwned,
         false,
         None,
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
     );
     assert_eq!(
         struct_expression.synthetic_interface_provenance.members(),
@@ -269,46 +263,19 @@ fn aggregate_value_constructors_union_child_provenance() {
             id: path_fork
                 .try_intern_portable_path("payload", &mut string_table)
                 .expect("test path fits"),
-            value: Expression::int(5, span, ValueMode::ImmutableOwned)
+            value: Expression::fixed_scalar(i32_value(5), span, ValueMode::ImmutableOwned)
                 .with_synthetic_interface_provenance(project_provenance),
             binding_span: None,
             config_qualifier: None,
         }],
-        diagnostic_type: DataType::Int,
-        type_id: builtin_type_ids::INT,
+        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
         span: None,
         value_mode: ValueMode::ImmutableOwned,
     });
     assert_eq!(
         choice_expression.synthetic_interface_provenance.members(),
         &[project_member,]
-    );
-}
-
-#[test]
-fn provenance_preserved_through_int_to_float_coercion() {
-    // The `Int -> Float` coercion in `coerce_expression_to_declared_type` must preserve the
-    // original value's provenance because it derives the new value from the old one.
-    use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-    use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_declared_type;
-
-    let member_identity = member(SyntheticInterfaceClass::ProjectContext, "render", "html");
-    let provenance = SyntheticInterfaceProvenance::single(member_identity.clone());
-
-    let int_expr = Expression::int(7, None, ValueMode::ImmutableOwned)
-        .with_synthetic_interface_provenance(provenance);
-
-    let type_environment = TypeEnvironment::new();
-    let coerced = coerce_expression_to_declared_type(
-        int_expr,
-        builtin_type_ids::FLOAT,
-        &type_environment,
-        NumericProfile::STANDARD.float_precision,
-    );
-
-    assert_eq!(
-        coerced.synthetic_interface_provenance.members(),
-        &[member_identity]
     );
 }
 
@@ -326,9 +293,9 @@ fn provenance_unioned_through_constant_folding() {
     let lhs_member = member(SyntheticInterfaceClass::ProjectContext, "render", "html");
     let rhs_member = member(SyntheticInterfaceClass::Builder, "assets", "bundle");
 
-    let lhs = Expression::int(3, None, ValueMode::ImmutableOwned)
+    let lhs = Expression::fixed_scalar(i32_value(3), None, ValueMode::ImmutableOwned)
         .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(lhs_member));
-    let rhs = Expression::int(4, None, ValueMode::ImmutableOwned)
+    let rhs = Expression::fixed_scalar(i32_value(4), None, ValueMode::ImmutableOwned)
         .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(rhs_member));
 
     let rpn = ExpressionRpn {
@@ -344,15 +311,14 @@ fn provenance_unioned_through_constant_folding() {
 
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let folded = match constant_fold(rpn.items, &mut string_table, NumericProfile::STANDARD, None)
-        .expect("folding should succeed")
-    {
-        ConstantFoldOutcome::Folded(stack) => stack,
-        ConstantFoldOutcome::NotConstant(_) => panic!("expected a fully folded stack"),
-        ConstantFoldOutcome::TextUnavailable { .. } => {
-            panic!("expected folded text to remain available")
-        }
-    };
+    let folded =
+        match constant_fold(rpn.items, &mut string_table, None).expect("folding should succeed") {
+            ConstantFoldOutcome::Folded(stack) => stack,
+            ConstantFoldOutcome::NotConstant(_) => panic!("expected a fully folded stack"),
+            ConstantFoldOutcome::TextUnavailable { .. } => {
+                panic!("expected folded text to remain available")
+            }
+        };
 
     assert_eq!(folded.len(), 1);
     let ExpressionRpnItem::Operand(result) = &folded[0] else {
@@ -371,10 +337,12 @@ fn provenance_unioned_through_constant_folding() {
 #[test]
 fn empty_expression_has_empty_provenance() {
     let expr = Expression::new(
-        crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind::Int(1),
+        crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind::FixedScalar(
+            i32_value(1),
+        ),
         None,
-        builtin_type_ids::INT,
-        DataType::Int,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        DataType::FixedScalar(FixedScalar::I32),
         ValueMode::ImmutableOwned,
     );
 

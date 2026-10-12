@@ -413,7 +413,11 @@ fn dynamic_expression_guarantees_output(
             // Pending syntax never survives evaluation; flag it in debug builds so the invalid
             // boundary is visible instead of silently assuming output.
             ExpressionRpnItem::PendingNumericLiteral { .. }
-            | ExpressionRpnItem::PendingGroup { .. } => {
+            | ExpressionRpnItem::PendingGroup { .. }
+            | ExpressionRpnItem::PendingNumericBinding { .. }
+            | ExpressionRpnItem::PendingNumericCast { .. }
+            | ExpressionRpnItem::PendingNumericCall { .. }
+            | ExpressionRpnItem::PendingNumericExpression { .. } => {
                 debug_assert!(
                     false,
                     "pending expression syntax reached HIR output-guarantee query"

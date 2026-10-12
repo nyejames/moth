@@ -1,6 +1,6 @@
 Box type T = |
     value T,
-    other Int = 1,
+    other I32 = 1,
 |
 
 box = Box()

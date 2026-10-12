@@ -17,7 +17,7 @@ use std::path::PathBuf;
 
 #[test]
 fn single_function_header_counts_function() {
-    let headers = parse_single_file_headers("identity |value Int| -> Int:\n    return value\n;\n");
+    let headers = parse_single_file_headers("identity |value I32| -> I32:\n    return value\n;\n");
 
     assert_eq!(headers.header_stats.functions, 1);
     assert_eq!(headers.header_stats.structs, 0);
@@ -27,7 +27,7 @@ fn single_function_header_counts_function() {
 #[test]
 fn struct_and_choice_count_members() {
     let source = r#"
-Point = | x Int, y Int |
+Point = | x I32, y I32 |
 Color :: Red, Green, Blue, ;
 "#;
     let headers = parse_single_file_headers(source);
@@ -108,7 +108,7 @@ fn multi_file_declarations_are_aggregated() {
     };
     let entry_output = prepare_file("[runtime1]\n", &entry_path, entry_id);
     let helper_output = prepare_file(
-        "helper_func || -> Int:\n    return 1\n;\n",
+        "helper_func || -> I32:\n    return 1\n;\n",
         &helper_path,
         helper_id,
     );

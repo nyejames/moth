@@ -1,7 +1,7 @@
 Counter = |
-    count Int,
+    count I32,
 |
 
-tick |this Counter| -> Int:
+tick |this Counter| -> I32:
     return this.count + 1
 ;

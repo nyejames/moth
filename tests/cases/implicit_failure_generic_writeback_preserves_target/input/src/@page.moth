@@ -13,4 +13,19 @@ recovered = safe_bump(~kept, 100) catch |err|:
 ;
 exact_target ~U8 = 200
 exact = safe_bump(~exact_target, 50) catch then 0
-[: generic writeback target=[kept] code=[code] recovered=[recovered] exact=[exact] exact-target=[exact_target]]
+mixed_bump type T |marker T, target ~U8, amount U16| -> U8:
+    target += amount
+    return target
+;
+safe_mixed_bump |target ~U8, amount U16| -> U8, Error!:
+    return mixed_bump(0, ~target, amount)
+;
+mixed_target ~U8 = 200
+mixed_code ~U32 = 0
+mixed_recovered = safe_mixed_bump(~mixed_target, 100) catch |mixed_err|:
+    mixed_code = mixed_err.code
+    then copy mixed_target
+;
+mixed_exact_target ~U8 = 200
+mixed_exact = safe_mixed_bump(~mixed_exact_target, 50) catch then 0
+[: generic writeback target=[kept] code=[code] recovered=[recovered] exact=[exact] exact-target=[exact_target] mixed-target=[mixed_target] mixed-code=[mixed_code] mixed-recovered=[mixed_recovered] mixed-exact=[mixed_exact] mixed-exact-target=[mixed_exact_target]]

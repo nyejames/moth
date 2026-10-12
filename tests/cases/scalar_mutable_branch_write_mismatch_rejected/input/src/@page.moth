@@ -1,0 +1,14 @@
+receive_u64 |value U64| -> String:
+    return cast value
+;
+
+count ~= 1
+count = 2
+if true:
+    count = 3
+else
+    invalid I32 = 4
+    count = invalid
+;
+received = receive_u64(count)
+[:unreachable]

@@ -161,6 +161,12 @@ fn substitute_source_consts_in_rpn_item(
             substitute_source_consts_in_expression(expression.clone(), context, string_table),
         ),
         operator @ ExpressionRpnItem::Operator { .. } => operator.clone(),
+        // A retained numeric recipe must stay untouched: body completion replaces it before
+        // any fold runs, so the item is carried through unchanged.
+        pending @ (ExpressionRpnItem::PendingNumericBinding { .. }
+        | ExpressionRpnItem::PendingNumericCast { .. }
+        | ExpressionRpnItem::PendingNumericCall { .. }
+        | ExpressionRpnItem::PendingNumericExpression { .. }) => pending.clone(),
         // Pending syntax never survives evaluation. This helper is infallible, so flag an escaped
         // item in debug builds; final type validation rejects the cloned item with the canonical
         // pending-item invariant error.
@@ -189,12 +195,7 @@ fn fold_substituted_runtime_condition(
     // itself is returned by move.
     add_ast_counter(AstCounter::ExpressionOperandClones, rpn.items.len());
 
-    match constant_fold(
-        rpn.items.clone(),
-        string_table,
-        context.numeric_profile,
-        Some(context),
-    ) {
+    match constant_fold(rpn.items.clone(), string_table, Some(context)) {
         Ok(ConstantFoldOutcome::Folded(mut stack)) => {
             if stack.len() == 1
                 && let Some(ExpressionRpnItem::Operand(folded)) = stack.pop()

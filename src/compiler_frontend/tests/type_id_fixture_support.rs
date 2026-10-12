@@ -619,6 +619,7 @@ pub(crate) fn build_ast_with_choices(
         type_environment,
         const_facts: AstConstFacts::default(),
         imported_functions_by_local_path: Default::default(),
+        infallible_cast_evidence: Default::default(),
         imported_struct_definitions: vec![],
         static_if_function_provenance: Default::default(),
     }

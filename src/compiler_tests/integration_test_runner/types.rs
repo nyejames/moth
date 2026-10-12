@@ -5,7 +5,6 @@
 use crate::build_system::build::BuildResult;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
-use moth_lexical::numeric::profile::NumericProfile;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -77,7 +76,6 @@ pub(crate) struct TestCaseSpec {
     pub tags: Vec<String>,
     pub contract: Option<String>,
     pub role: Option<CaseRole>,
-    pub numeric_profile: NumericProfile,
     pub backend_id: BackendId,
     pub entry_path: PathBuf,
     pub flags: Vec<Flag>,
@@ -494,7 +492,6 @@ impl CaseRole {
 
 pub(crate) struct ParsedExpectationFile {
     pub entry: Option<String>,
-    pub numeric_profile: NumericProfile,
     pub backend_expectations: Vec<ParsedBackendExpectation>,
 }
 

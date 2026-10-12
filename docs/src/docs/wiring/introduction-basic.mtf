@@ -23,8 +23,8 @@ different contracts:
     ;
 
     Point = |
-        x Int,
-        y Int,
+        x I32,
+        y I32,
     |
 
     Status ::
@@ -51,7 +51,7 @@ ordinary generic calls, optional values and casts:
         return {}
     ;
 
-    items {Int} = empty()
+    items {I32} = empty()
     maybe_name String? = none
     wide I64 = cast 1
 ]

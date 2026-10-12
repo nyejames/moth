@@ -25,8 +25,11 @@ use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
+use crate::compiler_frontend::tests::ast_fixture_support::{
+    function_body_by_name, function_node_by_name,
+};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::cell::Cell;
 
 fn returned_value(body: &[AstNode]) -> &Expression {
@@ -54,9 +57,9 @@ fn arithmetic_codes_exclude_boundary_and_format_invariants() {
     let mut facts = ExpressionFailureFacts::default();
     facts.record_numeric_operation(
         NumericOperator::Power,
-        NumericScalar::Int,
-        Some(NumericScalar::Int),
-        NumericScalar::Int,
+        NumericScalar::Fixed(FixedScalar::I32),
+        Some(NumericScalar::Fixed(FixedScalar::I32)),
+        NumericScalar::Fixed(FixedScalar::I32),
         None,
     );
     assert_eq!(
@@ -70,9 +73,9 @@ fn arithmetic_codes_exclude_boundary_and_format_invariants() {
     let mut remainder = ExpressionFailureFacts::default();
     remainder.record_numeric_operation(
         NumericOperator::Remainder,
-        NumericScalar::Int,
-        Some(NumericScalar::Int),
-        NumericScalar::Int,
+        NumericScalar::Fixed(FixedScalar::I32),
+        Some(NumericScalar::Fixed(FixedScalar::I32)),
+        NumericScalar::Fixed(FixedScalar::I32),
         None,
     );
     assert_eq!(
@@ -83,9 +86,9 @@ fn arithmetic_codes_exclude_boundary_and_format_invariants() {
     let mut float = ExpressionFailureFacts::default();
     float.record_numeric_operation(
         NumericOperator::Divide,
-        NumericScalar::Float,
-        Some(NumericScalar::Float),
-        NumericScalar::Float,
+        NumericScalar::Fixed(FixedScalar::F64),
+        Some(NumericScalar::Fixed(FixedScalar::F64)),
+        NumericScalar::Fixed(FixedScalar::F64),
         None,
     );
     assert_eq!(
@@ -100,8 +103,8 @@ fn arithmetic_codes_exclude_boundary_and_format_invariants() {
 #[test]
 fn call_keeps_argument_failure_without_changing_success_type() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "format_count |count Int| -> String:\n    return \"count\"\n;\n\
-         check |value Int| -> String:\n    return format_count(value + 1)\n;\n",
+        "format_count |count I32| -> String:\n    return \"count\"\n;\n\
+         check |value I32| -> String:\n    return format_count(value + 1)\n;\n",
     );
     let body = function_body_by_name(&ast, &path_fork, &string_table, "check");
     let expression = returned_value(body);
@@ -135,10 +138,10 @@ fn nested_calls_retain_one_local_witness_per_producer_in_postorder() {
     let mut source = String::new();
     for index in 0..PRODUCER_COUNT {
         source.push_str(&format!(
-            "producer_{index} |value Int| -> Int:\n    return value + 1\n;\n",
+            "producer_{index} |value I32| -> I32:\n    return value + 1\n;\n",
         ));
     }
-    source.push_str("check || -> Int:\n    return ");
+    source.push_str("check || -> I32:\n    return ");
     for index in (0..PRODUCER_COUNT).rev() {
         source.push_str(&format!("producer_{index}("));
     }
@@ -211,8 +214,8 @@ fn nested_calls_retain_one_local_witness_per_producer_in_postorder() {
 #[test]
 fn catch_handler_failure_goes_outward_without_reentering_protected_work() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "protected |value Int| -> Int:\n    return value + 1\n;\n\
-         check |value Int| -> Int:\n\
+        "protected |value I32| -> I32:\n    return value + 1\n;\n\
+         check |value I32| -> I32:\n\
              return protected(value + 1) catch:\n        then value // value\n    ;\n;\n",
     );
     let body = function_body_by_name(&ast, &path_fork, &string_table, "check");
@@ -280,9 +283,9 @@ fn catch_handler_failure_goes_outward_without_reentering_protected_work() {
 #[test]
 fn first_numeric_and_typed_diagnostics_keep_descendant_producer_spans() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "typed_first |value Int| -> Int, Error!:\n    return value\n;\n\
-         typed_second |value Int| -> Int, Error!:\n    return value\n;\n\
-         check |value Int| -> Int:\n\
+        "typed_first |value I32| -> I32, Error!:\n    return value\n;\n\
+         typed_second |value I32| -> I32, Error!:\n    return value\n;\n\
+         check |value I32| -> I32:\n\
              return typed_second(typed_first(value + 1)) + typed_second(value * 2) catch then 0\n;\n",
     );
     let body = function_body_by_name(&ast, &path_fork, &string_table, "check");
@@ -366,14 +369,16 @@ fn first_numeric_and_typed_diagnostics_keep_descendant_producer_spans() {
 #[test]
 fn failure_witness_prefers_only_the_same_compound_updates_writeback_through_private_hops() {
     // The earlier statement must stay genuinely fallible so the first-origin branch keeps its
-    // intent: U8 + U8 is discharged (promoted to U32), so the fixture uses U32 + U32 here.
+    // intent: `U8 + I8` is discharged through its `I16` common domain, so the only failure edge
+    // left inside the compound update is the `I16`-to-`U8` write-back, while `U32 + U32` is a
+    // genuinely fallible operation.
     for earlier in ["", "    earlier = wide + one\n"] {
         let (ast, path_fork, string_table) = parse_single_file_ast(&format!(
-            "risky |amount U8| -> U8, Error!:\n    return amount\n;\n\
-             bump |wide U32, one U32, amount U8| -> U8:\n\
+            "risky |amount I8| -> I8, Error!:\n    return amount\n;\n\
+             bump |wide U32, one U32, amount I8| -> U8:\n\
              {earlier}    total ~U8 = 250\n\
                  total += risky(amount) catch then amount\n    return total\n;\n\
-             forward |wide U32, one U32, amount U8| -> U8:\n    return bump(wide, one, amount)\n;\n"
+             forward |wide U32, one U32, amount I8| -> U8:\n    return bump(wide, one, amount)\n;\n"
         ));
         let summaries = AstBuiltinFailureSummaries::compute(&[&ast.nodes], &TemplateIrStore::new())
             .expect("fixture summaries converge");
@@ -410,13 +415,13 @@ fn recursive_witness_skips_back_edge_before_later_numeric_origin() {
     // WHY: the witness must skip only the back-edge and retain the available origin instead
     //      of stopping with call-only hops and empty cause codes.
     for source in [
-        "helper |value Int, ready Bool| -> Int:\n\
+        "helper |value I32, ready Bool| -> I32:\n\
              if ready:\n        return helper(value, ready)\n    ;\n    return value * 2\n;\n\
-         boundary |value Int, ready Bool| -> Int:\n    return helper(value, ready)\n;\n",
-        "first |value Int, ready Bool| -> Int:\n\
+         boundary |value I32, ready Bool| -> I32:\n    return helper(value, ready)\n;\n",
+        "first |value I32, ready Bool| -> I32:\n\
              if ready:\n        return second(value, ready)\n    ;\n    return value * 2\n;\n\
-         second |value Int, ready Bool| -> Int:\n    return first(value, ready)\n;\n\
-         boundary |value Int, ready Bool| -> Int:\n    return first(value, ready)\n;\n",
+         second |value I32, ready Bool| -> I32:\n    return first(value, ready)\n;\n\
+         boundary |value I32, ready Bool| -> I32:\n    return first(value, ready)\n;\n",
     ] {
         let (ast, path_fork, string_table) = parse_single_file_ast(source);
         let summaries = AstBuiltinFailureSummaries::compute(&[&ast.nodes], &TemplateIrStore::new())
@@ -467,8 +472,8 @@ fn recursive_witness_skips_back_edge_before_later_numeric_origin() {
 #[test]
 fn origin_free_recursion_stays_free_of_recoverable_numeric_failure() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "recurse |value Int| -> Int:\n    return recurse(value)\n;\n\
-         boundary |value Int| -> Int:\n    return recurse(value)\n;\n",
+        "recurse |value I32| -> I32:\n    return recurse(value)\n;\n\
+         boundary |value I32| -> I32:\n    return recurse(value)\n;\n",
     );
     let summaries = AstBuiltinFailureSummaries::compute(&[&ast.nodes], &TemplateIrStore::new())
         .expect("fixture summaries converge");
@@ -488,8 +493,8 @@ fn unavailable_call_before_numeric_origin_stops_at_the_visible_leaf() {
     //      connected origin across the unavailable hop already recorded in call_spans.
     let (ast, path_fork, string_table) = parse_single_file_ast(
         "deferred type U |value U| -> U:\n    return value\n;\n\
-         helper |value Int| -> Int:\n    return deferred(value) + value * 2\n;\n\
-         boundary |value Int| -> Int:\n    return helper(value)\n;\n",
+         helper |value I32| -> I32:\n    return deferred(value) + value * 2\n;\n\
+         boundary |value I32| -> I32:\n    return helper(value)\n;\n",
     );
     let summaries = AstBuiltinFailureSummaries::compute(&[&ast.nodes], &TemplateIrStore::new())
         .expect("fixture summaries converge");
@@ -519,11 +524,11 @@ fn recursive_back_edge_before_compound_update_keeps_writeback_origin() {
     // WHY: skipping the back-edge must reapply the write-back policy instead of walking
     //      the remainder in raw order (which would report the arithmetic as Operation).
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "risky |amount U8| -> U8, Error!:\n    return amount\n;\n\
-         helper |wide U32, one U32, amount U8, ready Bool| -> U8:\n\
+        "risky |amount I8| -> I8, Error!:\n    return amount\n;\n\
+         helper |wide U32, one U32, amount I8, ready Bool| -> U8:\n\
              if ready:\n        return helper(wide, one, amount, ready)\n    ;\n\
              total ~U8 = 250\n    total += risky(amount) catch then amount\n    return total\n;\n\
-         boundary |wide U32, one U32, amount U8, ready Bool| -> U8:\n\
+         boundary |wide U32, one U32, amount I8, ready Bool| -> U8:\n\
              return helper(wide, one, amount, ready)\n;\n",
     );
     let summaries = AstBuiltinFailureSummaries::compute(&[&ast.nodes], &TemplateIrStore::new())
@@ -565,7 +570,7 @@ fn mutually_recursive_component_with_late_origin_expands_each_body_once() {
     const BODY_COUNT: usize = 12;
     let mut source = String::new();
     for body in 0..BODY_COUNT {
-        source.push_str(&format!("body_{body} |value Int, ready Bool| -> Int:\n"));
+        source.push_str(&format!("body_{body} |value I32, ready Bool| -> I32:\n"));
         for callee in (0..BODY_COUNT).filter(|callee| *callee != body) {
             source.push_str(&format!(
                 "    if ready:\n        return body_{callee}(value, ready)\n    ;\n"
@@ -575,7 +580,7 @@ fn mutually_recursive_component_with_late_origin_expands_each_body_once() {
         source.push_str(&format!("    return {result}\n;\n"));
     }
     source
-        .push_str("boundary |value Int, ready Bool| -> Int:\n    return body_0(value, ready)\n;\n");
+        .push_str("boundary |value I32, ready Bool| -> I32:\n    return body_0(value, ready)\n;\n");
 
     let (ast, path_fork, string_table) = parse_single_file_ast(&source);
     let summaries = AstBuiltinFailureSummaries::compute(&[&ast.nodes], &TemplateIrStore::new())
@@ -673,29 +678,29 @@ fn witness_candidates_yield_calls_then_one_terminal_origin_on_demand() {
 }
 
 #[test]
-fn uint_arithmetic_records_stable_integer_failure_codes() {
-    // Uint overflow, zero-divisor and power failures reuse the stable
+fn u32_arithmetic_records_stable_integer_failure_codes() {
+    // U32 overflow, zero-divisor and power failures reuse the stable
     // integer failure codes through the shared failure classification.
     let mut add = ExpressionFailureFacts::default();
     add.record_numeric_operation(
         NumericOperator::Add,
-        NumericScalar::Uint,
-        Some(NumericScalar::Uint),
-        NumericScalar::Uint,
+        NumericScalar::Fixed(FixedScalar::U32),
+        Some(NumericScalar::Fixed(FixedScalar::U32)),
+        NumericScalar::Fixed(FixedScalar::U32),
         None,
     );
     assert_eq!(add.implicit[0].codes, &[BuiltinErrorCode::IntOverflow]);
     assert_eq!(
         add.summary.first_numeric, add.summary.first_implicit,
-        "the Uint add witness is the first implicit witness"
+        "the U32 add witness is the first implicit witness"
     );
 
     let mut floor_div = ExpressionFailureFacts::default();
     floor_div.record_numeric_operation(
         NumericOperator::IntegerDivide,
-        NumericScalar::Uint,
-        Some(NumericScalar::Uint),
-        NumericScalar::Uint,
+        NumericScalar::Fixed(FixedScalar::U32),
+        Some(NumericScalar::Fixed(FixedScalar::U32)),
+        NumericScalar::Fixed(FixedScalar::U32),
         None,
     );
     assert_eq!(
@@ -709,9 +714,9 @@ fn uint_arithmetic_records_stable_integer_failure_codes() {
     let mut power = ExpressionFailureFacts::default();
     power.record_numeric_operation(
         NumericOperator::Power,
-        NumericScalar::Uint,
-        Some(NumericScalar::Uint),
-        NumericScalar::Uint,
+        NumericScalar::Fixed(FixedScalar::U32),
+        Some(NumericScalar::Fixed(FixedScalar::U32)),
+        NumericScalar::Fixed(FixedScalar::U32),
         None,
     );
     assert_eq!(
@@ -724,14 +729,199 @@ fn uint_arithmetic_records_stable_integer_failure_codes() {
 }
 
 #[test]
-fn uint_int_comparison_records_no_failure_witness() {
-    // Exact Uint/Int comparisons convert nothing, so they carry no
+fn u32_i32_comparison_records_no_failure_witness() {
+    // Exact U32/I32 comparisons convert nothing, so they carry no
     // failure edge even though both sides are checked integer domains.
-    let source = "compare |value Uint, limit Int| -> Bool:\n    return value > limit\n;\n";
+    let source = "compare |value U32, limit I32| -> Bool:\n    return value > limit\n;\n";
     let (ast, path_fork, string_table) = parse_single_file_ast(source);
     let body = function_body_by_name(&ast, &path_fork, &string_table, "compare");
     let expression = returned_value(body);
     assert!(expression.failure_facts.implicit.is_empty());
     assert!(expression.failure_facts.summary.first_numeric.is_none());
     assert!(!expression.failure_facts.checked_numeric_operation);
+}
+
+#[cfg(feature = "benchmark_counters")]
+#[test]
+fn generic_failure_chain_classification_visits_are_linear_in_authored_bodies() {
+    use crate::compiler_frontend::instrumentation::{
+        AstCounter, lock_counter_test, reset_ast_counters, test_read_ast_counter,
+    };
+    let _guard = lock_counter_test();
+    let mut measurements = Vec::new();
+    for count in [8, 32, 128] {
+        for unrelated_size in [1, 64] {
+            for reverse in [false, true] {
+                let mut source =
+                    String::from("identity type T |value T| -> T:\n    return value\n;\n");
+                for position in 0..count {
+                    let index = if reverse {
+                        count - position - 1
+                    } else {
+                        position
+                    };
+                    let result = if index + 1 == count {
+                        String::from("value + 1")
+                    } else {
+                        format!("step_{}(value)", index + 1)
+                    };
+                    source.push_str(&format!(
+                        "step_{index} |value I32| -> I32:\n    return {result}\n;\n"
+                    ));
+                }
+                source.push_str("unrelated |value I32| -> I32:\n");
+                for index in 0..unrelated_size {
+                    source.push_str(&format!("    local_{index} = value\n"));
+                }
+                source.push_str("    return value\n;\n");
+                reset_ast_counters();
+                let (ast, path_fork, string_table) = parse_single_file_ast(&source);
+                let production_bodies =
+                    test_read_ast_counter(AstCounter::FailureSummaryBodiesClassified);
+                let production_nodes =
+                    test_read_ast_counter(AstCounter::FailureSummaryBodyNodesClassified);
+                measurements.push((
+                    count,
+                    unrelated_size,
+                    reverse,
+                    production_bodies,
+                    production_nodes,
+                ));
+                let summaries =
+                    AstBuiltinFailureSummaries::compute(&[&ast.nodes], &TemplateIrStore::new())
+                        .expect("chain summaries converge");
+                let boundary = function_body_by_name(&ast, &path_fork, &string_table, "step_0");
+                let pending = pending_function_failure_facts(boundary, &TemplateIrStore::new())
+                    .expect("valid chain body");
+                assert!(summaries.first_active(&pending.body.implicit).is_some());
+            }
+        }
+    }
+    eprintln!("failure convergence (chain, unrelated, reverse, bodies, nodes): {measurements:?}");
+    for (count, unrelated_size, reverse, bodies, nodes) in measurements {
+        assert!(
+            bodies <= count + 3,
+            "count={count}, reverse={reverse}: {bodies} bodies"
+        );
+        assert!(
+            nodes <= count + unrelated_size + 3,
+            "count={count}, unrelated={unrelated_size}, reverse={reverse}: {nodes} nodes"
+        );
+    }
+}
+
+#[test]
+fn summary_convergence_keeps_nested_handler_origins_outside_protected_scopes() {
+    let source = "identity type T |value T| -> T:\n    return value\n;\n\
+        producer |value I32| -> I32:\n    return value + 1\n;\n\
+        check |value I32| -> I32:\n\
+            return producer(value) catch:\n\
+                nested = producer(value) catch:\n            then value // value\n        ;\n\
+                then nested\n    ;\n;\n";
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
+    let summaries = AstBuiltinFailureSummaries::compute(&[&ast.nodes], &TemplateIrStore::new())
+        .expect("nested handler summaries converge");
+    let NodeKind::Function(path, ..) =
+        function_node_by_name(&ast, &path_fork, &string_table, "check").kind
+    else {
+        unreachable!("the named fixture is a function");
+    };
+    let facts = summaries
+        .function_facts(path)
+        .expect("check has closed facts");
+    assert_eq!(facts.body.implicit.len(), 1);
+    let contributor = summaries
+        .first_active(&facts.body.implicit)
+        .expect("the nested handler division escapes");
+    assert_eq!(contributor.source, ImplicitFailureSource::NumericOperation);
+    assert_eq!(
+        contributor.codes,
+        &[
+            BuiltinErrorCode::DivideByZero,
+            BuiltinErrorCode::IntOverflow
+        ]
+    );
+    assert!(summaries.witness(contributor).call_spans.is_empty());
+}
+
+#[test]
+fn infallible_protected_work_retains_validation_without_executable_handler_failure() {
+    let source = "identity type T |value T| -> T:\n    return value\n;\n\
+        producer |value I8| -> I8:\n    return value + 1\n;\n\
+        check |unsigned U8, signed I8| -> I16:\n\
+            return unsigned + signed catch:\n\
+                fallback I16 = cast producer(127)\n        then fallback\n    ;\n;\n";
+    let (ast, path_fork, string_table) = parse_single_file_ast(source);
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "check");
+    let expression = returned_value(body);
+    assert!(
+        matches!(expression.kind, ExpressionKind::ValueBlock { .. }),
+        "validated recovery remains present despite its provisional empty failure summary"
+    );
+    let pending = pending_function_failure_facts(body, &TemplateIrStore::new())
+        .expect("the non-executable handler remains valid");
+    assert!(pending.body.implicit.is_empty());
+    let summaries = AstBuiltinFailureSummaries::compute(&[&ast.nodes], &TemplateIrStore::new())
+        .expect("infallible protected work converges");
+    let NodeKind::Function(path, ..) =
+        function_node_by_name(&ast, &path_fork, &string_table, "check").kind
+    else {
+        unreachable!("the named fixture is a function");
+    };
+    let closed = summaries
+        .function_facts(path)
+        .expect("check has closed facts");
+    assert!(closed.body.implicit.is_empty());
+}
+
+#[cfg(feature = "benchmark_counters")]
+#[test]
+fn catch_dependencies_batch_activation_before_reclassifying_the_consumer() {
+    use crate::compiler_frontend::instrumentation::{
+        AstCounter, lock_counter_test, reset_ast_counters, test_read_ast_counter,
+    };
+    let _guard = lock_counter_test();
+    for count in [8, 32, 128] {
+        let mut source = String::from("identity type T |value T| -> T:\n    return value\n;\n");
+        source.push_str(
+            "check |value I32| -> Bool:\n\
+                return step_0(value) is step_1(value) catch:\n\
+                    then value // value > 0\n    ;\n;\n",
+        );
+        for index in 0..count {
+            let result = if index + 1 == count {
+                String::from("value + 1")
+            } else {
+                format!("step_{}(value)", index + 1)
+            };
+            source.push_str(&format!(
+                "step_{index} |value I32| -> I32:\n    return {result}\n;\n"
+            ));
+        }
+        let (ast, path_fork, string_table) = parse_single_file_ast(&source);
+        reset_ast_counters();
+        let summaries = AstBuiltinFailureSummaries::compute(&[&ast.nodes], &TemplateIrStore::new())
+            .expect("dependent catch summaries converge");
+        let visits = test_read_ast_counter(AstCounter::FailureSummaryBodiesClassified);
+        assert!(
+            visits <= ast.nodes.len() + 1,
+            "the two protected dependencies share one batched reclassification: {visits}"
+        );
+        let NodeKind::Function(path, ..) =
+            function_node_by_name(&ast, &path_fork, &string_table, "check").kind
+        else {
+            unreachable!("the named fixture is a function");
+        };
+        let facts = summaries
+            .function_facts(path)
+            .expect("check has closed facts");
+        let contributor = summaries
+            .first_active(&facts.body.implicit)
+            .expect("the handler becomes executable after the chain activates");
+        assert_eq!(contributor.source, ImplicitFailureSource::NumericOperation);
+        eprintln!(
+            "batched catch chain={count}: bodies={visits}, retained={}",
+            ast.nodes.len()
+        );
+    }
 }

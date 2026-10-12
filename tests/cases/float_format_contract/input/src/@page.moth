@@ -1,7 +1,7 @@
--- float_format_contract: backend-stable Float and fixed-float -> String formatting coverage.
+-- float_format_contract: backend-stable F64 and fixed-float -> String formatting coverage.
 --
 -- This test exercises both the compile-time/folded path and the runtime path for
--- Float -> String formatting, locking the exact output contract for all required
+-- F64 -> String formatting, locking the exact output contract for all required
 -- edge cases:
 --   0.0       -> "0"
 --   -0.0      -> "0"     (negative zero normalised)
@@ -15,27 +15,27 @@
 -- ---------------------------
 --  Compile-time/folded path
 -- ---------------------------
--- Float constants interpolated in a top-level template fold at compile time,
+-- F64 constants interpolated in a top-level template fold at compile time,
 -- proving the AST constant-folding path agrees with the runtime formatter.
 
-zero #Float = 0.0
-neg_zero #Float = -0.0
-one #Float = 1.0
-one_half #Float = 1.5
-small #Float = 0.000001
-tiny #Float = 0.0000001
-big #Float = 1e21
-neg_big #Float = -1e21
+zero #F64 = 0.0
+neg_zero #F64 = -0.0
+one #F64 = 1.0
+one_half #F64 = 1.5
+small #F64 = 0.000001
+tiny #F64 = 0.0000001
+big #F64 = 1e21
+neg_big #F64 = -1e21
 
 [:folded float: [zero]|[neg_zero]|[one]|[one_half]|[small]|[tiny]|[big]|[neg_big]]
 
 -- ---------------------
 --  Runtime path
 -- ---------------------
--- An explicit Float -> String cast inside a function body exercises the
+-- An explicit F64 -> String cast inside a function body exercises the
 -- runtime formatter on both backends.
 
-format_value |value Float| -> String:
+format_value |value F64| -> String:
     text String = cast value
     return text
 ;

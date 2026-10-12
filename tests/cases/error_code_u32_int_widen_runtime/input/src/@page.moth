@@ -1,8 +1,8 @@
--- Explicit Int -> U32 casts re-enter ordinary Error! recovery: a fitting
+-- Explicit I32 -> U32 casts re-enter ordinary Error! recovery: a fitting
 -- source widens at runtime, a negative source fails with the existing cast
 -- failure which callers recover from like any other error.
-widen_code |value Int| -> U32, Error!:
-    return cast! value
+widen_code |value I32| -> U32, Error!:
+    return cast value
 ;
 
 positive_wide_code ~U32 = 0

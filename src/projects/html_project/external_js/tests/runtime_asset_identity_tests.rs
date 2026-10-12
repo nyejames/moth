@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 
 /// A parseable project-local JS module with one export, as Stage 0 would hand it over.
 const WIDGET_JS_SOURCE: &str =
-    "/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 7; }\n";
+    "/**\n * @moth.sig draw || -> I32\n */\nexport function draw() { return 7; }\n";
 
 struct ResolvedWidgetIdentity {
     registered_package_path: String,

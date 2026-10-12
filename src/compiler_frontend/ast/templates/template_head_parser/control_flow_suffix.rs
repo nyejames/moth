@@ -6,19 +6,24 @@
 //! body construction belongs to the body parser under the selected binding scope.
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::ast::numeric_construction::{
+    DeferredArmPattern, StatementExpression,
+};
 use crate::compiler_frontend::ast::statements::if_headers::{ParsedIfHeader, parse_if_header};
 use crate::compiler_frontend::ast::statements::loop_headers::{
-    ParsedLoopHeader, parse_loop_header_cursor,
+    ParsedLoopHeader, ParsedRangeHeader, parse_loop_header_cursor,
 };
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateBodyParseMode, TemplateBranchSelector, TemplateControlFlowValidationMode,
-    TemplateIfBodyParseInput, TemplateLoopBodyParseInput, TemplateLoopHeader,
+    TemplateBodyParseMode, TemplateBranchSelector, TemplateBranchSelectorDraft,
+    TemplateControlFlowValidationMode, TemplateIfBodyParseInput, TemplateLoopBodyParseInput,
+    TemplateLoopHeader, TemplateLoopHeaderDraft,
     inline_source_consts_for_const_required_expression,
     inline_source_consts_for_const_required_if_condition,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
@@ -71,7 +76,20 @@ pub(crate) fn parse_if_suffix(
         ParsedIfHeader::BoolCondition { condition } => {
             let then_context =
                 context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
-            (TemplateBranchSelector::Bool(condition), then_context)
+            (
+                match condition {
+                    StatementExpression::Built(condition) => TemplateBranchSelectorDraft::Concrete(
+                        TemplateBranchSelector::Bool(condition),
+                    ),
+                    StatementExpression::Retained(deferred) => {
+                        TemplateBranchSelectorDraft::RetainedBool {
+                            domain: context.numeric_domain_id(),
+                            deferred: Box::new(deferred),
+                        }
+                    }
+                },
+                then_context,
+            )
         }
 
         ParsedIfHeader::OptionPresentCapture {
@@ -81,22 +99,46 @@ pub(crate) fn parse_if_suffix(
         } => {
             let then_context =
                 then_context.new_child_control_flow(ContextKind::Branch, string_table, path_fork);
-            (
-                TemplateBranchSelector::OptionPresentCapture {
-                    scrutinee,
-                    pattern: Box::new(pattern),
-                },
-                then_context,
-            )
+            let selector = match (scrutinee, pattern) {
+                (StatementExpression::Built(scrutinee), DeferredArmPattern::Ready(pattern)) => {
+                    TemplateBranchSelectorDraft::Concrete(
+                        TemplateBranchSelector::OptionPresentCapture {
+                            scrutinee,
+                            pattern: Box::new(pattern),
+                        },
+                    )
+                }
+                (StatementExpression::Retained(deferred), pattern) => {
+                    TemplateBranchSelectorDraft::RetainedOptionPresent {
+                        domain: context.numeric_domain_id(),
+                        deferred: Box::new(deferred),
+                        pattern: Box::new(pattern),
+                    }
+                }
+                (StatementExpression::Built(_), _) => {
+                    return Err(CompilerError::compiler_error(
+                        "a built template option capture reached a deferred pattern shape",
+                    )
+                    .into());
+                }
+            };
+            (selector, then_context)
         }
 
         ParsedIfHeader::MatchStyle { scrutinee } => {
+            // The subject travels as a statement continuation, so its authored span is the span of
+            // whichever shape it holds; a template head has no match-style body to host it.
+            let scrutinee_span = match &scrutinee {
+                StatementExpression::Built(expression) => expression.span,
+                StatementExpression::Retained(deferred) => deferred.span,
+            };
+
             return Err(with_token_span(
                 token_stream,
                 marker_span,
                 CompilerDiagnostic::invalid_template_structure(
                     InvalidTemplateStructureReason::TemplateMatchStyleControlFlowUnsupported,
-                    scrutinee.span,
+                    scrutinee_span,
                 ),
             )
             .into());
@@ -104,8 +146,20 @@ pub(crate) fn parse_if_suffix(
     };
 
     if validation_mode == TemplateControlFlowValidationMode::ConstRequired {
-        condition =
-            inline_source_consts_for_const_required_if_condition(condition, context, string_table);
+        condition = match condition {
+            TemplateBranchSelectorDraft::Concrete(selector) => {
+                TemplateBranchSelectorDraft::Concrete(
+                    inline_source_consts_for_const_required_if_condition(
+                        selector,
+                        context,
+                        string_table,
+                    ),
+                )
+            }
+            // A retained fragment cannot exist in a const-required template: const contexts have
+            // no pending numeric origins, so the position completes before this mode matters.
+            retained => retained,
+        };
     }
 
     Ok(TemplateBodyParseMode::If(Box::new(
@@ -176,26 +230,73 @@ pub(crate) fn parse_loop_suffix(
     }
 
     let header = match parsed_header {
-        ParsedLoopHeader::Conditional { mut condition } => {
-            if validation_mode == TemplateControlFlowValidationMode::ConstRequired {
-                condition = inline_source_consts_for_const_required_expression(
-                    condition,
-                    context,
-                    string_table,
-                );
+        ParsedLoopHeader::Conditional { condition } => match condition {
+            StatementExpression::Built(mut expression) => {
+                if validation_mode == TemplateControlFlowValidationMode::ConstRequired {
+                    expression = inline_source_consts_for_const_required_expression(
+                        expression,
+                        context,
+                        string_table,
+                    );
+                }
+
+                TemplateLoopHeaderDraft::Concrete(TemplateLoopHeader::Conditional {
+                    condition: Box::new(expression),
+                })
             }
 
-            TemplateLoopHeader::Conditional {
-                condition: Box::new(condition),
+            StatementExpression::Retained(deferred) => {
+                // The condition's fragment belongs to the body that raised it: this suffix's
+                // enclosing context owns the numeric domain whose root completion selects the
+                // origin's type.
+                TemplateLoopHeaderDraft::RetainedCondition {
+                    domain: context.numeric_domain_id(),
+                    deferred: Box::new(deferred),
+                }
             }
-        }
+        },
 
-        ParsedLoopHeader::Range { bindings, range } => {
-            TemplateLoopHeader::Range { bindings, range }
-        }
-        ParsedLoopHeader::Collection { bindings, iterable } => TemplateLoopHeader::Collection {
+        ParsedLoopHeader::Range(header) => match header {
+            ParsedRangeHeader::Concrete { bindings, range } => {
+                TemplateLoopHeaderDraft::Concrete(TemplateLoopHeader::Range { bindings, range })
+            }
+
+            ParsedRangeHeader::Deferred(header) => TemplateLoopHeaderDraft::RetainedRange {
+                // The header's exact domain is a forward result of its operands' selected types;
+                // this suffix's enclosing context owns the numeric domain whose root completes it.
+                domain: context.numeric_domain_id(),
+                header: Box::new(header),
+            },
+        },
+        ParsedLoopHeader::Collection {
             bindings,
-            iterable: Box::new(iterable),
+            iterable,
+            pending_item,
+        } => match (iterable, pending_item) {
+            (StatementExpression::Built(iterable), None) => {
+                TemplateLoopHeaderDraft::Concrete(TemplateLoopHeader::Collection {
+                    bindings,
+                    iterable: Box::new(iterable),
+                })
+            }
+
+            (StatementExpression::Retained(deferred), pending_item) => {
+                TemplateLoopHeaderDraft::RetainedCollection {
+                    // The iterable's origin type is selected at the body root, and this suffix's
+                    // enclosing context owns the numeric domain whose root completes it. The bindings
+                    // are concrete except a pending item, which that root declares from the source.
+                    domain: context.numeric_domain_id(),
+                    bindings,
+                    pending_item,
+                    deferred: Box::new(deferred),
+                }
+            }
+
+            (StatementExpression::Built(_), Some(_)) => {
+                return Err(TemplateError::from(CompilerError::compiler_error(
+                    "a collection loop source was built after its loop declared a pending item.",
+                )));
+            }
         },
     };
 

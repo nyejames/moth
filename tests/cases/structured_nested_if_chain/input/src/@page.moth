@@ -1,6 +1,6 @@
 -- Acyclic match with many literal arms that must stay structured.
 
-pick_label |n Int| -> String:
+pick_label |n I32| -> String:
     if n is:
         0 => return "branch_a"
         1 => return "branch_b"

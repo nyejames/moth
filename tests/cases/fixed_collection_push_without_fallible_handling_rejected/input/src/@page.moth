@@ -1,5 +1,5 @@
 append || -> String:
-    items ~{2 Int} = {}
+    items ~{2 I32} = {}
     ~items.push(1)
     return ""
 ;

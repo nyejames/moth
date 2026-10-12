@@ -12,8 +12,6 @@ use crate::compiler_frontend::builtins::casts::policies::{
 };
 use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use moth_lexical::numeric::format::format_finite_float;
-use moth_lexical::numeric::profile::NumericProfile;
 
 /// Attempts to coerce a constant expression kind to its string representation
 /// for use in template folding.
@@ -29,18 +27,9 @@ use moth_lexical::numeric::profile::NumericProfile;
 pub(crate) fn fold_expression_kind_to_string(
     kind: &ExpressionKind,
     string_table: &StringTable,
-    numeric_profile: NumericProfile,
 ) -> Option<String> {
     match kind {
         ExpressionKind::StringSlice(string) => Some(string_table.resolve(*string).to_owned()),
-        ExpressionKind::Float(value) => {
-            // Compile-time Float values are finite by language contract, but the
-            // formatter still returns a Result. Fold non-finite values away from
-            // the compile-time path rather than panicking on an internal invariant.
-            format_finite_float(*value, numeric_profile.float_precision.into()).ok()
-        }
-        ExpressionKind::Uint(value) => Some(value.to_string()),
-        ExpressionKind::Int(value) => Some(value.to_string()),
         ExpressionKind::Number(value) => Some(value.to_string()),
         ExpressionKind::FixedScalar(value) => {
             // `Byte` is outside the numeric vocabulary, so it has no text policy and folds away
@@ -49,7 +38,6 @@ pub(crate) fn fold_expression_kind_to_string(
             let BuiltinCastLiteral::String(text) = apply_builtin_cast_policy(
                 BuiltinCastPolicyId::NumericToString(scalar),
                 &BuiltinCastLiteral::Fixed(*value),
-                numeric_profile,
             )
             .ok()?
             else {
@@ -64,7 +52,7 @@ pub(crate) fn fold_expression_kind_to_string(
             // Contextual coercion nodes do not change the rendered scalar value;
             // delegate to the inner expression so coerced literals fold the same
             // way as their unwrapped counterparts.
-            fold_expression_kind_to_string(&value.kind, string_table, numeric_profile)
+            fold_expression_kind_to_string(&value.kind, string_table)
         }
         _ => None,
     }

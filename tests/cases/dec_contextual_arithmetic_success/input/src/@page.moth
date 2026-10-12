@@ -1,19 +1,19 @@
-int_left_text |value Int| -> String:
+int_left_text |value I32| -> String:
     result Dec4 = value + 1
     return [result]
 ;
 
-int_right_text |value Int| -> String:
+int_right_text |value I32| -> String:
     result Dec4 = 1 + value
     return [result]
 ;
 
-typed_inner_text |left Int, right Int| -> String:
+typed_inner_text |left I32, right I32| -> String:
     result Dec4 = (left + right) + 1
     return [result]
 ;
 
-received_inner_text |left Int, right Int| -> String:
+received_inner_text |left I32, right I32| -> String:
     result Dec4 = left + (right + 1)
     return [result]
 ;
@@ -43,12 +43,12 @@ peer_product_text |value Dec4| -> String:
     return [result]
 ;
 
-peer_typed_inner_text |value Dec4, integer Int| -> String:
+peer_typed_inner_text |value Dec4, integer I32| -> String:
     result = value + (integer + 1)
     return [result]
 ;
 
-received_typed_inner_text |value Dec4, integer Int| -> String:
+received_typed_inner_text |value Dec4, integer I32| -> String:
     result Dec4 = value + (integer + 1)
     return [result]
 ;
@@ -58,7 +58,7 @@ same_text |value Dec4| -> String:
     return [result]
 ;
 
-power_int_text |exponent Int| -> String:
+power_int_text |exponent I32| -> String:
     result Dec4 = 2 ^ exponent
     return [result]
 ;
@@ -73,13 +73,19 @@ division_group_runtime_text |value Dec2| -> String:
     return [result]
 ;
 
-power_runtime_text |value Dec2, exponent Int| -> String:
+power_runtime_text |value Dec2, exponent I32| -> String:
     result Dec2 = value ^ exponent
     return [result]
 ;
 
 multiply_runtime_text |value Dec2| -> String:
     result Dec2 = (value * value) * value
+    return [result]
+;
+
+converted_power_text |value Dec2, exponent U32| -> String:
+    exact_exponent I32 = cast exponent
+    result Dec2 = value ^ exact_exponent
     return [result]
 ;
 
@@ -124,12 +130,21 @@ branch_text |flag Bool| -> Dec4:
     return result
 ;
 
-split_pair |flag Bool| -> Dec4, Int:
+split_pair |flag Bool| -> Dec4, I32:
     return 0.1 + 0.2, 1 + 2
 ;
 
 make_dec || -> Dec4:
     return 0.1 + 0.2
+;
+
+identity type T |value T| -> T:
+    return value
+;
+
+generic_identity_text || -> String:
+    result Dec4 = identity(0.1 + 0.2)
+    return [result]
 ;
 
 call_peer_text || -> String:
@@ -142,55 +157,74 @@ local_peer |value Dec4| -> String:
     return [result]
 ;
 
-float_outer_flag |value Float| -> Dec4:
+float_outer_flag |value F64| -> Dec4:
     if value > 0.3:
         return 1
     ;
     return 0
 ;
 
-overflow_inner_text |left Int, right Int| -> Dec4, Error!:
+overflow_inner_text |left I32, right I32| -> Dec4, Error!:
     result Dec4 = (left + right) + 1
     return result
 ;
 
-peer_overflow |value Dec4, integer Int| -> Dec4, Error!:
+peer_overflow |value Dec4, integer I32| -> Dec4, Error!:
     result = value + (integer + 1)
     return result
 ;
 
-received_overflow |value Dec4, integer Int| -> Dec4, Error!:
+received_overflow |value Dec4, integer I32| -> Dec4, Error!:
     result Dec4 = value + (integer + 1)
     return result
 ;
 
-compound_overflow |integer Int| -> Dec4, Error!:
+compound_overflow |integer I32| -> Dec4, Error!:
     total ~Dec4 = 1
     total += integer + 1
     return total
 ;
 
-bump_dec |calls ~Int| -> Dec4:
+mutation_barrier |value Dec4, integer I32| -> Dec4, Error!:
+    result ~= value + (integer + 1)
+    result = copy value
+    return result
+;
+
+generic_barrier |value Dec4, integer I32| -> Dec4, Error!:
+    result = value + (integer + 1)
+    received Dec4 = identity(result)
+    return received
+;
+
+copy_barrier |value Dec4, integer I32| -> Dec4, Error!:
+    result = value + (integer + 1)
+    duplicate ~= copy result
+    duplicate = copy value
+    return duplicate
+;
+
+bump_dec |calls ~I32| -> Dec4:
     calls += 1
     return 0.1 + 0.2
 ;
 
-zero_dec |calls ~Int| -> Dec4:
+zero_dec |calls ~I32| -> Dec4:
     calls += 1
     return 0
 ;
 
-order_text |calls ~Int, seen Dec4| -> Dec4:
+order_text |calls ~I32, seen Dec4| -> Dec4:
     calls += 1
     return seen + calls
 ;
 
-divide_dec |target ~Dec4, rhs_calls ~Int| -> Dec4, Error!:
+divide_dec |target ~Dec4, rhs_calls ~I32| -> Dec4, Error!:
     target /= zero_dec(~rhs_calls)
     return target
 ;
 
-read_int || -> Int, Error!:
+read_int || -> I32, Error!:
     return 7
 ;
 
@@ -252,6 +286,16 @@ power_once Dec2 = 1.07 ^ 3
 power_runtime = power_runtime_text(1.07, 3)
 multiply_chain Dec2 = (1.07 * 1.07) * 1.07
 multiply_runtime = multiply_runtime_text(1.07)
+constant_chain #Dec4 = 1 / 3 * 3
+constant_power #Dec2 = 1.07 ^ 3
+constant_multiply #Dec2 = (1.07 * 1.07) * 1.07
+constant_chain_text = [constant_chain]
+constant_power_text = [constant_power]
+constant_multiply_text = [constant_multiply]
+assert(constant_chain_text is division_runtime)
+assert(constant_power_text is power_runtime)
+assert(constant_multiply_text is multiply_runtime)
+assert(converted_power_text(1.07, 3) is power_runtime)
 folded #Dec4 = 0.1 + 0.2
 folded_rounding #Dec1 = 1.5 * 0.3 + 0.3
 rounding_runtime = rounding_runtime_text(1.5)
@@ -276,7 +320,7 @@ keyed_value Dec4 = keyed.get("a") catch:
 ;
 branch_true = branch_text(true)
 branch_false = branch_text(false)
-split_first Dec4, split_second Int = split_pair(true)
+split_first Dec4, split_second I32 = split_pair(true)
 alias_value Money = 0.1 + 0.2
 holder Holder of Dec4 = Holder(value = 0.1 + 0.2)
 holder_value = take_holder(holder)
@@ -310,7 +354,7 @@ compound_overflow_value = compound_overflow(2147483647) catch |compound_error|:
     compound_overflow_code = compound_error.code
     then 0
 ;
-order_calls ~Int = 0
+order_calls ~I32 = 0
 order_value = order_text(~order_calls, 0.1 + 0.2) - order_text(~order_calls, 0.1 + 0.2)
 accumulate ~Dec4 = 2
 accumulate += 0.1 + 0.2
@@ -320,11 +364,11 @@ scaled ~Dec4 = 2
 scaled *= 0.1 + 0.2
 power_accum ~Dec4 = 2
 power_accum ^= (1 + 2)
-dec_bump_calls ~Int = 0
+dec_bump_calls ~I32 = 0
 dec_first = bump_dec(~dec_bump_calls)
 dec_second = bump_dec(~dec_bump_calls)
 divide_target ~Dec4 = 5
-divide_calls ~Int = 0
+divide_calls ~I32 = 0
 divide_code ~U32 = 0
 divide_result = divide_dec(~divide_target, ~divide_calls) catch |divide_error|:
     divide_code = divide_error.code
@@ -335,5 +379,21 @@ protected_recovery Dec4 = 1 / zero_divisor catch then 0.1 + 0.2
 caught_arithmetic Dec4 = read_int() + 0 catch then 0
 grouped_arithmetic Dec4 = (read_int() + 0) catch then 0
 protected_literal Dec4 = read_int() + (0.1 + 0.2) catch then 0
+generic_identity = generic_identity_text()
+mutation_code ~U32 = 0
+mutation_value Dec4 = mutation_barrier(1, 2147483647) catch |mutation_error|:
+    mutation_code = mutation_error.code
+    then 0
+;
+generic_code ~U32 = 0
+received_value Dec4 = generic_barrier(1, 2147483647) catch |generic_error|:
+    generic_code = generic_error.code
+    then 0
+;
+copy_code ~U32 = 0
+copy_value Dec4 = copy_barrier(1, 2147483647) catch |copy_error|:
+    copy_code = copy_error.code
+    then 0
+;
 
-[:dec context whole=[whole] fraction=[fraction] group=[group] negative=[negative] large=[large] zero-exponent-leaf=[zero_exponent_leaf] int-left=[int_left] int-right=[int_right] typed-inner=[typed_inner] received-inner=[received_inner] u8=[unsigned_mix] peer-left=[peer_left] peer-right=[peer_right] peer-group-right=[peer_group_right] peer-product=[peer_product] peer-typed-inner=[peer_typed_inner] received-typed-inner=[received_typed_inner] same=[same] power-group=[power_group] power-right=[power_right] power-left=[power_left] power-int=[power_int] cast=[cast_sum] division-chain=[division_chain] division-runtime=[division_runtime] division-group=[division_group] division-group-runtime=[division_group_runtime] power-once=[power_once] power-runtime=[power_runtime] multiply-chain=[multiply_chain] multiply-runtime=[multiply_runtime] folded=[folded] folded-rounding=[folded_rounding] rounding-runtime=[rounding_runtime] maximum-leaf=[maximum_leaf] maximum-sum=[maximum_sum] maximum-exact=[maximum_exact] zero-leaf=[zero_leaf] mutable-assign=[mutable_assign] concrete-argument=[concrete_argument] explicit-return=[explicit_return] omitted-default=[omitted_default] optional=[optional_text] field=[point.x] element=[element_value] map-value=[keyed_value] branch-true=[branch_true] branch-false=[branch_false] split=[split_first]/[split_second] alias=[alias_value] holder=[holder_value] choice=[choice_text] struct-default=[struct_default.x] local-peer=[local_peer_text] call-peer=[call_peer] float-outer=[float_outer] overflow=[overflow_code]/[overflow_value] peer-overflow=[peer_overflow_code]/[peer_overflow_value] received-overflow=[received_overflow_code]/[received_overflow_value] compound-overflow=[compound_overflow_code]/[compound_overflow_value] order=[order_value]/[order_calls] accumulate=[accumulate] reduced=[reduced] scaled=[scaled] power-accum=[power_accum] bumps=[dec_first]/[dec_second]/[dec_bump_calls] divide=[divide_code]/[divide_result]/[divide_target]/[divide_calls] protected-recovery=[protected_recovery] caught=[caught_arithmetic] grouped=[grouped_arithmetic] protected-literal=[protected_literal]]
+[:dec context whole=[whole] fraction=[fraction] group=[group] negative=[negative] large=[large] zero-exponent-leaf=[zero_exponent_leaf] int-left=[int_left] int-right=[int_right] typed-inner=[typed_inner] received-inner=[received_inner] u8=[unsigned_mix] peer-left=[peer_left] peer-right=[peer_right] peer-group-right=[peer_group_right] peer-product=[peer_product] peer-typed-inner=[peer_typed_inner] received-typed-inner=[received_typed_inner] same=[same] power-group=[power_group] power-right=[power_right] power-left=[power_left] power-int=[power_int] cast=[cast_sum] division-chain=[division_chain] division-runtime=[division_runtime] division-group=[division_group] division-group-runtime=[division_group_runtime] power-once=[power_once] power-runtime=[power_runtime] multiply-chain=[multiply_chain] multiply-runtime=[multiply_runtime] folded=[folded] folded-rounding=[folded_rounding] rounding-runtime=[rounding_runtime] maximum-leaf=[maximum_leaf] maximum-sum=[maximum_sum] maximum-exact=[maximum_exact] zero-leaf=[zero_leaf] mutable-assign=[mutable_assign] concrete-argument=[concrete_argument] explicit-return=[explicit_return] omitted-default=[omitted_default] optional=[optional_text] field=[point.x] element=[element_value] map-value=[keyed_value] branch-true=[branch_true] branch-false=[branch_false] split=[split_first]/[split_second] alias=[alias_value] holder=[holder_value] choice=[choice_text] struct-default=[struct_default.x] local-peer=[local_peer_text] call-peer=[call_peer] float-outer=[float_outer] overflow=[overflow_code]/[overflow_value] peer-overflow=[peer_overflow_code]/[peer_overflow_value] received-overflow=[received_overflow_code]/[received_overflow_value] compound-overflow=[compound_overflow_code]/[compound_overflow_value] order=[order_value]/[order_calls] accumulate=[accumulate] reduced=[reduced] scaled=[scaled] power-accum=[power_accum] bumps=[dec_first]/[dec_second]/[dec_bump_calls] divide=[divide_code]/[divide_result]/[divide_target]/[divide_calls] protected-recovery=[protected_recovery] caught=[caught_arithmetic] grouped=[grouped_arithmetic] protected-literal=[protected_literal] generic-identity=[generic_identity] mutation=[mutation_code]/[mutation_value] generic=[generic_code]/[received_value] copy=[copy_code]/[copy_value]]

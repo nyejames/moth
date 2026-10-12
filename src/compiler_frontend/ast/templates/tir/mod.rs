@@ -54,6 +54,7 @@
 //! | `copy_state.rs` and `subtree_copy.rs` | Copy module-local derived subtrees for runtime slot planning |
 //! | `expression_constness.rs` | Shared expression constness, exact branch/loop overlay payload selection and the narrow runtime-contribution structural query |
 //! | `expression_sites.rs` | Walk expression payloads through exact TIR views and nested expression values |
+//! | `numeric_intake.rs` | Retained numeric template intakes, their pending items and authored install positions |
 //! | `expression_overlays.rs` | Collect structural/effective expression overlays and precedence |
 //! | `preparation.rs` | Sole exhaustive semantic preparation owner |
 //! | `fold/` | Prepared fold entries, the insertion-aware reducer, control flow, wrappers and estimates |
@@ -73,6 +74,7 @@ mod expression_constness;
 mod expression_overlays;
 mod expression_sites;
 mod ids;
+mod numeric_intake;
 mod subtree_copy;
 
 mod construction_context;
@@ -104,6 +106,8 @@ pub(crate) use ids::{
     TemplateWrapperSetId,
 };
 
+pub(crate) use numeric_intake::{NumericTemplateIntakePosition, RangeOperandSlot};
+
 pub(crate) use expression_overlays::{
     collect_effective_tir_expression_overlay_payloads, replace_expression_overlay_entries,
 };
@@ -113,7 +117,10 @@ pub(crate) use expression_sites::{
 
 #[cfg(test)]
 pub(crate) use node::TemplateLoopHeaderExpressionSites;
-pub(crate) use node::{TemplateIr, TemplateIrNode, TemplateIrNodeKind, TirSlotPlaceholder};
+pub(crate) use node::{
+    RetainedControlFlowRenderUnit, RetainedNumericIntakeRole, TemplateIr, TemplateIrNode,
+    TemplateIrNodeKind, TirSlotPlaceholder,
+};
 #[cfg(test)]
 pub(crate) use store::MalformedTirStore;
 pub(crate) use store::{

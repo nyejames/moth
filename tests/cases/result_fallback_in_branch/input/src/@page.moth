@@ -1,6 +1,6 @@
 -- Fallback paths inside if-branch and else-branch bodies.
 
-get_value |i Int| -> String, Error!:
+get_value |i I32| -> String, Error!:
     if i is 2:
         return! Error("fail")
     ;

@@ -15,7 +15,7 @@ use super::support::{
 };
 fn reserved_name_fixtures() -> Vec<ParityFixture> {
     let mut fixtures = Vec::new();
-    let scalar_schema = || Schema::record(vec![Field::required("ordinary", SchemaType::Int)]);
+    let scalar_schema = || Schema::record(vec![Field::required("ordinary", SchemaType::I32)]);
 
     for name in ["__LoOp", "_U64", "dec01", "dec257", "if", "U64", "Dec"] {
         let literal = format!("{name} = 1");
@@ -54,12 +54,12 @@ fn reserved_name_fixtures() -> Vec<ParityFixture> {
         fixtures.push(fixture(
             format!("reserved_nominal_use_site_qualifier_{name}"),
             literal.clone(),
-            "Box = | inner Int |\n",
+            "Box = | inner I32 |\n",
             Schema::record(vec![Field::required(
                 "value",
                 SchemaType::Struct {
                     name: "Box".into(),
-                    fields: vec![Field::required("inner", SchemaType::Int)],
+                    fields: vec![Field::required("inner", SchemaType::I32)],
                 },
             )]),
             match name {
@@ -128,12 +128,12 @@ fn reserved_name_fixtures() -> Vec<ParityFixture> {
     fixtures.push(fixture(
         "reserved_payload_use_site_label",
         payload_literal.clone(),
-        "Box = | inner Int |\n",
+        "Box = | inner I32 |\n",
         Schema::record(vec![Field::required(
             "value",
             SchemaType::Struct {
                 name: "Box".into(),
-                fields: vec![Field::required("inner", SchemaType::Int)],
+                fields: vec![Field::required("inner", SchemaType::I32)],
             },
         )]),
         source_named_argument_not_found(in_literal(&payload_literal, "__LoOp", 1)),
@@ -150,7 +150,7 @@ fn reserved_name_fixtures() -> Vec<ParityFixture> {
     for name in [
         "__LoOp", "_U64", "dec01", "dec257", "Dec", "true", "false", "none",
     ] {
-        let declarations = format!("{name} = | inner Int |\n");
+        let declarations = format!("{name} = | inner I32 |\n");
         let expected_source = match name {
             "true" | "false" => {
                 source_expression_assignment(in_declarations(&declarations, "=", 1))
@@ -166,7 +166,7 @@ fn reserved_name_fixtures() -> Vec<ParityFixture> {
                 "value",
                 SchemaType::Struct {
                     name: name.into(),
-                    fields: vec![Field::required("inner", SchemaType::Int)],
+                    fields: vec![Field::required("inner", SchemaType::I32)],
                 },
             )]),
             expected_source,
@@ -210,7 +210,7 @@ fn reserved_name_fixtures() -> Vec<ParityFixture> {
     }
 
     let payload_declaration_literal = "value = Box(inner = 1)";
-    let payload_declarations = "Box = | __LoOp Int |\n";
+    let payload_declarations = "Box = | __LoOp I32 |\n";
     fixtures.push(fixture(
         "reserved_payload_declaration___LoOp",
         payload_declaration_literal,
@@ -219,7 +219,7 @@ fn reserved_name_fixtures() -> Vec<ParityFixture> {
             "value",
             SchemaType::Struct {
                 name: "Box".into(),
-                fields: vec![Field::required("__LoOp", SchemaType::Int)],
+                fields: vec![Field::required("__LoOp", SchemaType::I32)],
             },
         )]),
         source_reserved_keyword(in_declarations(payload_declarations, "__LoOp", 1)),
@@ -235,15 +235,15 @@ fn reserved_name_fixtures() -> Vec<ParityFixture> {
         control_literal,
         "",
         Schema::record(vec![
-            Field::required("DecBox", SchemaType::Int),
-            Field::required("configuration", SchemaType::Int),
-            Field::required("_configuration", SchemaType::Int),
+            Field::required("DecBox", SchemaType::I32),
+            Field::required("configuration", SchemaType::I32),
+            Field::required("_configuration", SchemaType::I32),
         ]),
         SourceExpectation::Accept,
         MonExpectation::Accept(Value::Record(vec![
-            ("DecBox".into(), Value::Int(1)),
-            ("configuration".into(), Value::Int(2)),
-            ("_configuration".into(), Value::Int(3)),
+            ("DecBox".into(), Value::I32(1)),
+            ("configuration".into(), Value::I32(2)),
+            ("_configuration".into(), Value::I32(3)),
         ])),
     ));
 
@@ -252,13 +252,13 @@ fn reserved_name_fixtures() -> Vec<ParityFixture> {
     let word_fields = vec![
         Field::required("truth", SchemaType::Bool),
         Field::required("falsehood", SchemaType::Bool),
-        Field::required("absent", SchemaType::Optional(Box::new(SchemaType::Int))),
+        Field::required("absent", SchemaType::Optional(Box::new(SchemaType::I32))),
     ];
     fixtures.push(
         fixture(
             "literal_words_keep_value_roles",
             word_literal,
-            "WordRoles = |\n    truth Bool,\n    falsehood Bool,\n    absent Int?,\n|\n",
+            "WordRoles = |\n    truth Bool,\n    falsehood Bool,\n    absent I32?,\n|\n",
             Schema::record(vec![Field::required(
                 "words",
                 SchemaType::Struct {
@@ -300,8 +300,8 @@ fn reserved_name_fixtures() -> Vec<ParityFixture> {
     let map_expected = Value::Record(vec![(
         "map".into(),
         Value::Map(vec![
-            (Value::String("if".into()), Value::Int(1)),
-            (Value::String("true".into()), Value::Int(2)),
+            (Value::String("if".into()), Value::I32(1)),
+            (Value::String("true".into()), Value::I32(2)),
         ]),
     )]);
     let string_keyed_map = fixture(
@@ -312,7 +312,7 @@ fn reserved_name_fixtures() -> Vec<ParityFixture> {
             "map",
             SchemaType::Map {
                 key: Box::new(SchemaType::String),
-                value: Box::new(SchemaType::Int),
+                value: Box::new(SchemaType::I32),
             },
         )]),
         SourceExpectation::AcceptObserved(map_expected.clone()),
@@ -320,7 +320,7 @@ fn reserved_name_fixtures() -> Vec<ParityFixture> {
     );
     let string_keyed_map = string_keyed_map
         .with_source_override(format!(
-            "MapHolder = | map {{String = Int}} |\ndata = MapHolder(map = {map_value})\n"
+            "MapHolder = | map {{String = I32}} |\ndata = MapHolder(map = {map_value})\n"
         ))
         .with_source_nominal_type("", "MapHolder");
     fixtures.push(string_keyed_map);

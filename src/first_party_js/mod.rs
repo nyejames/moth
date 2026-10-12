@@ -17,13 +17,11 @@
 
 use crate::backends::js::collection_javascript_helpers;
 use crate::backends::js::package_bindings::core::core_javascript_helpers;
-use crate::backends::js::package_bindings::core::random::BIGINT_RANDOM_INT_JS;
 use crate::builder_surface::core_packages::core_javascript_inline_expressions;
 use crate::projects::html_project::external_js::parser::{
     parsed_js_module::JsDiagnosticKind, scan_exports,
 };
 use crate::projects::html_project::external_js::runtime_module_registry::RuntimeModuleRegistry;
-use moth_lexical::numeric::profile::NumericProfile;
 
 /// One compiler-owned JavaScript fragment inspected by first-party dependency validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,11 +60,7 @@ pub fn inventoried_javascript_sources() -> Vec<InventoriedJsSource> {
             source: helper.source.to_owned(),
         });
     }
-    sources.push(InventoriedJsSource {
-        label: "core-js-helper:__moth_random_int_bigint".to_owned(),
-        source: BIGINT_RANDOM_INT_JS.to_owned(),
-    });
-    for helper in collection_javascript_helpers(NumericProfile::STANDARD) {
+    for helper in collection_javascript_helpers() {
         sources.push(InventoriedJsSource {
             label: format!("core-collections-js-helper:{}", helper.name),
             source: helper.source,

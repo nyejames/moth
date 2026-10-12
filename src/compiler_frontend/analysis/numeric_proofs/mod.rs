@@ -2,7 +2,7 @@
 //!
 //! WHAT: an optional, statement-keyed table of proven-safe checked integer operations and
 //!       proven-safe fallible integer narrowings, computed once per validated HIR executable
-//!       under one `NumericProfile`. Consumers (the scalar backends) elide redundant runtime
+//!       from its exact numeric domains. Consumers (the scalar backends) elide redundant runtime
 //!       range predicates only where a fact exists; every unproven operation keeps its check.
 //! WHY: backend check elision needs conservative facts that pair with the exact immutable HIR
 //!      they were derived from. HIR, AST evidence, public semantics and target capability gates
@@ -12,7 +12,7 @@
 //!
 //! Facts are closed integer intervals over `i128`, seeded from `NumericScalar::integer_range`
 //! (including exact `U64`), fixed-scalar literals and infallible integer cast expressions.
-//! `Byte`, `Float`, binary floats and exact `Dec` never prove. Blocks are walked
+//! `Byte`, binary floats and exact `Dec` never prove. Blocks are walked
 //! independently with one last-written-local interval cache: state resets at every block entry,
 //! and every write, call or unknown statement drops the cache. There is no predecessor
 //! dataflow, fixpoint, refinement or HIR mutation. Checked `i128` endpoint arithmetic that
@@ -23,7 +23,7 @@
 //! Facts are keyed by the statement's own `HirNodeId` and carry no interned strings, paths or
 //! dense local layouts, so a table needs no remap when its executable is published. The table
 //! is computed inside the compiler services after HIR validation, before publication, and is
-//! consumed only together with that same executable's HIR and profile.
+//! consumed only together with that same executable's HIR.
 
 use rustc_hash::FxHashSet;
 
@@ -41,7 +41,6 @@ use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-use moth_lexical::numeric::profile::NumericProfile;
 
 #[cfg(test)]
 mod tests;
@@ -51,14 +50,12 @@ type Interval = (i128, i128);
 
 /// Proven-safe integer operation and narrowing facts for one immutable HIR executable.
 ///
-/// WHAT: sparse statement-keyed side table paired with its `NumericProfile`. The empty default
-///       table retains every runtime check.
-/// WHY: backends query per statement instead of re-deriving ranges, and a missing or
-///      mismatched table degrades to the fully checked behavior.
+/// WHAT: sparse statement-keyed side table computed from the executable it is paired with. The
+///       empty default table retains every runtime check.
+/// WHY: backends query per statement instead of re-deriving ranges, and a missing fact degrades
+///      to the fully checked behavior.
 #[derive(Debug, Default)]
 pub(crate) struct NumericProofs {
-    /// Numeric profile the facts were computed under. Mismatched queries return false.
-    profile: NumericProfile,
     /// `NumericOp` statement ids whose relevant failures are impossible.
     safe_operations: FxHashSet<HirNodeId>,
     /// Fallible integer-to-integer `NumericConversion` `CastOp` statement ids whose range
@@ -69,49 +66,32 @@ pub(crate) struct NumericProofs {
 impl NumericProofs {
     /// Whether the checked integer operation recorded at `statement` cannot fail.
     ///
-    /// Profile mismatch returns false: facts are only valid under the profile they were
-    /// derived from.
-    pub(crate) fn integer_operation_is_safe(
-        &self,
-        statement: HirNodeId,
-        profile: NumericProfile,
-    ) -> bool {
-        self.profile == profile && self.safe_operations.contains(&statement)
+    /// The facts derive from exact numeric domains, so the lookup needs only the statement.
+    pub(crate) fn integer_operation_is_safe(&self, statement: HirNodeId) -> bool {
+        self.safe_operations.contains(&statement)
     }
 
     /// Whether the fallible integer narrowing recorded at `statement` cannot fail.
-    ///
-    /// Profile mismatch returns false, matching the operation lookup.
-    pub(crate) fn integer_narrowing_is_safe(
-        &self,
-        statement: HirNodeId,
-        profile: NumericProfile,
-    ) -> bool {
-        self.profile == profile && self.safe_narrowings.contains(&statement)
+    pub(crate) fn integer_narrowing_is_safe(&self, statement: HirNodeId) -> bool {
+        self.safe_narrowings.contains(&statement)
     }
 }
 
 /// Computes the conservative proof table for one validated HIR module.
 ///
-/// WHAT: walks every block independently under `profile`, deriving closed intervals for
-///       checked integer operations and fallible integer narrowings.
+/// WHAT: walks every block independently, deriving closed intervals from each statement's
+///       exact numeric domains for checked integer operations and fallible integer narrowings.
 /// WHY: base and generated sidecar compilation each call this once after HIR validation and
 ///      before publication, so every executable carries its own paired table.
 pub(crate) fn analyse_numeric_proofs(
     hir: &HirModule,
     environment: &TypeEnvironment,
-    profile: NumericProfile,
 ) -> NumericProofs {
     let mut analyser = BlockAnalyser {
         environment,
         expressions: &hir.expressions,
-        profile,
         cache: None,
-        facts: NumericProofs {
-            profile,
-            safe_operations: FxHashSet::default(),
-            safe_narrowings: FxHashSet::default(),
-        },
+        facts: NumericProofs::default(),
     };
 
     // Blocks are walked independently: value-specific state resets at every block entry,
@@ -130,7 +110,6 @@ pub(crate) fn analyse_numeric_proofs(
 struct BlockAnalyser<'a> {
     environment: &'a TypeEnvironment,
     expressions: &'a HirExpressionStore,
-    profile: NumericProfile,
     /// The single last-written-local interval cache. `None` means no value-specific fact.
     cache: Option<(LocalId, Interval)>,
     facts: NumericProofs,
@@ -211,7 +190,7 @@ impl BlockAnalyser<'_> {
 
     /// Proves one checked numeric operation safe, returning its exact result interval.
     ///
-    /// `Power` never proves, and every non-integer domain (Float, binary floats, exact
+    /// `Power` never proves, and every non-integer domain (binary floats, exact
     /// `Dec`) stays checked. The returned interval must fit the operation domain, which is
     /// what makes the checked operation's failure impossible.
     fn prove_operation(
@@ -219,7 +198,7 @@ impl BlockAnalyser<'_> {
         op: &HirNumericOp,
         operands: &HirNumericOperands,
     ) -> Option<Interval> {
-        let domain = op.domain.integer_range(self.profile)?;
+        let domain = op.domain.integer_range()?;
         if !op.domain.is_integer() {
             return None;
         }
@@ -291,9 +270,10 @@ impl BlockAnalyser<'_> {
                 }
             }
             NumericOperator::Negate => {
-                // Signed integer domains only: unsigned negation is rejected at the source
-                // level even for known zero, and signed narrow domains promote to their
-                // negation domain, so any other shape keeps its check.
+                // Only domains whose negation keeps the exact same type can prove here: unsigned
+                // integers and `Byte` have no negation at all, and no signed or binary-float
+                // domain widens. Binary floats and `Dec` still expose no bounded integer
+                // interval, so their checks always stay.
                 if negation_domain(op.domain) != Some(op.domain) {
                     return None;
                 }
@@ -336,7 +316,7 @@ impl BlockAnalyser<'_> {
         if !source.is_integer() || !target.is_integer() {
             return false;
         }
-        let Some((target_low, target_high)) = target.integer_range(self.profile) else {
+        let Some((target_low, target_high)) = target.integer_range() else {
             return false;
         };
         source_interval.0 >= target_low && source_interval.1 <= target_high
@@ -350,14 +330,6 @@ impl BlockAnalyser<'_> {
         let expression = self.expressions.expression(expression_id);
         match &expression.kind {
             // Literals are singleton exact values.
-            HirExpressionKind::Uint(value) => {
-                let value = i128::from(*value);
-                Some((value, value))
-            }
-            HirExpressionKind::Int(value) => {
-                let value = i128::from(*value);
-                Some((value, value))
-            }
             HirExpressionKind::FixedScalar(value) => {
                 // Signed integers carry sign-extended i64 payloads; unsigned integers and Byte
                 // carry zero-extended u64 payloads. Binary floats have no integer interval.
@@ -373,7 +345,7 @@ impl BlockAnalyser<'_> {
                 let BuiltinCastPolicyId::NumericConversion { target, .. } = policy else {
                     return None;
                 };
-                let target_range = target.integer_range(self.profile)?;
+                let target_range = target.integer_range()?;
                 let source_interval = self.expression_interval(*source)?;
                 let low = source_interval.0.max(target_range.0);
                 let high = source_interval.1.min(target_range.1);
@@ -402,6 +374,6 @@ impl BlockAnalyser<'_> {
         if !scalar.is_integer() {
             return None;
         }
-        scalar.integer_range(self.profile)
+        scalar.integer_range()
     }
 }

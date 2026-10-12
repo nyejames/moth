@@ -8,9 +8,9 @@
 //!      `Exact` context and callers own their own post-parse coercion. However, some
 //!      literals are parse-context-sensitive: `none` needs an `Option(_)` target, empty
 //!      collection literals need an explicit `Collection(T)` target, and numeric literals
-//!      need a numeric scalar target. Without those hints the parser must reject the literal
-//!      immediately, because there is no post-parse coercion that can recover a literal that
-//!      already overflowed its default `Int`/`Float` materialisation.
+//!      need an exact numeric scalar target. Without those hints the parser must reject the
+//!      literal immediately, because there is no post-parse coercion that can recover a
+//!      literal that already overflowed its default `I32`/`F64` materialisation.
 
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastTarget, cast_target_for_receiving_type,
@@ -27,9 +27,9 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ExpectedType {
     Known(TypeId),
-    /// A numeric receiving destination. Every numeric type can materialise a lone pending
-    /// literal, while Dec and Uint additionally supply context through raw arithmetic and
-    /// groups. This is a literal hint, never a strict expectation for typed operands or results.
+    /// A numeric receiving destination. Every exact numeric identity can materialise a lone
+    /// pending literal and supplies context through raw arithmetic and groups. This is a literal
+    /// hint, never a strict expectation for typed operands or results.
     NumericLiteral(TypeId),
     Infer,
 }
@@ -53,7 +53,7 @@ impl ExpectedType {
 /// Explicit cast target supplied by a receiving boundary.
 ///
 /// WHAT: carries the builtin target type from a typed boundary into expression
-///      parsing so that a leading `cast` / `cast!` keyword can resolve its
+///      parsing so that a leading `cast` keyword can resolve its
 ///      target without making ordinary expression parsing globally type-directed.
 /// WHY: `ExpectedType` owns parse-time literal context only; cast target
 ///      ownership is intentionally separate so boundary callers can offer an
@@ -116,7 +116,7 @@ pub(crate) fn parse_expectation_for_type_id(
 
 /// Returns whether a receiving type can directly materialise a numeric literal.
 ///
-/// WHAT: accepts `Int`, `Uint`, `Float`, fixed scalars, `Byte`, `Dec`, and their optional forms.
+/// WHAT: accepts every fixed scalar (including `Byte`), `Dec`, and their optional forms.
 /// WHY: assignments and call arguments share one semantic eligibility rule, while each
 ///      boundary retains its own handling for `none`.
 pub(crate) fn is_numeric_literal_destination_type_id(
@@ -126,12 +126,8 @@ pub(crate) fn is_numeric_literal_destination_type_id(
     let inner_type_id = type_environment
         .option_inner_type(type_id)
         .unwrap_or(type_id);
-    let builtins = type_environment.builtins();
 
-    inner_type_id == builtins.int
-        || inner_type_id == builtins.uint
-        || inner_type_id == builtins.float
-        || type_environment.fixed_scalar(inner_type_id).is_some()
+    type_environment.fixed_scalar(inner_type_id).is_some()
         || type_environment.number_scale(inner_type_id).is_some()
 }
 

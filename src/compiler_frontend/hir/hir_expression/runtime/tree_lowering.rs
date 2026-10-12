@@ -157,9 +157,9 @@ impl<'a> HirBuilder<'a> {
                     return Ok(LoweredExpression { prelude, value });
                 }
 
-                // Arithmetic always uses checked NumericOp effects. Mixed Int/Float and Uint/Float
-                // comparisons preserve their profile-precision promotion; Dec comparisons explicitly
-                // convert a mixed integer operand to the Dec scale before plain BinOp lowering.
+                // Arithmetic always uses checked NumericOp effects. Comparisons between bounded
+                // fixed domains use their exact promotion; Dec comparisons explicitly convert a
+                // mixed integer operand to the Dec scale before plain BinOp lowering.
                 if let Some((numeric_op, numeric_result_ty, discharged)) =
                     self.classify_checked_numeric_binop(op, lowered_left, lowered_right)
                 {
@@ -217,9 +217,10 @@ impl<'a> HirBuilder<'a> {
         }
     }
 
-    /// WHAT: makes mixed Int/Float and Uint/Float precision conversion and Dec/integer exact scaling explicit.
-    /// WHY: backends compare already aligned carriers; they must not reconstruct profile rounding
-    ///      or treat a Dec coefficient as an unscaled integer.
+    /// WHAT: makes Dec/integer exact scaling explicit for mixed comparisons.
+    /// WHY: backends compare already aligned carriers; they must not reconstruct conversion
+    ///      rounding or treat a Dec coefficient as an unscaled integer. Bounded fixed domains
+    ///      never mix implicitly, so no numeric coercion is inserted between them.
     fn lower_numeric_comparison_operands(
         &mut self,
         operator: &Operator,
@@ -244,16 +245,6 @@ impl<'a> HirBuilder<'a> {
         let left_domain = NumericScalar::from_type_id(left_type, &self.type_environment);
         let right_domain = NumericScalar::from_type_id(right_type, &self.type_environment);
         match (left_domain, right_domain) {
-            (Some(NumericScalar::Int | NumericScalar::Uint), Some(NumericScalar::Float)) => {
-                let converted =
-                    self.convert_numeric_operand_to_domain(left, NumericScalar::Float, span)?;
-                Ok((converted, right))
-            }
-            (Some(NumericScalar::Float), Some(NumericScalar::Int | NumericScalar::Uint)) => {
-                let converted =
-                    self.convert_numeric_operand_to_domain(right, NumericScalar::Float, span)?;
-                Ok((left, converted))
-            }
             (Some(NumericScalar::Number(scale)), Some(integer)) if integer.is_integer() => {
                 let converted = self.convert_numeric_operand_to_domain(
                     right,

@@ -1,6 +1,6 @@
 //! JavaScript numeric carrier and conversion policy.
 //!
-//! WHAT: maps numeric domains and profiles to JS carriers, then classifies casts into shared
+//! WHAT: maps numeric domains to JS carriers, then classifies casts into shared
 //!       lowering decisions and demand-driven runtime-helper requirements.
 //! WHY: representation and helper selection must not drift between generated calls and the
 //!      prelude, especially when BigInt and Number carriers meet.
@@ -17,7 +17,6 @@ use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::{FixedScalarClass, FixedScalarValue};
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
-use moth_lexical::numeric::profile::NumericProfile;
 
 const MAX_EXACT_JS_INTEGER: i128 = 9_007_199_254_740_991;
 
@@ -27,7 +26,7 @@ const MAX_EXACT_JS_INTEGER: i128 = 9_007_199_254_740_991;
 ///       BigInt carrier, and declared binary-float scalars the precision-preserving Number
 ///       carrier. Arbitrary-precision `Dec` rides a primitive BigInt coefficient with its
 ///       scale carried in typed HIR, so it selects a dedicated scaled variant instead of
-///       pretending to have profile-derived integer bounds.
+///       pretending to have fixed integer bounds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum JsNumericCarrier {
     ExactInteger {
@@ -44,7 +43,7 @@ pub(crate) enum JsNumericCarrier {
     /// Arbitrary-precision decimal at one canonical scale.
     ///
     /// WHAT: stores the exact primitive BigInt coefficient carrier; the scale lives in the HIR
-    ///       value and type, not in a profile guess or a fixed 64-bit bound pair.
+    ///       value and type, not in a guessed width or a fixed 64-bit bound pair.
     /// WHY: `Dec` has no language-level width, so borrowing fixed integer bounds would
     ///      silently reject legal scale-256 values and mislead later checks.
     ScaledInteger {
@@ -53,13 +52,13 @@ pub(crate) enum JsNumericCarrier {
 }
 
 impl JsNumericCarrier {
-    /// Maps a semantic scalar and selected profile to its JavaScript representation.
-    pub(crate) fn for_scalar(scalar: NumericScalar, profile: NumericProfile) -> Option<Self> {
+    /// Maps one semantic scalar to its JavaScript representation.
+    pub(crate) fn for_scalar(scalar: NumericScalar) -> Option<Self> {
         if let NumericScalar::Number(scale) = scalar {
             return Some(Self::ScaledInteger { scale });
         }
 
-        if let Some((min, max)) = scalar.integer_range(profile) {
+        if let Some((min, max)) = scalar.integer_range() {
             return Some(
                 if min >= -MAX_EXACT_JS_INTEGER && max <= MAX_EXACT_JS_INTEGER {
                     Self::ExactInteger { min, max }
@@ -70,20 +69,8 @@ impl JsNumericCarrier {
         }
 
         scalar
-            .binary_float_precision(profile)
+            .binary_float_precision()
             .map(|precision| Self::BinaryFloat { precision })
-    }
-
-    /// Formats a profile-selected Moth `Int` literal for JavaScript.
-    pub(crate) fn int_literal(value: i64, profile: NumericProfile) -> Option<String> {
-        let carrier = Self::for_scalar(NumericScalar::Int, profile)?;
-        Self::integer_literal(carrier, i128::from(value))
-    }
-
-    /// Formats a profile-selected Moth `Uint` literal for JavaScript.
-    pub(crate) fn uint_literal(value: u64, profile: NumericProfile) -> Option<String> {
-        let carrier = Self::for_scalar(NumericScalar::Uint, profile)?;
-        Self::integer_literal(carrier, i128::from(value))
     }
 
     /// Formats an already-materialised fixed scalar without changing its exact value.
@@ -91,20 +78,17 @@ impl JsNumericCarrier {
     /// WHAT: integer carriers choose decimal Number or BigInt spelling, binary-float values retain
     ///       their exact f64 carrier bits (including signed zero), and Byte stays a Number octet.
     /// WHY: HIR literals must enter the same carrier used by later comparisons, casts and checked
-    ///      operations instead of passing through profile Int or Float.
-    pub(crate) fn fixed_literal(
-        value: FixedScalarValue,
-        profile: NumericProfile,
-    ) -> Option<String> {
+    ///      operations instead of a separate literal carrier.
+    pub(crate) fn fixed_literal(value: FixedScalarValue) -> Option<String> {
         let scalar = value.scalar();
 
         match scalar.class() {
             FixedScalarClass::SignedInteger => {
-                let carrier = Self::for_scalar(NumericScalar::Fixed(scalar), profile)?;
+                let carrier = Self::for_scalar(NumericScalar::Fixed(scalar))?;
                 Self::integer_literal(carrier, i128::from(value.as_i64()?))
             }
             FixedScalarClass::UnsignedInteger => {
-                let carrier = Self::for_scalar(NumericScalar::Fixed(scalar), profile)?;
+                let carrier = Self::for_scalar(NumericScalar::Fixed(scalar))?;
                 Self::integer_literal(carrier, i128::from(value.as_u64()?))
             }
             FixedScalarClass::BinaryFloat => {
@@ -128,13 +112,18 @@ impl JsNumericCarrier {
         format!("{}n", value.coefficient())
     }
 
-    fn integer_literal(carrier: Self, value: i128) -> Option<String> {
-        let (min, max) = carrier.integer_bounds()?;
+    /// Formats one integer value in this carrier's JavaScript spelling.
+    ///
+    /// WHAT: exact-range carriers emit decimal Number literals, wider carriers exact BigInt
+    ///       literals, and every non-integer carrier rejects the value.
+    /// WHY: materialised literals must be spelled in the same carrier the runtime values use.
+    fn integer_literal(self, value: i128) -> Option<String> {
+        let (min, max) = self.integer_bounds()?;
         if value < min || value > max {
             return None;
         }
 
-        match carrier {
+        match self {
             Self::ExactInteger { .. } => Some(value.to_string()),
             Self::BigInteger { .. } => Some(format!("{value}n")),
             Self::BinaryFloat { .. } | Self::ScaledInteger { .. } => None,
@@ -148,15 +137,6 @@ impl JsNumericCarrier {
         }
     }
 
-    pub(crate) fn float_precision(self) -> Option<BinaryFloatPrecision> {
-        match self {
-            Self::BinaryFloat { precision } => Some(precision),
-            Self::ExactInteger { .. } | Self::BigInteger { .. } | Self::ScaledInteger { .. } => {
-                None
-            }
-        }
-    }
-
     /// Family stem used by checked numeric helper names.
     pub(crate) fn helper_family(self) -> Option<&'static str> {
         match self {
@@ -164,7 +144,7 @@ impl JsNumericCarrier {
             Self::BigInteger { .. } => Some("bigint"),
             Self::BinaryFloat {
                 precision: BinaryFloatPrecision::Binary16,
-            } => None,
+            } => Some("float16"),
             Self::BinaryFloat {
                 precision: BinaryFloatPrecision::Binary32,
             } => Some("float32"),
@@ -187,7 +167,7 @@ impl JsNumericCarrier {
     }
 }
 
-/// JavaScript conversion selected for one semantic numeric pair and profile.
+/// JavaScript conversion selected for one semantic numeric pair.
 ///
 /// WHAT: owns carrier changes, fallibility, range bounds and binary-float rounding decisions, the
 ///       rendered JS expression and the runtime helpers that expression needs.
@@ -248,10 +228,9 @@ impl JsNumericConversion {
     pub(crate) fn classify(
         source: NumericScalar,
         target: NumericScalar,
-        profile: NumericProfile,
     ) -> Result<Self, CompilerError> {
         let carrier = |scalar: NumericScalar| {
-            JsNumericCarrier::for_scalar(scalar, profile).ok_or_else(|| {
+            JsNumericCarrier::for_scalar(scalar).ok_or_else(|| {
                 CompilerError::compiler_error(format!(
                     "JS backend has no numeric carrier for {scalar:?}"
                 ))
@@ -259,8 +238,8 @@ impl JsNumericConversion {
         };
         let source_carrier = carrier(source)?;
         let target_carrier = carrier(target)?;
-        let fallible = numeric_conversion_fallibility(source, target, profile)
-            == BuiltinCastFallibility::Fallible;
+        let fallible =
+            numeric_conversion_fallibility(source, target) == BuiltinCastFallibility::Fallible;
 
         match (source, target, source_carrier, target_carrier) {
             (NumericScalar::Number(source_scale), NumericScalar::Number(target_scale), _, _)

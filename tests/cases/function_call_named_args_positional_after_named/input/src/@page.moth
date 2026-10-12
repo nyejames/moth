@@ -1,4 +1,4 @@
-sum |a Int, b Int| -> Int:
+sum |a I32, b I32| -> I32:
     return a + b
 ;
 

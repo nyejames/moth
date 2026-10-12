@@ -20,7 +20,7 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    ConstRangeCursor, ConstRangeIterationValue, TemplateBranchSelector, TemplateLoopHeader,
+    ConstRangeCursor, TemplateBranchSelector, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateEmission, TemplateFoldResult, TirFoldContext,
@@ -61,38 +61,54 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::{FloatPrecision, NumericProfile};
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::path::Path;
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 fn build_test_fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldContext<'a> {
-    build_test_fold_context_with_profile(string_table, NumericProfile::STANDARD)
-}
-
-fn build_test_fold_context_with_profile<'a>(
-    string_table: &'a mut StringTable,
-    numeric_profile: NumericProfile,
-) -> TirFoldContext<'a> {
     TirFoldContext {
         string_table,
         template_const_loop_iteration_limit:
             crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile,
         bindings: vec![],
         source_scope: None,
     }
 }
 
-fn int_expression(value: i64) -> Expression {
-    Expression::int(value, None, ValueMode::ImmutableOwned)
+fn i32_value(value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32")
 }
-fn uint_expression(value: u64) -> Expression {
-    Expression::uint(value, None, ValueMode::ImmutableOwned)
+
+fn i32_expression(value: i64) -> Expression {
+    Expression::fixed_scalar(i32_value(value), None, ValueMode::ImmutableOwned)
 }
+
+fn u64_expression(value: u64) -> Expression {
+    Expression::fixed_scalar(
+        FixedScalarValue::unsigned(FixedScalar::U64, value).expect("test literal fits U64"),
+        None,
+        ValueMode::ImmutableOwned,
+    )
+}
+
 fn float_expression(value: f64) -> Expression {
-    Expression::float(value, None, ValueMode::ImmutableOwned)
+    float_expression_at(FixedScalar::F64, value)
+}
+
+fn float32_expression(value: f32) -> Expression {
+    float_expression_at(FixedScalar::F32, f64::from(value))
+}
+
+/// One exact binary-float literal; the caller supplies a value already representable at the scalar.
+fn float_expression_at(scalar: FixedScalar, value: f64) -> Expression {
+    Expression::fixed_scalar(
+        FixedScalarValue::binary_float(scalar, value)
+            .expect("test float is exactly representable at its scalar"),
+        None,
+        ValueMode::ImmutableOwned,
+    )
 }
 
 fn bool_expression(value: bool) -> Expression {
@@ -162,27 +178,6 @@ fn fold_final_view_fixture(
         )));
     }
     // Existing final-view text assertions do not own semantic provenance.
-    let TemplateFoldResult { emission, .. } =
-        fold_prepared_template(&prepared, view, &mut fold_context)?;
-    Ok(emission)
-}
-
-fn fold_final_view_fixture_with_profile(
-    fixture: &FinalViewFoldFixture,
-    string_table: &mut StringTable,
-    phase: TemplateTirPhase,
-    numeric_profile: NumericProfile,
-) -> Result<TemplateEmission, TemplateError> {
-    let store = fixture.store.borrow();
-    let view = TirView::new(&store, fixture.template_id, phase, fixture.context)
-        .expect("test view should construct");
-    let mut fold_context = build_test_fold_context_with_profile(string_table, numeric_profile);
-    let prepared = prepare_tir_view(&view, TemplatePreparationMode::Value)?;
-    if !matches!(prepared.outcome, TemplatePreparationOutcome::Foldable) {
-        return Err(TemplateError::Infrastructure(Box::new(
-            CompilerError::compiler_error("test view was not foldable"),
-        )));
-    }
     let TemplateFoldResult { emission, .. } =
         fold_prepared_template(&prepared, view, &mut fold_context)?;
     Ok(emission)
@@ -470,8 +465,8 @@ fn const_template_projection_repeats_slots_in_const_loops() -> Result<(), Templa
                 index: None,
             }),
             range: Box::new(RangeLoopSpec {
-                start: int_expression(0),
-                end: int_expression(2),
+                start: i32_expression(0),
+                end: i32_expression(2),
                 step: None,
                 end_kind: RangeEndKind::Exclusive,
             }),
@@ -585,8 +580,8 @@ fn const_template_projection_preserves_loop_aggregate_content() -> Result<(), Te
                 index: None,
             }),
             range: Box::new(RangeLoopSpec {
-                start: int_expression(0),
-                end: int_expression(2),
+                start: i32_expression(0),
+                end: i32_expression(2),
                 step: None,
                 end_kind: RangeEndKind::Exclusive,
             }),
@@ -679,8 +674,8 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
                 index: None,
             }),
             range: Box::new(RangeLoopSpec {
-                start: int_expression(0),
-                end: int_expression(0),
+                start: i32_expression(0),
+                end: i32_expression(0),
                 step: None,
                 end_kind: RangeEndKind::Exclusive,
             }),
@@ -791,8 +786,8 @@ fn build_range_loop_template(
             index: None,
         }),
         range: Box::new(RangeLoopSpec {
-            start: int_expression(start),
-            end: int_expression(end),
+            start: i32_expression(start),
+            end: i32_expression(end),
             step: None,
             end_kind: RangeEndKind::Exclusive,
         }),
@@ -810,6 +805,7 @@ fn build_range_loop_template(
 
 fn build_float_range_loop_template(
     store: &mut TemplateIrStore,
+    scalar: FixedScalar,
     start: f64,
     end: f64,
     step: f64,
@@ -822,9 +818,9 @@ fn build_float_range_loop_template(
             index: None,
         }),
         range: Box::new(RangeLoopSpec {
-            start: float_expression(start),
-            end: float_expression(end),
-            step: Some(float_expression(step)),
+            start: float_expression_at(scalar, start),
+            end: float_expression_at(scalar, end),
+            step: Some(float_expression_at(scalar, step)),
             end_kind: RangeEndKind::Exclusive,
         }),
     };
@@ -881,8 +877,8 @@ fn final_view_fold_loop_binding_and_body_provenance_reach_exact_result() {
         let item_value = builder.push_dynamic_expression_node(
             Expression::reference_with_type_id(
                 item_path,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 None,
                 ValueMode::ImmutableReference,
                 ConstRecordState::RuntimeValue,
@@ -905,17 +901,16 @@ fn final_view_fold_loop_binding_and_body_provenance_reach_exact_result() {
             bindings: Box::new(LoopBindings {
                 item: Some(Declaration {
                     id: item_path,
-                    value: Expression::int(0, None, ValueMode::ImmutableOwned),
+                    value: i32_expression(0),
                     binding_span: None,
                     config_qualifier: None,
                 }),
                 index: None,
             }),
             range: Box::new(RangeLoopSpec {
-                start: Expression::int(0, None, ValueMode::ImmutableOwned)
+                start: i32_expression(0)
                     .with_synthetic_interface_provenance(range_provenance.clone()),
-                end: Expression::int(2, None, ValueMode::ImmutableOwned)
-                    .with_synthetic_interface_provenance(range_provenance),
+                end: i32_expression(2).with_synthetic_interface_provenance(range_provenance),
                 step: None,
                 end_kind: RangeEndKind::Exclusive,
             }),
@@ -1000,8 +995,8 @@ fn final_view_fold_loop_preserves_visited_no_output_selector_provenance() {
                     index: None,
                 }),
                 range: Box::new(RangeLoopSpec {
-                    start: int_expression(0),
-                    end: int_expression(end),
+                    start: i32_expression(0),
+                    end: i32_expression(end),
                     step: None,
                     end_kind: RangeEndKind::Exclusive,
                 }),
@@ -1119,17 +1114,16 @@ fn final_view_fold_zero_iteration_loop_rejects_missing_body_authority() {
 //  Range cursor precision
 // -------------------------
 
-/// Collects float counters from a range cursor at the given boundary precision.
+/// Collects exact float counters from a range cursor to completion.
 ///
-/// WHAT: drives `ConstRangeCursor` directly so precision behavior is pinned without
+/// WHAT: drives `ConstRangeCursor` directly so precision behaviour is pinned without
 ///       template rendering in the way.
-/// WHY: Float32 stepping must round every accumulation like a Bits32 literal; this
-///      helper is the single place these tests advance a cursor to completion.
+/// WHY: every counter keeps its range's selected precision, so this helper is the
+///      single place these tests advance a float cursor to completion.
 fn collect_float_counters(
     start: Expression,
     end: Expression,
     step: Option<Expression>,
-    float_precision: FloatPrecision,
 ) -> Vec<f64> {
     let range = RangeLoopSpec {
         start,
@@ -1141,23 +1135,15 @@ fn collect_float_counters(
         &range,
         crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         None,
-        float_precision,
     )
     .expect("range cursor should construct");
     let mut counters = Vec::new();
     while let Some(counter) = cursor.next_counter().expect("range cursor should advance") {
-        match counter {
-            ConstRangeIterationValue::Float(value) => counters.push(value),
-            ConstRangeIterationValue::Int(value) => {
-                panic!("expected a float counter, got int {value}")
-            }
-            ConstRangeIterationValue::Uint(value) => {
-                panic!("expected a float counter, got uint {value}")
-            }
-            ConstRangeIterationValue::Fixed(value) => {
-                panic!("expected a float counter, got fixed value {value}")
-            }
-        }
+        counters.push(
+            counter
+                .as_f64()
+                .expect("float ranges must emit binary-float counters"),
+        );
     }
     counters
 }
@@ -1165,97 +1151,135 @@ fn collect_float_counters(
 #[test]
 fn range_cursor_rounds_float32_step_accumulation() {
     let counters = collect_float_counters(
-        float_expression(0.0),
-        float_expression(1.0),
-        Some(float_expression(0.1)),
-        FloatPrecision::Bits32,
+        float32_expression(0.0),
+        float32_expression(1.0),
+        Some(float32_expression(0.1)),
     );
 
     assert_eq!(
         counters.len(),
         10,
-        "Float32 0.0 to 1.0 by 0.1 should still take ten const iterations"
+        "F32 0.0 to 1.0 by 0.1 should still take ten const iterations"
     );
     assert_eq!(
         counters[3],
         f64::from(0.1_f32 + 0.1_f32 + 0.1_f32),
-        "Float32 counters must accumulate with f32 rounding, not f64 drift"
+        "F32 counters must accumulate with f32 rounding, not f64 drift"
     );
 }
 
 #[test]
-fn range_cursor_rejects_non_progressing_float32_mixed_range() {
-    // 16777217 widens to 16777216 at Float32 precision, and a step of 1.0 rounds
-    // back to 16777216. The source-level bounds diagnostic may occur during
-    // construction or cursor advancement, so consume up to the normal template
-    // iteration limit without pinning its timing.
+fn range_cursor_rounds_float16_step_accumulation() {
+    // F16(0.1) is 0.099_975_585_937_5; every accumulation rounds back to F16, and the
+    // third F16 accumulation is 0.299_804_687_5.
+    let counters = collect_float_counters(
+        float_expression_at(FixedScalar::F16, 0.0),
+        float_expression_at(FixedScalar::F16, 1.0),
+        Some(float_expression_at(FixedScalar::F16, 0.099_975_585_937_5)),
+    );
+
+    assert_eq!(
+        counters.len(),
+        10,
+        "F16 0.0 to 1.0 by 0.1 should take ten const iterations, unlike F64"
+    );
+    assert_eq!(
+        counters[3], 0.299_804_687_5,
+        "F16 counters must accumulate with F16 rounding, not an F32 or f64 carrier"
+    );
+}
+
+#[test]
+fn range_cursor_rejects_non_progressing_float32_range() {
+    // 16777217 is not representable at F32 precision, so a step of 1.0 rounds back to
+    // 16777216. The source-level bounds diagnostic may occur during construction or
+    // cursor advancement, so consume up to the normal template iteration limit without
+    // pinning its timing.
     let range = RangeLoopSpec {
-        start: int_expression(16_777_217),
-        end: float_expression(16_777_218.5),
+        start: float_expression_at(FixedScalar::F32, 16_777_216.0),
+        end: float_expression_at(FixedScalar::F32, 16_777_218.0),
         end_kind: RangeEndKind::Exclusive,
-        step: Some(float_expression(1.0)),
+        step: Some(float_expression_at(FixedScalar::F32, 1.0)),
     };
-    let error = match ConstRangeCursor::new(
+    let error = expect_non_progressing_range(range, "a stalled F32 update");
+    assert_non_progressing_bounds_diagnostic(error, "a stalled F32 update");
+}
+
+#[test]
+fn range_cursor_rejects_non_progressing_float16_range() {
+    // 2049 is not representable at F16 precision, so a step of 1.0 from 2048 rounds back
+    // to 2048. An F32 carrier would advance, which is exactly the removed floor.
+    let range = RangeLoopSpec {
+        start: float_expression_at(FixedScalar::F16, 2048.0),
+        end: float_expression_at(FixedScalar::F16, 2052.0),
+        end_kind: RangeEndKind::Exclusive,
+        step: Some(float_expression_at(FixedScalar::F16, 1.0)),
+    };
+    let error = expect_non_progressing_range(range, "a stalled F16 update");
+    assert_non_progressing_bounds_diagnostic(error, "a stalled F16 update");
+}
+
+/// Advances one range cursor to its non-progressing source diagnostic.
+///
+/// WHAT: accepts either construction or advancement failure because both carry the
+///       same source-level bounds reason.
+/// WHY: the range owns its endpoint and no-progress rules, so the test must not pin
+///      which stage detects the stall.
+fn expect_non_progressing_range(range: RangeLoopSpec, context: &str) -> TemplateError {
+    let mut cursor = match ConstRangeCursor::new(
         &range,
         crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         None,
-        FloatPrecision::Bits32,
     ) {
-        Err(error) => error,
-        Ok(mut cursor) => {
-            let mut error = None;
-            for _ in
-                0..crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS
-            {
-                match cursor.next_counter() {
-                    Err(next_error) => {
-                        error = Some(next_error);
-                        break;
-                    }
-                    Ok(Some(_)) => {}
-                    Ok(None) => {
-                        panic!("a stalled Float32 update must not exhaust the range normally")
-                    }
-                }
-            }
-            error.expect("a stalled Float32 update must fail within the template iteration limit")
-        }
+        Err(error) => return error,
+        Ok(cursor) => cursor,
     };
+    for _ in 0..crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS
+    {
+        match cursor.next_counter() {
+            Err(error) => return error,
+            Ok(Some(_)) => {}
+            Ok(None) => panic!("{context} must not exhaust the range normally"),
+        }
+    }
+    panic!("{context} must fail within the template iteration limit")
+}
+
+fn assert_non_progressing_bounds_diagnostic(error: TemplateError, context: &str) {
     let TemplateError::Diagnostic(diagnostic) = error else {
-        panic!("a stalled Float32 range must stay on the source diagnostic lane");
+        panic!("{context} must stay on the source diagnostic lane");
     };
     match &diagnostic.payload {
         DiagnosticPayload::InvalidTemplateStructure { reason } => assert_eq!(
             *reason,
             InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-            "a stalled Float32 update must report non-progressing bounds"
+            "{context} must report non-progressing bounds"
         ),
         payload => panic!("expected invalid template structure payload, found {payload:?}"),
     }
 }
 
 #[test]
-fn range_cursor_keeps_standard_float64_step_accumulation() {
+fn range_cursor_keeps_float64_step_accumulation() {
     let counters = collect_float_counters(
         float_expression(0.0),
         float_expression(1.0),
         Some(float_expression(0.1)),
-        FloatPrecision::Bits64,
     );
 
     assert_eq!(
         counters.len(),
         11,
-        "STANDARD Float64 0.0 to 1.0 by 0.1 keeps eleven const iterations"
+        "F64 0.0 to 1.0 by 0.1 keeps eleven const iterations"
     );
     assert_eq!(
         counters[3],
         0.1 + 0.1 + 0.1,
-        "STANDARD counters must keep f64 accumulation unchanged"
+        "F64 range counters must keep f64 accumulation unchanged"
     );
 }
 
-/// Collects Uint counters from a const range cursor to completion.
+/// Collects `U64` counters from a const range cursor to completion.
 ///
 /// WHAT: drives `ConstRangeCursor` directly so unsigned iteration is pinned
 ///       without template rendering in the way.
@@ -1278,23 +1302,15 @@ fn collect_uint_counters(
         &range,
         crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         None,
-        FloatPrecision::Bits64,
     )
     .expect("range cursor should construct");
     let mut counters = Vec::new();
     while let Some(counter) = cursor.next_counter().expect("range cursor should advance") {
-        match counter {
-            ConstRangeIterationValue::Uint(value) => counters.push(value),
-            ConstRangeIterationValue::Int(value) => {
-                panic!("expected a uint counter, got int {value}")
-            }
-            ConstRangeIterationValue::Float(value) => {
-                panic!("expected a uint counter, got float {value}")
-            }
-            ConstRangeIterationValue::Fixed(value) => {
-                panic!("expected a uint counter, got fixed value {value}")
-            }
-        }
+        counters.push(
+            counter
+                .as_u64()
+                .expect("unsigned ranges must emit unsigned counters"),
+        );
     }
     counters
 }
@@ -1302,8 +1318,8 @@ fn collect_uint_counters(
 #[test]
 fn range_cursor_terminates_at_inclusive_uint_maximum() {
     let counters = collect_uint_counters(
-        uint_expression(u64::MAX - 2),
-        uint_expression(u64::MAX),
+        u64_expression(u64::MAX - 2),
+        u64_expression(u64::MAX),
         None,
         RangeEndKind::Inclusive,
     );
@@ -1311,15 +1327,15 @@ fn range_cursor_terminates_at_inclusive_uint_maximum() {
     assert_eq!(
         counters,
         vec![u64::MAX - 2, u64::MAX - 1, u64::MAX],
-        "an inclusive Uint range must emit the maximum and stop without a successor"
+        "an inclusive U64 range must emit the maximum and stop without a successor"
     );
 }
 
 #[test]
 fn range_cursor_terminates_descending_at_uint_zero() {
     let counters = collect_uint_counters(
-        uint_expression(2),
-        uint_expression(0),
+        u64_expression(2),
+        u64_expression(0),
         None,
         RangeEndKind::Inclusive,
     );
@@ -1327,111 +1343,95 @@ fn range_cursor_terminates_descending_at_uint_zero() {
     assert_eq!(
         counters,
         vec![2, 1, 0],
-        "a descending Uint range must reach zero and stop without underflowing"
+        "a descending U64 range must reach zero and stop without underflowing"
     );
 }
 
 #[test]
 fn range_cursor_rejects_zero_uint_step() {
     let range = RangeLoopSpec {
-        start: uint_expression(0),
-        end: uint_expression(10),
+        start: u64_expression(0),
+        end: u64_expression(10),
         end_kind: RangeEndKind::Inclusive,
-        step: Some(uint_expression(0)),
+        step: Some(u64_expression(0)),
     };
     let error = match ConstRangeCursor::new(
         &range,
         crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         None,
-        FloatPrecision::Bits64,
     ) {
         Err(error) => error,
-        Ok(_) => panic!("a zero Uint step must not construct a const cursor"),
+        Ok(_) => panic!("a zero U64 step must not construct a const cursor"),
     };
-    let TemplateError::Diagnostic(diagnostic) = error else {
-        panic!("a zero Uint step must stay on the source diagnostic lane");
-    };
-    match &diagnostic.payload {
-        DiagnosticPayload::InvalidTemplateStructure { reason } => assert_eq!(
-            *reason,
-            InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-            "a zero Uint step must report non-const bounds"
-        ),
-        payload => panic!("expected invalid template structure payload, found {payload:?}"),
-    }
+    assert_non_progressing_bounds_diagnostic(error, "a zero U64 step");
 }
 
 #[test]
-fn final_view_fold_float_range_loop_follows_the_fold_context_precision() {
-    let float32_profile = NumericProfile {
-        float_precision: FloatPrecision::Bits32,
-        ..NumericProfile::STANDARD
-    };
-
-    // Float32 accumulation through the production `fold_tir_loop` path reaches
-    // 1.0 in ten const iterations; an f64-ignoring cursor would emit eleven dots.
+fn final_view_fold_float_range_loop_follows_operand_precision() {
+    // F32 accumulation through the production `fold_tir_loop` path reaches 1.0 in
+    // ten const iterations; an f64-ignoring cursor would emit eleven dots.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let narrow_fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
         let dot_text = string_table.intern(".");
         let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
-        build_float_range_loop_template(store, 0.0, 1.0, 0.1, dot_node)
+        build_float_range_loop_template(
+            store,
+            FixedScalar::F32,
+            0.0,
+            f64::from(1.0_f32),
+            f64::from(0.1_f32),
+            dot_node,
+        )
     });
-    let narrow_emission = fold_final_view_fixture_with_profile(
+    let narrow_emission = fold_final_view_fixture(
         &narrow_fixture,
         &mut string_table,
         TemplateTirPhase::Composed,
-        float32_profile,
     )
-    .expect("Float32 range loop should fold through the TIR fold");
+    .expect("F32 range loop should fold through the TIR fold");
     assert_eq!(
         emission_to_string(narrow_emission, &string_table),
         "..........",
-        "Float32 0.0 to 1.0 by 0.1 must fold to ten iterations through the TIR fold"
+        "F32 0.0 to 1.0 by 0.1 must fold to ten iterations through the TIR fold"
     );
 
-    // The same loop under STANDARD keeps eleven f64 iterations; a fold context
-    // stuck at Bits32 would emit ten dots here instead.
+    // The F64 loop keeps eleven f64 iterations; a cursor stuck at F32 precision
+    // would emit ten dots here instead.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let standard_fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
         let dot_text = string_table.intern(".");
         let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
-        build_float_range_loop_template(store, 0.0, 1.0, 0.1, dot_node)
+        build_float_range_loop_template(store, FixedScalar::F64, 0.0, 1.0, 0.1, dot_node)
     });
-    let standard_emission = fold_final_view_fixture_with_profile(
+    let standard_emission = fold_final_view_fixture(
         &standard_fixture,
         &mut string_table,
         TemplateTirPhase::Composed,
-        NumericProfile::STANDARD,
     )
-    .expect("STANDARD range loop should fold through the TIR fold");
+    .expect("F64 range loop should fold through the TIR fold");
     assert_eq!(
         emission_to_string(standard_emission, &string_table),
         "...........",
-        "STANDARD 0.0 to 1.0 by 0.1 must keep eleven f64 iterations through the TIR fold"
+        "F64 0.0 to 1.0 by 0.1 must keep eleven f64 iterations through the TIR fold"
     );
 }
 
 #[test]
-fn final_view_fold_float_interpolation_uses_the_fold_context_precision() {
-    let float32_profile = NumericProfile {
-        float_precision: FloatPrecision::Bits32,
-        ..NumericProfile::STANDARD
-    };
-    // Carrier as Float32 materialisation leaves it: the f32 value widened to f64.
+fn final_view_fold_float_interpolation_uses_value_precision() {
+    // An F32 value renders its shortest f32 text, while the same numeric carrier at
+    // F64 keeps the long expansion. The value's own precision decides.
     let carrier = f64::from(0.1f32);
 
-    // The reducer formats at the fold context precision, so the Float32 fold
-    // renders the shortest f32 text instead of the long f64 expansion.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let narrow_fixture = build_final_view_fixture(&mut string_table, |_string_table, store| {
         let mut builder = TemplateIrBuilder::new(store);
         let float_node = builder.push_dynamic_expression_node(
-            float_expression(carrier),
+            float_expression_at(FixedScalar::F32, carrier),
             TemplateSegmentOrigin::Body,
             None,
         );
@@ -1443,21 +1443,18 @@ fn final_view_fold_float_interpolation_uses_the_fold_context_precision() {
             None,
         )
     });
-    let narrow_emission = fold_final_view_fixture_with_profile(
+    let narrow_emission = fold_final_view_fixture(
         &narrow_fixture,
         &mut string_table,
         TemplateTirPhase::Composed,
-        float32_profile,
     )
-    .expect("Float32 interpolation should fold through the TIR fold");
+    .expect("F32 interpolation should fold through the TIR fold");
     assert_eq!(
         emission_to_string(narrow_emission, &string_table),
         "0.1",
-        "a Float32 0.1 must render its shortest f32 text through the TIR fold"
+        "an F32 0.1 must render its shortest f32 text through the TIR fold"
     );
 
-    // The same carrier under STANDARD must not collapse to f32 text; a reducer
-    // ignoring the profile precision would render "0.1" here as well.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let standard_fixture = build_final_view_fixture(&mut string_table, |_string_table, store| {
@@ -1475,17 +1472,16 @@ fn final_view_fold_float_interpolation_uses_the_fold_context_precision() {
             None,
         )
     });
-    let standard_emission = fold_final_view_fixture_with_profile(
+    let standard_emission = fold_final_view_fixture(
         &standard_fixture,
         &mut string_table,
         TemplateTirPhase::Composed,
-        NumericProfile::STANDARD,
     )
-    .expect("STANDARD interpolation should fold through the TIR fold");
+    .expect("F64 interpolation should fold through the TIR fold");
     assert_ne!(
         emission_to_string(standard_emission, &string_table),
         "0.1",
-        "the same carrier under STANDARD must keep its f64 expansion"
+        "the same carrier at F64 must keep its full f64 expansion"
     );
 }
 

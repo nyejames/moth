@@ -1,0 +1,20 @@
+-- One numeric origin passed through a generic signature cannot satisfy both an
+-- exact U64 receiver and an exact I64 receiver. Both constraints participate.
+
+identity type T |value T| -> T:
+    return value
+;
+
+read_u64 |value U64| -> String:
+    return [: [value]]
+;
+
+read_i64 |value I64| -> String:
+    return [: [value]]
+;
+
+origin = identity(4294967296)
+first = read_u64(origin)
+second = read_i64(origin)
+
+[: [first] [second]]

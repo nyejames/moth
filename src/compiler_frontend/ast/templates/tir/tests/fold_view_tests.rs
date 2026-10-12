@@ -55,7 +55,7 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -91,10 +91,27 @@ fn fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldContext<'a> {
     TirFoldContext {
         string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         source_scope: None,
         bindings: vec![],
     }
+}
+
+/// One exact `I32` literal for fold-view fixtures.
+fn i32_expression(value: i64) -> Expression {
+    Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+        None,
+        ValueMode::ImmutableOwned,
+    )
+}
+
+/// Whether this expression is one exact `I32` literal with the expected value.
+fn is_i32_literal(expression: &Expression, expected: i64) -> bool {
+    matches!(
+        &expression.kind,
+        ExpressionKind::FixedScalar(value)
+            if value.scalar() == FixedScalar::I32 && value.as_i64() == Some(expected)
+    )
 }
 
 fn fold_prepared_view(
@@ -201,11 +218,10 @@ fn fold_view_is_deterministic_with_and_without_active_bindings() {
     let mut active_context = TirFoldContext {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         source_scope: None,
         bindings: vec![TemplateFoldBinding {
             path,
-            value: Expression::int(1, None, ValueMode::ImmutableOwned),
+            value: i32_expression(1),
         }],
     };
     fold_prepared_view(&view, &mut active_context)
@@ -254,7 +270,6 @@ fn prepared_view_rejects_identity_mismatch() {
     let mut context = TirFoldContext {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         source_scope: None,
         bindings: vec![],
     };
@@ -397,7 +412,7 @@ fn fold_view_conditional_selectors_use_overlay_or_structural_expression() {
     };
     let mut option_some = option_none.clone();
     option_some.kind = ExpressionKind::Coerced {
-        value: Box::new(Expression::int(7, None, ValueMode::ImmutableOwned)),
+        value: Box::new(i32_expression(7)),
         to_type: option_some.type_id,
     };
     let (option_template, option_site, option_body_text) = build_conditional_template(
@@ -503,20 +518,20 @@ fn fold_view_restores_option_and_loop_bindings_after_const_loop_limit_error() {
 
     let mut type_environment = TypeEnvironment::new();
     let mut option_scrutinee = Expression::option_none_with_type_id(
-        builtin_type_ids::INT,
-        DataType::Int,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        DataType::FixedScalar(FixedScalar::I32),
         &mut type_environment,
         None,
     );
     option_scrutinee.kind = ExpressionKind::Coerced {
-        value: Box::new(Expression::int(7, None, ValueMode::ImmutableOwned)),
+        value: Box::new(i32_expression(7)),
         to_type: option_scrutinee.type_id,
     };
 
     let option_pattern = MatchPattern::OptionPresentCapture {
         name: option_capture_name,
         binding_path: option_capture_path,
-        inner_type_id: builtin_type_ids::INT,
+        inner_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
         span: None,
         binding_span: None,
     };
@@ -533,8 +548,8 @@ fn fold_view_restores_option_and_loop_bindings_after_const_loop_limit_error() {
     let range_header = |item, end| TemplateLoopHeader::Range {
         bindings: Box::new(LoopBindings { item, index: None }),
         range: Box::new(RangeLoopSpec {
-            start: Expression::int(0, None, ValueMode::ImmutableOwned),
-            end: Expression::int(end, None, ValueMode::ImmutableOwned),
+            start: i32_expression(0),
+            end: i32_expression(end),
             end_kind: RangeEndKind::Exclusive,
             step: None,
         }),
@@ -545,7 +560,7 @@ fn fold_view_restores_option_and_loop_bindings_after_const_loop_limit_error() {
         range_header(
             Some(Declaration {
                 id: outer_iteration_path,
-                value: Expression::int(0, None, ValueMode::ImmutableOwned),
+                value: i32_expression(0),
                 binding_span: None,
                 config_qualifier: None,
             }),
@@ -591,7 +606,7 @@ fn fold_view_restores_option_and_loop_bindings_after_const_loop_limit_error() {
     context.template_const_loop_iteration_limit = 1;
     context.bindings.push(TemplateFoldBinding {
         path: unrelated_outer_path,
-        value: Expression::int(9, None, ValueMode::ImmutableOwned),
+        value: i32_expression(9),
     });
 
     let error = fold_prepared_template(&prepared, view, &mut context)
@@ -618,10 +633,7 @@ fn fold_view_restores_option_and_loop_bindings_after_const_loop_limit_error() {
         vec![unrelated_outer_path],
         "the failed fold must remove the option capture and active outer loop item"
     );
-    assert!(matches!(
-        context.bindings[0].value.kind,
-        ExpressionKind::Int(9)
-    ));
+    assert!(is_i32_literal(&context.bindings[0].value, 9));
 }
 
 // -------------------------
@@ -1161,7 +1173,6 @@ fn fold_dynamic_ast_template_with_missing_root_authority() -> TemplateError {
     let mut fold_context = TirFoldContext {
         string_table: &mut string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         source_scope: None,
         bindings: vec![],
     };

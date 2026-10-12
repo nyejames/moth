@@ -648,12 +648,12 @@ fn provider_declaration_selection_rejects_keyword_shadow_names_before_provider_r
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 fn binding_counters_separate_namespace_clauses_from_selected_names() {
     use crate::compiler_frontend::instrumentation::{
-        capture_frontend_counters_for_test, log_frontend_counters, reset_frontend_counters,
+        capture_counters_for_test, log_frontend_counters, reset_frontend_counters,
     };
     use crate::timing::start_benchmark_collection;
 
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let _counter_capture = capture_frontend_counters_for_test();
+    let _counter_capture = capture_counters_for_test();
     reset_frontend_counters();
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
 

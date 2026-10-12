@@ -30,7 +30,6 @@ use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
-use moth_lexical::numeric::profile::NumericProfile;
 
 // -------------------------
 //  Folding Context
@@ -43,11 +42,6 @@ use moth_lexical::numeric::profile::NumericProfile;
 pub(crate) struct TirFoldContext<'a> {
     pub string_table: &'a mut StringTable,
     pub template_const_loop_iteration_limit: usize,
-    /// The compilation boundary's `Int` width and `Float` precision for folds under this context.
-    ///
-    /// WHY: substituted RPN folds and range iteration values must use the same widths
-    ///      as literal materialisation rather than assuming the default profile.
-    pub(crate) numeric_profile: NumericProfile,
 
     pub(crate) bindings: Vec<TemplateFoldBinding>,
     /// Optional source-scope lookup for already-resolved module constants.
@@ -399,6 +393,7 @@ fn fold_runtime_expression_with_bindings<'a>(
 ) -> Result<FoldResolvedExpression<'a>, TemplateError> {
     let mut substituted = Vec::with_capacity(rpn.items.len());
     let mut any_substituted = false;
+    let mut retained_pending = false;
 
     for item in &rpn.items {
         let new_item = match item {
@@ -418,6 +413,15 @@ fn fold_runtime_expression_with_bindings<'a>(
                 }
             }
             ExpressionRpnItem::Operator { .. } => item.clone(),
+            // A retained numeric recipe must stay untouched: body completion replaces it
+            // before any fold runs, so the item is carried through unchanged.
+            ExpressionRpnItem::PendingNumericBinding { .. }
+            | ExpressionRpnItem::PendingNumericCast { .. }
+            | ExpressionRpnItem::PendingNumericCall { .. }
+            | ExpressionRpnItem::PendingNumericExpression { .. } => {
+                retained_pending = true;
+                item.clone()
+            }
             // Pending syntax never survives evaluation; its presence here is a broken
             // compiler invariant, not a foldable position.
             ExpressionRpnItem::PendingNumericLiteral { .. }
@@ -434,6 +438,17 @@ fn fold_runtime_expression_with_bindings<'a>(
         return Ok(FoldResolvedExpression::Borrowed(expression));
     }
 
+    // A retained numeric recipe cannot be constant-folded yet: keep the substituted RPN
+    // as authored so body completion resolves its pending items exactly once.
+    if retained_pending {
+        add_ast_counter(AstCounter::TemplateFoldExpressionCloneRequests, 1);
+        add_ast_counter(AstCounter::TemplateFoldExpressionOwnedRewrites, 1);
+        return Ok(FoldResolvedExpression::Owned(Box::new(Expression {
+            kind: ExpressionKind::Runtime(ExpressionRpn { items: substituted }),
+            ..expression.clone()
+        })));
+    }
+
     // At least one operand was substituted; attempt constant folding on the
     // updated RPN to see if the expression can be simplified further.
     // Folding consumes what it is given, and both non-folding outcomes below rebuild a runtime
@@ -443,7 +458,6 @@ fn fold_runtime_expression_with_bindings<'a>(
     match constant_fold(
         substituted.clone(),
         fold_context.string_table,
-        fold_context.numeric_profile,
         fold_context.source_scope,
     ) {
         Ok(ConstantFoldOutcome::Folded(mut stack)) => {

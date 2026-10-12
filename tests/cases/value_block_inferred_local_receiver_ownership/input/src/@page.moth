@@ -7,7 +7,7 @@ Role ::
     Scout,
 ;
 
-Summary = | label String, role Role, size Int |
+Summary = | label String, role Role, size I32 |
 
 role_name |role Role| -> String:
     return if role is:
@@ -23,7 +23,7 @@ empty_labels type A || -> {A}:
 
 -- Full match, inline Bool if and block Bool if, each with a local type that
 -- differs from the single function result.
-make_summary |slot Int| -> Summary:
+make_summary |slot I32| -> Summary:
     role = if slot is:
         < 4 => then Role::Worker
         < 7 => then Role::Sentinel
@@ -40,7 +40,7 @@ make_summary |slot Int| -> Summary:
 
 -- A branch can still return through the function contract while the other
 -- branches produce the local's own String value.
-checked_summary |slot Int| -> Summary:
+checked_summary |slot I32| -> Summary:
     label = if slot is:
         < 0 => return Summary("negative", Role::Scout, 0)
         < 4 => then "small"
@@ -50,7 +50,7 @@ checked_summary |slot Int| -> Summary:
 ;
 
 -- An explicit local annotation constrains `then` values but not `return`.
-annotated_summary |slot Int| -> Summary:
+annotated_summary |slot I32| -> Summary:
     label String = if slot < 0:
         return Summary("annotated-negative", Role::Scout, 0)
     else
@@ -60,7 +60,7 @@ annotated_summary |slot Int| -> Summary:
 ;
 
 -- Multiple success results: the local stays one value and returns keep both slots.
-describe |count Int| -> String, Int:
+describe |count I32| -> String, I32:
     label = if count < 0:
         return "negative", 0
     else
@@ -70,12 +70,12 @@ describe |count Int| -> String, Int:
 ;
 
 -- No success results.
-add_bonus |total ~Int, count Int|:
+add_bonus |total ~I32, count I32|:
     bonus = if count > 2 then 10 else 1
     total += bonus
 ;
 
-count_large |limit Int| -> Summary:
+count_large |limit I32| -> Summary:
     total ~= 0
     loop 0 to limit |value|:
         step = if value > 2 then 1 else 0
@@ -84,9 +84,9 @@ count_large |limit Int| -> Summary:
     return Summary("loop", Role::Worker, total)
 ;
 
--- The inner declaration owns its Int target. The later `then` values still
+-- The inner declaration owns its I32 target. The later `then` values still
 -- target the outer String receiver.
-nested_summary |count Int| -> Summary:
+nested_summary |count I32| -> Summary:
     label String = if count > 0:
         doubled = if count > 5 then count * 2 else count
         if doubled > 10:
@@ -101,14 +101,14 @@ nested_summary |count Int| -> Summary:
 ;
 
 -- Typed locals keep context-dependent forms: typed `none` and generic evidence.
-typed_context_summary |count Int| -> Summary:
+typed_context_summary |count I32| -> Summary:
     note String? = if count > 3 then "noted" else none
     label = if note is |text| then text else "plain"
     labels {String} = if count > 3 then empty_labels() else {"seeded"}
     return Summary(label, Role::Scout, labels.length())
 ;
 
-checked_label |count Int| -> String, Error!:
+checked_label |count I32| -> String, Error!:
     if count > 100:
         return! Error("too large")
     ;
@@ -116,7 +116,7 @@ checked_label |count Int| -> String, Error!:
 ;
 
 -- `return!` and postfix `!` inside a local value block use the function's error slot.
-validated |count Int| -> Summary, Error!:
+validated |count I32| -> Summary, Error!:
     label = if count is:
         < 0 => return! Error("negative count")
         else => then checked_label(count)!
@@ -124,15 +124,15 @@ validated |count Int| -> Summary, Error!:
     return Summary(label, Role::Worker, count)
 ;
 
-find_count |count Int| -> Int?:
+find_count |count I32| -> I32?:
     if count is 0:
         return none
     ;
     return count
 ;
 
--- Postfix `?` returns `none` from the function. The local itself stays `Int`.
-doubled_count |count Int| -> Int?:
+-- Postfix `?` returns `none` from the function. The local itself stays `I32`.
+doubled_count |count I32| -> I32?:
     found = if count > 5:
         then find_count(count - 6)?
     else
@@ -141,7 +141,7 @@ doubled_count |count Int| -> Int?:
     return found * 2
 ;
 
-doubled_or_zero |count Int| -> Int:
+doubled_or_zero |count I32| -> I32:
     return if doubled_count(count) is |value| then value else 0
 ;
 

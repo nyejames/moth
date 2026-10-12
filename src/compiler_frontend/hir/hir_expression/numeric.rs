@@ -29,6 +29,7 @@ use crate::compiler_frontend::hir::statements::{
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::return_hir_transformation_error;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 use super::fallible::EmittedFallibleCarrier;
 
@@ -225,14 +226,14 @@ impl<'a> HirBuilder<'a> {
         self.emit_statement_to_current_block(statement, span)
     }
 
-    /// Formats a `Float` expression into a `String` using Moth's formatting contract.
+    /// Formats a binary-float expression into a `String` using Moth's formatting contract.
     ///
     /// WHAT: allocates a result local, emits `HirStatementKind::FormatFloat`, and, in
     ///       `ReturnError` mode, branches on the internal fallible carrier before returning the
     ///       unwrapped formatted string. In `Trap` mode the result local receives the scalar `String`
     ///       success value and a local load is returned.
-    /// WHY: `Float -> String` casts and runtime Float template interpolation must share one
-    ///      Moth-owned formatter instead of relying on target-native stringification.
+    /// WHY: runtime binary-float template interpolation must use one Moth-owned formatter instead
+    ///      of relying on target-native stringification.
     pub(crate) fn emit_formatted_float_value(
         &mut self,
         source: HirValueId,
@@ -250,7 +251,7 @@ impl<'a> HirBuilder<'a> {
             }
             NumericFailureMode::Infallible => {
                 return_hir_transformation_error!(
-                    "Float formatting has no semantically discharged mode",
+                    "Binary-float formatting has no semantically discharged mode",
                     self.hir_error_location(span)
                 );
             }
@@ -308,22 +309,22 @@ impl<'a> HirBuilder<'a> {
         self.lower_numeric_carrier_to_success_value(carrier, span)
     }
 
-    /// Validates a `Float` value from an external/backend boundary before exposing it as an
-    /// ordinary Moth `Float`.
+    /// Validates an external/backend-boundary binary float before ordinary Moth code observes it.
     ///
     /// WHAT: allocates a result local, emits `HirStatementKind::ValidateFloat`, and, in
     ///       `ReturnError` mode, branches on the internal fallible carrier before returning the
-    ///       unwrapped finite `Float`. In `Trap` mode the result local receives the scalar `Float`
-    ///       success value and a local load is returned.
-    /// WHY: incoming `Float` values must be rounded at the selected profile precision and
-    ///      validated as finite before ordinary Moth code observes them.
+    ///       unwrapped finite value. In `Trap` mode the result local receives the scalar success
+    ///       value and a local load is returned.
+    /// WHY: incoming binary floats must be rounded at their resolved exact precision and
+    ///      validated as finite, so the source row's type owns both the result local and the
+    ///      recoverable carrier's success slot instead of a re-derived precision.
     pub(crate) fn emit_validated_float_value(
         &mut self,
         source: HirValueId,
         span: &Option<SourceSpan>,
     ) -> Result<HirValueId, HirConstructionFailure> {
         let failure_mode = self.select_float_integrity_failure_mode(span)?;
-        let float_type = self.lower_type_id(self.type_environment.builtins().float, span)?;
+        let float_type = self.module.expressions.expression(source).ty;
 
         match failure_mode {
             NumericFailureMode::Trap => {
@@ -334,14 +335,14 @@ impl<'a> HirBuilder<'a> {
             }
             NumericFailureMode::Infallible => {
                 return_hir_transformation_error!(
-                    "Float validation has no semantically discharged mode",
+                    "Binary-float validation has no semantically discharged mode",
                     self.hir_error_location(span)
                 );
             }
         }
     }
 
-    /// Emits a trapping `ValidateFloat` and returns the scalar `Float` local load.
+    /// Emits a trapping `ValidateFloat` and returns the scalar result local load.
     fn emit_trapping_validated_float_value(
         &mut self,
         source: HirValueId,
@@ -356,11 +357,11 @@ impl<'a> HirBuilder<'a> {
         self.make_local_load_expression(result_local, float_type, &no_span, region)
     }
 
-    /// Emits a recoverable `ValidateFloat` and returns the unwrapped finite `Float`.
+    /// Emits a recoverable `ValidateFloat` and returns the unwrapped finite value.
     ///
     /// WHAT: stores the internal fallible carrier in a temp local, emits `FallibleBranch` and a
     ///       `ReturnError` edge, then continues on the success block and returns
-    ///       `FallibleUnwrapSuccess`.
+    ///       `FallibleUnwrapSuccess` at the carrier's resolved success type.
     /// WHY: this mirrors the existing fallible-carrier helpers for calls and casts, keeping the
     ///      error path visible to borrow validation.
     fn emit_recoverable_validated_float_value(
@@ -547,7 +548,7 @@ impl<'a> HirBuilder<'a> {
     ///       take a separate trap-only path.
     /// WHY: the private failure lane later installs inferred delivery for private no-slot
     ///      functions. Custom error slots require frontend-validated local recovery or explicit
-    ///      mapping, never automatic conversion. Code-less operations (`Float` negation,
+    ///      mapping, never automatic conversion. Code-less operations (binary-float negation,
     ///      exact `Dec` arithmetic) keep their `Trap` permanently because they never become
     ///      lane producers.
     pub(crate) fn select_numeric_failure_mode(
@@ -621,8 +622,8 @@ impl<'a> HirBuilder<'a> {
 
     /// Converts binary operands to the selected checked-operation domain.
     ///
-    /// WHAT: makes operation-domain promotions explicit, except that Dec power keeps its Int
-    ///       exponent in the canonical profile type.
+    /// WHAT: makes operation-domain promotions explicit, except that Dec power keeps its exact
+    ///       `I32` exponent.
     /// WHY: backends consume typed operations without reconstructing source promotions, while the
     ///      exponent is semantically distinct from the Dec base and must never be rescaled.
     pub(crate) fn lower_checked_numeric_binary_operands(
@@ -635,10 +636,11 @@ impl<'a> HirBuilder<'a> {
         let left = self.convert_numeric_operand_to_domain(left, op.domain, span)?;
 
         if op.operator == NumericOperator::Power && matches!(op.domain, NumericScalar::Number(_)) {
-            let int_type = self.type_environment.builtins().int;
-            if self.module.expressions.expression(right).ty != int_type {
+            let exponent_type =
+                NumericScalar::Fixed(FixedScalar::I32).type_id(&self.type_environment);
+            if self.module.expressions.expression(right).ty != exponent_type {
                 return_hir_transformation_error!(
-                    "Dec power exponent must remain the canonical Int type",
+                    "Dec power exponent must remain the exact I32 type",
                     self.hir_error_location(span)
                 );
             }
@@ -685,7 +687,7 @@ impl<'a> HirBuilder<'a> {
     /// WHAT: emits the standard `NumericConversion` expression for a source scalar whose
     ///       canonical type differs from `domain`, leaving already-matching operands unchanged.
     /// WHY: shared operator policy determines promotions; HIR makes each required conversion
-    ///      explicit. Dec power keeps its exponent in the canonical profile Int type.
+    ///      explicit. Dec power keeps its exponent in the exact `I32` type.
     pub(crate) fn convert_numeric_operand_to_domain(
         &mut self,
         value: HirValueId,

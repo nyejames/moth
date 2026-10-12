@@ -1,7 +1,7 @@
 //! Private failure lane producer-selection tests.
 //!
 //! WHAT: proves lane installation splits only trapping numeric operations that carry the
-//!       shared failure code set, leaving code-less traps (`Float` negation) untouched.
+//!       shared failure code set, leaving code-less traps (`F64` negation) untouched.
 //! WHY: the installer cannot re-derive AST failure facts; it must consult the same code
 //!      set or it would route a dead error edge for an operation the frontend calls
 //!      infallible (and, on Wasm, report recoverable numeric failure for exact arithmetic).
@@ -86,12 +86,12 @@ fn install_lanes(
 
 #[test]
 fn lane_installation_splits_code_carrying_traps_but_not_codeless_float_negation() {
-    // `negate` becomes a lane function through its escaping `failer` call. Its `Int`
+    // `negate` becomes a lane function through its escaping `failer` call. Its `I32`
     // multiplication (code-carrying) must split onto the inferred lane, while its
-    // `Float` negation (empty shared code set) must keep its lowering-time trap.
+    // `F64` negation (empty shared code set) must keep its lowering-time trap.
     let (hir, _, report, path_fork, string_table) = install_lanes(
-        "failer |value Int| -> Int:\n    return value * 2\n;\n\
-         negate |value Float, seed Int| -> Float:\n    bumped = failer(seed)\n    return -value\n;\n",
+        "failer |value I32| -> I32:\n    return value * 2\n;\n\
+         negate |value F64, seed I32| -> F64:\n    bumped = failer(seed)\n    return -value\n;\n",
     );
     let negate = function_id_by_name(&hir, &path_fork, &string_table, "negate");
     assert!(
@@ -106,7 +106,7 @@ fn lane_installation_splits_code_carrying_traps_but_not_codeless_float_negation(
     assert_eq!(
         numeric_op_modes(&hir, NumericOperator::Negate),
         vec![NumericFailureMode::Trap],
-        "codeless Float negation must keep its trap instead of gaining a dead error edge"
+        "codeless F64 negation must keep its trap instead of gaining a dead error edge"
     );
     assert!(
         hir.blocks

@@ -1258,3 +1258,945 @@ points = [
     { case = "generic_scaling_80_frontend", size = 80 },
     { case = "generic_scaling_160_frontend", size = 160 },
 ]
+
+# Body-local numeric inference and selected-width operation workloads.
+
+[[workload]]
+id = "numeric_copy_chain_32"
+entry = "benchmarks/numeric-scaling/copy-chain-32.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/copy-chain-32.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_copy_chain_32_check"
+workload = "numeric_copy_chain_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_copy_chain_32_frontend"
+workload = "numeric_copy_chain_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_copy_chain_128"
+entry = "benchmarks/numeric-scaling/copy-chain-128.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/copy-chain-128.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_copy_chain_128_check"
+workload = "numeric_copy_chain_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_copy_chain_128_frontend"
+workload = "numeric_copy_chain_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_copy_chain_512"
+entry = "benchmarks/numeric-scaling/copy-chain-512.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/copy-chain-512.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_copy_chain_512_check"
+workload = "numeric_copy_chain_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_copy_chain_512_frontend"
+workload = "numeric_copy_chain_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[scaling]]
+id = "numeric_copy_chain"
+metric = "frontend.ast.total"
+max_exponent = 1.25
+points = [
+    { case = "numeric_copy_chain_32_frontend", size = 32 },
+    { case = "numeric_copy_chain_128_frontend", size = 128 },
+    { case = "numeric_copy_chain_512_frontend", size = 512 },
+]
+
+[[workload]]
+id = "numeric_origin_fanout_32"
+entry = "benchmarks/numeric-scaling/origin-fanout-32.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/origin-fanout-32.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_origin_fanout_32_check"
+workload = "numeric_origin_fanout_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_origin_fanout_32_frontend"
+workload = "numeric_origin_fanout_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_origin_fanout_128"
+entry = "benchmarks/numeric-scaling/origin-fanout-128.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/origin-fanout-128.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_origin_fanout_128_check"
+workload = "numeric_origin_fanout_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_origin_fanout_128_frontend"
+workload = "numeric_origin_fanout_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_origin_fanout_512"
+entry = "benchmarks/numeric-scaling/origin-fanout-512.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/origin-fanout-512.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_origin_fanout_512_check"
+workload = "numeric_origin_fanout_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_origin_fanout_512_frontend"
+workload = "numeric_origin_fanout_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[scaling]]
+id = "numeric_origin_fanout"
+metric = "frontend.ast.total"
+max_exponent = 1.25
+points = [
+    { case = "numeric_origin_fanout_32_frontend", size = 32 },
+    { case = "numeric_origin_fanout_128_frontend", size = 128 },
+    { case = "numeric_origin_fanout_512_frontend", size = 512 },
+]
+
+[[workload]]
+id = "numeric_alias_receiver_chain_256"
+entry = "benchmarks/numeric-scaling/alias-receiver-chain-256.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/alias-receiver-chain-256.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_alias_receiver_chain_256_check"
+workload = "numeric_alias_receiver_chain_256"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_alias_receiver_chain_256_frontend"
+workload = "numeric_alias_receiver_chain_256"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_alias_receiver_chain_1024"
+entry = "benchmarks/numeric-scaling/alias-receiver-chain-1024.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/alias-receiver-chain-1024.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_alias_receiver_chain_1024_check"
+workload = "numeric_alias_receiver_chain_1024"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_alias_receiver_chain_1024_frontend"
+workload = "numeric_alias_receiver_chain_1024"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_alias_receiver_chain_4096"
+entry = "benchmarks/numeric-scaling/alias-receiver-chain-4096.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/alias-receiver-chain-4096.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_alias_receiver_chain_4096_check"
+workload = "numeric_alias_receiver_chain_4096"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_alias_receiver_chain_4096_frontend"
+workload = "numeric_alias_receiver_chain_4096"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[scaling]]
+id = "numeric_alias_receiver_chain"
+metric = "frontend.ast.total"
+max_exponent = 1.25
+points = [
+    { case = "numeric_alias_receiver_chain_256_frontend", size = 256 },
+    { case = "numeric_alias_receiver_chain_1024_frontend", size = 1024 },
+    { case = "numeric_alias_receiver_chain_4096_frontend", size = 4096 },
+]
+
+[[workload]]
+id = "numeric_grouped_arithmetic_32"
+entry = "benchmarks/numeric-scaling/grouped-arithmetic-32.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/grouped-arithmetic-32.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_grouped_arithmetic_32_check"
+workload = "numeric_grouped_arithmetic_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_grouped_arithmetic_32_frontend"
+workload = "numeric_grouped_arithmetic_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_grouped_arithmetic_128"
+entry = "benchmarks/numeric-scaling/grouped-arithmetic-128.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/grouped-arithmetic-128.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_grouped_arithmetic_128_check"
+workload = "numeric_grouped_arithmetic_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_grouped_arithmetic_128_frontend"
+workload = "numeric_grouped_arithmetic_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_grouped_arithmetic_512"
+entry = "benchmarks/numeric-scaling/grouped-arithmetic-512.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/grouped-arithmetic-512.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_grouped_arithmetic_512_check"
+workload = "numeric_grouped_arithmetic_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_grouped_arithmetic_512_frontend"
+workload = "numeric_grouped_arithmetic_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[scaling]]
+id = "numeric_grouped_arithmetic"
+metric = "frontend.ast.total"
+max_exponent = 1.25
+points = [
+    { case = "numeric_grouped_arithmetic_32_frontend", size = 32 },
+    { case = "numeric_grouped_arithmetic_128_frontend", size = 128 },
+    { case = "numeric_grouped_arithmetic_512_frontend", size = 512 },
+]
+
+[[workload]]
+id = "numeric_independent_regions_32"
+entry = "benchmarks/numeric-scaling/independent-regions-32.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/independent-regions-32.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_independent_regions_32_check"
+workload = "numeric_independent_regions_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_independent_regions_32_frontend"
+workload = "numeric_independent_regions_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_independent_regions_128"
+entry = "benchmarks/numeric-scaling/independent-regions-128.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/independent-regions-128.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_independent_regions_128_check"
+workload = "numeric_independent_regions_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_independent_regions_128_frontend"
+workload = "numeric_independent_regions_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_independent_regions_512"
+entry = "benchmarks/numeric-scaling/independent-regions-512.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/independent-regions-512.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_independent_regions_512_check"
+workload = "numeric_independent_regions_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_independent_regions_512_frontend"
+workload = "numeric_independent_regions_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[scaling]]
+id = "numeric_independent_regions"
+metric = "frontend.ast.total"
+max_exponent = 1.25
+points = [
+    { case = "numeric_independent_regions_32_frontend", size = 32 },
+    { case = "numeric_independent_regions_128_frontend", size = 128 },
+    { case = "numeric_independent_regions_512_frontend", size = 512 },
+]
+
+[[workload]]
+id = "numeric_aggregate_forwarding_32"
+entry = "benchmarks/numeric-scaling/aggregate-forwarding-32.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/aggregate-forwarding-32.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_aggregate_forwarding_32_check"
+workload = "numeric_aggregate_forwarding_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_aggregate_forwarding_32_frontend"
+workload = "numeric_aggregate_forwarding_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_aggregate_forwarding_128"
+entry = "benchmarks/numeric-scaling/aggregate-forwarding-128.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/aggregate-forwarding-128.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_aggregate_forwarding_128_check"
+workload = "numeric_aggregate_forwarding_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_aggregate_forwarding_128_frontend"
+workload = "numeric_aggregate_forwarding_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_aggregate_forwarding_512"
+entry = "benchmarks/numeric-scaling/aggregate-forwarding-512.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/aggregate-forwarding-512.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_aggregate_forwarding_512_check"
+workload = "numeric_aggregate_forwarding_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_aggregate_forwarding_512_frontend"
+workload = "numeric_aggregate_forwarding_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[scaling]]
+id = "numeric_aggregate_forwarding"
+metric = "frontend.ast.total"
+max_exponent = 1.25
+points = [
+    { case = "numeric_aggregate_forwarding_32_frontend", size = 32 },
+    { case = "numeric_aggregate_forwarding_128_frontend", size = 128 },
+    { case = "numeric_aggregate_forwarding_512_frontend", size = 512 },
+]
+
+[[workload]]
+id = "numeric_safety_pruning_32"
+entry = "benchmarks/numeric-scaling/safety-pruning-32.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/safety-pruning-32.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_safety_pruning_32_check"
+workload = "numeric_safety_pruning_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_safety_pruning_32_frontend"
+workload = "numeric_safety_pruning_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_safety_pruning_128"
+entry = "benchmarks/numeric-scaling/safety-pruning-128.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/safety-pruning-128.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_safety_pruning_128_check"
+workload = "numeric_safety_pruning_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_safety_pruning_128_frontend"
+workload = "numeric_safety_pruning_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_safety_pruning_512"
+entry = "benchmarks/numeric-scaling/safety-pruning-512.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/safety-pruning-512.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_safety_pruning_512_check"
+workload = "numeric_safety_pruning_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_safety_pruning_512_frontend"
+workload = "numeric_safety_pruning_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[scaling]]
+id = "numeric_safety_pruning"
+metric = "frontend.ast.total"
+max_exponent = 1.25
+points = [
+    { case = "numeric_safety_pruning_32_frontend", size = 32 },
+    { case = "numeric_safety_pruning_128_frontend", size = 128 },
+    { case = "numeric_safety_pruning_512_frontend", size = 512 },
+]
+
+[[workload]]
+id = "numeric_mutable_cycles_32"
+entry = "benchmarks/numeric-scaling/mutable-cycles-32.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/mutable-cycles-32.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_mutable_cycles_32_check"
+workload = "numeric_mutable_cycles_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_mutable_cycles_32_frontend"
+workload = "numeric_mutable_cycles_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_mutable_cycles_128"
+entry = "benchmarks/numeric-scaling/mutable-cycles-128.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/mutable-cycles-128.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_mutable_cycles_128_check"
+workload = "numeric_mutable_cycles_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_mutable_cycles_128_frontend"
+workload = "numeric_mutable_cycles_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_mutable_cycles_512"
+entry = "benchmarks/numeric-scaling/mutable-cycles-512.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/mutable-cycles-512.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_mutable_cycles_512_check"
+workload = "numeric_mutable_cycles_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_mutable_cycles_512_frontend"
+workload = "numeric_mutable_cycles_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[scaling]]
+id = "numeric_mutable_cycles"
+metric = "frontend.ast.total"
+max_exponent = 1.25
+points = [
+    { case = "numeric_mutable_cycles_32_frontend", size = 32 },
+    { case = "numeric_mutable_cycles_128_frontend", size = 128 },
+    { case = "numeric_mutable_cycles_512_frontend", size = 512 },
+]
+
+[[workload]]
+id = "numeric_narrow_chains_32"
+entry = "benchmarks/numeric-scaling/narrow-chains-32.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/narrow-chains-32.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_narrow_chains_32_check"
+workload = "numeric_narrow_chains_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_narrow_chains_32_frontend"
+workload = "numeric_narrow_chains_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_narrow_chains_128"
+entry = "benchmarks/numeric-scaling/narrow-chains-128.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/narrow-chains-128.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_narrow_chains_128_check"
+workload = "numeric_narrow_chains_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_narrow_chains_128_frontend"
+workload = "numeric_narrow_chains_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_narrow_chains_512"
+entry = "benchmarks/numeric-scaling/narrow-chains-512.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/narrow-chains-512.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_narrow_chains_512_check"
+workload = "numeric_narrow_chains_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_narrow_chains_512_frontend"
+workload = "numeric_narrow_chains_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[scaling]]
+id = "numeric_narrow_chains"
+metric = "frontend.ast.total"
+max_exponent = 1.25
+points = [
+    { case = "numeric_narrow_chains_32_frontend", size = 32 },
+    { case = "numeric_narrow_chains_128_frontend", size = 128 },
+    { case = "numeric_narrow_chains_512_frontend", size = 512 },
+]
+
+[[workload]]
+id = "numeric_generic_failure_chain_32"
+entry = "benchmarks/numeric-scaling/generic-failure-chain-32.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/generic-failure-chain-32.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_generic_failure_chain_32_check"
+workload = "numeric_generic_failure_chain_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_generic_failure_chain_32_frontend"
+workload = "numeric_generic_failure_chain_32"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_generic_failure_chain_128"
+entry = "benchmarks/numeric-scaling/generic-failure-chain-128.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/generic-failure-chain-128.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_generic_failure_chain_128_check"
+workload = "numeric_generic_failure_chain_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_generic_failure_chain_128_frontend"
+workload = "numeric_generic_failure_chain_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "numeric_generic_failure_chain_512"
+entry = "benchmarks/numeric-scaling/generic-failure-chain-512.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/generic-failure-chain-512.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "numeric_generic_failure_chain_512_check"
+workload = "numeric_generic_failure_chain_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "numeric_generic_failure_chain_512_frontend"
+workload = "numeric_generic_failure_chain_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[scaling]]
+id = "numeric_generic_failure_chain"
+metric = "frontend.ast.total"
+max_exponent = 1.25
+points = [
+    { case = "numeric_generic_failure_chain_32_frontend", size = 32 },
+    { case = "numeric_generic_failure_chain_128_frontend", size = 128 },
+    { case = "numeric_generic_failure_chain_512_frontend", size = 512 },
+]

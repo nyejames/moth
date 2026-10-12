@@ -316,6 +316,9 @@ pub(in crate::compiler_frontend::ast::templates) fn head_prefix_tir_nodes(
         if matches!(
             node.kind,
             TemplateIrNodeKind::Loop { .. } | TemplateIrNodeKind::Conditional { .. }
+        ) || matches!(
+            &node.kind,
+            TemplateIrNodeKind::RetainedNumericIntake(role) if role.completes_into_control_flow()
         ) {
             break;
         }

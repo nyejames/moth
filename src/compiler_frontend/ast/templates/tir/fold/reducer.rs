@@ -835,6 +835,13 @@ pub(super) fn fold_tir_node_into_buffer(
             )
             .into(),
         ),
+
+        // A retained position is unfinished compiler scratch: body-root numeric completion
+        // installs its value before any template is folded.
+        TemplateIrNodeKind::RetainedNumericIntake(_) => Err(CompilerError::compiler_error(
+            "TIR fold: a retained numeric intake position cannot enter the constant-fold reducer.",
+        )
+        .into()),
     }
 }
 
@@ -923,11 +930,7 @@ fn fold_tir_dynamic_expression(
         return Ok(());
     }
 
-    match fold_expression_kind_to_string(
-        &expression_ref.kind,
-        fold_context.string_table,
-        fold_context.numeric_profile,
-    ) {
+    match fold_expression_kind_to_string(&expression_ref.kind, fold_context.string_table) {
         Some(text) => {
             output_state.append_text(&text);
             output_state.emitted_output = true;

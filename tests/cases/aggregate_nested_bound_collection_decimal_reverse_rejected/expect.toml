@@ -1,0 +1,8 @@
+entry = "."
+
+# Reversing the outer entries preserves the bound whole collection's integer-family conflict.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]

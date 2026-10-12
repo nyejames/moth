@@ -1,0 +1,15 @@
+-- Two exact nested receivers constrain the numeric leaves of one unannotated literal.
+-- The later I64 receiver is primary and the earlier U64 receiver is secondary.
+receive_u64_grid |grid {{U64}}| -> String:
+    return ""
+;
+
+receive_i64_grid |grid {{I64}}| -> String:
+    return ""
+;
+
+grid = {{1, 2}}
+first = receive_u64_grid(grid)
+second = receive_i64_grid(grid)
+
+[:unreachable]

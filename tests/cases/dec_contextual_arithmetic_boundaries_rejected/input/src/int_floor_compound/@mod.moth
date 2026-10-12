@@ -1,4 +1,4 @@
-reject_int_floor_compound |integer Int| -> String:
+reject_int_floor_compound |integer I32| -> String:
     total ~Dec4 = 1
     total += integer // 2
     return [total]

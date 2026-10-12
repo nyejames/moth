@@ -1,1 +1,1 @@
-value Int = cast 1
+value I32 = cast 1

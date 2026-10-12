@@ -1,21 +1,27 @@
--- Narrow fixed operand ranges let the compiler discharge selected additions,
--- subtractions, multiplications and negation when their promoted results fit.
+-- Explicit operand widening preserves the former wide numerical witnesses.
+-- Separate narrow operations assert D15 completion and exact overflow edges.
 -- HTML renders all exact values from parameter operands without constant folding.
 -- Other operations retain checked failure, including wide_minus_zero's
 -- subtraction after an infallible cast, division, power and the final pair-add.
--- HTML-Wasm rejects the recoverable numeric capability at wide_minus_zero,
+-- HTML-Wasm rejects recoverable numeric capability at the widened sum,
 -- before runtime, rather than computing and rendering the values.
 
 u8_sum |left U8, right U8| -> U32:
-    return left + right
+    wide_left U32 = cast left
+    wide_right U32 = cast right
+    return wide_left + wide_right
 ;
 
 i16_pair_sum |left I16, right I16| -> I32:
-    return left + right
+    wide_left I32 = cast left
+    wide_right I32 = cast right
+    return wide_left + wide_right
 ;
 
 i8_difference |left I8, right I8| -> I32:
-    return left - right
+    wide_left I32 = cast left
+    wide_right I32 = cast right
+    return wide_left - wide_right
 ;
 
 i16_unsigned_difference |left I16, right U16| -> I32:
@@ -33,11 +39,15 @@ zero_minus_wide |value U32| -> I64:
 ;
 
 i8_product |left I8, right I8| -> I32:
-    return left * right
+    wide_left I32 = cast left
+    wide_right I32 = cast right
+    return wide_left * wide_right
 ;
 
 u16_product |left U16, right U16| -> U32:
-    return left * right
+    wide_left U32 = cast left
+    wide_right U32 = cast right
+    return wide_left * wide_right
 ;
 
 i16_unsigned_product |left I16, right U16| -> I32:
@@ -45,14 +55,15 @@ i16_unsigned_product |left I16, right U16| -> I32:
 ;
 
 negate_i8 |value I8| -> I32:
-    return -value
+    wide I32 = cast value
+    return -wide
 ;
 
-i16_halve |value I16| -> I32:
+i16_halve |value I16| -> I16:
     return value // 2
 ;
 
-u16_last_bit |value U16| -> U32:
+u16_last_bit |value U16| -> U16:
     return value % 2
 ;
 
@@ -86,7 +97,9 @@ u32_wide_product |value U32| -> U64:
 ;
 
 power_u8 |base U8, exponent U8| -> U32:
-    return base ^ exponent
+    wide U32 = cast base
+    power U32 = cast exponent
+    return wide ^ power
 ;
 
 i32_pair_add |left I32, right I32| -> I32:
@@ -119,3 +132,51 @@ power_boundary = power_u8(2, 31)
 retained_add = i32_pair_add(2147483646, 1)
 
 [:bounded proofs u8=[u8_add] i16=[i16_add] i8sub=[i8_sub] i16u16sub=[i16u16_sub] wide-high=[wide_sub_high] wide-low=[wide_sub_low] i8mul=[i8_mul] u16mul=[u16_mul] i16u16mul=[i16u16_mul] neg-min=[neg_min_i8] neg-zero=[neg_zero_i8] halve=[halve_i16] lastbit=[odd_bit_u16]/[even_bit_u16] halve64=[halve_i64] parity64=[parity_i64] i64min=[identity_i64_min] i64max=[identity_i64_max] u64max=[identity_u64_max] u64third=[third_u64] u64parity=[parity_u64] widemul=[wide_mul] power=[power_boundary] retained=[retained_add]]
+narrow_add |left U8, right U8| -> U8, Error!:
+    return left + right
+;
+narrow_sub |left I8, right I8| -> I8, Error!:
+    return left - right
+;
+narrow_mul |left U16, right U16| -> U16, Error!:
+    return left * right
+;
+narrow_neg |value I8| -> I8, Error!:
+    return -value
+;
+narrow_power |base U8, exponent U8| -> U8, Error!:
+    return base ^ exponent
+;
+safe_mixed |left I8, right U8| -> I16:
+    return left + right
+;
+add_code ~U32 = 0
+failed_add = narrow_add(200, 100) catch |error|:
+    add_code = error.code
+    then 0
+;
+sub_code ~U32 = 0
+failed_sub = narrow_sub(-128, 127) catch |error|:
+    sub_code = error.code
+    then 0
+;
+mul_code ~U32 = 0
+failed_mul = narrow_mul(65535, 65535) catch |error|:
+    mul_code = error.code
+    then 0
+;
+neg_code ~U32 = 0
+failed_neg = narrow_neg(-128) catch |error|:
+    neg_code = error.code
+    then 0
+;
+power_code ~U32 = 0
+failed_power = narrow_power(2, 31) catch |error|:
+    power_code = error.code
+    then 0
+;
+safe_add = narrow_add(200, 55) catch:
+    then 0
+;
+mixed_sum = safe_mixed(-128, 255)
+[:D15 narrow safe=[safe_add] mixed=[mixed_sum] codes=[add_code]/[sub_code]/[mul_code]/[neg_code]/[power_code] results=[failed_add]/[failed_sub]/[failed_mul]/[failed_neg]/[failed_power]]

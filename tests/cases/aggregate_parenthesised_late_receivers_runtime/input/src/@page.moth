@@ -1,0 +1,13 @@
+render || -> String:
+    values = ({1, 2})
+    received {U64} = values
+    nested = ((({3, 4})))
+    received_nested {U64} = nested
+    entries = ({1 = 5, 2 = 6})
+    received_entries {U64 = U64} = entries
+    nested_entries = ((({7 = 8})))
+    received_nested_entries {U64 = U64} = nested_entries
+    return "parenthesised numeric receivers"
+;
+
+[:[render()]]

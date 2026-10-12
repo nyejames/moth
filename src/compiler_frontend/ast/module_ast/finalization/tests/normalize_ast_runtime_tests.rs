@@ -1,6 +1,6 @@
 use super::*;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 fn runtime_template_handoff_from_expression(expression: Expression) -> OwnedRuntimeTemplateHandoff {
     let ExpressionKind::RuntimeTemplateHandoff(handoff) = expression.kind else {
@@ -62,7 +62,6 @@ fn conditional_tir_root_normalizes_into_owned_runtime_handoff() {
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -148,7 +147,6 @@ fn loop_tir_root_normalizes_into_owned_runtime_handoff() {
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -305,7 +303,6 @@ fn ordinary_runtime_template_handoff_uses_module_tir_store() {
 
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -445,7 +442,6 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
         &template_ir_store.borrow(),
         &mut string_table,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        NumericProfile::STANDARD,
         None,
     )
     .expect("selected exact TIR fold should project module constants");
@@ -458,7 +454,6 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
     let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -504,7 +499,6 @@ fn runtime_template_expression_normalization_replaces_template_with_owned_handof
 
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -592,7 +586,6 @@ fn runtime_template_expression_handoff_uses_finalized_expression_overlay_view() 
 
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -665,7 +658,6 @@ fn nested_runtime_template_normalizes_through_final_view() {
 
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -787,7 +779,6 @@ fn nested_const_template_folds_through_final_view() {
             TemplateValueFinalizationInputs {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-                numeric_profile: NumericProfile::STANDARD,
                 template_ir_store: &template_ir_store,
             },
             TemplatePreparationMode::Value,
@@ -846,7 +837,6 @@ fn helper_artifact_rejected_after_final_view_traversal() {
 
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
@@ -905,7 +895,6 @@ fn retained_signature_default_normalizes_template_to_string_slice() {
     normalize_retained_signature_defaults(
         &mut signature,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        NumericProfile::STANDARD,
         &template_ir_store,
         &mut string_table,
     )
@@ -957,7 +946,6 @@ fn static_true_assertion_discards_normalized_runtime_template_message_after_vali
     };
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store,
         module_resources: None,
@@ -1087,7 +1075,7 @@ fn body_method_call_args<'a>(
 #[test]
 fn finalization_synchronizes_ordinary_receiver_root_entry_with_emitted_signature() {
     // Receiver ownership publishes this private method through Counter's public surface.
-    let source = "export:\n    Counter = | count Int = 0 |\n    run || -> Int:\n        counter = Counter()\n        counter.bump()\n        return counter.count\n    ;\n;\nbump |this Counter, label String = [\"joined \", \"default\"]| -> Int:\n    return this.count\n;\n";
+    let source = "export:\n    Counter = | count I32 = 0 |\n    run || -> I32:\n        counter = Counter()\n        counter.bump()\n        return counter.count\n    ;\n;\nbump |this Counter, label String = [\"joined \", \"default\"]| -> I32:\n    return this.count\n;\n";
     let (build_result, path_fork, string_table) = parse_single_file_ast_build_result(source)
         .expect("an ordinary receiver method with a template default should finalize");
     let nodes = &build_result.ast.nodes;
@@ -1277,7 +1265,7 @@ fn finalization_normalizes_generic_receiver_root_entry_and_retained_function_def
 
 #[test]
 fn finalization_keeps_private_receiver_methods_out_of_public_roots_and_fills_call_defaults() {
-    let source = "Counter = | count Int = 0 |\nbump |this Counter, step Int = 7| -> Int:\n    return this.count + step\n;\nexport:\n    run || -> Int:\n        counter = Counter()\n        counter.bump()\n        return counter.count\n    ;\n;\n";
+    let source = "Counter = | count I32 = 0 |\nbump |this Counter, step I32 = 7| -> I32:\n    return this.count + step\n;\nexport:\n    run || -> I32:\n        counter = Counter()\n        counter.bump()\n        return counter.count\n    ;\n;\n";
     let (build_result, path_fork, string_table) = parse_single_file_ast_build_result(source)
         .expect("a private receiver method on a private struct should finalize and stay callable");
     let nodes = &build_result.ast.nodes;
@@ -1299,7 +1287,11 @@ fn finalization_keeps_private_receiver_methods_out_of_public_roots_and_fills_cal
     let step = signature_parameter(bump_signature, &path_fork, &string_table, "step")
         .expect("the private method signature must retain its step parameter");
     assert!(
-        matches!(step.value.kind, ExpressionKind::Int(7)),
+        matches!(
+            step.value.kind,
+            ExpressionKind::FixedScalar(value)
+                if value == FixedScalarValue::signed(FixedScalar::I32, 7).expect("7 fits I32")
+        ),
         "the private method's authored default must survive finalization, got {:?}",
         step.value.kind
     );
@@ -1314,7 +1306,11 @@ fn finalization_keeps_private_receiver_methods_out_of_public_roots_and_fills_cal
         panic!("the receiver call must fill exactly its defaulted parameter")
     };
     assert!(
-        matches!(filled.value.kind, ExpressionKind::Int(7)),
+        matches!(
+            filled.value.kind,
+            ExpressionKind::FixedScalar(value)
+                if value == FixedScalarValue::signed(FixedScalar::I32, 7).expect("7 fits I32")
+        ),
         "the omitted default must fill with the declared value at the call site, got {:?}",
         filled.value.kind
     );

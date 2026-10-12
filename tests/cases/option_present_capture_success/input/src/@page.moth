@@ -1,4 +1,4 @@
-value Int? = 42
+value I32? = 42
 result ~= "unset"
 
 if value is |m|:

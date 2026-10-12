@@ -1,6 +1,6 @@
 SITE_TITLE #= "Moth"
 
-badFunc |value Int|:
+badFunc |value I32|:
     BadLocal = value
     io.line([: [BadLocal]])
 ;

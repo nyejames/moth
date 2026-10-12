@@ -1,3 +1,3 @@
-render_value |n Int| -> String:
+render_value |n I32| -> String:
     return [:<p>runtime [n]</p>]
 ;

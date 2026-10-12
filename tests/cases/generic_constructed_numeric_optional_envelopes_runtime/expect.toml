@@ -1,0 +1,8 @@
+entry = "."
+
+# Authored for Phase 5B.2 and unobserved until the parent harness run. No html_wasm block is declared, so no Wasm outcome is asserted. The collection, map, choice_collection, nested, and nested_map forms are unobserved until a new build; no probe covers the NestedMapSlot {String = {T?}} shape. The seeded_collection, seeded_choice, sibling, marker, and tagged paths have no observed outcome: the parent-observed seeded probes in tmp/exact-numerics/phase5 failed INFRA0001 at bg922. The tagged path uses a ready U64 marker argument that determines T; it has no probe.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "generic_constructed_numeric_optional_envelopes struct=4294967319 choice=4294967320 packet=4294967321 immediate=4294967322 field=4294967323 ready=1 collection=4294967327 map=4294967328 choice_collection=4294967329 nested=4294967330 nested_map=4294967331 seeded_collection=4294967338 seeded_choice=4294967339 sibling=4294967340 marker=4294967341 tagged=4294967343 tagged_marker=4294967342"

@@ -39,6 +39,22 @@ use std::path::Path;
 use std::{cell::RefCell, rc::Rc};
 
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+/// One exact `I32` literal expression.
+///
+/// WHY: these fixtures pin the exact `I32` width explicitly at the scalar carrier.
+fn i32_literal(
+    value: i64,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
+    value_mode: ValueMode,
+) -> Expression {
+    Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+        span,
+        value_mode,
+    )
+}
 
 fn add_test_module_constant(ast: &mut Ast, declaration: Declaration) {
     let _path_fork = super::PathInternerFork::empty();
@@ -73,7 +89,11 @@ fn registers_declarations_and_resolves_start_function() {
             struct_name,
             vec![make_test_variable(
                 field_name,
-                no_value_expr(builtin_type_ids::INT, None, ValueMode::ImmutableOwned),
+                no_value_expr(
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    None,
+                    ValueMode::ImmutableOwned,
+                ),
             )],
         ),
         None,
@@ -242,7 +262,7 @@ fn start_function_can_reference_module_constant() {
         vec![node(
             NodeKind::ExpressionStatement(reference_expr_with_type_id(
                 third_const,
-                builtin_type_ids::INT,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 None,
                 ValueMode::ImmutableReference,
             )),
@@ -254,10 +274,7 @@ fn start_function_can_reference_module_constant() {
     let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
     add_test_module_constant(
         &mut ast,
-        make_test_variable(
-            third_const,
-            Expression::int(3, None, ValueMode::ImmutableOwned),
-        ),
+        make_test_variable(third_const, i32_literal(3, None, ValueMode::ImmutableOwned)),
     );
 
     let (module, _type_environment) = lower_ast(ast, &mut string_table, &mut path_fork)
@@ -276,7 +293,8 @@ fn start_function_can_reference_module_constant() {
                 HirStatementKind::Expr(value)
                     if matches!(
                         &module.expressions.expression(*value).kind,
-                        HirExpressionKind::Int(3)
+                        HirExpressionKind::FixedScalar(literal)
+                            if literal.as_i64() == Some(3)
                     )
             )
         }),
@@ -471,11 +489,19 @@ fn lowers_struct_module_constant_into_record_with_ordered_fields() {
             vec![
                 make_test_variable(
                     x_field,
-                    no_value_expr(builtin_type_ids::INT, None, ValueMode::ImmutableOwned),
+                    no_value_expr(
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                        None,
+                        ValueMode::ImmutableOwned,
+                    ),
                 ),
                 make_test_variable(
                     y_field,
-                    no_value_expr(builtin_type_ids::INT, None, ValueMode::ImmutableOwned),
+                    no_value_expr(
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                        None,
+                        ValueMode::ImmutableOwned,
+                    ),
                 ),
             ],
         ),
@@ -502,14 +528,8 @@ fn lowers_struct_module_constant_into_record_with_ordered_fields() {
             Expression::struct_instance(
                 super::symbol("Point", &mut path_fork, &mut string_table),
                 vec![
-                    make_test_variable(
-                        x_field,
-                        Expression::int(5, None, ValueMode::ImmutableOwned),
-                    ),
-                    make_test_variable(
-                        y_field,
-                        Expression::int(99, None, ValueMode::ImmutableOwned),
-                    ),
+                    make_test_variable(x_field, i32_literal(5, None, ValueMode::ImmutableOwned)),
+                    make_test_variable(y_field, i32_literal(99, None, ValueMode::ImmutableOwned)),
                 ],
                 None,
                 ValueMode::ImmutableOwned,
@@ -534,14 +554,20 @@ fn lowers_struct_module_constant_into_record_with_ordered_fields() {
                 .next()
                 .unwrap_or(fields[0].name.as_str());
             assert_eq!(first_field_name, "x");
-            assert!(matches!(fields[0].value, HirConstValue::Int(5)));
+            assert!(matches!(
+                fields[0].value,
+                HirConstValue::FixedScalar(value) if value.as_i64() == Some(5)
+            ));
             let second_field_name = fields[1]
                 .name
                 .rsplit(['/', '\\'])
                 .next()
                 .unwrap_or(fields[1].name.as_str());
             assert_eq!(second_field_name, "y");
-            assert!(matches!(fields[1].value, HirConstValue::Int(99)));
+            assert!(matches!(
+                fields[1].value,
+                HirConstValue::FixedScalar(value) if value.as_i64() == Some(99)
+            ));
         }
         other => panic!("expected record constant, got {other:?}"),
     }
@@ -549,8 +575,6 @@ fn lowers_struct_module_constant_into_record_with_ordered_fields() {
 
 #[test]
 fn lowers_fixed_scalar_module_constant_with_exact_bits_and_type() {
-    use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
-
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) =
@@ -965,10 +989,7 @@ fn nested_structural_piece_lists<'value>(
 
         HirConstValue::OptionSome(inner) => nested_structural_piece_lists(inner, piece_lists),
 
-        HirConstValue::Int(_)
-        | HirConstValue::Uint(_)
-        | HirConstValue::Float(_)
-        | HirConstValue::FixedScalar(_)
+        HirConstValue::FixedScalar(_)
         | HirConstValue::Number(_)
         | HirConstValue::Bool(_)
         | HirConstValue::Char(_)

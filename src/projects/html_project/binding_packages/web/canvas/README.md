@@ -32,8 +32,9 @@ WebGL belongs in `@web/graphics`, never here. `@web/canvas` stays the owner of t
 ## Implementation notes
 
 - The binding ABI is concrete, synchronous and scalar or opaque only. Browser overloads and union source types become explicitly named wrappers, such as the `to_data_url*` and `create_image*` families.
+- Numeric annotations name `I32` dimensions, indices and pixel channels, and `F64` coordinates and measurements. Generated wrappers validate successful scalar payloads against those exact contracts. A declared `Error!` result preserves its error channel, while the shared finite-result boundary handles non-finite float success values. The [external binding contract](../../../../../../docs/src/docs/packages/external-binding-contracts.mtf) owns validation and failure delivery. Exact numeric types don't supply a Wasm lowering.
 - `create_image` returns the element immediately while the browser keeps loading it. Drawing stays fallible through `assertLoadedImage` until loading completes.
-- Pixel channels cross as `Int` values clamped to 0 through 255 because the annotation subset has no `U8`. Any future binary-data design keeps numeric `U8` channels distinct from `Byte` octets. They share one-byte storage but aren't interchangeable, and this package doesn't settle a Core byte API or bitwise syntax.
+- Pixel channels cross as `I32` values clamped to 0 through 255 because the annotation subset has no `U8`. Any future binary-data design keeps numeric `U8` channels distinct from `Byte` octets. They share one-byte storage but aren't interchangeable, and this package doesn't settle a Core byte API or bitwise syntax.
 - Handles have no teardown functions. The host JavaScript runtime manages their lifetime.
 - Failures use compiler-owned host error codes imported by name from `@moth/runtime`: `MOTH_ERROR_HOST_INVALID_ARGUMENT` (400), `MOTH_ERROR_HOST_RESOURCE_NOT_FOUND` (404), `MOTH_ERROR_HOST_RESOURCE_UNAVAILABLE` (409) and `MOTH_ERROR_HOST_OPERATION_FAILED` (500). `BuiltinErrorCode` owns the values. The asset never spells a number, and `web/tests/canvas_error_tests.rs` pins each category's code and message.
 

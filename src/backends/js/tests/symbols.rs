@@ -36,10 +36,10 @@ fn missing_field_name_metadata_is_an_internal_compiler_error() {
     let mut module = HirModule::new();
     module.structs.push(HirStruct {
         id: StructId(0),
-        frontend_type_id: types.int,
+        frontend_type_id: types.i32,
         fields: vec![HirField {
             id: FieldId(0),
-            ty: types.int,
+            ty: types.i32,
         }],
     });
 

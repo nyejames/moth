@@ -1,4 +1,4 @@
-capacity #Int = 4
+capacity #I32 = 4
 Names as {capacity String}
 
 render_alias || -> String:

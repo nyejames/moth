@@ -1,0 +1,9 @@
+-- The unannotated `seed` retains the known-result call. The missing String
+-- key must receive the ordinary missing-argument diagnostic before the get
+-- assignment target guard.
+make_entries |seed U64| -> {String = I32}:
+    return {"entry" = 1}
+;
+
+seed = 1
+make_entries(seed).get() = 0

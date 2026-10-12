@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "collection_loop_leaf before len=2 items=0=4294967296;1=2; after items=0=4294967296;1=2; len=2 body items=0=4294967296;1=2; statement last=2 last_index=1 wrapped len=2 <ul>0=4294967296;1=2;</ul> inline_source items=0=4294967296;1=2; nested_projection row=0=4294967296;1=2; typed_float=1; mixed_float=1;2.5; converted=1"

@@ -196,7 +196,7 @@ fn runtime_prelude_contains_cast_helpers() {
 
     assert!(
         source.contains("function __moth_cast_int("),
-        "prelude must contain __moth_cast_int when the String -> Int numeric text parse is used"
+        "prelude must contain __moth_cast_int when the String -> I32 numeric text parse is used"
     );
     assert!(
         source.contains("function __moth_cast_integer_in_range("),
@@ -204,11 +204,11 @@ fn runtime_prelude_contains_cast_helpers() {
     );
     assert!(
         !source.contains("function __moth_normalize_numeric_text("),
-        "String -> Int must not emit the whitespace-trimming numeric text normalizer"
+        "String -> I32 must not emit the whitespace-trimming numeric text normalizer"
     );
 }
 
-/// Verifies that the expression-level `Float -> String` helper also emits the shared formatter.
+/// Verifies that the expression-level `F64 -> String` helper also emits the shared formatter.
 /// [prelude-presence] [float-helper]
 #[test]
 fn runtime_prelude_contains_float_formatter_for_float_to_string_cast() {
@@ -216,19 +216,19 @@ fn runtime_prelude_contains_float_formatter_for_float_to_string_cast() {
 
     assert!(
         source.contains("function __moth_cast_float_to_string("),
-        "Float -> String expression casts must emit their cast helper"
+        "F64 -> String expression casts must emit their cast helper"
     );
     assert!(
         source.contains("function __moth_format_float("),
-        "Float -> String expression casts must emit the Moth formatter helper"
+        "F64 -> String expression casts must emit the Moth formatter helper"
     );
     assert!(
         source.contains("function __moth_numeric_trap("),
-        "Float -> String expression casts use the shared numeric trap helper"
+        "F64 -> String expression casts use the shared numeric trap helper"
     );
 }
 
-/// Verifies that a module that only performs an `Int -> Float` cast does not
+/// Verifies that a module that only performs an `I32 -> F64` cast does not
 /// emit the numeric parsing helpers. [prelude-presence]
 #[test]
 fn runtime_prelude_omits_cast_helpers_when_only_identity_cast_is_used() {
@@ -236,11 +236,11 @@ fn runtime_prelude_omits_cast_helpers_when_only_identity_cast_is_used() {
 
     assert!(
         !source.contains("function __moth_cast_int("),
-        "prelude must not contain __moth_cast_int when only Int -> Float is used"
+        "prelude must not contain __moth_cast_int when only I32 -> F64 is used"
     );
     assert!(
         !source.contains("function __moth_cast_float("),
-        "prelude must not contain __moth_cast_float when only Int -> Float is used"
+        "prelude must not contain __moth_cast_float when only I32 -> F64 is used"
     );
     assert!(
         !source.contains("function __moth_normalize_numeric_text("),

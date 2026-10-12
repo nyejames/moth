@@ -70,7 +70,6 @@ use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use moth_lexical::numeric::profile::NumericProfile;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -435,7 +434,6 @@ fn parse_project_config_for_test(
     let mut source_files = SourceDatabase::empty();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
-        numeric_profile: NumericProfile::STANDARD,
         style_directives,
         frontend_surface: &frontend_surface,
         build_config_inputs: &build_config_inputs,
@@ -462,7 +460,6 @@ fn parse_project_config_for_test_with_html_keys(
     let mut source_files = SourceDatabase::empty();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
-        numeric_profile: NumericProfile::STANDARD,
         style_directives,
         frontend_surface: &frontend_surface,
         build_config_inputs: &build_config_inputs,
@@ -487,7 +484,6 @@ fn parse_project_config_for_test_with_packages(
     let mut source_files = SourceDatabase::empty();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
-        numeric_profile: NumericProfile::STANDARD,
         style_directives,
         frontend_surface,
         build_config_inputs: &build_config_inputs,
@@ -1644,7 +1640,7 @@ fn direct_selection_resolves_source_package_facade() {
     fs::write(src.join("@page.moth"), "@helper add\n#[:entry]\n").expect("should write entry");
     fs::write(
         package_root.join("@mod.moth"),
-        "export:\n    add |a Int, b Int| -> Int:\n        return a + b\n    ;\n;\n",
+        "export:\n    add |a I32, b I32| -> I32:\n        return a + b\n    ;\n;\n",
     )
     .expect("should write helper package root");
 

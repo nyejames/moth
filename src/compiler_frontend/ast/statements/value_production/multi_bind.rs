@@ -14,7 +14,7 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::ast::statements::value_production::completeness::{
-    visit_reachable_then_values, visit_reachable_then_values_mut,
+    visit_authored_then_values_mut, visit_reachable_then_values,
 };
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ActiveValueProductionTarget, ParsedReceiverValue, ProducedValues, ValueBlock, ValueReceiverKind,
@@ -29,7 +29,8 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
+use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
+use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Value-producing multi-bind bodies recurse into the AST body parser, so they preserve the
 /// source-diagnostic and retained-data-infrastructure lanes for expression callers.
@@ -73,10 +74,26 @@ pub fn try_parse_multi_bind_value_block(
             target_count,
             type_interner,
         ),
+        // A branch body still holds numeric continuations, so the block cannot be finished here.
+        // The block is this right-hand position's whole authored syntax, so it travels to the
+        // enclosing body root through the shared retained splice, which rebuilds it and runs the
+        // slot inference above exactly once.
+        ParsedReceiverValue::Retained(retained) => {
+            Err(retained.into_deferral(&ValueMode::ImmutableOwned))
+        }
     }))
 }
 
-fn finalize_inferred_value_block(
+/// Complete one inferred mixed-slot value block into its multi-bind result expression.
+///
+/// WHAT: infers every unknown slot from the block's producing bodies, coerces each produced value
+///       against the final slot list, and builds the value-block expression with the interned
+///       result type.
+/// WHY `pub(crate)`: this is the single semantic finalizer for an inferred or mixed value block.
+/// The retained mixed-slot resume in this module's subtree and the pending-target assignment
+/// value-if lane both need it, so it stays reachable across the crate instead of being duplicated
+/// or wrapped by a forwarding helper.
+pub(crate) fn finalize_inferred_value_block(
     block: ValueBlock,
     span: Option<SourceSpan>,
     known_slot_types: &[Option<TypeId>],
@@ -316,7 +333,7 @@ fn validate_expression_against_slot(
     type_environment: &TypeEnvironment,
 ) -> MultiBindValueResult<()> {
     if expression.type_id == expected_type
-        || is_declaration_compatible(expected_type, expression.type_id, type_environment)
+        || is_type_compatible(expected_type, expression.type_id, type_environment)
     {
         return Ok(());
     }
@@ -363,13 +380,13 @@ fn validate_optional_produced_arity(
     .into())
 }
 
-/// Mutates reachable `ThenValue` expressions in a body to apply coercion when needed.
+/// Mutates every authored `ThenValue` group in a body to apply coercion, including dead groups.
 fn coerce_produced_values_in_body(
     body: &mut [AstNode],
     expected_types: &[TypeId],
     type_environment: &TypeEnvironment,
 ) -> MultiBindValueResult<()> {
-    visit_reachable_then_values_mut(body, &mut |produced_values| {
+    visit_authored_then_values_mut(body, &mut |produced_values| {
         if produced_values.expressions.len() != expected_types.len() {
             return validate_optional_produced_arity(
                 Some(&produced_values.expressions),
@@ -387,7 +404,7 @@ fn coerce_produced_values_in_body(
                 continue;
             }
 
-            if !is_declaration_compatible(*expected_type, expr.type_id, type_environment) {
+            if !is_type_compatible(*expected_type, expr.type_id, type_environment) {
                 return Err(CompilerDiagnostic::type_mismatch(
                     *expected_type,
                     expr.type_id,
@@ -404,10 +421,15 @@ fn coerce_produced_values_in_body(
     })
 }
 
+/// A single inferred slot is the block's own value type; only several slots form a tuple, the
+/// same result shape the known-slot receivers build.
 fn intern_multi_bind_result_type(
     result_type_ids: &[TypeId],
     type_interner: &mut AstTypeInterner<'_>,
 ) -> TypeId {
+    if let [single] = result_type_ids {
+        return *single;
+    }
     type_interner
         .environment_mut_for_derived_types()
         .intern_tuple(result_type_ids.to_vec())

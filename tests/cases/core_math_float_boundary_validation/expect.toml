@@ -5,19 +5,6 @@ rendered_output_contains = [
     "core_math_float_boundary_validation finite=4 namespace=4 alias=true errors=304/304/304/304/304/304/304/304/304/304/304/304/304",
 ]
 
-[[backends.html.artifact_assertions]]
-path = "index.html"
-kind = "html"
-must_contain = [
-    "function __moth_float_validate(",
-    "__moth_float_validate(",
-    "Math.sqrt(",
-    "Math.exp(",
-]
-must_not_contain = [
-    "function __moth_math_sqrt(",
-]
-
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"

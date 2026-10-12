@@ -5,6 +5,7 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_messages::BuiltinFailureWitness;
 use crate::compiler_frontend::compiler_messages::{
     BorrowAccessKind, BorrowDiagnosticKind, BuiltinFailureOriginKind, ChoiceVariantSeparatorGap,
     CommonSyntaxMistakeReason, ConfigDiagnosticKind, DeferredFeatureDiagnosticKind,
@@ -37,8 +38,8 @@ use crate::compiler_frontend::source::{
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::{TokenRef, TokenTag, TokenViewError};
+use crate::compiler_frontend::traits::evidence::environment::InfallibleCastEvidenceContract;
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
-use moth_lexical::numeric::profile::NumericProfile;
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompilerDiagnostic {
     pub kind: DiagnosticKind,
@@ -1489,6 +1490,44 @@ impl CompilerDiagnostic {
         )
     }
 
+    pub(crate) fn infallible_cast_evidence_failure(
+        contract: &InfallibleCastEvidenceContract,
+        witness: &BuiltinFailureWitness,
+    ) -> Self {
+        let mut labels = Vec::with_capacity(witness.call_spans.len() + 1);
+        for span in &witness.call_spans {
+            if span.is_some() {
+                labels.push(DiagnosticLabel::secondary(
+                    *span,
+                    Some(DiagnosticLabelMessage::BuiltinFailureCall),
+                ));
+            }
+        }
+        if witness.origin_span.is_some() {
+            let message = match witness.origin {
+                BuiltinFailureOriginKind::Operation => DiagnosticLabelMessage::BuiltinFailureOrigin,
+                BuiltinFailureOriginKind::CompoundWriteBack { target } => {
+                    DiagnosticLabelMessage::BuiltinWriteBackOrigin {
+                        target_type_id: target,
+                    }
+                }
+            };
+            labels.push(DiagnosticLabel::secondary(
+                witness.origin_span,
+                Some(message),
+            ));
+        }
+        Self::invalid_trait_conformance(
+            contract.target_name,
+            Some(contract.trait_name),
+            InvalidTraitConformanceReason::InferredFailureInInfallibleCast {
+                requirement_name: contract.requirement_name,
+            },
+            contract.span,
+        )
+        .with_labels(labels)
+    }
+
     pub(crate) fn invalid_trait_incompatibility(
         subject_name: StringId,
         incompatible_trait_name: Option<StringId>,
@@ -1948,16 +1987,11 @@ impl CompilerDiagnostic {
         reason: crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason,
         operation: Option<StringId>,
         span: Option<SourceSpan>,
-        numeric_profile: Option<NumericProfile>,
     ) -> Self {
         Self::new(
             DiagnosticKind::Rule(RuleDiagnosticKind::CompileTimeEvaluationError),
             span,
-            DiagnosticPayload::CompileTimeEvaluationError {
-                reason,
-                operation,
-                numeric_profile,
-            },
+            DiagnosticPayload::CompileTimeEvaluationError { reason, operation },
         )
     }
 

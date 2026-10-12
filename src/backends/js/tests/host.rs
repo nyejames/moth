@@ -86,7 +86,6 @@ fn host_io_reads_the_underlying_value_before_logging() {
         &string_table,
         JsLoweringConfig {
             pretty: true,
-            numeric_profile: NumericProfile::STANDARD,
             auto_invoke_start: true,
             function_emission_policy: JsFunctionEmissionPolicy::AllFunctions,
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
@@ -160,7 +159,6 @@ fn auto_invokes_start_function_when_enabled() {
         &string_table,
         JsLoweringConfig {
             pretty: true,
-            numeric_profile: NumericProfile::STANDARD,
             auto_invoke_start: true,
             function_emission_policy: JsFunctionEmissionPolicy::AllFunctions,
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
@@ -190,7 +188,7 @@ fn auto_invokes_fallible_start_once_and_branches_on_its_carrier_tag() {
         let (type_environment, types) = build_type_environment();
         let region = RegionId(0);
         let terminator = if succeeds {
-            HirTerminator::ReturnSuccess(int_expression(42, types.int, region, &mut expressions))
+            HirTerminator::ReturnSuccess(i32_expression(42, types.i32, region, &mut expressions))
         } else {
             HirTerminator::ReturnError(string_expression(
                 "application-secret",
@@ -225,7 +223,7 @@ fn auto_invokes_fallible_start_once_and_branches_on_its_carrier_tag() {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![],
-            return_type: types.fallible_int_string,
+            return_type: types.fallible_i32_string,
         };
         let module = build_module(
             expressions,

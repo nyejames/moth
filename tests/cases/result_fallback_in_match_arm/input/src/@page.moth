@@ -1,6 +1,6 @@
 -- Fallback path inside a match arm body.
 
-get_value |n Int| -> String, Error!:
+get_value |n I32| -> String, Error!:
     if n is 2:
         return! Error("fail")
     ;

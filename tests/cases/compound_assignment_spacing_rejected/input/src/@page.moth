@@ -1,2 +1,2 @@
-count ~Int = 0
+count ~I32 = 0
 count +=1

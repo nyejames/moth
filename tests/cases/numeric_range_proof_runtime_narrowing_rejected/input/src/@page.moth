@@ -1,6 +1,7 @@
 increment_when_safe |small U8| -> U8:
     if small < 255:
-        total U8 = small + 1
+        one #U16 = 1
+        total U8 = small + one
         return total
     else
         return small

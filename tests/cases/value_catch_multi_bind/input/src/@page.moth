@@ -1,8 +1,8 @@
-load_user || -> String, Float, Error!:
+load_user || -> String, F64, Error!:
     return! Error("missing")
 ;
 
-recover || -> String, Float:
+recover || -> String, F64:
     name, score = load_user() catch:
         then "guest", 0.0
     ;

@@ -27,10 +27,26 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use crate::compiler_frontend::hir::hir_builder::{
     assert_no_placeholder_terminators, build_ast_with_registered_types, lower_ast,
 };
+
+/// One exact `I32` literal expression.
+///
+/// WHY: these fixtures pin the exact `I32` width explicitly at the scalar carrier.
+fn i32_literal(
+    value: i64,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
+    value_mode: ValueMode,
+) -> Expression {
+    Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+        span,
+        value_mode,
+    )
+}
 
 /// Extracts the result-local definition and merge target from a value-block arm block.
 fn value_block_result_definition(
@@ -68,11 +84,11 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
     let result_name = super::symbol("result", &mut path_fork, &mut string_table);
 
     let arm_a = MatchArm {
-        pattern: MatchPattern::Literal(Expression::int(1, None, ValueMode::ImmutableOwned)),
+        pattern: MatchPattern::Literal(i32_literal(1, None, ValueMode::ImmutableOwned)),
         guard: None,
         body: vec![node(
             NodeKind::ThenValue(ProducedValues {
-                expressions: vec![Expression::int(10, None, ValueMode::ImmutableOwned)],
+                expressions: vec![i32_literal(10, None, ValueMode::ImmutableOwned)],
                 span: None,
             }),
             None,
@@ -80,11 +96,11 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
     };
 
     let arm_b = MatchArm {
-        pattern: MatchPattern::Literal(Expression::int(2, None, ValueMode::ImmutableOwned)),
+        pattern: MatchPattern::Literal(i32_literal(2, None, ValueMode::ImmutableOwned)),
         guard: None,
         body: vec![node(
             NodeKind::ThenValue(ProducedValues {
-                expressions: vec![Expression::int(20, None, ValueMode::ImmutableOwned)],
+                expressions: vec![i32_literal(20, None, ValueMode::ImmutableOwned)],
                 span: None,
             }),
             None,
@@ -93,7 +109,7 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
 
     let default_body = vec![node(
         NodeKind::ThenValue(ProducedValues {
-            expressions: vec![Expression::int(0, None, ValueMode::ImmutableOwned)],
+            expressions: vec![i32_literal(0, None, ValueMode::ImmutableOwned)],
             span: None,
         }),
         None,
@@ -104,7 +120,7 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
             block: Box::new(ValueBlock::Match(ValueMatchBlock {
                 scrutinee: reference_expr_with_type_id(
                     x,
-                    builtin_type_ids::INT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     None,
                     ValueMode::ImmutableReference,
                 ),
@@ -112,11 +128,11 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
                 default: Some(default_body),
                 exhaustiveness: MatchExhaustiveness::HasDefault,
                 span: None,
-                result_type_ids: vec![builtin_type_ids::INT],
+                result_type_ids: vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
             })),
         },
         None,
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         DataType::Inferred,
         ValueMode::ImmutableOwned,
     );
@@ -124,7 +140,12 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param_with_type_id(x, builtin_type_ids::INT, false, None)],
+            parameters: vec![param_with_type_id(
+                x,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                false,
+                None,
+            )],
             returns: vec![],
         },
         vec![node(
@@ -199,7 +220,7 @@ fn then_value_without_active_target_is_hir_invariant_failure() {
         },
         vec![node(
             NodeKind::ThenValue(ProducedValues {
-                expressions: vec![Expression::int(1, None, ValueMode::ImmutableOwned)],
+                expressions: vec![i32_literal(1, None, ValueMode::ImmutableOwned)],
                 span: None,
             }),
             None,

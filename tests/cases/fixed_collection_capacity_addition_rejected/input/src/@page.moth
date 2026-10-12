@@ -1,4 +1,4 @@
 render || -> String:
-    items {2 + 2 Int} = {}
+    items {2 + 2 I32} = {}
     return ""
 ;

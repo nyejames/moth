@@ -840,7 +840,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             validation_context.trait_evidence_environment,
             validation_context.visibility,
             &self.resolved_type_aliases_by_path,
-            self.context.numeric_profile,
         );
 
         let instance_name = self
@@ -1099,7 +1098,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             template_const_loop_iteration_limit: self.context.template_const_loop_iteration_limit,
             template_ir_store: Rc::clone(&self.context.template_ir_store),
             build_profile: self.context.build_profile,
-            numeric_profile: self.context.numeric_profile,
             source_token_owners: self.source_token_owners.clone(),
         });
 
@@ -1257,15 +1255,17 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         }
                     },
                 )
-                .map_err(|error| match error {
-                    ExpressionParseError::Diagnostic(diagnostic) => {
-                        ExpressionParseError::Diagnostic(member_shell_diagnostic_for_context(
-                            diagnostic,
-                            member_context,
-                        ))
-                    }
-                    ExpressionParseError::Infrastructure(error) => {
-                        ExpressionParseError::Infrastructure(error)
+                .map_err(|error| {
+                    // The member shell is the boundary that maps signature-member failures onto
+                    // their struct-default or choice-payload context; a leaked numeric deferral
+                    // has no diagnostic context to remap, so it reports its broken handoff here.
+                    match error.at_boundary_without_numeric_retention(
+                        "the module environment type resolution",
+                    ) {
+                        Ok(diagnostic) => ExpressionParseError::Diagnostic(
+                            member_shell_diagnostic_for_context(diagnostic, member_context),
+                        ),
+                        Err(error) => ExpressionParseError::Infrastructure(Box::new(error)),
                     }
                 })?;
                 declarations.push(declaration);

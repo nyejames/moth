@@ -29,6 +29,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::test_source_location;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
+use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -138,14 +139,14 @@ pub(crate) fn unit_expression(
     )
 }
 
-pub(crate) fn int_expression(
-    value: i64,
+pub(crate) fn fixed_scalar_expression(
+    value: FixedScalarValue,
     ty: TypeId,
     region: RegionId,
     expressions: &mut HirExpressionStore,
 ) -> HirValueId {
     expression(
-        HirExpressionKind::Int(value),
+        HirExpressionKind::FixedScalar(value),
         ty,
         region,
         ValueKind::Const,

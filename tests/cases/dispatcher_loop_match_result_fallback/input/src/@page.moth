@@ -1,6 +1,6 @@
 -- Loop + match + result fallback combined inside a dispatcher path.
 
-step_value |i Int| -> Int, Error!:
+step_value |i I32| -> I32, Error!:
     if i is 2:
         return! Error("fail")
     ;

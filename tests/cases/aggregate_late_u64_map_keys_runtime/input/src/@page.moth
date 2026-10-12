@@ -1,0 +1,22 @@
+-- Raw U64 map keys and values are materialised by a later {U64 = U64} receiver.
+-- Max and max-1 stay distinct keys, and the absent lower key remains absent.
+
+read_scores |scores {U64 = U64}| -> String:
+    top = scores.get(18_446_744_073_709_551_615) catch:
+        then 0
+    ;
+    below = scores.get(18_446_744_073_709_551_614) catch:
+        then 0
+    ;
+    len = scores.length
+    top_found = scores.contains(18_446_744_073_709_551_615)
+    lower_found = scores.contains(18_446_744_073_709_551_613)
+    return [:late_u64_map top=[top] below=[below] len=[len] top_found=[top_found] lower_found=[lower_found]]
+;
+
+render_late_u64_map_keys || -> String:
+    scores = {18_446_744_073_709_551_615 = 9, 18_446_744_073_709_551_614 = 7}
+    return read_scores(scores)
+;
+
+[:[render_late_u64_map_keys()]]

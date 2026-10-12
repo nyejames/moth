@@ -819,6 +819,9 @@ fn collect_static_tir_fragments(
         | TemplateIrNodeKind::AggregateOutput
         | TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => {}
+        // A retained position has no static fragment yet: its value is installed by body-root
+        // numeric completion.
+        TemplateIrNodeKind::RetainedNumericIntake(_) => {}
     }
 }
 
@@ -869,6 +872,8 @@ fn tir_subtree_contains_slot(
         | TemplateIrNodeKind::AggregateOutput
         | TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => false,
+        // A retained position is not an unresolved slot declaration.
+        TemplateIrNodeKind::RetainedNumericIntake(_) => false,
     }
 }
 

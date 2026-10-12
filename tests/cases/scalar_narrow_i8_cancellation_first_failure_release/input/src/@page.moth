@@ -1,0 +1,25 @@
+-- (127 + 1) - 1 fits I8 only after cancellation, but the checked addition
+-- fails first at the selected I8 width. The reassociated order fits and
+-- succeeds, proving the failure belongs to the earlier operation order.
+-- Operands arrive through parameters so nothing folds or reassociates.
+cancel_i8 |left I8, right I8| -> I8, Error!:
+    return (left + right) - right
+;
+
+reassociate_i8 |left I8, right I8| -> I8, Error!:
+    return (left - right) + right
+;
+
+cancel_code ~U32 = 0
+cancel_value = cancel_i8(127, 1) catch |cancel_error|:
+    cancel_code = cancel_error.code
+    then 0
+;
+cancel_text String = cast cancel_value
+
+reassociated_value = reassociate_i8(127, 1) catch:
+    then 0
+;
+reassociated_text String = cast reassociated_value
+
+[:scalar i8 cancellation code=[cancel_code] cancelled=[cancel_text] reassociated=[reassociated_text]]

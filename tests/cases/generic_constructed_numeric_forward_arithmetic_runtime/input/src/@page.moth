@@ -1,0 +1,16 @@
+-- Arithmetic over an unannotated numeric origin flows into a direct generic
+-- constructor field. The origin is constrained only by later U64 consumers;
+-- the constructed field is consumed as U64 and the sum is distinct from origin.
+
+Packet type T = |value T|
+
+read_u64 |value U64| -> String:
+    return cast value
+;
+
+origin = 4294967298
+packet = Packet(origin + origin)
+packet_text = read_u64(packet.value)
+origin_text = read_u64(origin)
+
+[:generic_constructed_numeric_forward_arithmetic_runtime packet=[packet_text] origin=[origin_text]]

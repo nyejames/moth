@@ -6,4 +6,4 @@ display type A |this Box of A| -> String:
     return "box"
 ;
 
-Box of Int must DISPLAYABLE
+Box of I32 must DISPLAYABLE

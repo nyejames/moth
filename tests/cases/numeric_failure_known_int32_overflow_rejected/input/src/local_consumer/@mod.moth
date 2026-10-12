@@ -1,4 +1,4 @@
-consume || -> Int:
-    maximum #Int = 2147483647
+consume || -> I32:
+    maximum #I32 = 2147483647
     return maximum + 1
 ;

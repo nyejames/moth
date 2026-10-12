@@ -1,6 +1,6 @@
 -- Regression: mutable RHS short-circuit call with later runtime-fragment capture.
 
-rhs_capture |calls ~Int| -> Bool:
+rhs_capture |calls ~I32| -> Bool:
     calls = calls + 1
     return true
 ;

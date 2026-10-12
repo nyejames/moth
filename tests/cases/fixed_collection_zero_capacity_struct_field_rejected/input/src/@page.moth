@@ -1,5 +1,5 @@
 Buffer = |
-    items {0 Int},
+    items {0 I32},
 |
 
 render || -> String:

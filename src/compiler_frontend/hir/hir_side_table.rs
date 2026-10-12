@@ -23,7 +23,7 @@ use crate::compiler_frontend::hir::statements::HirStatement;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringIdRemap, StringTable};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
 #[cfg(test)]
@@ -235,6 +235,29 @@ impl HirSideTable {
             .into_iter()
             .filter_map(|(id, span)| remap.get(&id).copied().map(|id| (id, span)))
             .collect();
+    }
+    /// Drops local and statement source metadata after unreachable HIR blocks are removed.
+    pub(crate) fn retain_live_locals_and_statements(
+        &mut self,
+        live_locals: &FxHashSet<LocalId>,
+        live_statements: &FxHashSet<HirNodeId>,
+    ) {
+        let is_live = |location: &HirLocation| match location {
+            HirLocation::Local(id) => live_locals.contains(id),
+            HirLocation::Statement(id) => live_statements.contains(id),
+            _ => true,
+        };
+        self.local_names.retain(|id, _| live_locals.contains(id));
+        self.local_origins.retain(|id, _| live_locals.contains(id));
+        self.ast_to_hir = std::mem::take(&mut self.ast_to_hir)
+            .into_iter()
+            .filter_map(|(span, mut locations)| {
+                locations.retain(&is_live);
+                (!locations.is_empty()).then_some((span, locations))
+            })
+            .collect();
+        self.hir_to_ast.retain(|location, _| is_live(location));
+        self.hir_to_source.retain(|location, _| is_live(location));
     }
 
     /// Remap every path identity retained by HIR side metadata after a module-local path merge.

@@ -1,4 +1,4 @@
-read_value |n Int| -> Int, Error!:
+read_value |n I32| -> I32, Error!:
     if n is 2:
         return! Error("bad value")
     ;

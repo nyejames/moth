@@ -1,0 +1,1 @@
+caught_overflow U8 = 255 + 1 catch then 0

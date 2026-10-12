@@ -1,11 +1,11 @@
 -- Calculator utility module
-compute |a Int, b Int| -> Int:
+compute |a I32, b I32| -> I32:
     result = a + b
     io.line([: Computing: [a] + [b] = [result]])
     return result
 ;
 
-multiply |a Int, b Int| -> Int:
+multiply |a I32, b I32| -> I32:
     result = a * b
     io.line([: Multiplying: [a] * [b] = [result]])
     return result

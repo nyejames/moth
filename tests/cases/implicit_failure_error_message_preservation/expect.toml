@@ -1,10 +1,9 @@
 entry = "."
-numeric_profile = "Int32/Float64"
 
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = " preservation first=-1 freport= 0 first-msg second=-2 sreport= 7 second-msg overflow=-3 oreport= 301 Int operation overflowed ok=34"
+rendered_output_exact = " preservation first=-1 freport= 0 first-msg second=-2 sreport= 7 second-msg overflow=-3 oreport= 301 Integer operation overflowed ok=34"
 
 [backends.html_wasm]
 mode = "failure"

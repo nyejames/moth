@@ -34,7 +34,6 @@ fn case(
         tags: tags.iter().map(|tag| (*tag).to_owned()).collect(),
         contract: contract.map(str::to_owned),
         role,
-        numeric_profile: Default::default(),
         backend_id,
         entry_path: PathBuf::from("input/@page.moth"),
         flags: Vec::new(),
@@ -361,7 +360,7 @@ fn inventory_reports_each_rendered_output_form_and_schema_ten_summary_counts() {
                 golden: GoldenExpectation::default(),
                 rendered_output: RenderedOutputExpectation {
                     runtime_error_contains: vec![
-                        "Int operation".to_owned(),
+                        "Integer operation".to_owned(),
                         "overflowed".to_owned(),
                     ],
                     ..Default::default()

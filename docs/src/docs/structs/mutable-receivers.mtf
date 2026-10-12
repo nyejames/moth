@@ -2,8 +2,8 @@ A mutable receiver method declares `this ~Type`.
 
 [codeblock, $code("moth"):
     Vector2 = |
-        x Float,
-        y Float,
+        x F64,
+        y F64,
     |
 
     reset |this ~Vector2|:

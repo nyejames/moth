@@ -2,7 +2,7 @@ Add `#` when a value must be known during compilation.
 
 [codeblock, $code("moth"):
     site_name #= "Moth"
-    version #Int = 1
+    version #I32 = 1
 ]
 
 Constants cannot change.

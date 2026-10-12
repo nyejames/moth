@@ -2,7 +2,7 @@ Holder = |
     value CASTABLE_TO_STRING,
 |
 
-capacity #Int = 2
+capacity #I32 = 2
 Names as {capacity String}
 names Names = {"a", "b"}
 

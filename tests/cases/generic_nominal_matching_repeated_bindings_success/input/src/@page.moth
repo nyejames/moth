@@ -3,7 +3,7 @@ Pair type T = |
     right T,
 |
 
-good Pair of Int = Pair(1, 2)
+good Pair of I32 = Pair(1, 2)
 
 io.line([: [good.left]])
 io.line([: [good.right]])

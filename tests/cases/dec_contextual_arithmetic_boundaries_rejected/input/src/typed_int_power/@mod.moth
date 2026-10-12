@@ -1,4 +1,4 @@
-reject_typed_int_power |value Int| -> String:
+reject_typed_int_power |value I32| -> String:
     result Dec4 = value ^ 2
     return [result]
 ;

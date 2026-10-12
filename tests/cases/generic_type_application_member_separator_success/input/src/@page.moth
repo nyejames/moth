@@ -1,4 +1,4 @@
-Count as Int
+Count as I32
 
 Box type Value = |
     value Value,
@@ -11,7 +11,7 @@ Pair type Name, Amount = |
 
 Grid type Item = |
     values {Item},
-    last_index Int,
+    last_index I32,
 |
 
 Holder = |
@@ -27,11 +27,11 @@ Lookup ::
     Missing,
 ;
 
-at type Item |this Grid of Item, index Int| -> Item, Error!:
+at type Item |this Grid of Item, index I32| -> Item, Error!:
     return this.values.get(index)!
 ;
 
-mark type Item |this ~Grid of Item, index Int|:
+mark type Item |this ~Grid of Item, index I32|:
     this.last_index = index
 ;
 
@@ -43,7 +43,7 @@ describe_pair |pair Pair of String, Count, index ~Count| -> String:
     return [: [pair.name]:[pair.amount]:[index]]
 ;
 
-describe_int_pair |pair Pair of String, Int, label String| -> String:
+describe_int_pair |pair Pair of String, I32, label String| -> String:
     return [: [pair.name]:[pair.amount]:[label]]
 ;
 

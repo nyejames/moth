@@ -13,7 +13,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::source::line_index::LinePosition;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::fs;
 
 #[test]
@@ -66,14 +66,14 @@ fn assert_config_input_overflow_build(
     .expect("should write config");
 
     let consumer_source = format!(
-        "@facade {imported_name}\n\noverflow || -> Int, Error!:\n    return {expression}\n;\n"
+        "@facade {imported_name}\n\noverflow || -> I32, Error!:\n    return {expression}\n;\n"
     );
     let consumer_path = root.join("src/@page.moth");
     fs::write(&consumer_path, consumer_source).expect("should write consumer source");
     let facade_path = facade_directory.join("@mod.moth");
     fs::write(
         &facade_path,
-        "configured_maximum #Config of Int = 2147483647\n\nexport:\n    maximum #Int = configured_maximum\n    counts #= (maximum = configured_maximum)\n;\n",
+        "configured_maximum #Config of I32 = 2147483647\n\nexport:\n    maximum #I32 = configured_maximum\n    counts #= (maximum = configured_maximum)\n;\n",
     )
     .expect("should write facade source");
 
@@ -104,20 +104,10 @@ fn assert_config_input_overflow_build(
     );
     let (diagnostic_index, diagnostic) = errors[0];
     assert_eq!(diagnostic.identity().code, "MOTH-RULE-0053");
-    let DiagnosticPayload::CompileTimeEvaluationError {
-        reason,
-        numeric_profile,
-        ..
-    } = &diagnostic.payload
-    else {
+    let DiagnosticPayload::CompileTimeEvaluationError { reason, .. } = &diagnostic.payload else {
         panic!("MOTH-RULE-0053 should carry its typed compile-time evaluation payload");
     };
     assert_eq!(*reason, CompileTimeEvaluationErrorReason::IntegerOverflow);
-    assert_eq!(
-        *numeric_profile,
-        Some(NumericProfile::STANDARD),
-        "the HtmlProjectBuilder default profile should be the reported boundary"
-    );
 
     let render_context = messages.diagnostic_render_context(diagnostic_index);
     let primary_position = render_context
@@ -194,7 +184,10 @@ fn explicit_configured_maximum_input() -> BuildConfigInputSet {
         .insert(BuildConfigInputEntry::new(
             BuildInputName::new("configured_maximum")
                 .expect("declared input name should validate as lower_snake_case"),
-            PrimitiveBuildValue::Int(2_147_483_647),
+            PrimitiveBuildValue::Fixed(
+                FixedScalarValue::signed(FixedScalar::I32, 2_147_483_647)
+                    .expect("2_147_483_647 is in I32 range"),
+            ),
             BuildConfigValueLocation::Command(BuildCommandLocation::new(0)),
         ))
         .expect("a single builder input should not collide");

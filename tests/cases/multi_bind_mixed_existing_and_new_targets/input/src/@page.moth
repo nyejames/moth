@@ -1,4 +1,4 @@
-pair || -> String, Int:
+pair || -> String, I32:
     return "fresh", 9
 ;
 

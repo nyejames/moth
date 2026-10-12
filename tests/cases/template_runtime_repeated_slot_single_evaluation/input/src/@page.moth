@@ -6,14 +6,14 @@ repeater = [:
     </section>
 ]
 
-mark_once |values ~{Int}| -> String:
+mark_once |values ~{I32}| -> String:
     ~values.push(1)
     count = values.length()
     return [:count=[count]]
 ;
 
 show = true
-values ~{Int} = {}
+values ~{I32} = {}
 
 rendered = [repeater:
     [$insert("item"):

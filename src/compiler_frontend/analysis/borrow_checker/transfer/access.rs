@@ -30,6 +30,7 @@ use crate::compiler_frontend::hir::statements::{
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 mod conflicts;
 mod move_decision;
 mod statement;
@@ -779,9 +780,6 @@ fn record_shared_reads_in_expression(
     let expression = env.context.expressions.expression(expression_id);
     match &expression.kind {
         HirExpressionKind::Number(_)
-        | HirExpressionKind::Uint(_)
-        | HirExpressionKind::Int(_)
-        | HirExpressionKind::Float(_)
         | HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)
@@ -1039,9 +1037,6 @@ fn collect_expression_roots(
         }
 
         HirExpressionKind::Number(_)
-        | HirExpressionKind::Uint(_)
-        | HirExpressionKind::Int(_)
-        | HirExpressionKind::Float(_)
         | HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)
@@ -1270,9 +1265,6 @@ pub(super) fn transfer_aggregate_expression_ownership(
         }
 
         HirExpressionKind::Number(_)
-        | HirExpressionKind::Uint(_)
-        | HirExpressionKind::Int(_)
-        | HirExpressionKind::Float(_)
         | HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)
@@ -1320,10 +1312,13 @@ fn transfer_aggregate_child(
         }
 
         // Scalar builtins are implicitly copied into aggregate literals. Non-scalar values keep
-        // shared storage unless this site has a proven optional transfer opportunity.
+        // shared storage unless this site has a proven optional transfer opportunity. The implicitly
+        // copied numeric scalars are `I32`, `U32` and `F64`; other fixed widths keep their ordinary
+        // transfer decision.
         if expression.ty == builtin_type_ids::BOOL
-            || expression.ty == builtin_type_ids::INT
-            || expression.ty == builtin_type_ids::FLOAT
+            || expression.ty == builtin_type_ids::fixed_scalar(FixedScalar::I32)
+            || expression.ty == builtin_type_ids::fixed_scalar(FixedScalar::U32)
+            || expression.ty == builtin_type_ids::fixed_scalar(FixedScalar::F64)
             || expression.ty == builtin_type_ids::CHAR
             || expression.ty == builtin_type_ids::NONE
         {

@@ -3,20 +3,27 @@
 //! WHAT: parses the `T?` match surface: `none =>` for absence, literal and
 //! relational patterns for present values, and `|value|` for present capture.
 //! WHY: option matching needs a narrow owner that preserves the compiler-owned
-//! carrier model without exposing public `Option` constructors.
+//! carrier model without exposing public `Option` constructors. A retained optional
+//! subject shares the same capture and value syntax, and its arm is finished once the
+//! body root selects the subject's inner type.
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::ast::statements::match_patterns::{
-    MatchPattern, parse_non_choice_pattern,
+use crate::compiler_frontend::ast::numeric_construction::{
+    DeferredArmPattern, DeferredExpressionCompletion, PendingOptionPattern,
 };
+use crate::compiler_frontend::ast::statements::match_patterns::{
+    MatchPattern, MatchSubject, ensure_pattern_compatible_with_subject, finish_retained_pattern,
+    parse_non_choice_pattern,
+};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidMatchPatternReason};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use moth_lexical::numeric::profile::NumericProfile;
-
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 
 /// Result for the option pattern family.
 ///
@@ -24,6 +31,18 @@ use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 /// lane; the surrounding parser boundary owns any infrastructure failure.
 type OptionPatternResult<T> =
     Result<T, crate::compiler_frontend::ast::expressions::error::ExpressionParseError>;
+
+/// The authored parts of one `|name|` present capture, before its binding path is declared.
+///
+/// WHAT: the arm-local name, the span of the opening pipe and the span of the name token.
+/// WHY: a known and a retained optional subject share this syntax; only the binding's type
+///      and its declaration differ between them.
+#[derive(Debug, Clone)]
+pub(crate) struct OptionCaptureBinding {
+    pub(crate) name: StringId,
+    pub(crate) span: Option<SourceSpan>,
+    pub(crate) binding_span: Option<SourceSpan>,
+}
 
 /// Parse a pattern for an optional scrutinee.
 ///
@@ -35,7 +54,6 @@ type OptionPatternResult<T> =
 pub fn parse_option_pattern(
     token_stream: &mut AstCursor,
     option_inner_type_id: TypeId,
-    numeric_profile: NumericProfile,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
 ) -> OptionPatternResult<MatchPattern> {
@@ -50,51 +68,57 @@ pub fn parse_option_pattern(
     }
 
     // Option present-value checks reuse the non-choice parser's plain
-    // diagnostic boundary without an intermediate representation.
+    // diagnostic boundary without an intermediate representation. The inner type is the exact
+    // known subject for this path, so the parser returns a ready pattern.
     let pattern = parse_non_choice_pattern(
         token_stream,
-        option_inner_type_id,
-        numeric_profile,
+        MatchSubject::Known(option_inner_type_id),
         string_table,
         type_environment,
     )?;
 
     match pattern {
-        MatchPattern::Literal(value) => {
-            if !type_environment.supports_runtime_equality(option_inner_type_id) {
-                return Err(CompilerDiagnostic::invalid_match_pattern(
-                    InvalidMatchPatternReason::OptionValuePatternRequiresEquality,
-                    None,
-                    None,
-                    value.span,
-                )
-                .into());
-            }
-
-            let span = value.span;
-            Ok(MatchPattern::OptionValue { value, span })
+        DeferredArmPattern::Ready(pattern) => {
+            wrap_option_present_value(pattern, option_inner_type_id, type_environment)
         }
 
-        MatchPattern::Relational { .. } => Ok(pattern),
-
-        // parse_non_choice_pattern only returns Literal or Relational for
-        // non-choice patterns, so any other variant is unreachable here.
-        _ => {
-            unreachable!("parse_non_choice_pattern returned unexpected pattern variant for option")
-        }
+        // A known-subject non-choice parse only returns a ready literal or relational pattern,
+        // so any other variant is an invariant violation rather than user input.
+        _ => Err(CompilerError::compiler_error(
+            "parse_non_choice_pattern returned unexpected pattern variant for option",
+        )
+        .into()),
     }
 }
-/// Parse `|name|` present capture for an optional scrutinee.
-///
-/// Validates:
-/// - `||` is rejected.
-/// - Multiple names are rejected.
-/// - Type annotations inside `|...|` are rejected.
+
+/// Parse `|name|` present capture for a known optional scrutinee.
 fn parse_option_present_capture(
     token_stream: &mut AstCursor,
     inner_type_id: TypeId,
     string_table: &mut StringTable,
 ) -> OptionPatternResult<MatchPattern> {
+    let binding = parse_option_capture_binding(token_stream, string_table)?;
+
+    // Binding path is filled in by the caller (branching.rs) once the arm scope is known.
+    Ok(MatchPattern::OptionPresentCapture {
+        name: binding.name,
+        binding_path: PathId::ROOT,
+        inner_type_id,
+        span: binding.span,
+        binding_span: binding.binding_span,
+    })
+}
+
+/// Parse the authored `|name|` capture shared by known and retained optional subjects.
+///
+/// Validates:
+/// - `||` is rejected.
+/// - Multiple names are rejected.
+/// - Type annotations inside `|...|` are rejected.
+pub(crate) fn parse_option_capture_binding(
+    token_stream: &mut AstCursor,
+    string_table: &mut StringTable,
+) -> OptionPatternResult<OptionCaptureBinding> {
     let span = Some(token_stream.current_span());
     token_stream.advance(); // consume opening '|'
     token_stream.skip_newlines();
@@ -112,9 +136,7 @@ fn parse_option_present_capture(
         TokenTag::SYMBOL => token_stream
             .current_string_id_in(string_table)?
             .ok_or_else(|| {
-                crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
-                    "option capture symbol is missing its payload",
-                )
+                CompilerError::compiler_error("option capture symbol is missing its payload")
             })?,
         _ => {
             return Err(CompilerDiagnostic::invalid_match_pattern(
@@ -153,12 +175,96 @@ fn parse_option_present_capture(
     }
     token_stream.advance(); // consume closing '|'
 
-    // Binding path is filled in by the caller (branching.rs) once the arm scope is known.
-    Ok(MatchPattern::OptionPresentCapture {
+    Ok(OptionCaptureBinding {
         name,
-        binding_path: PathId::ROOT,
-        inner_type_id,
         span,
         binding_span,
     })
+}
+
+/// Wrap a ready non-choice pattern as an option present-value arm.
+///
+/// WHAT: a literal must support runtime equality on the inner type and becomes an `OptionValue`;
+///       a relational pattern is forwarded unchanged.
+/// WHY: the equality check depends on the selected inner type, so a pending literal reaches this
+///      check only once that type is known.
+/// MUST NOT: accept any other variant; the non-choice parser returns only these two for options.
+fn wrap_option_present_value(
+    pattern: MatchPattern,
+    inner_type_id: TypeId,
+    type_environment: &TypeEnvironment,
+) -> OptionPatternResult<MatchPattern> {
+    match pattern {
+        MatchPattern::Literal(value) => {
+            if !type_environment.supports_runtime_equality(inner_type_id) {
+                return Err(CompilerDiagnostic::invalid_match_pattern(
+                    InvalidMatchPatternReason::OptionValuePatternRequiresEquality,
+                    None,
+                    None,
+                    value.span,
+                )
+                .into());
+            }
+
+            let span = value.span;
+            Ok(MatchPattern::OptionValue { value, span })
+        }
+
+        relational @ MatchPattern::Relational { .. } => Ok(relational),
+
+        _ => Err(CompilerError::compiler_error(
+            "option present-value pattern is neither a literal nor a relational pattern",
+        )
+        .into()),
+    }
+}
+
+/// Finish a pending optional arm once the subject's concrete optional type is selected.
+///
+/// WHAT: a capture becomes an `OptionPresentCapture` over the selected inner type; a value
+///       becomes an `OptionValue` or a forwarded relational pattern after the subject check.
+/// WHY: a retained optional's inner shape is known at parse time, but the concrete types and
+///      the literal's equality check wait for the body root.
+pub(in crate::compiler_frontend::ast::statements) fn finish_pending_option_pattern<'env>(
+    pending: PendingOptionPattern,
+    subject_type_id: TypeId,
+    completion: &mut impl DeferredExpressionCompletion<'env>,
+) -> OptionPatternResult<MatchPattern> {
+    let inner_type_id = completion
+        .session_services()
+        .type_interner
+        .environment()
+        .option_inner_type(subject_type_id)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "pending option arm finished against a non-option subject",
+            )
+        })?;
+
+    match pending {
+        PendingOptionPattern::PresentCapture(capture) => Ok(MatchPattern::OptionPresentCapture {
+            name: capture.name,
+            binding_path: capture.binding_path,
+            inner_type_id,
+            span: capture.span,
+            binding_span: capture.binding_span,
+        }),
+
+        PendingOptionPattern::PresentValue(pattern) => {
+            let environment = completion.session_services().type_interner.environment();
+            ensure_pattern_compatible_with_subject(&pattern, subject_type_id, environment)?;
+            wrap_option_present_value(pattern, inner_type_id, environment)
+        }
+
+        PendingOptionPattern::RetainedValue(retained) => {
+            let value = completion.resolve_fragment(
+                retained.value.items,
+                ExpectedType::NumericLiteral(inner_type_id),
+                &retained.value.value_mode,
+            )?;
+            let pattern = finish_retained_pattern(retained.relational, value);
+            let environment = completion.session_services().type_interner.environment();
+            wrap_option_present_value(pattern, inner_type_id, environment)
+        }
+    }
 }

@@ -2,7 +2,7 @@
 -- Validates the computed-place layer for nested struct paths.
 
 Inner = |
-    value Int,
+    value I32,
 |
 
 Outer = |

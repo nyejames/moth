@@ -30,16 +30,16 @@ pub(super) fn emit_validate_float(
         BinaryFloatPrecision::Binary64 => WasmAbiType::F64,
         BinaryFloatPrecision::Binary16 => {
             return Err(wasm_generation_error(
-                "Wasm Float validation does not support F16".to_owned(),
+                "Wasm binary-float validation does not support F16".to_owned(),
             ));
         }
     };
-    ensure_local_abi(source, abi_type, context, "Float validation source")?;
+    ensure_local_abi(source, abi_type, context, "binary-float validation source")?;
     ensure_local_abi(
         destination,
         abi_type,
         context,
-        "Float validation destination",
+        "binary-float validation destination",
     )?;
 
     function.instruction(&Instruction::LocalGet(local_index(source, context)?));
@@ -161,7 +161,7 @@ pub(super) fn emit_finite_float_predicate(
         }
         BinaryFloatPrecision::Binary16 => {
             return Err(wasm_generation_error(
-                "Wasm finite Float checks do not support F16".to_owned(),
+                "Wasm finite binary-float checks do not support F16".to_owned(),
             ));
         }
     }

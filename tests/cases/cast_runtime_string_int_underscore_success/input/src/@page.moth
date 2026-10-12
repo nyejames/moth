@@ -1,6 +1,6 @@
-parse |text String| -> Int:
-    value Int = cast text catch |err|:
-        code Int = cast err.code catch:
+parse |text String| -> I32:
+    value I32 = cast text catch |err|:
+        code I32 = cast err.code catch:
             then 0
         ;
         then code

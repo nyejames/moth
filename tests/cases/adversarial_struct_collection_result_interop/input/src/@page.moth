@@ -1,9 +1,9 @@
 Point = |
-    x Int,
-    y Int,
+    x I32,
+    y I32,
 |
 
-load_index |items ~{Int}, idx Int| -> Int, Error!:
+load_index |items ~{I32}, idx I32| -> I32, Error!:
     return items.get(idx)!
 ;
 

@@ -40,6 +40,18 @@ Teaching vocabulary:
 
 Expression side effects linearise into statement preludes. The final value then feeds the next operation or terminator. Plain binary operations may remain for booleans and comparisons. Runtime template string construction lowers through explicit string append operations. Runtime scalar arithmetic lowers through explicit checked numeric statements.
 
+Numeric statements carry canonical exact operand/result domains, the operator
+and the actual failure mode. They consume completed AST facts, never pending
+numeric origins, receiving constraints or inference recipes. Equal fixed types
+preserve their eligible arithmetic width or precision. `I8 + I8` checks at
+`I8` and each `F16` operation rounds and checks finiteness before the next
+operation consumes its result, regardless of scratch carrier width.
+
+Builtin runtime casts carry explicit source and target types. Source-authored
+cast evidence has already become an ordinary direct call. A separate
+`NumericProofs` table can justify predicate elision, but changes neither
+canonical types nor failure delivery and cannot grant target capabilities.
+
 ## Runtime template work
 
 Neutral template handoff from AST becomes ordinary string and control-flow operations in HIR:
@@ -62,7 +74,7 @@ Source calls use explicit target classes:
 
 Generated concrete functions add another stable target class once materialised.
 
-HIR stores no dependency aliases as semantic authority and no backend runtime names as identity. Beside HIR, the compiler records **per-function link facts**: call edges, helper and capability needs, numeric and cast operation presence, resource uses, project-context provenance and generated-function requests. Statement-level numeric safety belongs to the separate profile-aware `NumericProofs` side table paired with executable HIR.
+HIR stores no dependency aliases as semantic authority and no backend runtime names as identity. Beside HIR, the compiler records **per-function link facts**: call edges, helper and capability needs, numeric and cast operation presence, resource uses, project-context provenance and generated-function requests. Statement-level numeric safety belongs to the separate `NumericProofs` side table paired with executable HIR.
 
 Those facts are the linking authority later stages consume.
 

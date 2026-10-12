@@ -1,5 +1,4 @@
 use super::*;
-use moth_lexical::numeric::profile::NumericProfile;
 #[test]
 fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_cascades() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
@@ -22,7 +21,7 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
     .expect("should write second blocked consumer");
     fs::write(
         dir.join("provider/+mod.moth"),
-        "export:\n    run || -> Int:\n        return missing_provider_value\n    ;\n;\n",
+        "export:\n    run || -> I32:\n        return missing_provider_value\n    ;\n;\n",
     )
     .expect("should write diagnosed provider");
     fs::write(
@@ -115,7 +114,6 @@ fn registered_source_database_retains_exact_text_for_multiple_compiled_sources()
     compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
-        NumericProfile::STANDARD,
         None,
         &style_directives,
         &mut builder_surface,
@@ -222,7 +220,6 @@ fn unselected_preload_read_failure_stays_inert() {
     let frontend = compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
-        NumericProfile::STANDARD,
         None,
         &style_directives,
         &mut builder_surface,
@@ -412,7 +409,7 @@ fn directory_frontend_registers_package_and_project_boundaries() {
     fs::write(dir.join("@page.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         package_root.join("@mod.moth"),
-        "export:\n    helper || -> Int:\n        return 7\n    ;\n;\n",
+        "export:\n    helper || -> I32:\n        return 7\n    ;\n;\n",
     )
     .expect("should write package module");
 

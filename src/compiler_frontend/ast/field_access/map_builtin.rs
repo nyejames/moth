@@ -4,56 +4,203 @@
 //! WHY: map builtin policy should stay separate from user field/method dispatch.
 
 use super::MemberStepContext;
-use super::builtin_call_args::parse_builtin_method_args_typed;
+use super::ParsedBuiltinMemberCall;
+use super::builtin_call_args::{
+    BuiltinCallSite, builtin_argument_expectations, builtin_argument_slots,
+    builtin_result_type_ids, concrete_shape_type, intern_concrete_shape,
+    resolve_builtin_member_arguments,
+};
 use super::parse_chain::expression_from_postfix_node;
 use super::receiver_access::{
     ReceiverAccessDiagnostic, ReceiverAccessRequirement, validate_receiver_access,
 };
 use super::receiver_calls::finish_pending_receiver_call_expression;
+use super::retained_postfix::{RetainedBuiltinKind, RetainedBuiltinStep, retained_builtin_operand};
+use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::ast::expressions::call_arguments::{
+    CallArgumentSyntax, ParsedCallArguments, parse_call_arguments_typed_with_numeric_retention,
+};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::numeric_construction::DeferredCallHandling;
+use crate::compiler_frontend::ast::numeric_known_shape::{KnownShape, KnownShapeId};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::builtins::error_type::{
-    ResolvedBuiltinType, resolve_builtin_error_type_typed,
-};
+use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidBuiltinCallReason,
 };
-use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
-
-// --------------------------
-//  Helpers
-// --------------------------
-
-/// Temporary carrier bridge: map fallibility is public `Error!` control flow,
-/// not a first-class `Result` value. HIR consumes this carrier immediately
-/// while lowering the handled call into explicit success/error edges.
-fn fallible_map_result(
-    ok_type_id: TypeId,
-    error_type: ResolvedBuiltinType,
-    type_interner: &mut AstTypeInterner<'_>,
-) -> Vec<TypeId> {
-    vec![type_interner.intern_fallible_carrier(ok_type_id, error_type.type_id)]
-}
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 // --------------------------
 //  Main parser
 // --------------------------
 
+/// One map builtin member's argument slots, success slot and declared error.
+///
+/// WHAT: the authored argument slots the shared argument owner validates against and the success
+///       slot an authored `!` propagates, both as construction shapes, plus the declared error.
+/// WHY: a retained receiver can hold an open numeric key or value, so the slots stay shapes until
+///      body-root completion materialises them; the completed and retained lanes resolve the same
+///      member through this one rule.
+pub(super) struct MapBuiltinMemberRule {
+    /// The authored argument slots in order: the key, then the value for `set`.
+    pub(super) expected_argument_shapes: Vec<KnownShapeId>,
+    /// The success slot an authored `!` propagates, before the carrier wrap. `None` when the
+    /// operation produces no value.
+    pub(super) success_shape: Option<KnownShapeId>,
+    /// The declared error an authored `!` unwraps; `None` for an infallible operation.
+    pub(super) error_return_type_id: Option<TypeId>,
+}
+
+/// One resolved map builtin member, independent of where its receiver value comes from.
+pub(super) struct MapBuiltinMember {
+    pub(super) op: MapBuiltinOp,
+    /// The receiver's value slot, shared by the operation's value argument and success slots.
+    pub(super) value_shape: KnownShapeId,
+    pub(super) rule: MapBuiltinMemberRule,
+}
+
+/// The receiver a map builtin resolves against.
+///
+/// WHAT: a completed receiver is resolved by its canonical type; a retained receiver is resolved
+///       by its construction shape, whose key or value may still be an open numeric leaf.
+/// WHY: one resolver owns the per-operation rule for both lanes, so no lane resolves a member
+///      through a placeholder type.
+pub(super) enum MapBuiltinReceiver {
+    Concrete(TypeId),
+    Shape(KnownShapeId),
+}
+
+/// Resolve one map builtin member against a receiver without consuming any tokens.
+///
+/// WHAT: classifies the receiver, resolves the authored member name and computes the operation's
+///       argument slots and success slot. Non-map receivers resolve to `None` and intern nothing.
+/// WHY: a retained chain has no receiver value, so it resolves the exact member the completed
+///      chain would, then parses the same argument syntax through the shared owner.
+pub(super) fn resolve_map_builtin_member(
+    receiver: MapBuiltinReceiver,
+    member_name: StringId,
+    member_span: Option<SourceSpan>,
+    scope_context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    string_table: &mut StringTable,
+) -> Result<Option<MapBuiltinMember>, ExpressionParseError> {
+    let receiver_shape = match receiver {
+        MapBuiltinReceiver::Concrete(type_id) => KnownShape::Concrete {
+            type_id,
+            span: None,
+        },
+        MapBuiltinReceiver::Shape(shape) => scope_context.numeric_state().shape(shape),
+    };
+    let (key_shape, value_shape) = match receiver_shape {
+        KnownShape::Map { key, value } => (key, value),
+        KnownShape::Concrete { type_id, .. } => {
+            let Some(map_shape) = type_interner.environment().map_shape(type_id) else {
+                return Ok(None);
+            };
+            let key_shape = intern_concrete_shape(scope_context, map_shape.key_type)?;
+            let value_shape = intern_concrete_shape(scope_context, map_shape.value_type)?;
+            (key_shape, value_shape)
+        }
+        KnownShape::Numeric(_)
+        | KnownShape::Collection { .. }
+        | KnownShape::Optional { .. }
+        | KnownShape::DeclaredSubstitution { .. } => return Ok(None),
+    };
+
+    let Some(op) = MapBuiltinOp::from_source_name(string_table.resolve(member_name)) else {
+        return Ok(None);
+    };
+
+    let bool_shape = intern_concrete_shape(scope_context, type_interner.builtins().bool)?;
+    let int_shape = intern_concrete_shape(
+        scope_context,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+    )?;
+
+    let rule = match op {
+        MapBuiltinOp::Get => {
+            let error_type =
+                resolve_builtin_error_type_typed(scope_context, member_span, string_table)?;
+            MapBuiltinMemberRule {
+                expected_argument_shapes: vec![key_shape],
+                success_shape: Some(value_shape),
+                error_return_type_id: Some(error_type.type_id),
+            }
+        }
+
+        MapBuiltinOp::Contains => MapBuiltinMemberRule {
+            expected_argument_shapes: vec![key_shape],
+            success_shape: Some(bool_shape),
+            error_return_type_id: None,
+        },
+
+        // Set produces no value; its declared error is the only result slot.
+        MapBuiltinOp::Set => {
+            let error_type =
+                resolve_builtin_error_type_typed(scope_context, member_span, string_table)?;
+            MapBuiltinMemberRule {
+                expected_argument_shapes: vec![key_shape, value_shape],
+                success_shape: None,
+                error_return_type_id: Some(error_type.type_id),
+            }
+        }
+
+        MapBuiltinOp::Remove => {
+            let error_type =
+                resolve_builtin_error_type_typed(scope_context, member_span, string_table)?;
+            MapBuiltinMemberRule {
+                expected_argument_shapes: vec![key_shape],
+                success_shape: Some(value_shape),
+                error_return_type_id: Some(error_type.type_id),
+            }
+        }
+
+        MapBuiltinOp::Clear => MapBuiltinMemberRule {
+            expected_argument_shapes: Vec::new(),
+            success_shape: None,
+            error_return_type_id: None,
+        },
+
+        // `length` is parsed as a property: the call form is rejected before any rule is
+        // consulted, and the property form carries the integer result.
+        MapBuiltinOp::Length => MapBuiltinMemberRule {
+            expected_argument_shapes: Vec::new(),
+            success_shape: Some(int_shape),
+            error_return_type_id: None,
+        },
+    };
+
+    Ok(Some(MapBuiltinMember {
+        op,
+        value_shape,
+        rule,
+    }))
+}
+
+/// Parse one map builtin member step on a completed receiver node.
+///
+/// WHAT: validates receiver access, parses the operation's arguments through the shared argument
+///       owner and either builds the builtin call or keeps the member as one retained step.
+/// WHY: the operation, the receiver shape and the result slots are already resolved when an
+///      argument turns out to still hold a numeric origin, so the member step must travel with the
+///      retained argument and resume through this same constructor instead of ending the chain.
 pub(super) fn parse_map_builtin_member_typed(
     token_stream: &mut AstCursor<'_>,
     context: MemberStepContext<'_>,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<Option<AstNode>, ExpressionParseError> {
+) -> Result<Option<ParsedBuiltinMemberCall>, ExpressionParseError> {
     let MemberStepContext {
         receiver_node,
         receiver_type_id,
@@ -64,24 +211,20 @@ pub(super) fn parse_map_builtin_member_typed(
         scope_context,
     } = context;
 
-    let Some(map_shape) = type_interner.environment().map_shape(receiver_type_id) else {
+    let Some(member) = resolve_map_builtin_member(
+        MapBuiltinReceiver::Concrete(receiver_type_id),
+        member_name,
+        member_span,
+        scope_context,
+        type_interner,
+        string_table,
+    )?
+    else {
         return Ok(None);
     };
-
-    let Some(builtin) = MapBuiltinOp::from_source_name(string_table.resolve(member_name)) else {
-        return Ok(None);
-    };
-
-    let bool_type_id = type_interner.builtins().bool;
-    let int_type_id = type_interner.builtins().int;
-    let none_type_id = type_interner.builtins().none;
-
-    let key_type_id = map_shape.key_type;
-    let value_type_id = map_shape.value_type;
-    let member_name_text = builtin.source_name().to_owned();
 
     // Property-style `length` requires no parentheses.
-    if builtin.is_property() {
+    if member.op.is_property() {
         if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS) {
             return Err(CompilerDiagnostic::invalid_builtin_call(
                 InvalidBuiltinCallReason::MapLengthIsProperty,
@@ -124,22 +267,28 @@ pub(super) fn parse_map_builtin_member_typed(
 
         increment_ast_counter(AstCounter::PostfixReceiverNodesCopied);
 
+        let result_type_ids = builtin_result_type_ids(
+            member.rule.success_shape,
+            member.rule.error_return_type_id,
+            scope_context,
+            type_interner,
+        )?;
         let receiver_expression = expression_from_postfix_node(receiver_node)?;
         let builtin_expression = Expression::map_builtin_call_with_typed_arguments(
             receiver_expression,
-            builtin,
+            member.op,
             false,
             Vec::new(),
-            vec![int_type_id],
+            result_type_ids,
             type_interner.environment_mut_for_derived_types(),
             member_span,
         );
 
-        return Ok(Some(AstNode {
+        return Ok(Some(ParsedBuiltinMemberCall::Completed(AstNode {
             kind: NodeKind::ExpressionStatement(builtin_expression),
             scope: scope_context.scope.to_owned(),
             span: member_span,
-        }));
+        })));
     }
 
     // All other map builtins require parentheses.
@@ -152,7 +301,7 @@ pub(super) fn parse_map_builtin_member_typed(
         .into());
     }
 
-    let mutating_receiver_required = builtin.requires_mutable_receiver();
+    let mutating_receiver_required = member.op.requires_mutable_receiver();
 
     validate_receiver_access(
         receiver_node,
@@ -170,108 +319,52 @@ pub(super) fn parse_map_builtin_member_typed(
 
     token_stream.advance();
 
-    // Parse arguments and compute result types for each builtin variant.
-    let (args, result_type_ids) = match builtin {
-        MapBuiltinOp::Get => {
-            let expected_type_ids = [key_type_id];
-            let args = parse_builtin_method_args_typed(
-                token_stream,
-                &member_name_text,
-                &expected_type_ids,
-                scope_context,
-                type_interner,
-                member_span,
-                string_table,
-                path_fork,
-            )?;
-            let error_type =
-                resolve_builtin_error_type_typed(scope_context, member_span, string_table)?;
-            let result_type_ids = fallible_map_result(value_type_id, error_type, type_interner);
-            (args, result_type_ids)
-        }
-
-        MapBuiltinOp::Contains => {
-            let expected_type_ids = [key_type_id];
-            let args = parse_builtin_method_args_typed(
-                token_stream,
-                &member_name_text,
-                &expected_type_ids,
-                scope_context,
-                type_interner,
-                member_span,
-                string_table,
-                path_fork,
-            )?;
-            (args, vec![bool_type_id])
-        }
-
-        MapBuiltinOp::Set => {
-            let expected_type_ids = [key_type_id, value_type_id];
-            let args = parse_builtin_method_args_typed(
-                token_stream,
-                &member_name_text,
-                &expected_type_ids,
-                scope_context,
-                type_interner,
-                member_span,
-                string_table,
-                path_fork,
-            )?;
-            let error_type =
-                resolve_builtin_error_type_typed(scope_context, member_span, string_table)?;
-            let result_type_ids = fallible_map_result(none_type_id, error_type, type_interner);
-            (args, result_type_ids)
-        }
-
-        MapBuiltinOp::Remove => {
-            let expected_type_ids = [key_type_id];
-            let args = parse_builtin_method_args_typed(
-                token_stream,
-                &member_name_text,
-                &expected_type_ids,
-                scope_context,
-                type_interner,
-                member_span,
-                string_table,
-                path_fork,
-            )?;
-            let error_type =
-                resolve_builtin_error_type_typed(scope_context, member_span, string_table)?;
-            let result_type_ids = fallible_map_result(value_type_id, error_type, type_interner);
-            (args, result_type_ids)
-        }
-
-        MapBuiltinOp::Clear => {
-            let args = parse_builtin_method_args_typed(
-                token_stream,
-                &member_name_text,
-                &[],
-                scope_context,
-                type_interner,
-                member_span,
-                string_table,
-                path_fork,
-            )?;
-            (args, vec![none_type_id])
-        }
-
-        MapBuiltinOp::Length => {
-            // Defensive: `length` is parsed as a property above.
-            return Err(CompilerDiagnostic::invalid_builtin_call(
-                InvalidBuiltinCallReason::MapLengthIsProperty,
-                Some(member_name),
-                member_span,
-            )
-            .into());
-        }
-    };
+    let expectations = builtin_argument_expectations(builtin_argument_slots(
+        scope_context,
+        &member.rule.expected_argument_shapes,
+    ));
+    let parsed_arguments = parse_call_arguments_typed_with_numeric_retention(
+        token_stream,
+        scope_context,
+        type_interner,
+        string_table,
+        &expectations,
+        CallArgumentSyntax::UnsupportedBuiltinMember {
+            member_name: Some(member_name),
+            takes_no_arguments: member.rule.expected_argument_shapes.is_empty(),
+        },
+        path_fork,
+    )?;
 
     // Reject assignment through `map.get(...)`.
-    if matches!(builtin, MapBuiltinOp::Get) && token_stream.current_tag().is_assignment_operator() {
+    // The completed lane validates the parsed arguments through the same shared owner the
+    // retained lane resumes at completion, so no lane skips the operation's arity, access-mode or
+    // type-compatibility contract, and the validation keeps its authored order before the
+    // assignment-target guard below.
+    let parsed_arguments = match parsed_arguments {
+        ParsedCallArguments::Ready(arguments) => {
+            ParsedCallArguments::Ready(resolve_builtin_member_arguments(
+                BuiltinCallSite {
+                    member_name: member.op.source_name(),
+                    member_span,
+                },
+                &arguments,
+                &expectations,
+                scope_context,
+                type_interner,
+                string_table,
+                path_fork,
+            )?)
+        }
+        retained => retained,
+    };
+
+    if matches!(member.op, MapBuiltinOp::Get) && token_stream.current_tag().is_assignment_operator()
+    {
         return Err(CompilerDiagnostic::invalid_assignment_target(
             InvalidAssignmentTargetReason::MapGetTargetNotWritable,
             None,
-            Some(value_type_id),
+            concrete_shape_type(scope_context, member.value_shape),
             None,
             None,
             None,
@@ -280,14 +373,44 @@ pub(super) fn parse_map_builtin_member_typed(
         .into());
     }
 
+    let arguments = match parsed_arguments {
+        ParsedCallArguments::Ready(arguments) => arguments,
+        // The operation and its result slots are already resolved, so the member step travels with
+        // the retained argument and resumes through this same constructor once it completes.
+        ParsedCallArguments::Retained(arguments) => {
+            increment_ast_counter(AstCounter::PostfixReceiverNodesCopied);
+            return Ok(Some(ParsedBuiltinMemberCall::RetainedOperand(
+                retained_builtin_operand(
+                    expression_from_postfix_node(receiver_node)?,
+                    RetainedBuiltinStep {
+                        kind: RetainedBuiltinKind::Map(member.op),
+                        member_name,
+                        member_span,
+                        arguments: ParsedCallArguments::Retained(arguments),
+                        expected_argument_shapes: member.rule.expected_argument_shapes,
+                        success_shape: member.rule.success_shape,
+                        error_return_type_id: member.rule.error_return_type_id,
+                        authored_handling: DeferredCallHandling::Unhandled,
+                    },
+                ),
+            )));
+        }
+    };
+
     increment_ast_counter(AstCounter::PostfixReceiverNodesCopied);
 
     let receiver_expression = expression_from_postfix_node(receiver_node)?;
+    let result_type_ids = builtin_result_type_ids(
+        member.rule.success_shape,
+        member.rule.error_return_type_id,
+        scope_context,
+        type_interner,
+    )?;
     let builtin_expression = Expression::map_builtin_call_with_typed_arguments(
         receiver_expression,
-        builtin,
+        member.op,
         mutating_receiver_required,
-        args,
+        arguments,
         result_type_ids,
         type_interner.environment_mut_for_derived_types(),
         member_span,
@@ -299,9 +422,9 @@ pub(super) fn parse_map_builtin_member_typed(
         type_interner,
     );
 
-    Ok(Some(AstNode {
+    Ok(Some(ParsedBuiltinMemberCall::Completed(AstNode {
         kind: NodeKind::ExpressionStatement(builtin_expression),
         scope: scope_context.scope.to_owned(),
         span: member_span,
-    }))
+    })))
 }

@@ -1,0 +1,13 @@
+-- An invalid member occurrence must not be retained as a direct binding
+-- reference: `result U64 = count.unsupported()` names a result receiver, and the
+-- member boundary means that receiver is not an independent constraint on
+-- `count`. With no other use, `count` keeps the language default I32, so the
+-- delayed unknown-member diagnostic reports the defaulted receiver.
+--
+-- Retaining the occurrence as a direct `count` reference would let the U64
+-- result receiver choose the scalar's type instead of the default.
+
+count = 1
+result U64 = count.unsupported()
+
+[:unreachable]

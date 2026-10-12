@@ -23,7 +23,7 @@ pub struct TypeId(pub u32);
 /// can construct expressions without threading a full `TypeEnvironment`.
 ///
 /// WHY: `Expression::int()` and similar factories should not need `&TypeEnvironment`
-/// just to refer to `Int`. These constants are valid for any `TypeEnvironment`
+/// just to refer to `I32`. These constants are valid for any `TypeEnvironment`
 /// created via `TypeEnvironment::new()` or `Default::default()`.
 ///
 /// WARNING: if `TypeEnvironment::new()` changes its builtin seeding order,
@@ -32,24 +32,20 @@ pub mod builtin_type_ids {
     use super::{FixedScalar, TypeId};
 
     pub const BOOL: TypeId = TypeId(0);
-    pub const INT: TypeId = TypeId(1);
-    pub const FLOAT: TypeId = TypeId(2);
-    pub const STRING: TypeId = TypeId(3);
-    pub const CHAR: TypeId = TypeId(4);
-    pub const RANGE: TypeId = TypeId(5);
+    pub const STRING: TypeId = TypeId(1);
+    pub const CHAR: TypeId = TypeId(2);
+    pub const RANGE: TypeId = TypeId(3);
     /// The seeded `None` type. This is not an unresolved-type sentinel: resolvers
     /// that need a `TypeId` for every spelling also map an unresolved annotation
     /// onto this same id. Callers must keep that deferred state separate from a
     /// resolved `None`.
-    pub const NONE: TypeId = TypeId(6);
-    /// Seeded profile-sized unsigned integer, following the selected `Int` width.
-    pub const UINT: TypeId = TypeId(7);
+    pub const NONE: TypeId = TypeId(4);
 
-    /// First seeded fixed-scalar `TypeId`; fixed scalars occupy the ids after `Uint`.
+    /// First seeded fixed-scalar `TypeId`; fixed scalars occupy the ids after `None`.
     ///
     /// `Dec` types are NOT seeded here: their 257 scale identities intern lazily through
     /// `TypeEnvironment::intern_number`, so they take the ids after every fixed scalar.
-    const FIRST_FIXED_SCALAR: u32 = 8;
+    const FIRST_FIXED_SCALAR: u32 = 5;
 
     /// Deterministic `TypeId` for one fixed-width builtin scalar.
     ///
@@ -80,17 +76,12 @@ pub struct GenericParameterListId(pub u32);
 
 /// Keys for builtin scalar types.
 ///
-/// These are seeded once when `TypeEnvironment` is created. `FixedScalar` identities carry their
-/// own width, signedness or octet meaning, so `Int` and `Float` never alias a fixed width that
-/// happens to match the active `NumericProfile`. `Dec` identities carry their scale and intern
-/// lazily instead of being seeded.
+/// These are seeded once when `TypeEnvironment` is created. Each `FixedScalar` identity carries its
+/// own exact width, signedness or octet meaning. `Dec`
+/// identities carry their scale and intern lazily instead of being seeded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuiltinTypeKey {
     Bool,
-    Int,
-    /// Profile-sized unsigned integer identity, following the selected `Int` width.
-    Uint,
-    Float,
     String,
     Char,
     Range,
@@ -133,7 +124,7 @@ pub struct ConstructedTypeKey {
 /// Key for a generic nominal instance.
 ///
 /// WHAT: base nominal + concrete argument IDs.
-/// WHY: canonicalises `Box of Int` so repeated uses share one `TypeId`.
+/// WHY: canonicalises `Box of I32` so repeated uses share one `TypeId`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GenericInstanceKey {
     pub base: NominalTypeId,

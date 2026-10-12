@@ -23,7 +23,7 @@ fn map_get_statement_lowers_to_helper() {
 
     let receiver = expression(
         HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-        types.map_string_int,
+        types.map_string_i32,
         region,
         ValueKind::Place,
         &mut expressions,
@@ -44,8 +44,8 @@ fn map_get_statement_lowers_to_helper() {
         id: BlockId(0),
         region,
         locals: vec![
-            local(0, types.map_string_int, region),
-            local(1, types.int, region),
+            local(0, types.map_string_i32, region),
+            local(1, types.i32, region),
         ],
         statements: vec![get_stmt],
         terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
@@ -103,13 +103,13 @@ fn map_set_statement_without_result_emits_plain_call() {
 
     let receiver = expression(
         HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-        types.map_string_int,
+        types.map_string_i32,
         region,
         ValueKind::Place,
         &mut expressions,
     );
     let key = string_expression("Priya", types.string, region, &mut expressions);
-    let value = int_expression(42, types.int, region, &mut expressions);
+    let value = i32_expression(42, types.i32, region, &mut expressions);
 
     let set_stmt = statement(
         1,
@@ -124,7 +124,7 @@ fn map_set_statement_without_result_emits_plain_call() {
     let block = HirBlock {
         id: BlockId(0),
         region,
-        locals: vec![local(0, types.map_string_int, region)],
+        locals: vec![local(0, types.map_string_i32, region)],
         statements: vec![set_stmt],
         terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
@@ -175,7 +175,7 @@ fn map_infallible_ops_lower_to_plain_helpers() {
 
     let receiver = expression(
         HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-        types.map_string_int,
+        types.map_string_i32,
         region,
         ValueKind::Place,
         &mut expressions,
@@ -216,9 +216,9 @@ fn map_infallible_ops_lower_to_plain_helpers() {
         id: BlockId(0),
         region,
         locals: vec![
-            local(0, types.map_string_int, region),
+            local(0, types.map_string_i32, region),
             local(1, types.boolean, region),
-            local(2, types.int, region),
+            local(2, types.i32, region),
         ],
         statements: vec![contains_stmt, clear_stmt, length_stmt],
         terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
@@ -286,7 +286,7 @@ fn map_remove_statement_lowers_to_helper() {
 
     let receiver = expression(
         HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-        types.map_string_int,
+        types.map_string_i32,
         region,
         ValueKind::Place,
         &mut expressions,
@@ -307,8 +307,8 @@ fn map_remove_statement_lowers_to_helper() {
         id: BlockId(0),
         region,
         locals: vec![
-            local(0, types.map_string_int, region),
-            local(1, types.int, region),
+            local(0, types.map_string_i32, region),
+            local(1, types.i32, region),
         ],
         statements: vec![remove_stmt],
         terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),

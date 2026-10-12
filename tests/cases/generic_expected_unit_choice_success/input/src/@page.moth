@@ -3,6 +3,6 @@ State type T ::
     Full | value T |,
 ;
 
-state State of Int = State::Empty
+state State of I32 = State::Empty
 
 [: expected unit choice generic]

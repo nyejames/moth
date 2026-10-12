@@ -2,6 +2,6 @@ Box type T = |
     value T,
 |
 
-StringIntBox as Box of String, Int
+StringIntBox as Box of String, I32
 
 #[: wrong arity]

@@ -1,4 +1,4 @@
-divide || -> Int, Error!:
+divide || -> I32, Error!:
     return 10 // 0
 ;
 

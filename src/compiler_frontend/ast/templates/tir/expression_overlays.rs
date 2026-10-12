@@ -312,14 +312,10 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
             ));
         }
 
-        let (contribution_roots, site_render_roots) = runtime_slot_plan_roots(store, slot_plan_id)?;
+        let roots = runtime_slot_plan_roots(store, slot_plan_id)?;
 
         let result = self.collect_node(store, wrapper_root).and_then(|()| {
-            for root in contribution_roots {
-                self.collect_node(store, root)?;
-            }
-
-            for root in site_render_roots {
+            for root in roots {
                 self.collect_node(store, root)?;
             }
 
@@ -437,6 +433,9 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
             | TemplateIrNodeKind::AggregateOutput
             | TemplateIrNodeKind::RuntimeSlotSite { .. }
             | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(()),
+            // A retained position contributes no expression payload: its value is installed by
+            // body-root completion, and every overlay reader runs on the completed tree.
+            TemplateIrNodeKind::RetainedNumericIntake(_) => Ok(()),
         }
     }
 

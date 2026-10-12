@@ -1,9 +1,9 @@
 A = |
-    x Int,
+    x I32,
 |
 
 B = |
-    x Int,
+    x I32,
 |
 
 take |value B|:

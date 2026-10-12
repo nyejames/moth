@@ -1,4 +1,4 @@
 -- Test () instead of | inside parameter list
-bad |a Int, (b Int)| -> Int:
+bad |a I32, (b I32)| -> I32:
     return a + b
 ;

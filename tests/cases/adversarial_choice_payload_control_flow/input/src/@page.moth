@@ -5,7 +5,7 @@
 default_success #= TaskResult::Success(42, "default")
 
 -- Function returning choice
-make_result |n Int| -> TaskResult:
+make_result |n I32| -> TaskResult:
     if n is 0:
         return TaskResult::Pending
     ;
@@ -67,7 +67,7 @@ if outer is:
 formatted = format_task(default_success)
 
 -- Result interop: convert choice to result
-read_task |n Int| -> TaskResult, Error!:
+read_task |n I32| -> TaskResult, Error!:
     if n is 0:
         return! Error("zero")
     ;

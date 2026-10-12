@@ -6,17 +6,17 @@
 //!      `resolve_type.rs` focus on parsed-ref orchestration and diagnostic-type conversion,
 //!      while this module owns the constant-evaluation boundary for collection sizes.
 //!      Type syntax materialises literals at `Bits64` as the widest lossless carrier;
-//!      this boundary owns the final range check against the compilation `Int` width.
+//!      this boundary owns the final range check against the exact `I32` capacity domain.
 
 use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
-use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
+use crate::compiler_frontend::ast::module_ast::scope_context::{ScopeContext, ScopeDeclarationRef};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidCollectionTypeReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::parsed::ParsedCollectionCapacity;
 use crate::compiler_frontend::source::SourceSpan;
-use moth_lexical::numeric::profile::{IntWidth, NumericProfile};
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 pub(crate) type CollectionCapacityResult<T> = Result<T, CollectionCapacityDiagnostic>;
 
@@ -44,29 +44,24 @@ impl From<CompilerDiagnostic> for CollectionCapacityDiagnostic {
 ///       constant name) directly without invoking the full expression parser.
 /// WHY: the parser already rejected general capacity forms, so type resolution only
 ///      needs to validate literals and look up bare constants in the visible scope.
-///      Capacity is a positive `Int` literal of the boundary width: header parsing has
-///      no profile, so it materialises at `Bits64` and this boundary re-checks the value
-///      against the compilation `IntWidth`. The literal's source text is not retained in
-///      `ParsedCollectionCapacity::Literal`, so an out-of-width literal reports the closest
+///      Capacity is a positive `I32` value: header parsing has no resolved environment, so it
+///      materialises the literal at `Bits64` and this boundary re-checks the value against the
+///      exact `I32` capacity domain. The literal's source text is not retained in
+///      `ParsedCollectionCapacity::Literal`, so an out-of-domain literal reports the closest
 ///      existing diagnostic, `CapacityOverflow`, rather than rebuilding an
 ///      `invalid_number_literal` diagnostic from unavailable text.
 pub(crate) fn fold_collection_capacity(
     capacity: &ParsedCollectionCapacity,
     scope_context: Option<&ScopeContext>,
     type_environment: &mut TypeEnvironment,
-    numeric_profile: NumericProfile,
 ) -> CollectionCapacityResult<usize> {
     let span = match capacity {
         ParsedCollectionCapacity::Literal { span, .. }
         | ParsedCollectionCapacity::BareConstant { span, .. } => *span,
     };
 
-    let int_width = numeric_profile.int_width;
-
     match capacity {
-        ParsedCollectionCapacity::Literal { value, .. } => {
-            validate_capacity_value(*value, span, int_width)
-        }
+        ParsedCollectionCapacity::Literal { value, .. } => validate_capacity_value(*value, span),
 
         ParsedCollectionCapacity::BareConstant { name, .. } => {
             let Some(scope_context) = scope_context else {
@@ -77,7 +72,7 @@ pub(crate) fn fold_collection_capacity(
                 .into());
             };
 
-            let Some(declaration) = scope_context.get_reference(name) else {
+            let Some(declaration_ref) = scope_context.get_reference(name) else {
                 return Err(CompilerDiagnostic::invalid_collection_type(
                     InvalidCollectionTypeReason::CapacityNotConstant,
                     span,
@@ -85,7 +80,21 @@ pub(crate) fn fold_collection_capacity(
                 .into());
             };
 
-            if !scope_context.is_explicit_compile_time_constant(declaration.as_declaration()) {
+            let declaration = match &declaration_ref {
+                ScopeDeclarationRef::Local { declaration, .. } => declaration.as_ref(),
+                ScopeDeclarationRef::Shared(declaration) => declaration,
+                // An unresolved body-local numeric binding has no declaration or folded value
+                // yet, so it can never satisfy the capacity constant contract.
+                ScopeDeclarationRef::PendingNumeric { .. } => {
+                    return Err(CompilerDiagnostic::invalid_collection_type(
+                        InvalidCollectionTypeReason::CapacityNotConstant,
+                        span,
+                    )
+                    .into());
+                }
+            };
+
+            if !scope_context.is_explicit_compile_time_constant(declaration) {
                 return Err(CompilerDiagnostic::invalid_collection_type(
                     InvalidCollectionTypeReason::CapacityNotConstant,
                     span,
@@ -93,9 +102,9 @@ pub(crate) fn fold_collection_capacity(
                 .into());
             }
 
-            // Capacity syntax needs authored `#` provenance plus an already folded Int payload.
-            // Template const classification cannot strengthen either part of that proof.
-            if declaration.value.type_id != type_environment.builtins().int {
+            // Capacity syntax needs authored `#` provenance plus an already folded exact `I32`
+            // payload. Template const classification cannot strengthen either part of that proof.
+            if type_environment.fixed_scalar(declaration.value.type_id) != Some(FixedScalar::I32) {
                 return Err(CompilerDiagnostic::invalid_collection_type(
                     InvalidCollectionTypeReason::CapacityNotInt,
                     span,
@@ -103,7 +112,7 @@ pub(crate) fn fold_collection_capacity(
                 .into());
             }
 
-            let ExpressionKind::Int(value) = &declaration.value.kind else {
+            let ExpressionKind::FixedScalar(value) = &declaration.value.kind else {
                 return Err(CompilerDiagnostic::invalid_collection_type(
                     InvalidCollectionTypeReason::CapacityNotInt,
                     span,
@@ -111,14 +120,22 @@ pub(crate) fn fold_collection_capacity(
                 .into());
             };
 
-            validate_capacity_value(*value, span, int_width)
+            let Some(value) = value.as_i64() else {
+                return Err(CompilerDiagnostic::invalid_collection_type(
+                    InvalidCollectionTypeReason::CapacityNotInt,
+                    span,
+                )
+                .into());
+            };
+
+            validate_capacity_value(value, span)
         }
     }
 }
+
 fn validate_capacity_value(
     value: i64,
     span: Option<SourceSpan>,
-    int_width: IntWidth,
 ) -> CollectionCapacityResult<usize> {
     if value < 0 {
         return Err(CompilerDiagnostic::invalid_collection_type(
@@ -137,9 +154,9 @@ fn validate_capacity_value(
     }
 
     // Header parsing materialises capacity literals at `Bits64` as the widest lossless
-    // carrier, so a literal above the boundary `Int` width is rejected here with the
-    // same overflow diagnostic the old `Int32` materialisation produced.
-    if !int_width.contains(value) {
+    // carrier, so a literal above the exact `I32` capacity domain is rejected here with the
+    // closest existing overflow diagnostic.
+    if FixedScalarValue::signed(FixedScalar::I32, value).is_none() {
         return Err(CompilerDiagnostic::invalid_collection_type(
             InvalidCollectionTypeReason::CapacityOverflow,
             span,

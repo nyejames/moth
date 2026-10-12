@@ -537,6 +537,13 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                     span: node.span,
                 })
             }
+
+            // A retained position is unfinished compiler scratch: body-root numeric completion
+            // installs its value before any template reaches the runtime handoff.
+            TemplateIrNodeKind::RetainedNumericIntake(_) => Err(CompilerError::compiler_error(
+                "TIR HIR handoff materialization reached a retained numeric intake position; \
+                 body-root completion must install every retained value before handoff.",
+            )),
         }?;
 
         increment_ast_counter(AstCounter::RuntimeSlotHandoffOwnedNodesMaterialized);

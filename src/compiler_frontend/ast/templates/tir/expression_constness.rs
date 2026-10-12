@@ -122,10 +122,7 @@ pub(crate) fn classify_expression_const_evaluable_with_nested_template(
     nested_template: &mut impl FnMut(TemplateTirReference, &[PathId]) -> Result<bool, TemplateError>,
 ) -> Result<bool, TemplateError> {
     match &expression.kind {
-        ExpressionKind::Int(_)
-        | ExpressionKind::Uint(_)
-        | ExpressionKind::Float(_)
-        | ExpressionKind::FixedScalar(_)
+        ExpressionKind::FixedScalar(_)
         | ExpressionKind::Number(_)
         | ExpressionKind::StringSlice(_)
         | ExpressionKind::StructuralString { .. }
@@ -164,6 +161,14 @@ pub(crate) fn classify_expression_const_evaluable_with_nested_template(
                             )?;
                     }
                     ExpressionRpnItem::Operator { .. } => {}
+                    // A retained numeric recipe is not const-evaluable yet; body completion
+                    // replaces it before any fold runs, so the item stays here untouched.
+                    ExpressionRpnItem::PendingNumericBinding { .. }
+                    | ExpressionRpnItem::PendingNumericCast { .. }
+                    | ExpressionRpnItem::PendingNumericCall { .. }
+                    | ExpressionRpnItem::PendingNumericExpression { .. } => {
+                        const_evaluable = false;
+                    }
                     // Pending syntax never survives evaluation; this fallible constness walk
                     // reports the broken invariant instead of treating it as const-evaluable.
                     ExpressionRpnItem::PendingNumericLiteral { .. }
@@ -393,6 +398,9 @@ fn tir_tree_is_const_evaluable_standalone_value(
         }
         TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(false),
+        // A retained position has no selected value yet, so it can never be a compile-time
+        // constant and must wait for body-root completion.
+        TemplateIrNodeKind::RetainedNumericIntake(_) => Ok(false),
     }
 }
 
@@ -532,6 +540,9 @@ fn tir_tree_is_const_evaluable_value(
         }
         TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(false),
+        // A retained position has no selected value yet, so it can never be a compile-time
+        // constant and must wait for body-root completion.
+        TemplateIrNodeKind::RetainedNumericIntake(_) => Ok(false),
     }
 }
 

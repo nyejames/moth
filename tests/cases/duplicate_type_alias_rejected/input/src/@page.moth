@@ -1,2 +1,2 @@
-UserId as Int
+UserId as I32
 UserId as String

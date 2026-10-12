@@ -1,4 +1,4 @@
-pair |left Int, right Int| -> Int, String:
+pair |left I32, right I32| -> I32, String:
     return left * right, "ok"
 ;
 

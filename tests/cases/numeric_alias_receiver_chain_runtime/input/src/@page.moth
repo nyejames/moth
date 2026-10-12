@@ -1,0 +1,27 @@
+receive_u64 |value U64| -> String:
+    return cast value
+;
+
+value_0 = 4_294_967_296
+value_1 = copy value_0
+received_1 = receive_u64(value_1)
+value_2 = copy value_1
+received_2 = receive_u64(value_2)
+value_3 = copy value_2
+received_3 = receive_u64(value_3)
+value_4 = copy value_3
+received_4 = receive_u64(value_4)
+value_5 = copy value_4
+received_5 = receive_u64(value_5)
+value_6 = copy value_5
+received_6 = receive_u64(value_6)
+value_7 = copy value_6
+received_7 = receive_u64(value_7)
+value_8 = copy value_7
+received_8 = receive_u64(value_8)
+
+annotated U64 = copy value_4
+annotated_alias = copy annotated
+received_annotation = receive_u64(annotated_alias)
+
+[:chain=[received_1]/[received_2]/[received_3]/[received_4]/[received_5]/[received_6]/[received_7]/[received_8] annotation=[received_annotation]]

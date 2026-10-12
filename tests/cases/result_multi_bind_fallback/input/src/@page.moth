@@ -1,8 +1,8 @@
-pair_err |name String| -> String, Float, Error!:
+pair_err |name String| -> String, F64, Error!:
     return! Error("boom")
 ;
 
-recover || -> String, Float:
+recover || -> String, F64:
     first, score = pair_err("Ana") catch:
         then "x", 1.0
     ;

@@ -10,13 +10,20 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::function_body_to_ast;
+use crate::compiler_frontend::ast::numeric_construction::{
+    BodyDraft, DeferredBody, DeferredConstruct, DeferredLoop, DeferredLoopHeader,
+    DeferredRangeHeader, NumericContinuation, StatementExpression,
+};
+use crate::compiler_frontend::ast::statements::body_dispatch::{
+    ParsedBody, parse_function_body_statements,
+};
 use crate::compiler_frontend::ast::statements::loop_headers::{
-    ParsedLoopHeader, parse_loop_header_cursor,
+    ParsedLoopHeader, ParsedRangeHeader, parse_loop_header_cursor,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidLoopHeaderReason};
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
@@ -27,7 +34,75 @@ use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 /// internal compiler error, while ordinary loop syntax remains a typed source diagnostic.
 type LoopResult<T> = Result<T, ExpressionParseError>;
 
+/// One parsed loop body: finished nodes, or a retained draft awaiting numeric completion.
+///
+/// WHAT: a nested loop body shares the enclosing function's construction domain, so it returns
+///       its authored draft until the body root completes every retained origin.
+/// WHY: the loop statement must retain the exact parsed body instead of re-parsing tokens or
+///      defaulting the origins it references.
+enum LoopBody {
+    Complete(Vec<AstNode>),
+    Retained(DeferredBody),
+}
+
+impl LoopBody {
+    /// Bridge one nested body parse into the loop's own body representation.
+    fn from_parsed(parsed: ParsedBody, scope: PathId) -> LoopResult<Self> {
+        match parsed {
+            ParsedBody::Complete(nodes) => Ok(LoopBody::Complete(nodes)),
+            ParsedBody::Draft(draft) => {
+                if draft.has_pending() {
+                    Ok(LoopBody::Retained(DeferredBody { draft, scope }))
+                } else {
+                    Ok(LoopBody::Complete(
+                        draft.into_nodes_for_host("a loop body")?,
+                    ))
+                }
+            }
+        }
+    }
+
+    fn is_retained(&self) -> bool {
+        matches!(self, LoopBody::Retained(_))
+    }
+
+    /// Move one parsed body into the loop's retained representation.
+    ///
+    /// WHAT: a retained body is handed over as-is; a body whose statements all completed in place
+    ///       becomes an authored draft of those nodes.
+    /// WHY: a loop whose header still needs numeric completion must reach the body root as one
+    ///      retained loop even when its body needed no completion, so the header's operands can
+    ///      select their types there instead of failing as an unsupported source position.
+    fn into_deferred(self, scope: PathId) -> DeferredBody {
+        match self {
+            LoopBody::Complete(nodes) => {
+                let mut draft = BodyDraft::new();
+                draft.extend_nodes(nodes);
+                DeferredBody { draft, scope }
+            }
+            LoopBody::Retained(body) => body,
+        }
+    }
+
+    fn into_nodes(self) -> LoopResult<Vec<AstNode>> {
+        match self {
+            LoopBody::Complete(nodes) => Ok(nodes),
+            LoopBody::Retained(_) => Err(CompilerError::compiler_error(
+                "a loop body was retained after the loop decided it needs no numeric completion",
+            )
+            .into()),
+        }
+    }
+}
+
 /// Parse a complete `loop` statement after the `loop` keyword has been consumed.
+///
+/// WHAT: pushes the finished loop node, or records one retained construct when the header
+///       condition, the header operands or the body still hold numeric-dependent positions. A
+///       loop whose header needs completion is retained even when its body parsed every statement
+///       in place, and the body then reaches the body root as an authored draft.
+/// WHY: a nested body's pending positions resolve at the body root, so the loop must keep its
+///      authored header, body draft and request boundaries until then.
 pub fn create_loop(
     token_stream: &mut AstCursor,
     context: ScopeContext,
@@ -35,11 +110,16 @@ pub fn create_loop(
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> LoopResult<AstNode> {
+    draft: &mut BodyDraft,
+) -> LoopResult<()> {
     ast_log!("Creating a Loop");
 
     let span = token_stream.previous_span();
     let scope = context.scope;
+    // The loop's retained construct registers in the enclosing body's construction domain, while
+    // the header and body parses consume this context; keeping the shared handle registers the
+    // continuation without cloning the scope payload or re-deriving the domain.
+    let numeric_construction = context.numeric_construction_handle();
     let start_index = token_stream.position();
     let colon_index = find_loop_header_colon_index(&mut *token_stream)?;
 
@@ -67,7 +147,8 @@ pub fn create_loop(
 
     token_stream.set_position(colon_index.saturating_add(1))?;
 
-    let body = function_body_to_ast(
+    let body_scope = body_context.scope;
+    let parsed_body = parse_function_body_statements(
         token_stream,
         body_context,
         type_interner,
@@ -75,22 +156,110 @@ pub fn create_loop(
         string_table,
         path_fork,
     )?;
+    let body = LoopBody::from_parsed(parsed_body, body_scope)?;
 
-    let kind = match parsed_loop_header {
-        ParsedLoopHeader::Conditional { condition } => NodeKind::WhileLoop(condition, body),
-        ParsedLoopHeader::Range { bindings, range } => NodeKind::RangeLoop {
-            bindings,
-            range,
+    if header_needs_completion(&parsed_loop_header) || body.is_retained() {
+        let body = body.into_deferred(body_scope);
+        let deferred = DeferredLoop {
+            header: deferred_loop_header(parsed_loop_header),
             body,
-        },
-        ParsedLoopHeader::Collection { bindings, iterable } => NodeKind::CollectionLoop {
+            span,
+            scope,
+        };
+        let continuation = numeric_construction
+            .borrow_mut()
+            .register_continuation(NumericContinuation::Construct(Box::new(
+                DeferredConstruct::Loop(Box::new(deferred)),
+            )))
+            .map_err(ExpressionParseError::from)?;
+        draft.push_pending(continuation);
+        return Ok(());
+    }
+
+    let body = body.into_nodes()?;
+    let kind = match parsed_loop_header {
+        ParsedLoopHeader::Conditional { condition } => {
+            let StatementExpression::Built(condition) = condition else {
+                return Err(CompilerError::compiler_error(
+                    "a loop condition was retained after the loop decided it needs no numeric completion",
+                )
+                .into());
+            };
+            NodeKind::WhileLoop(condition, body)
+        }
+        ParsedLoopHeader::Range(header) => {
+            let ParsedRangeHeader::Concrete { bindings, range } = header else {
+                return Err(CompilerError::compiler_error(
+                    "a range header was retained after the loop decided it needs no numeric completion",
+                )
+                .into());
+            };
+            NodeKind::RangeLoop {
+                bindings,
+                range,
+                body,
+            }
+        }
+        ParsedLoopHeader::Collection {
             bindings,
             iterable,
-            body,
-        },
+            pending_item,
+        } => {
+            let (StatementExpression::Built(iterable), None) = (iterable, pending_item) else {
+                return Err(CompilerError::compiler_error(
+                    "a collection loop source was retained after the loop decided it needs no numeric completion",
+                )
+                .into());
+            };
+            NodeKind::CollectionLoop {
+                bindings,
+                iterable,
+                body,
+            }
+        }
     };
 
-    Ok(AstNode { kind, span, scope })
+    draft.push_node(AstNode { kind, span, scope });
+    Ok(())
+}
+
+/// True when one parsed loop header still holds a numeric-dependent position.
+fn header_needs_completion(header: &ParsedLoopHeader) -> bool {
+    match header {
+        ParsedLoopHeader::Conditional { condition } => {
+            matches!(condition, StatementExpression::Retained(_))
+        }
+        ParsedLoopHeader::Range(header) => matches!(header, ParsedRangeHeader::Deferred(_)),
+        ParsedLoopHeader::Collection { iterable, .. } => {
+            matches!(iterable, StatementExpression::Retained(_))
+        }
+    }
+}
+
+/// Move one parsed loop header into its retained representation.
+fn deferred_loop_header(header: ParsedLoopHeader) -> DeferredLoopHeader {
+    match header {
+        ParsedLoopHeader::Conditional { condition } => {
+            DeferredLoopHeader::Conditional { condition }
+        }
+        ParsedLoopHeader::Range(header) => match header {
+            // A concrete header whose loop stayed retained because of its body: the spec and its
+            // bindings are final, so the body root only assembles the node.
+            ParsedRangeHeader::Concrete { bindings, range } => {
+                DeferredLoopHeader::Range(Box::new(DeferredRangeHeader::Ready { bindings, range }))
+            }
+            ParsedRangeHeader::Deferred(header) => DeferredLoopHeader::Range(Box::new(header)),
+        },
+        ParsedLoopHeader::Collection {
+            bindings,
+            iterable,
+            pending_item,
+        } => DeferredLoopHeader::Collection {
+            bindings,
+            iterable,
+            pending_item,
+        },
+    }
 }
 
 fn find_loop_header_colon_index(token_stream: &mut AstCursor) -> LoopResult<usize> {

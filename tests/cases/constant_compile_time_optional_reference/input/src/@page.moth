@@ -1,10 +1,10 @@
--- Compile-time optional constant referenced in the page body. The `Int -> Int?`
+-- Compile-time optional constant referenced in the page body. The `I32 -> I32?`
 -- coercion folds into the optional payload, and the body reference lowers the
 -- OptionSome constant shape into the expression.
 
-present #Int? = 7
+present #I32? = 7
 
-describe || -> Int:
+describe || -> I32:
     if present is |value|:
         return value
     ;

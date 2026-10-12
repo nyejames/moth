@@ -1,6 +1,5 @@
 use super::*;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use moth_lexical::numeric::profile::NumericProfile;
 #[test]
 fn parses_config_constant_declarations() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
@@ -69,7 +68,6 @@ fn config_span_tables_finalize_for_success_and_diagnosed_results() {
         let build_config_inputs =
             crate::compiler_frontend::build_config::BuildConfigInputSet::new();
         let services = ProjectConfigParseServices {
-            numeric_profile: NumericProfile::STANDARD,
             style_directives: &style_directives,
             frontend_surface: &frontend_surface,
             build_config_inputs: &build_config_inputs,
@@ -188,7 +186,6 @@ fn loads_canonical_config_file_from_project_root() {
         ))));
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
-        numeric_profile: NumericProfile::STANDARD,
         style_directives: &style_directives,
         frontend_surface: &frontend_surface,
         build_config_inputs: &build_config_inputs,
@@ -212,7 +209,6 @@ fn loads_canonical_config_file_from_project_root() {
     let frontend = compile_project_frontend_with_inputs(
         &mut config,
         crate::build_system::BuildProfile::Dev,
-        NumericProfile::STANDARD,
         validated_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,
@@ -361,7 +357,6 @@ fn directory_projects_require_config_moth() {
     let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = ProjectConfigParseServices {
-        numeric_profile: NumericProfile::STANDARD,
         style_directives: &style_directives,
         frontend_surface: &frontend_surface,
         build_config_inputs: &build_config_inputs,

@@ -44,6 +44,7 @@ use fixtures::{
     branch_join, copy, empty, field_accesses, loop_with_rebind, old_alias_after_rebind,
     same_statement_access_order,
 };
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 #[test]
 fn borrow_problem_copy_fixture_validates_and_keeps_source_and_result_origins_distinct() {
@@ -572,7 +573,7 @@ fn borrow_problem_hir_extractor_reads_the_returned_value_before_scope_exit() {
         id: FunctionId(0),
         entry: HirBlockId(0),
         params: vec![local],
-        return_type: builtin_type_ids::INT,
+        return_type: builtin_type_ids::fixed_scalar(FixedScalar::I32),
     };
     let problem = from_hir(&module, &function, None, None).expect("returning HIR should extract");
 
@@ -925,7 +926,7 @@ fn borrow_problem_hir_extractor_seeds_parameter_origins() {
         id: FunctionId(0),
         entry: HirBlockId(0),
         params: vec![local],
-        return_type: builtin_type_ids::INT,
+        return_type: builtin_type_ids::fixed_scalar(FixedScalar::I32),
     };
     let problem = from_hir(&module, &function, None, None).expect("parameter HIR should extract");
 
@@ -1240,7 +1241,7 @@ fn borrow_problem_hir_extractor_emits_aggregate_storage_events() {
     let collection = hir_expression(
         &mut expressions,
         HirExpressionKind::Collection(elements),
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         ValueKind::RValue,
         region,
     );
@@ -1293,14 +1294,14 @@ fn borrow_problem_hir_extractor_maps_oversized_index_to_dynamic_projection() {
 
     // Above `u32::MAX`, so the `FixedIndex` path cannot represent it.
     let mut expressions = HirExpressionStore::default();
-    let index = int_expression(&mut expressions, i64::from(u32::MAX) + 1, region);
+    let index = i64_expression(&mut expressions, i64::from(u32::MAX) + 1, region);
     let indexed_place = HirPlace::local(source)
         .with_index(index, &mut expressions, None)
         .expect("index projection should fit the expression store");
     let indexed_load = hir_expression(
         &mut expressions,
         HirExpressionKind::Load(indexed_place),
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         ValueKind::RValue,
         region,
     );
@@ -1430,7 +1431,9 @@ fn borrow_problem_hir_extractor_uses_conservative_generated_fallback_without_sum
             "identity".to_owned(),
             None,
         )),
-        Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]),
+        Box::new([CanonicalTypeIdentity::Builtin(
+            CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+        )]),
         Box::new([]),
     );
     let mut expressions = HirExpressionStore::default();
@@ -1978,7 +1981,7 @@ fn hir_literal_fixture() -> (HirModule, HirFunction) {
             region,
             locals: vec![HirLocal {
                 id: local,
-                ty: builtin_type_ids::INT,
+                ty: builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 mutable: true,
                 region,
                 span: None,
@@ -2000,7 +2003,7 @@ fn hir_literal_fixture() -> (HirModule, HirFunction) {
         id: FunctionId(0),
         entry: HirBlockId(0),
         params: vec![],
-        return_type: builtin_type_ids::INT,
+        return_type: builtin_type_ids::fixed_scalar(FixedScalar::I32),
     };
     (module, function)
 }
@@ -2033,14 +2036,14 @@ fn function_for(entry: HirBlockId) -> HirFunction {
         id: FunctionId(0),
         entry,
         params: vec![],
-        return_type: builtin_type_ids::INT,
+        return_type: builtin_type_ids::fixed_scalar(FixedScalar::I32),
     }
 }
 
 fn hir_local(id: LocalId, region: RegionId) -> HirLocal {
     HirLocal {
         id,
-        ty: builtin_type_ids::INT,
+        ty: builtin_type_ids::fixed_scalar(FixedScalar::I32),
         mutable: true,
         region,
         span: None,
@@ -2053,8 +2056,26 @@ fn int_expression(
     region: RegionId,
 ) -> HirValueId {
     crate::compiler_frontend::tests::hir_fixture_support::expression(
-        HirExpressionKind::Int(value),
-        builtin_type_ids::INT,
+        HirExpressionKind::FixedScalar(
+            FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range"),
+        ),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        region,
+        ValueKind::RValue,
+        expressions,
+    )
+}
+
+fn i64_expression(
+    expressions: &mut HirExpressionStore,
+    value: i64,
+    region: RegionId,
+) -> HirValueId {
+    crate::compiler_frontend::tests::hir_fixture_support::expression(
+        HirExpressionKind::FixedScalar(
+            FixedScalarValue::signed(FixedScalar::I64, value).expect("I64 literal in range"),
+        ),
+        builtin_type_ids::fixed_scalar(FixedScalar::I64),
         region,
         ValueKind::RValue,
         expressions,
@@ -2084,7 +2105,7 @@ fn load_expression(
 ) -> HirValueId {
     crate::compiler_frontend::tests::hir_fixture_support::expression(
         HirExpressionKind::Load(HirPlace::local(local)),
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         region,
         ValueKind::Place,
         expressions,

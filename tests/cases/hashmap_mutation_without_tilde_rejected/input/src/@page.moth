@@ -1,4 +1,4 @@
-scores ~{String = Int} = {"Priya" = 10}
+scores ~{String = I32} = {"Priya" = 10}
 scores.set("Linus", 7) catch:
 ;
 [:test]

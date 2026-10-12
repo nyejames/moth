@@ -1,0 +1,11 @@
+entry = "."
+
+# HTML-only by design: exact output covers collection-builtin and
+# source-method receiver mutations on retained bindings. The HTML-Wasm
+# disposition for the retained source-method receiver path is unobserved, so
+# only the backend whose runtime output is asserted is declared.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "scalar retained mutable receiver initial=3 final=5 values=1/2/3/2/5 nominal=9"

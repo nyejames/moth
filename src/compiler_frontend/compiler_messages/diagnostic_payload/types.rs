@@ -174,8 +174,8 @@ impl UnsupportedBackendFeatureReason {
             Self::RuntimeCasts => "runtime casts",
             Self::CheckedNumericOperations => "checked numeric operations",
             Self::RecoverableNumericFailure => "recoverable numeric failure",
-            Self::FloatFormatting => "Float formatting",
-            Self::FloatBoundaryValidation => "Float boundary validation",
+            Self::FloatFormatting => "binary-float formatting",
+            Self::FloatBoundaryValidation => "binary-float boundary validation",
             Self::GenericRuntimeValues => "generic runtime values",
             Self::FixedWidthScalarValues => "fixed-width numeric and Byte values",
             Self::CrossModuleCalls => "cross-module calls",
@@ -246,6 +246,15 @@ pub enum InvalidConfigReason {
     ConfigInputTypeMismatch {
         provided: StringId,
         expected: StringId,
+        provided_argument_index: Option<usize>,
+    },
+    /// A supplied numeric literal does not fit the exact scalar its contract selects.
+    ///
+    /// `provided_argument_index` retains command provenance, because a command value has no
+    /// source span of its own and the primary anchor is the receiving declaration.
+    ConfigInputOutOfRange {
+        literal: StringId,
+        reason: NumberLiteralErrorReason,
         provided_argument_index: Option<usize>,
     },
     /// A required declaration-owned config contract had no input, global or default.
@@ -526,6 +535,9 @@ impl InvalidConfigReason {
                 *provided = remap.get(*provided);
                 *expected = remap.get(*expected);
             }
+            Self::ConfigInputOutOfRange { literal, .. } => {
+                *literal = remap.get(*literal);
+            }
 
             Self::MissingKey
             | Self::MissingConfigFile
@@ -726,7 +738,7 @@ pub enum InvalidCollectionTypeReason {
     ShorthandCapacityNotAllowed,
     /// Fixed collection capacity must be greater than zero.
     ZeroCapacity,
-    /// Capacity expression did not fold to an `Int` value.
+    /// Capacity expression did not fold to an integer value.
     CapacityNotInt,
     /// Capacity expression references a non-constant value or contains runtime-only syntax.
     CapacityNotConstant,
@@ -1127,6 +1139,9 @@ pub enum InvalidTraitConformanceReason {
         requirement_name: StringId,
         return_index: usize,
     },
+    InferredFailureInInfallibleCast {
+        requirement_name: StringId,
+    },
 }
 
 impl InvalidTraitConformanceReason {
@@ -1134,6 +1149,7 @@ impl InvalidTraitConformanceReason {
         match self {
             Self::MissingMethod { requirement_name }
             | Self::ReceiverMutabilityMismatch { requirement_name }
+            | Self::InferredFailureInInfallibleCast { requirement_name }
             | Self::ParameterCountMismatch {
                 requirement_name, ..
             }
@@ -1229,21 +1245,15 @@ pub enum InvalidCastReason {
     TargetIsGenericParameter,
     SameSourceAndTarget,
     SourceIsOptional,
-    OperandIsFallible,
     OperandArityMismatch,
     TargetArityMismatch,
-    FallibleEvidenceRequiresHandling,
-    InfallibleEvidenceCannotUseFallibleForm,
-    PropagationRequiresErrorReturn,
-    PropagationAndRecoveryConflict,
-    BangMustAttachToCast,
+    CastPropagationRemoved,
     ScalarConstructorRemoved,
     NoEvidence,
     BuiltinEvidenceNotConstFoldable,
     UserDefinedEvidenceNotConstFoldable,
     GenericBoundEvidenceNotConstFoldable,
     BuiltinCastFailedInConst,
-    CatchHandlerNotConstFoldable,
 }
 
 /// Which receiver-call surface produced a receiver-access diagnostic.
@@ -1446,7 +1456,7 @@ impl InvalidFallibleHandlingReason {
             }
 
             InvalidFallibleHandlingReason::CatchOutsideBoundary => {
-                "`catch` can only handle a fallible expression at an assignment, declaration, return, or statement boundary."
+                "`catch` is only allowed at an assignment, declaration, return or statement boundary."
             }
 
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler => {
@@ -1482,7 +1492,8 @@ impl InvalidFallibleHandlingReason {
             }
 
             InvalidFallibleHandlingReason::CatchOnNonFallible => {
-                "`catch` handles implicit built-in failure or compatible typed errors, but this expression is not fallible."
+                "`catch` needs a compatible recoverable failure or an authored cast, arithmetic operation or \
+                 multiple calls at this expression level; this expression has none."
             }
 
             InvalidFallibleHandlingReason::CatchOnOptional => {
@@ -1580,7 +1591,6 @@ pub enum CompileTimeEvaluationErrorReason {
     DivideByZero,
     InvalidExponent,
     InvalidOperatorForType,
-    IntegerDivisionOnlyIntInt,
     ConstantSelfReference,
     ConstantNotVisible,
     NonConstantReferenceInConstant,
@@ -1895,7 +1905,7 @@ pub enum InvalidLoopHeaderReason {
     TooManyBindings,
     DuplicateBindingName,
     BindingAlreadyDeclared,
-    CollectionSourceNotCollection { found_type: TypeId },
+    CollectionSourceNotCollection { found_type: Option<TypeId> },
     MissingRangeSeparator,
     MissingRangeEndBound,
     MissingRangeStep,

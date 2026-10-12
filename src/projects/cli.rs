@@ -17,7 +17,7 @@ use crate::compiler_frontend::analysis::borrow_checker::{
 };
 use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigInputDuplicate, BuildConfigInputEntry, BuildConfigInputSet,
-    BuildConfigValueLocation, BuildInputName, BuildInputValueError, PrimitiveBuildValue,
+    BuildConfigInputValue, BuildConfigValueLocation, BuildInputName, BuildInputValueError,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::display_messages::print_compiler_messages;
@@ -34,7 +34,6 @@ use crate::projects::command_status::{
 use crate::projects::dev_server::{self, DevServerOptions};
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
-use moth_lexical::numeric::profile::NumericProfile;
 use saying::say;
 use std::path::{Path, PathBuf};
 
@@ -47,15 +46,15 @@ const BUILD_FLAGS: &[&str] = &["--release", "--html-wasm"];
 /// The error text used when an `--input` flag carries no `name=value` argument.
 const MISSING_COMMAND_INPUT_VALUE: &str = "Missing value for --input.";
 
-/// One `--input name=value` argument whose value is not yet materialised.
+/// One `--input name=value` argument whose value is not yet classified.
 ///
 /// WHAT: the validated input name, the raw authored value text and the zero-based position of the
 ///       `--input` argument that carried them.
-/// WHY:  a command value's primitive type and value depend on the numeric profile of the selected
-///       builder, and the builder is only known once the command starts. The argument shape and
-///       name are still validated and stored while parsing, so a malformed argument is rejected
-///       before any compilation work begins, and the raw value keeps the authored spelling that
-///       materialisation and diagnostics report.
+/// WHY:  a command value's primitive type depends on the config contract that receives it, and
+///       that contract is only known once the project compiles. The argument shape and name are
+///       still validated and stored while parsing, so a malformed argument is rejected before any
+///       compilation work begins. The raw value keeps the authored spelling that classification
+///       and diagnostics report.
 #[derive(Debug, PartialEq, Eq)]
 struct CommandInputArgument {
     name: BuildInputName,
@@ -64,36 +63,33 @@ struct CommandInputArgument {
     argument_index: usize,
 }
 
-/// Materialise every parsed `--input` argument into the typed input set one command compiles with.
+/// Build the typed input set one command compiles with from every parsed `--input` argument.
 ///
-/// WHAT: the one deferred materialisation path build, check and dev share. Each value is inferred
-///       under the selected builder's numeric profile exactly as the immediate command inference
-///       does, entries keep their argument order, and a repeated name is rejected deterministically
-///       while the earlier entry keeps its place.
-/// WHY:  the numeric profile belongs to the selected builder, so the profile-dependent part of
-///       command inference happens once here rather than duplicated inside each command arm, and
-///       the user-facing failure text stays identical to the parse-time rejection it replaces.
-fn materialise_command_inputs(
-    arguments: &[CommandInputArgument],
-    numeric_profile: NumericProfile,
-) -> Result<BuildConfigInputSet, String> {
+/// WHAT: the one classification path build, check and dev share. Each value is classified from its
+///       authored text alone, entries keep their argument order, and a repeated name is rejected
+///       deterministically while the earlier entry keeps its place.
+/// WHY:  a command number has no intrinsic width, so no builder chooses one here. The receiving
+///       contract materialises it at its exact scalar.
+fn command_input_set(arguments: &[CommandInputArgument]) -> Result<BuildConfigInputSet, String> {
     let mut inputs = BuildConfigInputSet::new();
 
     for argument in arguments {
-        let value = PrimitiveBuildValue::from_command_text(&argument.value, numeric_profile)
-            .map_err(|error| match error {
-                BuildInputValueError::Infrastructure(error) => {
-                    format!(
-                        "Failed to process --input '{}': {}.",
-                        argument.name.as_str(),
-                        error.msg
-                    )
-                }
-                error => format!(
-                    "Invalid value for --input '{}': {error}.",
-                    argument.name.as_str()
-                ),
-            })?;
+        let value =
+            BuildConfigInputValue::from_command_text(&argument.value).map_err(
+                |error| match error {
+                    BuildInputValueError::Infrastructure(error) => {
+                        format!(
+                            "Failed to process --input '{}': {}.",
+                            argument.name.as_str(),
+                            error.msg
+                        )
+                    }
+                    error => format!(
+                        "Invalid value for --input '{}': {error}.",
+                        argument.name.as_str()
+                    ),
+                },
+            )?;
 
         let entry = BuildConfigInputEntry::new(
             argument.name.clone(),
@@ -109,7 +105,7 @@ fn materialise_command_inputs(
     Ok(inputs)
 }
 
-/// Parse one shared `--input name=value` value argument and retain it for materialisation.
+/// Parse one shared `--input name=value` value argument and retain it for classification.
 ///
 /// WHAT: the one input parser build, check and dev share. It rejects a missing or flag-shaped
 ///       value argument, splits the argument at the first `=` so every later `=` stays inside
@@ -117,9 +113,9 @@ fn materialise_command_inputs(
 ///       raw value text and the zero-based position of the `--input` argument.
 /// WHY:  all three commands must share one parser and one typed carrier — no command owns a
 ///       second conversion or defaulting path, and unknown input names stay in the set for the
-///       later selected-contract validation phases. The value's primitive type is decided by the
-///       selected builder's numeric profile, so it materialises in
-///       [`materialise_command_inputs`] once the command owns that builder.
+///       later selected-contract validation phases. The value is classified by
+///       [`command_input_set`], and a numeric value materialises only at the contract that
+///       receives it.
 fn parse_command_input_argument(
     value_argument: Option<&String>,
     argument_index: usize,
@@ -254,7 +250,7 @@ pub fn start_cli() -> process::ExitCode {
                 Command::Build { path, flags, inputs } => {
                     let project_builder =
                         build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-                    match materialise_command_inputs(&inputs, project_builder.numeric_profile()) {
+                    match command_input_set(&inputs) {
                         Ok(inputs) => {
                             run_build_command(&project_builder, &path, &flags, &inputs)
                         }
@@ -269,7 +265,7 @@ pub fn start_cli() -> process::ExitCode {
                 Command::Check { path, terse, inputs } => {
                     let project_builder =
                         build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-                    match materialise_command_inputs(&inputs, project_builder.numeric_profile()) {
+                    match command_input_set(&inputs) {
                         Ok(inputs) => check::run_check(
                             &path,
                             CheckOptions { terse, inputs },
@@ -307,7 +303,7 @@ pub fn start_cli() -> process::ExitCode {
                 } => {
                     let project_builder =
                         build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-                    match materialise_command_inputs(&inputs, project_builder.numeric_profile()) {
+                    match command_input_set(&inputs) {
                         Ok(inputs) => {
                             say!("\nStarting dev server...");
                             options.inputs = inputs;
@@ -397,7 +393,7 @@ fn run_build_command(
 ///
 /// The injected plan builder keeps the command's terminal timing point shared
 /// between ordinary output planning and focused failure-path tests. The selected builder arrives
-/// from the command arm because it owns the numeric profile the parsed inputs materialised under.
+/// from the command arm and compiles the classified input set.
 fn run_build_command_with_output_plan(
     project_builder: &build::ProjectBuilder,
     path: &str,

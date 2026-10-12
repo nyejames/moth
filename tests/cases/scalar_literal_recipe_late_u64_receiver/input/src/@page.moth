@@ -1,0 +1,10 @@
+receive_u64 |value U64| -> String:
+    return cast value
+;
+
+-- The whole initializer is unresolved literal arithmetic, so the later U64
+-- receiver types both leaves and completes the checked addition in U64.
+value = 1 + 2
+received = receive_u64(value)
+
+[:scalar literal recipe=[received]]

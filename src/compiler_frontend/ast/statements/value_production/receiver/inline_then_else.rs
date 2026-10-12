@@ -5,6 +5,7 @@
 //! WHY: these two syntactic forms previously duplicated structural validation
 //! (newline rejection, `else then` rejection, same-line checks, and coercion).
 
+use super::block_body::ValueBlockBranchBody;
 use super::result_type::{infer_inline_result_type, receiver_type_mismatch_context};
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::cursor::AstCursor;
@@ -19,17 +20,24 @@ use crate::compiler_frontend::ast::expressions::parse_expression_input::{
 use crate::compiler_frontend::ast::generic_functions::{
     GenericRequestRange, IfGenericRequestRanges,
 };
-use crate::compiler_frontend::ast::statements::value_production::parse_values::{
-    ProducedValuesParseInput, is_missing_produced_value_boundary, parse_produced_values_typed,
+use crate::compiler_frontend::ast::numeric_construction::{
+    BodyDraft, DeferredBody, NumericContinuation, StatementExpression, deferred_numeric_expression,
 };
-use crate::compiler_frontend::ast::statements::value_production::types::ActiveValueProductionTarget;
+use crate::compiler_frontend::ast::statements::value_production::expression_build::then_value_node;
+use crate::compiler_frontend::ast::statements::value_production::parse_values::{
+    ProducedValuesParseInput, is_missing_produced_value_boundary, parse_retained_produced_values,
+};
+use crate::compiler_frontend::ast::statements::value_production::types::{
+    ActiveValueProductionTarget, ThenValueContinuation, ThenValueSlot,
+};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
@@ -38,6 +46,13 @@ use crate::compiler_frontend::type_coercion::parse_context::{
 };
 use crate::compiler_frontend::utilities::token_scan::ExpressionBoundaryDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
+
+/// True when every value of one inline branch completed at its parse position.
+fn branch_values_are_ready(values: &[StatementExpression]) -> bool {
+    values
+        .iter()
+        .all(|value| matches!(value, StatementExpression::Built(_)))
+}
 
 /// Input for the shared inline then/else parser.
 pub(super) struct InlineThenElseInput<'a, 'b, 'tokens> {
@@ -63,9 +78,116 @@ pub(super) struct InlineThenElseOutput {
 struct ParsedInlineBranchValues {
     then_span: Option<SourceSpan>,
     else_span: Option<SourceSpan>,
-    then_values: Vec<Expression>,
-    else_values: Vec<Expression>,
+    then_values: Vec<StatementExpression>,
+    else_values: Vec<StatementExpression>,
     generic_request_ranges: IfGenericRequestRanges,
+}
+
+/// The result of parsing the shared inline `then`/`else` shape.
+///
+/// WHAT: either both branches completed where they were parsed, or at least one branch kept a
+///       numeric-dependent value that only the enclosing body root can resolve.
+/// WHY: an inline value-if or value-match is an expression over branch values, so a branch that
+///      retained a numeric origin travels as the whole authored block instead of escaping as a
+///      non-owning deferral that no construct can resume.
+pub(super) enum InlineThenElseOutcome {
+    /// Both branches completed at their parse position.
+    Complete(InlineThenElseOutput),
+    /// At least one branch holds values whose numeric origins the body root must select first.
+    Retained {
+        then_body: InlineBranchBody,
+        else_body: InlineBranchBody,
+        generic_request_ranges: IfGenericRequestRanges,
+    },
+}
+
+/// One parsed inline branch body.
+///
+/// WHAT: the branch's authored `then` values, or the draft that keeps them for the body root.
+/// WHY: the two shapes must stay distinct — a concrete branch publishes directly, while a
+///      retained branch resumes through the session's single construction state.
+pub(super) enum InlineBranchBody {
+    /// The branch completed at its parse position; these values publish as one `then` node.
+    Ready {
+        values: Vec<Expression>,
+        span: Option<SourceSpan>,
+        scope: PathId,
+    },
+    /// The branch retained numeric continuations for the enclosing body root.
+    Retained(DeferredBody),
+}
+
+impl InlineBranchBody {
+    /// The authored body this branch contributes to its value block.
+    pub(super) fn into_value_block_body(self) -> ValueBlockBranchBody {
+        match self {
+            Self::Ready {
+                values,
+                span,
+                scope,
+            } => ValueBlockBranchBody::Nodes {
+                nodes: vec![then_value_node(values, span, scope)],
+                scope,
+            },
+            Self::Retained(body) => ValueBlockBranchBody::Draft(body),
+        }
+    }
+}
+
+/// Turns one branch's parsed values into its authored body.
+///
+/// WHAT: publishes a fully built branch directly, and registers a branch that holds any retained
+///       value as one `then` continuation inside a fresh draft.
+/// WHY: the enclosing body root owns numeric resolution, so a retained branch keeps its values,
+///       scope and authored span until the session resolves them at the resolved receiving slots —
+///       never materialised early and never escaped as a non-owning deferral.
+fn inline_branch_body(
+    values: Vec<StatementExpression>,
+    span: Option<SourceSpan>,
+    scope: PathId,
+    context: &ScopeContext,
+    target: &ActiveValueProductionTarget,
+) -> InlineThenElseResult<InlineBranchBody> {
+    if values
+        .iter()
+        .all(|value| matches!(value, StatementExpression::Built(_)))
+    {
+        return Ok(InlineBranchBody::Ready {
+            values: into_built_values(values)?,
+            span,
+            scope,
+        });
+    }
+
+    let continuation = context.register_numeric_continuation(NumericContinuation::ThenValue(
+        ThenValueContinuation {
+            values: values.into_iter().map(ThenValueSlot::Pending).collect(),
+            slot_expected_types: target.slot_expected_types(),
+            receiver_kind: target.receiver_kind,
+            span,
+            scope,
+        },
+    ))?;
+    let mut draft = BodyDraft::new();
+    draft.push_pending(continuation);
+
+    Ok(InlineBranchBody::Retained(DeferredBody { draft, scope }))
+}
+
+/// Extracts the built expressions of a fully built branch value list.
+fn into_built_values(values: Vec<StatementExpression>) -> InlineThenElseResult<Vec<Expression>> {
+    let mut built = Vec::with_capacity(values.len());
+    for value in values {
+        let StatementExpression::Built(expression) = value else {
+            return Err(CompilerError::compiler_error(
+                "an inline branch reported ready while holding a retained value",
+            )
+            .into());
+        };
+        built.push(expression);
+    }
+
+    Ok(built)
 }
 
 /// Returns `true` when both source locations are on the same logical line.
@@ -97,8 +219,9 @@ type InlineThenElseResult<T> = Result<T, ExpressionParseError>;
 /// Parses inline `then` / `else` values against an active production target.
 ///
 /// WHAT: assumes the current token is `then`. Consumes the shared one-line shape
-/// and reads each branch through `parse_produced_values_typed`.
-/// WHY: known multi-value receivers and inferred multi-bind share this grammar;
+/// and reads each branch through `parse_retained_produced_values`.
+/// WHY: known multi-value receivers and inferred multi-bind share this grammar, and each branch
+/// owns its numeric deferral so a pending value travels to the body root rather than escaping;
 /// slot inference stays with the multi-bind owner after these values are collected.
 fn parse_inline_then_else_with_target(
     token_stream: &mut AstCursor,
@@ -132,12 +255,11 @@ fn parse_inline_then_else_with_target(
         .into());
     }
 
-    let then_values = parse_produced_values_typed(ProducedValuesParseInput {
+    let then_values = parse_retained_produced_values(ProducedValuesParseInput {
         token_stream,
         context: then_context,
         type_interner,
         target,
-        label: "then branch",
         string_table,
         path_fork,
     })?;
@@ -151,12 +273,11 @@ fn parse_inline_then_else_with_target(
     reject_newline_after_else(token_stream)?;
     reject_empty_value_after_else(token_stream)?;
 
-    let else_values = parse_produced_values_typed(ProducedValuesParseInput {
+    let else_values = parse_retained_produced_values(ProducedValuesParseInput {
         token_stream,
         context: else_context,
         type_interner,
         target,
-        label: "else branch",
         string_table,
         path_fork,
     })?;
@@ -182,7 +303,7 @@ fn parse_inline_then_else_with_target(
 /// single-predicate value-match.
 pub(super) fn parse_inline_then_else(
     input: InlineThenElseInput<'_, '_, '_>,
-) -> InlineThenElseResult<InlineThenElseOutput> {
+) -> InlineThenElseResult<InlineThenElseOutcome> {
     let InlineThenElseInput {
         token_stream,
         then_context,
@@ -205,16 +326,47 @@ pub(super) fn parse_inline_then_else(
             string_table,
             path_fork,
         )?;
+
+        // A branch that retained a numeric origin keeps the whole inline block for the body root,
+        // where this block's own constructor runs once with the resolved values.
+        if !branch_values_are_ready(&parsed.then_values)
+            || !branch_values_are_ready(&parsed.else_values)
+        {
+            let then_body = inline_branch_body(
+                parsed.then_values,
+                parsed.then_span,
+                then_context.scope,
+                then_context,
+                &target,
+            )?;
+            let else_body = inline_branch_body(
+                parsed.else_values,
+                parsed.else_span,
+                else_context.scope,
+                else_context,
+                &target,
+            )?;
+
+            return Ok(InlineThenElseOutcome::Retained {
+                then_body,
+                else_body,
+                generic_request_ranges: parsed.generic_request_ranges,
+            });
+        }
+
+        let then_values = into_built_values(parsed.then_values)?;
+        let else_values = into_built_values(parsed.else_values)?;
+
         if target.needs_slot_inference() {
-            return Ok(InlineThenElseOutput {
+            return Ok(InlineThenElseOutcome::Complete(InlineThenElseOutput {
                 then_span: parsed.then_span,
                 else_span: parsed.else_span,
-                then_values: parsed.then_values,
-                else_values: parsed.else_values,
+                then_values,
+                else_values,
                 result_type_id: None,
                 result_type_ids: Vec::new(),
                 generic_request_ranges: parsed.generic_request_ranges,
-            });
+            }));
         }
 
         let result_type_ids = expected_result_type_ids;
@@ -222,15 +374,15 @@ pub(super) fn parse_inline_then_else(
             .environment_mut_for_derived_types()
             .intern_tuple(result_type_ids.clone());
 
-        return Ok(InlineThenElseOutput {
+        return Ok(InlineThenElseOutcome::Complete(InlineThenElseOutput {
             then_span: parsed.then_span,
             else_span: parsed.else_span,
-            then_values: parsed.then_values,
-            else_values: parsed.else_values,
+            then_values,
+            else_values,
             result_type_id: Some(result_type_id),
             result_type_ids,
             generic_request_ranges: parsed.generic_request_ranges,
-        });
+        }));
     }
 
     let then_index = token_stream.position();
@@ -282,23 +434,50 @@ pub(super) fn parse_inline_then_else(
         string_table,
         path_fork,
     });
-    let then_expr = if else_follows {
-        create_expression_until(input, &[TokenTag::ELSE])?
+    // This branch owns its numeric deferral: a value that still depends on an unresolved origin
+    // is retained for the body root instead of escaping as a non-owning failure.
+    let mut input = input.with_numeric_deferral_owner();
+    if expected_type_id.is_none() {
+        // An unresolved slot has no destination yet, so a literal-only branch must stay
+        // unresolved too; a known slot materialises it through its own expectation.
+        input = input.with_retained_pending_numeric_fragment();
+    }
+    let then_stops: &[TokenTag] = if else_follows {
+        &[TokenTag::ELSE]
     } else {
-        create_expression_until(
-            input,
-            &[
-                TokenTag::NEWLINE,
-                TokenTag::END,
-                TokenTag::EOF,
-                TokenTag::COMMA,
-                TokenTag::CLOSE_PARENTHESIS,
-                TokenTag::CLOSE_CURLY,
-            ],
-        )?
+        &[
+            TokenTag::NEWLINE,
+            TokenTag::END,
+            TokenTag::EOF,
+            TokenTag::COMMA,
+            TokenTag::CLOSE_PARENTHESIS,
+            TokenTag::CLOSE_CURLY,
+        ]
+    };
+    let then_value = match create_expression_until(input, then_stops) {
+        Ok(expression) => StatementExpression::Built(expression),
+        Err(error) => {
+            let deferral = error.take_numeric_deferral(
+                "an inline value-if branch whose receiving site is not resolved yet",
+            )?;
+            StatementExpression::Retained(deferred_numeric_expression(
+                deferral.items,
+                deferral.expected,
+                deferral.value_mode,
+                deferral.span,
+                deferral.suffix,
+            ))
+        }
     };
     let then_request_end = then_context.generic_request_checkpoint();
 
+    if else_follows {
+        // An authored `else` on a later line still belongs to this value-if: the scan above only
+        // follows expression-continuation newlines, so the cursor rests on the newline before it.
+        // Skipping it lets `require_else_inline` report the authored multiline form instead of a
+        // missing `else` at the first receiving boundary.
+        token_stream.skip_newlines();
+    }
     require_else_inline(token_stream, then_index)?;
     let else_span = Some(token_stream.current_span());
     token_stream.advance(); // consume `else`
@@ -331,16 +510,78 @@ pub(super) fn parse_inline_then_else(
         },
         false,
     );
-    let else_expr = create_expression_with_trailing_newline_policy(input)?;
+    // The else branch owns its numeric deferral for the same reason as the then branch.
+    let mut input = input.with_numeric_deferral_owner();
+    if expected_type_id.is_none() {
+        input = input.with_retained_pending_numeric_fragment();
+    }
+    let else_value = match create_expression_with_trailing_newline_policy(input) {
+        Ok(expression) => StatementExpression::Built(expression),
+        Err(error) => {
+            let deferral = error.take_numeric_deferral(
+                "an inline value-if branch whose receiving site is not resolved yet",
+            )?;
+            StatementExpression::Retained(deferred_numeric_expression(
+                deferral.items,
+                deferral.expected,
+                deferral.value_mode,
+                deferral.span,
+                deferral.suffix,
+            ))
+        }
+    };
     let else_request_end = else_context.generic_request_checkpoint();
 
     if !same_logical_line(token_stream, then_index, else_expression_start_index) {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::InlineValueIfMultiline,
-            else_expr.span,
+            else_span,
         )
         .into());
     }
+
+    // A branch that still depends on an unresolved numeric origin keeps the whole inline block:
+    // the enclosing body root resolves the values and re-runs this form's constructor once.
+    if !matches!(then_value, StatementExpression::Built(_))
+        || !matches!(else_value, StatementExpression::Built(_))
+    {
+        let then_body = inline_branch_body(
+            vec![then_value],
+            then_span,
+            then_context.scope,
+            then_context,
+            &target,
+        )?;
+        let else_body = inline_branch_body(
+            vec![else_value],
+            else_span,
+            else_context.scope,
+            else_context,
+            &target,
+        )?;
+
+        return Ok(InlineThenElseOutcome::Retained {
+            then_body,
+            else_body,
+            generic_request_ranges: IfGenericRequestRanges {
+                then_branch: GenericRequestRange::new(then_request_start, then_request_end),
+                else_branch: GenericRequestRange::new(then_request_end, else_request_end),
+            },
+        });
+    }
+
+    let StatementExpression::Built(then_expr) = then_value else {
+        return Err(CompilerError::compiler_error(
+            "an inline then branch reported ready while holding a retained value",
+        )
+        .into());
+    };
+    let StatementExpression::Built(else_expr) = else_value else {
+        return Err(CompilerError::compiler_error(
+            "an inline else branch reported ready while holding a retained value",
+        )
+        .into());
+    };
 
     let result_type_id = if let Some(expected_type_id) = expected_type_id {
         expected_type_id
@@ -360,18 +601,16 @@ pub(super) fn parse_inline_then_else(
         then_expr,
         result_type_id,
         type_interner.environment(),
-        then_context.numeric_profile.float_precision,
         mismatch_context,
     )?;
     let else_expr = coerce_expression_to_explicit_type_boundary(
         else_expr,
         result_type_id,
         type_interner.environment(),
-        then_context.numeric_profile.float_precision,
         mismatch_context,
     )?;
 
-    Ok(InlineThenElseOutput {
+    Ok(InlineThenElseOutcome::Complete(InlineThenElseOutput {
         then_span,
         else_span,
         then_values: vec![then_expr],
@@ -386,7 +625,7 @@ pub(super) fn parse_inline_then_else(
             then_branch: GenericRequestRange::new(then_request_start, then_request_end),
             else_branch: GenericRequestRange::new(then_request_end, else_request_end),
         },
-    })
+    }))
 }
 
 fn cast_target_context_for_inline_branch(

@@ -1,0 +1,2 @@
+maybe String? = none
+label String = if (maybe) is none then "none" else "present"

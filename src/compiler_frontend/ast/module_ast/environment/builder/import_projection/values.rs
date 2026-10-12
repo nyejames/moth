@@ -275,8 +275,6 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
     span: Option<SourceSpan>,
 ) -> Result<Expression, CompilerError> {
     let kind = match folded {
-        PublicFoldedValue::Int(value) => ExpressionKind::Int(*value),
-        PublicFoldedValue::Uint(value) => ExpressionKind::Uint(*value),
         PublicFoldedValue::Number(value) => {
             if materialiser
                 .type_environment()
@@ -290,7 +288,6 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
             }
             ExpressionKind::Number(value.clone())
         }
-        PublicFoldedValue::Float(value) => ExpressionKind::Float(value.value()),
         PublicFoldedValue::FixedScalar(value) => ExpressionKind::FixedScalar(*value),
         PublicFoldedValue::Bool(value) => ExpressionKind::Bool(*value),
         PublicFoldedValue::Char(value) => ExpressionKind::Char(*value),
@@ -428,20 +425,28 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
             }
         }
         PublicFoldedValue::Range { start, end } => {
+            // A range has no shared endpoint identity: preserve each folded scalar's
+            // exact type instead of applying the unconstrained literal default.
+            let (start_type, end_type) = match (start.as_ref(), end.as_ref()) {
+                (PublicFoldedValue::FixedScalar(start), PublicFoldedValue::FixedScalar(end)) => (
+                    builtin_type_ids::fixed_scalar(start.scalar()),
+                    builtin_type_ids::fixed_scalar(end.scalar()),
+                ),
+                _ => {
+                    return Err(CompilerError::compiler_error(
+                        "Imported folded range endpoints must be fixed scalar values",
+                    ));
+                }
+            };
             let start = materialize_public_folded_value(
                 materialiser,
                 start,
-                builtin_type_ids::INT,
+                start_type,
                 string_table,
                 span,
             )?;
-            let end = materialize_public_folded_value(
-                materialiser,
-                end,
-                builtin_type_ids::INT,
-                string_table,
-                span,
-            )?;
+            let end =
+                materialize_public_folded_value(materialiser, end, end_type, string_table, span)?;
             ExpressionKind::Range(Box::new(start), Box::new(end))
         }
         PublicFoldedValue::OptionSome(value) => {

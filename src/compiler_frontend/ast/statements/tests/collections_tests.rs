@@ -25,6 +25,15 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+/// One exact `I32` scalar value for collection-item fixtures.
+///
+/// WHY: an unconstrained whole literal defaults to `I32`, so completed collection items carry
+///      the exact `I32` identity.
+fn i32_value(value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32")
+}
 
 fn runtime_collection_builtin_op(expression: &Expression) -> CollectionBuiltinOp {
     let ExpressionKind::CollectionBuiltinCall { op, .. } = &expression.kind else {
@@ -72,14 +81,14 @@ fn parses_collection_literal_items() {
     };
 
     assert_eq!(items.len(), 3);
-    assert!(matches!(items[0].kind, ExpressionKind::Int(1)));
-    assert!(matches!(items[1].kind, ExpressionKind::Int(2)));
-    assert!(matches!(items[2].kind, ExpressionKind::Int(3)));
+    assert!(matches!(items[0].kind, ExpressionKind::FixedScalar(value) if value == i32_value(1)));
+    assert!(matches!(items[1].kind, ExpressionKind::FixedScalar(value) if value == i32_value(2)));
+    assert!(matches!(items[2].kind, ExpressionKind::FixedScalar(value) if value == i32_value(3)));
 }
 
 #[test]
 fn parses_multiline_inferred_collection_literal_with_constructor_items() {
-    let source = "Entry = |\n    value Int,\n|\n\nrender || -> String:\n    entries = {\n        Entry(1),\n        Entry(2),\n    }\n    return [entries.length()]\n;\n";
+    let source = "Entry = |\n    value I32,\n|\n\nrender || -> String:\n    entries = {\n        Entry(1),\n        Entry(2),\n    }\n    return [entries.length()]\n;\n";
     let (ast, path_fork, string_table) = parse_single_file_ast(source);
     let body = function_body_by_name(&ast, &path_fork, &string_table, "render");
 
@@ -115,14 +124,14 @@ fn infers_collection_element_type_from_non_empty_literal() {
             .value
             .diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{Int}"
+        "{I32}"
     );
 }
 
 #[test]
 fn parses_empty_collection_with_explicit_element_type() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("Reading = |\n    value Float,\n|\n\nreadings ~{Reading} = {}\n");
+        parse_single_file_ast("Reading = |\n    value F64,\n|\n\nreadings ~{Reading} = {}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(readings_decl) = &body[0].kind else {
@@ -153,7 +162,7 @@ fn rejects_mixed_item_types_in_inferred_collection() {
 
 #[test]
 fn rejects_item_that_does_not_match_explicit_collection_type() {
-    let diagnostic = parse_single_file_ast_diagnostic("values ~{Int} = {1, \"bad\"}\n");
+    let diagnostic = parse_single_file_ast_diagnostic("values ~{I32} = {1, \"bad\"}\n");
 
     assert!(matches!(
         diagnostic.payload,
@@ -167,7 +176,7 @@ fn rejects_item_that_does_not_match_explicit_collection_type() {
 #[test]
 fn parses_growable_push_after_explicit_empty_collection() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("values ~{Int} = {}\n~values.push(1)\n");
+        parse_single_file_ast("values ~{I32} = {}\n~values.push(1)\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::ExpressionStatement(push_expr) = &body[1].kind else {
@@ -207,7 +216,7 @@ fn rejects_missing_collection_item_after_comma() {
 #[test]
 fn parses_collection_get_with_fallback_handler_and_propagation() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "read_or_default |values {Int}, idx Int| -> Int:\n    return values.get(idx) catch:\n        then 0\n    ;\n;\n\nread_with_handler |values {Int}, idx Int| -> Int:\n    return values.get(idx) catch |err|:\n        io.line([: [err.message]])\n        then 0\n    ;\n;\n\nforward_read |values {Int}, idx Int| -> Int, Error!:\n    return values.get(idx)!\n;\n",
+        "read_or_default |values {I32}, idx I32| -> I32:\n    return values.get(idx) catch:\n        then 0\n    ;\n;\n\nread_with_handler |values {I32}, idx I32| -> I32:\n    return values.get(idx) catch |err|:\n        io.line([: [err.message]])\n        then 0\n    ;\n;\n\nforward_read |values {I32}, idx I32| -> I32, Error!:\n    return values.get(idx)!\n;\n",
     );
 
     let fallback_body = function_body_by_name(&ast, &path_fork, &string_table, "read_or_default");
@@ -270,7 +279,10 @@ fn parses_collection_mutators_and_length_calls() {
     let NodeKind::VariableDeclaration(size_decl) = &body[4].kind else {
         panic!("expected length declaration");
     };
-    assert_eq!(size_decl.value.type_id, builtin_type_ids::INT);
+    assert_eq!(
+        size_decl.value.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
     assert_eq!(
         runtime_collection_builtin_op(&size_decl.value),
         CollectionBuiltinOp::Length
@@ -335,7 +347,7 @@ fn accepts_unhandled_growable_collection_push() {
 
 #[test]
 fn rejects_unhandled_fixed_collection_push_result() {
-    let diagnostic = parse_single_file_ast_diagnostic("items ~{2 Int} = {1, 2}\n~items.push(3)\n");
+    let diagnostic = parse_single_file_ast_diagnostic("items ~{2 I32} = {1, 2}\n~items.push(3)\n");
 
     assert!(matches!(
         diagnostic.payload,
@@ -382,7 +394,7 @@ fn rejects_propagation_on_growable_collection_push() {
 #[test]
 fn parses_fixed_collection_push_with_fallback_handler() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("items ~{2 Int} = {1, 2}\n~items.push(3) catch:\n;\n");
+        parse_single_file_ast("items ~{2 I32} = {1, 2}\n~items.push(3) catch:\n;\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::ExpressionStatement(push_expr) = &body[1].kind else {
@@ -399,7 +411,7 @@ fn parses_fixed_collection_push_with_fallback_handler() {
 fn parses_fixed_collection_push_postfix_propagation() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
         "append || -> Error!:
-        items ~{2 Int} = {1, 2}
+        items ~{2 I32} = {1, 2}
         ~items.push(3)!
     ;
     ",
@@ -419,7 +431,7 @@ fn parses_fixed_collection_push_postfix_propagation() {
 #[test]
 fn rejects_fixed_collection_push_fallback_value() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "items ~{2 Int} = {1, 2}
+        "items ~{2 I32} = {1, 2}
 ~items.push(3) catch:
     then 0
 ;
@@ -448,7 +460,7 @@ fn rejects_mutating_collection_method_without_explicit_receiver_tilde() {
     ));
 
     let fixed_diagnostic =
-        parse_single_file_ast_diagnostic("items ~{2 Int} = {1, 2}\nitems.push(3)\n");
+        parse_single_file_ast_diagnostic("items ~{2 I32} = {1, 2}\nitems.push(3)\n");
 
     assert!(matches!(
         fixed_diagnostic.payload,
@@ -485,7 +497,7 @@ fn rejects_explicit_receiver_tilde_for_collection_get_and_length() {
 
 #[test]
 fn parses_multiline_zero_argument_collection_and_map_builtins() {
-    let source = "values = {1, 2}\ncount = values.length(\n)\nscores ~{String = Int} = {\"Ada\" = 10}\n~scores.clear(\n)\n";
+    let source = "values = {1, 2}\ncount = values.length(\n)\nscores ~{String = I32} = {\"Ada\" = 10}\n~scores.clear(\n)\n";
 
     parse_single_file_ast(source);
 }
@@ -546,7 +558,7 @@ fn rejects_unhandled_collection_get_result() {
 #[test]
 fn preserves_nested_builtin_diagnostic_origin_under_whole_expression_catch() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "read |values {Int}, index Int| -> Int:\n    return values.get(index) + 1 catch then 0\n;\n",
+        "read |values {I32}, index I32| -> I32:\n    return values.get(index) + 1 catch then 0\n;\n",
     );
     let body = function_body_by_name(&ast, &path_fork, &string_table, "read");
     let NodeKind::Return(values) = &body[0].kind else {
@@ -649,7 +661,7 @@ fn rejects_removed_builtin_error_helper_methods() {
 
 #[test]
 fn fixed_collection_literal_within_capacity_is_accepted() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("items {2 Int} = {1, 2}\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast("items {2 I32} = {1, 2}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(decl) = &body[0].kind else {
@@ -660,7 +672,7 @@ fn fixed_collection_literal_within_capacity_is_accepted() {
         decl.value
             .diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{2 Int}"
+        "{2 I32}"
     );
 }
 
@@ -692,13 +704,13 @@ fn parses_inferred_map_literal() {
             .value
             .diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{String = Int}"
+        "{String = I32}"
     );
 }
 
 #[test]
 fn parses_explicit_empty_map_literal() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("scores {String = Int} = {}\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast("scores {String = I32} = {}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(scores_decl) = &body[0].kind else {
@@ -715,7 +727,7 @@ fn parses_explicit_empty_map_literal() {
             .value
             .diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{String = Int}"
+        "{String = I32}"
     );
 }
 
@@ -768,7 +780,7 @@ fn parses_map_literal_with_bare_identifier_key_as_variable() {
 #[test]
 fn parses_map_literal_with_contextual_none_value() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("scores ~{String = Int?} = {\"Ada\" = none, \"Grace\" = 12}\n");
+        parse_single_file_ast("scores ~{String = I32?} = {\"Ada\" = none, \"Grace\" = 12}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(scores_decl) = &body[0].kind else {
@@ -789,7 +801,7 @@ fn parses_map_literal_with_contextual_none_value() {
 #[test]
 fn parses_map_literal_with_string_key_coercion() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("scores ~{String = Int} = {\"Ada\" = 10}\n");
+        parse_single_file_ast("scores ~{String = I32} = {\"Ada\" = 10}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(scores_decl) = &body[0].kind else {
@@ -810,7 +822,7 @@ fn parses_map_literal_with_string_key_coercion() {
 #[test]
 fn parses_nested_map_literal_value() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("scores ~{String = {String = Int}} = {\"group\" = {\"Ada\" = 10}}\n");
+        parse_single_file_ast("scores ~{String = {String = I32}} = {\"group\" = {\"Ada\" = 10}}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(scores_decl) = &body[0].kind else {
@@ -831,7 +843,7 @@ fn parses_nested_map_literal_value() {
 #[test]
 fn parses_map_type_alias_literal() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("Scores as {String = Int}\nscores Scores = {\"Ada\" = 10}\n");
+        parse_single_file_ast("Scores as {String = I32}\nscores Scores = {\"Ada\" = 10}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(scores_decl) = &body[0].kind else {
@@ -848,7 +860,7 @@ fn parses_map_type_alias_literal() {
             .value
             .diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{String = Int}"
+        "{String = I32}"
     );
 }
 
@@ -894,7 +906,7 @@ fn rejects_double_equal_inside_collection_as_common_syntax_mistake() {
 #[test]
 fn rejects_unknown_bare_identifier_key() {
     let diagnostic =
-        parse_single_file_ast_diagnostic("scores ~{String = Int} = {unknown_key = 10}\n");
+        parse_single_file_ast_diagnostic("scores ~{String = I32} = {unknown_key = 10}\n");
 
     assert!(matches!(
         diagnostic.payload,
@@ -944,7 +956,7 @@ fn handled_map_builtin_op(expression: &Expression) -> MapBuiltinOp {
 #[test]
 fn parses_map_get_with_catch_handler() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "scores ~{String = Int} = {\"Ada\" = 10}\nvalue = scores.get(\"Ada\") catch:\n    then 0\n;\n",
+        "scores ~{String = I32} = {\"Ada\" = 10}\nvalue = scores.get(\"Ada\") catch:\n    then 0\n;\n",
     );
     let body = start_function_body(&ast, &path_fork, &string_table);
 
@@ -958,7 +970,7 @@ fn parses_map_get_with_catch_handler() {
 #[test]
 fn parses_map_get_with_propagation() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "get_value |scores {String = Int}| -> Int, Error!:\n    return scores.get(\"Ada\")!\n;\n",
+        "get_value |scores {String = I32}| -> I32, Error!:\n    return scores.get(\"Ada\")!\n;\n",
     );
     let body = function_body_by_name(&ast, &path_fork, &string_table, "get_value");
 
@@ -972,7 +984,7 @@ fn parses_map_get_with_propagation() {
 #[test]
 fn parses_map_contains() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "scores ~{String = Int} = {\"Ada\" = 10}\nfound = scores.contains(\"Ada\")\n",
+        "scores ~{String = I32} = {\"Ada\" = 10}\nfound = scores.contains(\"Ada\")\n",
     );
     let body = start_function_body(&ast, &path_fork, &string_table);
 
@@ -989,7 +1001,7 @@ fn parses_map_contains() {
 #[test]
 fn parses_map_set_with_mutable_receiver() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "scores ~{String = Int} = {\"Ada\" = 10}\n~scores.set(\"Linus\", 7) catch:\n;\n",
+        "scores ~{String = I32} = {\"Ada\" = 10}\n~scores.set(\"Linus\", 7) catch:\n;\n",
     );
     let body = start_function_body(&ast, &path_fork, &string_table);
 
@@ -1003,7 +1015,7 @@ fn parses_map_set_with_mutable_receiver() {
 #[test]
 fn parses_map_remove_with_mutable_receiver() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "scores ~{String = Int} = {\"Ada\" = 10}\nremoved = ~scores.remove(\"Ada\") catch:\n    then 0\n;\n",
+        "scores ~{String = I32} = {\"Ada\" = 10}\nremoved = ~scores.remove(\"Ada\") catch:\n    then 0\n;\n",
     );
     let body = start_function_body(&ast, &path_fork, &string_table);
 
@@ -1020,7 +1032,7 @@ fn parses_map_remove_with_mutable_receiver() {
 #[test]
 fn parses_map_clear_with_mutable_receiver() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("scores ~{String = Int} = {\"Ada\" = 10}\n~scores.clear()\n");
+        parse_single_file_ast("scores ~{String = I32} = {\"Ada\" = 10}\n~scores.clear()\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::ExpressionStatement(expr) = &body[1].kind else {
@@ -1033,7 +1045,7 @@ fn parses_map_clear_with_mutable_receiver() {
 #[test]
 fn parses_map_length_as_property() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("scores ~{String = Int} = {\"Ada\" = 10}\ncount = scores.length\n");
+        parse_single_file_ast("scores ~{String = I32} = {\"Ada\" = 10}\ncount = scores.length\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(count_decl) = &body[1].kind else {
@@ -1049,7 +1061,7 @@ fn parses_map_length_as_property() {
 #[test]
 fn rejects_map_get_index_assignment() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "scores ~{String = Int} = {\"Ada\" = 10}\nscores.get(\"Ada\") = 5\n",
+        "scores ~{String = I32} = {\"Ada\" = 10}\nscores.get(\"Ada\") = 5\n",
     );
 
     assert!(matches!(
@@ -1064,7 +1076,7 @@ fn rejects_map_get_index_assignment() {
 #[test]
 fn rejects_map_mutation_on_immutable_binding() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "scores {String = Int} = {\"Ada\" = 10}\n~scores.set(\"Linus\", 7)!\n",
+        "scores {String = I32} = {\"Ada\" = 10}\n~scores.set(\"Linus\", 7)!\n",
     );
 
     assert!(matches!(
@@ -1079,7 +1091,7 @@ fn rejects_map_mutation_on_immutable_binding() {
 #[test]
 fn rejects_map_contains_with_fallible_suffix() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "scores ~{String = Int} = {\"Ada\" = 10}\nvalue = scores.contains(\"Ada\")!\n",
+        "scores ~{String = I32} = {\"Ada\" = 10}\nvalue = scores.contains(\"Ada\")!\n",
     );
 
     assert!(matches!(
@@ -1094,7 +1106,7 @@ fn rejects_map_contains_with_fallible_suffix() {
 #[test]
 fn rejects_map_clear_with_fallible_suffix() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "scores ~{String = Int} = {\"Ada\" = 10}\n~scores.clear()!\n",
+        "scores ~{String = I32} = {\"Ada\" = 10}\n~scores.clear()!\n",
     );
 
     assert!(matches!(
@@ -1109,7 +1121,7 @@ fn rejects_map_clear_with_fallible_suffix() {
 #[test]
 fn rejects_map_length_with_fallible_suffix() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "scores ~{String = Int} = {\"Ada\" = 10}\ncount = scores.length!\n",
+        "scores ~{String = I32} = {\"Ada\" = 10}\ncount = scores.length!\n",
     );
 
     assert!(matches!(
@@ -1124,7 +1136,7 @@ fn rejects_map_length_with_fallible_suffix() {
 #[test]
 fn rejects_map_builtin_as_free_function() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "scores ~{String = Int} = {\"Ada\" = 10}\nvalue = get(scores, \"Ada\")!\n",
+        "scores ~{String = I32} = {\"Ada\" = 10}\nvalue = get(scores, \"Ada\")!\n",
     );
 
     assert!(matches!(
@@ -1138,7 +1150,7 @@ fn map_builtin_wins_before_visible_value_name() {
     // A visible free function named `get` must not capture `scores.get(...)`.
     // Map member syntax is compiler-owned once the receiver has a map type.
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "get |key String| -> Int:\n    return 0\n;\n\nget_value |scores {String = Int}| -> Int, Error!:\n    return scores.get(\"Ada\")!\n;\n",
+        "get |key String| -> I32:\n    return 0\n;\n\nget_value |scores {String = I32}| -> I32, Error!:\n    return scores.get(\"Ada\")!\n;\n",
     );
     let body = function_body_by_name(&ast, &path_fork, &string_table, "get_value");
 

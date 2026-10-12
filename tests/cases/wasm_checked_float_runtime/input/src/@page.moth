@@ -124,7 +124,7 @@ u8_to_u16 |value U8| -> U16:
     return converted
 ;
 
-int_to_i64 |value Int| -> I64:
+int_to_i64 |value I32| -> I64:
     converted I64 = cast value
     return converted
 ;
@@ -133,7 +133,7 @@ u64_u32_divide |numerator U64, denominator U32| -> F64:
     return numerator / denominator
 ;
 
-int_divide |numerator Int, denominator Int| -> Float:
+int_divide |numerator I32, denominator I32| -> F64:
     return numerator / denominator
 ;
 

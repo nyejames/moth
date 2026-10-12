@@ -21,6 +21,7 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 fn row(kind: HirExpressionKind) -> HirExpression {
     HirExpression {
@@ -30,6 +31,15 @@ fn row(kind: HirExpressionKind) -> HirExpression {
         region: RegionId(0),
         span: None,
     }
+}
+
+/// One exact `I32` payload for store rows.
+///
+/// WHY: store mechanics tests only need a stable literal payload, so they pin the `I32` width here.
+fn i32_kind(value: i64) -> HirExpressionKind {
+    HirExpressionKind::FixedScalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+    )
 }
 
 fn assert_capacity_diagnostic<T>(
@@ -71,7 +81,7 @@ fn module_store_issues_row_positions_including_zero() {
     let mut module = HirModule::new();
     let first = module
         .expressions
-        .append_expression(row(HirExpressionKind::Int(12)))
+        .append_expression(row(i32_kind(12)))
         .expect("first row should fit");
     let second = module
         .expressions
@@ -82,7 +92,7 @@ fn module_store_issues_row_positions_including_zero() {
     assert_eq!(second, HirValueId(1));
     assert!(matches!(
         &module.expressions.expression(first).kind,
-        HirExpressionKind::Int(12)
+        HirExpressionKind::FixedScalar(value) if value.as_i64() == Some(12)
     ));
     assert!(matches!(
         &module.expressions.expression(second).kind,
@@ -94,7 +104,7 @@ fn module_store_issues_row_positions_including_zero() {
 fn typed_ranges_read_empty_and_nonempty_payloads() {
     let mut store = HirExpressionStore::default();
     let child = store
-        .append_expression(row(HirExpressionKind::Int(7)))
+        .append_expression(row(i32_kind(7)))
         .expect("expression row should fit");
 
     assert!(store.values(HirValueRange::empty()).is_empty());
@@ -179,7 +189,7 @@ fn typed_ranges_read_empty_and_nonempty_payloads() {
 fn growth_preserves_row_ids_and_previous_ranges() {
     let mut store = HirExpressionStore::with_capacity(1, 1);
     let first = store
-        .append_expression(row(HirExpressionKind::Int(1)))
+        .append_expression(row(i32_kind(1)))
         .expect("first row should fit");
     let first_values = store
         .append_values(&[first], None)
@@ -214,7 +224,7 @@ fn growth_preserves_row_ids_and_previous_ranges() {
 
     for value in 2..=32 {
         let value_id = store
-            .append_expression(row(HirExpressionKind::Int(value)))
+            .append_expression(row(i32_kind(i64::from(value))))
             .expect("growth should preserve valid row IDs");
         store
             .append_values(&[value_id], None)
@@ -253,7 +263,7 @@ fn growth_preserves_row_ids_and_previous_ranges() {
 
     assert!(matches!(
         &store.expression(first).kind,
-        HirExpressionKind::Int(1)
+        HirExpressionKind::FixedScalar(value) if value.as_i64() == Some(1)
     ));
     assert_eq!(store.values(first_values), &[first]);
     assert_eq!(store.struct_fields(first_fields), &[(FieldId(1), first)]);
@@ -291,7 +301,7 @@ fn test_limits_reject_each_append_without_mutating_the_store() {
     let child = HirValueId(0);
 
     let row_id = store
-        .append_expression(row(HirExpressionKind::Int(0)))
+        .append_expression(row(i32_kind(0)))
         .expect("first row should fit below the test limit");
     assert_eq!(row_id, child);
     store
@@ -327,7 +337,7 @@ fn test_limits_reject_each_append_without_mutating_the_store() {
     let before_rejected_appends = store.measurements();
     let span = nonempty_test_span();
 
-    let mut rejected_row = row(HirExpressionKind::Int(1));
+    let mut rejected_row = row(i32_kind(1));
     rejected_row.span = Some(span);
     assert_capacity_diagnostic(
         store.append_expression(rejected_row),
@@ -426,7 +436,7 @@ fn checked_side_ranges_accept_exact_u32_bounds_and_reject_overflow() {
 fn checked_range_accessors_reject_out_of_bounds_and_overflowing_ranges() {
     let mut store = HirExpressionStore::default();
     let value = store
-        .append_expression(row(HirExpressionKind::Int(1)))
+        .append_expression(row(i32_kind(1)))
         .expect("expression row should fit");
     let values = store
         .append_values(&[value], None)
@@ -521,7 +531,7 @@ fn checked_range_accessors_reject_out_of_bounds_and_overflowing_ranges() {
 fn places_keep_flat_root_outward_field_and_index_order() {
     let mut store = HirExpressionStore::default();
     let index = store
-        .append_expression(row(HirExpressionKind::Int(2)))
+        .append_expression(row(i32_kind(2)))
         .expect("index expression should fit");
     let place = HirPlace::local(LocalId(9))
         .with_field(FieldId(2), &mut store, None)
@@ -554,7 +564,7 @@ fn places_keep_flat_root_outward_field_and_index_order() {
 fn branched_place_prefixes_survive_store_growth_and_extension() {
     let mut store = HirExpressionStore::default();
     let index = store
-        .append_expression(row(HirExpressionKind::Int(2)))
+        .append_expression(row(i32_kind(2)))
         .expect("index expression should fit");
     let prefix = HirPlace::local(LocalId(9))
         .with_field(FieldId(2), &mut store, None)
@@ -685,7 +695,7 @@ fn freeze_keeps_exact_capacity_and_rejects_every_append_family() {
         projections: 1,
     });
     let value = store
-        .append_expression(row(HirExpressionKind::Int(1)))
+        .append_expression(row(i32_kind(1)))
         .expect("expression row should fit");
     let value_range = store
         .append_values(&[value], None)
@@ -775,7 +785,7 @@ fn scalar_remapping_preserves_ids_and_ranges_before_and_after_freeze() {
 
         let mut store = HirExpressionStore::default();
         let value = store
-            .append_expression(row(HirExpressionKind::Int(1)))
+            .append_expression(row(i32_kind(1)))
             .expect("expression row should fit");
         let variant_range = store
             .append_variant_fields(
@@ -797,7 +807,7 @@ fn scalar_remapping_preserves_ids_and_ranges_before_and_after_freeze() {
 
         assert!(matches!(
             &store.expression(value).kind,
-            HirExpressionKind::Int(1)
+            HirExpressionKind::FixedScalar(payload) if payload.as_i64() == Some(1)
         ));
         assert_eq!(
             store.variant_fields(variant_range)[0].name,
@@ -815,13 +825,13 @@ fn expression_rewrites_reuse_unchanged_rows_and_allocate_changed_parents() {
     let mut store = HirExpressionStore::default();
     let mut side_table = HirSideTable::default();
     let changed_child = store
-        .append_expression(row(HirExpressionKind::Int(1)))
+        .append_expression(row(i32_kind(1)))
         .expect("child row should fit");
     let unchanged_child = store
-        .append_expression(row(HirExpressionKind::Int(2)))
+        .append_expression(row(i32_kind(2)))
         .expect("unchanged child should fit");
     let replacement = store
-        .append_expression(row(HirExpressionKind::Int(3)))
+        .append_expression(row(i32_kind(3)))
         .expect("replacement row should fit");
     let old_elements = store
         .append_values(&[changed_child, unchanged_child], None)
@@ -847,7 +857,7 @@ fn expression_rewrites_reuse_unchanged_rows_and_allocate_changed_parents() {
 
     let rewritten_parent =
         rewrite_expression_bottom_up(&mut store, &mut side_table, old_parent, &mut |expression| {
-            matches!(&expression.kind, HirExpressionKind::Int(1)).then_some(replacement)
+            matches!(&expression.kind, HirExpressionKind::FixedScalar(value) if value.as_i64() == Some(1)).then_some(replacement)
         })
         .expect("changed rewrite should succeed");
     assert_ne!(old_parent, rewritten_parent);
@@ -883,9 +893,7 @@ fn metadata_replacements_reuse_unchanged_roots_and_isolate_changed_rows() {
         values: 1,
         ..HirExpressionStoreTestLimits::default()
     });
-    let child = store
-        .append_expression(row(HirExpressionKind::Int(7)))
-        .unwrap();
+    let child = store.append_expression(row(i32_kind(7))).unwrap();
     let elements = store.append_values(&[child], None).unwrap();
     let original_span = nonempty_test_span();
     let replacement_span = test_span(2, 17);

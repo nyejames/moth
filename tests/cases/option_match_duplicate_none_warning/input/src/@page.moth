@@ -1,4 +1,4 @@
-value Int? = none
+value I32? = none
 result ~= "unset"
 
 if value is:

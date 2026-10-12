@@ -5,8 +5,7 @@
 //!       caller's `BinaryFloatPrecision`.
 //! WHY: AST constant folding, builtin casts, and compile-time template
 //!      interpolation must all agree on binary-float stringification without relying on
-//!      Rust, JavaScript, or host-native formatting quirks, for `Float` and the fixed
-//!      binary floats alike.
+//!      Rust, JavaScript, or host-native formatting quirks, for `F16`, `F32` and `F64` alike.
 //!
 //! Contract:
 //! - finite values only;
@@ -64,9 +63,9 @@ impl std::error::Error for FloatFormatError {}
 ///       representation (the `f64` carrier must already hold an `f32`-exact value), and
 ///       `Binary16` the shortest `F16` representation. The existing re-thresholding and exponent
 ///       formatting apply to all three.
-/// WHY: the value's own precision owns the stringification, so `Float32` values such as
+/// WHY: the value's own precision owns the stringification, so `F32` values such as
 ///      `f64::from(0.1f32)` format as `"0.1"` rather than the long `f64` expansion of that
-///      carrier, and fixed `F16`/`F32` values format through the same contract as `Float`.
+///      carrier, and `F16`, `F32` and `F64` values format through this same contract.
 ///
 /// Returns [`FloatFormatError::NonFiniteFloat`] for `NaN` or infinities and
 /// [`FloatFormatError::InexactPrecision`] if the finite carrier has not already been rounded to

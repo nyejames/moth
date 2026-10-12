@@ -3,12 +3,12 @@ Status ::
     Waiting,
 ;
 
-score_for |status Status| -> Int:
+score_for |status Status| -> I32:
     score = if status is Ready then 1 else 0
     return score
 ;
 
-qualified_score_for |status Status| -> Int:
+qualified_score_for |status Status| -> I32:
     score = if status is Status::Ready then 1 else 0
     return score
 ;

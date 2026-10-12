@@ -1,43 +1,43 @@
--- Task 3 under Int32/Float32: Uint32 boundary values execute through the
--- shared Number-carrier helpers with unsigned bounds, Uint/Int comparisons
--- stay exact in both directions, and implicit Uint returns convert at Float32
+-- Task 3 under I32/F32: U32 boundary values execute through the
+-- shared Number-carrier helpers with unsigned bounds, U32/I32 comparisons
+-- stay exact in both directions, and explicit U32 returns convert at F32
 -- precision with direct rounding.
 
-add_wide |a Uint, b Uint| -> Uint, Error!:
+add_wide |a U32, b U32| -> U32, Error!:
     return a + b
 ;
 
-mul_wide |a Uint, b Uint| -> Uint, Error!:
+mul_wide |a U32, b U32| -> U32, Error!:
     return a * b
 ;
 
-sub_wide |a Uint, b Uint| -> Uint, Error!:
+sub_wide |a U32, b U32| -> U32, Error!:
     return a - b
 ;
 
-just_below Uint = add_wide(2147483647, 0) catch:
+just_below U32 = add_wide(2147483647, 0) catch:
     then 0
 ;
-just_above Uint = add_wide(2147483648, 1) catch:
+just_above U32 = add_wide(2147483648, 1) catch:
     then 0
 ;
-top Uint = add_wide(4294967295, 0) catch:
+top U32 = add_wide(4294967295, 0) catch:
     then 0
 ;
-top_plus_one Uint = add_wide(4294967295, 1) catch:
+top_plus_one U32 = add_wide(4294967295, 1) catch:
     then 7
 ;
-zero_minus_one Uint = sub_wide(0, 1) catch:
+zero_minus_one U32 = sub_wide(0, 1) catch:
     then 9
 ;
-boundary_product Uint = mul_wide(65535, 65537) catch:
+boundary_product U32 = mul_wide(65535, 65537) catch:
     then 0
 ;
-large_product Uint = mul_wide(100000, 100000) catch:
+large_product U32 = mul_wide(100000, 100000) catch:
     then 8
 ;
 
-wide_below |edge Uint, limit Int| -> Bool, Bool:
+wide_below |edge U32, limit I32| -> Bool, Bool:
     return limit < edge, edge > limit
 ;
 
@@ -45,49 +45,51 @@ low_before Bool, low_after Bool = wide_below(2147483648, 2147483647)
 neg_before Bool, neg_after Bool = wide_below(0, -1)
 top_before Bool, top_after Bool = wide_below(4294967295, -1)
 
--- Implicit Uint returns convert at the Float32 profile precision: 16777217
--- rounds to 16777216, exactly as the explicit cast of a runtime Uint and the
+-- Explicit U32 returns convert at the F32 declared precision: 16777217
+-- rounds to 16777216, exactly as the explicit cast of a runtime U32 and the
 -- folded constants.
-implicit_to_float |value Uint| -> Float:
-    return value
-;
-
-explicit_to_float |value Uint| -> Float:
+converted_to_float |value U32| -> F32:
     return cast value
 ;
 
-implicit_big Float = implicit_to_float(16777217)
-explicit_big Float = explicit_to_float(16777217)
-folded_big #Uint = 16777217
-folded_eq #Bool = folded_big is 16777216.0
-dynamic_eq Bool = implicit_big is 16777216.0
-explicit_eq Bool = explicit_big is 16777216.0
+explicit_to_float |value U32| -> F32:
+    return cast value
+;
+
+converted_big F32 = converted_to_float(16777217)
+explicit_big F32 = explicit_to_float(16777217)
+folded_big #U32 = 16777217
+rounded_big #F32 = cast folded_big
+comparison_float #F32 = 16777216.0
+folded_eq #Bool = rounded_big is comparison_float
+dynamic_eq Bool = converted_big is comparison_float
+explicit_eq Bool = explicit_big is comparison_float
 
 -- Compound failure stores nothing and reports through catch and Error!.
-accumulate |target ~Uint, delta Uint| -> Uint, Error!:
+accumulate |target ~U32, delta U32| -> U32, Error!:
     target += delta
     return target
 ;
 
-growing ~Uint = 4294967291
-grown Uint = accumulate(~growing, 5) catch:
+growing ~U32 = 4294967291
+grown U32 = accumulate(~growing, 5) catch:
     then 11
 ;
 
-failing |value Uint| -> Uint, Error!:
+failing |value U32| -> U32, Error!:
     return sub_wide(value, 1)!
 ;
 
-recovered Uint = failing(0) catch |recovery_err|:
+recovered U32 = failing(0) catch |recovery_err|:
     then 13
 ;
 
 -- Folded and dynamic evaluation of the same boundary value agree.
-folded_top #Uint = 4294967295
-folded_top_kept Uint = folded_top + 0
-dynamic_top Uint = add_wide(4294967295, 0) catch:
+folded_top #U32 = 4294967295
+folded_top_kept U32 = folded_top + 0
+dynamic_top U32 = add_wide(4294967295, 0) catch:
     then 0
 ;
 folded_dynamic_agree Bool = folded_top_kept is dynamic_top
 
-[:uint float32 wide=[just_below]/[just_above]/[top]/[top_plus_one]/[zero_minus_one] prod=[boundary_product]/[large_product] compare=[low_before]/[low_after]/[neg_before]/[neg_after]/[top_before]/[top_after] implicit=[implicit_big]/[explicit_big]/[folded_eq]/[dynamic_eq]/[explicit_eq] compound=[growing]/[grown]/[recovered] agree=[folded_dynamic_agree]]
+[:uint float32 wide=[just_below]/[just_above]/[top]/[top_plus_one]/[zero_minus_one] prod=[boundary_product]/[large_product] compare=[low_before]/[low_after]/[neg_before]/[neg_after]/[top_before]/[top_after] converted=[converted_big]/[explicit_big]/[folded_eq]/[dynamic_eq]/[explicit_eq] compound=[growing]/[grown]/[recovered] agree=[folded_dynamic_agree]]

@@ -1,4 +1,4 @@
-limit #Int? = 2
+limit #I32? = 2
 
 #[if limit is |captured|:
     [loop 0 to captured |i|:

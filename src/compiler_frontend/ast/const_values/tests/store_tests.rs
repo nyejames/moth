@@ -410,7 +410,11 @@ fn int_field(
         id: path_fork
             .try_intern_portable_path(name, string_table)
             .expect("test path fits"),
-        value: Expression::int(7, span, ValueMode::ImmutableOwned),
+        value: Expression::fixed_scalar(
+            FixedScalarValue::signed(FixedScalar::I32, 7).expect("7 fits I32"),
+            span,
+            ValueMode::ImmutableOwned,
+        ),
         binding_span: None,
         config_qualifier: None,
     }
@@ -580,8 +584,8 @@ fn fixed_scalar_values_round_trip_with_exact_bits_and_type() {
             panic!("payload must keep the exact {path} bits");
         };
         assert_eq!(*stored, value, "payload must keep the exact {path} bits");
-        // U64::MAX does not fit i64: matching the payload as `Int` would already fail, but
-        // assert the accessor view too so an Int/Float intermediate cannot hide here.
+        // U64::MAX does not fit i64. Assert the accessor view too so an intermediate signed
+        // integer or binary float cannot hide here.
         assert_eq!(
             store.metadata(id).expect("row has metadata").type_id,
             builtin_type_ids::fixed_scalar(value.scalar())

@@ -138,6 +138,92 @@ pub(super) fn validate_receiver_access(
     }
 }
 
+/// Apply the receiver-access policy to a retained receiver that is an existing place.
+///
+/// WHAT: the same decisions `validate_receiver_access` takes for an existing place receiver,
+///       split out so a retained step whose receiver is a pending binding — a real place with a
+///       known declaration mutability but no node to classify — reuses the exact diagnostics.
+/// WHY: a binding root is a place, never the initializer's temporary, so classifying it as a
+///      temporary rejects legal `~name.push(..)` and accepts an unneeded `~name.length(..)`; the
+///      place facts come from the binding's own declaration row, not from a fabricated node.
+pub(super) fn validate_place_receiver_access(
+    access_mode: ReceiverAccessMode,
+    authored_marker_span: Option<SourceSpan>,
+    requires_mutable: bool,
+    receiver_is_mutable: bool,
+    binding_name: Option<StringId>,
+    access_diagnostic: &ReceiverAccessDiagnostic,
+    method_boundary_span: Option<SourceSpan>,
+) -> ReceiverAccessResult {
+    if !requires_mutable {
+        if access_mode == ReceiverAccessMode::Mutable {
+            return reject_unneeded_mutable_access_marker(
+                access_diagnostic,
+                authored_marker_span,
+                method_boundary_span,
+            );
+        }
+        return Ok(());
+    }
+
+    match (access_mode, receiver_is_mutable) {
+        (ReceiverAccessMode::Shared, true) => reject_mutable_receiver_missing_marker(
+            access_diagnostic,
+            binding_name,
+            method_boundary_span,
+        ),
+        (ReceiverAccessMode::Shared, false) => reject_immutable_receiver_mutable_method(
+            access_diagnostic,
+            binding_name,
+            method_boundary_span,
+        ),
+        (ReceiverAccessMode::Mutable, true) => Ok(()),
+        (ReceiverAccessMode::Mutable, false) => reject_mutable_marker_on_immutable_receiver(
+            access_diagnostic,
+            binding_name,
+            authored_marker_span,
+            method_boundary_span,
+        ),
+    }
+}
+
+/// Apply the receiver-access policy to a receiver that is a completed temporary value.
+///
+/// WHAT: the same decisions `validate_receiver_access` takes for `ReceiverSourceState::Temporary`,
+///       split out so a retained step — whose receiver is the preceding step's completed value and
+///       has no node to classify yet — reuses the exact diagnostics.
+/// WHY: a chained receiver is never a place, so a mutable requirement cannot be satisfied and an
+///      authored `~` marker is invalid; the decision must not inspect a fabricated receiver node.
+pub(super) fn reject_temporary_receiver_access(
+    access_mode: ReceiverAccessMode,
+    authored_marker_span: Option<SourceSpan>,
+    requires_mutable: bool,
+    access_diagnostic: &ReceiverAccessDiagnostic,
+    method_boundary_span: Option<SourceSpan>,
+) -> ReceiverAccessResult {
+    if !requires_mutable {
+        if access_mode == ReceiverAccessMode::Mutable {
+            return reject_unneeded_mutable_access_marker(
+                access_diagnostic,
+                authored_marker_span,
+                method_boundary_span,
+            );
+        }
+        return Ok(());
+    }
+
+    match access_mode {
+        ReceiverAccessMode::Shared => {
+            reject_non_place_receiver_mutable_method(access_diagnostic, method_boundary_span)
+        }
+        ReceiverAccessMode::Mutable => reject_mutable_marker_on_non_place_receiver(
+            access_diagnostic,
+            authored_marker_span,
+            method_boundary_span,
+        ),
+    }
+}
+
 // --------------------------
 //  Rejection helpers
 // --------------------------

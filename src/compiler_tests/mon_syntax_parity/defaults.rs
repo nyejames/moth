@@ -35,7 +35,7 @@ fn inner_schema() -> SchemaType {
     SchemaType::Struct {
         name: "Inner".into(),
         fields: vec![
-            Field::with_default("count", SchemaType::Int, Value::Int(1)),
+            Field::with_default("count", SchemaType::I32, Value::I32(1)),
             Field::with_default(
                 "note",
                 SchemaType::String,
@@ -53,7 +53,7 @@ fn outer_schema() -> SchemaType {
                 "inner",
                 inner_schema(),
                 Value::Record(vec![
-                    ("count".into(), Value::Int(2)),
+                    ("count".into(), Value::I32(2)),
                     ("note".into(), Value::String("parent default".into())),
                 ]),
             ),
@@ -137,7 +137,7 @@ fn default_fixtures() -> Vec<ParityFixture> {
     ));
 
     let nested_declarations = concat!(
-        "Inner = | count Int = 1, note String = \"inner default\" |\n",
+        "Inner = | count I32 = 1, note String = \"inner default\" |\n",
         "Outer = | name String = \"guest\", ",
         "inner Inner = Inner(count = 2, note = \"parent default\") |\n",
     );
@@ -161,7 +161,7 @@ fn default_fixtures() -> Vec<ParityFixture> {
                     (
                         "inner".into(),
                         Value::Record(vec![
-                            ("count".into(), Value::Int(9)),
+                            ("count".into(), Value::I32(9)),
                             ("note".into(), Value::String("inner default".into())),
                         ]),
                     ),
@@ -174,13 +174,13 @@ fn default_fixtures() -> Vec<ParityFixture> {
         .with_source_nominal_type("outer.inner", "Inner"),
     );
 
-    let explicit_none_literal = "profile = Profile(nickname = none)";
-    let profile_declarations = "Profile = | nickname String?, label String = \"member\" |\n";
-    let profile_schema = || {
+    let explicit_none_literal = "member = Member(nickname = none)";
+    let member_declarations = "Member = | nickname String?, label String = \"member\" |\n";
+    let member_schema = || {
         Schema::record(vec![Field::required(
-            "profile",
+            "member",
             SchemaType::Struct {
-                name: "Profile".into(),
+                name: "Member".into(),
                 fields: vec![
                     Field::required(
                         "nickname",
@@ -203,7 +203,7 @@ fn default_fixtures() -> Vec<ParityFixture> {
         ),
         (
             "present_optional_value_keeps_its_optional_layer",
-            "profile = Profile(nickname = \"Priya\")",
+            "member = Member(nickname = \"Priya\")",
             Value::String("Priya".into()),
         ),
     ] {
@@ -211,28 +211,28 @@ fn default_fixtures() -> Vec<ParityFixture> {
             fixture(
                 name,
                 literal,
-                profile_declarations,
-                profile_schema(),
+                member_declarations,
+                member_schema(),
                 SourceExpectation::Accept,
                 MonExpectation::Accept(Value::Record(vec![(
-                    "profile".into(),
+                    "member".into(),
                     Value::Record(vec![
                         ("nickname".into(), nickname),
                         ("label".into(), Value::String("member".into())),
                     ]),
                 )])),
             )
-            .with_source_nominal_type("profile", "Profile")
-            .with_source_optional("profile.nickname"),
+            .with_source_nominal_type("member", "Member")
+            .with_source_optional("member.nickname"),
         );
     }
 
-    let optional_default_declarations = "Profile = | nickname String? = \"guest\" |\n";
+    let optional_default_declarations = "Member = | nickname String? = \"guest\" |\n";
     let optional_default_schema = || {
         Schema::record(vec![Field::required(
-            "profile",
+            "member",
             SchemaType::Struct {
-                name: "Profile".into(),
+                name: "Member".into(),
                 fields: vec![Field::with_default(
                     "nickname",
                     SchemaType::Optional(Box::new(SchemaType::String)),
@@ -244,22 +244,22 @@ fn default_fixtures() -> Vec<ParityFixture> {
     for (name, literal, nickname) in [
         (
             "same_field_optional_default_omission_uses_present_default",
-            "profile = Profile()",
+            "member = Member()",
             Value::String("guest".into()),
         ),
         (
             "same_field_optional_default_explicit_none_remains_absent",
-            "profile = Profile(nickname = none)",
+            "member = Member(nickname = none)",
             Value::None,
         ),
         (
             "same_field_optional_default_present_string_replaces_default",
-            "profile = Profile(nickname = \"Priya\")",
+            "member = Member(nickname = \"Priya\")",
             Value::String("Priya".into()),
         ),
         (
             "same_field_optional_default_empty_string_replaces_default",
-            "profile = Profile(nickname = \"\")",
+            "member = Member(nickname = \"\")",
             Value::String("".into()),
         ),
     ] {
@@ -271,35 +271,35 @@ fn default_fixtures() -> Vec<ParityFixture> {
                 optional_default_schema(),
                 SourceExpectation::Accept,
                 MonExpectation::Accept(Value::Record(vec![(
-                    "profile".into(),
+                    "member".into(),
                     Value::Record(vec![("nickname".into(), nickname)]),
                 )])),
             )
-            .with_source_nominal_type("profile", "Profile")
-            .with_source_optional("profile.nickname"),
+            .with_source_nominal_type("member", "Member")
+            .with_source_optional("member.nickname"),
         );
     }
 
     let rob_source_override = concat!(
-        "Profile = | nickname String? = \"guest\" |\n",
+        "Member = | nickname String? = \"guest\" |\n",
         "rob #String? = \"Rob\"\n",
-        "data #= (profile = Profile(nickname = rob))\n",
+        "data #= (member = Member(nickname = rob))\n",
     );
     fixtures.push(
         fixture(
             "same_field_optional_default_source_override_uses_typed_rob_binding",
-            "profile = Profile(nickname = \"Rob\")",
+            "member = Member(nickname = \"Rob\")",
             optional_default_declarations,
             optional_default_schema(),
             SourceExpectation::Accept,
             MonExpectation::Accept(Value::Record(vec![(
-                "profile".into(),
+                "member".into(),
                 Value::Record(vec![("nickname".into(), Value::String("Rob".into()))]),
             )])),
         )
         .with_source_override(rob_source_override)
-        .with_source_nominal_type("profile", "Profile")
-        .with_source_optional("profile.nickname"),
+        .with_source_nominal_type("member", "Member")
+        .with_source_optional("member.nickname"),
     );
 
     fixtures

@@ -1,0 +1,28 @@
+-- A pending numeric identity origin meets literal and named U64 peer comparisons
+-- in inline and block value-ifs, and direct and nested generic call subjects reach the Bool owner,
+-- before a later U64 receiver reads it.
+
+identity type T |value T| -> T:
+    return value
+;
+read_u64 |value U64| -> String:
+    return cast value
+;
+identity1 = identity(1)
+peer U64 = 1
+inline_yes String = if identity1 is 1 then "yes" else "no"
+block_yes String = if identity1 is 1:
+    then "yes"
+else
+    then "no"
+;
+named_yes String = if identity1 is peer then "yes" else "no"
+nested_yes String = if identity(identity(identity1)) is peer then "yes" else "no"
+later_text = read_u64(identity1)
+direct_inline String = if identity(1) is 1 then "yes" else "no"
+direct_block String = if identity(1) is 2:
+    then "yes"
+else
+    then "no"
+;
+[:pending-numeric-comparison inline=[inline_yes] block=[block_yes] named=[named_yes] nested=[nested_yes] later=[later_text] direct_inline=[direct_inline] direct_block=[direct_block]]

@@ -2,36 +2,46 @@ Bucket = |
     value U8,
 |
 
-next_u8 |calls ~Int, value U8| -> U8:
+next_u8 |calls ~I32, value U8| -> U8:
     calls += 1
     return value
 ;
-next_i8 |calls ~Int, value I8| -> I8:
+next_i8 |calls ~I32, value I8| -> I8:
     calls += 1
     return value
 ;
 
 
-mutate_i8 |target ~I8, rhs_calls ~Int, factor I8| -> I8, Error!:
+mutate_i8 |target ~I8, rhs_calls ~I32, factor I8| -> I8, Error!:
     target *= next_i8(~rhs_calls, factor)
     return target
 ;
 
-mutate_field |target ~Bucket, rhs_calls ~Int, step U8| -> U8, Error!:
+mutate_field |target ~Bucket, rhs_calls ~I32, step U8| -> U8, Error!:
     target.value += next_u8(~rhs_calls, step)
+    return target.value
+;
+
+next_u16 |calls ~I32, value U16| -> U16:
+    calls += 1
+    return value
+;
+
+mutate_mixed_field |target ~Bucket, rhs_calls ~I32, step U16| -> U8, Error!:
+    target.value += next_u16(~rhs_calls, step)
     return target.value
 ;
 
 
 i8_factor I8 = 2
 ok_local_i8 ~I8 = 10
-ok_local_i8_rhs_calls ~Int = 0
+ok_local_i8_rhs_calls ~I32 = 0
 ok_local_i8_result = mutate_i8(~ok_local_i8, ~ok_local_i8_rhs_calls, i8_factor) catch:
     then 0
 ;
 ok_local_i8_result_text String = cast ok_local_i8_result
 failed_local_i8 ~I8 = 100
-failed_local_i8_rhs_calls ~Int = 0
+failed_local_i8_rhs_calls ~I32 = 0
 failed_local_i8_error ~U32 = 0
 failed_local_i8_result = mutate_i8(~failed_local_i8, ~failed_local_i8_rhs_calls, i8_factor) catch |local_i8_error|:
     failed_local_i8_error = local_i8_error.code
@@ -40,13 +50,13 @@ failed_local_i8_result = mutate_i8(~failed_local_i8, ~failed_local_i8_rhs_calls,
 failed_local_i8_text String = cast failed_local_i8
 
 ok_bucket ~= Bucket(value = 7)
-ok_bucket_rhs_calls ~Int = 0
+ok_bucket_rhs_calls ~I32 = 0
 ok_bucket_result = mutate_field(~ok_bucket, ~ok_bucket_rhs_calls, 3) catch:
     then 0
 ;
 ok_bucket_result_text String = cast ok_bucket_result
 failed_bucket ~= Bucket(value = 255)
-failed_bucket_rhs_calls ~Int = 0
+failed_bucket_rhs_calls ~I32 = 0
 failed_bucket_error ~U32 = 0
 failed_bucket_result = mutate_field(~failed_bucket, ~failed_bucket_rhs_calls, 1) catch |field_error|:
     failed_bucket_error = field_error.code
@@ -54,4 +64,46 @@ failed_bucket_result = mutate_field(~failed_bucket, ~failed_bucket_rhs_calls, 1)
 ;
 failed_bucket_text String = cast failed_bucket.value
 
-[:compound atomicity i8=[ok_local_i8_result_text]/[ok_local_i8_rhs_calls] failed-i8=[failed_local_i8_error]/[failed_local_i8_text]/[failed_local_i8_rhs_calls] field=[ok_bucket_result_text]/[ok_bucket_rhs_calls] failed-field=[failed_bucket_error]/[failed_bucket_text]/[failed_bucket_rhs_calls]]
+mixed_bucket ~= Bucket(value = 255)
+mixed_bucket_rhs_calls ~I32 = 0
+mixed_bucket_error ~U32 = 0
+mixed_bucket_result = mutate_mixed_field(~mixed_bucket, ~mixed_bucket_rhs_calls, 1) catch |mixed_error|:
+    mixed_bucket_error = mixed_error.code
+    then 0
+;
+mixed_bucket_text String = cast mixed_bucket.value
+
+[:compound atomicity i8=[ok_local_i8_result_text]/[ok_local_i8_rhs_calls] failed-i8=[failed_local_i8_error]/[failed_local_i8_text]/[failed_local_i8_rhs_calls] field=[ok_bucket_result_text]/[ok_bucket_rhs_calls] failed-field=[failed_bucket_error]/[failed_bucket_text]/[failed_bucket_rhs_calls] mixed-field=[mixed_bucket_error]/[mixed_bucket_text]/[mixed_bucket_rhs_calls]]
+
+-- Same-domain U16 overflow is arithmetic failure, while U16 + U32 first
+-- succeeds in U32 and then fails conversion. Neither may commit a store.
+mutate_u16 |target ~U16, rhs_calls ~I32, step U16| -> U16:
+    target += next_u16(~rhs_calls, step)
+    return target
+;
+next_u32 |calls ~I32, value U32| -> U32:
+    calls += 1
+    return value
+;
+mutate_mixed_u16 |target ~U16, rhs_calls ~I32, step U32| -> U16:
+    target += next_u32(~rhs_calls, step)
+    return target
+;
+ok_u16 ~U16 = 65534
+ok_u16_calls ~I32 = 0
+ok_u16_result = mutate_u16(~ok_u16, ~ok_u16_calls, 1)
+failed_u16 ~U16 = 65535
+failed_u16_calls ~I32 = 0
+failed_u16_code ~U32 = 0
+failed_u16_result = mutate_u16(~failed_u16, ~failed_u16_calls, 1) catch |u16_error|:
+    failed_u16_code = u16_error.code
+    then 0
+;
+mixed_u16 ~U16 = 65535
+mixed_u16_calls ~I32 = 0
+mixed_u16_code ~U32 = 0
+mixed_u16_result = mutate_mixed_u16(~mixed_u16, ~mixed_u16_calls, 1) catch |mixed_u16_error|:
+    mixed_u16_code = mixed_u16_error.code
+    then 0
+;
+[:compound u16 ok=[ok_u16_result]/[ok_u16_calls] failed=[failed_u16_code]/[failed_u16]/[failed_u16_calls]/[failed_u16_result] mixed=[mixed_u16_code]/[mixed_u16]/[mixed_u16_calls]/[mixed_u16_result]]

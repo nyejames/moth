@@ -1,15 +1,16 @@
 //! Literal match-pattern parsing regression tests.
 //!
-//! WHAT: validates destination-aware fixed scalar and profile Float literal patterns, existing
-//!       `Int` boundaries, and relational-pattern literal typing.
+//! WHAT: validates destination-aware fixed scalar literal patterns, exact I32 subject boundaries,
+//!       and relational-pattern literal typing.
 //! WHY: pattern literals have an independent parser path whose receiver-aware and signed numeric
 //!      behavior must stay aligned with the shared materialization contract.
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::numeric_construction::DeferredArmPattern;
 use crate::compiler_frontend::ast::statements::match_patterns::{
-    MatchPattern, RelationalPatternOp,
+    MatchPattern, MatchSubject, RelationalPatternOp,
     literal::{parse_literal_pattern, parse_non_choice_pattern},
     option::parse_option_pattern,
 };
@@ -24,38 +25,46 @@ use crate::compiler_frontend::tokenizer::tokens::{TestSourceTokensBuilder, Token
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::grammar::{NumericLiteralKind, NumericLiteralSign};
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
-use moth_lexical::numeric::profile::NumericProfile;
 
 type LiteralPatternTestResult<T> = Result<T, ExpressionParseError>;
 
 #[test]
 fn parse_literal_pattern_accepts_i32_boundary_values() {
     let max = parse_whole_number_pattern(NumericLiteralSign::Positive, "2147483647").unwrap();
-    assert!(matches!(max.kind, ExpressionKind::Int(2147483647)));
+    assert_fixed_scalar_pattern(&max, FixedScalar::I32, Some(2147483647), None, None);
 
     let min = parse_whole_number_pattern(NumericLiteralSign::Negative, "2147483648").unwrap();
-    assert!(matches!(min.kind, ExpressionKind::Int(-2147483648)));
+    assert_fixed_scalar_pattern(&min, FixedScalar::I32, Some(-2147483648), None, None);
 }
 
 #[test]
 fn parse_literal_pattern_rejects_i32_out_of_range() {
     let error = parse_whole_number_pattern(NumericLiteralSign::Positive, "2147483648").unwrap_err();
-    assert_invalid_number_literal_reason(error, NumberLiteralErrorReason::OutsideIntRange);
+    assert_invalid_number_literal_reason(
+        error,
+        NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
+    );
 
     let error = parse_whole_number_pattern(NumericLiteralSign::Negative, "2147483649").unwrap_err();
-    assert_invalid_number_literal_reason(error, NumberLiteralErrorReason::OutsideIntRange);
+    assert_invalid_number_literal_reason(
+        error,
+        NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
+    );
 }
 
 #[test]
-fn parse_literal_pattern_negative_fallback_allows_i32_min() {
+fn parse_literal_pattern_negative_lead_token_allows_i32_min() {
     let min = parse_negative_number_pattern("2147483648").unwrap();
-    assert!(matches!(min.kind, ExpressionKind::Int(-2147483648)));
+    assert_fixed_scalar_pattern(&min, FixedScalar::I32, Some(-2147483648), None, None);
 }
 
 #[test]
-fn parse_literal_pattern_negative_fallback_rejects_i32_underflow() {
+fn parse_literal_pattern_negative_lead_token_rejects_i32_underflow() {
     let error = parse_negative_number_pattern("2147483649").unwrap_err();
-    assert_invalid_number_literal_reason(error, NumberLiteralErrorReason::OutsideIntRange);
+    assert_invalid_number_literal_reason(
+        error,
+        NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
+    );
 }
 
 #[test]
@@ -94,68 +103,58 @@ fn fixed_scalar_literal_patterns_materialize_at_the_subject_type() {
 }
 
 #[test]
-fn profile_float_subject_patterns_materialise_whole_literals_directly() {
+fn f64_subject_patterns_materialise_whole_literals_directly() {
     let large = parse_numeric_pattern(
-        builtin_type_ids::FLOAT,
+        builtin_type_ids::fixed_scalar(FixedScalar::F64),
         "18_446_744_073_709_551_615",
         NumericLiteralKind::WholeNumber,
     )
     .unwrap();
-    assert_eq!(large.type_id, builtin_type_ids::FLOAT);
-    assert!(
-        matches!(large.kind, ExpressionKind::Float(value) if value == 18_446_744_073_709_551_615_f64),
-        "Float match subjects should materialise whole literals as profile Float"
+    assert_fixed_scalar_pattern(
+        &large,
+        FixedScalar::F64,
+        None,
+        None,
+        Some(18_446_744_073_709_551_615_f64),
     );
 
     let negative_zero = parse_negative_numeric_pattern(
-        builtin_type_ids::FLOAT,
+        builtin_type_ids::fixed_scalar(FixedScalar::F64),
         "0",
         NumericLiteralKind::WholeNumber,
     )
     .unwrap();
-    assert!(
-        matches!(negative_zero.kind, ExpressionKind::Float(value) if value.to_bits() == (-0.0_f64).to_bits()),
-        "Float match subjects should preserve the sign of whole-number zero"
-    );
+    assert_float_pattern_bits(&negative_zero, FixedScalar::F64, (-0.0_f64).to_bits());
 }
 
 #[test]
-fn profile_float_subject_patterns_apply_attached_numeric_sign_once() {
+fn f64_subject_patterns_apply_attached_numeric_sign_once() {
     let negative_decimal = parse_numeric_pattern_with_sign(
-        builtin_type_ids::FLOAT,
+        builtin_type_ids::fixed_scalar(FixedScalar::F64),
         NumericLiteralKind::DecimalPoint,
         NumericLiteralSign::Negative,
         "1.5",
     )
     .unwrap();
-    assert!(
-        matches!(negative_decimal.kind, ExpressionKind::Float(value) if value == -1.5),
-        "attached negative decimal Float patterns should remain negative"
-    );
+    assert_fixed_scalar_pattern(&negative_decimal, FixedScalar::F64, None, None, Some(-1.5));
 
     let negative_exponent = parse_numeric_pattern_with_sign(
-        builtin_type_ids::FLOAT,
+        builtin_type_ids::fixed_scalar(FixedScalar::F64),
         NumericLiteralKind::Exponent,
         NumericLiteralSign::Negative,
         "15e-1",
     )
     .unwrap();
-    assert!(
-        matches!(negative_exponent.kind, ExpressionKind::Float(value) if value == -1.5),
-        "attached negative exponent Float patterns should remain negative"
-    );
+    assert_fixed_scalar_pattern(&negative_exponent, FixedScalar::F64, None, None, Some(-1.5));
 
     let negative_zero = parse_numeric_pattern_with_sign(
-        builtin_type_ids::FLOAT,
+        builtin_type_ids::fixed_scalar(FixedScalar::F64),
         NumericLiteralKind::DecimalPoint,
         NumericLiteralSign::Negative,
         "0.0",
     )
     .unwrap();
-    assert!(
-        matches!(negative_zero.kind, ExpressionKind::Float(value) if value.to_bits() == (-0.0_f64).to_bits()),
-        "attached negative Float zero patterns should preserve the sign bit"
-    );
+    assert_float_pattern_bits(&negative_zero, FixedScalar::F64, (-0.0_f64).to_bits());
 }
 
 #[test]
@@ -320,8 +319,7 @@ fn malformed_numeric_literal_payload_is_infrastructure_error() {
 
     let error = parse_literal_pattern(
         &mut token_stream,
-        builtin_type_ids::INT,
-        NumericProfile::STANDARD,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         &mut StringTable::new(),
         &type_environment,
     )
@@ -339,6 +337,9 @@ fn assert_invalid_number_literal_reason(
         ExpressionParseError::Infrastructure(error) => {
             panic!("literal pattern infrastructure failure is not a source diagnostic: {error:?}")
         }
+        ExpressionParseError::NumericDeferral(deferral) => {
+            panic!("literal pattern numeric deferral is not a source diagnostic: {deferral:?}")
+        }
     };
 
     assert!(matches!(
@@ -352,6 +353,9 @@ fn assert_match_pattern_type_mismatch(error: ExpressionParseError) {
         ExpressionParseError::Diagnostic(diagnostic) => diagnostic,
         ExpressionParseError::Infrastructure(error) => {
             panic!("literal pattern mismatch must be a source diagnostic: {error:?}")
+        }
+        ExpressionParseError::NumericDeferral(deferral) => {
+            panic!("literal pattern mismatch must be a source diagnostic: {deferral:?}")
         }
     };
 
@@ -385,6 +389,23 @@ fn assert_fixed_scalar_pattern(
     assert_eq!(value.as_f64(), float_value);
 }
 
+/// Assert a fixed binary-float pattern at its exact payload bits.
+///
+/// Signed zero compares equal to positive zero through `f64` equality, so only the bit pattern
+/// can pin a preserved sign.
+fn assert_float_pattern_bits(
+    expression: &Expression,
+    expected_scalar: FixedScalar,
+    expected_bits: u64,
+) {
+    let ExpressionKind::FixedScalar(value) = &expression.kind else {
+        panic!("expected a fixed scalar pattern constant");
+    };
+
+    assert_eq!(value.scalar(), expected_scalar);
+    assert_eq!(value.as_f64().map(f64::to_bits), Some(expected_bits));
+}
+
 fn assert_relational_fixed_scalar_pattern(
     pattern: &MatchPattern,
     expected_operator: RelationalPatternOp,
@@ -412,7 +433,7 @@ fn parse_whole_number_pattern(
     normalized_text: &str,
 ) -> LiteralPatternTestResult<Expression> {
     parse_numeric_pattern_with_sign(
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         NumericLiteralKind::WholeNumber,
         sign,
         normalized_text,
@@ -421,7 +442,7 @@ fn parse_whole_number_pattern(
 
 fn parse_negative_number_pattern(normalized_text: &str) -> LiteralPatternTestResult<Expression> {
     parse_negative_numeric_pattern(
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         normalized_text,
         NumericLiteralKind::WholeNumber,
     )
@@ -468,7 +489,6 @@ fn parse_numeric_pattern_with_sign(
     parse_literal_pattern(
         &mut token_stream,
         subject_type_id,
-        NumericProfile::STANDARD,
         &mut string_table,
         &type_environment,
     )
@@ -509,7 +529,6 @@ fn parse_negative_numeric_pattern(
     parse_literal_pattern(
         &mut token_stream,
         subject_type_id,
-        NumericProfile::STANDARD,
         &mut string_table,
         &type_environment,
     )
@@ -548,13 +567,23 @@ fn parse_relational_pattern(
         .expect("test token stream must expose an AST cursor");
     let type_environment = TypeEnvironment::new();
 
-    parse_non_choice_pattern(
+    let draft = parse_non_choice_pattern(
         &mut token_stream,
-        subject_type_id,
-        NumericProfile::STANDARD,
+        MatchSubject::Known(subject_type_id),
         &mut string_table,
         &type_environment,
-    )
+    )?;
+
+    // A known subject always parses to a ready pattern; a retained draft would be a parser
+    // regression, so the test fails loudly instead of hiding it.
+    match draft {
+        DeferredArmPattern::Ready(pattern) => Ok(pattern),
+        DeferredArmPattern::Retained(_)
+        | DeferredArmPattern::PendingChoice(_)
+        | DeferredArmPattern::PendingOption(_) => {
+            panic!("known subject {subject_type_id:?} produced a retained pattern draft")
+        }
+    }
 }
 
 fn parse_optional_numeric_pattern(
@@ -589,7 +618,6 @@ fn parse_optional_numeric_pattern(
     parse_option_pattern(
         &mut token_stream,
         inner_type_id,
-        NumericProfile::STANDARD,
         &mut string_table,
         &type_environment,
     )

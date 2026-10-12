@@ -1,0 +1,4 @@
+value #U32 = 0
+reject ||:
+    negated = -value
+;

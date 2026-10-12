@@ -1,4 +1,4 @@
 Point = |
-    x Int,
-    x Int,
+    x I32,
+    x I32,
 |

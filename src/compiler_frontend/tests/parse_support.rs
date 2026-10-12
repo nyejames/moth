@@ -43,7 +43,6 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::TokenizeFailure;
 use crate::compiler_frontend::tokenizer::tokens::TokenizerEntryMode;
-use moth_lexical::numeric::profile::NumericProfile;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -119,13 +118,6 @@ fn test_file_value_resolution_services(
 
 pub(crate) fn parse_single_file_ast_build_result(
     source: &str,
-) -> Result<(AstBuildResult, PathInternerFork, StringTable), CompilerDiagnostic> {
-    parse_single_file_ast_build_result_with_profile(source, NumericProfile::STANDARD)
-}
-
-pub(crate) fn parse_single_file_ast_build_result_with_profile(
-    source: &str,
-    numeric_profile: NumericProfile,
 ) -> Result<(AstBuildResult, PathInternerFork, StringTable), CompilerDiagnostic> {
     let mut source_context = TestSourceContext::new("@page.moth");
 
@@ -260,7 +252,6 @@ pub(crate) fn parse_single_file_ast_build_result_with_profile(
             source_build_config_contract_names: Arc::new(Default::default()),
         },
         AstBuildContext {
-            numeric_profile,
             root_role: ModuleRootRole::Normal,
             external_package_registry,
             style_directives: &style_directives,

@@ -1,0 +1,6 @@
+hidden |raw Byte|:
+    value = 1 + 2 catch:
+        wide U16 = cast raw
+        then 0
+    ;
+;

@@ -1,13 +1,13 @@
 -- Validate struct/collection semantics through rendered values.
 
 Point = |
-    x Int,
-    y Int,
+    x I32,
+    y I32,
 |
 
 Person = |
     name String,
-    age Int,
+    age I32,
 |
 
 render_structs_and_collections || -> String:
@@ -18,7 +18,7 @@ render_structs_and_collections || -> String:
     p2.x = 5
     p2.y = 10
 
-    empty {Int} = {}
+    empty {I32} = {}
     numbers = {1, 2, 3, 4, 5}
     names = {"Alice", "Bob", "Charlie"}
     matrix = {{1, 2}, {3, 4}}

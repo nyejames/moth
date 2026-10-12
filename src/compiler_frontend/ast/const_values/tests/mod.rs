@@ -22,7 +22,7 @@ use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 fn make_resolver<'a>(
     string_table: &'a mut StringTable,
@@ -33,7 +33,6 @@ fn make_resolver<'a>(
         string_table,
         const_values,
         Rc::new(RefCell::new(std::mem::take(store))),
-        NumericProfile::STANDARD,
     )
 }
 
@@ -72,7 +71,11 @@ fn literal_int_resolves_as_const() {
     let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
-    let expression = Expression::int(42, None, ValueMode::ImmutableOwned);
+    let expression = Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, 42).expect("42 fits I32"),
+        None,
+        ValueMode::ImmutableOwned,
+    );
     let env = ConstValueEnvironment::default();
     let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
 
@@ -80,7 +83,10 @@ fn literal_int_resolves_as_const() {
         .resolve_expression(&expression, &env)
         .expect("literal should resolve");
 
-    assert!(matches!(result.kind, ExpressionKind::Int(42)));
+    assert!(matches!(
+        result.kind,
+        ExpressionKind::FixedScalar(value) if value.as_i64() == Some(42)
+    ));
 }
 
 #[test]
@@ -113,15 +119,23 @@ fn folded_arithmetic_resolves_to_literal() {
     let const_values = ConstValueStore::default();
     let rpn = ExpressionRpn {
         items: vec![
-            rvalue_item(Expression::int(1, None, ValueMode::ImmutableOwned)),
-            rvalue_item(Expression::int(2, None, ValueMode::ImmutableOwned)),
+            rvalue_item(Expression::fixed_scalar(
+                FixedScalarValue::signed(FixedScalar::I32, 1).expect("1 fits I32"),
+                None,
+                ValueMode::ImmutableOwned,
+            )),
+            rvalue_item(Expression::fixed_scalar(
+                FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 fits I32"),
+                None,
+                ValueMode::ImmutableOwned,
+            )),
             operator_item(Operator::Add),
         ],
     };
     let expression = Expression::runtime_with_type_id(
         rpn,
-        DataType::Int,
-        builtin_type_ids::INT,
+        DataType::FixedScalar(FixedScalar::I32),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         None,
         ValueMode::ImmutableOwned,
     );
@@ -132,7 +146,10 @@ fn folded_arithmetic_resolves_to_literal() {
         .resolve_expression(&expression, &env)
         .expect("folded arithmetic should resolve");
 
-    assert!(matches!(result.kind, ExpressionKind::Int(3)));
+    assert!(matches!(
+        result.kind,
+        ExpressionKind::FixedScalar(value) if value.as_i64() == Some(3)
+    ));
 }
 
 #[test]
@@ -147,25 +164,33 @@ fn folded_arithmetic_with_reference_substitution_resolves() {
                 path_fork
                     .try_intern_portable_path("x", &mut string_table)
                     .expect("test path fits"),
-                DataType::Int,
+                DataType::FixedScalar(FixedScalar::I32),
                 None,
                 ValueMode::ImmutableReference,
             )),
-            rvalue_item(Expression::int(5, None, ValueMode::ImmutableOwned)),
+            rvalue_item(Expression::fixed_scalar(
+                FixedScalarValue::signed(FixedScalar::I32, 5).expect("5 fits I32"),
+                None,
+                ValueMode::ImmutableOwned,
+            )),
             operator_item(Operator::Multiply),
         ],
     };
     let expression = Expression::runtime_with_type_id(
         rpn,
-        DataType::Int,
-        builtin_type_ids::INT,
+        DataType::FixedScalar(FixedScalar::I32),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         None,
         ValueMode::ImmutableOwned,
     );
 
     let env = make_environment_with(
         "x",
-        Expression::int(3, None, ValueMode::ImmutableOwned),
+        Expression::fixed_scalar(
+            FixedScalarValue::signed(FixedScalar::I32, 3).expect("3 fits I32"),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
         &mut path_fork,
         &mut string_table,
     );
@@ -175,7 +200,10 @@ fn folded_arithmetic_with_reference_substitution_resolves() {
         .resolve_expression(&expression, &env)
         .expect("substituted arithmetic should resolve");
 
-    assert!(matches!(result.kind, ExpressionKind::Int(15)));
+    assert!(matches!(
+        result.kind,
+        ExpressionKind::FixedScalar(value) if value.as_i64() == Some(15)
+    ));
 }
 
 #[test]
@@ -188,28 +216,39 @@ fn folded_arithmetic_with_coerced_reference_substitution_resolves() {
         path_fork
             .try_intern_portable_path("x", &mut string_table)
             .expect("test path fits"),
-        DataType::Int,
+        DataType::FixedScalar(FixedScalar::I32),
         None,
         ValueMode::ImmutableReference,
     );
     let rpn = ExpressionRpn {
         items: vec![
-            rvalue_item(Expression::coerced(reference, builtin_type_ids::INT)),
-            rvalue_item(Expression::int(2, None, ValueMode::ImmutableOwned)),
+            rvalue_item(Expression::coerced(
+                reference,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            )),
+            rvalue_item(Expression::fixed_scalar(
+                FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 fits I32"),
+                None,
+                ValueMode::ImmutableOwned,
+            )),
             operator_item(Operator::Add),
         ],
     };
     let expression = Expression::runtime_with_type_id(
         rpn,
-        DataType::Int,
-        builtin_type_ids::INT,
+        DataType::FixedScalar(FixedScalar::I32),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         None,
         ValueMode::ImmutableOwned,
     );
 
     let env = make_environment_with(
         "x",
-        Expression::int(40, None, ValueMode::ImmutableOwned),
+        Expression::fixed_scalar(
+            FixedScalarValue::signed(FixedScalar::I32, 40).expect("40 fits I32"),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
         &mut path_fork,
         &mut string_table,
     );
@@ -219,7 +258,10 @@ fn folded_arithmetic_with_coerced_reference_substitution_resolves() {
         .resolve_expression(&expression, &env)
         .expect("coerced reference arithmetic should resolve");
 
-    assert!(matches!(result.kind, ExpressionKind::Int(42)));
+    assert!(matches!(
+        result.kind,
+        ExpressionKind::FixedScalar(value) if value.as_i64() == Some(42)
+    ));
 }
 
 // ------------------------------
@@ -235,11 +277,15 @@ fn reference_to_known_const_resolves() {
     let path = path_fork
         .try_intern_portable_path("ratio", &mut string_table)
         .expect("test path fits");
-    let expression = Expression::reference_with_type_id(path, DataType::Float, builtin_type_ids::FLOAT, None, ValueMode::ImmutableReference, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue);
+    let expression = Expression::reference_with_type_id(path, DataType::FixedScalar(FixedScalar::F64), builtin_type_ids::fixed_scalar(FixedScalar::F64), None, ValueMode::ImmutableReference, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue);
 
     let env = make_environment_with(
         "ratio",
-        Expression::float(2.71, None, ValueMode::ImmutableOwned),
+        Expression::fixed_scalar(
+            FixedScalarValue::binary_float(FixedScalar::F64, 2.71).expect("2.71 is a finite F64"),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
         &mut path_fork,
         &mut string_table,
     );
@@ -249,9 +295,11 @@ fn reference_to_known_const_resolves() {
         .resolve_expression(&expression, &env)
         .expect("reference should resolve");
 
-    assert!(
-        matches!(result.kind, ExpressionKind::Float(value) if (value - 2.71).abs() < f64::EPSILON)
-    );
+    assert!(matches!(
+        result.kind,
+        ExpressionKind::FixedScalar(value)
+            if value.as_f64().is_some_and(|resolved| (resolved - 2.71).abs() < f64::EPSILON)
+    ));
 }
 
 // ------------------------------
@@ -267,7 +315,7 @@ fn unresolved_reference_fails() {
     let path = path_fork
         .try_intern_portable_path("unknown", &mut string_table)
         .expect("test path fits");
-    let expression = Expression::reference_with_type_id(path, DataType::Int, builtin_type_ids::INT, None, ValueMode::ImmutableReference, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue);
+    let expression = Expression::reference_with_type_id(path, DataType::FixedScalar(FixedScalar::I32), builtin_type_ids::fixed_scalar(FixedScalar::I32), None, ValueMode::ImmutableReference, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue);
 
     let env = ConstValueEnvironment::default();
     let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
@@ -294,7 +342,7 @@ fn function_call_fails_const_resolution() {
             .try_intern_portable_path("foo", &mut string_table)
             .expect("test path fits"),
         vec![],
-        vec![builtin_type_ids::INT],
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
         None,
     );
 
@@ -322,7 +370,11 @@ fn mutable_declaration_fails_private_const_resolution() {
         id: path_fork
             .try_intern_portable_path("value", &mut string_table)
             .expect("test path fits"),
-        value: Expression::int(1, None, ValueMode::MutableOwned),
+        value: Expression::fixed_scalar(
+            FixedScalarValue::signed(FixedScalar::I32, 1).expect("1 fits I32"),
+            None,
+            ValueMode::MutableOwned,
+        ),
         binding_span: None,
         config_qualifier: None,
     };
@@ -367,8 +419,12 @@ fn coerced_expression_resolves_inner_value() {
     let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
     let const_values = ConstValueStore::default();
-    let inner = Expression::int(7, None, ValueMode::ImmutableOwned);
-    let coerced = Expression::coerced(inner, builtin_type_ids::FLOAT);
+    let inner = Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, 7).expect("7 fits I32"),
+        None,
+        ValueMode::ImmutableOwned,
+    );
+    let coerced = Expression::coerced(inner, builtin_type_ids::fixed_scalar(FixedScalar::F64));
 
     let env = ConstValueEnvironment::default();
     let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
@@ -397,18 +453,22 @@ fn runtime_rpn_with_unresolved_reference_fails() {
                 path_fork
                     .try_intern_portable_path("missing", &mut string_table)
                     .expect("test path fits"),
-                DataType::Int,
+                DataType::FixedScalar(FixedScalar::I32),
                 None,
                 ValueMode::ImmutableReference,
             )),
-            rvalue_item(Expression::int(2, None, ValueMode::ImmutableOwned)),
+            rvalue_item(Expression::fixed_scalar(
+                FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 fits I32"),
+                None,
+                ValueMode::ImmutableOwned,
+            )),
             operator_item(Operator::Add),
         ],
     };
     let expression = Expression::runtime_with_type_id(
         rpn,
-        DataType::Int,
-        builtin_type_ids::INT,
+        DataType::FixedScalar(FixedScalar::I32),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         None,
         ValueMode::ImmutableOwned,
     );
@@ -437,7 +497,11 @@ fn body_local_immutable_literal_resolves() {
         id: path_fork
             .try_intern_portable_path("local", &mut string_table)
             .expect("test path fits"),
-        value: Expression::int(99, None, ValueMode::ImmutableOwned),
+        value: Expression::fixed_scalar(
+            FixedScalarValue::signed(FixedScalar::I32, 99).expect("99 fits I32"),
+            None,
+            ValueMode::ImmutableOwned,
+        ),
         binding_span: None,
         config_qualifier: None,
     };
@@ -451,7 +515,10 @@ fn body_local_immutable_literal_resolves() {
 
     assert_eq!(resolved.value_kind, ConstFactValueKind::Literal);
     assert_eq!(resolved.expression.span, None);
-    assert!(matches!(resolved.expression.kind, ExpressionKind::Int(99)));
+    assert!(matches!(
+        resolved.expression.kind,
+        ExpressionKind::FixedScalar(value) if value.as_i64() == Some(99)
+    ));
 }
 
 #[test]
@@ -464,7 +531,11 @@ fn body_local_mutable_declaration_fails() {
         id: path_fork
             .try_intern_portable_path("local", &mut string_table)
             .expect("test path fits"),
-        value: Expression::int(99, None, ValueMode::MutableOwned),
+        value: Expression::fixed_scalar(
+            FixedScalarValue::signed(FixedScalar::I32, 99).expect("99 fits I32"),
+            None,
+            ValueMode::MutableOwned,
+        ),
         binding_span: None,
         config_qualifier: None,
     };

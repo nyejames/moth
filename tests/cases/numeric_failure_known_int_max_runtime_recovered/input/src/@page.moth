@@ -1,14 +1,14 @@
 @limits max_value
 
-increment |value Int| -> Int, Error!:
+increment |value I32| -> I32, Error!:
     return value + 1
 ;
 
-valid_top #Int = max_value + 0
+valid_top #I32 = max_value + 0
 copied = copy valid_top
 copied_sum = copy valid_top + 0
 
-caller_top ~Int = max_value
+caller_top ~I32 = max_value
 overflow_code ~U32 = 0
 ignored = increment(caller_top) catch |overflow_error|:
     overflow_code = overflow_error.code

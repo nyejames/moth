@@ -1,0 +1,5 @@
+stored #I32 = cast "42"
+
+compare_stored |value I32| -> Bool:
+    return stored is value catch then false
+;

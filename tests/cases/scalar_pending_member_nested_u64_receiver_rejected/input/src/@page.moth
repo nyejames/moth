@@ -1,0 +1,18 @@
+-- An invalid member occurrence must parse its own argument region through the
+-- existing postfix/argument owner, so a nested call's concrete receiver still
+-- registers its witness. `receive_u64(count)` receives `count` at its U64
+-- parameter, so the delayed unknown-member diagnostic reports the independently
+-- resolved U64 receiver.
+--
+-- The whole `4_294_967_296` does not fit I32, so a skipped nested witness that
+-- let `count` default would report the literal's range instead of the member
+-- diagnostic.
+
+receive_u64 |value U64| -> String:
+    return cast value
+;
+
+count = 4_294_967_296
+count.unsupported(receive_u64(count))
+
+[:unreachable]

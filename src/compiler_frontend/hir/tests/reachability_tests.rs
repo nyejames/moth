@@ -38,6 +38,7 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId,
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use std::path::Path;
 
@@ -1098,8 +1099,10 @@ fn test_expression_store() -> HirExpressionStore {
         .expect("bool expression should append");
     expressions
         .append_expression(HirExpression {
-            kind: HirExpressionKind::Int(1),
-            ty: builtin_type_ids::INT,
+            kind: HirExpressionKind::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, 1).expect("I32 literal in range"),
+            ),
+            ty: builtin_type_ids::fixed_scalar(FixedScalar::I32),
             value_kind: ValueKind::Const,
             region: RegionId(0),
             span: None,
@@ -1107,8 +1110,11 @@ fn test_expression_store() -> HirExpressionStore {
         .expect("int expression should append");
     expressions
         .append_expression(HirExpression {
-            kind: HirExpressionKind::Float(1.5),
-            ty: builtin_type_ids::FLOAT,
+            kind: HirExpressionKind::FixedScalar(
+                FixedScalarValue::binary_float(FixedScalar::F64, 1.5)
+                    .expect("1.5 is exactly representable at F64"),
+            ),
+            ty: builtin_type_ids::fixed_scalar(FixedScalar::F64),
             value_kind: ValueKind::Const,
             region: RegionId(0),
             span: None,
@@ -1118,7 +1124,9 @@ fn test_expression_store() -> HirExpressionStore {
         .append_expression(HirExpression {
             kind: HirExpressionKind::Cast {
                 source: HirValueId(2),
-                policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Int),
+                policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Fixed(
+                    FixedScalar::I32,
+                )),
             },
             ty: builtin_type_ids::STRING,
             value_kind: ValueKind::RValue,
@@ -1138,7 +1146,7 @@ fn test_expression_store() -> HirExpressionStore {
     expressions
         .append_expression(HirExpression {
             kind: HirExpressionKind::MapLiteral(map_entries),
-            ty: builtin_type_ids::INT,
+            ty: builtin_type_ids::fixed_scalar(FixedScalar::I32),
             value_kind: ValueKind::RValue,
             region: RegionId(0),
             span: None,

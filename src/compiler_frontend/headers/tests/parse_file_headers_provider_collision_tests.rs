@@ -11,7 +11,7 @@ fn prelude_symbol_declaration_prepared_without_registry_then_collides_at_binding
     // Preparation takes no registry input, so a declaration that reuses a prelude symbol name
     // still parses into a retained declaration shell during provider-independent preparation.
     let (output, mut span_builder) = prepare_single_file_with_fork(
-        "prelude_fn |x Int| -> Int:\n    return x\n;\n",
+        "prelude_fn |x I32| -> I32:\n    return x\n;\n",
         &file_path,
         &file_path,
         &mut string_table,

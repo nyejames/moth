@@ -19,10 +19,8 @@ use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::grammar::NumericLiteralKind;
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 use moth_lexical::numeric::parse::{
-    literal_kind_initialises, materialize_normalized_fixed_scalar, materialize_normalized_float,
-    materialize_normalized_int, materialize_normalized_uint, parse_numeric_literal,
+    literal_kind_initialises, materialize_normalized_fixed_scalar, parse_numeric_literal,
 };
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth};
 
 /// Decode one complete MON document against a prepared root record schema.
 ///
@@ -1309,9 +1307,6 @@ fn validate_value(
             RawKind::String(value) => Ok(Value::String(value)),
             _ => type_mismatch(raw.span, path, "expected string"),
         },
-        PreparedType::Int { width } => validate_int(raw, *width, budget, path),
-        PreparedType::Uint { width } => validate_uint(raw, *width, budget, path),
-        PreparedType::Float { precision } => validate_float(raw, *precision, budget, path),
         PreparedType::Integer => validate_integer(raw, budget, path),
         PreparedType::Decimal { scale } => validate_decimal(raw, *scale, budget, path),
         PreparedType::Fixed(scalar) => validate_fixed(raw, *scalar, budget, path),
@@ -1380,120 +1375,6 @@ fn type_mismatch<T>(span: Span, path: &[PathSegment], detail: &str) -> Result<T,
     ))
 }
 
-fn validate_int(
-    raw: RawValue<'_>,
-    width: IntWidth,
-    _budget: &mut BudgetState<'_>,
-    path: &[PathSegment],
-) -> Result<Value, MonError> {
-    let span = raw.span;
-    let RawKind::Number(number) = raw.kind else {
-        return type_mismatch(span, path, "expected Int numeric literal");
-    };
-    if number.kind != NumericLiteralKind::WholeNumber {
-        return Err(MonError::new(
-            MonErrorCode::NumericType,
-            Some(span),
-            path,
-            "Int requires whole-number spelling",
-        ));
-    }
-
-    // The receiving node carries the profile the schema was prepared under, so an `Int64`
-    // boundary materialises its own range instead of the delivered `Int32` default.
-    materialize_normalized_int(&number.normalized, number.text.starts_with('-'), width)
-        .map(Value::Int)
-        .map_err(|reason| {
-            let code = match reason {
-                NumberLiteralErrorReason::OutsideIntRange => MonErrorCode::NumericRange,
-                _ => MonErrorCode::NumericSyntax,
-            };
-            MonError::new(
-                code,
-                Some(span),
-                path,
-                format!("cannot materialise Int ({reason:?})"),
-            )
-        })
-}
-
-/// Decode one profile-width `Uint` literal through the shared unsigned policy.
-///
-/// WHAT: whole-number spelling only, including separators; every negative spelling (including
-///       `-0`) rejects, magnitudes parse as `u64` so Uint64 values above `i64::MAX` stay exact,
-///       and the captured profile width bounds the accepted range. Both the spelling rule and
-///       the materialisation come from the shared numeric-text owner, so a MON literal agrees
-///       with the same spelling reaching the same width from source.
-/// WHY:  the budget was already charged before the normalized magnitude was retained, and this
-///       arm only reads those facts, so a `Uint` literal needs no new budget kind.
-fn validate_uint(
-    raw: RawValue<'_>,
-    width: IntWidth,
-    _budget: &mut BudgetState<'_>,
-    path: &[PathSegment],
-) -> Result<Value, MonError> {
-    let span = raw.span;
-    let RawKind::Number(number) = raw.kind else {
-        return type_mismatch(span, path, "expected Uint numeric literal");
-    };
-    if number.kind != NumericLiteralKind::WholeNumber {
-        return Err(MonError::new(
-            MonErrorCode::NumericType,
-            Some(span),
-            path,
-            "Uint requires whole-number spelling",
-        ));
-    }
-
-    // The receiving node carries the profile the schema was prepared under, so a `Uint64`
-    // boundary materialises its own range instead of the delivered `Uint32` default.
-    materialize_normalized_uint(&number.normalized, number.text.starts_with('-'), width)
-        .map(Value::Uint)
-        .map_err(|reason| {
-            let code = match reason {
-                NumberLiteralErrorReason::OutsideUintRange(_)
-                | NumberLiteralErrorReason::NegativeUintLiteral(_) => MonErrorCode::NumericRange,
-                _ => MonErrorCode::NumericSyntax,
-            };
-            MonError::new(
-                code,
-                Some(span),
-                path,
-                format!("cannot materialise Uint ({reason:?})"),
-            )
-        })
-}
-
-fn validate_float(
-    raw: RawValue<'_>,
-    precision: FloatPrecision,
-    _budget: &mut BudgetState<'_>,
-    path: &[PathSegment],
-) -> Result<Value, MonError> {
-    let span = raw.span;
-    let RawKind::Number(number) = raw.kind else {
-        return type_mismatch(span, path, "expected Float numeric literal");
-    };
-
-    // `Float` materialises at the profile the receiving node captured, rounding once at that
-    // precision, exactly as the fixed binary floats round at their own.
-    materialize_normalized_float(&number.normalized, number.text.starts_with('-'), precision)
-        .map(Value::Float)
-        .map_err(|reason| {
-            let code = match reason {
-                NumberLiteralErrorReason::NonFiniteFloat => MonErrorCode::NonFiniteFloat,
-                NumberLiteralErrorReason::ParseOverflow => MonErrorCode::NonFiniteFloat,
-                _ => MonErrorCode::NumericSyntax,
-            };
-            MonError::new(
-                code,
-                Some(span),
-                path,
-                format!("cannot materialise Float ({reason:?})"),
-            )
-        })
-}
-
 /// Decode one explicit-width scalar or `Byte` literal.
 ///
 /// WHAT: fixed integers and `Byte` require whole-number spelling and their own exact range,
@@ -1531,8 +1412,7 @@ fn validate_fixed(
         .map(fixed_scalar_to_value)
         .map_err(|reason| {
             let code = match reason {
-                NumberLiteralErrorReason::NonFiniteFloat
-                | NumberLiteralErrorReason::NonFiniteFixedFloat(_) => MonErrorCode::NonFiniteFloat,
+                NumberLiteralErrorReason::NonFiniteFixedFloat(_) => MonErrorCode::NonFiniteFloat,
                 NumberLiteralErrorReason::OutsideFixedScalarRange(_)
                 | NumberLiteralErrorReason::NegativeUnsignedLiteral(_) => {
                     MonErrorCode::NumericRange

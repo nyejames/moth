@@ -15,7 +15,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
+use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
 
 /// File-local result alias for value-producing receiver type inference.
 ///
@@ -49,13 +49,13 @@ pub(super) fn infer_inline_result_type(
     if let Some(expected) = expected_type_id {
         let env = type_interner.environment();
 
-        if !is_declaration_compatible(expected, then_type, env) {
+        if !is_type_compatible(expected, then_type, env) {
             return Err(CompilerDiagnostic::type_mismatch(
                 expected, then_type, context, span,
             ));
         }
 
-        if !is_declaration_compatible(expected, else_type, env) {
+        if !is_type_compatible(expected, else_type, env) {
             return Err(CompilerDiagnostic::type_mismatch(
                 expected, else_type, context, span,
             ));

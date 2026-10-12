@@ -10,13 +10,13 @@ Response ::
     |,
 ;
 
-inline_option |maybe_name String?| -> String, Int:
+inline_option |maybe_name String?| -> String, I32:
     label, count = if maybe_name is |name| then name, 1 else "guest", 0
     return label, count
 ;
 
-block_option |maybe_name String?| -> String, Int:
-    label, count Int = if maybe_name is |name|:
+block_option |maybe_name String?| -> String, I32:
+    label, count I32 = if maybe_name is |name|:
         then name, 1
     else
         then "guest", 0
@@ -24,12 +24,12 @@ block_option |maybe_name String?| -> String, Int:
     return label, count
 ;
 
-inline_choice |status Status| -> Int, String:
+inline_choice |status Status| -> I32, String:
     score, tag = if status is Ready then 1, "ready" else 0, "other"
     return score, tag
 ;
 
-block_payload |response Response| -> String, Int:
+block_payload |response Response| -> String, I32:
     text, code = if response is Failed(message):
         then message, 1
     else
@@ -38,7 +38,7 @@ block_payload |response Response| -> String, Int:
     return text, code
 ;
 
-nested_same |maybe_name String?, use_fallback Bool| -> String, Int:
+nested_same |maybe_name String?, use_fallback Bool| -> String, I32:
     label, count = if maybe_name is |name|:
         if use_fallback:
             then name, 1
@@ -51,7 +51,7 @@ nested_same |maybe_name String?, use_fallback Bool| -> String, Int:
     return label, count
 ;
 
-mixed_terminate |maybe_name String?, use_fallback Bool| -> String, Int:
+mixed_terminate |maybe_name String?, use_fallback Bool| -> String, I32:
     label, count = if maybe_name is |name|:
         if use_fallback:
             then name, 1
@@ -64,12 +64,12 @@ mixed_terminate |maybe_name String?, use_fallback Bool| -> String, Int:
     return label, count
 ;
 
-optional_none |ready Bool| -> String?, Int:
+optional_none |ready Bool| -> String?, I32:
     label String?, count = if ready then none, 1 else none, 2
     return label, count
 ;
 
-optional_none_block |maybe_name String?| -> String?, Int:
+optional_none_block |maybe_name String?| -> String?, I32:
     label String?, count = if maybe_name is |name|:
         then name, 1
     else

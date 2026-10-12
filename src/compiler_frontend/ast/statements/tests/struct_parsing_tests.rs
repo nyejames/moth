@@ -29,7 +29,15 @@ use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_build_result, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+/// One exact `I32` scalar value for struct-default fixtures.
+///
+/// WHY: an unconstrained whole literal defaults to `I32`, so completed defaults carry the exact
+///      `I32` identity.
+fn i32_value(value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32")
+}
 
 #[test]
 fn body_local_struct_default_preserves_missing_template_authority() {
@@ -89,7 +97,7 @@ fn authored_runtime_struct_default_remains_a_source_diagnostic() {
 #[test]
 fn parses_struct_definitions_with_field_defaults() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("Point = |\n    x Int,\n    y Int = 2,\n|\n");
+        parse_single_file_ast("Point = |\n    x I32,\n    y I32 = 2,\n|\n");
 
     let struct_node = ast
         .nodes
@@ -118,7 +126,10 @@ fn parses_struct_definitions_with_field_defaults() {
     );
     assert_eq!(fields.len(), 2);
     assert!(matches!(fields[0].value.kind, ExpressionKind::NoValue));
-    assert!(matches!(fields[1].value.kind, ExpressionKind::Int(2)));
+    assert!(matches!(
+        fields[1].value.kind,
+        ExpressionKind::FixedScalar(value) if value == i32_value(2)
+    ));
 }
 
 #[test]
@@ -183,7 +194,7 @@ fn optional_present_default_preserves_struct_field_type() {
 #[test]
 fn parses_struct_construction_and_field_access_in_declarations() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "Point = |\n    x Int,\n    y Int,\n|\n\npoint = Point(1, 2)\nvalue = point.x\n",
+        "Point = |\n    x I32,\n    y I32,\n|\n\npoint = Point(1, 2)\nvalue = point.x\n",
     );
 
     let body = start_function_body(&ast, &path_fork, &string_table);
@@ -235,7 +246,7 @@ fn parses_builtin_error_with_default_code_field() {
         Some("code")
     );
     // Consumer-visible canonical contract: the omitted `code` materialises as a
-    // genuine `U32` zero fixed-scalar value, never as an `Int` fallback.
+    // genuine `U32` zero fixed-scalar value, never a removed identity fallback.
     assert_eq!(
         fields[1].value.type_id,
         builtin_type_ids::fixed_scalar(FixedScalar::U32)
@@ -267,7 +278,7 @@ fn generic_struct_conflict_keeps_argument_and_expected_type_evidence_labels() {
              left T,\n\
              right T,\n\
          |\n\
-         bad Pair of Int = Pair(\"two\", 1)\n",
+         bad Pair of I32 = Pair(\"two\", 1)\n",
     );
 
     let DiagnosticPayload::InvalidGenericInstantiation {
@@ -521,7 +532,7 @@ boxed = Box(value = 7)\n";
             _ => None,
         })
         .expect("boxed declaration should be present");
-    let int = ast.type_environment.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let string = ast.type_environment.builtins().string;
 
     let TypeDefinition::GenericInstance(instance) = ast
@@ -534,7 +545,7 @@ boxed = Box(value = 7)\n";
     assert_eq!(
         instance.arguments.as_ref(),
         &[int],
-        "the ordinary value field should establish T as Int"
+        "the ordinary value field should establish T as I32"
     );
     let published_label = ast
         .type_environment

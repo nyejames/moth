@@ -1,9 +1,9 @@
-double |value Int| -> Int:
+double |value I32| -> I32:
     return value + 2147483647
 ;
 
 -- The handler's own failure leaves this private helper; it never re-enters the same handler.
-retry |entries ~U32, value Int| -> Int:
+retry |entries ~U32, value I32| -> I32:
     return double(value) catch |err|:
         entries = entries + err.code
         then double(value)

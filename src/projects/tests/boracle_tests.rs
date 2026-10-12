@@ -367,7 +367,7 @@ result = shared
 #[test]
 fn boracle_source_differential_replays_mutable_parameter_return() {
     let source = r#"
-measure |items ~{Int}| -> Int:
+measure |items ~{I32}| -> I32:
     shared = items
     items = {2}
     return shared.length()
@@ -424,7 +424,7 @@ measure |items ~{Int}| -> Int:
 #[test]
 fn boracle_source_differential_replays_if_branch() {
     let source = r#"
-choose |seed Bool| -> Int:
+choose |seed Bool| -> I32:
     condition ~= seed
     value ~= 0
     if condition:
@@ -1577,7 +1577,7 @@ result = items
 fn boracle_source_call_result_write_through_is_a_holder_use() {
     let report = solve_source(
         r#"
-observe |value {Int}| -> {Int}:
+observe |value {I32}| -> {I32}:
     return value
 ;
 
@@ -1688,7 +1688,7 @@ result = writer
 fn boracle_source_local_mutable_parameter_is_exclusive() {
     let output = run_source_dump(
         r#"
-increment |value ~Int| -> Int:
+increment |value ~I32| -> I32:
     value = value + 1
     return value
 ;
@@ -1709,7 +1709,7 @@ result = increment(value = ~x)
 fn boracle_source_local_mutable_parameter_report_is_exclusive() {
     let report = solve_source(
         r#"
-increment |value ~Int| -> Int:
+increment |value ~I32| -> I32:
     value = value + 1
     return value
 ;
@@ -1744,7 +1744,7 @@ result = increment(value = ~x)
 fn boracle_source_mutable_parameter_existing_place_is_write_through_in_callee() {
     assert_mutable_parameter_is_write_through(
         r#"
-mutate |value ~{Int}| -> {Int}:
+mutate |value ~{I32}| -> {I32}:
     shared = value
     value = {2}
     result = shared
@@ -1761,7 +1761,7 @@ result = mutate(value = ~items)
 fn boracle_source_mutable_parameter_fresh_rvalue_is_write_through_in_callee() {
     assert_mutable_parameter_is_write_through(
         r#"
-mutate |value ~{Int}| -> {Int}:
+mutate |value ~{I32}| -> {I32}:
     shared = value
     value = {2}
     result = shared
@@ -1777,7 +1777,7 @@ result = mutate(value = {1})
 fn boracle_source_unknown_result_does_not_prove_independence() {
     let output = run_source_dump(
         r#"
-keep_values |value {Int}| -> {Int}:
+keep_values |value {I32}| -> {I32}:
     return value
 ;
 
@@ -1800,7 +1800,7 @@ result = shared
 fn boracle_source_unknown_result_report_keeps_conservative_overlap() {
     let report = solve_source(
         r#"
-keep_values |value {Int}| -> {Int}:
+keep_values |value {I32}| -> {I32}:
     return value
 ;
 
@@ -1916,7 +1916,7 @@ result = wrap(value = item)
 fn boracle_source_fallible_paths_keep_success_result_loan_out_of_error_handler() {
     let report = solve_source(
         r#"
-load_values |value {Int}, fail Bool| -> {Int}, Error!:
+load_values |value {I32}, fail Bool| -> {I32}, Error!:
     if fail:
         return! Error("failed")
     ;
@@ -2037,8 +2037,8 @@ fn boracle_source_aggregate_field_keeps_stored_alias_live() {
     let output = run_source_dump(
         r#"
 Pair = |
-    first {Int},
-    second {Int},
+    first {I32},
+    second {I32},
 |
 
 items ~= {1}
@@ -2061,8 +2061,8 @@ fn boracle_source_aggregate_field_report_keeps_typed_origin_lineage() {
     let report = solve_source(
         r#"
 Pair = |
-    first {Int},
-    second {Int},
+    first {I32},
+    second {I32},
 |
 
 items ~= {1}
@@ -2146,8 +2146,8 @@ fn boracle_source_projected_write_is_not_a_binding_definition() {
     let report = solve_source(
         r#"
 Pair = |
-    first {Int},
-    second {Int},
+    first {I32},
+    second {I32},
 |
 
 pair ~= Pair({1}, {2})
@@ -2177,8 +2177,8 @@ fn boracle_source_projected_rebind_separates_old_projection_origin() {
     let report = solve_source(
         r#"
 Pair = |
-    first {Int},
-    second {Int},
+    first {I32},
+    second {I32},
 |
 
 pair ~= Pair({1}, {2})
@@ -2205,8 +2205,8 @@ fn boracle_source_distinct_projected_fields_remain_disjoint() {
     let report = solve_source(
         r#"
 Pair = |
-    first {Int},
-    second {Int},
+    first {I32},
+    second {I32},
 |
 
 pair ~= Pair({1}, {2})
@@ -2232,8 +2232,8 @@ fn boracle_source_base_alias_protects_fresh_projected_storage() {
     let report = solve_source(
         r#"
 Pair = |
-    first {Int},
-    second {Int},
+    first {I32},
+    second {I32},
 |
 
 pair ~= Pair({1}, {2})
@@ -2258,7 +2258,7 @@ result = shared
 fn boracle_source_alias_used_only_as_call_argument_stays_live() {
     let report = solve_source(
         r#"
-observe |value {Int}| -> {Int}:
+observe |value {I32}| -> {I32}:
     return value
 ;
 
@@ -2379,7 +2379,7 @@ result = shared
 fn boracle_source_branch_separates_typed_use_and_mutation() {
     let report = solve_source(
         r#"
-observe |value {Int}| -> {Int}:
+observe |value {I32}| -> {I32}:
     return value
 ;
 
@@ -2583,7 +2583,7 @@ result = shared
 fn boracle_source_map_get_keeps_receiver_protected_while_live() {
     let output = run_source_dump(
         r#"
-scores ~{String = Int} = {"Priya" = 10}
+scores ~{String = I32} = {"Priya" = 10}
 score = scores.get("Priya") catch:
     then 0
 ;
@@ -2604,7 +2604,7 @@ result = score
 fn boracle_source_map_get_report_keeps_receiver_loan_live() {
     let report = solve_source(
         r#"
-scores ~{String = Int} = {"Priya" = 10}
+scores ~{String = I32} = {"Priya" = 10}
 score = scores.get("Priya") catch:
     then 0
 ;
@@ -2636,7 +2636,7 @@ result = score
 fn boracle_source_map_remove_is_not_fresh_provenance() {
     let output = run_source_dump(
         r#"
-scores ~{String = Int} = {"Priya" = 10}
+scores ~{String = I32} = {"Priya" = 10}
 removed = ~scores.remove("Priya") catch:
     then 0
 ;
@@ -2655,7 +2655,7 @@ result = removed
 fn boracle_source_map_remove_report_is_unknown_not_fresh() {
     let report = solve_source(
         r#"
-scores ~{String = Int} = {"Priya" = 10}
+scores ~{String = I32} = {"Priya" = 10}
 removed = ~scores.remove("Priya") catch:
     then 0
 ;

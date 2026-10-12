@@ -1,4 +1,4 @@
-pair |condition Bool| -> Float, String:
+pair |condition Bool| -> F64, String:
     return if condition then 1, "yes" else 2, "no"
 ;
 

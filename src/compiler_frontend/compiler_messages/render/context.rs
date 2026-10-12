@@ -22,8 +22,9 @@ use unicode_width::UnicodeWidthStr;
 
 /// A secondary diagnostic label resolved into renderer-independent display facts.
 ///
-/// A label with a source span carries a root-relative path and one-based display coordinates.
-/// A spanless message carries no location. Labels with an unresolved source span are omitted by
+/// A label with a source span carries a root-relative path and one-based display coordinates;
+/// its message is empty when the label marks a location without prose. A spanless message carries
+/// no location. Labels with an unresolved source span are omitted by
 /// [`resolve_label_render_facts_from_root`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ResolvedDiagnosticLabel {
@@ -321,8 +322,9 @@ impl<'a> DiagnosticRenderContext<'a> {
 /// Resolve secondary labels into facts consumed independently by terminal and HTML renderers.
 ///
 /// The path is made relative to `root`, while line and column remain one-based display
-/// coordinates. A spanless message is retained with no location; a label whose source span cannot
-/// be resolved is omitted.
+/// coordinates. A label with a resolvable source span keeps its location even when it carries no
+/// message, which then stays empty. A spanless message is retained with no location; a label whose
+/// source span cannot be resolved, or that has neither a location nor a message, is omitted.
 pub(crate) fn resolve_label_render_facts_from_root(
     diagnostic: &CompilerDiagnostic,
     context: DiagnosticRenderContext<'_>,
@@ -331,12 +333,18 @@ pub(crate) fn resolve_label_render_facts_from_root(
     let mut labels = Vec::new();
 
     for label in &diagnostic.labels {
-        let Some(message) = label.message.as_ref() else {
-            continue;
-        };
-        let message = diagnostic_label_message_text(message, context);
+        let message = label
+            .message
+            .as_ref()
+            .map(|message| diagnostic_label_message_text(message, context));
         let Some(position) = context.label_position(label) else {
-            if label.span.is_none() {
+            // A spanless label carries only its message, and a message that renders empty leaves
+            // nothing to show. A label whose source span cannot be resolved has no usable global
+            // fact, so it keeps the existing omission policy.
+            if label.span.is_none()
+                && let Some(message) = message
+                && !message.is_empty()
+            {
                 labels.push(ResolvedDiagnosticLabel {
                     style: label.style,
                     path: None,
@@ -360,7 +368,7 @@ pub(crate) fn resolve_label_render_facts_from_root(
             column: Some(display_column_number(
                 i32::try_from(position.start.column).unwrap_or(i32::MAX),
             )),
-            message,
+            message: message.unwrap_or_default(),
         });
     }
 

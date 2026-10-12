@@ -219,7 +219,7 @@ pub(super) fn stable_body_symbol_names(
 /// Collect every nominal identity one canonical type reaches, including generic-instance bases.
 ///
 /// WHY: `CanonicalTypeIdentity::visit` yields an instance and its arguments, but reconstructing
-/// `Box of Int` inside a generated sidecar also needs the blueprint of `Box` itself. Blueprint
+/// `Box of I32` inside a generated sidecar also needs the blueprint of `Box` itself. Blueprint
 /// type trees already record that base explicitly; canonical identities carry it on the instance.
 fn collect_reachable_nominal_identities(
     identity: &CanonicalTypeIdentity,
@@ -856,7 +856,7 @@ impl ModuleMaterialisationPreparation {
     /// retained evidence) and keeps the blueprint of each one that has one.
     /// WHY: this is the single owner of blueprint closure collection. Every canonical identity
     /// source runs through [`collect_reachable_nominal_identities`], because a concrete
-    /// `Box of Int` identity also needs the `Box` blueprint and canonical identities carry that
+    /// `Box of I32` identity also needs the `Box` blueprint and canonical identities carry that
     /// base on the instance rather than as a nested identity.
     pub(super) fn stable_nominal_blueprints(
         &self,

@@ -10,14 +10,21 @@ use crate::ast_log;
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::error::{ExpressionParseError, NumericDeferral};
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
 use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::module_ast::environment::config_resolution::expression_for_resolved_build_config_value;
-use crate::compiler_frontend::ast::statements::collections::new_collection;
+use crate::compiler_frontend::ast::module_ast::scope_context::AuthoredBindingFacts;
+use crate::compiler_frontend::ast::numeric_construction::{
+    BindingContinuation, DeferredExpressionSuffix, NumericContinuation, NumericContinuationId,
+    classify_recipe, register_binding_annotation,
+};
+use crate::compiler_frontend::ast::numeric_known_shape::directed_recipe_shape;
+use crate::compiler_frontend::ast::statements::collections::{CurlyLiteral, new_curly_literal};
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, SignatureTypeFallbackPolicy, signature_member_to_declaration,
 };
@@ -31,6 +38,7 @@ use crate::compiler_frontend::ast::{
     ContextKind, ScopeContext,
     ast_nodes::Declaration,
     expressions::parse_expression::create_expression_with_trailing_newline_policy,
+    statements::value_production::types::ParsedReceiverValue,
     statements::value_production::{ValueReceiverKind, try_parse_value_block_at_receiver},
 };
 use crate::compiler_frontend::builtins::error_type::is_reserved_builtin_symbol;
@@ -42,6 +50,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 
 use crate::compiler_frontend::build_config::BuildInputName;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::datatypes::{DataType, ReceiverKey};
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
@@ -63,8 +72,8 @@ use crate::compiler_frontend::syntax_errors::signature_position::check_signature
 use crate::compiler_frontend::tokenizer::tokens::{TokenRange, TokenTag};
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{
-    CastTargetContext, ExpectedCollectionContext, ExpectedType, cast_target_context_for_type_id,
-    parse_expectation_for_type_id,
+    CastTargetContext, ExpectedCollectionContext, ExpectedCurlyLiteralContext, ExpectedType,
+    cast_target_context_for_type_id, parse_expectation_for_type_id,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -90,14 +99,14 @@ fn capacity_only_shorthand(type_ref: &ParsedTypeRef) -> Option<&ParsedCollection
         _ => None,
     }
 }
-/// Inspect the first authored initializer token without retaining a token vector on the shell.
+/// Inspect the first authored initializer token in canonical source coordinates.
 fn initializer_starts_with_type_parameter(source: &AstCursor, range: Option<TokenRange>) -> bool {
     let Some(range) = range else {
         return false;
     };
     matches!(
         source
-            .token_ref_at(range.start().index())
+            .canonical_token_ref_at(range.start())
             .map(|token| token.tag()),
         Some(TokenTag::TYPE_PARAMETER_BRACKET)
     )
@@ -154,10 +163,83 @@ pub(crate) struct DeclarationLoweringTables<'a> {
     pub(crate) path_fork: &'a mut PathInternerFork,
 }
 
+/// Register one eligible pending numeric declaration and its ordered continuation.
+///
+/// WHAT: creates the body-owned origin, records the declaration's own exact annotation as a
+///       receiving witness, and returns the continuation ID the statement draft records.
+/// WHY: the binding must stay visible through its frame slot while no `Declaration` exists, and
+///      the authored `=`/`~=` spelling decides the slot's mutability at completion.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "pending registration keeps interning tables, authored spans, the declared mode and the retained fragment as separate facts"
+)]
+fn register_pending_declaration(
+    context: &ScopeContext,
+    type_interner: &AstTypeInterner<'_>,
+    path_fork: &PathInternerFork,
+    qualified_name: PathId,
+    declaration_span: Option<SourceSpan>,
+    binding_span: Option<SourceSpan>,
+    value_mode: ValueMode,
+    mutable: bool,
+    items: Vec<ExpressionRpnItem>,
+    annotation_type_id: Option<TypeId>,
+) -> DeclarationResult<NumericContinuationId> {
+    let name = path_fork.component(qualified_name).ok_or_else(|| {
+        CompilerError::compiler_error("a body-local declaration has no terminal declaration name")
+    })?;
+    let directed_shape = directed_recipe_shape(context, type_interner.environment(), &items)?;
+    let recipe = classify_recipe(items, directed_shape);
+    let facts = AuthoredBindingFacts {
+        name,
+        path: qualified_name,
+        span: declaration_span,
+        binding_span,
+        value_mode,
+        mutable,
+    };
+    let binding = context.declare_pending_numeric_binding(facts, recipe)?;
+    if let Some(type_id) = annotation_type_id {
+        // The declaration's own annotation is one exact receiving constraint on its origin, and it
+        // becomes the exact reference shape every read of the binding sees.
+        let mut state = context.numeric_state_mut();
+        register_binding_annotation(
+            &mut state,
+            type_interner.environment(),
+            binding,
+            type_id,
+            declaration_span,
+        )?;
+    }
+    let continuation = context.register_numeric_continuation(NumericContinuation::Binding(
+        BindingContinuation {
+            binding,
+            span: binding_span,
+            scope: context.scope,
+        },
+    ))?;
+    Ok(continuation)
+}
+
 /// Parse a new body-local declaration from the token stream.
 ///
 /// Handles function declarations as a fast path (they use a dedicated signature/body syntax)
 /// before falling through to generic value declaration parsing via `resolve_declaration_syntax`.
+/// Outcome of parsing one body-local declaration.
+///
+/// WHAT: either a finished declaration, or an eligible numeric binding whose declaration node
+///       resumes at the body root through one ordered continuation.
+/// WHY: an unannotated numeric initializer has no selected static type yet, so the statement
+///      cannot build its declaration node here without defaulting the origin early.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "each outcome is produced once and consumed by its caller, so boxing the Ready arm would add one heap allocation per declaration"
+)]
+pub(crate) enum NewDeclarationOutcome {
+    Ready(ResolvedDeclaration),
+    PendingNumeric(NumericContinuationId),
+}
+
 pub(crate) fn new_declaration(
     token_stream: &mut AstCursor,
     symbol_id: StringId,
@@ -166,7 +248,7 @@ pub(crate) fn new_declaration(
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> DeclarationResult<ResolvedDeclaration> {
+) -> DeclarationResult<NewDeclarationOutcome> {
     let declaration_name = string_table.resolve(symbol_id).to_owned();
     ensure_not_keyword_shadow_identifier(
         symbol_id,
@@ -230,7 +312,10 @@ pub(crate) fn new_declaration(
             warnings,
             string_table,
             path_fork,
-        )?;
+        )?
+        // A local function is an independent body root: it owns its own numeric domain and
+        // completes before its declaring body's statements continue.
+        .expect_complete_nodes("a body-local function declaration");
         let receiver = function_signature_receiver(&function_signature, string_table, path_fork);
         let function_data_type =
             DataType::Function(Box::new(receiver.clone()), function_signature.clone());
@@ -240,7 +325,7 @@ pub(crate) fn new_declaration(
             Some(token_stream.current_span()),
         )?;
 
-        return Ok(ResolvedDeclaration {
+        return Ok(NewDeclarationOutcome::Ready(ResolvedDeclaration {
             declaration: Declaration {
                 id: qualified_name,
                 value: Expression::function(
@@ -254,11 +339,11 @@ pub(crate) fn new_declaration(
             },
             statement_kind: ResolvedDeclarationStatementKind::Function {
                 signature: function_signature,
-                body: function_body,
+                body: function_body?,
             },
             is_compile_time_binding: false,
             binding_span,
-        });
+        }));
     }
 
     if let Some(error) = check_signature_common_mistake(token_stream) {
@@ -304,9 +389,10 @@ pub(crate) fn new_declaration(
         context.emit_warning(warning);
     }
     let is_compile_time_binding = declaration_syntax.binding_mode.is_compile_time();
-    let mut declaration = resolve_declaration_syntax(
+    let mut declaration = match resolve_declaration_syntax(
         declaration_syntax,
         qualified_name,
+        binding_span,
         Some(token_stream),
         &mut *context,
         type_interner,
@@ -314,7 +400,12 @@ pub(crate) fn new_declaration(
             string_table,
             path_fork,
         },
-    )?;
+    )? {
+        DeclarationLowering::Ready(declaration) => declaration,
+        DeclarationLowering::PendingNumeric(continuation) => {
+            return Ok(NewDeclarationOutcome::PendingNumeric(continuation));
+        }
+    };
     // The binding anchor is the declaration-name token captured on entry, not the
     // initializer value span. `resolve_declaration_syntax` leaves it empty for this
     // body-local path; restore the exact anchor here.
@@ -326,12 +417,12 @@ pub(crate) fn new_declaration(
         _ => ResolvedDeclarationStatementKind::Variable,
     };
 
-    Ok(ResolvedDeclaration {
+    Ok(NewDeclarationOutcome::Ready(ResolvedDeclaration {
         declaration,
         statement_kind,
         is_compile_time_binding,
         binding_span,
-    })
+    }))
 }
 /// Extract the receiver key from a function signature when the first parameter is named `this`.
 fn function_signature_receiver(
@@ -354,14 +445,30 @@ fn function_signature_receiver(
 /// validates type compatibility, and applies contextual coercion.
 /// Names the runtime storage position a declaration creates, or `None` when it is a constant.
 ///
+/// Result of lowering one declaration initializer.
+///
+/// WHAT: a finished declaration, or an eligible numeric binding registered in the current frame
+///       and construction domain whose declaration node resumes at the body root.
+/// WHY: only a runtime body owns a construction domain; compile-time constant headers always
+///       fold at their own boundary and can never return a pending outcome.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "each outcome is produced once and consumed by its caller, so boxing the Ready arm would add one heap allocation per declaration"
+)]
+pub(crate) enum DeclarationLowering {
+    Ready(Declaration),
+    PendingNumeric(NumericContinuationId),
+}
+
 pub fn resolve_declaration_syntax(
     declaration_syntax: DeclarationSyntax,
     qualified_name: PathId,
+    binding_span: Option<SourceSpan>,
     source_owner: Option<&AstCursor>,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     tables: DeclarationLoweringTables<'_>,
-) -> DeclarationResult<Declaration> {
+) -> DeclarationResult<DeclarationLowering> {
     let DeclarationLoweringTables {
         string_table,
         path_fork,
@@ -421,6 +528,14 @@ pub fn resolve_declaration_syntax(
         .into());
     }
 
+    // A runtime body-local binding is an eligible numeric origin: its initializer keeps
+    // literal arithmetic and unresolved origins until the body root has recorded every
+    // permitted use. Compile-time constants and non-runtime declaration contexts always
+    // fold at this declaration boundary.
+    let retain_pending_origin = !declaration_syntax.binding_mode.is_compile_time()
+        && config_qualifier.is_none()
+        && !context.kind.is_constant_context();
+
     // ----------------------------
     //  Resolve declared type
     // ----------------------------
@@ -430,7 +545,6 @@ pub fn resolve_declaration_syntax(
             capacity,
             Some(&*context),
             type_interner.environment_mut_for_derived_types(),
-            context.numeric_profile,
         )
         .map_err(|diagnostic| diagnostic.into_diagnostic())?;
 
@@ -452,14 +566,16 @@ pub fn resolve_declaration_syntax(
         let collection_context = ExpectedCollectionContext::CapacityOnlyShorthand {
             fixed_capacity: folded_capacity,
         };
-        let mut parsed_initializer = new_collection(
+        let literal_span = Some(initializer_stream.current_span());
+        let parsed_literal = new_curly_literal(
             &mut initializer_stream,
-            collection_context,
+            ExpectedCurlyLiteralContext::Collection(collection_context),
             context,
             type_interner,
             &value_mode,
             string_table,
             path_fork,
+            retain_pending_origin,
         )?;
 
         // The collection literal parser stops at the closing `}` without consuming it.
@@ -467,6 +583,46 @@ pub fn resolve_declaration_syntax(
         if initializer_stream.current_tag() == TokenTag::CLOSE_CURLY {
             initializer_stream.advance();
         }
+
+        let mut parsed_initializer = match parsed_literal {
+            CurlyLiteral::Ready(expression) => expression,
+            CurlyLiteral::Retained(deferred) => {
+                if !retain_pending_origin {
+                    let deferral =
+                        ExpressionParseError::NumericDeferral(Box::new(NumericDeferral {
+                            items: vec![ExpressionRpnItem::PendingNumericExpression {
+                                expression: Box::new(deferred),
+                                span: literal_span,
+                            }],
+                            expected: ExpectedType::Infer,
+                            value_mode: value_mode.to_owned(),
+                            span: literal_span,
+                            suffix: DeferredExpressionSuffix::None,
+                            complete_fragment: true,
+                        }));
+                    return Err(deferral.reject_at_boundary_without_numeric_retention(
+                        "the collection initializer of a declaration",
+                    ));
+                }
+                ensure_initializer_stream_ends(&mut initializer_stream, string_table)?;
+                let continuation = register_pending_declaration(
+                    context,
+                    type_interner,
+                    path_fork,
+                    qualified_name,
+                    declaration_syntax.span,
+                    binding_span,
+                    value_mode.to_owned(),
+                    declaration_syntax.binding_mode.is_mutable(),
+                    vec![ExpressionRpnItem::PendingNumericExpression {
+                        expression: Box::new(deferred),
+                        span: literal_span,
+                    }],
+                    None,
+                )?;
+                return Ok(DeclarationLowering::PendingNumeric(continuation));
+            }
+        };
 
         // Shorthand already rejected empty literals during parsing, but immutable
         // empty fixed collections are also invalid for explicit fixed annotations.
@@ -485,38 +641,19 @@ pub fn resolve_declaration_syntax(
                 CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
                 path_fork.component(qualified_name),
                 declaration_syntax.span,
-                None,
             )
             .into());
         }
 
-        initializer_stream.skip_newlines();
-        if initializer_stream.current_tag() != TokenTag::EOF {
-            let found = initializer_stream
-                .current_diagnostic_token(string_table)
-                .map_err(|error| {
-                    CompilerDiagnostic::token_view_invariant_error(
-                        error,
-                        "declaration initializer diagnostic",
-                    )
-                })?
-                .unwrap_or_else(|| {
-                    DiagnosticToken::from_static_tag(initializer_stream.current_tag())
-                });
-            return Err(CompilerDiagnostic::unexpected_token_from_tag(
-                found,
-                Some(initializer_stream.current_span()),
-            )
-            .into());
-        }
+        ensure_initializer_stream_ends(&mut initializer_stream, string_table)?;
 
         parsed_initializer.value_mode = value_mode.to_owned();
-        return Ok(Declaration {
+        return Ok(DeclarationLowering::Ready(Declaration {
             id: qualified_name,
             value: parsed_initializer,
             binding_span: None,
             config_qualifier,
-        });
+        }));
     }
 
     let resolved_annotation = {
@@ -524,7 +661,6 @@ pub fn resolve_declaration_syntax(
             TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
                 declaration_table: &context.top_level_declarations,
                 declaring_file_id: context.shared.declaring_file_id,
-                numeric_profile: context.numeric_profile,
                 visible_declaration_ids: context.visible_declaration_ids.as_ref(),
                 visible_external_symbols: context
                     .file_visibility
@@ -569,7 +705,7 @@ pub fn resolve_declaration_syntax(
         && declaration_syntax.config_qualifier.is_some()
         && declaration_syntax.initializer_range.is_none()
     {
-        return Ok(Declaration {
+        return Ok(DeclarationLowering::Ready(Declaration {
             id: qualified_name,
             value: Expression::no_value(
                 declaration_syntax.span,
@@ -578,7 +714,7 @@ pub fn resolve_declaration_syntax(
             ),
             binding_span: None,
             config_qualifier,
-        });
+        }));
     }
     if source_build_config_context && declaration_syntax.config_qualifier.is_some() {
         let name = path_fork.component(qualified_name).ok_or_else(|| {
@@ -610,13 +746,13 @@ pub fn resolve_declaration_syntax(
             ),
             type_interner,
             string_table,
-        );
-        return Ok(Declaration {
+        )?;
+        return Ok(DeclarationLowering::Ready(Declaration {
             id: qualified_name,
             value,
             binding_span: None,
             config_qualifier,
-        });
+        }));
     }
     let mut initializer_stream = declaration_initializer_stream(
         source_owner,
@@ -728,9 +864,53 @@ pub fn resolve_declaration_syntax(
                 string_table,
                 path_fork,
             ) {
-                value_block_result?
+                match value_block_result {
+                    Ok(ParsedReceiverValue::Complete(expression)) => expression,
+                    // A value block whose nested bodies or slot types only the enclosing body
+                    // root can finish keeps its authored block: this boundary either owns the
+                    // completion pass (a body-local runtime binding) and registers the deferral
+                    // exactly like a retained fragment initializer, or it owns none and rejects
+                    // the position instead of dropping the retained bodies.
+                    Ok(ParsedReceiverValue::Retained(retained)) => {
+                        let deferral = retained.into_deferral(&value_mode);
+                        if !retain_pending_origin {
+                            return Err(deferral.reject_at_boundary_without_numeric_retention(
+                                "the value-block initializer of a body-local declaration",
+                            ));
+                        }
+                        let deferral = deferral.take_numeric_deferral(
+                            "the value-block initializer of a body-local declaration",
+                        )?;
+                        ensure_initializer_stream_ends(&mut initializer_stream, string_table)?;
+                        let continuation = register_pending_declaration(
+                            context,
+                            type_interner,
+                            path_fork,
+                            qualified_name,
+                            declaration_syntax.span,
+                            binding_span,
+                            value_mode.to_owned(),
+                            declaration_syntax.binding_mode.is_mutable(),
+                            deferral.items,
+                            declared_type_id,
+                        )?;
+                        return Ok(DeclarationLowering::PendingNumeric(continuation));
+                    }
+                    Ok(ParsedReceiverValue::NeedsSlotInference { .. }) => {
+                        return Err(CompilerError::compiler_error(
+                            "a declaration initializer receiver knows its slot types; a value \
+                             block cannot ask for slot inference",
+                        )
+                        .into());
+                    }
+                    Err(error) => {
+                        return Err(error.reject_at_boundary_without_numeric_retention(
+                            "the value-block initializer of a body-local declaration",
+                        ));
+                    }
+                }
             } else {
-                let input = ExpressionParseInput::ordinary(
+                let mut input = ExpressionParseInput::ordinary(
                     ExpressionParseResources {
                         token_stream: &mut initializer_stream,
                         scope_context: &expression_context,
@@ -743,7 +923,50 @@ pub fn resolve_declaration_syntax(
                     },
                     false,
                 );
-                create_expression_with_trailing_newline_policy(input)?
+                if retain_pending_origin {
+                    // The initializer is the position's whole authored syntax and it owns its
+                    // deferred fragment, so completion may splice it verbatim at the body root.
+                    input = input.with_numeric_deferral_owner();
+                    if declared_type_id.is_none() {
+                        // Only an unannotated origin needs literal-only recipes retained: its
+                        // single static type is still being collected, so a later exact receiver
+                        // may still type the raw leaves. An explicit annotation already
+                        // establishes the literal materialisation at this declaration boundary
+                        // through the ordinary destination rules (a whole literal materialises
+                        // directly in F32/Byte/Dec without an integer intermediate), so retaining
+                        // it would only make the body-root pass re-derive the same type.
+                        input = input.with_retained_pending_numeric_fragment();
+                    }
+                }
+                match create_expression_with_trailing_newline_policy(input) {
+                    Ok(expression) => expression,
+                    Err(error) => {
+                        if !retain_pending_origin {
+                            // A compile-time or otherwise non-runtime initializer folds at this
+                            // declaration boundary; it can never retain an unresolved numeric
+                            // origin, and the boundary names the rejected position.
+                            return Err(error.reject_at_boundary_without_numeric_retention(
+                                "a compile-time or non-runtime declaration initializer",
+                            ));
+                        }
+                        let deferral = error
+                            .take_numeric_deferral("the initializer of a body-local declaration")?;
+                        ensure_initializer_stream_ends(&mut initializer_stream, string_table)?;
+                        let continuation = register_pending_declaration(
+                            context,
+                            type_interner,
+                            path_fork,
+                            qualified_name,
+                            declaration_syntax.span,
+                            binding_span,
+                            value_mode.to_owned(),
+                            declaration_syntax.binding_mode.is_mutable(),
+                            deferral.items,
+                            declared_type_id,
+                        )?;
+                        return Ok(DeclarationLowering::PendingNumeric(continuation));
+                    }
+                }
             };
 
             if config_resolution_context && declaration_syntax.config_qualifier.is_some() {
@@ -758,7 +981,6 @@ pub fn resolve_declaration_syntax(
                     expression,
                     declared_type_id,
                     type_interner.environment(),
-                    context.numeric_profile.float_precision,
                     TypeMismatchContext::Declaration,
                 )?
             } else {
@@ -776,7 +998,6 @@ pub fn resolve_declaration_syntax(
             CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
             path_fork.component(qualified_name),
             declaration_syntax.span,
-            None,
         )
         .into());
     }
@@ -798,22 +1019,7 @@ pub fn resolve_declaration_syntax(
         .into());
     }
 
-    if initializer_stream.current_tag() != TokenTag::EOF {
-        let found = initializer_stream
-            .current_diagnostic_token(string_table)
-            .map_err(|error| {
-                CompilerDiagnostic::token_view_invariant_error(
-                    error,
-                    "declaration initializer diagnostic",
-                )
-            })?
-            .unwrap_or_else(|| DiagnosticToken::from_static_tag(initializer_stream.current_tag()));
-        return Err(CompilerDiagnostic::unexpected_token_from_tag(
-            found,
-            Some(initializer_stream.current_span()),
-        )
-        .into());
-    }
+    ensure_initializer_stream_ends(&mut initializer_stream, string_table)?;
 
     // Reject immutable bindings initialized with an empty fixed collection literal.
     // Mutable bindings are allowed because the collection may be filled later.
@@ -841,13 +1047,44 @@ pub fn resolve_declaration_syntax(
     parsed_initializer.value_mode = value_mode.to_owned();
 
     ast_log!("Created new ", Cyan #value_mode);
-    Ok(Declaration {
+    Ok(DeclarationLowering::Ready(Declaration {
         id: qualified_name,
         value: parsed_initializer,
         binding_span: None,
         config_qualifier,
-    })
+    }))
 }
+
+/// Requires a declaration initializer to end after its single expression.
+///
+/// WHAT: skips trailing newlines and reports any leftover token as an unexpected token.
+/// WHY: the expression parser stops at a token it cannot continue with, and shorthand literals
+///      bypass it entirely, so every declaration boundary must check the remaining tokens itself,
+///      including one whose numeric fragment is retained for body completion.
+fn ensure_initializer_stream_ends(
+    initializer_stream: &mut AstCursor<'_>,
+    string_table: &mut StringTable,
+) -> DeclarationResult<()> {
+    initializer_stream.skip_newlines();
+    if initializer_stream.current_tag() != TokenTag::EOF {
+        let found = initializer_stream
+            .current_diagnostic_token(string_table)
+            .map_err(|error| {
+                CompilerDiagnostic::token_view_invariant_error(
+                    error,
+                    "declaration initializer diagnostic",
+                )
+            })?
+            .unwrap_or_else(|| DiagnosticToken::from_static_tag(initializer_stream.current_tag()));
+        return Err(CompilerDiagnostic::unexpected_token_from_tag(
+            found,
+            Some(initializer_stream.current_span()),
+        )
+        .into());
+    }
+    Ok(())
+}
+
 /// Build the bounded parser cursor for a declaration initializer.
 ///
 /// Source-owned ranges stay on the canonical `AstCursor` view. A missing owner is an

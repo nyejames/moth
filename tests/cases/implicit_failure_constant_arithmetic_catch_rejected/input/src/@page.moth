@@ -1,0 +1,5 @@
+sum #= 1 + 2
+
+compare_sum |value I32| -> Bool:
+    return sum is value catch then false
+;

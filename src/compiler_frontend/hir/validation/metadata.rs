@@ -91,10 +91,7 @@ impl<'a> HirValidator<'a> {
             // and the site-root mark carry nothing this validation inspects (no empty-name,
             // type or location check reads final characters), so no check needs the resolved
             // text and pieces must not be flattened to provide one.
-            HirConstValue::Uint(_)
-            | HirConstValue::Int(_)
-            | HirConstValue::Float(_)
-            | HirConstValue::FixedScalar(_)
+            HirConstValue::FixedScalar(_)
             | HirConstValue::Number(_)
             | HirConstValue::Bool(_)
             | HirConstValue::Char(_)

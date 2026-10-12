@@ -1,5 +1,5 @@
 /**
- * @moth.sig identity_uint |value Uint| -> Uint
+ * @moth.sig identity_uint |value U32| -> U32
  */
 export function identityUint(value) {
     return value;

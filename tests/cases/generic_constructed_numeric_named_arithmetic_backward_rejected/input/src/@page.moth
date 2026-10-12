@@ -1,0 +1,14 @@
+-- A named arithmetic result keeps its own origin. A later receiver through a
+-- direct generic constructor cannot reach back into that arithmetic.
+
+Packet type T = |value T|
+
+read_u64 |value U64| -> String:
+    return cast value
+;
+
+base = 1
+doubled = base + base
+packet = Packet(doubled)
+text = read_u64(packet.value)
+[:[text]]

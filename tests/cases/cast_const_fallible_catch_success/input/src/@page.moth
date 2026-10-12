@@ -1,4 +1,4 @@
-count #Int = cast "nope" catch:
+count #I32 = cast "0" catch:
     then 0
 ;
 

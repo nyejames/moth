@@ -10,8 +10,11 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::failure_classification::pending_function_failure_facts;
+use crate::compiler_frontend::ast::numeric_construction::{
+    BodyDraft, NumericContinuation, StatementExpression,
+};
 use crate::compiler_frontend::ast::statements::asserts::parse_assert_statement;
-use crate::compiler_frontend::ast::statements::body_expr_stmt::parse_expression_statement_candidate;
+use crate::compiler_frontend::ast::statements::body_expr_stmt::push_statement_expression;
 use crate::compiler_frontend::ast::statements::body_return::parse_return_statement;
 use crate::compiler_frontend::ast::statements::body_symbol::{
     parse_symbol_statement, parse_this_statement,
@@ -25,13 +28,16 @@ use crate::compiler_frontend::ast::statements::loops::create_loop;
 use crate::compiler_frontend::ast::statements::match_arm_boundaries::{
     current_line_contains_top_level_fat_arrow, current_token_starts_match_arm_header,
 };
+use crate::compiler_frontend::ast::statements::numeric_body_completion::complete_numeric_body;
+use crate::compiler_frontend::ast::statements::value_production::parse_values::ProducedValuesParseInput;
 use crate::compiler_frontend::ast::statements::value_production::{
-    ProducedValues, ProducedValuesParseInput, ValueReceiverKind,
-    is_missing_produced_value_boundary, parse_produced_values_typed,
+    ProducedValues, ThenValueContinuation, ThenValueSlot, ValueReceiverKind,
+    is_missing_produced_value_boundary, parse_retained_produced_values,
 };
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, InvalidControlFlowStatementReason,
     InvalidFallibleHandlingReason, InvalidMatchArmReason, InvalidStandaloneStatementReason,
@@ -50,6 +56,43 @@ use crate::compiler_frontend::value_mode::ValueMode;
 /// `CompilerError` values unchanged. Nested statement parsers therefore must not collapse this
 /// result back into a diagnostic when a loop header meets a stream without canonical provenance.
 type StatementDispatchResult<T> = Result<T, ExpressionParseError>;
+
+/// One parsed statement body before its numeric-dependent positions resolve.
+///
+/// WHAT: an independent body root completes its construction state and returns finished nodes;
+///       a nested body returns its authored-order draft, whose pending positions resolve when the
+///       enclosing root completes.
+/// WHY: one function body (or root/concrete-generic body) owns the numeric construction domain,
+///      while nested blocks share it. Returning the draft from nested parses is what lets a
+///      construct retain its body in authored order instead of re-parsing tokens later.
+pub(crate) enum ParsedBody {
+    /// An independent body root: pending state is complete and released.
+    Complete(Vec<AstNode>),
+    /// A nested body sharing an enclosing root's domain.
+    Draft(BodyDraft),
+}
+
+impl ParsedBody {
+    /// Demand the finished node list of an independent body root.
+    ///
+    /// WHAT: returns the completed nodes for a root parse, and a precise invariant failure when a
+    ///       body that was entered as a root returned a nested draft instead.
+    /// WHY: only a caller that passed a root context may publish body nodes; a draft at that
+    ///      boundary means the context never owned a construction domain, and silently unwrapping
+    ///      it would let unresolved origins reach later stages.
+    pub(crate) fn expect_complete_nodes(
+        self,
+        position: &str,
+    ) -> Result<Vec<AstNode>, ExpressionParseError> {
+        match self {
+            ParsedBody::Complete(nodes) => Ok(nodes),
+            ParsedBody::Draft(_) => Err(CompilerError::compiler_error(format!(
+                "{position} returned a nested numeric draft instead of completed body nodes"
+            ))
+            .into()),
+        }
+    }
+}
 
 fn statement_dispatch_error(diagnostic: CompilerDiagnostic) -> ExpressionParseError {
     diagnostic.into()
@@ -91,10 +134,10 @@ pub(crate) fn parse_function_body_statements(
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> StatementDispatchResult<Vec<AstNode>> {
-    // Ordinary growth: the cursor's end is an absolute token position, so any estimate from it
-    // grows with the body's place in the file and repeats for every nested scope.
-    let mut body_nodes: Vec<AstNode> = Vec::new();
+) -> StatementDispatchResult<ParsedBody> {
+    // Authored statement order for this body, including every position whose statement could not
+    // finish until the body root had selected each numeric origin's single static type.
+    let mut draft = BodyDraft::new();
 
     while token_stream.position() < token_stream.length() {
         let current_tag = token_stream.current_tag();
@@ -134,7 +177,7 @@ pub(crate) fn parse_function_body_statements(
             // Symbol statements (declarations, assignments, calls)
             TokenTag::SYMBOL => parse_symbol_statement(
                 token_stream,
-                &mut body_nodes,
+                &mut draft,
                 &mut context,
                 type_interner,
                 warnings,
@@ -144,7 +187,7 @@ pub(crate) fn parse_function_body_statements(
 
             TokenTag::THIS => parse_this_statement(
                 token_stream,
-                &mut body_nodes,
+                &mut draft,
                 &mut context,
                 type_interner,
                 string_table,
@@ -174,31 +217,29 @@ pub(crate) fn parse_function_body_statements(
             TokenTag::LOOP => {
                 token_stream.advance();
 
-                body_nodes.push(create_loop(
+                create_loop(
                     token_stream,
                     context.new_child_control_flow(ContextKind::Loop, string_table, path_fork),
                     type_interner,
                     warnings,
                     string_table,
                     path_fork,
-                )?);
+                    &mut draft,
+                )?;
             }
 
             TokenTag::IF => {
                 token_stream.advance();
 
-                body_nodes.extend(create_branch(
+                create_branch(
                     token_stream,
-                    &mut context.new_child_control_flow(
-                        ContextKind::Branch,
-                        string_table,
-                        path_fork,
-                    ),
+                    context.new_child_control_flow(ContextKind::Branch, string_table, path_fork),
                     type_interner,
                     warnings,
                     string_table,
                     path_fork,
-                )?);
+                    &mut draft,
+                )?;
             }
 
             TokenTag::ELSE => {
@@ -223,7 +264,7 @@ pub(crate) fn parse_function_body_statements(
             TokenTag::ASSERT => {
                 parse_assert_statement(
                     token_stream,
-                    &mut body_nodes,
+                    &mut draft,
                     &context,
                     type_interner,
                     string_table,
@@ -234,7 +275,7 @@ pub(crate) fn parse_function_body_statements(
             TokenTag::RETURN | TokenTag::RETURN_BANG => {
                 parse_return_statement(
                     token_stream,
-                    &mut body_nodes,
+                    &mut draft,
                     &context,
                     type_interner,
                     string_table,
@@ -252,7 +293,7 @@ pub(crate) fn parse_function_body_statements(
                     ));
                 }
 
-                body_nodes.push(AstNode {
+                draft.push_node(AstNode {
                     kind: NodeKind::Break,
                     span: Some(token_stream.current_span()),
                     scope: context.scope,
@@ -270,7 +311,7 @@ pub(crate) fn parse_function_body_statements(
                     ));
                 }
 
-                body_nodes.push(AstNode {
+                draft.push_node(AstNode {
                     kind: NodeKind::Continue,
                     span: Some(token_stream.current_span()),
                     scope: context.scope,
@@ -320,24 +361,56 @@ pub(crate) fn parse_function_body_statements(
                     ));
                 }
 
-                let produced_values = parse_produced_values_typed(ProducedValuesParseInput {
+                // Every `then` position owns its numeric deferral: a numeric-dependent fallback is
+                // retained for the body root, while a fully built list keeps the ordinary eager
+                // path with no continuation.
+                let values = parse_retained_produced_values(ProducedValuesParseInput {
                     token_stream,
                     context: &context,
                     type_interner,
                     target: active_target,
-                    label: "then fallback values",
                     string_table,
                     path_fork,
                 })?;
 
-                body_nodes.push(AstNode {
-                    kind: NodeKind::ThenValue(ProducedValues {
-                        expressions: produced_values,
+                if values
+                    .iter()
+                    .all(|value| matches!(value, StatementExpression::Built(_)))
+                {
+                    let mut expressions = Vec::with_capacity(values.len());
+                    for value in values {
+                        let StatementExpression::Built(expression) = value else {
+                            return Err(CompilerError::compiler_error(
+                                "a produced-value list reported ready while holding a retained \
+                                 fallback",
+                            )
+                            .into());
+                        };
+                        expressions.push(expression);
+                    }
+
+                    draft.push_node(AstNode {
+                        kind: NodeKind::ThenValue(ProducedValues {
+                            expressions,
+                            span: then_span,
+                        }),
                         span: then_span,
-                    }),
-                    span: then_span,
-                    scope: context.scope,
-                });
+                        scope: context.scope,
+                    });
+                } else {
+                    // The receiving site may not be resolved yet, so the authored contract travels
+                    // with the values and the body root completes them at their real slots.
+                    let continuation = context.register_numeric_continuation(
+                        NumericContinuation::ThenValue(ThenValueContinuation {
+                            values: values.into_iter().map(ThenValueSlot::Pending).collect(),
+                            slot_expected_types: active_target.slot_expected_types(),
+                            receiver_kind: active_target.receiver_kind,
+                            span: then_span,
+                            scope: context.scope,
+                        }),
+                    )?;
+                    draft.push_pending(continuation);
+                }
             }
 
             // Scope terminators
@@ -390,7 +463,7 @@ pub(crate) fn parse_function_body_statements(
                 )?;
                 let expression = Expression::template(template, ValueMode::MutableOwned);
 
-                body_nodes.push(AstNode {
+                draft.push_node(AstNode {
                     kind: NodeKind::PushStartRuntimeFragment(expression),
                     span: fragment_span,
                     scope: context.scope,
@@ -410,20 +483,16 @@ pub(crate) fn parse_function_body_statements(
             | TokenTag::CHAR_LITERAL
             | TokenTag::COPY
             | TokenTag::MUTABLE => {
-                let expression = parse_expression_statement_candidate(
+                // One statement-expression owner: a produced value takes the authored position,
+                // and a numeric-dependent statement records its retained continuation there.
+                push_statement_expression(
                     token_stream,
+                    &mut draft,
                     &context,
                     type_interner,
                     string_table,
                     path_fork,
                 )?;
-
-                let span = expression.span;
-                body_nodes.push(AstNode {
-                    kind: NodeKind::ExpressionStatement(expression),
-                    span,
-                    scope: context.scope,
-                });
             }
 
             // Unrecognized tokens
@@ -442,6 +511,25 @@ pub(crate) fn parse_function_body_statements(
         }
     }
 
+    // Numeric-dependent statements complete here for an independent body root: it is the only
+    // owner of the body's construction state, and no later stage may observe a pending origin,
+    // recipe or suspended statement. A nested body shares its enclosing root's domain, so it
+    // returns its authored-order draft and the enclosing construct resumes it.
+    warnings.extend(context.take_emitted_warnings());
+    if !context.is_numeric_body_root() {
+        return Ok(ParsedBody::Draft(draft));
+    }
+
+    let completed = complete_numeric_body(draft, &context, type_interner, string_table, path_fork);
+
+    // Completion may emit trailing diagnostics from resumed positions (for example a retained
+    // match arm whose duplicate value only existed after the subject type was selected). They
+    // belong to the same root context and follow the parse-time warnings above, and a failing
+    // completion must still deliver the warnings emitted before its error.
+    warnings.extend(context.take_emitted_warnings());
+
+    let body_nodes = completed?;
+
     // Only completed callable bodies prove infallibility. Branch/loop bodies and unresolved
     // recursive edges cannot close the callee's failure contract on their own.
     if context.kind == ContextKind::Function
@@ -459,6 +547,5 @@ pub(crate) fn parse_function_body_statements(
         }
     }
 
-    warnings.extend(context.take_emitted_warnings());
-    Ok(body_nodes)
+    Ok(ParsedBody::Complete(body_nodes))
 }

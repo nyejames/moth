@@ -1,0 +1,171 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0053","MOTH-RULE-0053","MOTH-RULE-0053","MOTH-RULE-0053","MOTH-RULE-0053","MOTH-RULE-0053","MOTH-RULE-0053","MOTH-RULE-0053","MOTH-RULE-0083","MOTH-RULE-0083"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 1
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/add_i8/@mod.moth"
+line = 3
+column = 19
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 2
+reason = "compile_time_evaluation_error.divide_by_zero"
+path = "input/divide_zero/@mod.moth"
+line = 3
+column = 24
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 3
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/multiply_i8/@mod.moth"
+line = 3
+column = 19
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 4
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/multiply_u8/@mod.moth"
+line = 3
+column = 19
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 5
+reason = "compile_time_evaluation_error.invalid_exponent"
+path = "input/negative_exponent/@mod.moth"
+line = 3
+column = 20
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 6
+reason = "compile_time_evaluation_error.divide_by_zero"
+path = "input/remainder_zero/@mod.moth"
+line = 3
+column = 24
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 7
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/subtract_i8/@mod.moth"
+line = 3
+column = 19
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 8
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/subtract_u8/@mod.moth"
+line = 3
+column = 19
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+occurrence = 1
+reason = "invalid_cast.builtin_cast_failed_in_const"
+path = "input/compound_u16/@mod.moth"
+line = 3
+column = 20
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+occurrence = 2
+reason = "invalid_cast.builtin_cast_failed_in_const"
+path = "input/compound_u8/@mod.moth"
+line = 3
+column = 19
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0053","MOTH-RULE-0053","MOTH-RULE-0053","MOTH-RULE-0053","MOTH-RULE-0053","MOTH-RULE-0053","MOTH-RULE-0053","MOTH-RULE-0053","MOTH-RULE-0083","MOTH-RULE-0083"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 1
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/add_i8/@mod.moth"
+line = 3
+column = 19
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 2
+reason = "compile_time_evaluation_error.divide_by_zero"
+path = "input/divide_zero/@mod.moth"
+line = 3
+column = 24
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 3
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/multiply_i8/@mod.moth"
+line = 3
+column = 19
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 4
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/multiply_u8/@mod.moth"
+line = 3
+column = 19
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 5
+reason = "compile_time_evaluation_error.invalid_exponent"
+path = "input/negative_exponent/@mod.moth"
+line = 3
+column = 20
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 6
+reason = "compile_time_evaluation_error.divide_by_zero"
+path = "input/remainder_zero/@mod.moth"
+line = 3
+column = 24
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 7
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/subtract_i8/@mod.moth"
+line = 3
+column = 19
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+occurrence = 8
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/subtract_u8/@mod.moth"
+line = 3
+column = 19
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+occurrence = 1
+reason = "invalid_cast.builtin_cast_failed_in_const"
+path = "input/compound_u16/@mod.moth"
+line = 3
+column = 20
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+occurrence = 2
+reason = "invalid_cast.builtin_cast_failed_in_const"
+path = "input/compound_u8/@mod.moth"
+line = 3
+column = 19

@@ -1,4 +1,4 @@
-reject_decimal_leaf_receiver |value Uint| -> String:
-    result Uint = value + 1.5
+reject_decimal_leaf_receiver |value U32| -> String:
+    result U32 = value + 1.5
     return [result]
 ;

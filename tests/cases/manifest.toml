@@ -4500,37 +4500,23 @@ contract = "language.loops.fixed_numeric_range_runtime"
 role = "primary"
 
 [[case]]
-id = "fixed_numeric_range_runtime_int32_float32"
-path = "fixed_numeric_range_runtime_int32_float32"
-tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
-contract = "language.loops.fixed_numeric_range_runtime"
-role = "boundary"
-
-[[case]]
-id = "fixed_numeric_range_runtime_int64_float32"
-path = "fixed_numeric_range_runtime_int64_float32"
-tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
-contract = "language.loops.fixed_numeric_range_runtime"
-role = "boundary"
-
-[[case]]
-id = "fixed_numeric_range_runtime_int64_float64"
-path = "fixed_numeric_range_runtime_int64_float64"
-tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+id = "fixed_numeric_range_runtime_i64"
+path = "fixed_numeric_range_runtime_i64"
+tags = ["integration", "numeric", "runtime", "fixed-width", "html-wasm"]
 contract = "language.loops.fixed_numeric_range_runtime"
 role = "boundary"
 
 [[case]]
 id = "fixed_float_range_rounded_endpoint_runtime"
 path = "fixed_float_range_rounded_endpoint_runtime"
-tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+tags = ["integration", "numeric", "runtime", "fixed-width", "html-wasm"]
 contract = "language.loops.fixed_numeric_range_runtime"
 role = "boundary"
 
 [[case]]
 id = "fixed_float_range_stall_recovery"
 path = "fixed_float_range_stall_recovery"
-tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+tags = ["integration", "numeric", "runtime", "fixed-width", "html-wasm"]
 contract = "language.numeric.range_step_uses_builtin_failure"
 role = "boundary"
 
@@ -4644,6 +4630,13 @@ id = "multi_bind_immutable_existing_target_rejected"
 path = "multi_bind_immutable_existing_target_rejected"
 tags = ["integration", "results", "diagnostics"]
 contract = "language.functions.multi_bind_immutable_existing_target_rejected"
+role = "primary"
+
+[[case]]
+id = "multi_bind_existing_target_mutable_marker_rejected"
+path = "multi_bind_existing_target_mutable_marker_rejected"
+tags = ["integration", "results", "diagnostics"]
+contract = "language.functions.multi_bind_existing_target_mutable_marker_rejected"
 role = "primary"
 
 [[case]]
@@ -5560,7 +5553,7 @@ role = "primary"
 [[case]]
 id = "struct_using_constant"
 path = "struct_using_constant"
-tags = ["integration","structs","constants"]
+tags = ["integration","structs","constants","numeric"]
 contract = "language.structs.constant_default_field_acceptance"
 role = "primary"
 
@@ -5812,21 +5805,21 @@ role = "primary"
 [[case]]
 id = "template_const_range_int64_endpoints"
 path = "template_const_range_int64_endpoints"
-tags = ["integration", "templates", "numeric", "numeric-profile", "int64"]
+tags = ["integration", "templates", "numeric", "int64"]
 contract = "language.templates.const_range_int64_endpoints"
 role = "boundary"
 
 [[case]]
 id = "template_const_range_fixed_initializer_success"
 path = "template_const_range_fixed_initializer_success"
-tags = ["integration", "templates", "numeric", "numeric-profile", "int64"]
+tags = ["integration", "templates", "numeric", "int64"]
 contract = "language.templates.const_range_fixed_initializer_success"
 role = "primary"
 
 [[case]]
 id = "template_const_range_runtime_reference_rejected"
 path = "template_const_range_runtime_reference_rejected"
-tags = ["integration", "templates", "diagnostics", "numeric", "numeric-profile", "int64"]
+tags = ["integration", "templates", "diagnostics", "numeric", "int64"]
 contract = "language.templates.const_range_runtime_reference_rejected"
 role = "primary"
 
@@ -6881,24 +6874,24 @@ contract = "language.casts.non_builtin_target_rejected"
 role = "primary"
 
 [[case]]
-id = "cast_concrete_function_parameter_fallible_rejected"
-path = "cast_concrete_function_parameter_fallible_rejected"
-tags = ["integration","diagnostics","cast"]
-contract = "language.casts.fallible_source_in_plain_cast_position_rejected"
+id = "cast_concrete_function_parameter_plain_fallible_success"
+path = "cast_concrete_function_parameter_plain_fallible_success"
+tags = ["integration","language","cast","runtime"]
+contract = "language.casts.plain_fallible_typed_boundaries"
 role = "primary"
 
 [[case]]
-id = "cast_struct_constructor_field_fallible_rejected"
-path = "cast_struct_constructor_field_fallible_rejected"
-tags = ["integration","diagnostics","cast"]
-contract = "language.casts.fallible_source_in_plain_cast_position_rejected"
+id = "cast_struct_constructor_field_plain_fallible_success"
+path = "cast_struct_constructor_field_plain_fallible_success"
+tags = ["integration","language","cast","runtime"]
+contract = "language.casts.plain_fallible_typed_boundaries"
 role = "boundary"
 
 [[case]]
-id = "cast_choice_constructor_field_fallible_rejected"
-path = "cast_choice_constructor_field_fallible_rejected"
-tags = ["integration","diagnostics","cast"]
-contract = "language.casts.fallible_source_in_plain_cast_position_rejected"
+id = "cast_choice_constructor_field_plain_fallible_success"
+path = "cast_choice_constructor_field_plain_fallible_success"
+tags = ["integration","language","cast","runtime"]
+contract = "language.casts.plain_fallible_typed_boundaries"
 role = "boundary"
 
 [[case]]
@@ -6911,9 +6904,9 @@ role = "primary"
 [[case]]
 id = "cast_struct_field_default_fallible_rejected"
 path = "cast_struct_field_default_fallible_rejected"
-tags = ["integration","diagnostics","cast"]
-contract = "language.casts.fallible_source_in_plain_cast_position_rejected"
-role = "boundary"
+tags = ["integration","diagnostics","cast","const","structs"]
+contract = "language.casts.struct_field_default_static_invalid_rejected"
+role = "primary"
 
 [[case]]
 id = "cast_const_infallible_success"
@@ -7112,6 +7105,13 @@ contract = "language.casts.missing_builtin_target_rejected"
 role = "primary"
 
 [[case]]
+id = "catch_partial_generic_unknown_slot_cast_target_rejected"
+path = "catch_partial_generic_unknown_slot_cast_target_rejected"
+tags = ["integration", "diagnostics", "cast", "catch", "generics", "html-wasm"]
+contract = "language.casts.missing_builtin_target_rejected"
+role = "boundary"
+
+[[case]]
 id = "cast_same_type_rejected"
 path = "cast_same_type_rejected"
 tags = ["integration","diagnostics","cast"]
@@ -7157,21 +7157,21 @@ role = "boundary"
 id = "cast_propagation_requires_error_return_rejected"
 path = "cast_propagation_requires_error_return_rejected"
 tags = ["integration","diagnostics","cast","results"]
-contract = "language.casts.propagation_requires_error_return_rejected"
+contract = "language.casts.exported_plain_cast_failure_rejected"
 role = "primary"
 
 [[case]]
 id = "cast_propagation_recovery_conflict_rejected"
 path = "cast_propagation_recovery_conflict_rejected"
 tags = ["integration","diagnostics","cast","results"]
-contract = "language.casts.propagation_recovery_conflict_rejected"
-role = "primary"
+contract = "language.casts.cast_bang_removed"
+role = "boundary"
 
 [[case]]
 id = "cast_infallible_with_bang_rejected"
 path = "cast_infallible_with_bang_rejected"
 tags = ["integration","diagnostics","cast","results"]
-contract = "language.casts.infallible_with_bang_rejected"
+contract = "language.casts.cast_bang_removed"
 role = "primary"
 
 [[case]]
@@ -7189,10 +7189,10 @@ contract = "language.casts.numeric_fixed_chain_acceptance"
 role = "primary"
 
 [[case]]
-id = "cast_numeric_fixed_const_catch_success"
-path = "cast_numeric_fixed_const_catch_success"
-tags = ["integration","language","cast","const","numeric"]
-contract = "language.casts.numeric_fixed_const_catch_acceptance"
+id = "cast_numeric_fixed_const_catch_rejected"
+path = "cast_numeric_fixed_const_catch_rejected"
+tags = ["integration","diagnostics","cast","const","numeric"]
+contract = "language.casts.numeric_fixed_const_catch_rejected"
 role = "primary"
 
 [[case]]
@@ -7206,15 +7206,15 @@ role = "primary"
 id = "cast_numeric_plain_fallible_rejected"
 path = "cast_numeric_plain_fallible_rejected"
 tags = ["integration","diagnostics","cast","numeric"]
-contract = "language.casts.numeric_plain_fallible_rejected"
-role = "primary"
+contract = "language.casts.exported_plain_cast_failure_rejected"
+role = "boundary"
 
 [[case]]
 id = "cast_numeric_infallible_bang_rejected"
 path = "cast_numeric_infallible_bang_rejected"
 tags = ["integration","diagnostics","cast","numeric"]
-contract = "language.casts.numeric_infallible_with_bang_rejected"
-role = "primary"
+contract = "language.casts.cast_bang_removed"
+role = "boundary"
 
 [[case]]
 id = "cast_numeric_byte_no_evidence_rejected"
@@ -7259,10 +7259,10 @@ contract = "language.casts.numeric_text_parse_acceptance"
 role = "primary"
 
 [[case]]
-id = "cast_numeric_text_string_parse_catch_success"
-path = "cast_numeric_text_string_parse_catch_success"
-tags = ["integration","language","cast","const","numeric"]
-contract = "language.casts.numeric_text_parse_catch_acceptance"
+id = "cast_numeric_text_string_parse_catch_rejected"
+path = "cast_numeric_text_string_parse_catch_rejected"
+tags = ["integration","diagnostics","cast","const","numeric"]
+contract = "language.casts.numeric_text_parse_catch_rejected"
 role = "primary"
 
 [[case]]
@@ -7276,15 +7276,15 @@ role = "primary"
 id = "cast_numeric_text_plain_fallible_rejected"
 path = "cast_numeric_text_plain_fallible_rejected"
 tags = ["integration","diagnostics","cast","numeric"]
-contract = "language.casts.numeric_text_plain_fallible_rejected"
-role = "primary"
+contract = "language.casts.exported_plain_cast_failure_rejected"
+role = "boundary"
 
 [[case]]
 id = "cast_numeric_text_infallible_bang_rejected"
 path = "cast_numeric_text_infallible_bang_rejected"
 tags = ["integration","diagnostics","cast","numeric"]
-contract = "language.casts.numeric_text_infallible_with_bang_rejected"
-role = "primary"
+contract = "language.casts.cast_bang_removed"
+role = "boundary"
 
 [[case]]
 id = "cast_numeric_text_byte_no_evidence_rejected"
@@ -9898,13 +9898,6 @@ contract = "language.dependencies.core_random_functions_acceptance"
 role = "primary"
 
 [[case]]
-id = "core_random_float_int32_float32_boundary"
-path = "core_random_float_int32_float32_boundary"
-tags = ["integration", "numeric", "runtime", "external-packages", "core-packages", "js", "int32", "float32"]
-contract = "language.numeric.core_random_float32_random_float_half_open_range"
-role = "boundary"
-
-[[case]]
 id = "core_random_float_int32_float64_boundary"
 path = "core_random_float_int32_float64_boundary"
 tags = ["integration", "numeric", "runtime", "external-packages", "core-packages", "js", "int32", "float64"]
@@ -11187,6 +11180,13 @@ contract = "language.functions.multi_bind_type_mismatch_rejected"
 role = "boundary"
 
 [[case]]
+id = "value_if_terminal_then_type_rejected"
+path = "value_if_terminal_then_type_rejected"
+tags = ["integration", "diagnostics", "value-blocks", "if", "multi-bind", "then"]
+contract = "language.functions.multi_bind_type_mismatch_rejected"
+role = "boundary"
+
+[[case]]
 id = "value_if_multi_bind_block_terminating_branch"
 path = "value_if_multi_bind_block_terminating_branch"
 tags = ["integration", "language", "value-blocks", "if", "multi-bind"]
@@ -11413,6 +11413,55 @@ role = "primary"
 [[case]]
 id = "option_value_if_literal_predicate_rejected"
 path = "option_value_if_literal_predicate_rejected"
+tags = ["integration", "diagnostics", "language", "optionals", "value-blocks"]
+contract = "language.expressions.value_if_optional_predicate_rejected"
+role = "boundary"
+
+[[case]]
+id = "option_value_if_pending_none_predicate_rejected"
+path = "option_value_if_pending_none_predicate_rejected"
+tags = ["integration", "diagnostics", "language", "optionals", "value-blocks", "numeric", "generics"]
+contract = "language.expressions.value_if_optional_predicate_rejected"
+role = "boundary"
+
+[[case]]
+id = "option_value_if_pending_literal_predicate_rejected"
+path = "option_value_if_pending_literal_predicate_rejected"
+tags = ["integration", "diagnostics", "language", "optionals", "value-blocks", "numeric", "generics"]
+contract = "language.expressions.value_if_optional_predicate_rejected"
+role = "boundary"
+
+[[case]]
+id = "generic_constructed_optional_collection_bound_argument_rejected"
+path = "generic_constructed_optional_collection_bound_argument_rejected"
+tags = ["integration", "diagnostics", "numeric", "generics", "optionals", "structs"]
+contract = "language.generics.numeric_constructor_optional_envelopes"
+role = "boundary"
+
+[[case]]
+id = "generic_constructed_optional_map_bound_argument_rejected"
+path = "generic_constructed_optional_map_bound_argument_rejected"
+tags = ["integration", "diagnostics", "numeric", "generics", "optionals", "structs"]
+contract = "language.generics.numeric_constructor_optional_envelopes"
+role = "boundary"
+
+[[case]]
+id = "option_value_if_pending_none_newline_predicate_rejected"
+path = "option_value_if_pending_none_newline_predicate_rejected"
+tags = ["integration", "diagnostics", "language", "optionals", "value-blocks", "numeric", "generics"]
+contract = "language.expressions.value_if_optional_predicate_rejected"
+role = "boundary"
+
+[[case]]
+id = "option_value_if_grouped_known_none_predicate_rejected"
+path = "option_value_if_grouped_known_none_predicate_rejected"
+tags = ["integration", "diagnostics", "language", "optionals", "value-blocks"]
+contract = "language.expressions.value_if_optional_predicate_rejected"
+role = "boundary"
+
+[[case]]
+id = "option_value_if_grouped_string_literal_predicate_rejected"
+path = "option_value_if_grouped_string_literal_predicate_rejected"
 tags = ["integration", "diagnostics", "language", "optionals", "value-blocks"]
 contract = "language.expressions.value_if_optional_predicate_rejected"
 role = "boundary"
@@ -12034,6 +12083,13 @@ contract = "language.numeric.direct_private_catch_recovery"
 role = "primary"
 
 [[case]]
+id = "implicit_failure_recursive_nested_catch_runtime"
+path = "implicit_failure_recursive_nested_catch_runtime"
+tags = ["integration", "language", "numeric", "results", "runtime", "generics", "js-backend"]
+contract = "language.numeric.recursive_nested_catch_convergence"
+role = "primary"
+
+[[case]]
 id = "implicit_failure_composite_first_failure_wins"
 path = "implicit_failure_composite_first_failure_wins"
 tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
@@ -12104,11 +12160,116 @@ contract = "language.results.folded_checked_expression_keeps_catch_eligibility"
 role = "boundary"
 
 [[case]]
+id = "implicit_failure_folded_catch_handler_no_evidence_cast_rejected"
+path = "implicit_failure_folded_catch_handler_no_evidence_cast_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.folded_checked_expression_keeps_catch_eligibility"
+role = "boundary"
+
+[[case]]
 id = "implicit_failure_literal_catch_rejected"
 path = "implicit_failure_literal_catch_rejected"
 tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
-contract = "language.results.literal_does_not_make_catch_eligible"
+contract = "language.results.authored_catch_eligibility_boundaries"
 role = "primary"
+
+[[case]]
+id = "implicit_failure_binding_catch_rejected"
+path = "implicit_failure_binding_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_constant_arithmetic_reference_catch_rejected"
+path = "implicit_failure_constant_arithmetic_reference_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_signed_literal_catch_rejected"
+path = "implicit_failure_signed_literal_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_comparison_catch_rejected"
+path = "implicit_failure_comparison_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_single_call_catch_rejected"
+path = "implicit_failure_single_call_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_nested_argument_call_catch_rejected"
+path = "implicit_failure_nested_argument_call_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_constructor_catch_rejected"
+path = "implicit_failure_constructor_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_constructor_argument_calls_catch_rejected"
+path = "implicit_failure_constructor_argument_calls_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_choice_constructor_argument_calls_catch_rejected"
+path = "implicit_failure_choice_constructor_argument_calls_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_constant_cast_reference_catch_rejected"
+path = "implicit_failure_constant_cast_reference_catch_rejected"
+tags = ["integration", "language", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.authored_catch_eligibility_boundaries"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_constant_reference_catch_rejected"
+path = "implicit_failure_constant_reference_catch_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.constant_reference_keeps_its_own_occurrence_eligibility"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_constant_arithmetic_catch_rejected"
+path = "implicit_failure_constant_arithmetic_catch_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.constant_reference_keeps_its_own_occurrence_eligibility"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_constant_projection_cast_catch_rejected"
+path = "implicit_failure_constant_projection_cast_catch_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.constant_reference_keeps_its_own_occurrence_eligibility"
+role = "boundary"
+
+[[case]]
+id = "implicit_failure_constant_projection_arithmetic_catch_rejected"
+path = "implicit_failure_constant_projection_arithmetic_catch_rejected"
+tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
+contract = "language.results.constant_reference_keeps_its_own_occurrence_eligibility"
+role = "boundary"
 
 [[case]]
 id = "implicit_failure_custom_catch_private_rejected"
@@ -12247,7 +12408,7 @@ role = "primary"
 [[case]]
 id = "numeric_failure_known_int64_overflow_boundary"
 path = "numeric_failure_known_int64_overflow_boundary"
-tags = ["integration", "language", "numeric", "diagnostics", "numeric-profile", "int64"]
+tags = ["integration", "language", "numeric", "diagnostics", "int64"]
 contract = "language.numeric.known_constant_int_overflow_rejected"
 role = "boundary"
 
@@ -12275,7 +12436,7 @@ role = "boundary"
 [[case]]
 id = "numeric_failure_known_int64_runtime_recovered"
 path = "numeric_failure_known_int64_runtime_recovered"
-tags = ["integration", "language", "numeric", "runtime", "js-backend", "numeric-profile", "int64"]
+tags = ["integration", "language", "numeric", "runtime", "js-backend", "int64"]
 contract = "language.numeric.known_constant_int_overflow_rejected"
 role = "boundary"
 
@@ -13296,8 +13457,8 @@ role = "primary"
 [[case]]
 id = "fixed_width_literal_operator_result_u8"
 path = "fixed_width_literal_operator_result_u8"
-tags = ["integration", "numeric", "diagnostics"]
-contract = "language.numbers.fixed_width_literal_operator_result_u8_rejected"
+tags = ["integration", "numeric", "runtime"]
+contract = "language.numbers.fixed_width_literal_operator_result_u8_success"
 role = "primary"
 
 [[case]]
@@ -13310,8 +13471,8 @@ role = "primary"
 [[case]]
 id = "fixed_width_literal_grouped_operand_u8"
 path = "fixed_width_literal_grouped_operand_u8"
-tags = ["integration", "numeric", "diagnostics"]
-contract = "language.numbers.fixed_width_literal_grouped_operand_u8_rejected"
+tags = ["integration", "numeric", "runtime"]
+contract = "language.numbers.fixed_width_literal_grouped_operand_u8_success"
 role = "primary"
 
 [[case]]
@@ -13359,7 +13520,7 @@ role = "backend"
 [[case]]
 id = "fixed_width_integer_profile_int64_checked_arithmetic"
 path = "fixed_width_integer_profile_int64_checked_arithmetic"
-tags = ["integration", "numeric", "runtime", "fixed-width", "numeric-profile", "html-wasm"]
+tags = ["integration", "numeric", "runtime", "fixed-width", "html-wasm"]
 contract = "language.numbers.fixed_width_integer_checked_arithmetic"
 role = "backend"
 
@@ -13436,14 +13597,14 @@ role = "backend"
 [[case]]
 id = "fixed_width_integer_int32_overflow_entry_error"
 path = "fixed_width_integer_int32_overflow_entry_error"
-tags = ["integration", "numeric", "runtime", "fixed-width", "numeric-profile", "entry-error", "html-wasm"]
+tags = ["integration", "numeric", "runtime", "fixed-width", "entry-error", "html-wasm"]
 contract = "language.numbers.numeric_profile_int32_overflow_entry_error"
 role = "backend"
 
 [[case]]
 id = "fixed_width_integer_int64_overflow_entry_error"
 path = "fixed_width_integer_int64_overflow_entry_error"
-tags = ["integration", "numeric", "runtime", "fixed-width", "numeric-profile", "entry-error", "html-wasm"]
+tags = ["integration", "numeric", "runtime", "fixed-width", "entry-error", "html-wasm"]
 contract = "language.numbers.numeric_profile_int64_overflow_entry_error"
 role = "backend"
 
@@ -13485,7 +13646,7 @@ role = "primary"
 [[case]]
 id = "wasm_scalar_profile_comparison_runtime"
 path = "wasm_scalar_profile_comparison_runtime"
-tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+tags = ["integration", "numeric", "runtime", "fixed-width", "html-wasm"]
 contract = "backend.html_wasm.numeric_profile_scalar_identity_and_comparison"
 role = "backend"
 
@@ -13506,21 +13667,21 @@ role = "backend"
 [[case]]
 id = "wasm_scalar_profile_comparison_runtime_int32_float64"
 path = "wasm_scalar_profile_comparison_runtime_int32_float64"
-tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+tags = ["integration", "numeric", "runtime", "fixed-width", "html-wasm"]
 contract = "backend.html_wasm.numeric_profile_scalar_identity_and_comparison"
 role = "backend"
 
 [[case]]
 id = "wasm_scalar_profile_comparison_runtime_int64_float32"
 path = "wasm_scalar_profile_comparison_runtime_int64_float32"
-tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+tags = ["integration", "numeric", "runtime", "fixed-width", "html-wasm"]
 contract = "backend.html_wasm.numeric_profile_scalar_identity_and_comparison"
 role = "backend"
 
 [[case]]
 id = "wasm_scalar_profile_comparison_runtime_int64_float64"
 path = "wasm_scalar_profile_comparison_runtime_int64_float64"
-tags = ["integration", "numeric", "numeric-profile", "runtime", "fixed-width", "html-wasm"]
+tags = ["integration", "numeric", "runtime", "fixed-width", "html-wasm"]
 contract = "backend.html_wasm.numeric_profile_scalar_identity_and_comparison"
 role = "backend"
 
@@ -13562,7 +13723,7 @@ role = "backend"
 [[case]]
 id = "numeric_profile_int64_float32_fixed_width_mix"
 path = "numeric_profile_int64_float32_fixed_width_mix"
-tags = ["integration", "numeric", "runtime", "numeric-profile", "fixed-width"]
+tags = ["integration", "numeric", "runtime", "fixed-width"]
 contract = "language.numbers.numeric_profile_fixed_width_carriers"
 role = "primary"
 
@@ -13777,44 +13938,51 @@ contract = "backend.html.external_native_float64_nonfinite_error"
 role = "backend"
 
 [[case]]
+id = "external_native_float64_start_nonfinite"
+path = "external_native_float64_start_nonfinite"
+tags = ["integration", "numeric", "external", "runtime", "float64"]
+contract = "backend.html.external_native_float64_start_nonfinite_error"
+role = "backend"
+
+[[case]]
 id = "numeric_float_whole_literal_int32_float32"
 path = "numeric_float_whole_literal_int32_float32"
-tags = ["integration", "numeric", "numeric-profile", "float32"]
+tags = ["integration", "numeric", "float32"]
 contract = "language.numeric.whole_float_literal_destination_int32_float32"
 role = "primary"
 
 [[case]]
 id = "numeric_float_whole_literal_int32_float64"
 path = "numeric_float_whole_literal_int32_float64"
-tags = ["integration", "numeric", "numeric-profile", "float64"]
+tags = ["integration", "numeric", "float64"]
 contract = "language.numeric.whole_float_literal_destination_int32_float64"
 role = "primary"
 
 [[case]]
 id = "numeric_float_whole_literal_int64_float32"
 path = "numeric_float_whole_literal_int64_float32"
-tags = ["integration", "numeric", "numeric-profile", "float32"]
+tags = ["integration", "numeric", "float32"]
 contract = "language.numeric.whole_float_literal_destination_int64_float32"
 role = "primary"
 
 [[case]]
 id = "numeric_float_whole_literal_int64_float64"
 path = "numeric_float_whole_literal_int64_float64"
-tags = ["integration", "numeric", "numeric-profile", "float64"]
+tags = ["integration", "numeric", "float64"]
 contract = "language.numeric.whole_float_literal_destination_int64_float64"
 role = "primary"
 
 [[case]]
 id = "core_math_profile_int64_float32"
 path = "core_math_profile_int64_float32"
-tags = ["integration", "numeric", "runtime", "numeric-profile", "core-math", "int64", "float32"]
+tags = ["integration", "numeric", "runtime", "core-math", "int64", "float32"]
 contract = "language.numeric.core_math_native_float_int64_float32_profile"
 role = "boundary"
 
 [[case]]
 id = "core_math_profile_int32_float64"
 path = "core_math_profile_int32_float64"
-tags = ["integration", "numeric", "runtime", "numeric-profile", "core-math", "int32", "float64"]
+tags = ["integration", "numeric", "runtime", "core-math", "int32", "float64"]
 contract = "language.numeric.core_math_native_float_int32_float64_profile"
 role = "boundary"
 
@@ -13884,7 +14052,7 @@ role = "backend"
 [[case]]
 id = "number_dynamic_arithmetic_runtime"
 path = "number_dynamic_arithmetic_runtime"
-tags = ["integration", "language", "numeric", "number", "runtime", "arithmetic", "html-wasm", "numeric-profile", "int32", "float64"]
+tags = ["integration", "language", "numeric", "number", "runtime", "arithmetic", "html-wasm", "int32", "float64"]
 contract = "language.numbers.dynamic_arithmetic_rounding_and_power"
 role = "primary"
 
@@ -13912,14 +14080,14 @@ role = "primary"
 [[case]]
 id = "number_mixed_integer_runtime"
 path = "number_mixed_integer_runtime"
-tags = ["integration", "language", "numeric", "number", "runtime", "mixed-integer", "comparisons", "numeric-profile", "int32", "float32"]
+tags = ["integration", "language", "numeric", "number", "runtime", "mixed-integer", "comparisons", "int32", "float32"]
 contract = "language.numbers.mixed_integer_arithmetic_and_comparison"
 role = "primary"
 
 [[case]]
 id = "number_cast_exactness_runtime"
 path = "number_cast_exactness_runtime"
-tags = ["integration", "language", "numeric", "number", "casts", "runtime", "numeric-profile", "int64", "float64"]
+tags = ["integration", "language", "numeric", "number", "casts", "runtime", "int64", "float64"]
 contract = "language.numbers.exact_integer_and_scale_casts"
 role = "primary"
 
@@ -13954,7 +14122,7 @@ role = "primary"
 [[case]]
 id = "number_int64_power_fastpaths_runtime"
 path = "number_int64_power_fastpaths_runtime"
-tags = ["integration", "language", "numeric", "number", "runtime", "numeric-profile", "int64", "float32"]
+tags = ["integration", "language", "numeric", "number", "runtime", "int64", "float32"]
 contract = "language.numbers.int64_exponents_preserve_unity_fastpaths"
 role = "primary"
 
@@ -13989,16 +14157,16 @@ role = "primary"
 [[case]]
 id = "number_try_castable_to_int_generic_success"
 path = "number_try_castable_to_int_generic_success"
-tags = ["integration", "language", "numeric", "number", "generics", "traits", "casts", "runtime"]
-contract = "language.generics.number_try_castable_to_int"
+tags = ["integration", "language", "numeric", "number", "generics", "traits", "casts", "user-defined", "dependencies", "runtime"]
+contract = "language.generics.number_try_castable_to_i32"
 role = "primary"
 
 [[case]]
 id = "number_fallible_cast_requires_handling_rejected"
 path = "number_fallible_cast_requires_handling_rejected"
 tags = ["integration", "language", "numeric", "number", "casts", "diagnostics"]
-contract = "language.casts.number_fallibility_requires_handling"
-role = "primary"
+contract = "language.casts.exported_plain_cast_failure_rejected"
+role = "boundary"
 
 [[case]]
 id = "dec_keyword_reclaim_and_value_flow_success"
@@ -14281,13 +14449,6 @@ contract = "language.numeric.discharged_u8_add_public_success"
 role = "primary"
 
 [[case]]
-id = "implicit_failure_discharged_u8_add_public_success_int64_float32"
-path = "implicit_failure_discharged_u8_add_public_success_int64_float32"
-tags = ["integration", "language", "numeric", "numeric-profile", "runtime", "js-backend", "html-wasm"]
-contract = "language.numeric.discharged_u8_add_public_success"
-role = "boundary"
-
-[[case]]
 id = "implicit_failure_discharged_u8_add_rejected_u32"
 path = "implicit_failure_discharged_u8_add_rejected_u32"
 tags = ["integration", "language", "numeric", "results", "diagnostics", "js-backend", "html-wasm"]
@@ -14327,20 +14488,6 @@ id = "implicit_failure_fixed_int_range_zero_step"
 path = "implicit_failure_fixed_int_range_zero_step"
 tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
 contract = "language.numeric.fixed_int_range_zero_step_recovery"
-role = "boundary"
-
-[[case]]
-id = "implicit_failure_discharged_u8_add_public_success_int32_float32"
-path = "implicit_failure_discharged_u8_add_public_success_int32_float32"
-tags = ["integration", "language", "numeric", "numeric-profile", "runtime", "js-backend", "html-wasm"]
-contract = "language.numeric.discharged_u8_add_public_success"
-role = "boundary"
-
-[[case]]
-id = "implicit_failure_discharged_u8_add_public_success_int64_float64"
-path = "implicit_failure_discharged_u8_add_public_success_int64_float64"
-tags = ["integration", "language", "numeric", "numeric-profile", "runtime", "js-backend", "html-wasm"]
-contract = "language.numeric.discharged_u8_add_public_success"
 role = "boundary"
 
 [[case]]
@@ -14484,10 +14631,17 @@ contract = "language.numbers.uint_literal_out_of_range_rejected"
 role = "primary"
 
 [[case]]
-id = "uint_config_contract_unsupported_rejected"
-path = "uint_config_contract_unsupported_rejected"
+id = "config_contract_unsupported_type_rejected"
+path = "config_contract_unsupported_type_rejected"
 tags = ["integration", "config", "diagnostics"]
-contract = "language.numbers.uint_config_contract_unsupported_rejected"
+contract = "language.configuration.source_config_unsupported_type_rejected"
+role = "primary"
+
+[[case]]
+id = "config_contract_u32_success"
+path = "config_contract_u32_success"
+tags = ["integration", "config", "numeric"]
+contract = "language.configuration.source_config_exact_unsigned_default"
 role = "primary"
 
 [[case]]
@@ -14832,3 +14986,1480 @@ path = "external_const_u32_static_emission"
 tags = ["integration", "numeric", "external", "runtime", "fixed-consts", "reachability"]
 contract = "backend.html.external_fixed_u32_constant_static_emission"
 role = "boundary"
+
+[[case]]
+id = "cast_statement_boundary_catch_runtime"
+path = "cast_statement_boundary_catch_runtime"
+tags = ["integration", "language", "cast", "runtime", "catch", "statement-boundary"]
+contract = "language.casts.cast_operand_ends_at_statement_boundary"
+role = "primary"
+
+[[case]]
+id = "scalar_late_u64_full_literal_receiver"
+path = "scalar_late_u64_full_literal_receiver"
+tags = ["integration", "numeric", "inference", "fixed-width"]
+contract = "language.numbers.late_full_u64_literal_receiver"
+role = "primary"
+
+[[case]]
+id = "scalar_late_copy_chain_u64"
+path = "scalar_late_copy_chain_u64"
+tags = ["integration", "numeric", "inference", "copy"]
+contract = "language.numbers.late_copy_chain_u64_receiver"
+role = "primary"
+
+[[case]]
+id = "scalar_mutable_binding_static_type_u64"
+path = "scalar_mutable_binding_static_type_u64"
+tags = ["integration", "numeric", "inference", "mutation"]
+contract = "language.numbers.mutable_binding_single_static_type_at_u64_receiver"
+role = "primary"
+
+[[case]]
+id = "scalar_literal_recipe_late_u64_receiver"
+path = "scalar_literal_recipe_late_u64_receiver"
+tags = ["integration", "numeric", "inference", "arithmetic"]
+contract = "language.numbers.literal_recipe_late_u64_receiver"
+role = "primary"
+
+[[case]]
+id = "scalar_named_arithmetic_independent_u64"
+path = "scalar_named_arithmetic_independent_u64"
+tags = ["integration", "numeric", "inference", "arithmetic"]
+contract = "language.numbers.independent_base_use_resolves_u64_forward"
+role = "primary"
+
+[[case]]
+id = "scalar_raw_leaf_beside_named_i32_at_i64"
+path = "scalar_raw_leaf_beside_named_i32_at_i64"
+tags = ["integration", "numeric", "inference", "arithmetic"]
+contract = "language.numbers.raw_leaf_beside_named_i32_selects_i64"
+role = "primary"
+
+[[case]]
+id = "scalar_formatting_before_late_u64_receiver"
+path = "scalar_formatting_before_late_u64_receiver"
+tags = ["integration", "numeric", "inference", "template"]
+contract = "language.numbers.template_formatting_does_not_constrain_origin"
+role = "primary"
+
+[[case]]
+id = "scalar_cast_target_independent_source"
+path = "scalar_cast_target_independent_source"
+tags = ["integration", "numeric", "inference", "cast"]
+contract = "language.numbers.cast_target_does_not_constrain_source"
+role = "primary"
+
+[[case]]
+id = "scalar_receiver_conflict_deterministic"
+path = "scalar_receiver_conflict_deterministic"
+tags = ["integration", "numeric", "diagnostics", "inference"]
+contract = "language.numbers.conflicting_receivers_deterministic_diagnostic"
+role = "primary"
+
+[[case]]
+id = "scalar_named_arithmetic_backward_rejected"
+path = "scalar_named_arithmetic_backward_rejected"
+tags = ["integration", "numeric", "diagnostics", "inference"]
+contract = "language.numbers.named_arithmetic_backward_rejected"
+role = "primary"
+
+[[case]]
+id = "scalar_concrete_i32_operands_at_i64_receiver_rejected"
+path = "scalar_concrete_i32_operands_at_i64_receiver_rejected"
+tags = ["integration", "numeric", "diagnostics", "arithmetic"]
+contract = "language.numbers.concrete_i32_result_rejects_i64_receiver"
+role = "primary"
+
+[[case]]
+id = "scalar_narrow_u8_runtime_checked_failures"
+path = "scalar_narrow_u8_runtime_checked_failures"
+tags = ["integration", "numeric", "runtime", "arithmetic", "fixed-width"]
+contract = "language.numbers.narrow_u8_checked_failure_runtime"
+role = "primary"
+
+[[case]]
+id = "scalar_narrow_i8_runtime_checked_failures"
+path = "scalar_narrow_i8_runtime_checked_failures"
+tags = ["integration", "numeric", "runtime", "arithmetic", "fixed-width"]
+contract = "language.numbers.narrow_i8_checked_failure_runtime"
+role = "primary"
+
+[[case]]
+id = "scalar_narrow_i8_cancellation_first_failure"
+path = "scalar_narrow_i8_cancellation_first_failure"
+tags = ["integration", "numeric", "runtime", "arithmetic", "fixed-width"]
+contract = "language.numbers.narrow_i8_cancellation_first_failure"
+role = "primary"
+
+[[case]]
+id = "scalar_f16_operation_completion_runtime"
+path = "scalar_f16_operation_completion_runtime"
+tags = ["integration", "numeric", "runtime", "arithmetic", "fixed-width"]
+contract = "language.numbers.f16_operation_completion_runtime"
+role = "primary"
+
+[[case]]
+id = "scalar_i8_widened_operands_and_result_cast_runtime"
+path = "scalar_i8_widened_operands_and_result_cast_runtime"
+tags = ["integration", "numeric", "runtime", "arithmetic", "cast"]
+contract = "language.numbers.i8_operand_widening_and_result_cast"
+role = "primary"
+
+[[case]]
+id = "scalar_concrete_i8_result_at_i32_receiver_rejected"
+path = "scalar_concrete_i8_result_at_i32_receiver_rejected"
+tags = ["integration", "numeric", "diagnostics", "arithmetic"]
+contract = "language.numbers.concrete_i8_result_rejects_i32_receiver"
+role = "primary"
+
+[[case]]
+id = "scalar_concrete_f16_result_at_f32_receiver_rejected"
+path = "scalar_concrete_f16_result_at_f32_receiver_rejected"
+tags = ["integration", "numeric", "diagnostics", "arithmetic"]
+contract = "language.numbers.concrete_f16_result_rejects_f32_receiver"
+role = "primary"
+
+[[case]]
+id = "scalar_f16_operand_widening_and_result_cast"
+path = "scalar_f16_operand_widening_and_result_cast"
+tags = ["integration", "numeric", "inference", "arithmetic"]
+contract = "language.numbers.f16_operand_widening_requests_f32_arithmetic"
+role = "primary"
+
+[[case]]
+id = "scalar_casts_only_source_defaults_i32_rejected"
+path = "scalar_casts_only_source_defaults_i32_rejected"
+tags = ["integration", "numeric", "diagnostics", "inference", "cast"]
+contract = "language.numbers.cast_only_uses_keep_i32_default_rejected_at_same_type_cast"
+role = "primary"
+
+[[case]]
+id = "scalar_narrow_i8_known_negation_rejected"
+path = "scalar_narrow_i8_known_negation_rejected"
+tags = ["integration", "numeric", "diagnostics", "arithmetic", "fixed-width"]
+contract = "language.numbers.narrow_i8_known_negation_rejected"
+role = "primary"
+
+[[case]]
+id = "scalar_narrow_i8_known_integer_division_rejected"
+path = "scalar_narrow_i8_known_integer_division_rejected"
+tags = ["integration", "numeric", "diagnostics", "arithmetic", "fixed-width"]
+contract = "language.numbers.narrow_i8_known_integer_division_rejected"
+role = "primary"
+
+[[case]]
+id = "scalar_result_identity_owned_copy_runtime"
+path = "scalar_result_identity_owned_copy_runtime"
+tags = ["integration", "numeric", "runtime", "identity", "copy"]
+contract = "language.numbers.published_result_identity_and_authored_copy_mode"
+role = "primary"
+
+[[case]]
+id = "scalar_pending_body_drain_runtime"
+path = "scalar_pending_body_drain_runtime"
+tags = ["integration", "numeric", "runtime", "value-blocks", "catch"]
+contract = "language.numbers.nested_pending_body_continuation_drain"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_division_result_domain_runtime"
+path = "scalar_retained_division_result_domain_runtime"
+tags = ["integration", "numeric", "runtime", "inference", "arithmetic"]
+contract = "language.numbers.retained_division_result_domain_boundaries"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_fragment_catch_contract_runtime"
+path = "scalar_retained_fragment_catch_contract_runtime"
+tags = ["integration", "numeric", "runtime", "catch", "arithmetic"]
+contract = "language.numbers.retained_whole_fragment_catch_result_contract"
+role = "primary"
+
+[[case]]
+id = "scalar_nested_protected_argument_recovery_runtime"
+path = "scalar_nested_protected_argument_recovery_runtime"
+tags = ["integration", "numeric", "runtime", "catch", "functions"]
+contract = "language.numbers.nested_protected_argument_failure_recovery"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_arithmetic_catch_fallthrough_rejected"
+path = "scalar_retained_arithmetic_catch_fallthrough_rejected"
+tags = ["integration", "numeric", "diagnostics", "catch", "value-blocks"]
+contract = "language.numbers.retained_arithmetic_catch_fallthrough_rejected"
+role = "primary"
+
+[[case]]
+id = "multi_bind_retained_single_result_rhs_rejected"
+path = "multi_bind_retained_single_result_rhs_rejected"
+tags = ["integration", "numeric", "diagnostics", "multi-bind", "catch"]
+contract = "language.numbers.multi_bind_retained_single_result_rhs_rejected"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_arithmetic_catch_fallback_type_rejected"
+path = "scalar_retained_arithmetic_catch_fallback_type_rejected"
+tags = ["integration", "numeric", "diagnostics", "catch", "arithmetic"]
+contract = "language.numbers.retained_arithmetic_catch_fallback_type_rejected"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_optional_and_collection_runtime"
+path = "scalar_retained_optional_and_collection_runtime"
+tags = ["integration", "numeric", "runtime", "optionals", "collections"]
+contract = "language.numbers.retained_optional_and_collection_result_shapes"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_known_result_postfix_runtime"
+path = "scalar_retained_known_result_postfix_runtime"
+tags = ["integration", "numeric", "runtime", "receiver-methods", "field-access"]
+contract = "language.numbers.retained_known_result_postfix_consumers"
+role = "primary"
+
+[[case]]
+id = "scalar_pending_member_after_independent_u64_rejected"
+path = "scalar_pending_member_after_independent_u64_rejected"
+tags = ["integration", "numeric", "diagnostics", "inference"]
+contract = "language.numbers.pending_member_diagnostic_after_independent_resolution"
+role = "primary"
+
+[[case]]
+id = "scalar_pending_member_nested_u64_receiver_rejected"
+path = "scalar_pending_member_nested_u64_receiver_rejected"
+tags = ["integration", "numeric", "diagnostics", "inference"]
+contract = "language.numbers.pending_member_nested_receiver_resolution"
+role = "primary"
+
+[[case]]
+id = "scalar_pending_member_result_receiver_barrier_rejected"
+path = "scalar_pending_member_result_receiver_barrier_rejected"
+tags = ["integration", "numeric", "diagnostics", "inference"]
+contract = "language.numbers.pending_member_result_receiver_not_a_constraint"
+role = "primary"
+
+[[case]]
+id = "scalar_pending_member_result_receiver_independent_rejected"
+path = "scalar_pending_member_result_receiver_independent_rejected"
+tags = ["integration", "numeric", "diagnostics", "inference"]
+contract = "language.numbers.pending_member_result_receiver_independent_resolution"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_mixed_handler_type_rejected"
+path = "scalar_retained_mixed_handler_type_rejected"
+tags = ["integration", "numeric", "diagnostics", "catch", "arithmetic"]
+contract = "language.numbers.retained_mixed_handler_type_rejected"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_nested_handler_type_rejected"
+path = "scalar_retained_nested_handler_type_rejected"
+tags = ["integration", "numeric", "diagnostics", "catch", "value-blocks"]
+contract = "language.numbers.retained_nested_handler_type_rejected"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_receiver_scopes_runtime"
+path = "scalar_retained_receiver_scopes_runtime"
+tags = ["integration", "numeric", "runtime", "value-blocks", "catch"]
+contract = "language.numbers.retained_receiver_scoped_value_completion"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_sibling_custom_error_runtime"
+path = "scalar_retained_sibling_custom_error_runtime"
+tags = ["integration", "numeric", "runtime", "catch", "errors"]
+contract = "language.numbers.retained_sibling_custom_error_binding"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_concrete_constructor_receivers_runtime"
+path = "scalar_retained_concrete_constructor_receivers_runtime"
+tags = ["integration", "numeric", "runtime", "constructors", "inference"]
+contract = "language.numbers.retained_concrete_constructor_field_receivers"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_inferred_multi_bind_runtime"
+path = "scalar_retained_inferred_multi_bind_runtime"
+tags = ["integration", "numeric", "runtime", "multi-bind", "value-blocks"]
+contract = "language.numbers.retained_inferred_multi_bind_slots"
+role = "primary"
+
+[[case]]
+id = "scalar_pending_property_u64_receiver_rejected"
+path = "scalar_pending_property_u64_receiver_rejected"
+tags = ["integration", "numeric", "diagnostics", "inference", "postfix"]
+contract = "language.numbers.pending_property_independent_resolution"
+role = "primary"
+
+[[case]]
+id = "scalar_pending_property_chain_u64_receiver_rejected"
+path = "scalar_pending_property_chain_u64_receiver_rejected"
+tags = ["integration", "numeric", "diagnostics", "inference", "postfix"]
+contract = "language.numbers.pending_property_chain_independent_resolution"
+role = "primary"
+
+[[case]]
+id = "scalar_pending_member_named_u64_receiver_rejected"
+path = "scalar_pending_member_named_u64_receiver_rejected"
+tags = ["integration", "numeric", "diagnostics", "inference", "postfix"]
+contract = "language.numbers.pending_member_named_argument_independent_resolution"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_mutable_receiver_runtime"
+path = "scalar_retained_mutable_receiver_runtime"
+tags = ["integration", "numeric", "runtime", "postfix", "access"]
+contract = "language.numbers.retained_binding_mutable_receiver"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_unnecessary_marker_rejected"
+path = "scalar_retained_unnecessary_marker_rejected"
+tags = ["integration", "numeric", "diagnostics", "postfix", "access"]
+contract = "language.numbers.retained_binding_unnecessary_marker"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_collection_get_argument_priority_rejected"
+path = "scalar_retained_collection_get_argument_priority_rejected"
+tags = ["integration", "numeric", "diagnostics", "postfix", "collections"]
+contract = "language.numbers.retained_collection_get_argument_priority"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_map_get_argument_priority_rejected"
+path = "scalar_retained_map_get_argument_priority_rejected"
+tags = ["integration", "numeric", "diagnostics", "postfix", "maps"]
+contract = "language.numbers.retained_map_get_argument_priority"
+role = "primary"
+
+[[case]]
+id = "scalar_numeric_mutation_cycle_runtime"
+path = "scalar_numeric_mutation_cycle_runtime"
+tags = ["integration", "numeric", "runtime", "inference", "mutation"]
+contract = "language.numbers.mutable_write_equality_cycle_around_directed_arithmetic"
+role = "primary"
+
+[[case]]
+id = "scalar_raw_float_receiver_priority_runtime"
+path = "scalar_raw_float_receiver_priority_runtime"
+tags = ["integration", "numeric", "runtime", "inference", "arithmetic", "fixed-width"]
+contract = "language.numbers.f16_raw_receiver_priority_runtime"
+role = "primary"
+
+[[case]]
+id = "scalar_f16_completion_boundaries_runtime"
+path = "scalar_f16_completion_boundaries_runtime"
+tags = ["integration", "numeric", "runtime", "arithmetic", "fixed-width"]
+contract = "language.numbers.f16_operation_completion_runtime"
+role = "boundary"
+
+[[case]]
+id = "scalar_retained_mutable_field_projection_runtime"
+path = "scalar_retained_mutable_field_projection_runtime"
+tags = ["integration", "numeric", "runtime", "inference", "postfix", "access"]
+contract = "language.numbers.retained_mutable_field_receiver"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_immutable_field_projection_rejected"
+path = "scalar_retained_immutable_field_projection_rejected"
+tags = ["integration", "numeric", "diagnostics", "inference", "postfix", "access"]
+contract = "language.numbers.retained_immutable_field_receiver"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_generic_receiver_method_runtime"
+path = "scalar_retained_generic_receiver_method_runtime"
+tags = ["integration", "numeric", "runtime", "inference", "postfix", "generics"]
+contract = "language.numbers.retained_concrete_generic_receiver_method"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_template_context_runtime"
+path = "scalar_retained_template_context_runtime"
+tags = ["integration", "numeric", "runtime", "inference", "templates", "slots", "wrappers"]
+contract = "language.templates.retained_numeric_control_flow_context"
+role = "primary"
+
+[[case]]
+id = "scalar_casts_only_source_defaults_f64_rejected"
+path = "scalar_casts_only_source_defaults_f64_rejected"
+tags = ["integration", "numeric", "inference", "diagnostics", "casts"]
+contract = "language.numbers.unconstrained_float_default"
+role = "primary"
+
+[[case]]
+id = "scalar_bound_whole_float_receiver_rejected"
+path = "scalar_bound_whole_float_receiver_rejected"
+tags = ["integration", "numeric", "inference", "diagnostics"]
+contract = "language.numbers.bound_whole_float_family_barrier"
+role = "primary"
+
+[[case]]
+id = "scalar_bound_whole_dec_receiver_rejected"
+path = "scalar_bound_whole_dec_receiver_rejected"
+tags = ["integration", "numeric", "inference", "diagnostics"]
+contract = "language.numbers.bound_whole_decimal_family_barrier"
+role = "primary"
+
+[[case]]
+id = "scalar_constant_later_u64_receiver_rejected"
+path = "scalar_constant_later_u64_receiver_rejected"
+tags = ["integration", "numeric", "inference", "diagnostics", "constants"]
+contract = "language.numbers.constant_inference_boundary"
+role = "primary"
+
+[[case]]
+id = "scalar_constant_inferred_u64_field_default_rejected"
+path = "scalar_constant_inferred_u64_field_default_rejected"
+tags = ["integration", "numeric", "inference", "diagnostics", "constants", "structs"]
+contract = "language.numbers.constant_inference_boundary"
+role = "boundary"
+
+[[case]]
+id = "scalar_literal_receiver_overrides_narrow_peer_runtime"
+path = "scalar_literal_receiver_overrides_narrow_peer_runtime"
+tags = ["integration", "numeric", "inference", "runtime"]
+contract = "language.numbers.literal_receiver_overrides_peer"
+role = "primary"
+
+[[case]]
+id = "fixed_width_literal_operator_overflow_u8"
+path = "fixed_width_literal_operator_overflow_u8"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_width_literal_operator_overflow_u8_rejected"
+role = "primary"
+
+[[case]]
+id = "fixed_width_literal_operator_overflow_u8_catch"
+path = "fixed_width_literal_operator_overflow_u8_catch"
+tags = ["integration", "numeric", "diagnostics"]
+contract = "language.numbers.fixed_width_literal_operator_overflow_u8_catch_rejected"
+role = "primary"
+
+[[case]]
+id = "implicit_failure_discharged_mixed_i32_add_wasm_runtime"
+path = "implicit_failure_discharged_mixed_i32_add_wasm_runtime"
+tags = ["integration", "language", "numeric", "results", "runtime", "js-backend", "html-wasm"]
+contract = "language.numeric.discharged_mixed_i32_add_wasm_runtime"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_template_body_domain_runtime"
+path = "scalar_retained_template_body_domain_runtime"
+tags = ["integration", "numeric", "runtime", "inference", "templates"]
+contract = "language.templates.retained_range_numeric_body_domain"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_zero_result_producer_rejected"
+path = "scalar_retained_zero_result_producer_rejected"
+tags = ["integration", "numeric", "diagnostics", "inference", "multi-bind", "value-blocks"]
+contract = "language.numbers.retained_zero_result_producer"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_multi_bind_raw_leaf_receiver_runtime"
+path = "scalar_retained_multi_bind_raw_leaf_receiver_runtime"
+tags = ["integration", "numeric", "runtime", "inference", "multi-bind", "value-blocks"]
+contract = "language.numbers.retained_multi_bind_raw_leaf_receiver"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_multi_bind_inferred_return_rejected"
+path = "scalar_retained_multi_bind_inferred_return_rejected"
+tags = ["integration", "numeric", "inference", "multi-bind", "diagnostics"]
+contract = "language.numbers.inferred_multi_bind_forward_result_barrier"
+role = "boundary"
+
+[[case]]
+id = "scalar_retained_nested_catch_receiver_runtime"
+path = "scalar_retained_nested_catch_receiver_runtime"
+tags = ["integration", "numeric", "runtime", "inference", "catch", "value-blocks"]
+contract = "language.numbers.retained_nested_catch_receiver"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_cast_catch_recovery_runtime"
+path = "scalar_retained_cast_catch_recovery_runtime"
+tags = ["integration", "numeric", "runtime", "inference", "cast", "catch", "collections"]
+contract = "language.numbers.retained_cast_catch_recovery"
+role = "primary"
+
+[[case]]
+id = "scalar_retained_cast_catch_wasm_boundary"
+path = "scalar_retained_cast_catch_wasm_boundary"
+tags = ["integration", "numeric", "runtime", "inference", "cast", "catch", "backends"]
+contract = "language.numbers.retained_cast_catch_recovery"
+role = "backend"
+
+[[case]]
+id = "aggregate_late_u64_collection_runtime"
+path = "aggregate_late_u64_collection_runtime"
+tags = ["integration", "numeric", "inference", "collections", "runtime", "copies"]
+contract = "language.collections.late_u64_receiver_runtime"
+role = "primary"
+
+[[case]]
+id = "aggregate_raw_mixed_collection_f32_runtime"
+path = "aggregate_raw_mixed_collection_f32_runtime"
+tags = ["integration", "numeric", "inference", "collections", "runtime", "rounding"]
+contract = "language.numbers.raw_mixed_collection_f32_runtime"
+role = "primary"
+
+[[case]]
+id = "aggregate_bound_integer_decimal_mixed_rejected"
+path = "aggregate_bound_integer_decimal_mixed_rejected"
+tags = ["integration", "numeric", "inference", "collections", "diagnostics"]
+contract = "language.collections.bound_integer_decimal_mixed_rejected"
+role = "primary"
+
+[[case]]
+id = "aggregate_concrete_i32_u64_elements_rejected"
+path = "aggregate_concrete_i32_u64_elements_rejected"
+tags = ["integration", "numeric", "collections", "diagnostics"]
+contract = "language.collections.concrete_element_no_storage_promotion_rejected"
+role = "primary"
+
+[[case]]
+id = "aggregate_nested_known_numeric_shapes_runtime"
+path = "aggregate_nested_known_numeric_shapes_runtime"
+tags = ["integration", "numeric", "inference", "collections", "hashmaps", "structs", "options", "runtime"]
+contract = "language.collections.nested_known_numeric_shapes_runtime"
+role = "primary"
+
+[[case]]
+id = "aggregate_mutable_element_constraints_runtime"
+path = "aggregate_mutable_element_constraints_runtime"
+tags = ["integration", "numeric", "inference", "collections", "borrows", "runtime"]
+contract = "language.collections.mutable_element_constraints_runtime"
+role = "primary"
+
+[[case]]
+id = "aggregate_get_result_late_u64_runtime"
+path = "aggregate_get_result_late_u64_runtime"
+tags = ["integration", "numeric", "inference", "collections", "catch", "runtime"]
+contract = "language.collections.get_result_shares_element_leaf_runtime"
+role = "primary"
+
+[[case]]
+id = "aggregate_late_u64_map_keys_runtime"
+path = "aggregate_late_u64_map_keys_runtime"
+tags = ["integration", "numeric", "inference", "hashmaps", "runtime"]
+contract = "language.maps.late_u64_key_runtime"
+role = "primary"
+
+[[case]]
+id = "aggregate_late_u64_duplicate_key_rejected"
+path = "aggregate_late_u64_duplicate_key_rejected"
+tags = ["integration", "numeric", "inference", "hashmaps", "diagnostics"]
+contract = "language.maps.late_u64_duplicate_key_rejected"
+role = "primary"
+
+[[case]]
+id = "aggregate_bound_integer_decimal_mixed_reverse_rejected"
+path = "aggregate_bound_integer_decimal_mixed_reverse_rejected"
+tags = ["integration", "numeric", "inference", "collections", "diagnostics"]
+contract = "language.collections.bound_integer_decimal_mixed_rejected"
+role = "boundary"
+
+[[case]]
+id = "aggregate_concrete_u64_i32_elements_rejected"
+path = "aggregate_concrete_u64_i32_elements_rejected"
+tags = ["integration", "numeric", "collections", "diagnostics"]
+contract = "language.collections.concrete_element_no_storage_promotion_rejected"
+role = "boundary"
+
+[[case]]
+id = "aggregate_collection_loop_leaf_runtime"
+path = "aggregate_collection_loop_leaf_runtime"
+tags = ["integration", "numeric", "inference", "collections", "loops", "templates", "runtime"]
+contract = "language.collections.loop_item_shares_element_leaf_runtime"
+role = "primary"
+
+[[case]]
+id = "aggregate_independent_map_leaf_alias_runtime"
+path = "aggregate_independent_map_leaf_alias_runtime"
+tags = ["integration", "numeric", "inference", "hashmaps", "borrows", "runtime"]
+contract = "language.maps.independent_numeric_leaves_mutable_alias"
+role = "primary"
+
+[[case]]
+id = "aggregate_collection_default_i32_cast_rejected"
+path = "aggregate_collection_default_i32_cast_rejected"
+tags = ["integration", "numeric", "inference", "collections", "casts", "diagnostics"]
+contract = "language.collections.default_i32_element_source"
+role = "primary"
+
+[[case]]
+id = "aggregate_collection_default_f64_cast_rejected"
+path = "aggregate_collection_default_f64_cast_rejected"
+tags = ["integration", "numeric", "inference", "collections", "casts", "diagnostics"]
+contract = "language.collections.default_f64_element_source"
+role = "primary"
+
+[[case]]
+id = "aggregate_nested_receiver_conflict_rejected"
+path = "aggregate_nested_receiver_conflict_rejected"
+tags = ["integration", "numeric", "inference", "collections", "diagnostics"]
+contract = "language.collections.nested_numeric_receiver_conflict"
+role = "primary"
+
+[[case]]
+id = "aggregate_nested_receiver_conflict_reverse_rejected"
+path = "aggregate_nested_receiver_conflict_reverse_rejected"
+tags = ["integration", "numeric", "inference", "collections", "diagnostics"]
+contract = "language.collections.nested_numeric_receiver_conflict"
+role = "boundary"
+
+[[case]]
+id = "aggregate_late_fixed_receiver_shape_rejected"
+path = "aggregate_late_fixed_receiver_shape_rejected"
+tags = ["integration", "numeric", "inference", "collections", "diagnostics"]
+contract = "language.collections.late_receiver_preserves_capacity_shape"
+role = "primary"
+
+[[case]]
+id = "aggregate_assignment_leaf_constraints_runtime"
+path = "aggregate_assignment_leaf_constraints_runtime"
+tags = ["integration", "numeric", "inference", "collections", "hashmaps", "assignment", "runtime"]
+contract = "language.collections.aggregate_assignment_leaf_constraints"
+role = "primary"
+
+[[case]]
+id = "aggregate_known_nonnumeric_pending_element_runtime"
+path = "aggregate_known_nonnumeric_pending_element_runtime"
+tags = ["integration", "numeric", "inference", "collections", "calls", "runtime"]
+contract = "language.collections.retained_calls_preserve_nonnumeric_elements"
+role = "primary"
+
+[[case]]
+id = "aggregate_pending_builtin_unhandled_chain_rejected"
+path = "aggregate_pending_builtin_unhandled_chain_rejected"
+tags = ["integration", "numeric", "inference", "collections", "results", "diagnostics"]
+contract = "language.collections.pending_builtin_carrier_requires_handling_before_chaining"
+role = "primary"
+
+[[case]]
+id = "aggregate_pending_shape_unknown_member_rejected"
+path = "aggregate_pending_shape_unknown_member_rejected"
+tags = ["integration", "numeric", "inference", "hashmaps", "diagnostics"]
+contract = "language.maps.pending_shape_preserves_unknown_member_diagnostic"
+role = "primary"
+
+[[case]]
+id = "aggregate_optional_builtin_postfix_runtime"
+path = "aggregate_optional_builtin_postfix_runtime"
+tags = ["integration", "numeric", "inference", "collections", "options", "results", "runtime"]
+contract = "language.collections.retained_builtin_optional_success_propagation"
+role = "primary"
+
+[[case]]
+id = "aggregate_pending_builtin_whole_chain_catch_runtime"
+path = "aggregate_pending_builtin_whole_chain_catch_runtime"
+tags = ["integration", "numeric", "inference", "collections", "results", "runtime"]
+contract = "language.collections.pending_builtin_whole_chain_catch_protection"
+role = "primary"
+
+[[case]]
+id = "aggregate_nested_bound_collection_decimal_rejected"
+path = "aggregate_nested_bound_collection_decimal_rejected"
+tags = ["integration", "numeric", "inference", "collections", "diagnostics"]
+contract = "language.collections.nested_bound_integer_family_is_stable"
+role = "primary"
+
+[[case]]
+id = "aggregate_nested_bound_collection_decimal_reverse_rejected"
+path = "aggregate_nested_bound_collection_decimal_reverse_rejected"
+tags = ["integration", "numeric", "inference", "collections", "diagnostics"]
+contract = "language.collections.nested_bound_integer_family_is_stable"
+role = "boundary"
+
+[[case]]
+id = "aggregate_forward_f16_collection_runtime"
+path = "aggregate_forward_f16_collection_runtime"
+tags = ["integration", "numeric", "inference", "collections", "runtime"]
+contract = "language.collections.forward_arithmetic_preserves_natural_element_domain"
+role = "primary"
+
+[[case]]
+id = "aggregate_parameter_projection_receivers_runtime"
+path = "aggregate_parameter_projection_receivers_runtime"
+tags = ["integration", "numeric", "inference", "collections", "results", "catch", "runtime"]
+contract = "language.collections.parameter_projection_receivers_runtime"
+role = "primary"
+
+[[case]]
+id = "aggregate_template_unhandled_get_rejected"
+path = "aggregate_template_unhandled_get_rejected"
+tags = ["integration", "numeric", "inference", "collections", "templates", "diagnostics"]
+contract = "language.collections.template_unhandled_get_rejected"
+role = "primary"
+
+[[case]]
+id = "aggregate_template_collection_head_rejected"
+path = "aggregate_template_collection_head_rejected"
+tags = ["integration", "numeric", "inference", "collections", "templates", "diagnostics"]
+contract = "language.templates.retained_collection_head_rejected"
+role = "primary"
+
+[[case]]
+id = "aggregate_named_forward_builtin_writes_runtime"
+path = "aggregate_named_forward_builtin_writes_runtime"
+tags = ["integration", "numeric", "inference", "collections", "runtime"]
+contract = "language.collections.named_forward_builtin_writes"
+role = "primary"
+
+[[case]]
+id = "aggregate_named_forward_shared_storage_runtime"
+path = "aggregate_named_forward_shared_storage_runtime"
+tags = ["integration", "numeric", "inference", "collections", "runtime"]
+contract = "language.collections.named_forward_shared_storage"
+role = "primary"
+
+[[case]]
+id = "aggregate_pending_map_get_argument_priority_rejected"
+path = "aggregate_pending_map_get_argument_priority_rejected"
+tags = ["integration", "numeric", "inference", "collections", "diagnostics"]
+contract = "language.maps.pending_get_argument_priority"
+role = "primary"
+
+[[case]]
+id = "aggregate_pending_map_get_assignment_rejected"
+path = "aggregate_pending_map_get_assignment_rejected"
+tags = ["integration", "numeric", "inference", "collections", "diagnostics"]
+contract = "language.maps.pending_get_assignment_target"
+role = "primary"
+
+[[case]]
+id = "aggregate_cyclic_forward_storage_runtime"
+path = "aggregate_cyclic_forward_storage_runtime"
+tags = ["integration", "numeric", "inference", "collections", "runtime"]
+contract = "language.collections.cyclic_forward_storage"
+role = "primary"
+
+[[case]]
+id = "aggregate_cyclic_forward_storage_widen_rejected"
+path = "aggregate_cyclic_forward_storage_widen_rejected"
+tags = ["integration", "numeric", "inference", "collections", "diagnostics"]
+contract = "language.collections.cyclic_forward_storage_widen"
+role = "primary"
+
+[[case]]
+id = "aggregate_direct_numeric_read_receivers_runtime"
+path = "aggregate_direct_numeric_read_receivers_runtime"
+tags = ["integration", "numeric", "inference", "collections", "runtime"]
+contract = "language.collections.direct_numeric_read_receivers"
+role = "primary"
+
+[[case]]
+id = "aggregate_cyclic_forward_producer_order_runtime"
+path = "aggregate_cyclic_forward_producer_order_runtime"
+tags = ["integration", "numeric", "inference", "collections", "runtime"]
+contract = "language.collections.cyclic_forward_producer_order"
+role = "primary"
+
+[[case]]
+id = "aggregate_cyclic_resolving_aliases_runtime"
+path = "aggregate_cyclic_resolving_aliases_runtime"
+tags = ["integration", "numeric", "inference", "collections", "runtime"]
+contract = "language.collections.cyclic_resolving_aliases"
+role = "primary"
+
+[[case]]
+id = "aggregate_multi_bind_known_leaf_receivers_runtime"
+path = "aggregate_multi_bind_known_leaf_receivers_runtime"
+tags = ["integration", "numeric", "inference", "collections", "maps", "multi_bind", "runtime"]
+contract = "language.collections.multi_bind_known_leaf_receivers"
+role = "primary"
+
+[[case]]
+id = "aggregate_multi_bind_bound_collection_decimal_rejected"
+path = "aggregate_multi_bind_bound_collection_decimal_rejected"
+tags = ["integration", "numeric", "inference", "collections", "multi_bind", "diagnostics"]
+contract = "language.collections.multi_bind_bound_whole_family"
+role = "primary"
+
+[[case]]
+id = "aggregate_multi_bind_bound_map_decimal_rejected"
+path = "aggregate_multi_bind_bound_map_decimal_rejected"
+tags = ["integration", "numeric", "inference", "maps", "multi_bind", "diagnostics"]
+contract = "language.maps.multi_bind_bound_whole_family"
+role = "primary"
+
+[[case]]
+id = "aggregate_inline_loop_bound_float_rejected"
+path = "aggregate_inline_loop_bound_float_rejected"
+tags = ["integration", "numeric", "inference", "collections", "loops", "diagnostics"]
+contract = "language.loops.bound_whole_receiver_family"
+role = "primary"
+
+[[case]]
+id = "aggregate_inline_loop_nested_bound_decimal_rejected"
+path = "aggregate_inline_loop_nested_bound_decimal_rejected"
+tags = ["integration", "numeric", "inference", "collections", "loops", "diagnostics"]
+contract = "language.loops.nested_bound_whole_peer_family"
+role = "primary"
+
+[[case]]
+id = "aggregate_inline_float_loop_decimal_rejected"
+path = "aggregate_inline_float_loop_decimal_rejected"
+tags = ["integration", "numeric", "inference", "collections", "diagnostics"]
+contract = "language.numeric.inline_float_loop_family"
+role = "primary"
+
+[[case]]
+id = "generic_numeric_signature_late_receivers_runtime"
+path = "generic_numeric_signature_late_receivers_runtime"
+tags = ["integration", "numeric", "inference", "generics", "runtime"]
+contract = "language.generics.numeric_signature_late_receivers"
+role = "primary"
+
+[[case]]
+id = "generic_numeric_named_arithmetic_backward_rejected"
+path = "generic_numeric_named_arithmetic_backward_rejected"
+tags = ["integration", "numeric", "inference", "generics", "diagnostics"]
+contract = "language.generics.numeric_named_arithmetic_barrier"
+role = "primary"
+
+[[case]]
+id = "generic_numeric_named_plus_raw_receiver_rejected"
+path = "generic_numeric_named_plus_raw_receiver_rejected"
+tags = ["integration", "numeric", "inference", "generics", "diagnostics"]
+contract = "language.generics.numeric_named_plus_raw_receiver_barrier"
+role = "boundary"
+
+[[case]]
+id = "generic_numeric_receiver_conflict_rejected"
+path = "generic_numeric_receiver_conflict_rejected"
+tags = ["integration", "numeric", "inference", "generics", "diagnostics"]
+contract = "language.generics.numeric_receiver_conflict"
+role = "primary"
+
+[[case]]
+id = "generic_numeric_rejected_member_bang"
+path = "generic_numeric_rejected_member_bang"
+tags = ["integration", "numeric", "inference", "generics", "diagnostics"]
+contract = "language.generics.member_error_before_bang"
+role = "primary"
+
+[[case]]
+id = "generic_numeric_concrete_result_barrier_rejected"
+path = "generic_numeric_concrete_result_barrier_rejected"
+tags = ["integration", "numeric", "inference", "generics", "diagnostics"]
+contract = "language.generics.numeric_concrete_result_barrier"
+role = "primary"
+
+[[case]]
+id = "generic_numeric_bound_after_resolution_rejected"
+path = "generic_numeric_bound_after_resolution_rejected"
+tags = ["integration", "numeric", "inference", "generics", "traits", "diagnostics"]
+contract = "language.generics.numeric_bound_after_resolution"
+role = "primary"
+
+[[case]]
+id = "generic_numeric_named_result_family_rejected"
+path = "generic_numeric_named_result_family_rejected"
+tags = ["integration", "numeric", "inference", "generics", "diagnostics"]
+contract = "language.generics.numeric_named_result_family"
+role = "primary"
+
+[[case]]
+id = "generic_numeric_bound_float_decimal_rejected"
+path = "generic_numeric_bound_float_decimal_rejected"
+tags = ["integration", "numeric", "inference", "generics", "diagnostics"]
+contract = "language.generics.numeric_bound_float_decimal"
+role = "primary"
+
+[[case]]
+id = "generic_numeric_bound_whole_annotated_float_peer_rejected"
+path = "generic_numeric_bound_whole_annotated_float_peer_rejected"
+tags = ["integration", "numeric", "inference", "generics", "diagnostics"]
+contract = "language.generics.bound_whole_typed_float_peer"
+role = "primary"
+
+[[case]]
+id = "generic_numeric_shared_result_bound_mutable_target_rejected"
+path = "generic_numeric_shared_result_bound_mutable_target_rejected"
+tags = ["integration", "numeric", "inference", "generics", "diagnostics"]
+contract = "language.generics.bound_mutable_shared_result"
+role = "primary"
+
+[[case]]
+id = "generic_numeric_inactive_handler_evidence_rejected"
+path = "generic_numeric_inactive_handler_evidence_rejected"
+tags = ["integration", "numeric", "inference", "generics", "traits", "recovery", "diagnostics"]
+contract = "language.generics.numeric_inactive_handler_evidence"
+role = "primary"
+
+[[case]]
+id = "generic_numeric_error_origin_runtime"
+path = "generic_numeric_error_origin_runtime"
+tags = ["integration", "numeric", "inference", "generics", "recovery", "runtime"]
+contract = "language.generics.numeric_error_origin"
+role = "primary"
+
+[[case]]
+id = "generic_constructed_numeric_retention_runtime"
+path = "generic_constructed_numeric_retention_runtime"
+tags = ["integration", "numeric", "inference", "generics", "structs", "choices", "runtime"]
+contract = "language.generics.numeric_constructor_late_receivers"
+role = "primary"
+
+[[case]]
+id = "generic_constructed_numeric_immediate_receivers_runtime"
+path = "generic_constructed_numeric_immediate_receivers_runtime"
+tags = ["integration", "numeric", "generics", "structs", "runtime"]
+contract = "language.generics.numeric_constructor_immediate_receivers"
+role = "boundary"
+
+[[case]]
+id = "generic_constructed_numeric_deferred_float_runtime"
+path = "generic_constructed_numeric_deferred_float_runtime"
+tags = ["integration", "numeric", "generics", "structs", "runtime"]
+contract = "language.generics.numeric_constructor_deferred_float_precision"
+role = "boundary"
+
+[[case]]
+id = "generic_constructed_numeric_partial_envelope_runtime"
+path = "generic_constructed_numeric_partial_envelope_runtime"
+tags = ["integration", "numeric", "generics", "structs", "runtime"]
+contract = "language.generics.numeric_constructor_partial_envelope"
+role = "boundary"
+
+[[case]]
+id = "generic_constructed_numeric_repeated_parameter_runtime"
+path = "generic_constructed_numeric_repeated_parameter_runtime"
+tags = ["integration", "numeric", "generics", "structs", "runtime"]
+contract = "language.generics.numeric_constructor_repeated_parameter"
+role = "boundary"
+
+[[case]]
+id = "generic_constructed_numeric_forward_arithmetic_runtime"
+path = "generic_constructed_numeric_forward_arithmetic_runtime"
+tags = ["integration", "numeric", "generics", "structs", "runtime"]
+contract = "language.generics.numeric_constructor_forward_arithmetic"
+role = "boundary"
+
+[[case]]
+id = "generic_constructed_numeric_bound_nominal_float_rejected"
+path = "generic_constructed_numeric_bound_nominal_float_rejected"
+tags = ["integration", "numeric", "inference", "generics", "structs", "diagnostics"]
+contract = "language.generics.numeric_constructor_bound_nominal_float_rejected"
+role = "primary"
+
+[[case]]
+id = "generic_constructed_numeric_bound_float_decimal_rejected"
+path = "generic_constructed_numeric_bound_float_decimal_rejected"
+tags = ["integration", "numeric", "inference", "generics", "structs", "diagnostics"]
+contract = "language.generics.numeric_constructor_bound_float_decimal_rejected"
+role = "primary"
+
+[[case]]
+id = "generic_constructed_numeric_receiver_conflict_rejected"
+path = "generic_constructed_numeric_receiver_conflict_rejected"
+tags = ["integration", "numeric", "inference", "generics", "structs", "diagnostics"]
+contract = "language.generics.numeric_constructor_receiver_conflict_rejected"
+role = "primary"
+
+[[case]]
+id = "generic_constructed_numeric_named_arithmetic_backward_rejected"
+path = "generic_constructed_numeric_named_arithmetic_backward_rejected"
+tags = ["integration", "numeric", "inference", "generics", "structs", "diagnostics"]
+contract = "language.generics.numeric_constructor_named_arithmetic_barrier_rejected"
+role = "primary"
+
+[[case]]
+id = "generic_constructed_numeric_untyped_parameter_rejected"
+path = "generic_constructed_numeric_untyped_parameter_rejected"
+tags = ["integration", "numeric", "inference", "generics", "choices", "diagnostics"]
+contract = "language.generics.numeric_constructor_untyped_parameter_rejected"
+role = "boundary"
+
+[[case]]
+id = "generic_constructed_numeric_nominal_cast_bound_rejected"
+path = "generic_constructed_numeric_nominal_cast_bound_rejected"
+tags = ["integration", "numeric", "inference", "generics", "structs", "diagnostics"]
+contract = "language.generics.numeric_constructor_nominal_cast_bound_rejected"
+role = "primary"
+
+[[case]]
+id = "generic_constructed_numeric_immutable_field_root_rejected"
+path = "generic_constructed_numeric_immutable_field_root_rejected"
+tags = ["integration", "numeric", "generics", "structs", "diagnostics"]
+contract = "language.generics.numeric_constructor_immutable_field_root_rejected"
+role = "primary"
+
+[[case]]
+id = "generic_constructed_numeric_pending_root_concrete_field_cast_runtime"
+path = "generic_constructed_numeric_pending_root_concrete_field_cast_runtime"
+tags = ["integration", "numeric", "generics", "structs", "runtime"]
+contract = "language.generics.numeric_constructor_pending_root_concrete_field_runtime"
+role = "primary"
+
+[[case]]
+id = "generic_constructed_numeric_direct_and_grouped_choice_subject_runtime"
+path = "generic_constructed_numeric_direct_and_grouped_choice_subject_runtime"
+tags = ["integration", "numeric", "generics", "choices", "runtime"]
+contract = "language.generics.numeric_constructor_choice_subject_retention"
+role = "primary"
+
+[[case]]
+id = "optional_numeric_payload_late_receiver_runtime"
+path = "optional_numeric_payload_late_receiver_runtime"
+tags = ["integration", "numeric", "runtime", "optionals", "generics"]
+contract = "language.options.numeric_payload_late_receiver"
+role = "primary"
+
+[[case]]
+id = "optional_scalar_storage_runtime"
+path = "optional_scalar_storage_runtime"
+tags = ["integration", "numeric", "runtime", "optionals", "generics"]
+contract = "language.options.scalar_optional_storage_payloads"
+role = "primary"
+
+[[case]]
+id = "generic_constructed_numeric_optional_envelopes_runtime"
+path = "generic_constructed_numeric_optional_envelopes_runtime"
+tags = ["integration", "numeric", "runtime", "optionals", "generics", "structs", "choices"]
+contract = "language.generics.numeric_constructor_optional_envelopes"
+role = "primary"
+
+[[case]]
+id = "generic_numeric_identity_comparison_value_if_runtime"
+path = "generic_numeric_identity_comparison_value_if_runtime"
+tags = ["integration", "numeric", "runtime", "value-blocks", "generics"]
+contract = "language.numbers.number_comparison_consumers"
+role = "boundary"
+
+[[case]]
+id = "catch_fallback_u64_constrains_pending_arithmetic_runtime"
+path = "catch_fallback_u64_constrains_pending_arithmetic_runtime"
+tags = ["integration", "language", "numeric", "results", "catch", "runtime"]
+contract = "language.results.catch_fallback_infers_pending_arithmetic"
+role = "primary"
+
+[[case]]
+id = "catch_unreachable_handler_unknown_name_rejected"
+path = "catch_unreachable_handler_unknown_name_rejected"
+tags = ["integration", "language", "results", "diagnostics", "catch"]
+contract = "language.results.unreachable_catch_handler_still_checked"
+role = "boundary"
+
+[[case]]
+id = "catch_unreachable_handler_invalid_cast_rejected"
+path = "catch_unreachable_handler_invalid_cast_rejected"
+tags = ["integration", "language", "results", "diagnostics", "catch", "casts"]
+contract = "language.results.unreachable_catch_handler_still_checked"
+role = "boundary"
+
+[[case]]
+id = "catch_unreachable_handler_out_of_range_literal_rejected"
+path = "catch_unreachable_handler_out_of_range_literal_rejected"
+tags = ["integration", "language", "results", "diagnostics", "catch", "numeric"]
+contract = "language.results.unreachable_catch_handler_still_checked"
+role = "boundary"
+
+[[case]]
+id = "catch_terminal_then_type_rejected"
+path = "catch_terminal_then_type_rejected"
+tags = ["integration", "language", "results", "diagnostics", "catch", "then"]
+contract = "language.results.unreachable_catch_handler_still_checked"
+role = "boundary"
+
+[[case]]
+id = "value_catch_unreachable_map_fallback_runtime"
+path = "value_catch_unreachable_map_fallback_runtime"
+tags = ["integration", "backend", "html-wasm", "results", "catch", "runtime"]
+contract = "backend.html_wasm.unreachable_catch_fallback_pruned"
+role = "primary"
+
+[[case]]
+id = "pending_named_arithmetic_catch_fallback_type_rejected"
+path = "pending_named_arithmetic_catch_fallback_type_rejected"
+tags = ["integration", "language", "results", "diagnostics", "catch", "numeric"]
+contract = "language.results.named_arithmetic_pending_fallback_type_checked"
+role = "boundary"
+
+[[case]]
+id = "pending_computed_fallback_arithmetic_type_rejected"
+path = "pending_computed_fallback_arithmetic_type_rejected"
+tags = ["integration", "language", "results", "diagnostics", "catch", "numeric"]
+contract = "language.results.computed_fallback_arithmetic_keeps_protected_type_unselected"
+role = "boundary"
+
+[[case]]
+id = "catch_fallback_receiver_grouped_and_shaped_runtime"
+path = "catch_fallback_receiver_grouped_and_shaped_runtime"
+tags = ["integration", "language", "numeric", "results", "catch", "runtime"]
+contract = "language.results.grouped_and_generic_fallback_receiver_infers_pending"
+role = "boundary"
+
+[[case]]
+id = "int_promotion_to_float_receiver_rejected"
+path = "int_promotion_to_float_receiver_rejected"
+tags = ["integration", "type-coercion"]
+contract = "language.floats.integer_receiver_requires_cast"
+role = "primary"
+
+[[case]]
+id = "numeric_mixed_integer_float_comparison_rejected"
+path = "numeric_mixed_integer_float_comparison_rejected"
+tags = ["integration", "language", "numeric", "diagnostics"]
+contract = "language.numbers.integer_float_comparison_requires_cast"
+role = "primary"
+
+[[case]]
+id = "numeric_dependency_order_chain_fanout_runtime"
+path = "numeric_dependency_order_chain_fanout_runtime"
+tags = ["integration", "numbers", "inference", "determinism"]
+contract = "language.numbers.numeric_dependency_order_chain_fanout"
+role = "primary"
+
+[[case]]
+id = "fixed_float_literal_storage_transport"
+path = "fixed_float_literal_storage_transport"
+tags = ["integration", "numeric", "runtime", "rounding"]
+contract = "language.numbers.fixed_float_literal_storage_transport"
+role = "primary"
+
+[[case]]
+id = "numeric_module_constants_generic_identity_runtime"
+path = "numeric_module_constants_generic_identity_runtime"
+tags = ["integration", "numeric", "generics", "constants", "dependencies", "runtime"]
+contract = "language.numbers.cross_module_constants_canonical_generic_identity"
+role = "primary"
+
+[[case]]
+id = "numeric_equal_type_arithmetic_matrix"
+path = "numeric_equal_type_arithmetic_matrix"
+tags = ["integration", "numbers", "exact-numerics", "arithmetic"]
+contract = "language.numbers.equal_type_arithmetic_domain"
+role = "primary"
+
+[[case]]
+id = "catch_private_mutual_summary_convergence_runtime"
+path = "catch_private_mutual_summary_convergence_runtime"
+tags = ["integration", "numbers", "results", "runtime"]
+contract = "language.results.private_mutual_failure_summary_convergence"
+role = "primary"
+
+[[case]]
+id = "numeric_mixed_type_arithmetic_matrix"
+path = "numeric_mixed_type_arithmetic_matrix"
+tags = ["integration", "numbers", "exact-numerics", "arithmetic"]
+contract = "language.numbers.mixed_type_arithmetic_domain"
+role = "primary"
+
+[[case]]
+id = "scalar_concrete_i8_result_later_i32_use_rejected"
+path = "scalar_concrete_i8_result_later_i32_use_rejected"
+tags = ["integration", "numeric", "diagnostics", "arithmetic", "inference"]
+contract = "language.numbers.concrete_i8_result_rejects_i32_receiver"
+role = "boundary"
+
+[[case]]
+id = "scalar_unary_negation_exact_result_types_runtime"
+path = "scalar_unary_negation_exact_result_types_runtime"
+tags = ["integration", "numeric", "runtime", "arithmetic", "fixed-width"]
+contract = "language.numbers.unary_negation_preserves_exact_result_types"
+role = "primary"
+
+[[case]]
+id = "scalar_narrow_i8_runtime_checked_failures_release"
+path = "scalar_narrow_i8_runtime_checked_failures_release"
+tags = ["integration", "numeric", "release", "runtime"]
+contract = "language.numbers.phase9_release_parity.scalar_narrow_i8_runtime_checked_failures"
+role = "backend"
+
+[[case]]
+id = "scalar_narrow_u8_runtime_checked_failures_release"
+path = "scalar_narrow_u8_runtime_checked_failures_release"
+tags = ["integration", "numeric", "release", "runtime"]
+contract = "language.numbers.phase9_release_parity.scalar_narrow_u8_runtime_checked_failures"
+role = "backend"
+
+[[case]]
+id = "scalar_narrow_i8_cancellation_first_failure_release"
+path = "scalar_narrow_i8_cancellation_first_failure_release"
+tags = ["integration", "numeric", "release", "runtime"]
+contract = "language.numbers.phase9_release_parity.scalar_narrow_i8_cancellation_first_failure"
+role = "backend"
+
+[[case]]
+id = "scalar_f16_operation_completion_runtime_release"
+path = "scalar_f16_operation_completion_runtime_release"
+tags = ["integration", "numeric", "release", "runtime"]
+contract = "language.numbers.phase9_release_parity.scalar_f16_operation_completion_runtime"
+role = "backend"
+
+[[case]]
+id = "scalar_f16_completion_boundaries_runtime_release"
+path = "scalar_f16_completion_boundaries_runtime_release"
+tags = ["integration", "numeric", "release", "runtime"]
+contract = "language.numbers.phase9_release_parity.scalar_f16_completion_boundaries_runtime"
+role = "backend"
+
+[[case]]
+id = "scalar_narrow_i8_known_negation_rejected_release"
+path = "scalar_narrow_i8_known_negation_rejected_release"
+tags = ["integration", "numeric", "release", "diagnostics"]
+contract = "language.numbers.phase9_release_parity.scalar_narrow_i8_known_negation_rejected"
+role = "backend"
+
+[[case]]
+id = "scalar_narrow_i8_known_integer_division_rejected_release"
+path = "scalar_narrow_i8_known_integer_division_rejected_release"
+tags = ["integration", "numeric", "release", "diagnostics"]
+contract = "language.numbers.phase9_release_parity.scalar_narrow_i8_known_integer_division_rejected"
+role = "backend"
+
+[[case]]
+id = "cast_runtime_fallible_catch_recovery_release"
+path = "cast_runtime_fallible_catch_recovery_release"
+tags = ["integration", "numeric", "release", "runtime"]
+contract = "language.numbers.phase9_release_parity.cast_runtime_fallible_catch_recovery"
+role = "backend"
+
+[[case]]
+id = "numeric_no_common_integer_arithmetic_matrix"
+path = "numeric_no_common_integer_arithmetic_matrix"
+tags = ["integration", "numbers", "exact-numerics", "arithmetic"]
+contract = "language.numbers.mixed_type_arithmetic_domain"
+role = "boundary"
+
+[[case]]
+id = "numeric_float_integer_division_matrix_rejected"
+path = "numeric_float_integer_division_matrix_rejected"
+tags = ["integration", "numbers", "exact-numerics", "arithmetic"]
+contract = "language.numbers.equal_type_arithmetic_domain"
+role = "boundary"
+
+[[case]]
+id = "numeric_semantic_physical_variants_debug"
+path = "numeric_semantic_physical_variants_debug"
+tags = ["integration", "numbers", "backends", "parity"]
+contract = "language.numbers.semantic_physical_variants"
+role = "primary"
+
+[[case]]
+id = "numeric_semantic_physical_variants_release"
+path = "numeric_semantic_physical_variants_release"
+tags = ["integration", "numbers", "backends", "parity"]
+contract = "language.numbers.semantic_physical_variants"
+role = "backend"
+
+[[case]]
+id = "generic_no_numeric_origin_later_receiver_rejected"
+path = "generic_no_numeric_origin_later_receiver_rejected"
+tags = ["integration", "numeric", "generics", "diagnostics"]
+contract = "language.generics.no_numeric_origin_later_receiver_rejected"
+role = "primary"
+
+[[case]]
+id = "generic_failed_body_no_cascade_rejected"
+path = "generic_failed_body_no_cascade_rejected"
+tags = ["integration", "numeric", "generics", "diagnostics"]
+contract = "language.generics.failed_body_no_diagnostic_cascade"
+role = "primary"
+
+[[case]]
+id = "empty_container_later_receiver_rejected"
+path = "empty_container_later_receiver_rejected"
+tags = ["integration", "numeric", "collections", "diagnostics"]
+contract = "language.collections.empty_later_receiver_rejected"
+role = "primary"
+
+[[case]]
+id = "scalar_receiver_conflict_reverse_rejected"
+path = "scalar_receiver_conflict_reverse_rejected"
+tags = ["integration", "numeric", "inference", "diagnostics"]
+contract = "language.numbers.conflicting_receivers_deterministic_diagnostic"
+role = "adversarial"
+
+[[case]]
+id = "scalar_mutable_branch_write_mismatch_rejected"
+path = "scalar_mutable_branch_write_mismatch_rejected"
+tags = ["integration", "numeric", "inference", "diagnostics"]
+contract = "language.numbers.mutable_binding_single_static_type_at_u64_receiver"
+role = "adversarial"
+
+[[case]]
+id = "numeric_full_domain_catch_runtime"
+path = "numeric_full_domain_catch_runtime"
+tags = ["integration", "numeric", "runtime", "catch", "arithmetic"]
+contract = "language.numbers.full_domain_discharge_keeps_catch_eligibility"
+role = "primary"
+
+[[case]]
+id = "generic_numeric_signature_trait_cast_conflict_rejected"
+path = "generic_numeric_signature_trait_cast_conflict_rejected"
+tags = ["integration", "numeric", "inference", "generics", "traits", "casts", "diagnostics"]
+contract = "language.numbers.conflicting_receivers_deterministic_diagnostic"
+role = "boundary"
+
+[[case]]
+id = "catch_and_inactive_branch_source_validation_rejected"
+path = "catch_and_inactive_branch_source_validation_rejected"
+tags = ["integration", "results", "diagnostics"]
+contract = "language.results.unreachable_handler_and_branch_source_validity"
+role = "primary"
+
+[[case]]
+id = "cast_source_evidence_conflict_and_shape_rejected"
+path = "cast_source_evidence_conflict_and_shape_rejected"
+tags = ["integration", "casts", "traits", "diagnostics"]
+contract = "language.casts.source_evidence_conflict_and_method_shape_rejected"
+role = "primary"
+
+[[case]]
+id = "numeric_narrow_u8_public_failure_contract_rejected"
+path = "numeric_narrow_u8_public_failure_contract_rejected"
+tags = ["integration", "numeric", "diagnostics", "html-wasm", "arithmetic"]
+contract = "language.numbers.narrow_u8_add_requires_public_error_contract"
+role = "primary"
+
+[[case]]
+id = "scalar_pending_member_after_default_cast_rejected"
+path = "scalar_pending_member_after_default_cast_rejected"
+tags = ["integration", "numeric", "inference", "casts", "diagnostics"]
+contract = "language.numbers.pending_member_diagnostic_after_independent_resolution"
+role = "boundary"
+
+[[case]]
+id = "numeric_declaration_boundaries_runtime"
+path = "numeric_declaration_boundaries_runtime"
+tags = ["integration", "numeric", "constants", "structs", "collections", "runtime"]
+contract = "language.numbers.declaration_boundaries_complete_exact_types"
+role = "primary"
+
+[[case]]
+id = "fixed_width_binary_float_checked_boundaries_release"
+path = "fixed_width_binary_float_checked_boundaries_release"
+tags = ["integration", "numeric", "casts", "release"]
+contract = "language.numbers.fixed_binary_float_checked_boundaries"
+role = "boundary"
+
+[[case]]
+id = "cast_numeric_fixed_chain_success_release"
+path = "cast_numeric_fixed_chain_success_release"
+tags = ["integration", "numeric", "casts", "release"]
+contract = "language.casts.numeric_fixed_chain_acceptance"
+role = "boundary"
+
+[[case]]
+id = "number_cast_exactness_runtime_release"
+path = "number_cast_exactness_runtime_release"
+tags = ["integration", "numeric", "casts", "release"]
+contract = "language.numbers.exact_integer_and_scale_casts"
+role = "boundary"
+
+[[case]]
+id = "external_f64_pruned_handler"
+path = "external_f64_pruned_handler"
+tags = ["integration", "numeric", "external", "results", "reachability"]
+contract = "language.numbers.external_f64_pruned_handler_demands"
+role = "primary"
+
+[[case]]
+id = "scalar_unsigned_negation_widths_rejected"
+path = "scalar_unsigned_negation_widths_rejected"
+tags = ["integration", "numeric", "diagnostics", "arithmetic"]
+contract = "language.numbers.unsigned_unary_minus_rejected"
+role = "boundary"
+
+[[case]]
+id = "phase9_integer_compile_runtime_failure_pairs"
+path = "phase9_integer_compile_runtime_failure_pairs"
+tags = ["integration", "numeric", "arithmetic", "fixed-width", "diagnostics"]
+contract = "language.numbers.integer_compile_runtime_failure_pairs"
+role = "boundary"
+
+[[case]]
+id = "f16_known_per_operation_overflow_rejected"
+path = "f16_known_per_operation_overflow_rejected"
+tags = ["integration", "numeric", "arithmetic", "fixed-width", "diagnostics"]
+contract = "language.numbers.f16_known_per_operation_overflow"
+role = "boundary"
+
+[[case]]
+id = "aggregate_parenthesised_late_receivers_runtime"
+path = "aggregate_parenthesised_late_receivers_runtime"
+tags = ["numeric", "aggregate", "parentheses"]
+contract = "numeric.aggregate.parenthesised_late_receivers"
+role = "boundary"
+
+[[case]]
+id = "compound_assignment_atomicity_runtime_release"
+path = "compound_assignment_atomicity_runtime_release"
+tags = ["integration", "numeric", "runtime", "fixed-width", "mutation"]
+contract = "language.numbers.compound_assignment_runtime_atomicity"
+role = "backend"
+
+[[case]]
+id = "fixed_width_integer_checked_boundaries_release"
+path = "fixed_width_integer_checked_boundaries_release"
+tags = ["integration", "numeric", "runtime", "fixed-width"]
+contract = "language.numbers.fixed_width_integer_checked_boundaries"
+role = "backend"
+
+[[case]]
+id = "cast_infallible_evidence_direct_failure_rejected"
+path = "cast_infallible_evidence_direct_failure_rejected"
+tags = ["integration", "casts", "diagnostics", "numeric"]
+contract = "language.casts.infallible_evidence_rejects_inferred_failure"
+role = "primary"
+
+[[case]]
+id = "cast_infallible_evidence_transitive_failure_rejected"
+path = "cast_infallible_evidence_transitive_failure_rejected"
+tags = ["integration", "casts", "diagnostics", "numeric"]
+contract = "language.casts.infallible_evidence_rejects_inferred_failure"
+role = "boundary"
+
+[[case]]
+id = "cast_infallible_evidence_generic_failure_rejected"
+path = "cast_infallible_evidence_generic_failure_rejected"
+tags = ["integration", "casts", "diagnostics", "numeric", "generics"]
+contract = "language.casts.infallible_evidence_rejects_inferred_failure"
+role = "boundary"
+
+[[case]]
+id = "cast_evidence_local_recovery_and_declared_error_runtime"
+path = "cast_evidence_local_recovery_and_declared_error_runtime"
+tags = ["integration", "casts", "numeric", "catch"]
+contract = "language.casts.evidence_local_recovery_and_declared_error"
+role = "primary"
+
+[[case]]
+id = "cast_infallible_evidence_unused_generic_failure_rejected"
+path = "cast_infallible_evidence_unused_generic_failure_rejected"
+tags = ["integration", "casts", "diagnostics", "numeric", "generics"]
+contract = "language.casts.infallible_evidence_rejects_inferred_failure"
+role = "boundary"
+
+[[case]]
+id = "scalar_family_receiver_authored_order_rejected"
+path = "scalar_family_receiver_authored_order_rejected"
+tags = ["integration", "numeric", "inference", "diagnostics"]
+contract = "language.numbers.family_rejection_authored_receiver_order"
+role = "primary"
+
+[[case]]
+id = "numeric_alias_receiver_chain_runtime"
+path = "numeric_alias_receiver_chain_runtime"
+tags = ["integration", "numeric", "inference", "copies"]
+contract = "language.numbers.alias_chain_repeated_exact_receivers"
+role = "primary"
+
+[[case]]
+id = "numeric_known_shape_shared_pair_runtime"
+path = "numeric_known_shape_shared_pair_runtime"
+tags = ["integration", "numeric", "inference", "generics", "structs", "runtime"]
+contract = "language.generics.numeric_constructor_late_receivers"
+role = "adversarial"

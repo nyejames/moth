@@ -1,6 +1,6 @@
--- Validates that Bool cannot be implicitly promoted to Float.
--- Only Int → Float is supported as a contextual coercion.
+-- Validates that Bool cannot be implicitly promoted to F64.
+-- Numeric receiving boundaries require exact types; Bool is not F64.
 
-result Float = true
+result F64 = true
 
 io.line("should not reach here")

@@ -9,6 +9,7 @@
 //! `CompilerError` in this module means an internal compiler invariant or setup failure only.
 //! Source-authored syntax failures are rejected earlier with `CompilerDiagnostic`.
 
+use super::evaluator::pending_expression_item_bug;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -60,6 +61,15 @@ pub(super) fn order_expression_nodes(
             | ExpressionRpnItem::PendingNumericLiteral { .. }) => {
                 processed_items += 1;
                 output_queue.push(operand);
+            }
+            // Construction-only items are replaced by body completion before evaluation, and
+            // the parser retains every fragment that still contains one. Ordering therefore
+            // reports their presence as the broken compiler invariant it is.
+            ExpressionRpnItem::PendingNumericBinding { .. }
+            | ExpressionRpnItem::PendingNumericCall { .. }
+            | ExpressionRpnItem::PendingNumericCast { .. }
+            | ExpressionRpnItem::PendingNumericExpression { .. } => {
+                return Err(pending_expression_item_bug("expression ordering"));
             }
             operator_item @ ExpressionRpnItem::Operator { .. } => {
                 processed_items += 1;

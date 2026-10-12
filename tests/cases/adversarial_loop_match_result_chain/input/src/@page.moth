@@ -1,4 +1,4 @@
-read_value |flag Bool| -> Int, Error!:
+read_value |flag Bool| -> I32, Error!:
     if flag:
         return 10
     ;

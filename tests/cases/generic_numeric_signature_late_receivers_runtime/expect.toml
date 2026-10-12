@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "generic_numeric_signature_late_receivers scalar=4294967296 collection=4294967300 first=4294967297 independent=8589934596 control=7 bound_i8=1 map=18446744073709551615 optional=4294967301 packet=4294967304 field=4294967304 choice=4294967305 pair_first=4294967310 pair_second=-4294967311 field_only=4294967312 nested=4294967313 method=4294967315 method_argument=4294967316 annotated_float_loop=1 annotated_decimal_loop=1 partial_float_loop=2 reversed_float_loop=4 reversed_decimal_loop=3 duo_float_loop=1 duo_whole_loop=4294967297 count_text=4294967297 sample_text=2.5 reorder_before=1/2 reorder_after=1/2 immediate=11 immediate_collection=11 immediate_map=11 nominal=11/11"

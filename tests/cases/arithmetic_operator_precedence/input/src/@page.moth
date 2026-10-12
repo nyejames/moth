@@ -8,7 +8,7 @@ y = 10 - 2
 z = 4 * 6
 w = 20 / 4
 
--- Float arithmetic
+-- F64 arithmetic
 a = 3.14 + 2.86
 b = 10.5 - 3.5
 c = 2.5 * 4.0

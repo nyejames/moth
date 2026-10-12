@@ -40,7 +40,7 @@ use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TestSourceTokensBuilder, TokenTag,
 };
 use moth_lexical::numeric::decimal::NumberScale;
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
@@ -201,7 +201,10 @@ fn resolved_type_annotation_carries_canonical_type_id() {
         TypeResolutionContext::from_declaration_table(&declaration_table, &mut type_environment);
 
     let resolved = resolve_parsed_type_annotation(
-        ParsedTypeRef::BuiltinInt { span: None },
+        ParsedTypeRef::BuiltinFixedScalar {
+            scalar: FixedScalar::I32,
+            span: None,
+        },
         None,
         &mut resolution_context,
         &mut string_table,
@@ -209,8 +212,14 @@ fn resolved_type_annotation_carries_canonical_type_id() {
     )
     .expect("builtin annotation resolution should succeed");
 
-    assert_eq!(resolved.diagnostic_type, DataType::Int);
-    assert_eq!(resolved.type_id, Some(builtin_type_ids::INT));
+    assert_eq!(
+        resolved.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::I32)
+    );
+    assert_eq!(
+        resolved.type_id,
+        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32))
+    );
 }
 
 #[test]
@@ -320,9 +329,6 @@ fn builtin_scalar_spelling_mapper_covers_every_scalar_keyword() {
     // builtin-target header classification, so every scalar keyword must keep its authored
     // name here instead of falling through to a generic diagnostic.
     for (tag, spelling) in [
-        (TokenTag::DATATYPE_INT, "Int"),
-        (TokenTag::DATATYPE_UINT, "Uint"),
-        (TokenTag::DATATYPE_FLOAT, "Float"),
         (TokenTag::DATATYPE_BOOL, "Bool"),
         (TokenTag::DATATYPE_STRING, "String"),
         (TokenTag::DATATYPE_CHAR, "Char"),
@@ -580,7 +586,7 @@ fn public_result_type_syntax_is_deferred() {
         vec![
             symbol_token(result_name),
             token(TokenTag::OF),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             token(TokenTag::COMMA),
             token(TokenTag::DATATYPE_STRING),
             token(TokenTag::ASSIGN),
@@ -682,7 +688,7 @@ fn rejects_nested_generic_type_application() {
             token(TokenTag::OF),
             token(TokenTag::DATATYPE_STRING),
             token(TokenTag::COMMA),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             token(TokenTag::ASSIGN),
             token(TokenTag::EOF),
         ],
@@ -786,7 +792,6 @@ fn alias_expanded_nested_optional_type_is_rejected() {
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
         declaring_file_id: SourceId::COMPILATION_ROOT,
-        numeric_profile: NumericProfile::STANDARD,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,
@@ -835,7 +840,11 @@ fn resolves_named_types_recursively_in_composite_types() {
         .expect("test path fits");
     let declarations = vec![Declaration {
         id: point_path,
-        value: Expression::no_value(None, DataType::Int, ValueMode::ImmutableOwned),
+        value: Expression::no_value(
+            None,
+            DataType::FixedScalar(FixedScalar::I32),
+            ValueMode::ImmutableOwned,
+        ),
         binding_span: None,
         config_qualifier: None,
     }];
@@ -850,7 +859,9 @@ fn resolves_named_types_recursively_in_composite_types() {
 
     assert_eq!(
         resolved,
-        DataType::collection(DataType::Option(Box::new(DataType::Int)))
+        DataType::collection(DataType::Option(Box::new(DataType::FixedScalar(
+            FixedScalar::I32
+        ))))
     );
 }
 
@@ -887,7 +898,6 @@ fn resolves_generic_instance_base_to_canonical_nominal_path() {
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
         declaring_file_id: SourceId::COMPILATION_ROOT,
-        numeric_profile: NumericProfile::STANDARD,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,
@@ -924,7 +934,10 @@ fn generic_instance_resolution_rejects_wrong_arity() {
     let t_name = string_table.intern("T");
     let unresolved = DataType::GenericInstance {
         base: GenericBaseType::Named(box_name),
-        arguments: vec![DataType::StringSlice, DataType::Int],
+        arguments: vec![
+            DataType::StringSlice,
+            DataType::FixedScalar(FixedScalar::I32),
+        ],
     };
 
     let box_path = path_fork
@@ -949,7 +962,6 @@ fn generic_instance_resolution_rejects_wrong_arity() {
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
         declaring_file_id: SourceId::COMPILATION_ROOT,
-        numeric_profile: NumericProfile::STANDARD,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,
@@ -1017,7 +1029,6 @@ fn bare_generic_type_name_requires_type_arguments() {
     let mut resolution_context = TypeResolutionContext {
         declaration_table: &declaration_table,
         declaring_file_id: SourceId::COMPILATION_ROOT,
-        numeric_profile: NumericProfile::STANDARD,
         visible_declaration_ids: None,
         visible_external_symbols: None,
         visible_source_bindings: None,
@@ -1090,7 +1101,10 @@ fn returns_data_type_interns_multi_return_tuple_type_id() {
     let mut type_environment = TypeEnvironment::new();
 
     let returns_type_id = resolve_diagnostic_type_to_type_id(
-        &DataType::Returns(vec![DataType::Int, DataType::Bool]),
+        &DataType::Returns(vec![
+            DataType::FixedScalar(FixedScalar::I32),
+            DataType::Bool,
+        ]),
         &mut type_environment,
     );
 
@@ -1098,7 +1112,7 @@ fn returns_data_type_interns_multi_return_tuple_type_id() {
         type_environment.tuple_field_ids(returns_type_id),
         Some(
             [
-                type_environment.builtins().int,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 type_environment.builtins().bool
             ]
             .as_slice()
@@ -1175,14 +1189,14 @@ fn checked_type_id_conversion_rejects_unresolved_named_type() {
 
 #[test]
 fn parses_collection_with_capacity() {
-    // New pre-element syntax: {64 Int}
+    // New pre-element syntax: {64 I32}
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
             numeric_token("64", &mut string_table),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             token(TokenTag::CLOSE_CURLY),
             token(TokenTag::EOF),
         ],
@@ -1206,7 +1220,13 @@ fn parses_collection_with_capacity() {
     assert!(matches!(
         &parsed,
         ParsedTypeRef::Collection { element, .. }
-            if matches!(**element, ParsedTypeRef::BuiltinInt { span: Some(_) })
+            if matches!(
+                **element,
+                ParsedTypeRef::BuiltinFixedScalar {
+                    scalar: FixedScalar::I32,
+                    span: Some(_),
+                }
+            )
     ));
 }
 
@@ -1217,7 +1237,7 @@ fn parses_collection_without_capacity() {
     let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             token(TokenTag::CLOSE_CURLY),
             token(TokenTag::EOF),
         ],
@@ -1239,7 +1259,10 @@ fn parses_collection_without_capacity() {
             fixed_capacity: None,
         } if matches!(
             *element,
-            ParsedTypeRef::BuiltinInt { span: Some(_) }
+            ParsedTypeRef::BuiltinFixedScalar {
+                scalar: FixedScalar::I32,
+                span: Some(_),
+            }
         )
     ));
 }
@@ -1251,7 +1274,7 @@ fn rejects_old_post_element_collection_capacity_syntax() {
     let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             numeric_token("64", &mut string_table),
             token(TokenTag::CLOSE_CURLY),
             token(TokenTag::EOF),
@@ -1333,7 +1356,7 @@ fn rejects_collection_capacity_arithmetic_before_optional_element() {
             symbol_token(capacity_name),
             token(TokenTag::ADD),
             numeric_token("16", &mut string_table),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             token(TokenTag::QUESTION_MARK),
             token(TokenTag::CLOSE_CURLY),
             token(TokenTag::EOF),
@@ -1377,7 +1400,7 @@ fn parses_nested_fixed_collection_bare_capacity_constants() {
             symbol_token(rows_name),
             token(TokenTag::OPEN_CURLY),
             symbol_token(cols_name),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             token(TokenTag::CLOSE_CURLY),
             token(TokenTag::CLOSE_CURLY),
             token(TokenTag::EOF),
@@ -1417,7 +1440,10 @@ fn parses_nested_fixed_collection_bare_capacity_constants() {
     );
     assert!(matches!(
         *inner_element,
-        ParsedTypeRef::BuiltinInt { span: Some(_) }
+        ParsedTypeRef::BuiltinFixedScalar {
+            scalar: FixedScalar::I32,
+            span: Some(_),
+        }
     ));
 }
 
@@ -1572,7 +1598,7 @@ fn rejects_collection_type_missing_close_curly_with_expected_token() {
     let stream = stream_from_tokens(
         vec![
             token(TokenTag::OPEN_CURLY),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             token(TokenTag::EOF),
         ],
         &mut string_table,
@@ -1616,7 +1642,7 @@ fn parses_simple_map_type() {
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::DATATYPE_STRING),
             token(TokenTag::ASSIGN),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             token(TokenTag::CLOSE_CURLY),
             token(TokenTag::EOF),
         ],
@@ -1635,7 +1661,7 @@ fn parses_simple_map_type() {
         value,
         ..
     } if matches!(*key, ParsedTypeRef::BuiltinString { .. })
-        && matches!(*value, ParsedTypeRef::BuiltinInt { .. })
+        && matches!(*value, ParsedTypeRef::BuiltinFixedScalar { .. })
     ));
 }
 
@@ -1649,7 +1675,7 @@ fn parses_map_type_with_collection_value() {
             token(TokenTag::DATATYPE_STRING),
             token(TokenTag::ASSIGN),
             token(TokenTag::OPEN_CURLY),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             token(TokenTag::CLOSE_CURLY),
             token(TokenTag::CLOSE_CURLY),
             token(TokenTag::EOF),
@@ -1670,7 +1696,7 @@ fn parses_map_type_with_collection_value() {
         ..
     } if matches!(**key, ParsedTypeRef::BuiltinString { .. })
         && matches!(**value, ParsedTypeRef::Collection { ref element, .. }
-            if matches!(**element, ParsedTypeRef::BuiltinInt { .. })
+            if matches!(**element, ParsedTypeRef::BuiltinFixedScalar { .. })
         )
     ));
 }
@@ -1687,7 +1713,7 @@ fn parses_map_type_with_nested_map_value() {
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::DATATYPE_STRING),
             token(TokenTag::ASSIGN),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             token(TokenTag::CLOSE_CURLY),
             token(TokenTag::CLOSE_CURLY),
             token(TokenTag::EOF),
@@ -1745,7 +1771,7 @@ fn rejects_map_type_with_empty_key() {
         vec![
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::ASSIGN),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             token(TokenTag::CLOSE_CURLY),
             token(TokenTag::EOF),
         ],
@@ -1822,7 +1848,7 @@ fn rejects_map_type_with_multiple_separators() {
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::DATATYPE_STRING),
             token(TokenTag::ASSIGN),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             token(TokenTag::ASSIGN),
             token(TokenTag::DATATYPE_BOOL),
             token(TokenTag::CLOSE_CURLY),
@@ -1864,7 +1890,7 @@ fn rejects_fixed_capacity_map_syntax_on_key_side() {
             numeric_token("4", &mut string_table),
             token(TokenTag::DATATYPE_STRING),
             token(TokenTag::ASSIGN),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             token(TokenTag::CLOSE_CURLY),
             token(TokenTag::EOF),
         ],
@@ -1904,7 +1930,7 @@ fn rejects_fixed_capacity_map_syntax_on_value_side() {
             token(TokenTag::DATATYPE_STRING),
             token(TokenTag::ASSIGN),
             numeric_token("4", &mut string_table),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             token(TokenTag::CLOSE_CURLY),
             token(TokenTag::EOF),
         ],
@@ -1945,7 +1971,7 @@ fn rejects_named_capacity_map_syntax() {
             symbol_token(capacity_name),
             token(TokenTag::DATATYPE_STRING),
             token(TokenTag::ASSIGN),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             token(TokenTag::CLOSE_CURLY),
             token(TokenTag::EOF),
         ],
@@ -1984,7 +2010,7 @@ fn rejects_postfix_capacity_map_syntax_with_colon() {
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::DATATYPE_STRING),
             token(TokenTag::ASSIGN),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             token(TokenTag::COLON),
             numeric_token("5", &mut string_table),
             token(TokenTag::CLOSE_CURLY),
@@ -2025,7 +2051,7 @@ fn rejects_postfix_capacity_map_syntax_with_number() {
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::DATATYPE_STRING),
             token(TokenTag::ASSIGN),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             numeric_token("5", &mut string_table),
             token(TokenTag::CLOSE_CURLY),
             token(TokenTag::EOF),
@@ -2067,7 +2093,7 @@ fn rejects_postfix_capacity_map_syntax_on_key_side() {
             token(TokenTag::COLON),
             numeric_token("5", &mut string_table),
             token(TokenTag::ASSIGN),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             token(TokenTag::CLOSE_CURLY),
             token(TokenTag::EOF),
         ],
@@ -2107,7 +2133,7 @@ fn map_separator_inside_nested_braces_is_ignored() {
             token(TokenTag::OPEN_CURLY),
             token(TokenTag::DATATYPE_STRING),
             token(TokenTag::ASSIGN),
-            token(TokenTag::DATATYPE_INT),
+            token(TokenTag::DATATYPE_I32),
             token(TokenTag::CLOSE_CURLY),
             token(TokenTag::ASSIGN),
             token(TokenTag::DATATYPE_BOOL),

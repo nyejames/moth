@@ -92,7 +92,7 @@ fn trait_conformance_headers_parse_single_and_continued_trait_lists() {
 
 #[test]
 fn builtin_type_conformance_headers_parse_as_trait_conformances() {
-    let (headers, string_table) = parse_single_file_headers_with_table("Int must DISPLAYABLE\n");
+    let (headers, string_table) = parse_single_file_headers_with_table("I32 must DISPLAYABLE\n");
 
     let conformance_header = headers
         .headers
@@ -104,7 +104,7 @@ fn builtin_type_conformance_headers_parse_as_trait_conformances() {
         panic!("expected trait conformance header kind");
     };
 
-    assert_eq!(string_table.resolve(conformance.target.name), "Int");
+    assert_eq!(string_table.resolve(conformance.target.name), "I32");
     assert_eq!(
         string_table.resolve(conformance.traits[0].name),
         "DISPLAYABLE"
@@ -113,7 +113,7 @@ fn builtin_type_conformance_headers_parse_as_trait_conformances() {
 
 #[test]
 fn uint_conformance_header_parses_as_builtin_trait_conformance() {
-    let (headers, string_table) = parse_single_file_headers_with_table("Uint must DISPLAYABLE\n");
+    let (headers, string_table) = parse_single_file_headers_with_table("U32 must DISPLAYABLE\n");
 
     let conformance_header = headers
         .headers
@@ -125,7 +125,7 @@ fn uint_conformance_header_parses_as_builtin_trait_conformance() {
         panic!("expected trait conformance header kind");
     };
 
-    assert_eq!(string_table.resolve(conformance.target.name), "Uint");
+    assert_eq!(string_table.resolve(conformance.target.name), "U32");
     assert_eq!(
         string_table.resolve(conformance.traits[0].name),
         "DISPLAYABLE"
@@ -152,7 +152,7 @@ fn trait_requirement_rejects_lowercase_this_receiver() {
 #[test]
 fn trait_requirement_rejects_missing_this_receiver() {
     let result = parse_single_file_headers_with_entry(
-        "BAD must:\n    wrong |value Int|\n;\n",
+        "BAD must:\n    wrong |value I32|\n;\n",
         "src/@page.moth",
         "src/@page.moth",
     );

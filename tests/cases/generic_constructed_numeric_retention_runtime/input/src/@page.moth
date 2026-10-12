@@ -1,0 +1,56 @@
+-- Direct generic constructors keep bound numeric origins until same-body exact
+-- receivers select their canonical instances. Field writes, choice payloads,
+-- collection and map leaves, and nested nominal fields all resolve before use.
+
+Packet type T = |value T|
+Tagged type T = |
+    value T,
+    label String = "fallback",
+|
+Outcome type T ::
+    Some |value T|,
+    Empty,
+;
+Duo type T, U = |floating T, whole U|
+
+read_u64 |value U64| -> String:
+    return cast value
+;
+read_packet_collection_u64 |value Packet of {U64}| -> String, Error!:
+    element = value.value.get(0)!
+    return cast element
+;
+read_packet_map_u64 |value Packet of {String = U64}| -> String, Error!:
+    element = value.value.get("max")!
+    return cast element
+;
+
+packet = Packet(4294967297)
+packet_text = read_u64(packet.value)
+
+tagged = Tagged(value = 4294967300)
+tagged_text = read_u64(tagged.value)
+label_text = tagged.label
+
+box ~= Packet(1)
+box.value = 4294967301
+box.value += 1
+box_text = read_u64(box.value)
+
+origin = Outcome::Some(4294967298)
+outcome_text String = if origin is:
+    Some(value as payload) => then read_u64(payload)
+    Empty => then "missing"
+;
+
+nested = Packet({4294967302, 2})
+nested_text = read_packet_collection_u64(nested) catch then "failed"
+
+mapped = Packet({"max" = 18_446_744_073_709_551_615})
+map_text = read_packet_map_u64(mapped) catch then "failed"
+
+nominal = Packet(Duo(4294967303, 9))
+floating_text = read_u64(nominal.value.floating)
+whole_text = read_u64(nominal.value.whole)
+
+[:generic_constructed_numeric_retention_runtime packet=[packet_text] tagged=[tagged_text] label=[label_text] box=[box_text] choice=[outcome_text] nested=[nested_text] map=[map_text] floating=[floating_text] whole=[whole_text]]

@@ -4,7 +4,7 @@ check |value Bool| -> Bool, Failure!:
     return value
 ;
 
-risky |value Int| -> Int:
+risky |value I32| -> I32:
     return value + 2147483647
 ;
 

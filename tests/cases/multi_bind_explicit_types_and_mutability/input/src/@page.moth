@@ -1,8 +1,8 @@
-triple || -> Int, String, Float:
+triple || -> I32, String, F64:
     return 1, "two", 3.0
 ;
 
-a, b String, c ~Float = triple()
+a, b String, c ~F64 = triple()
 c = c + 1.0
 io.line([: multi-bind-int=[a]])
 io.line([: multi-bind-string=[b]])

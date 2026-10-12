@@ -1,0 +1,75 @@
+-- Phase 4: concrete nominal constructor receivers.
+--
+-- A concrete struct or choice payload constructor whose field argument depends
+-- on a pending numeric origin suspends as one retained call and resumes at the
+-- body root, where the declared field type is the argument's exact receiver.
+-- Each pending origin below has exactly one constraining receiver, so a default
+-- or a second wide consumer cannot stand in for the field/payload type:
+--
+-- 1. `pending` is fixed to U64 by `CountBox.amount` alone (no separate U64
+--    consumer exists), and the field read observes the full 4294967296.
+-- 2. `pending_code` is selected into the known concrete `CodeChoice::Filled`
+--    U64 payload and observed through the payload capture.
+-- 3. `nested` passes a field read of the already-suspended `outer` constructor
+--    as a constructor argument, so the inner completion depends on the outer one.
+-- 4. The builtin `Error` keeps the full U32 code from `pending_code32`
+--    (3000000000 is outside I32), so no signed default can satisfy it.
+-- 5. `ordered` mixes an ordinary side-effecting field argument with a retained
+--    one: the authored field order is preserved and `mark_step` runs exactly
+--    once, which the mutable carrier observes after the constructor completes.
+
+CountBox = |
+    amount U64,
+|
+
+receive_u64 |value U64| -> String:
+    return cast value
+;
+
+CodeChoice ::
+    Filled |
+        code U64,
+    |,
+    Empty,
+;
+
+describe_code |chosen CodeChoice| -> String:
+    if chosen is:
+        Filled(code) => return receive_u64(code)
+        Empty => return "empty"
+    ;
+;
+
+step_count ~U32 = 0
+
+mark_step |seen ~U32| -> U32:
+    seen += 1
+    return 7
+;
+
+OrderedBox = |
+    order U32,
+    amount U64,
+|
+
+-- 1. The nominal U64 field is this origin's only width constraint.
+pending = 4_294_967_296
+box = CountBox(amount = pending)
+
+-- 2. A raw origin selected into a known concrete choice payload.
+pending_code = 5_000_000_000
+selected = CodeChoice::Filled(code = pending_code)
+
+-- 3. A nested constructor argument over the suspended outer constructor's field.
+inner = 6_000_000_000
+outer = CountBox(amount = inner)
+nested = CountBox(amount = outer.amount)
+
+-- 4. The builtin Error keeps the full U32 code from a pending origin.
+pending_code32 = 3_000_000_000
+failure = Error(message = "full u32", code = pending_code32)
+
+-- 5. The ready side-effecting argument stays in field order with the retained one.
+ordered = OrderedBox(order = mark_step(~step_count), amount = pending)
+
+[:field=[receive_u64(box.amount)] origin=[pending] choice=[describe_code(selected)] nested=[receive_u64(nested.amount)] code=[failure.code] order=[ordered.order] marked=[step_count]]

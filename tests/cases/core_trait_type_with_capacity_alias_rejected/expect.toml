@@ -7,4 +7,5 @@ diagnostic_codes = ["MOTH-RULE-0075"]
 code = "MOTH-RULE-0075"
 path = "input/@page.moth"
 line = 2
+column = 5
 count = 1

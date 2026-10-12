@@ -1,6 +1,6 @@
 enabled #Config of Bool = true
 
-configured_result || -> Int:
+configured_result || -> I32:
     result ~= 0
     if enabled:
         result = 1

@@ -1,6 +1,6 @@
 -- remove returns an owned non-copy String that remains usable after later set and clear.
 
-observe |value String, before Int| -> String:
+observe |value String, before I32| -> String:
     return [:map_remove_returns_owned_value observed=[value] length_before=[before]]
 ;
 

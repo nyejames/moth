@@ -28,6 +28,7 @@ use crate::compiler_frontend::tokenizer::tokens::{
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -178,7 +179,12 @@ fn bounded_expression_parses_simple_literal() {
     )
     .expect("simple literal should parse");
 
-    assert!(matches!(expression.kind, ExpressionKind::Int(42)));
+    assert!(matches!(
+        expression.kind,
+        ExpressionKind::FixedScalar(value)
+            if value == FixedScalarValue::signed(FixedScalar::I32, 42)
+                .expect("42 is an I32 value")
+    ));
 
     // The stop token (comma) should not be consumed.
     assert_eq!(stream.position(), 1);
@@ -220,8 +226,13 @@ fn bounded_expression_nested_parentheses() {
     )
     .expect("nested parentheses should parse");
 
-    // All literals fold to a single Int(6).
-    assert!(matches!(expression.kind, ExpressionKind::Int(6)));
+    // All literals fold to a single I32(6).
+    assert!(matches!(
+        expression.kind,
+        ExpressionKind::FixedScalar(value)
+            if value == FixedScalarValue::signed(FixedScalar::I32, 6)
+                .expect("6 is an I32 value")
+    ));
 
     // Stop token should remain unconsumed.
     assert_eq!(stream.position(), 7);

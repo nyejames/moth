@@ -1,2 +1,2 @@
-limit #Int = 2
+limit #I32 = 2
 Fixed as {limit String}

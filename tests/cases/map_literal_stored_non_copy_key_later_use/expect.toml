@@ -12,7 +12,8 @@ diagnostic_codes = ["MOTH-RULE-0064"]
 
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0064"
-reason = "unsupported_backend_feature.hashmap_construction"
+reason = "unsupported_backend_feature.fixed_width_scalar_values"
 path = "input/@page.moth"
 line = 3
+column = 1
 count = 1

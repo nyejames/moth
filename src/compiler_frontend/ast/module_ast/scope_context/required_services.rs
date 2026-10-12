@@ -87,6 +87,9 @@ impl ScopeContext {
             ScopeDeclarationRef::Shared(declaration) => (declaration.id == *path
                 && self.is_explicit_compile_time_constant(declaration))
             .then(|| visit(&declaration.value)),
+            // A pending numeric binding is a runtime binding whose type is not selected yet;
+            // it is never an explicit compile-time constant and has no value to visit.
+            ScopeDeclarationRef::PendingNumeric { .. } => None,
         }
     }
 
@@ -130,7 +133,6 @@ impl ScopeContext {
         TirFoldContext {
             string_table,
             template_const_loop_iteration_limit: self.shared.template_const_loop_iteration_limit,
-            numeric_profile: self.shared.numeric_profile,
             bindings: Vec::new(),
             source_scope: Some(self),
         }

@@ -6,7 +6,6 @@
 //! acceptance results.
 
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
-use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::{
@@ -25,7 +24,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, function_signature_by_name,
 };
-use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result_with_profile;
+use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
 use crate::mon::Value;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
@@ -33,9 +32,6 @@ use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum SourceTypeIdentity {
     Bool,
-    Int,
-    Uint,
-    Float,
     String,
     Char,
     None,
@@ -59,10 +55,6 @@ pub(super) struct ObservedSourceValue {
 
 #[derive(Debug, Clone)]
 pub(super) enum ObservedSourceKind {
-    Int(i64),
-    /// One profile-sized unsigned integer observation; follows the selected `Int` width.
-    Uint(u64),
-    Float(f64),
     Number(NumberValue),
     FixedScalar(FixedScalarValue),
     Bool(bool),
@@ -164,19 +156,16 @@ pub(super) fn observe_data_value(
 /// Parse a source-only start-body call and retain argument values plus the parser-selected slots.
 pub(super) fn observe_start_body_call_arguments(
     source: &str,
-    profile: NumericProfile,
     function_name: &str,
 ) -> Vec<ObservedCallArgument> {
-    let (build_result, path_fork, string_table) = parse_single_file_ast_build_result_with_profile(
-        source, profile,
-    )
-    .unwrap_or_else(|diagnostic| {
-        panic!(
-            "source call fixture could not be compiled: {} {:?}",
-            diagnostic.identity().code,
-            diagnostic.payload
-        )
-    });
+    let (build_result, path_fork, string_table) = parse_single_file_ast_build_result(source)
+        .unwrap_or_else(|diagnostic| {
+            panic!(
+                "source call fixture could not be compiled: {} {:?}",
+                diagnostic.identity().code,
+                diagnostic.payload
+            )
+        });
     let ast = &build_result.ast;
     let context = ObservationContext {
         ast,
@@ -354,49 +343,6 @@ fn assert_source_matches_value(
             require_type(case, path, expected, observed, SourceTypeIdentity::String);
             match &observed.kind {
                 ObservedSourceKind::String(actual) if actual == expected_value => {}
-                _ => source_mismatch(case, path, expected, observed),
-            }
-        }
-        Value::Int(expected_value) => {
-            assert_identity_expectation_unused(
-                identity_expectation,
-                case,
-                path,
-                expected,
-                observed,
-            );
-            require_type(case, path, expected, observed, SourceTypeIdentity::Int);
-            match &observed.kind {
-                ObservedSourceKind::Int(actual) if *actual == *expected_value => {}
-                _ => source_mismatch(case, path, expected, observed),
-            }
-        }
-        Value::Uint(expected_value) => {
-            assert_identity_expectation_unused(
-                identity_expectation,
-                case,
-                path,
-                expected,
-                observed,
-            );
-            require_type(case, path, expected, observed, SourceTypeIdentity::Uint);
-            match &observed.kind {
-                ObservedSourceKind::Uint(actual) if *actual == *expected_value => {}
-                _ => source_mismatch(case, path, expected, observed),
-            }
-        }
-        Value::Float(expected_value) => {
-            assert_identity_expectation_unused(
-                identity_expectation,
-                case,
-                path,
-                expected,
-                observed,
-            );
-            require_type(case, path, expected, observed, SourceTypeIdentity::Float);
-            match &observed.kind {
-                ObservedSourceKind::Float(actual)
-                    if actual.to_bits() == expected_value.to_bits() => {}
                 _ => source_mismatch(case, path, expected, observed),
             }
         }
@@ -888,9 +834,6 @@ fn observe_stored_value(
         .payload(id)
         .expect("module constant row and child references must name stored values");
     let kind = match payload {
-        ConstValuePayload::Int(value) => ObservedSourceKind::Int(*value),
-        ConstValuePayload::Uint(value) => ObservedSourceKind::Uint(*value),
-        ConstValuePayload::Float(value) => ObservedSourceKind::Float(*value),
         ConstValuePayload::Number(value) => ObservedSourceKind::Number(value.clone()),
         ConstValuePayload::FixedScalar(value) => ObservedSourceKind::FixedScalar(*value),
         ConstValuePayload::Bool(value) => ObservedSourceKind::Bool(*value),
@@ -991,9 +934,6 @@ fn observe_expression(
 ) -> ObservedSourceValue {
     let type_identity = source_type_identity(expression.type_id, context);
     let kind = match &expression.kind {
-        ExpressionKind::Int(value) => ObservedSourceKind::Int(*value),
-        ExpressionKind::Uint(value) => ObservedSourceKind::Uint(*value),
-        ExpressionKind::Float(value) => ObservedSourceKind::Float(*value),
         ExpressionKind::Number(value) => ObservedSourceKind::Number(value.clone()),
         ExpressionKind::FixedScalar(value) => ObservedSourceKind::FixedScalar(*value),
         ExpressionKind::Bool(value) => ObservedSourceKind::Bool(*value),
@@ -1112,9 +1052,6 @@ fn source_type_identity(type_id: TypeId, context: &ObservationContext<'_>) -> So
     match definition {
         TypeDefinition::Builtin(builtin) => match builtin.key {
             BuiltinTypeKey::Bool => SourceTypeIdentity::Bool,
-            BuiltinTypeKey::Int => SourceTypeIdentity::Int,
-            BuiltinTypeKey::Uint => SourceTypeIdentity::Uint,
-            BuiltinTypeKey::Float => SourceTypeIdentity::Float,
             BuiltinTypeKey::String => SourceTypeIdentity::String,
             BuiltinTypeKey::Char => SourceTypeIdentity::Char,
             BuiltinTypeKey::None => SourceTypeIdentity::None,

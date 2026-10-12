@@ -188,6 +188,12 @@ fn inspect_nested_expression_kind(
                         inspect_nested_expression_kind(operand, visitor, pending_template_views)?;
                     }
                     ExpressionRpnItem::Operator { .. } => {}
+                    // A retained numeric recipe holds no nested expression payload to walk;
+                    // body completion replaces it before publication.
+                    ExpressionRpnItem::PendingNumericBinding { .. }
+                    | ExpressionRpnItem::PendingNumericCast { .. }
+                    | ExpressionRpnItem::PendingNumericCall { .. }
+                    | ExpressionRpnItem::PendingNumericExpression { .. } => {}
                     // Pending syntax never survives evaluation; this fallible TIR walk reports
                     // the broken invariant instead of silently skipping the malformed operand.
                     ExpressionRpnItem::PendingNumericLiteral { .. }
@@ -316,6 +322,9 @@ fn walk_tir_view_expression_payload_node(
         | TemplateIrNodeKind::AggregateOutput
         | TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => {}
+        // A retained position contributes no expression payload: its value only exists after
+        // body-root completion installs it, and every reader runs on the completed tree.
+        TemplateIrNodeKind::RetainedNumericIntake(_) => {}
     }
 
     Ok(())

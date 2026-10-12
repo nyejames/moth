@@ -102,7 +102,7 @@ word_8 #= [: [word_7]-[b07] ]
 word_9 #= [: [word_8]-[b08] ]
 
 -- Const record DAG
-Coord = | x Int, y Int |
+Coord = | x I32, y I32 |
 c0 #= Coord(b00, b01)
 c1 #= Coord(b02, b03)
 c2 #= Coord(s00, s01)

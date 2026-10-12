@@ -23,14 +23,13 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
-use crate::compiler_frontend::numeric_text::parse::{
-    materialize_float, materialize_int, materialize_number,
-};
+use crate::compiler_frontend::numeric_text::parse::{materialize_fixed_scalar, materialize_number};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::grammar::{NumericLiteralKind, NumericLiteralSign};
 
 pub(super) struct LiteralParseState<'a> {
@@ -121,10 +120,10 @@ pub(super) fn parse_literal_expression(
                         })?;
                     Expression::number(value, type_id, span, state.value_mode.to_owned())
                 } else if token.kind == NumericLiteralKind::WholeNumber {
-                    let value = materialize_int(
+                    let value = materialize_fixed_scalar(
                         &token,
                         token.sign,
-                        context.numeric_profile.int_width,
+                        FixedScalar::I32,
                         string_table,
                     )
                     .map_err(|reason| {
@@ -132,13 +131,14 @@ pub(super) fn parse_literal_expression(
                         CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
                     })?;
 
-                    Expression::int(value, span, state.value_mode.to_owned())
+                    Expression::fixed_scalar(value, span, state.value_mode.to_owned())
                 } else {
                     // The sign was already folded above, so materialising the signed
-                    // token rounds once at the boundary precision; negation is exact.
-                    let value = materialize_float(
+                    // token rounds once at the default precision; negation is exact.
+                    let value = materialize_fixed_scalar(
                         &token,
-                        context.numeric_profile.float_precision,
+                        token.sign,
+                        FixedScalar::F64,
                         string_table,
                     )
                     .map_err(|reason| {
@@ -146,7 +146,7 @@ pub(super) fn parse_literal_expression(
                         CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
                     })?;
 
-                    Expression::float(value, span, state.value_mode.to_owned())
+                    Expression::fixed_scalar(value, span, state.value_mode.to_owned())
                 };
 
                 token_stream.advance();
@@ -257,8 +257,7 @@ pub(super) fn parse_literal_expression(
                         CompileTimeEvaluationErrorReason::NoneLiteralRequiresOptionalTypeContext,
                         None,
                         span,
-                                        None,
-)
+                    )
                     .into());
                     };
 
@@ -275,7 +274,6 @@ pub(super) fn parse_literal_expression(
                         CompileTimeEvaluationErrorReason::NoneLiteralRequiresOptionalTypeContext,
                         None,
                         span,
-                        None,
                     )
                     .into());
                 };

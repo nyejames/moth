@@ -27,6 +27,7 @@ use crate::compiler_frontend::style_directives::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::fixed_scalar::{FixedScalarClass, FixedScalarValue};
 /// Typed result shared by handler-directive parsing helpers.
 type HandlerDirectiveResult<T> = Result<T, TemplateError>;
 
@@ -213,19 +214,24 @@ fn normalize_provided_style_argument_value(
             .into()),
         },
 
-        StyleDirectiveArgumentType::Number => match expression.kind {
-            ExpressionKind::Int(value) => Ok(StyleDirectiveArgumentValue::Number(value as f64)),
-            ExpressionKind::Float(value) => Ok(StyleDirectiveArgumentValue::Number(value)),
-            _ => Err(with_argument_span(
-                CompilerDiagnostic::invalid_template_directive(
-                    Some(string_table.intern(directive_name)),
-                    InvalidTemplateDirectiveReason::invalid_argument(),
+        StyleDirectiveArgumentType::Number => {
+            let number = match expression.kind {
+                ExpressionKind::FixedScalar(value) => style_argument_number(value),
+                _ => None,
+            };
+            match number {
+                Some(number) => Ok(StyleDirectiveArgumentValue::Number(number)),
+                None => Err(with_argument_span(
+                    CompilerDiagnostic::invalid_template_directive(
+                        Some(string_table.intern(directive_name)),
+                        InvalidTemplateDirectiveReason::invalid_argument(),
+                        argument_span,
+                    ),
                     argument_span,
-                ),
-                argument_span,
-            )
-            .into()),
-        },
+                )
+                .into()),
+            }
+        }
 
         StyleDirectiveArgumentType::Bool => match expression.kind {
             ExpressionKind::Bool(value) => Ok(StyleDirectiveArgumentValue::Bool(value)),
@@ -239,6 +245,20 @@ fn normalize_provided_style_argument_value(
             )
             .into()),
         },
+    }
+}
+
+/// Converts one exact numeric style-directive argument into its `f64` styling value.
+///
+/// WHY: style directives historically accepted the convenience integer/float literals;
+///      they now accept the exact fixed integers and binary floats, while `Byte` and
+///      `Dec` stay outside the numeric styling vocabulary.
+fn style_argument_number(value: FixedScalarValue) -> Option<f64> {
+    match value.scalar().class() {
+        FixedScalarClass::SignedInteger => value.as_i64().map(|value| value as f64),
+        FixedScalarClass::UnsignedInteger => value.as_u64().map(|value| value as f64),
+        FixedScalarClass::BinaryFloat => value.as_f64(),
+        FixedScalarClass::Octet => None,
     }
 }
 

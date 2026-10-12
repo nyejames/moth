@@ -2,4 +2,4 @@ identity type T |value T| -> T:
     return value
 ;
 
-value = identity(42 Int)
+value = identity(42 I32)

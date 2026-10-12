@@ -7,27 +7,27 @@ format_f32 |value F32| -> String:
 format_f64 |value F64| -> String:
     return cast value
 ;
-format_float |value Float| -> String:
+format_float |value F64| -> String:
     return cast value
 ;
 
 parse_f16 |text String| -> F16, Error!:
-    return cast! text
+    return cast text
 ;
 parse_f32 |text String| -> F32, Error!:
-    return cast! text
+    return cast text
 ;
 parse_f64 |text String| -> F64, Error!:
-    return cast! text
+    return cast text
 ;
-parse_float |text String| -> Float, Error!:
-    return cast! text
+parse_float |text String| -> F64, Error!:
+    return cast text
 ;
 round_f64_to_f16 |value F64| -> F16, Error!:
-    return cast! value
+    return cast value
 ;
 round_f64_to_f32 |value F64| -> F32, Error!:
-    return cast! value
+    return cast value
 ;
 round_i64_to_f32 |value I64| -> F32:
     return cast value
@@ -36,18 +36,18 @@ round_u64_to_f32 |value U64| -> F32:
     return cast value
 ;
 round_i64_to_f16 |value I64| -> F16, Error!:
-    return cast! value
+    return cast value
 ;
 round_u64_to_f16 |value U64| -> F16, Error!:
-    return cast! value
+    return cast value
 ;
 i64_via_f64_to_f32 |value I64| -> F32, Error!:
     intermediate F64 = cast value
-    return cast! intermediate
+    return cast intermediate
 ;
 u64_via_f64_to_f32 |value U64| -> F32, Error!:
     intermediate F64 = cast value
-    return cast! intermediate
+    return cast intermediate
 ;
 
 multiply_f32 |left F32, right F32| -> F32, Error!:
@@ -59,19 +59,19 @@ divide_f32 |left F32, right F32| -> F32, Error!:
 divide_f64 |left F64, right F64| -> F64, Error!:
     return left / right
 ;
-divide_f16 |left F16, right F16| -> F32, Error!:
+divide_f16 |left F16, right F16| -> F16, Error!:
     return left / right
 ;
-divide_float |left Float, right Float| -> Float, Error!:
+divide_float |left F64, right F64| -> F64, Error!:
     return left / right
 ;
 multiply_f64 |left F64, right F64| -> F64, Error!:
     return left * right
 ;
-multiply_f16 |left F16, right F16| -> F32, Error!:
+multiply_f16 |left F16, right F16| -> F16, Error!:
     return left * right
 ;
-multiply_profile_float |left Float, right Float| -> Float, Error!:
+multiply_profile_float |left F64, right F64| -> F64, Error!:
     return left * right
 ;
 capture_f64_to_f16 |value F64| -> U32:
@@ -122,7 +122,7 @@ capture_divide_f64 |left F64, right F64| -> U32:
     ;
     return code
 ;
-capture_divide_float |left Float, right Float| -> U32:
+capture_divide_float |left F64, right F64| -> U32:
     code ~U32 = 0
     ignored = divide_float(left, right) catch |err|:
         code = err.code
@@ -225,7 +225,7 @@ negative_f32_cast_text String = format_f64(negative_f32_as_f64)
 negative_f16_cast_text String = format_f32(negative_f16_as_f32)
 negative_f64_product_text String = format_f64(negative_f64_product)
 negative_f32_product_text String = format_f32(negative_f32_product)
-negative_f16_product_text String = format_f32(negative_f16_product)
+negative_f16_product_text String = format_f16(negative_f16_product)
 negative_profile_product_text String = format_float(negative_profile_product)
 negative_f32_underflow_text String = format_f32(negative_f32_underflow)
 negative_f16_underflow_text String = format_f16(negative_f16_underflow)
@@ -263,7 +263,7 @@ negative_f16_equals_zero = negative_f16_from_f64 is f16_positive_zero
 negative_profile_float_equals_zero = negative_profile_float is float_positive_zero
 negative_f64_product_equals_zero = negative_f64_product is positive_f64
 negative_f32_product_equals_zero = negative_f32_product is f32_positive_zero
-negative_f16_product_equals_zero = negative_f16_product is f32_positive_zero
+negative_f16_product_equals_zero = negative_f16_product is f16_positive_zero
 negative_profile_product_equals_zero = negative_profile_product is float_positive_zero
 f64_zero_division_error = capture_divide_f64(1.0, negative_f64)
 f32_zero_division_error = capture_divide_f32(1.0, negative_f32_from_f64)

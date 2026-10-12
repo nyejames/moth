@@ -1,8 +1,8 @@
 //! Checked numeric helpers for the JavaScript runtime.
 //!
 //! WHAT: emits carrier-parameterised bounded integer and binary-float operation families, exact
-//!       scale-generic Number coefficient operations, profile-aware Float boundary checks and
-//!       canonical Float-to-String formatting for HTML-JS.
+//!       scale-generic Number coefficient operations, exact-precision binary-float boundary validation and
+//!       canonical binary-float-to-String formatting for HTML-JS.
 //! WHY: HIR numeric statements already own operator domains and failure modes; this runtime only
 //!      enforces each selected domain's exact semantics at its operation boundary.
 //!
@@ -11,18 +11,13 @@
 
 use super::NumericRuntimeHelperUsage;
 use crate::backends::js::JsEmitter;
-use crate::backends::js::numeric_carrier::{JsNumericCarrier, binary_float_precision_bits};
+use crate::backends::js::numeric_carrier::binary_float_precision_bits;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
 
 impl<'hir> JsEmitter<'hir> {
     /// Emits only numeric helper families used by reachable HIR and cast statements.
     pub(crate) fn emit_runtime_numeric_helpers(&mut self, usage: NumericRuntimeHelperUsage) {
-        let float_precision =
-            JsNumericCarrier::for_scalar(NumericScalar::Float, self.config.numeric_profile)
-                .and_then(JsNumericCarrier::float_precision)
-                .expect("Float always has a JavaScript binary-float carrier");
         self.emit_numeric_trap_helper();
         if usage.binary_float_power {
             self.emit_javascript_source(include_str!("float_power.js"));
@@ -41,6 +36,10 @@ impl<'hir> JsEmitter<'hir> {
             self.emit_number_helpers();
         }
 
+        if usage.binary16_ops {
+            self.emit_float_helpers("float16", BinaryFloatPrecision::Binary16);
+        }
+
         if usage.binary32_ops {
             self.emit_float_helpers("float32", BinaryFloatPrecision::Binary32);
         }
@@ -54,7 +53,7 @@ impl<'hir> JsEmitter<'hir> {
         }
 
         if usage.validate_float {
-            self.emit_float_validate_helper(float_precision);
+            self.emit_float_validate_helper();
         }
     }
 
@@ -211,7 +210,7 @@ impl<'hir> JsEmitter<'hir> {
     /// Emits one integer family shared by every domain with the same JS carrier.
     ///
     /// WHY: domain bounds are call arguments rather than duplicated helper bodies, so I8 through
-    ///      U32 share Number arithmetic and I64/U64/profile-Int64 share exact BigInt arithmetic.
+    ///      U32 share Number arithmetic and I64/U64 share exact BigInt arithmetic.
     fn emit_integer_helpers(&mut self, family: &str, uses_bigint: bool) {
         let zero = if uses_bigint { "0n" } else { "0" };
         let one = if uses_bigint { "1n" } else { "1" };
@@ -382,13 +381,15 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     /// Emits checked operations for one binary-float precision.
+    ///
+    /// WHY: D15 completes every binary-float operation at its selected precision, so each family
+    ///      rounds once after the operation (binary16/binary32) and then checks finiteness on the
+    ///      rounded result; binary64 needs no rounding step.
     fn emit_float_helpers(&mut self, family: &str, precision: BinaryFloatPrecision) {
         let round = match precision {
+            BinaryFloatPrecision::Binary16 => Some("Math.f16round"),
             BinaryFloatPrecision::Binary32 => Some("Math.fround"),
             BinaryFloatPrecision::Binary64 => None,
-            BinaryFloatPrecision::Binary16 => {
-                unreachable!("binary16 is promoted to binary32 before arithmetic")
-            }
         };
         let non_finite = self.error_result_call(BuiltinErrorCode::FloatNonFinite);
         let divide_by_zero = self.error_result_call(BuiltinErrorCode::DivideByZero);
@@ -438,17 +439,27 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_line("");
     }
 
-    fn emit_float_validate_helper(&mut self, precision: BinaryFloatPrecision) {
+    /// Emits the exact-precision finite-boundary validator for raw external float carriers.
+    ///
+    /// WHAT: rejects non-Number carriers, rounds at the caller-supplied binary precision, and
+    ///       reports the shared binary-float boundary failure (code 304) for non-finite results.
+    /// WHY: the caller owns the source's exact precision, so one helper serves every validated
+    ///      boundary. The `typeof` gate must precede rounding because JS rounding coerces
+    ///      numeric strings, booleans and objects into values that were never Moth binary floats.
+    fn emit_float_validate_helper(&mut self) {
         let non_finite = self.error_result_call(BuiltinErrorCode::FloatBoundaryNonFinite);
-        self.emit_line("function __moth_float_validate(value) {");
+        self.emit_line("function __moth_float_validate(value, precision) {");
         self.with_indent(|emitter| {
-            if precision == BinaryFloatPrecision::Binary32 {
-                emitter.emit_line("value = Math.fround(value);");
-            }
-            emitter.emit_line("if (!Number.isFinite(value)) {");
+            emitter.emit_line("if (typeof value !== \"number\") {");
             emitter.with_indent(|em| em.emit_line(&non_finite));
             emitter.emit_line("}");
-            emitter.emit_line("return { tag: \"ok\", value };");
+            emitter.emit_line(
+                "const rounded = precision === 16 ? Math.f16round(value) : precision === 32 ? Math.fround(value) : value;",
+            );
+            emitter.emit_line("if (!Number.isFinite(rounded)) {");
+            emitter.with_indent(|em| em.emit_line(&non_finite));
+            emitter.emit_line("}");
+            emitter.emit_line("return { tag: \"ok\", value: rounded };");
         });
         self.emit_line("}");
         self.emit_line("");
@@ -459,7 +470,7 @@ impl<'hir> JsEmitter<'hir> {
     /// WHAT: binary16/binary32 search shortest round-tripping decimals with exact-distance
     ///       ties-to-even; binary64 uses the engine's shortest binary64 decimal. All precisions
     ///       share Moth's exponent thresholds, sign handling and result carrier.
-    /// WHY: fixed floats and profile Float must format according to their semantic precision, not
+    /// WHY: every binary float must format according to its exact semantic precision, not
     ///      merely the wider Number carrier that stores them.
     fn emit_format_float_helper(&mut self, usage: NumericRuntimeHelperUsage) {
         let error_code = BuiltinErrorCode::FloatFormatInvariant.as_u32().to_string();

@@ -1,0 +1,263 @@
+-- Retained receiver-scoped completion.
+--
+-- Every row keeps an unannotated pending scalar origin, so the protected
+-- fragment, its `then` fallback and any nested or inline value block stay
+-- retained until the receiver that owns them installs its exact slots. The rows
+-- cover the receiver-scoped completion paths and use distinct expected values
+-- so a premature default, an early completion or a leaked outer override
+-- changes the exact output.
+--
+-- 1. Return-owned inline and block catches over `fail_u64(pending) + 1` type the
+--    raw fallback 0 at the U64 return slot, and the assignment-owned forms type
+--    the same fragment at a U64 mutable target. `pending` stays unannotated and
+--    its only receiver is the I32 source argument. The succeeding siblings add a
+--    distinct raw operand so the four owning shapes report 43/44/45/46.
+-- 2. A U64 catch initializer whose handler terminates through a value-if keeps
+--    the enclosing I32 return slot for its branches, a nested assignment with
+--    its own I32 target keeps that contract, and an unannotated nested
+--    declaration infers from its own produced values instead of inheriting the
+--    surrounding U64 catch slot. `total` exists only to fix the outer catching
+--    receiver; the terminating handler never produces it.
+-- 3. Ordinary unannotated declarations own block if/match values: concrete
+--    strings infer String and unresolved numeric branches infer I32.
+-- 4. Inline value-if and inline option/choice predicate branches read the same
+--    unannotated pending origins as the block forms. The option-present
+--    predicate keeps its required capture while both produced values stay
+--    pending references, so the branch deferral cannot escape through the
+--    shared inline parser.
+-- 5. A U64 catch whose handler is a full `match` or multi-bind value-if
+--    resolves its I32 arms against the enclosing return slot. The assignment,
+--    inferred and two-slot forms keep their unannotated pending origins
+--    retained, so a nested full match must not inherit the U64 catch receiver.
+--    The handler always terminates, so `total` is never produced.
+-- 6. An ordinary statement match in a U64 catch handler has no value target
+--    of its own. Its literal `then` arms exit the enclosing catch and receive
+--    the U64 return slot, so the Ready and Waiting calls observe 0 and 1.
+
+Status ::
+    Ready,
+    Waiting,
+;
+
+fail_u64 |value I32| -> U64, Error!:
+    return! Error("u64 receiver scope failure")
+;
+
+succeed_u64 |value I32| -> U64, Error!:
+    return 41
+;
+
+u64_return_inline_failure || -> U64:
+    pending = 1
+    return fail_u64(pending) + 1 catch then 0
+;
+
+u64_return_block_failure || -> U64:
+    pending = 1
+    return fail_u64(pending) + 1 catch:
+        then 0
+    ;
+;
+
+u64_return_inline_success || -> U64:
+    pending = 1
+    return succeed_u64(pending) + 2 catch then 0
+;
+
+u64_return_block_success || -> U64:
+    pending = 1
+    return succeed_u64(pending) + 3 catch:
+        then 0
+    ;
+;
+
+u64_assignment_inline_failure || -> U64:
+    pending = 1
+    total ~U64 = 0
+    total = fail_u64(pending) + 1 catch then 0
+    return total
+;
+
+u64_assignment_block_failure || -> U64:
+    pending = 1
+    total ~U64 = 0
+    total = fail_u64(pending) + 1 catch:
+        then 0
+    ;
+    return total
+;
+
+u64_assignment_inline_success || -> U64:
+    pending = 1
+    total ~U64 = 0
+    total = succeed_u64(pending) + 4 catch then 0
+    return total
+;
+
+u64_assignment_block_success || -> U64:
+    pending = 1
+    total ~U64 = 0
+    total = succeed_u64(pending) + 5 catch:
+        then 0
+    ;
+    return total
+;
+
+u64_catch_nested_return |flag Bool| -> I32:
+    pending_one = 1
+    pending_two = 2
+    total U64 = fail_u64(pending_one) catch:
+        return if flag then pending_one else pending_two
+    ;
+    return 7
+;
+
+u64_catch_nested_assignment |flag Bool| -> I32:
+    pending_one = 3
+    pending_two = 4
+    total U64 = fail_u64(pending_one) catch:
+        chosen ~I32 = 0
+        chosen = if flag:
+            then pending_one
+        else
+            then pending_two
+        ;
+        return chosen
+    ;
+    return 8
+;
+
+u64_catch_nested_inferred |flag Bool| -> I32:
+    pending_one = 23
+    pending_two = 24
+    total U64 = fail_u64(pending_one) catch:
+        inner = if flag:
+            then pending_one
+        else
+            then pending_two
+        ;
+        return inner
+    ;
+    return 9
+;
+
+maybe_u64 |fail Bool, value I32| -> U64, Error!:
+    if fail:
+        return! Error("u64 match receiver failure")
+    ;
+    return 41
+;
+
+u64_catch_match_assignment |fail Bool, state Status| -> I32:
+    pending_one = 3
+    pending_two = 4
+    total U64 = maybe_u64(fail, pending_one) catch:
+        chosen ~I32 = 0
+        chosen = if state is:
+            Ready => then pending_one
+            Waiting => then pending_two
+        ;
+        return chosen
+    ;
+    return 10
+;
+
+u64_catch_match_inferred |fail Bool, state Status| -> I32:
+    pending_one = 23
+    pending_two = 24
+    total U64 = maybe_u64(fail, pending_one) catch:
+        inner = if state is:
+            Ready => then pending_one
+            Waiting => then pending_two
+        ;
+        return inner
+    ;
+    return 11
+;
+
+u64_catch_match_pair |fail Bool, state Status| -> I32:
+    pending_one = 5
+    pending_two = 6
+    total U64 = maybe_u64(fail, pending_one) catch:
+        first, second = if state is:
+            Ready => then pending_one, pending_two
+            Waiting => then pending_two, pending_one
+        ;
+        return first * 10 + second
+    ;
+    return 12
+;
+
+u64_statement_match_recovery |state Status| -> U64:
+    pending = 1
+    return fail_u64(pending) + 1 catch:
+        if state is:
+            Ready => then 0
+            Waiting => then 1
+        ;
+    ;
+;
+
+string_block_receiver |ready Bool| -> String:
+    label = if ready:
+        then "ready"
+    else
+        then "waiting"
+    ;
+    return label
+;
+
+numeric_block_receiver |ready Bool| -> I32:
+    value = if ready:
+        then 5
+    else
+        then 6
+    ;
+    return value
+;
+
+numeric_match_receiver |state Status| -> I32:
+    value = if state is:
+        Ready => then 7
+        Waiting => then 8
+    ;
+    return value
+;
+
+inline_reference_receiver |ready Bool| -> I32:
+    pending = 21
+    value = if ready then pending else pending
+    return value
+;
+
+inline_branch_receiver |ready Bool| -> I32:
+    pending_odd = 9
+    pending_even = 10
+    value = if ready then pending_odd else pending_even
+    return value
+;
+
+inline_option_receiver |maybe_name String?| -> I32:
+    pending_hit = 11
+    pending_miss = 13
+    value = if maybe_name is |name| then pending_hit else pending_miss
+    return value
+;
+
+inline_choice_receiver |state Status| -> I32:
+    pending_hit = 15
+    pending_miss = 16
+    score = if state is Ready then pending_hit else pending_miss
+    return score
+;
+
+present_name String? = "Priya"
+absent_name String? = none
+
+[:scalar retained return scopes inline=[u64_return_inline_failure()]/[u64_return_inline_success()] block=[u64_return_block_failure()]/[u64_return_block_success()]]
+[:scalar retained assignment scopes inline=[u64_assignment_inline_failure()]/[u64_assignment_inline_success()] block=[u64_assignment_block_failure()]/[u64_assignment_block_success()]]
+[:scalar retained nested scopes return=[u64_catch_nested_return(true)]/[u64_catch_nested_return(false)] assignment=[u64_catch_nested_assignment(true)]/[u64_catch_nested_assignment(false)] inferred=[u64_catch_nested_inferred(true)]/[u64_catch_nested_inferred(false)]]
+[:scalar retained inferred declarations string=[string_block_receiver(true)]/[string_block_receiver(false)] numeric=[numeric_block_receiver(true)]/[numeric_block_receiver(false)] match=[numeric_match_receiver(Status::Ready)]/[numeric_match_receiver(Status::Waiting)]]
+[:scalar retained inline pending same=[inline_reference_receiver(true)]/[inline_reference_receiver(false)] branches=[inline_branch_receiver(true)]/[inline_branch_receiver(false)] option=[inline_option_receiver(present_name)]/[inline_option_receiver(absent_name)] choice=[inline_choice_receiver(Status::Ready)]/[inline_choice_receiver(Status::Waiting)]]
+[:scalar retained nested match fail assignment=[u64_catch_match_assignment(true, Status::Ready)]/[u64_catch_match_assignment(true, Status::Waiting)] inferred=[u64_catch_match_inferred(true, Status::Ready)]/[u64_catch_match_inferred(true, Status::Waiting)] pair=[u64_catch_match_pair(true, Status::Ready)]/[u64_catch_match_pair(true, Status::Waiting)] success=[u64_catch_match_assignment(false, Status::Ready)]/[u64_catch_match_inferred(false, Status::Ready)]/[u64_catch_match_pair(false, Status::Ready)]]
+[:scalar retained statement match recovery=[u64_statement_match_recovery(Status::Ready)]/[u64_statement_match_recovery(Status::Waiting)]]

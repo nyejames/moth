@@ -3,7 +3,7 @@ unused_number_helper |value Dec2| -> Dec2:
     return value
 ;
 
-visible_control || -> Int:
+visible_control || -> I32:
     if false:
         removed Dec256 = 1e-256
     ;

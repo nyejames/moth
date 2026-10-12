@@ -1,0 +1,90 @@
+-- Retained known-result postfix consumers.
+--
+-- A retained call whose numeric argument origins are still unresolved already
+-- fixes its result from the declared signature, so every authored member or
+-- method step after it resolves before those arguments materialise:
+--
+-- 1. `meter.with_amount(method_value).amount` keeps the ready `Meter` receiver
+--    method call with its pending U64 argument and resolves the `.amount`
+--    projection from the method's declared `Meter` result.
+-- 2. `make_meter(source_value).amount` resolves that projection on a source
+--    call, and `(make_meter(grouped_value)).amount` resolves it through the
+--    authored group of one.
+-- 3. `meter.with_amount(chain_first).shift_amount(chain_second).amount`
+--    carries the first step's declared `Meter` result into the second source
+--    method step before either pending argument resolves.
+-- 4. `make_items(item_count).length()` and `meter.amounts(method_count).length()`
+--    resolve the collection builtin from the declared `{I32}` result, and
+--    `make_scores(score_count).length` resolves the map length property the same
+--    way, so each observable length is 3.
+-- 5. A no-success mutable method statement and a free call statement each run
+--    before the read authored after them: `method_read` observes 9 and
+--    `free_read` observes 11, so a dropped or reordered statement changes the
+--    exact output.
+--
+-- Every argument origin stays unannotated so the retained positions are
+-- genuinely pending, and only declared return metadata resolves the steps.
+
+Meter = |
+    amount U64,
+|
+
+with_amount |this Meter, value U64| -> Meter:
+    return Meter(amount = value)
+;
+
+shift_amount |this Meter, value U64| -> Meter:
+    return Meter(amount = value)
+;
+
+make_meter |value U64| -> Meter:
+    return Meter(amount = value)
+;
+
+amounts |this Meter, count U64| -> {I32}:
+    return {1, 2, 3}
+;
+
+make_items |count U64| -> {I32}:
+    return {1, 2, 3}
+;
+
+make_scores |count U64| -> {String = I32}:
+    return {"Priya" = 10, "Rob" = 12, "Emmy" = 7}
+;
+
+set_amount |this ~Meter, value U64|:
+    this.amount = value
+;
+
+set_free |target ~Meter, value U64|:
+    target.amount = value
+;
+
+meter = Meter(amount = 0)
+method_value = 7
+source_value = 9
+grouped_value = 11
+chain_first = 7
+chain_second = 13
+item_count = 7
+method_count = 13
+score_count = 11
+
+method_amount = meter.with_amount(method_value).amount
+source_amount = make_meter(source_value).amount
+grouped_amount = (make_meter(grouped_value)).amount
+chain_amount = meter.with_amount(chain_first).shift_amount(chain_second).amount
+item_length = make_items(item_count).length()
+method_length = meter.amounts(method_count).length()
+score_length = make_scores(score_count).length
+
+mutation_meter ~= Meter(amount = 0)
+set_value = 9
+~mutation_meter.set_amount(set_value)
+method_read String = cast mutation_meter.amount
+free_value = 11
+set_free(~mutation_meter, free_value)
+free_read String = cast mutation_meter.amount
+
+[:scalar retained known result postfix method=[method_amount] source=[source_amount] grouped=[grouped_amount] chain=[chain_amount] items=[item_length] method_items=[method_length] scores=[score_length] mutable=[method_read]/[free_read]]

@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "multi_bind_known_leaves named_first=selected=18446744073709551613 count=0 named_second=selected=18446744073709551612 count=1 inline_first=selected=18446744073709551611 count=0 inline_second=selected=18446744073709551610 count=1 named_map_first=selected=18446744073709551609 count=0 named_map_second=selected=18446744073709551608 count=1 inline_map_first=selected=18446744073709551607 count=0 inline_map_second=selected=18446744073709551606 count=1 mixed_first=selected=1 count=0 mixed_second=selected=2.5 count=1 mixed_map_first=selected=1 count=0 mixed_map_second=selected=2.5 count=1"

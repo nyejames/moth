@@ -14,20 +14,16 @@
 //!
 //! ## Supported Operations
 //!
-//! - **Arithmetic**: Checked Int, Uint, Float and fixed-width numeric arithmetic, plus exact Dec
-//!   arithmetic, with domain-specific rounding
+//! - **Arithmetic**: Checked fixed-width numeric arithmetic plus exact Dec arithmetic, with
+//!   domain-specific rounding
 //! - **Boolean**: Logical AND, OR, NOT operations
 //! - **Comparison**: Exact integer and Dec ordering, numeric float comparisons, and equality
 //! - **Promotion**: Shared operator-domain rules keep compile-time results aligned with typed
 //!   operations
 
 use std::borrow::Cow;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 use crate::compiler_frontend::ast::ScopeContext;
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
-use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
 #[cfg(test)]
@@ -42,7 +38,6 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
 };
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::builtins::casts::{BuiltinCastLiteral, apply_builtin_cast_policy};
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::compiler_messages::{
@@ -54,6 +49,7 @@ use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::number::{NumberArithmeticError, NumberValue};
 use crate::compiler_frontend::datatypes::numeric_operators::{
     NumericOperator, binary_operation_domain, comparison_supported, negation_domain,
+    range_iteration_domain,
 };
 use crate::compiler_frontend::datatypes::numeric_power;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -67,7 +63,6 @@ use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass, FixedScalarValue};
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
-use moth_lexical::numeric::profile::NumericProfile;
 
 #[derive(Debug)]
 pub(crate) enum ConstantFoldError {
@@ -145,7 +140,6 @@ pub(crate) fn require_concrete_text(
                             CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
                             Some(operation),
                             value.span,
-                            None,
                         ));
                     }
                 }
@@ -198,12 +192,11 @@ impl From<TemplateError> for ConstantFoldError {
 /// [`CompilerDiagnostic`] values while malformed internal RPN state remains an
 /// infrastructure [`CompilerError`]. A text-unavailable outcome is not an error for speculative
 /// callers because runtime lowering resolves the structural pieces later.
-/// `scope_context`, when available, resolves retained source-`#Config` provenance for numeric
+/// `scope_context`, when available, resolves retained source-`#Config` provenance for compile-time
 /// failure labels; speculative callers without that owner pass `None`.
 pub fn constant_fold(
     output_stack: Vec<ExpressionRpnItem>,
     string_table: &mut StringTable,
-    numeric_profile: NumericProfile,
     scope_context: Option<&ScopeContext>,
 ) -> Result<ConstantFoldOutcome, ConstantFoldError> {
     #[cfg(feature = "benchmark_counters")]
@@ -233,6 +226,10 @@ pub fn constant_fold(
             item,
             ExpressionRpnItem::PendingNumericLiteral { .. }
                 | ExpressionRpnItem::PendingGroup { .. }
+                | ExpressionRpnItem::PendingNumericBinding { .. }
+                | ExpressionRpnItem::PendingNumericCall { .. }
+                | ExpressionRpnItem::PendingNumericCast { .. }
+                | ExpressionRpnItem::PendingNumericExpression { .. }
         ) {
             return Err(pending_expression_item_bug("constant folding").into());
         }
@@ -263,23 +260,21 @@ pub fn constant_fold(
                 .pop()
                 .expect("unary operator should have one operand after the stack-length guard");
 
-            let folded =
-                match fold_unary_operator(operator, &operand, string_table, *span, numeric_profile)
-                {
-                    Ok(folded) => folded,
-                    Err(ConstantFoldError::Diagnostic(mut diagnostic)) => {
-                        if let ExpressionRpnItem::Operand(expression) = &operand {
-                            attach_source_config_origin_labels(
-                                &mut diagnostic,
-                                &[&expression.synthetic_interface_provenance],
-                                string_table,
-                                scope_context,
-                            )?;
-                        }
-                        return Err(ConstantFoldError::Diagnostic(diagnostic));
+            let folded = match fold_unary_operator(operator, &operand, string_table, *span) {
+                Ok(folded) => folded,
+                Err(ConstantFoldError::Diagnostic(mut diagnostic)) => {
+                    if let ExpressionRpnItem::Operand(expression) = &operand {
+                        attach_source_config_origin_labels(
+                            &mut diagnostic,
+                            &[&expression.synthetic_interface_provenance],
+                            string_table,
+                            scope_context,
+                        )?;
                     }
-                    Err(error) => return Err(error),
-                };
+                    return Err(ConstantFoldError::Diagnostic(diagnostic));
+                }
+                Err(error) => return Err(error),
+            };
 
             if let Some(folded) = folded {
                 stack.push(folded);
@@ -314,24 +309,22 @@ pub fn constant_fold(
             }
         };
 
-        let outcome = match lhs_expr.evaluate_operator(
-            rhs_expr,
-            operator,
-            string_table,
-            numeric_profile,
-            *span,
-        ) {
+        let outcome = match lhs_expr.evaluate_operator(rhs_expr, operator, string_table, *span) {
             Ok(outcome) => outcome,
             Err(ConstantFoldError::Diagnostic(mut diagnostic)) => {
-                attach_source_config_origin_labels(
-                    &mut diagnostic,
-                    &[
-                        &lhs_expr.synthetic_interface_provenance,
-                        &rhs_expr.synthetic_interface_provenance,
-                    ],
-                    string_table,
-                    scope_context,
-                )?;
+                // Only numeric folds name #Config provenance. Bool and string operator
+                // failures stay unlabelled.
+                if is_numeric_fold_operand(lhs_expr) {
+                    attach_source_config_origin_labels(
+                        &mut diagnostic,
+                        &[
+                            &lhs_expr.synthetic_interface_provenance,
+                            &rhs_expr.synthetic_interface_provenance,
+                        ],
+                        string_table,
+                        scope_context,
+                    )?;
+                }
                 return Err(ConstantFoldError::Diagnostic(diagnostic));
             }
             Err(error) => return Err(error),
@@ -397,10 +390,7 @@ fn attach_source_config_origin_labels(
 ) -> Result<(), ConstantFoldError> {
     if !matches!(
         &diagnostic.payload,
-        DiagnosticPayload::CompileTimeEvaluationError {
-            numeric_profile: Some(_),
-            ..
-        }
+        DiagnosticPayload::CompileTimeEvaluationError { .. }
     ) {
         return Ok(());
     }
@@ -443,12 +433,20 @@ fn attach_source_config_origin_labels(
     Ok(())
 }
 
+/// Numeric folds are the only diagnostics that name #Config provenance; bool and string
+/// operator failures keep no source labels.
+fn is_numeric_fold_operand(expression: &Expression) -> bool {
+    matches!(
+        &expression.kind,
+        ExpressionKind::FixedScalar(_) | ExpressionKind::Number(_)
+    )
+}
+
 fn fold_unary_operator(
     op: &Operator,
     operand: &ExpressionRpnItem,
     string_table: &mut StringTable,
     operator_span: Option<SourceSpan>,
-    numeric_profile: NumericProfile,
 ) -> Result<Option<ExpressionRpnItem>, ConstantFoldError> {
     let ExpressionRpnItem::Operand(expression) = operand else {
         return Ok(None);
@@ -457,7 +455,6 @@ fn fold_unary_operator(
     let mut failure_context = NumericFoldFailure {
         operator: op,
         span: operator_span,
-        numeric_profile,
         string_table,
     };
 
@@ -493,7 +490,7 @@ fn fold_unary_operator(
                 let Some(value) = value.checked_neg() else {
                     return integer_overflow_error(&mut failure_context);
                 };
-                let Some((minimum, maximum)) = result_domain.integer_range(numeric_profile) else {
+                let Some((minimum, maximum)) = result_domain.integer_range() else {
                     return Err(CompilerError::compiler_error(
                         "Integer negation received a non-integer result domain.",
                     )
@@ -509,7 +506,7 @@ fn fold_unary_operator(
                     expression.span,
                     expression.value_mode.to_owned(),
                 )
-            } else if let Some(precision) = result_domain.binary_float_precision(numeric_profile) {
+            } else if let Some(precision) = result_domain.binary_float_precision() {
                 let value = float_value_from_expression(expression)
                     .expect("float negation domain only accepts binary-float expressions");
                 let value = checked_float_result(-value, precision, &mut failure_context)?;
@@ -536,50 +533,31 @@ fn fold_unary_operator(
 }
 
 /// Folds a typed expression that has a dedicated AST const-eval path.
-///
-/// `template_ir_store` is the shared module-local store from the caller's `ScopeContext`.
-/// Catch-handler templates retain their exact TIR reference so const classification reads
-/// their effective view instead of reconstructing template structure.
 pub fn fold_compile_time_expression(
     expression: &Expression,
-    template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
     constant_context: bool,
-    numeric_profile: NumericProfile,
 ) -> Result<Expression, ConstantFoldError> {
     // Dedicated expression classifier includes the evaluator's single-value path.
     #[cfg(feature = "benchmark_counters")]
     increment_frontend_counter(FrontendCounter::CensusFoldCompileTimeExpressionEntries);
     match &expression.kind {
         ExpressionKind::Cast(cast) => {
-            let folded_source = fold_compile_time_expression(
-                &cast.source,
-                template_ir_store,
-                string_table,
-                constant_context,
-                numeric_profile,
-            )?;
+            let folded_source =
+                fold_compile_time_expression(&cast.source, string_table, constant_context)?;
             fold_resolved_cast(
                 expression,
                 cast,
                 &folded_source,
-                template_ir_store,
                 string_table,
                 constant_context,
-                numeric_profile,
-                None,
+                false,
             )
         }
         ExpressionKind::HandledFallibleExpression {
             value, handling, ..
         } => {
-            let folded_value = fold_compile_time_expression(
-                value,
-                template_ir_store,
-                string_table,
-                constant_context,
-                numeric_profile,
-            )?;
+            let folded_value = fold_compile_time_expression(value, string_table, constant_context)?;
 
             let mut folded_expression = match &folded_value.kind {
                 #[cfg(test)]
@@ -625,7 +603,7 @@ pub fn fold_compile_time_expression(
         }
         ExpressionKind::ValueBlock { block } => match block.as_ref() {
             ValueBlock::Catch(value_catch) => {
-                let FallibleHandling::Handler { body, .. } = &value_catch.handler else {
+                let FallibleHandling::Handler { .. } = &value_catch.handler else {
                     return Ok(expression.to_owned());
                 };
 
@@ -633,23 +611,16 @@ pub fn fold_compile_time_expression(
                     return Ok(expression.to_owned());
                 };
 
-                let folded_source = fold_compile_time_expression(
-                    &cast.source,
-                    template_ir_store,
-                    string_table,
-                    constant_context,
-                    numeric_profile,
-                )?;
+                let folded_source =
+                    fold_compile_time_expression(&cast.source, string_table, constant_context)?;
 
                 fold_resolved_cast(
                     expression,
                     cast,
                     &folded_source,
-                    template_ir_store,
                     string_table,
                     constant_context,
-                    numeric_profile,
-                    Some(body),
+                    true,
                 )
             }
 
@@ -669,19 +640,13 @@ pub fn fold_compile_time_expression(
 ///      compile time.
 /// WHY: keeping this logic in the AST const-eval owner means HIR lowering only sees
 ///      runtime casts that could not be folded away.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "cast folding keeps the original and folded expressions, the resolved cast, the TIR store, mutable string state, const context, boundary numeric profile and recovery body as separate inputs"
-)]
 fn fold_resolved_cast(
     original_expression: &Expression,
     cast: &ResolvedCastExpression,
     folded_source: &Expression,
-    template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
     constant_context: bool,
-    numeric_profile: NumericProfile,
-    recovery_handler_body: Option<&[AstNode]>,
+    has_recovery_handler: bool,
 ) -> Result<Expression, ConstantFoldError> {
     #[cfg(feature = "benchmark_counters")]
     increment_frontend_counter(FrontendCounter::CensusCastFoldAttempts);
@@ -713,7 +678,7 @@ fn fold_resolved_cast(
                     Err(diagnostic) => return Err(ConstantFoldError::Diagnostic(diagnostic)),
                 };
 
-            match apply_builtin_cast_policy(*policy, &source_literal, numeric_profile) {
+            match apply_builtin_cast_policy(*policy, &source_literal) {
                 Ok(folded_literal) => {
                     let Some(mut folded_expression) = builtin_cast_expression_from_literal(
                         &folded_literal,
@@ -733,43 +698,27 @@ fn fold_resolved_cast(
                         folded_source.synthetic_interface_provenance.clone(),
                     );
 
-                    Ok(folded_expression)
-                }
-                Err(_) if !constant_context => Ok(original_expression.to_owned()),
-                Err(_) => {
-                    // A const-required fallible cast with a local recovery handler should
-                    // fold to the handler's produced value when the source folded but the
-                    // builtin policy failed. If the handler itself cannot fold, report that
-                    // as a separate diagnostic so the user knows the recovery path is the
-                    // remaining obstacle.
-                    if let Some(handler_body) = recovery_handler_body
-                        && let Some(folded_handler) = fold_cast_recovery_handler(
-                            handler_body,
-                            cast.target_type_id,
-                            cast.requires_optional_wrap_after_cast,
-                            original_expression.type_id,
-                            original_expression.span,
-                            template_ir_store,
-                            string_table,
-                            numeric_profile,
-                        )?
-                    {
-                        let recovery_provenance = folded_source
-                            .synthetic_interface_provenance
-                            .union(&folded_handler.synthetic_interface_provenance);
-                        let folded_recovery =
-                            folded_handler.with_synthetic_interface_provenance(recovery_provenance);
-                        return Ok(folded_recovery);
+                    if !has_recovery_handler {
+                        let original_facts = &original_expression.failure_facts;
+                        folded_expression.failure_facts.checked_numeric_operation |=
+                            original_facts.checked_numeric_operation;
+                        folded_expression.failure_facts.authored_cast |=
+                            original_facts.authored_cast;
+                        folded_expression.failure_facts.safety_call_count = folded_expression
+                            .failure_facts
+                            .safety_call_count
+                            .max(original_facts.safety_call_count);
                     }
 
-                    Err(CompilerDiagnostic::invalid_cast(
-                        InvalidCastReason::BuiltinCastFailedInConst,
-                        Some(cast.source_type_id),
-                        Some(cast.target_type_id),
-                        original_expression.span,
-                    )
-                    .into())
+                    Ok(folded_expression)
                 }
+                Err(_) => Err(CompilerDiagnostic::invalid_cast(
+                    InvalidCastReason::BuiltinCastFailedInConst,
+                    Some(cast.source_type_id),
+                    Some(cast.target_type_id),
+                    original_expression.span,
+                )
+                .into()),
             }
         }
 
@@ -803,100 +752,6 @@ fn fold_resolved_cast(
     }
 }
 
-/// Folds a `cast ... catch:` handler body to its produced value in a const-required context.
-///
-/// WHAT: when a builtin cast failed at compile time, the handler body is the only remaining
-///      source for the result. This helper extracts the single produced value, folds it, and
-///      returns it if it collapsed to a compile-time value. If the handler cannot be folded, it
-///      reports a dedicated diagnostic so the failure is attributed to the recovery path, not the
-///      cast.
-/// WHY: keeping this small and local to the AST const-eval owner means HIR lowering does not need to
-///      interpret general catch handler bodies at compile time.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "recovery folding keeps the handler body, target/result types, wrap flag, span, TIR store, mutable string state and boundary numeric profile as separate inputs"
-)]
-fn fold_cast_recovery_handler(
-    handler_body: &[AstNode],
-    target_type_id: TypeId,
-    requires_optional_wrap_after_cast: bool,
-    result_type_id: TypeId,
-    diagnostic_span: Option<SourceSpan>,
-    template_ir_store: &Rc<RefCell<TemplateIrStore>>,
-    string_table: &mut StringTable,
-    numeric_profile: NumericProfile,
-) -> Result<Option<Expression>, ConstantFoldError> {
-    let Some(handler_expression) = extract_single_produced_value(handler_body) else {
-        return Err(CompilerDiagnostic::invalid_cast(
-            InvalidCastReason::CatchHandlerNotConstFoldable,
-            None,
-            Some(target_type_id),
-            diagnostic_span,
-        )
-        .into());
-    };
-
-    let folded_handler = fold_compile_time_expression(
-        handler_expression,
-        template_ir_store,
-        string_table,
-        true,
-        numeric_profile,
-    )?;
-
-    let handler_is_compile_time_constant = folded_handler
-        .const_value_kind_with_template_classifier(&mut |template| {
-            classify_template_from_effective_tir(template, template_ir_store)
-        })?
-        .is_compile_time_value();
-    if !handler_is_compile_time_constant {
-        return Err(CompilerDiagnostic::invalid_cast(
-            InvalidCastReason::CatchHandlerNotConstFoldable,
-            None,
-            Some(target_type_id),
-            folded_handler.span,
-        )
-        .into());
-    }
-
-    let mut result = folded_handler;
-    if requires_optional_wrap_after_cast {
-        result = Expression::coerced(result, result_type_id);
-    }
-
-    Ok(Some(result))
-}
-
-/// Extracts a direct single-value `then` expression from a value-producing body.
-///
-/// WHAT: catch handlers for cast recovery must produce exactly one value in a shape the constant
-///      folder can evaluate without interpreting statements or control-flow conditions.
-/// WHY: nested `if` or `match` handlers require real const statement evaluation to choose the
-///      executed branch. Until that owner exists, the safe frontend behavior is to reject those
-///      handlers in const-required casts instead of guessing at the first branch.
-fn extract_single_produced_value(body: &[AstNode]) -> Option<&Expression> {
-    for node in body {
-        match &node.kind {
-            NodeKind::ThenValue(produced_values) if produced_values.expressions.len() == 1 => {
-                return Some(&produced_values.expressions[0]);
-            }
-
-            NodeKind::If(..)
-            | NodeKind::Match { .. }
-            | NodeKind::LexicalScope { .. }
-            | NodeKind::RangeLoop { .. }
-            | NodeKind::CollectionLoop { .. }
-            | NodeKind::WhileLoop(..)
-            | NodeKind::Return(_)
-            | NodeKind::ReturnError(_) => return None,
-
-            _ => {}
-        }
-    }
-
-    None
-}
-
 /// Converts an AST `Expression` into a `BuiltinCastLiteral` for policy lookup.
 ///
 /// WHAT: extracts literal scalar values while routing string values through the single
@@ -909,9 +764,6 @@ fn builtin_cast_literal_from_expression(
 ) -> Result<Option<BuiltinCastLiteral>, CompilerDiagnostic> {
     match &value.kind {
         ExpressionKind::Bool(value) => Ok(Some(BuiltinCastLiteral::Bool(*value))),
-        ExpressionKind::Int(int) => Ok(Some(BuiltinCastLiteral::Int(*int))),
-        ExpressionKind::Uint(uint) => Ok(Some(BuiltinCastLiteral::Uint(*uint))),
-        ExpressionKind::Float(float) => Ok(Some(BuiltinCastLiteral::Float(*float))),
         ExpressionKind::FixedScalar(fixed) => Ok(Some(BuiltinCastLiteral::Fixed(*fixed))),
         ExpressionKind::Number(value) => Ok(Some(BuiltinCastLiteral::Number(value.clone()))),
         ExpressionKind::StringSlice(_) | ExpressionKind::StructuralString { .. } => {
@@ -939,15 +791,6 @@ fn builtin_cast_expression_from_literal(
     match literal {
         BuiltinCastLiteral::Bool(value) => {
             Some(Expression::bool(*value, span, ValueMode::ImmutableOwned))
-        }
-        BuiltinCastLiteral::Int(value) => {
-            Some(Expression::int(*value, span, ValueMode::ImmutableOwned))
-        }
-        BuiltinCastLiteral::Uint(value) => {
-            Some(Expression::uint(*value, span, ValueMode::ImmutableOwned))
-        }
-        BuiltinCastLiteral::Float(value) => {
-            Some(Expression::float(*value, span, ValueMode::ImmutableOwned))
         }
         BuiltinCastLiteral::String(value) => Some(Expression::string_slice(
             string_table.get_or_intern(value.to_owned()),
@@ -977,12 +820,10 @@ fn compile_time_evaluation_diagnostic(
     operation: Option<String>,
     string_table: &mut StringTable,
     span: Option<SourceSpan>,
-    numeric_profile: Option<NumericProfile>,
 ) -> ConstantFoldError {
     let operation = operation.map(|operation| string_table.get_or_intern(operation));
 
-    CompilerDiagnostic::compile_time_evaluation_error(reason, operation, span, numeric_profile)
-        .into()
+    CompilerDiagnostic::compile_time_evaluation_error(reason, operation, span).into()
 }
 
 fn integer_overflow_error<T>(ctx: &mut NumericFoldFailure<'_, '_>) -> Result<T, ConstantFoldError> {
@@ -991,7 +832,6 @@ fn integer_overflow_error<T>(ctx: &mut NumericFoldFailure<'_, '_>) -> Result<T, 
         Some(ctx.operator.to_str().to_string()),
         ctx.string_table,
         ctx.span,
-        Some(ctx.numeric_profile),
     ))
 }
 
@@ -1001,20 +841,18 @@ fn float_non_finite_error<T>(ctx: &mut NumericFoldFailure<'_, '_>) -> Result<T, 
         Some(ctx.operator.to_str().to_string()),
         ctx.string_table,
         ctx.span,
-        Some(ctx.numeric_profile),
     ))
 }
 
 /// Shared failure context for one numeric fold attempt.
 ///
-/// WHAT: carries the authored operator, its span, the selected numeric profile and the shared
-///       string table so both helpers funnel typed numeric diagnostics through one value.
-/// WHY: keeps the fold-function argument lists short while failures retain the same span,
-///       profile and operation identity that the standalone parameters provided.
+/// WHAT: carries the authored operator, its span and the shared string table so both helpers
+///       funnel typed numeric diagnostics through one value.
+/// WHY: keeps the fold-function argument lists short while failures retain the same span and
+///       operation identity that the standalone parameters provided.
 struct NumericFoldFailure<'table, 'operator> {
     operator: &'operator Operator,
     span: Option<SourceSpan>,
-    numeric_profile: NumericProfile,
     string_table: &'table mut StringTable,
 }
 
@@ -1033,7 +871,7 @@ fn checked_float_result(
 }
 
 /// Folds one integer operation exactly in `i128` and checks the result against the operation
-/// domain's inclusive `range`, so `Int` and every fixed integer share one set of rules.
+/// domain's inclusive `range`, so every fixed integer type shares one set of rules.
 fn checked_int_binary_result(
     lhs: i128,
     rhs: i128,
@@ -1109,7 +947,6 @@ fn divide_by_zero_error<T>(ctx: &mut NumericFoldFailure<'_, '_>) -> Result<T, Co
         None,
         ctx.string_table,
         ctx.span,
-        Some(ctx.numeric_profile),
     ))
 }
 
@@ -1121,21 +958,6 @@ fn exponent_operand_context_error<T>(
         Some(ctx.operator.to_str().to_string()),
         ctx.string_table,
         ctx.span,
-        Some(ctx.numeric_profile),
-    ))
-}
-
-fn integer_division_operand_error<T>(
-    string_table: &mut StringTable,
-    span: Option<SourceSpan>,
-    numeric_profile: NumericProfile,
-) -> Result<T, ConstantFoldError> {
-    Err(compile_time_evaluation_diagnostic(
-        CompileTimeEvaluationErrorReason::IntegerDivisionOnlyIntInt,
-        None,
-        string_table,
-        span,
-        Some(numeric_profile),
     ))
 }
 
@@ -1143,22 +965,17 @@ fn invalid_operator_for_compile_time_type<T>(
     op: &Operator,
     string_table: &mut StringTable,
     span: Option<SourceSpan>,
-    numeric_profile: Option<NumericProfile>,
 ) -> Result<T, ConstantFoldError> {
     Err(compile_time_evaluation_diagnostic(
         CompileTimeEvaluationErrorReason::InvalidOperatorForType,
         Some(op.to_str().to_string()),
         string_table,
         span,
-        numeric_profile,
     ))
 }
 
 fn numeric_scalar_for_expression(expression: &Expression) -> Option<NumericScalar> {
     match &expression.kind {
-        ExpressionKind::Int(_) => Some(NumericScalar::Int),
-        ExpressionKind::Uint(_) => Some(NumericScalar::Uint),
-        ExpressionKind::Float(_) => Some(NumericScalar::Float),
         ExpressionKind::FixedScalar(value) if value.scalar() != FixedScalar::Byte => {
             Some(NumericScalar::Fixed(value.scalar()))
         }
@@ -1169,11 +986,10 @@ fn numeric_scalar_for_expression(expression: &Expression) -> Option<NumericScala
 
 fn integer_value_from_expression(expression: &Expression) -> Option<i128> {
     match &expression.kind {
-        ExpressionKind::Int(value) => Some(i128::from(*value)),
-        // The `u64` payload widens exactly into `i128`, so values above `i64::MAX`
-        // keep their full unsigned value through checked folding and comparison.
-        ExpressionKind::Uint(value) => Some(i128::from(*value)),
         ExpressionKind::FixedScalar(value) => match value.scalar().class() {
+            // The `u64` payload widens exactly into `i128`, so `U64` values above
+            // `i64::MAX` keep their full unsigned value through checked folding and
+            // comparison without a lossy intermediate.
             FixedScalarClass::SignedInteger => value.as_i64().map(i128::from),
             FixedScalarClass::UnsignedInteger => value.as_u64().map(i128::from),
             FixedScalarClass::BinaryFloat | FixedScalarClass::Octet => None,
@@ -1184,7 +1000,6 @@ fn integer_value_from_expression(expression: &Expression) -> Option<i128> {
 
 fn float_value_from_expression(expression: &Expression) -> Option<f64> {
     match &expression.kind {
-        ExpressionKind::Float(value) => Some(*value),
         ExpressionKind::FixedScalar(value) => value.as_f64(),
         _ => None,
     }
@@ -1208,26 +1023,16 @@ fn integer_result_expression(
     value_mode: ValueMode,
 ) -> Expression {
     match domain {
-        NumericScalar::Int => {
-            // The profile-specific domain range check immediately precedes construction.
-            let value = i64::try_from(value).expect("Int result fits its i64 expression carrier");
-            Expression::int(value, span, value_mode)
-        }
-        NumericScalar::Uint => {
-            // The profile-specific unsigned range check immediately precedes construction.
-            let value = u64::try_from(value).expect("Uint result fits its u64 expression carrier");
-            Expression::uint(value, span, value_mode)
-        }
         NumericScalar::Fixed(scalar) => match scalar.class() {
             FixedScalarClass::SignedInteger => {
-                // The fixed-domain range check immediately precedes construction.
+                // The checked domain range immediately precedes construction.
                 let value = i64::try_from(value).expect("signed fixed result fits its i64 carrier");
                 let value = FixedScalarValue::signed(scalar, value)
                     .expect("checked result fits the signed fixed domain");
                 Expression::fixed_scalar(value, span, value_mode)
             }
             FixedScalarClass::UnsignedInteger => {
-                // The fixed-domain range check immediately precedes construction.
+                // The checked domain range immediately precedes construction.
                 let value =
                     u64::try_from(value).expect("unsigned fixed result fits its u64 carrier");
                 let value = FixedScalarValue::unsigned(scalar, value)
@@ -1238,7 +1043,6 @@ fn integer_result_expression(
                 unreachable!("integer result domain must be an integer scalar")
             }
         },
-        NumericScalar::Float => unreachable!("integer result domain cannot be Float"),
         NumericScalar::Number(_) => unreachable!("Number results use the exact Number constructor"),
     }
 }
@@ -1250,16 +1054,12 @@ fn float_result_expression(
     value_mode: ValueMode,
 ) -> Expression {
     match domain {
-        NumericScalar::Float => Expression::float(value, span, value_mode),
         NumericScalar::Fixed(scalar) if scalar.class() == FixedScalarClass::BinaryFloat => {
             let value = FixedScalarValue::binary_float(scalar, value)
                 .expect("rounded finite result fits the fixed float domain");
             Expression::fixed_scalar(value, span, value_mode)
         }
-        NumericScalar::Int
-        | NumericScalar::Uint
-        | NumericScalar::Fixed(_)
-        | NumericScalar::Number(_) => {
+        NumericScalar::Fixed(_) | NumericScalar::Number(_) => {
             unreachable!("float result domain must be a binary float scalar")
         }
     }
@@ -1271,12 +1071,10 @@ fn number_operand_in_domain(
 ) -> Option<Cow<'_, NumberValue>> {
     match &expression.kind {
         ExpressionKind::Number(value) if value.scale() == scale => Some(Cow::Borrowed(value)),
-        // `Uint` joins the exact mixed-integer rule with its full unsigned value,
-        // without an `Int` intermediary, including values above `i64::MAX`.
-        ExpressionKind::Int(_) | ExpressionKind::Uint(_) | ExpressionKind::FixedScalar(_) => {
-            integer_value_from_expression(expression)
-                .map(|integer| Cow::Owned(NumberValue::from_integer(integer, scale)))
-        }
+        // Exact fixed integers join the mixed-integer rule with their complete value,
+        // including `U64` above `i64::MAX` and signed values below zero.
+        ExpressionKind::FixedScalar(_) => integer_value_from_expression(expression)
+            .map(|integer| Cow::Owned(NumberValue::from_integer(integer, scale))),
         _ => None,
     }
 }
@@ -1309,13 +1107,28 @@ fn fold_number_binary(
             )
             .into());
         };
-        let ExpressionKind::Int(exponent) = &rhs.kind else {
+        // `Dec ^ I32` is the only Dec power row. The operator table already selected the
+        // exact `I32` exponent, so any other exponent is a broken invariant rather than a
+        // wider receiver repair.
+        let ExpressionKind::FixedScalar(exponent) = &rhs.kind else {
             return Err(CompilerError::compiler_error(
-                "Dec power folding received a non-Int exponent.",
+                "Dec power folding received a non-I32 exponent.",
             )
             .into());
         };
-        base.checked_power(*exponent)
+        if exponent.scalar() != FixedScalar::I32 {
+            return Err(CompilerError::compiler_error(
+                "Dec power folding received a non-I32 exponent.",
+            )
+            .into());
+        }
+        let Some(exponent) = exponent.as_i64() else {
+            return Err(CompilerError::compiler_error(
+                "Dec power folding received an unreadable I32 exponent.",
+            )
+            .into());
+        };
+        base.checked_power(exponent)
     } else {
         let Some(left_value) = number_operand_in_domain(lhs, scale) else {
             return Err(CompilerError::compiler_error(
@@ -1377,7 +1190,7 @@ fn fold_numeric_binary(
             .expect("integer operation domains only accept integer-valued expressions");
         let right_value = integer_value_from_expression(rhs)
             .expect("integer operation domains only accept integer-valued expressions");
-        let Some(range) = domain.integer_range(ctx.numeric_profile) else {
+        let Some(range) = domain.integer_range() else {
             return Err(CompilerError::compiler_error(
                 "Integer folding received a non-integer result domain.",
             )
@@ -1390,7 +1203,7 @@ fn fold_numeric_binary(
         ));
     }
 
-    let Some(precision) = domain.binary_float_precision(ctx.numeric_profile) else {
+    let Some(precision) = domain.binary_float_precision() else {
         return Err(CompilerError::compiler_error(
             "Numeric folding received a domain without integer or binary-float arithmetic.",
         )
@@ -1442,12 +1255,7 @@ fn comparison_result(op: &Operator, ordering: std::cmp::Ordering) -> Option<bool
     }
 }
 
-fn fold_numeric_comparison(
-    lhs: &Expression,
-    rhs: &Expression,
-    op: &Operator,
-    numeric_profile: NumericProfile,
-) -> Option<bool> {
+fn fold_numeric_comparison(lhs: &Expression, rhs: &Expression, op: &Operator) -> Option<bool> {
     if let (ExpressionKind::FixedScalar(left), ExpressionKind::FixedScalar(right)) =
         (&lhs.kind, &rhs.kind)
         && left.scalar() == FixedScalar::Byte
@@ -1465,14 +1273,6 @@ fn fold_numeric_comparison(
     }
 
     let ordering = match (left_domain, right_domain) {
-        (NumericScalar::Int, NumericScalar::Int)
-        | (NumericScalar::Uint, NumericScalar::Uint)
-        | (NumericScalar::Uint, NumericScalar::Int)
-        | (NumericScalar::Int, NumericScalar::Uint) => {
-            // Both values widen exactly into `i128`, so a negative `Int` compares
-            // less than every `Uint` and values above `i64::MAX` stay exact.
-            integer_value_from_expression(lhs)?.cmp(&integer_value_from_expression(rhs)?)
-        }
         (NumericScalar::Fixed(left), NumericScalar::Fixed(right))
             if matches!(
                 left.class(),
@@ -1482,27 +1282,14 @@ fn fold_numeric_comparison(
                 FixedScalarClass::SignedInteger | FixedScalarClass::UnsignedInteger
             ) =>
         {
+            // Both values widen exactly into `i128`, so a negative value compares less
+            // than every unsigned value and `U64` above `i64::MAX` stays exact.
             integer_value_from_expression(lhs)?.cmp(&integer_value_from_expression(rhs)?)
         }
-        (NumericScalar::Float, NumericScalar::Float)
-        | (NumericScalar::Fixed(_), NumericScalar::Fixed(_)) => {
+        (NumericScalar::Fixed(_), NumericScalar::Fixed(_)) => {
+            // Both remaining fixed pairs are binary floats; each reads back at its exact
+            // stored precision, so mixed `F16`/`F32`/`F64` comparisons need no extra rounding.
             float_value_from_expression(lhs)?.partial_cmp(&float_value_from_expression(rhs)?)?
-        }
-        (NumericScalar::Int, NumericScalar::Float)
-        | (NumericScalar::Uint, NumericScalar::Float) => {
-            let integer = integer_value_from_expression(lhs)?;
-            let precision: BinaryFloatPrecision = numeric_profile.float_precision.into();
-            // The unsigned value converts directly at the profile precision, inheriting
-            // the same Float rounding as `Int`/`Float` comparisons.
-            precision
-                .round_integer(integer)
-                .partial_cmp(&float_value_from_expression(rhs)?)?
-        }
-        (NumericScalar::Float, NumericScalar::Int)
-        | (NumericScalar::Float, NumericScalar::Uint) => {
-            let integer = integer_value_from_expression(rhs)?;
-            let precision: BinaryFloatPrecision = numeric_profile.float_precision.into();
-            float_value_from_expression(lhs)?.partial_cmp(&precision.round_integer(integer))?
         }
         (NumericScalar::Number(_), NumericScalar::Number(_)) => {
             let ExpressionKind::Number(left) = &lhs.kind else {
@@ -1561,17 +1348,16 @@ fn folded_operator_expression(
 impl Expression {
     /// Fold an already-typed binary operation in its shared numeric result domain.
     ///
-    /// WHAT: numeric arithmetic uses the same promotion table as AST operator typing. Comparisons
-    ///       keep their exact integer or numeric-value rules, while non-numeric constant operators
-    ///       retain their existing AST-local policies.
+    /// WHAT: numeric arithmetic uses the same operator table as AST operator typing. Comparisons
+    ///       keep their exact fixed-integer, fixed-float or Dec rules, while non-numeric constant
+    ///       operators retain their existing AST-local policies.
     /// WHY: compile-time evaluation must produce the same domain and failure boundary as runtime
-    ///      lowering, without reducing fixed scalars through the Int/Float carrier variants.
+    ///      lowering, without reducing exact scalars through a wider carrier variant.
     pub(crate) fn evaluate_operator(
         &self,
         rhs: &Expression,
         op: &Operator,
         string_table: &mut StringTable,
-        numeric_profile: NumericProfile,
         operator_span: Option<SourceSpan>,
     ) -> Result<OperatorFoldOutcome, ConstantFoldError> {
         if let (Some(numeric_operator), Some(left_domain), Some(right_domain)) = (
@@ -1585,7 +1371,6 @@ impl Expression {
             let mut failure_context = NumericFoldFailure {
                 operator: op,
                 span: operator_span,
-                numeric_profile,
                 string_table,
             };
             let expression =
@@ -1595,68 +1380,47 @@ impl Expression {
             )));
         }
 
-        let kind = if let Some(value) = fold_numeric_comparison(self, rhs, op, numeric_profile) {
+        let kind = if let Some(value) = fold_numeric_comparison(self, rhs, op) {
             ExpressionKind::Bool(value)
         } else {
             match (&self.kind, &rhs.kind) {
-                (ExpressionKind::Int(left), ExpressionKind::Int(right))
+                // `..` folds its already-typed literal endpoints into one compile-time range
+                // expression. Endpoints keep their own exact scalar identities, and the shared
+                // range selector decides whether the pair forms a valid iteration domain.
+                (ExpressionKind::FixedScalar(_), ExpressionKind::FixedScalar(_))
                     if matches!(op, Operator::Range) =>
                 {
-                    ExpressionKind::Range(
-                        Box::new(Expression::int(*left, self.span, ValueMode::ImmutableOwned)),
-                        Box::new(Expression::int(*right, rhs.span, ValueMode::ImmutableOwned)),
-                    )
+                    let Some((start, end)) =
+                        numeric_scalar_for_expression(self).zip(numeric_scalar_for_expression(rhs))
+                    else {
+                        return Ok(OperatorFoldOutcome::NotConstant);
+                    };
+                    if range_iteration_domain(start, end, None).is_none() {
+                        return Ok(OperatorFoldOutcome::NotConstant);
+                    }
+
+                    ExpressionKind::Range(Box::new(self.clone()), Box::new(rhs.clone()))
                 }
-                (ExpressionKind::Int(_), ExpressionKind::Float(_))
-                | (ExpressionKind::Float(_), ExpressionKind::Int(_))
-                    if matches!(op, Operator::IntDivide) =>
-                {
-                    integer_division_operand_error(string_table, operator_span, numeric_profile)?
-                }
-                (ExpressionKind::Float(_), ExpressionKind::Float(_))
-                    if matches!(op, Operator::IntDivide) =>
-                {
-                    invalid_operator_for_compile_time_type(
-                        op,
-                        string_table,
-                        operator_span,
-                        Some(numeric_profile),
-                    )?
-                }
-                (ExpressionKind::Int(_), ExpressionKind::Int(_))
-                | (ExpressionKind::Int(_), ExpressionKind::Float(_))
-                | (ExpressionKind::Float(_), ExpressionKind::Int(_))
-                | (ExpressionKind::Float(_), ExpressionKind::Float(_)) => {
-                    invalid_operator_for_compile_time_type(
-                        op,
-                        string_table,
-                        operator_span,
-                        Some(numeric_profile),
-                    )?
+                // Every remaining fixed-scalar operator pair is one the checked operator table
+                // does not support at these operand types (`//` on floats, fixed integer/float
+                // mixing, or a `U64`/signed pair with no common domain). AST typing normally
+                // rejects these before folding, so this arm guards the constant-fold invariant.
+                (ExpressionKind::FixedScalar(_), ExpressionKind::FixedScalar(_)) => {
+                    invalid_operator_for_compile_time_type(op, string_table, operator_span)?
                 }
                 (ExpressionKind::Bool(left), ExpressionKind::Bool(right)) => match op {
                     Operator::And => ExpressionKind::Bool(*left && *right),
                     Operator::Or => ExpressionKind::Bool(*left || *right),
                     Operator::Equality => ExpressionKind::Bool(left == right),
                     Operator::NotEqual => ExpressionKind::Bool(left != right),
-                    _ => invalid_operator_for_compile_time_type(
-                        op,
-                        string_table,
-                        operator_span,
-                        None,
-                    )?,
+                    _ => invalid_operator_for_compile_time_type(op, string_table, operator_span)?,
                 },
                 (
                     ExpressionKind::StringSlice(_) | ExpressionKind::StructuralString { .. },
                     ExpressionKind::StringSlice(_) | ExpressionKind::StructuralString { .. },
                 ) => {
                     if !matches!(op, Operator::Equality | Operator::NotEqual) {
-                        invalid_operator_for_compile_time_type(
-                            op,
-                            string_table,
-                            operator_span,
-                            None,
-                        )?;
+                        invalid_operator_for_compile_time_type(op, string_table, operator_span)?;
                     }
 
                     let requirement = ConstStringRequirement::EqualityComparison;
@@ -1690,12 +1454,8 @@ impl Expression {
             || rhs.contains_regular_division
             || matches!(op, Operator::Divide);
         let result_type = match &kind {
-            ExpressionKind::Int(_) => DataType::Int,
-            ExpressionKind::Float(_) => DataType::Float,
             ExpressionKind::Bool(_) => DataType::Bool,
-            ExpressionKind::StringSlice(_) => DataType::StringSlice,
             ExpressionKind::Range(_, _) => DataType::Range,
-            ExpressionKind::Char(_) => DataType::Char,
             _ => self.diagnostic_type.to_owned(),
         };
 

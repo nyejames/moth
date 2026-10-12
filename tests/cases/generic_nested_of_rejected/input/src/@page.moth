@@ -7,4 +7,4 @@ Box type T = |
     value T,
 |
 
-bad Box of Pair of String, Int = Box(Pair("count", 3))
+bad Box of Pair of String, I32 = Box(Pair("count", 3))

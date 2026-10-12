@@ -1,0 +1,4 @@
+value #U16 = 0
+reject ||:
+    negated = -value
+;

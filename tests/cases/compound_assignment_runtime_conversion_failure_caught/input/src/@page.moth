@@ -1,4 +1,4 @@
-divide |value ~Int, divisor Int| -> Int, Error!:
+divide |value ~I32, divisor I32| -> I32, Error!:
     value /= divisor
     return value
 ;

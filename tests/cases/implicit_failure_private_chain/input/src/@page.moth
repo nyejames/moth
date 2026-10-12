@@ -1,13 +1,13 @@
-multiply |left Int, right Int| -> Int:
+multiply |left I32, right I32| -> I32:
     return left * right
 ;
-first |left Int, right Int| -> Int:
+first |left I32, right I32| -> I32:
     return multiply(left, right)
 ;
-second |left Int, right Int| -> Int:
+second |left I32, right I32| -> I32:
     return first(left, right)
 ;
-safe_product |left Int, right Int| -> Int, Error!:
+safe_product |left I32, right I32| -> I32, Error!:
     return second(left, right)
 ;
 overflow_code ~U32 = 0

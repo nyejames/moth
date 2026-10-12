@@ -12,6 +12,12 @@
 // Counter variants are intentionally dormant in normal builds where storage is disabled.
 #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
 pub(crate) enum AstCounter {
+    // AST-local failure-summary convergence pressure.
+    FailureSummaryBodiesClassified,
+    /// Top-level statement nodes in bodies reopened by AST-local summary convergence.
+    /// Flat unrelated-body fixtures vary this count independently of call-chain length.
+    FailureSummaryBodyNodesClassified,
+
     // Scope-frame churn.
     ScopeContextsCreated,
     ScopeMaxFrameDepth,
@@ -151,6 +157,23 @@ pub(crate) enum AstCounter {
     /// Top-level TIR subtree copy entries used by runtime planning and composition.
     TirCopyPasses,
 
+    /// Pending bound-range header rows inspected through their counter's ordered queue.
+    TirNumericCounterHeadersInspected,
+
+    // Numeric binding-origin query pressure.
+    NumericAliasOriginSteps,
+    // Numeric exact-receiver selection pressure.
+    NumericReceiverWitnessesInspected,
+
+    // Declared numeric substitution lookup and identity-merge pressure.
+    NumericDeclaredBindingComparisons,
+
+    // Known-shape DAG traversal pressure.
+    NumericShapePinNodesVisited,
+
+    /// Registered numeric intake, header and pattern rows inspected while copying a TIR node.
+    TirNumericCopyRowsInspected,
+
     /// Slot schema or ordered-placeholder walks over TIR trees.
     TirSlotSchemaWalks,
 
@@ -162,9 +185,6 @@ pub(crate) enum AstCounter {
     CensusKindNoValue,
     CensusKindOptionNone,
     CensusKindRuntime,
-    CensusKindInt,
-    CensusKindUint,
-    CensusKindFloat,
     CensusKindFixedScalar,
     CensusKindNumber,
     CensusKindStringSlice,
@@ -309,6 +329,10 @@ pub(crate) enum AstCounter {
     CensusRpnOperands,
     CensusRpnOperators,
     CensusPendingNumericLiterals,
+    CensusPendingNumericBindings,
+    CensusPendingNumericCasts,
+    CensusPendingNumericCalls,
+    CensusPendingNumericExpressions,
     CensusPendingGroups,
     CensusIncompleteViews,
     CensusPlaceRoots,
@@ -481,8 +505,7 @@ mod detailed {
             if (census_start..=census_end).contains(&index) {
                 continue;
             }
-            let value = counter_value(counter);
-            log_benchmark_counter(counter_metric_name(counter), value as f64);
+            log_ast_counter(counter);
         }
     }
 
@@ -511,14 +534,25 @@ mod detailed {
             if !(census_start..=census_end).contains(&index) {
                 continue;
             }
-            let value = counter_value(counter);
-            log_benchmark_counter(counter_metric_name(counter), value as f64);
+            log_ast_counter(counter);
         }
         COUNTERS.with(|counters| {
             let mut array = counters.borrow_mut();
             array[census_start..=census_end].fill(0);
             array[overlay_index] = saved_overlay;
         });
+    }
+
+    /// Logs one AST counter into the active collection session.
+    fn log_ast_counter(counter: AstCounter) {
+        // Under test, only threads that opted into capture reach the shared collector, so an
+        // unrelated compile test cannot add AST rows to a guarded test's collection session.
+        #[cfg(test)]
+        if !crate::compiler_frontend::instrumentation::test_counter_capture_active() {
+            return;
+        }
+
+        log_benchmark_counter(counter_metric_name(counter), counter_value(counter) as f64);
     }
 
     /// Constant downstream-layout gauges recorded with each census snapshot.
@@ -550,6 +584,8 @@ mod detailed {
 
     fn all_counters() -> &'static [AstCounter] {
         &[
+            AstCounter::FailureSummaryBodiesClassified,
+            AstCounter::FailureSummaryBodyNodesClassified,
             AstCounter::ScopeContextsCreated,
             AstCounter::ScopeMaxFrameDepth,
             AstCounter::ScopeFrameLookupAncestorSteps,
@@ -619,14 +655,17 @@ mod detailed {
             AstCounter::TirViewFoldOverlayExpressionAndSlot,
             AstCounter::TirViewFoldWrapperContextPresent,
             AstCounter::TirCopyPasses,
+            AstCounter::TirNumericCounterHeadersInspected,
+            AstCounter::NumericAliasOriginSteps,
+            AstCounter::NumericReceiverWitnessesInspected,
+            AstCounter::NumericDeclaredBindingComparisons,
+            AstCounter::NumericShapePinNodesVisited,
+            AstCounter::TirNumericCopyRowsInspected,
             AstCounter::TirSlotSchemaWalks,
             AstCounter::TirContributionRoutingCalls,
             AstCounter::CensusKindNoValue,
             AstCounter::CensusKindOptionNone,
             AstCounter::CensusKindRuntime,
-            AstCounter::CensusKindInt,
-            AstCounter::CensusKindUint,
-            AstCounter::CensusKindFloat,
             AstCounter::CensusKindFixedScalar,
             AstCounter::CensusKindNumber,
             AstCounter::CensusKindStringSlice,
@@ -771,6 +810,10 @@ mod detailed {
             AstCounter::CensusRpnOperands,
             AstCounter::CensusRpnOperators,
             AstCounter::CensusPendingNumericLiterals,
+            AstCounter::CensusPendingNumericBindings,
+            AstCounter::CensusPendingNumericCasts,
+            AstCounter::CensusPendingNumericCalls,
+            AstCounter::CensusPendingNumericExpressions,
             AstCounter::CensusPendingGroups,
             AstCounter::CensusIncompleteViews,
             AstCounter::CensusPlaceRoots,
@@ -875,6 +918,10 @@ mod detailed {
 
     fn counter_metric_name(counter: AstCounter) -> &'static str {
         match counter {
+            AstCounter::FailureSummaryBodiesClassified => "ast_failure_summary_bodies_classified",
+            AstCounter::FailureSummaryBodyNodesClassified => {
+                "ast_failure_summary_body_nodes_classified"
+            }
             AstCounter::ScopeContextsCreated => "ast_scope_contexts_created",
             AstCounter::ScopeMaxFrameDepth => "ast_scope_max_frame_depth",
             AstCounter::ScopeFrameLookupAncestorSteps => "ast_scope_frame_lookup_ancestor_steps",
@@ -995,14 +1042,23 @@ mod detailed {
                 "ast_tir_view_fold_wrapper_context_present"
             }
             AstCounter::TirCopyPasses => "ast_tir_copy_passes",
+            AstCounter::NumericAliasOriginSteps => "ast_numeric_alias_origin_steps",
+            AstCounter::NumericReceiverWitnessesInspected => {
+                "ast_numeric_receiver_witnesses_inspected"
+            }
+            AstCounter::NumericDeclaredBindingComparisons => {
+                "ast_numeric_declared_binding_comparisons"
+            }
+            AstCounter::NumericShapePinNodesVisited => "ast_numeric_shape_pin_nodes_visited",
+            AstCounter::TirNumericCounterHeadersInspected => {
+                "ast_tir_numeric_counter_headers_inspected"
+            }
+            AstCounter::TirNumericCopyRowsInspected => "ast_tir_numeric_copy_rows_inspected",
             AstCounter::TirSlotSchemaWalks => "ast_tir_slot_schema_walks",
             AstCounter::TirContributionRoutingCalls => "ast_tir_contribution_routing_calls",
             AstCounter::CensusKindNoValue => "ast_census_kind_no_value",
             AstCounter::CensusKindOptionNone => "ast_census_kind_option_none",
             AstCounter::CensusKindRuntime => "ast_census_kind_runtime",
-            AstCounter::CensusKindInt => "ast_census_kind_int",
-            AstCounter::CensusKindUint => "ast_census_kind_uint",
-            AstCounter::CensusKindFloat => "ast_census_kind_float",
             AstCounter::CensusKindFixedScalar => "ast_census_kind_fixed_scalar",
             AstCounter::CensusKindNumber => "ast_census_kind_number",
             AstCounter::CensusKindStringSlice => "ast_census_kind_string_slice",
@@ -1203,6 +1259,10 @@ mod detailed {
             AstCounter::CensusRpnOperands => "ast_census_rpn_operands",
             AstCounter::CensusRpnOperators => "ast_census_rpn_operators",
             AstCounter::CensusPendingNumericLiterals => "ast_census_pending_numeric_literals",
+            AstCounter::CensusPendingNumericBindings => "ast_census_pending_numeric_bindings",
+            AstCounter::CensusPendingNumericCasts => "ast_census_pending_numeric_casts",
+            AstCounter::CensusPendingNumericCalls => "ast_census_pending_numeric_calls",
+            AstCounter::CensusPendingNumericExpressions => "ast_census_pending_numeric_expressions",
             AstCounter::CensusPendingGroups => "ast_census_pending_groups",
             AstCounter::CensusIncompleteViews => "ast_census_incomplete_views",
             AstCounter::CensusPlaceRoots => "ast_census_place_roots",

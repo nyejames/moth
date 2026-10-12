@@ -3,8 +3,8 @@
 A constant initializer must fully evaluate during AST construction.
 
 [codeblock, $code("moth"):
-    base #Int = 4
-    larger #Int = base + 2
+    base #I32 = 4
+    larger #I32 = base + 2
     label #= [: size [larger]]
 ]
 
@@ -67,11 +67,11 @@ Folding must preserve runtime language semantics.
 Examples:
 
 - a statically known checked-numeric failure is a compile-time diagnostic
-- `String -> Int`, `String -> Uint` and `Float -> Int` enforce the selected `Int`/`Uint` range, which the numeric profile selects as 32 or 64 bits
-- fixed-width numeric targets enforce their own declared ranges
-- `String -> Float` rejects non-finite materialization
-- `Float -> String` uses Moth's stable formatter
-- compile-time and runtime template interpolation use the same Float formatting
+- `String -> I32`, `String -> U32` and `F64 -> I32` enforce the complete source and target conversion rules.
+- Fixed-width numeric targets enforce their own declared ranges and precision.
+- `String -> F64` rejects non-finite materialisation.
+- `F64 -> String` uses Moth's stable formatter.
+- Compile-time and runtime template interpolation use the same F64 formatting.
 
 The compiler must not accept one result during folding and produce another at runtime.
 

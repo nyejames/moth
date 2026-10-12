@@ -1,0 +1,14 @@
+identity type T |value T| -> T:
+    return value
+;
+choose_same type T |first T, second T| -> T:
+    return first
+;
+read_float |value F32| -> String:
+    return cast value
+;
+whole = identity(1)
+floating F32 = identity(1)
+selected = choose_same(whole, floating)
+text = read_float(selected)
+[:[text]]

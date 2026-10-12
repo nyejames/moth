@@ -10,7 +10,9 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use super::{const_inline_field_value, const_inline_field_value_from_receiver};
+use super::{
+    const_inline_field_value, const_inline_field_value_from_receiver, receiver_value_expression,
+};
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
@@ -64,13 +66,29 @@ fn receiver_authored_field_uses_foreign_effective_tir() {
     let mut path_fork = PathInternerFork::empty();
     let (registry, template) = store_with_template();
     let field_name = string_table.intern("content");
-    let field_path = path_fork
-        .try_intern_components(&[field_name])
+    let card_path = path_fork
+        .try_intern_portable_path("Card", &mut string_table)
         .expect("test path fits");
+    let field_path = path_fork
+        .try_intern_child(card_path, field_name)
+        .expect("test path fits");
+    let mut type_environment = TypeEnvironment::new();
+    let (_, card_type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
+        // `register_nominal_struct` overwrites this placeholder and returns the real identity,
+        // so the fixture takes the canonical `TypeId` from registration.
+        id: NominalTypeId(0),
+        path: card_path,
+        fields: vec![FieldDefinition {
+            name: field_path,
+            type_id: type_environment.builtins().string,
+            span: None,
+        }]
+        .into_boxed_slice(),
+        generic_parameters: None,
+        const_record: true,
+    });
     let receiver_value = Expression::struct_instance(
-        path_fork
-            .try_intern_portable_path("Card", &mut string_table)
-            .expect("test path fits"),
+        card_path,
         vec![Declaration {
             id: field_path,
             value: Expression::template(template, ValueMode::ImmutableOwned),
@@ -81,7 +99,7 @@ fn receiver_authored_field_uses_foreign_effective_tir() {
         ValueMode::ImmutableOwned,
         true,
         None,
-        TypeEnvironment::new().builtins().none,
+        card_type_id,
     );
     let receiver = AstNode {
         kind: NodeKind::ExpressionStatement(receiver_value),
@@ -159,6 +177,7 @@ fn resolved_default_field_uses_foreign_effective_tir() {
         .try_intern_child(struct_path, field_name)
         .expect("test path fits");
     let (_, struct_type_id) = type_environment.register_nominal_struct(StructTypeDefinition {
+        // `register_nominal_struct` overwrites this placeholder and returns the real identity.
         id: NominalTypeId(0),
         path: struct_path,
         fields: vec![FieldDefinition {
@@ -196,8 +215,9 @@ fn resolved_default_field_uses_foreign_effective_tir() {
             .expect("test path fits"),
     };
 
+    let receiver_value = receiver_value_expression(&receiver);
     let inlined = const_inline_field_value(
-        &receiver,
+        receiver_value,
         struct_type_id,
         field_name,
         &type_environment,

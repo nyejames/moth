@@ -9,7 +9,7 @@ fn multi_file_parsing_aggregates_headers_const_fragments_and_runtime_count() {
             "src/@page.moth".to_owned(),
         ),
         (
-            "helper_func || -> Int:\n    return 1\n;\n".to_owned(),
+            "helper_func || -> I32:\n    return 1\n;\n".to_owned(),
             "src/helper.moth".to_owned(),
         ),
     ];

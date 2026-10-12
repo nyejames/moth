@@ -1,7 +1,7 @@
 export:
-    shared_count #Uint = 23
+    shared_count #U32 = 23
 
-    keep_uint |value Uint| -> Uint:
+    keep_uint |value U32| -> U32:
         return value
     ;
 ;

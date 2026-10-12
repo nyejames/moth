@@ -135,7 +135,6 @@ fn evidence_for_bound_method<'a>(
         type_environment,
         scope_context.trait_environment(),
         evidence_environment,
-        scope_context.numeric_profile,
     ) {
         Some(BoundEvidenceSelection::Registered(evidence_id)) => {
             Ok(evidence_environment.get(evidence_id))

@@ -8,8 +8,18 @@
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId, TraitRequirementId};
 use rustc_hash::FxHashMap;
+
+/// Infallible cast conformance retained for inferred-failure validation after evidence resolution.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct InfallibleCastEvidenceContract {
+    pub(crate) target_name: StringId,
+    pub(crate) trait_name: StringId,
+    pub(crate) requirement_name: StringId,
+    pub(crate) span: Option<SourceSpan>,
+}
 
 /// The ownership class of an evidence record.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -149,20 +149,22 @@ Config runs through one named **compiler service**, not a build-owned copy of th
 
 ## Build configuration values and `@project`
 
-Today’s Alpha implementation accepts declaration-owned `#Config of T` contracts in a grouped
-parenthesised `project`/`html` bootstrap. The future replacement uses `$config` as a prefix on
-exactly one explicitly typed top-level `#` binding. Its name is the input name, its type is the
-contract and its initializer is the fallback value. `$config` is valid in `config.moth` and in
-specified selected-source declarations wherever an ordinary compile-time constant is legal.
+`$config` prefixes exactly one explicitly typed top-level `#` binding. Its name
+names the input contract, its type fixes the receiving type and its initialiser
+supplies the fallback. Selected-source declarations use the same contract
+where an ordinary compile-time constant is legal.
 
-Only explicit `$config` declarations create input contracts in the queued provider model. Under
-the current bootstrap, fixed grouped-project fields retain authoritative provider precedence and
-override blocking for same-named source contracts; supported extra project metadata is visible
-through `@project`, while ordinary helpers and declaration-owned input contracts remain distinct.
-`@project` does not publish private helpers or input declarations. A contract named `version` does
-not replace the separate grouped project field identity.
+Only explicit `$config` declarations create input contracts. Project fields
+and ordinary helper constants neither supply nor block same-named inputs.
+`@project` publishes project metadata, not private helpers or input declarations.
+A contract named `version` does not replace the separate project field identity.
 
-Ordinary constants still require initializers. A marked `$config` declaration may omit an initializer only for a required input; optional declarations resolve to `none` when no present fallback or external value exists. The accepted input types remain `String`, `Int`, `Float`, `Bool`, `Char` and one optional layer around those primitives.
+Ordinary constants require initialisers. A non-optional `$config` declaration
+without an initialiser requires an input. An optional declaration resolves to
+`none` when no present fallback or external value exists. Input contracts accept
+`String`, `Bool`, `Char`, `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`,
+`U64`, `F16`, `F32`, `F64` and one optional layer around a supported primitive.
+They exclude `Byte`, `Dec`, aliases, inferred types, collections and records.
 
 Project identity, source discovery and compiler-control arguments remain fixed-only. `$config` dependence is rejected in `$project`'s `name`, `entry_root` and `template_const_loop_iteration_limit`, including through helper constants. `$project` has strict predefined fields; it does not become an open metadata record.
 
@@ -170,7 +172,7 @@ Bootstrap contracts resolve in this order:
 
 1. explicit CLI or programmatic build input for that name
 2. a compatible builder-provided primitive global
-3. the declaration’s validated fallback or optional absence
+3. the declaration's validated fallback or optional absence
 4. a structured required-input diagnostic
 
 Selected-source contracts resolve in this order:
@@ -181,7 +183,21 @@ Selected-source contracts resolve in this order:
 4. the common source fallback or optional absence
 5. a structured required-input diagnostic
 
-The current typed `--input name=value` carrier remains shared by build, check and dev. Exact booleans, whole numbers, decimal or exponent forms, quoted characters and quoted strings receive their primitive types in that order; all remaining valid unquoted values fall back to `String`. Malformed quoted text is a command-input diagnostic, and there is no implicit numeric or String coercion. Programmatic input uses the same policy.
+Build, check and dev share `--input name=value`. Classification recognises exact
+lowercase booleans, whole-number spelling, decimal/exponent spelling, quoted
+characters and quoted strings in that order. Other text falls back to `String`.
+Malformed quoted text produces a command-input diagnostic. Numeric inputs retain
+their original spelling and category until the exact contract resolves, then
+`moth-lexical` materialises them directly at that destination with range and
+finite checks, without an `i32` or `f64` intermediary. Whole spelling can
+initialise an `F32` contract, while decimal spelling cannot initialise an integer
+contract merely because its value is whole.
+
+Programmatic and builder inputs already carry exact primitive types and values.
+They permit only an exact type match or present wrapping into the matching
+optional type, not numeric width conversion or String coercion. Completed input
+values carry their exact canonical type and lossless value. Semantic fingerprints
+use that type and value, not raw spelling or source location.
 
 The folded `$project` result becomes a specialised immutable **`ProjectGlobalsInterface`** under the reserved **`@project`** dependency root. It carries stable field identities, folded backend-neutral values, source locations, field-level fingerprints and project-context provenance. It carries no AST, no HIR and no runtime body.
 

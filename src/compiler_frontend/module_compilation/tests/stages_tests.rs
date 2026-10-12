@@ -11,6 +11,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, HirCapacityResource,
     PremergeFailure, SyntaxDiagnosticKind,
 };
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::expression_store::HirExpressionStoreTestLimits;
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
@@ -23,6 +24,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{function_node, node, 
 use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 fn test_span(start: u32) -> SourceSpan {
     let mut extended_spans = ExtendedSpanBuilder::new();
@@ -52,8 +54,8 @@ fn lower_hir_capacity_failure_keeps_each_warning_and_render_context_once() {
                 returns: vec![],
             },
             vec![node(
-                NodeKind::ExpressionStatement(Expression::int(
-                    42,
+                NodeKind::ExpressionStatement(Expression::fixed_scalar(
+                    FixedScalarValue::signed(FixedScalar::I32, 42).expect("I32 literal in range"),
                     Some(authored_span),
                     ValueMode::ImmutableOwned,
                 )),
@@ -139,7 +141,7 @@ fn lower_hir_capacity_failure_keeps_each_warning_and_render_context_once() {
         context.diagnostic_range.contains(&capacity_index)
             && context
                 .type_environment
-                .get(context.type_environment.builtins().int)
+                .get(builtin_type_ids::fixed_scalar(FixedScalar::I32))
                 .is_some()
     }));
 }

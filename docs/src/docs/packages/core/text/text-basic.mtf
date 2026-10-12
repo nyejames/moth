@@ -16,11 +16,11 @@ Bind the functions you need with a direct-selection clause.
 
 ### Available functions
 
-- `length(text)` returns the number of Unicode scalar values as `Int`
+- `length(text)` returns the number of Unicode scalar values as `I32`
 - `is_empty(text)` returns `Bool`
 - `contains(text, substring)` returns `Bool`
 - `starts_with(text, prefix)` returns `Bool`
 - `ends_with(text, suffix)` returns `Bool`
 
-All functions take `String` values and return `Int` or `Bool`.
+All functions take `String` values and return `I32` or `Bool`.
 For the full function contract, backend behaviour and deferred surfaces, see @./ (Core text advanced).

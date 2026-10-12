@@ -1,11 +1,13 @@
 use super::*;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 
 #[test]
 fn source_config_contracts_are_normalized_in_authored_order() {
     let prepared = prepare_source_contract_syntax(
         "analytics #Config of Bool = false\n\
          optional_label #Config of String? = none\n\
-         required_count #Config of Int\n",
+         required_count #Config of I32\n",
     )
     .expect("source config contracts should prepare without providers");
 
@@ -20,11 +22,7 @@ fn source_config_contracts_are_normalized_in_authored_order() {
     );
     assert_eq!(
         contracts[0].default,
-        Some(
-            crate::compiler_frontend::declaration_syntax::build_config_contract::SourceConfigDefault::Value(
-                crate::compiler_frontend::build_config::PrimitiveBuildValue::Bool(false)
-            )
-        )
+        Some(crate::compiler_frontend::build_config::PrimitiveBuildValue::Bool(false))
     );
     assert!(!contracts[0].required);
 
@@ -51,37 +49,40 @@ fn source_config_contracts_are_normalized_in_authored_order() {
 }
 
 #[test]
-fn source_config_numeric_defaults_are_retained_until_a_profile_materialises_them() {
-    let prepared = prepare_source_contract_syntax("count #Config of Int = 4_000_000_000\n").expect(
-        "a numeric default prepares without a profile; only the boundary decides its range",
-    );
+fn source_config_numeric_defaults_materialise_at_their_declared_scalar() {
+    let prepared = prepare_source_contract_syntax("count #Config of I64 = 4_000_000_000\n")
+        .expect("an I64 default inside its range should prepare");
 
-    let default = prepared.source_build_config_contracts[0]
-        .default
-        .as_ref()
-        .expect("the numeric default should be retained");
     assert_eq!(
-        default.primitive_type(),
-        crate::compiler_frontend::build_config::PrimitiveBuildInputType::Int
+        prepared.source_build_config_contracts[0].default,
+        Some(
+            crate::compiler_frontend::build_config::PrimitiveBuildValue::Fixed(
+                FixedScalarValue::signed(FixedScalar::I64, 4_000_000_000)
+                    .expect("4_000_000_000 is inside the I64 range"),
+            )
+        )
     );
 
-    let wide = moth_lexical::numeric::profile::NumericProfile {
-        int_width: moth_lexical::numeric::profile::IntWidth::Bits64,
-        float_precision: moth_lexical::numeric::profile::FloatPrecision::Bits64,
+    let error = match prepare_source_contract_syntax("count #Config of I32 = 4_000_000_000\n") {
+        Ok(_) => panic!("an I32 default outside its range should fail during header preparation"),
+        Err(error) => error,
     };
-    assert_eq!(
-        default.materialize(wide),
-        Ok(crate::compiler_frontend::build_config::PrimitiveBuildValue::Int(4_000_000_000))
+    let diagnostic = error
+        .into_diagnostics()
+        .into_iter()
+        .next()
+        .expect("expected a number literal diagnostic");
+    assert!(
+        matches!(
+            &diagnostic.payload,
+            DiagnosticPayload::InvalidNumberLiteral {
+                reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
+                ..
+            }
+        ),
+        "expected an I32 range diagnostic, got {:?}",
+        diagnostic.payload
     );
-
-    let error = default
-        .materialize(moth_lexical::numeric::profile::NumericProfile::STANDARD)
-        .expect_err("the standard Int width must reject the wider value");
-    assert_eq!(error.text, "4_000_000_000");
-    assert!(matches!(
-        error.reason,
-        moth_lexical::numeric::parse::NumberLiteralErrorReason::OutsideIntRange
-    ));
 }
 
 #[test]
@@ -89,8 +90,8 @@ fn source_config_contracts_reject_invalid_name_type_and_default_during_preparati
     let cases = [
         ("BadName #Config of Bool = false\n", "name"),
         ("value #Config of Decimal = 1\n", "type"),
-        ("value #Config of Int = other + 1\n", "default"),
-        ("value #Config of Int = 1 + 2\n", "default"),
+        ("value #Config of I32 = other + 1\n", "default"),
+        ("value #Config of I32 = 1 + 2\n", "default"),
     ];
 
     for (source, expected_kind) in cases {

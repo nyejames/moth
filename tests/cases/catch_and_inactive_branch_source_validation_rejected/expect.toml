@@ -1,0 +1,50 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0002", "MOTH-SYNTAX-0024", "MOTH-RULE-0053", "MOTH-TYPE-0001", "MOTH-RULE-0034", "MOTH-RULE-0055", "MOTH-RULE-0051"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0002"
+path = "input/handler_syntax/@mod.moth"
+line = 3
+column = 5
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0024"
+path = "input/branch_syntax/@mod.moth"
+line = 2
+column = 16
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+reason = "compile_time_evaluation_error.integer_overflow"
+path = "input/handler_constant/@mod.moth"
+line = 2
+column = 22
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+path = "input/branch_type/@mod.moth"
+line = 2
+column = 18
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0034"
+path = "input/graph_validity/provider/@mod.moth"
+line = 8
+column = 13
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0055"
+path = "input/handler_arity/@mod.moth"
+line = 5
+column = 34
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0051"
+reason = "invalid_fallible_handling.catch_on_non_fallible"
+path = "input/hidden_helper/@mod.moth"
+line = 6
+column = 36

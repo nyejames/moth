@@ -1,5 +1,5 @@
 -- Compile-time parameters are intentionally deferred.
 
-use_constant_parameter |value #Int| -> Int:
+use_constant_parameter |value #I32| -> I32:
     return value
 ;

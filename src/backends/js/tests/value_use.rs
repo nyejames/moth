@@ -276,18 +276,18 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
         id: BlockId(0),
         region,
         locals: vec![
-            local(0, types.int, region),
-            local(2, types.int, region),
-            local(3, types.int, region),
+            local(0, types.i32, region),
+            local(2, types.i32, region),
+            local(3, types.i32, region),
         ],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(42, types.int, region, &mut expressions)),
+        terminator: HirTerminator::Return(i32_expression(42, types.i32, region, &mut expressions)),
     };
     let callee = HirFunction {
         id: FunctionId(1),
         entry: BlockId(0),
         params: vec![LocalId(0), LocalId(2), LocalId(3)],
-        return_type: types.int,
+        return_type: types.i32,
     };
 
     let call_stmt = statement(
@@ -298,21 +298,21 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
                 &[
                     expression(
                         HirExpressionKind::Copy(HirPlace::local(LocalId(0))),
-                        types.int,
+                        types.i32,
                         region,
                         ValueKind::RValue,
                         &mut expressions,
                     ),
                     expression(
                         HirExpressionKind::Load(HirPlace::local(LocalId(2))),
-                        types.int,
+                        types.i32,
                         region,
                         ValueKind::Place,
                         &mut expressions,
                     ),
                     expression(
                         HirExpressionKind::Load(HirPlace::local(LocalId(2))),
-                        types.int,
+                        types.i32,
                         region,
                         ValueKind::RValue,
                         &mut expressions,
@@ -328,18 +328,18 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
         id: BlockId(1),
         region,
         locals: vec![
-            local(0, types.int, region),
-            local(1, types.int, region),
-            local(2, types.int, region),
+            local(0, types.i32, region),
+            local(1, types.i32, region),
+            local(2, types.i32, region),
         ],
         statements: vec![call_stmt],
-        terminator: HirTerminator::Return(int_expression(0, types.int, region, &mut expressions)),
+        terminator: HirTerminator::Return(i32_expression(0, types.i32, region, &mut expressions)),
     };
     let caller = HirFunction {
         id: FunctionId(0),
         entry: BlockId(1),
         params: vec![],
-        return_type: types.int,
+        return_type: types.i32,
     };
 
     let mut module = HirModule::new();
@@ -534,11 +534,11 @@ fn load_in_return_reads_value_without_cloning() {
     let block = HirBlock {
         id: BlockId(0),
         region,
-        locals: vec![local(0, types.int, region)],
+        locals: vec![local(0, types.i32, region)],
         statements: vec![],
         terminator: HirTerminator::Return(expression(
             HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-            types.int,
+            types.i32,
             region,
             ValueKind::RValue,
             &mut expressions,
@@ -549,7 +549,7 @@ fn load_in_return_reads_value_without_cloning() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        return_type: types.int,
+        return_type: types.i32,
     };
 
     let mut module = HirModule::new();
@@ -619,11 +619,11 @@ fn copy_in_return_value_emits_clone_value() {
     let block = HirBlock {
         id: BlockId(0),
         region,
-        locals: vec![local(0, types.int, region)],
+        locals: vec![local(0, types.i32, region)],
         statements: vec![],
         terminator: HirTerminator::Return(expression(
             HirExpressionKind::Copy(HirPlace::local(LocalId(0))),
-            types.int,
+            types.i32,
             region,
             ValueKind::RValue,
             &mut expressions,
@@ -634,7 +634,7 @@ fn copy_in_return_value_emits_clone_value() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        return_type: types.int,
+        return_type: types.i32,
     };
 
     let mut module = HirModule::new();
@@ -695,7 +695,7 @@ fn tuple_return_preserves_return_value_handling_per_element() {
                 &[
                     expression(
                         HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-                        types.int,
+                        types.i32,
                         region,
                         ValueKind::RValue,
                         &mut expressions,
@@ -711,7 +711,7 @@ fn tuple_return_preserves_return_value_handling_per_element() {
                 &mut expressions,
             ),
         },
-        types.int,
+        types.i32,
         region,
         ValueKind::RValue,
         &mut expressions,
@@ -720,7 +720,7 @@ fn tuple_return_preserves_return_value_handling_per_element() {
     let block = HirBlock {
         id: BlockId(0),
         region,
-        locals: vec![local(0, types.int, region), local(1, types.string, region)],
+        locals: vec![local(0, types.i32, region), local(1, types.string, region)],
         statements: vec![],
         terminator: HirTerminator::Return(return_expr),
     };
@@ -729,7 +729,7 @@ fn tuple_return_preserves_return_value_handling_per_element() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0), LocalId(1)],
-        return_type: types.int,
+        return_type: types.i32,
     };
 
     let mut module = HirModule::new();

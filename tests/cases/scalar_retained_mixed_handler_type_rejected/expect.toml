@@ -1,0 +1,19 @@
+entry = "."
+
+# The mixed handler keeps a retained noop statement beside an eagerly built
+# concrete String fallback, so its body completes as a draft against the
+# resolved catch slot. The expected contract is the ordinary authored type
+# diagnostic the completed catch already reports for the same mismatch; an
+# internal HIR write-back failure instead fails the case through the missing
+# diagnostic contract. The specific reason key is left to parent observation,
+# and the code is asserted alone rather than guessing message wording.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]

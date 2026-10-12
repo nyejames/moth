@@ -4,15 +4,19 @@
 //! WHY: dispatch owns both token advancement and context-sensitive reference validation, so focused
 //!      tests keep those decisions aligned without exercising unrelated statement parsing.
 
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::ast_nodes::{Declaration, NodeKind};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::{
     Expression, ExpressionKind, Operator,
 };
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
-use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
+use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
+use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_with_trailing_newline_policy;
 use crate::compiler_frontend::ast::expressions::parse_expression_dispatch::{
     ExpressionDispatchState, ExpressionTokenStep, dispatch_expression_token,
+};
+use crate::compiler_frontend::ast::expressions::parse_expression_input::{
+    ExpressionParseInput, ExpressionParseResources,
 };
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{SlotKey, Style, TemplateType};
@@ -109,6 +113,7 @@ fn hash_in_expression_position_rejected() {
         allow_expected_result_evidence: true,
         expression: &mut expression,
         next_number_negative: &mut next_number_negative,
+        retain_pending_numeric_fragment: false,
     };
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -171,6 +176,7 @@ fn hash_before_template_head_allowed() {
         allow_expected_result_evidence: true,
         expression: &mut expression,
         next_number_negative: &mut next_number_negative,
+        retain_pending_numeric_fragment: false,
     };
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -222,6 +228,7 @@ fn negative_token_before_identifier_pushes_unary_negation_operator() {
         allow_expected_result_evidence: true,
         expression: &mut expression,
         next_number_negative: &mut next_number_negative,
+        retain_pending_numeric_fragment: false,
     };
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -299,16 +306,20 @@ fn hash_from_tokenized_source_rejected() {
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
     let mut expected_type = ExpectedType::Infer;
 
-    let result = create_expression(
-        &mut stream,
-        &context,
-        &mut type_interner,
-        &mut expected_type,
-        &ValueMode::ImmutableOwned,
+    let mut cast_target_context = CastTargetContext::None;
+    let result = create_expression_with_trailing_newline_policy(ExpressionParseInput::ordinary(
+        ExpressionParseResources {
+            token_stream: &mut stream,
+            scope_context: &context,
+            type_interner: &mut type_interner,
+            expected_type: &mut expected_type,
+            cast_target_context: &mut cast_target_context,
+            value_mode: &ValueMode::ImmutableOwned,
+            string_table: &mut string_table,
+            path_fork: &mut path_fork,
+        },
         false,
-        &mut string_table,
-        &mut path_fork,
-    );
+    ));
 
     assert!(
         result.is_err(),
@@ -316,6 +327,7 @@ fn hash_from_tokenized_source_rejected() {
     );
 }
 
+use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
@@ -405,16 +417,20 @@ fn constant_identifier_uses_module_store_tir() {
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
     let mut expected_type = ExpectedType::Infer;
 
-    let parsed = create_expression(
-        &mut token_stream,
-        &context,
-        &mut type_interner,
-        &mut expected_type,
-        &ValueMode::ImmutableOwned,
+    let mut cast_target_context = CastTargetContext::None;
+    let parsed = create_expression_with_trailing_newline_policy(ExpressionParseInput::ordinary(
+        ExpressionParseResources {
+            token_stream: &mut token_stream,
+            scope_context: &context,
+            type_interner: &mut type_interner,
+            expected_type: &mut expected_type,
+            cast_target_context: &mut cast_target_context,
+            value_mode: &ValueMode::ImmutableOwned,
+            string_table: &mut string_table,
+            path_fork: &mut path_fork,
+        },
         false,
-        &mut string_table,
-        &mut path_fork,
-    )
+    ))
     .expect("module-store constant reference should inline through effective TIR");
 
     let ExpressionKind::Template(parsed_template) = parsed.kind else {
@@ -511,4 +527,68 @@ fn adjacent_copy_reports_missing_operator_at_copy_keyword() {
 #[test]
 fn value_template_followed_by_comment_template_stays_valid() {
     let _ = parse_single_file_ast("value = [: one] [$note:ignored]");
+}
+
+// ----------------------------------
+//  Cast operand statement boundaries
+// ----------------------------------
+
+/// A cast whose operand ends on its own statement boundary must not adopt the `catch` of a
+/// later statement.
+///
+/// WHAT: parses sibling statements where an earlier implicit cast is followed by a later
+///       `catch`; the cast must stay implicit and every later binding must survive.
+/// WHY: the cast operand lookahead once treated the next statement's `catch` as the cast's
+///      suffix, which swallowed the statements in between and left `recovered` undeclared.
+#[test]
+fn cast_operand_ends_at_statement_boundary_before_later_catch() {
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        r#"
+octet U8 = 7
+value ~U64 = 0
+value = cast octet
+parse_int |text String| -> I32, Error!:
+    return cast text
+;
+maybe String = "not an integer"
+recovered = parse_int(maybe) catch then 0
+assert(value is 7)
+assert(recovered is 0)
+"#,
+    );
+    let body = start_function_body(&ast, &path_fork, &string_table);
+
+    let declared_names: Vec<String> = body
+        .iter()
+        .filter_map(|node| match &node.kind {
+            NodeKind::VariableDeclaration(declaration) => Some(declaration.id),
+            _ => None,
+        })
+        .filter_map(|id| path_fork.component(id))
+        .map(|component| string_table.resolve(component).to_owned())
+        .collect();
+    for expected in ["octet", "value", "maybe", "recovered"] {
+        assert!(
+            declared_names.iter().any(|name| name.as_str() == expected),
+            "declaration '{expected}' must survive the cast operand boundary, found {declared_names:?}"
+        );
+    }
+
+    let assignment_value = body
+        .iter()
+        .find_map(|node| match &node.kind {
+            NodeKind::Assignment { value, .. } => Some(value),
+            _ => None,
+        })
+        .expect("the cast assignment must be present");
+    let ExpressionKind::Cast(cast) = &assignment_value.kind else {
+        panic!(
+            "expected the assignment to carry a resolved cast, found {:?}",
+            assignment_value.kind
+        );
+    };
+    assert!(
+        matches!(cast.handling, CastHandling::Implicit),
+        "a later statement's `catch` must not become this cast's suffix"
+    );
 }

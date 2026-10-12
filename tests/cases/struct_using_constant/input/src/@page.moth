@@ -1,10 +1,16 @@
 const_message #= "Hello World!"
+u64_max #U64 = 18_446_744_073_709_551_615
 
 Basic = |
     nothing String,
-    complex_const String = const_message
+    complex_const String = const_message,
+    full_range U64 = u64_max,
 |
 
 basic = Basic(nothing = "required")
 
-[:[basic.complex_const]]
+to_text |value U64| -> String:
+    return cast value
+;
+
+[:[basic.complex_const] [to_text(basic.full_range)]]

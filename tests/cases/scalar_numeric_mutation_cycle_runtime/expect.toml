@@ -1,0 +1,8 @@
+entry = "."
+
+# HTML owns the exact runtime assertions. No HTML-Wasm disposition is claimed
+# for this checked numeric arithmetic and mutation path.
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "scalar numeric mutation u64=1/2/2 default=3/6/6 self=8/10"

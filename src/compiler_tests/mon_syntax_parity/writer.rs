@@ -21,20 +21,20 @@ fn public_writer_values_decode_and_compile_in_compatible_source_receivers() {
         ),
         (
             "ratio".into(),
-            Value::Float(f64::from_bits(0x8000_0000_0000_0000)),
+            Value::F64(f64::from_bits(0x8000_0000_0000_0000)),
         ),
         (
             "items".into(),
-            Value::Collection(vec![Value::Int(1), Value::Int(20)]),
+            Value::Collection(vec![Value::I32(1), Value::I32(20)]),
         ),
     ]);
     let schema = Schema::record(vec![
         Field::required("text", SchemaType::String),
-        Field::required("ratio", SchemaType::Float),
+        Field::required("ratio", SchemaType::F64),
         Field::required(
             "items",
             SchemaType::Collection {
-                element: Box::new(SchemaType::Int),
+                element: Box::new(SchemaType::I32),
             },
         ),
     ]);
@@ -48,7 +48,7 @@ fn public_writer_values_decode_and_compile_in_compatible_source_receivers() {
     let Value::Record(fields) = &decoded else {
         panic!("the MON document root is a record");
     };
-    let Value::Float(ratio) = &fields[1].1 else {
+    let Value::F64(ratio) = &fields[1].1 else {
         panic!("the ratio field is a binary float");
     };
     assert_eq!(
@@ -68,11 +68,11 @@ fn public_writer_values_decode_and_compile_in_compatible_source_receivers() {
 
     let map_type = SchemaType::Map {
         key: Box::new(SchemaType::String),
-        value: Box::new(SchemaType::Int),
+        value: Box::new(SchemaType::I32),
     };
     let map_value = Value::Map(vec![
-        (Value::String("first".into()), Value::Int(3)),
-        (Value::String("second".into()), Value::Int(8)),
+        (Value::String("first".into()), Value::I32(3)),
+        (Value::String("second".into()), Value::I32(8)),
     ]);
     let map_encoder_schema = Schema::value(map_type.clone())
         .prepare()
@@ -112,7 +112,7 @@ fn qualified_writer_input_is_checked_before_qualifier_omission() {
 
     let point_type = SchemaType::Struct {
         name: "Point".into(),
-        fields: vec![Field::required("x", SchemaType::Int)],
+        fields: vec![Field::required("x", SchemaType::I32)],
     };
     let point_schema = Schema::record(vec![Field::required("point", point_type)]);
     let prepared_point_schema = point_schema
@@ -159,7 +159,7 @@ fn qualified_writer_input_is_checked_before_qualifier_omission() {
     assert_fixture(fixture(
         "writer_qualified_struct_emits_source_anonymous_record",
         emitted_point,
-        "Point = | x Int |\n",
+        "Point = | x I32 |\n",
         point_schema,
         SourceExpectation::AcceptObserved(decoded_point.clone()),
         MonExpectation::Accept(decoded_point),

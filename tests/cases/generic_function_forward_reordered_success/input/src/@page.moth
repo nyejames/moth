@@ -10,7 +10,7 @@ swap_forward type X, Y |x X, y Y| -> Y:
     return pair(y, x)
 ;
 
-left Int = forward(7, "ignored")
+left I32 = forward(7, "ignored")
 right String = swap_forward(7, "kept")
 
 io.line([: generic forward [left] [right]])

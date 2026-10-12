@@ -20,7 +20,7 @@ use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirVariantCa
 use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
 use crate::compiler_frontend::hir::places::HirPlace;
-use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 #[derive(Clone, Copy)]
 enum OptionComparisonSide {
     Option { inner_type: TypeId },
@@ -48,62 +48,18 @@ impl<'hir> JsEmitter<'hir> {
         // WHY: HIR has already linearized side effects, so expression lowering can stay a direct
         //      semantic mapping from each variant to the exact JS runtime helper sequence it needs.
         match &expression.kind {
-            HirExpressionKind::Int(value) => {
-                JsNumericCarrier::int_literal(*value, self.config.numeric_profile).ok_or_else(
-                    || {
-                        CompilerError::compiler_error(
-                            "JS backend cannot format an Int literal for its numeric profile",
-                        )
-                    },
-                )
-            }
-            HirExpressionKind::Uint(value) => {
-                JsNumericCarrier::uint_literal(*value, self.config.numeric_profile).ok_or_else(
-                    || {
-                        CompilerError::compiler_error(
-                            "JS backend cannot format a Uint literal for its numeric profile",
-                        )
-                    },
-                )
-            }
-            HirExpressionKind::FixedScalar(value) => {
-                JsNumericCarrier::fixed_literal(*value, self.config.numeric_profile).ok_or_else(
-                    || {
-                        CompilerError::compiler_error(format!(
-                            "JS backend cannot format fixed scalar literal {value}"
-                        ))
-                    },
-                )
-            }
+            HirExpressionKind::FixedScalar(value) => JsNumericCarrier::fixed_literal(*value)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(format!(
+                        "JS backend cannot format fixed scalar literal {value}"
+                    ))
+                }),
             HirExpressionKind::Number(value) => Ok(JsNumericCarrier::number_literal(value)),
             HirExpressionKind::VariantConstruct {
                 carrier,
                 variant_index,
                 fields,
             } => self.lower_variant_construct(carrier, *variant_index, *fields),
-            // HIR Float literals already contain the exact value rounded to the profile precision.
-            // Non-finite values remain an internal invariant violation.
-            HirExpressionKind::Float(value) => {
-                let carrier =
-                    JsNumericCarrier::for_scalar(NumericScalar::Float, self.config.numeric_profile)
-                        .ok_or_else(|| {
-                            CompilerError::compiler_error(
-                                "JS backend has no carrier for Float literals",
-                            )
-                        })?;
-                if carrier.float_precision().is_none() {
-                    return Err(CompilerError::compiler_error(
-                        "JS backend mapped a Float literal to an integer carrier",
-                    ));
-                }
-                if !value.is_finite() {
-                    return Err(CompilerError::compiler_error(
-                        "JavaScript backend received non-finite HIR Float literal",
-                    ));
-                }
-
-                Ok(value.to_string())
-            }
 
             HirExpressionKind::Bool(value) => Ok(value.to_string()),
             HirExpressionKind::Char(value) => Ok(escape_js_char(*value)),
@@ -149,18 +105,25 @@ impl<'hir> JsEmitter<'hir> {
                 };
 
                 if let Some(fixed_capacity) = collection_shape.fixed_capacity {
-                    let fixed_capacity = i64::try_from(fixed_capacity).map_err(|_| {
+                    // Capacities are source-visible I32 counts, so their emitted literal uses the
+                    // exact I32 carrier (a decimal Number).
+                    let capacity = i64::from(i32::try_from(fixed_capacity).map_err(|_| {
                         CompilerError::compiler_error(
-                            "JS fixed collection capacity exceeds the Int literal carrier",
+                            "JS fixed collection capacity exceeds the I32 capacity carrier",
                         )
-                    })?;
+                    })?);
+                    let capacity = FixedScalarValue::signed(FixedScalar::I32, capacity)
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "JS fixed collection capacity exceeds the I32 capacity carrier",
+                            )
+                        })?;
                     let fixed_capacity =
-                        JsNumericCarrier::int_literal(fixed_capacity, self.config.numeric_profile)
-                            .ok_or_else(|| {
-                                CompilerError::compiler_error(
-                                    "JS fixed collection capacity exceeds the Int numeric profile",
-                                )
-                            })?;
+                        JsNumericCarrier::fixed_literal(capacity).ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "JS fixed collection capacity exceeds the I32 capacity carrier",
+                            )
+                        })?;
                     Ok(format!(
                         "__moth_fixed_collection({}, {})",
                         items, fixed_capacity
@@ -210,7 +173,7 @@ impl<'hir> JsEmitter<'hir> {
 
             HirExpressionKind::Cast { source, policy } => {
                 let lowered_source = self.lower_expr(*source)?;
-                js_cast_expression_for_policy(*policy, &lowered_source, self.config.numeric_profile)
+                js_cast_expression_for_policy(*policy, &lowered_source)
             }
 
             HirExpressionKind::VariantPayloadGet {
@@ -552,7 +515,7 @@ impl<'hir> JsEmitter<'hir> {
         }
 
         let scalar = NumericScalar::from_type_id(type_id, self.type_environment)?;
-        let carrier = JsNumericCarrier::for_scalar(scalar, self.config.numeric_profile)?;
+        let carrier = JsNumericCarrier::for_scalar(scalar)?;
         Some(matches!(
             carrier,
             JsNumericCarrier::BigInteger { .. } | JsNumericCarrier::ScaledInteger { .. }
@@ -675,11 +638,10 @@ pub(crate) fn escape_js_string(value: &str) -> String {
 pub(super) fn js_cast_expression_for_policy(
     policy: BuiltinCastPolicyId,
     value: &str,
-    numeric_profile: moth_lexical::numeric::profile::NumericProfile,
 ) -> Result<String, CompilerError> {
     match policy {
         BuiltinCastPolicyId::NumericConversion { source, target } => {
-            JsNumericConversion::classify(source, target, numeric_profile)
+            JsNumericConversion::classify(source, target)
                 .map(|conversion| conversion.expression(value, source, target))
         }
         BuiltinCastPolicyId::ByteToU8 | BuiltinCastPolicyId::U8ToByte => Ok(value.to_owned()),
@@ -690,13 +652,11 @@ pub(super) fn js_cast_expression_for_policy(
             Ok(format!("__moth_cast_int_to_string({value})"))
         }
         BuiltinCastPolicyId::NumericToString(scalar) => {
-            let precision = scalar
-                .binary_float_precision(numeric_profile)
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "JS backend received a non-numeric string formatting policy for {scalar}"
-                    ))
-                })?;
+            let precision = scalar.binary_float_precision().ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "JS backend received a non-numeric string formatting policy for {scalar}"
+                ))
+            })?;
             Ok(format!(
                 "__moth_cast_float_to_string({value}, {}, \"{scalar}\")",
                 binary_float_precision_bits(precision),
@@ -713,12 +673,11 @@ pub(super) fn js_cast_expression_for_policy(
             scale.get()
         )),
         BuiltinCastPolicyId::StringToNumeric(scalar) if scalar.is_integer() => {
-            let carrier =
-                JsNumericCarrier::for_scalar(scalar, numeric_profile).ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "JS backend has no integer carrier for {scalar}"
-                    ))
-                })?;
+            let carrier = JsNumericCarrier::for_scalar(scalar).ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "JS backend has no integer carrier for {scalar}"
+                ))
+            })?;
             let (minimum, maximum) = carrier.integer_bounds_js().ok_or_else(|| {
                 CompilerError::compiler_error(format!(
                     "JS backend has no integer bounds for {scalar}"
@@ -729,13 +688,11 @@ pub(super) fn js_cast_expression_for_policy(
             ))
         }
         BuiltinCastPolicyId::StringToNumeric(scalar) => {
-            let precision = scalar
-                .binary_float_precision(numeric_profile)
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "JS backend received a non-numeric parse policy for {scalar}"
-                    ))
-                })?;
+            let precision = scalar.binary_float_precision().ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "JS backend received a non-numeric parse policy for {scalar}"
+                ))
+            })?;
             Ok(format!(
                 "__moth_cast_float({value}, {}, \"{scalar}\")",
                 binary_float_precision_bits(precision),

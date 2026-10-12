@@ -1,0 +1,14 @@
+-- An unannotated multi-bind forward producer completes from its named operand.
+-- The natural U8 result is not retyped to the later U64 return slot, so the
+-- return of the binding is rejected.
+
+widen |base U8, ready Bool| -> U64:
+    total, label = if ready:
+        then base + 1, "ready"
+    else
+        then base + 2, "waiting"
+    ;
+    return total
+;
+
+[:[widen(1, true)]]

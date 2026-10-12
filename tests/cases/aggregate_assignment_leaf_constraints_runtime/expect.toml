@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "assignment_leaf_constraints collection_before=4294967296 collection_first=18446744073709551615 collection_second=7 collection_missing=0 collection_len=2 map_before=4294967296 map_top=18446744073709551615 map_absent=0 map_len=1"

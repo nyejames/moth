@@ -1,7 +1,7 @@
 @core/math PI, TAU, E, SQRT_2, LN_2, LN_10
 
--- Every constant is the nearest Float to its mathematical value, so each symbol
--- is compared with that exact Float. A swapped registration fails here.
+-- Every constant is the nearest F64 to its mathematical value, so each symbol
+-- is compared with that exact F64. A swapped registration fails here.
 pi_ok = PI is 3.141592653589793
 tau_ok = TAU is 6.283185307179586
 e_ok = E is 2.718281828459045

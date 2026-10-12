@@ -1,0 +1,21 @@
+-- Unannotated collection literal with full-range U64 leaves. A later {U64}
+-- receiver constrains each element leaf; the explicit copy keeps its own values.
+
+read_pair |values {U64}| -> String:
+    first = values.get(0) catch:
+        then 0
+    ;
+    second = values.get(1) catch:
+        then 0
+    ;
+    len = values.length()
+    return [:[first],[second] len=[len]]
+;
+
+render_late_u64_collection || -> String:
+    original = {18_446_744_073_709_551_615, 18_446_744_073_709_551_614}
+    duplicate = copy original
+    return [:late_u64_collection original=[read_pair(original)] duplicate=[read_pair(duplicate)]]
+;
+
+[:[render_late_u64_collection()]]

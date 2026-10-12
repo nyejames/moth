@@ -1,0 +1,8 @@
+stored #I32 = cast "42"
+point #= (
+    from_cast = stored,
+)
+
+compare_projected_cast |value I32| -> Bool:
+    return point.from_cast is value catch then false
+;

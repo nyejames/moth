@@ -1,76 +1,238 @@
-//! Shared argument parsing for builtin receiver members.
+//! Shared argument expectations and validation for builtin receiver members.
 //!
-//! WHAT: validates builtin argument lists and adapts them to call-validation expectations.
-//! WHY: collection and error builtins share positional-only parsing and type validation rules.
+//! WHAT: adapts a builtin operation's fixed parameter types to call-validation expectations and
+//!       runs the shared call-argument resolution with the builtin-member diagnostic surface.
+//! WHY: collection, map and error builtins share positional-only routing, arity, access-mode and
+//!      type-compatibility rules, so the completed lane and the retained lane both validate
+//!      through this one owner instead of restating the contract.
 
 use crate::compiler_frontend::ast::ScopeContext;
-use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
-use crate::compiler_frontend::ast::expressions::call_arguments::{
-    CallArgumentSyntax, parse_call_arguments_typed_with_expectations,
-};
 use crate::compiler_frontend::ast::expressions::call_validation::{
     CallArgumentResolutionContext, CallDiagnosticContext, ExpectedAccessMode,
     ExpectedParameterType, ParameterExpectation, resolve_call_arguments,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::numeric_known_shape::{
+    KnownShape, KnownShapeId, materialise_known_shape,
+};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "builtin method argument parsing keeps the token stream, member identity, expected types, scope, mutable interner/string/path state, and member span as separate borrows"
-)]
-pub(super) fn parse_builtin_method_args_typed(
-    token_stream: &mut AstCursor<'_>,
-    member_name: &str,
-    expected_type_ids: &[TypeId],
-    context: &ScopeContext,
+/// The concrete type a construction shape already names, when it is a concrete leaf.
+pub(crate) fn concrete_shape_type(
+    scope_context: &ScopeContext,
+    shape: KnownShapeId,
+) -> Option<TypeId> {
+    match scope_context.numeric_state().shape(shape) {
+        KnownShape::Concrete { type_id, .. } => Some(type_id),
+        KnownShape::Numeric(_)
+        | KnownShape::Collection { .. }
+        | KnownShape::Map { .. }
+        | KnownShape::Optional { .. }
+        | KnownShape::DeclaredSubstitution { .. } => None,
+    }
+}
+
+/// Interns one concrete type as a construction shape so a retained chain can carry it.
+pub(super) fn intern_concrete_shape(
+    scope_context: &ScopeContext,
+    type_id: TypeId,
+) -> Result<KnownShapeId, ExpressionParseError> {
+    scope_context
+        .numeric_state_mut()
+        .intern_shape(KnownShape::Concrete {
+            type_id,
+            span: None,
+        })
+}
+
+/// Materialises a construction shape into its canonical type once every leaf is concrete.
+pub(super) fn materialise_builtin_shape(
+    scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
-    member_span: Option<SourceSpan>,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> Result<Vec<CallArgument>, ExpressionParseError> {
-    let expectations = expected_type_ids
-        .iter()
-        .map(|expected_type_id| ParameterExpectation {
+    shape: KnownShapeId,
+) -> Result<TypeId, ExpressionParseError> {
+    let mut state = scope_context.numeric_state_mut();
+    materialise_known_shape(
+        &mut state,
+        type_interner.environment_mut_for_derived_types(),
+        shape,
+    )
+}
+
+/// Derives a builtin call's result slots from its success shape and declared error.
+///
+/// WHAT: materialises the success shape to its canonical type and wraps it in the fallible carrier
+///       when the operation declares an error. A zero-success operation yields `NONE!Error`, or no
+///       result slot when it declares no error.
+/// WHY: result slots are concrete only once every leaf is known, so they are derived here at
+///      completion and never at retained parse.
+pub(super) fn builtin_result_type_ids(
+    success_shape: Option<KnownShapeId>,
+    error_return_type_id: Option<TypeId>,
+    scope_context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+) -> Result<Vec<TypeId>, ExpressionParseError> {
+    let Some(success_shape) = success_shape else {
+        // A zero-success operation carries only its declared error, as `NONE!Error`. With no
+        // declared error it has no result slot at all.
+        return Ok(match error_return_type_id {
+            Some(error_type_id) => {
+                let none_type_id = type_interner.builtins().none;
+                vec![type_interner.intern_fallible_carrier(none_type_id, error_type_id)]
+            }
+            None => Vec::new(),
+        });
+    };
+    let success_type_id = materialise_builtin_shape(scope_context, type_interner, success_shape)?;
+    // Temporary carrier bridge: builtin fallibility is public `Error!` control flow, not a
+    // first-class `Result` value. HIR consumes this carrier immediately while lowering the
+    // handled call into explicit success/error edges.
+    Ok(vec![match error_return_type_id {
+        Some(error_type_id) => {
+            type_interner.intern_fallible_carrier(success_type_id, error_type_id)
+        }
+        None => success_type_id,
+    }])
+}
+
+/// The success slot as concrete types, when the shape is already concrete.
+///
+/// WHAT: returns `None` when the success shape is still a construction-only numeric or collection
+///       shape, so the fragment handling site defers its success list to body-root completion.
+/// WHY: a handling site validates its success list against concrete types only; an unresolved
+///      numeric element is decided at completion, never defaulted here.
+pub(super) fn builtin_success_type_ids(
+    scope_context: &ScopeContext,
+    success_shape: Option<KnownShapeId>,
+) -> Option<Vec<TypeId>> {
+    let Some(success_shape) = success_shape else {
+        return Some(Vec::new());
+    };
+    concrete_shape_type(scope_context, success_shape).map(|type_id| vec![type_id])
+}
+
+/// Builds one builtin operation's argument expectations from its parameter slots.
+pub(super) fn builtin_argument_expectations(
+    slots: Vec<ExpectedParameterType>,
+) -> Vec<ParameterExpectation> {
+    slots
+        .into_iter()
+        .map(|expected_type| ParameterExpectation {
             name: None,
-            expected_type: ExpectedParameterType::Known(*expected_type_id),
+            expected_type,
             access_mode: ExpectedAccessMode::Shared,
             default_value: None,
         })
-        .collect::<Vec<_>>();
+        .collect()
+}
 
-    let callee_name = string_table.intern(member_name);
-    let parsed_arguments = parse_call_arguments_typed_with_expectations(
-        token_stream,
-        context,
-        type_interner,
-        string_table,
-        &expectations,
-        CallArgumentSyntax::UnsupportedBuiltinMember {
-            member_name: Some(callee_name),
-            takes_no_arguments: expected_type_ids.is_empty(),
-        },
-        path_fork,
-    )?;
+/// Describes one builtin operation's argument slots for parse-time expectations.
+///
+/// WHAT: a concrete slot stays a canonical type; a numeric or collection slot stays a construction
+///       shape.
+/// WHY: a retained chain must not force an open numeric leaf before body-root completion.
+pub(super) fn builtin_argument_slots(
+    scope_context: &ScopeContext,
+    shapes: &[KnownShapeId],
+) -> Vec<ExpectedParameterType> {
+    let state = scope_context.numeric_state();
+    shapes
+        .iter()
+        .map(|shape| match state.shape(*shape) {
+            KnownShape::Concrete { type_id, .. } => ExpectedParameterType::Known(type_id),
+            KnownShape::Numeric(_)
+            | KnownShape::Collection { .. }
+            | KnownShape::Map { .. }
+            | KnownShape::Optional { .. }
+            | KnownShape::DeclaredSubstitution { .. } => {
+                ExpectedParameterType::ConstructionShape(*shape)
+            }
+        })
+        .collect()
+}
 
+/// Materialises every construction-only builtin slot before argument validation.
+///
+/// WHAT: a numeric or collection slot becomes its canonical type through the same materialiser the
+///       result slots use; concrete and external slots pass through unchanged.
+/// WHY: validation compares canonical types only, so an open slot must never reach completed call
+///      validation. A ready argument registers its exact receiver before this point, so a
+///      compatible argument materialises to its own type; only an incompatible argument is judged
+///      against the class default.
+fn materialised_builtin_expectations(
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    expectations: &[ParameterExpectation],
+) -> Result<Vec<ParameterExpectation>, ExpressionParseError> {
+    let mut slots = Vec::with_capacity(expectations.len());
+    for expectation in expectations {
+        slots.push(match &expectation.expected_type {
+            ExpectedParameterType::Known(type_id) => ExpectedParameterType::Known(*type_id),
+            ExpectedParameterType::UnknownExternal => ExpectedParameterType::UnknownExternal,
+            ExpectedParameterType::GenericParameter(_) => {
+                return Err(CompilerError::compiler_error(
+                    "a builtin member expectation carried a generic template parameter",
+                )
+                .into());
+            }
+            ExpectedParameterType::ConstructionShape(shape) => ExpectedParameterType::Known(
+                materialise_builtin_shape(context, type_interner, *shape)?,
+            ),
+        });
+    }
+    Ok(builtin_argument_expectations(slots))
+}
+
+/// The authored diagnostic identity of one builtin member call.
+///
+/// WHAT: the member's canonical source name and the span of its authored name.
+/// WHY: a builtin member has no callable signature, so argument diagnostics name it from this
+///      record alone. The retained lane builds the same record, so the diagnostic reads the same
+///      whether the arguments resolve immediately or after a numeric origin completes.
+#[derive(Clone, Copy)]
+pub(super) struct BuiltinCallSite<'a> {
+    /// The operation's canonical source spelling, as the diagnostic renders it.
+    pub(super) member_name: &'a str,
+    /// The source span of the authored member name, when the call has one.
+    pub(super) member_span: Option<SourceSpan>,
+}
+
+/// Validate one builtin member's parsed arguments against its operation's expectations.
+///
+/// WHAT: runs the shared argument resolution — arity, positional-only routing, defaults, access
+///       modes and final type compatibility — with the builtin-member diagnostic surface and
+///       returns the resolved arguments the builtin constructor consumes.
+/// WHY: a builtin member has no callable signature, so its fixed parameter expectations are the
+///      whole contract; the completed lane validates here before construction and the retained lane
+///      resumes the exact same owner once its arguments resolve, so no validation lane is skipped.
+pub(super) fn resolve_builtin_member_arguments(
+    call_site: BuiltinCallSite<'_>,
+    arguments: &[CallArgument],
+    expectations: &[ParameterExpectation],
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    string_table: &mut StringTable,
+    path_fork: &PathInternerFork,
+) -> Result<Vec<CallArgument>, ExpressionParseError> {
+    let expectations = materialised_builtin_expectations(context, type_interner, expectations)?;
     let type_check_context = type_interner.type_check_context();
 
     Ok(resolve_call_arguments(
-        CallDiagnosticContext::builtin_member(member_name),
-        &parsed_arguments,
+        CallDiagnosticContext::builtin_member(call_site.member_name),
+        arguments,
         &expectations,
-        member_span,
+        call_site.member_span,
         CallArgumentResolutionContext {
             string_table,
             type_environment: type_check_context.type_environment,
             compatibility_cache: type_check_context.compatibility_cache,
             path_fork,
-            float_precision: context.numeric_profile.float_precision,
         },
     )?)
 }

@@ -3,7 +3,7 @@ A constant can hold a fully known struct value.
 [codeblock, $code("moth"):
     Defaults = |
         title String,
-        year Int,
+        year I32,
     |
 
     defaults #= Defaults("Moth", 2026)

@@ -1,8 +1,8 @@
-can_error || -> Int, Error?!:
+can_error || -> I32, Error?!:
     return! Error("optional_error_boom")
 ;
 
-recover || -> Int:
+recover || -> I32:
     value = can_error() catch |err|:
         if err is not none:
             io.line("optional_error_present")

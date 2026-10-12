@@ -7,7 +7,7 @@ use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
 use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirStatementKind};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth};
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::process::Command;
 
 // Runtime helper contract tests
@@ -210,12 +210,12 @@ fn collection_remove_call_is_not_wrapped_with_result_propagate() {
                 &[
                     expression(
                         HirExpressionKind::Collection(append_values(&[], &mut expressions)),
-                        types.collection_int,
+                        types.collection_i32,
                         RegionId(0),
                         ValueKind::RValue,
                         &mut expressions,
                     ),
-                    int_expression(0, types.int, RegionId(0), &mut expressions),
+                    i32_expression(0, types.i32, RegionId(0), &mut expressions),
                 ],
                 &mut expressions,
             ),
@@ -226,7 +226,7 @@ fn collection_remove_call_is_not_wrapped_with_result_propagate() {
     let block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
-        locals: vec![local(0, types.int, RegionId(0))],
+        locals: vec![local(0, types.i32, RegionId(0))],
         statements: vec![call_statement],
         terminator: HirTerminator::Return(unit_expression(
             types.unit,
@@ -297,7 +297,7 @@ fn collection_length_call_is_not_wrapped_with_result_propagate() {
             args: append_values(
                 &[expression(
                     HirExpressionKind::Collection(append_values(&[], &mut expressions)),
-                    types.collection_int,
+                    types.collection_i32,
                     RegionId(0),
                     ValueKind::RValue,
                     &mut expressions,
@@ -311,7 +311,7 @@ fn collection_length_call_is_not_wrapped_with_result_propagate() {
     let block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
-        locals: vec![local(0, types.int, RegionId(0))],
+        locals: vec![local(0, types.i32, RegionId(0))],
         statements: vec![call_statement],
         terminator: HirTerminator::Return(unit_expression(
             types.unit,
@@ -369,30 +369,24 @@ fn cast_int_does_not_trim_string_input() {
     );
 }
 
-/// Verifies that Float -> Int casts use the standard profile's Int range helper. [cast]
+/// Verifies that `F64 -> I32` casts use the exact I32 range helper. [cast]
 #[test]
-fn cast_float_to_int_uses_standard_profile_range_helper() {
+fn cast_float_to_int_uses_exact_i32_range_helper() {
     let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
-    let source_expr = expression(
-        HirExpressionKind::Float((i32::MAX as f64) + 1.0),
-        type_environment.builtins().float,
-        region,
-        ValueKind::Const,
-        &mut expressions,
-    );
+    let source_expr = f64_expression((i32::MAX as f64) + 1.0, types.f64, region, &mut expressions);
 
     let cast_statement = statement(
         2,
         HirStatementKind::CastOp {
             policy:
                 crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId::NumericConversion {
-                source: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Float,
-                target: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Int,
+                source: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Fixed(FixedScalar::F64),
+                target: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Fixed(FixedScalar::I32),
             },
             source: source_expr,
             result: Some(HirLocalDestination::Define(LocalId(0))),
@@ -402,7 +396,7 @@ fn cast_float_to_int_uses_standard_profile_range_helper() {
     let block = HirBlock {
         id: BlockId(0),
         region,
-        locals: vec![local(0, types.int, region)],
+        locals: vec![local(0, types.i32, region)],
         statements: vec![cast_statement],
         terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
     };
@@ -694,7 +688,7 @@ fn clone_value_deep_copies_map_entries() {
 // Emitted error-code behavior tests
 // ---------------------------------------------------------------------------
 
-fn lower_error_runtime_module(profile: NumericProfile) -> String {
+fn lower_error_runtime_module() -> String {
     let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -705,11 +699,11 @@ fn lower_error_runtime_module(profile: NumericProfile) -> String {
         HirExpressionKind::MapLiteral(append_map_entries(
             &[HirMapEntry {
                 key: string_expression("seed", types.string, region, &mut expressions),
-                value: int_expression(1, types.int, region, &mut expressions),
+                value: i32_expression(1, types.i32, region, &mut expressions),
             }],
             &mut expressions,
         )),
-        types.map_string_int,
+        types.map_string_i32,
         region,
         ValueKind::RValue,
         &mut expressions,
@@ -752,7 +746,7 @@ fn lower_error_runtime_module(profile: NumericProfile) -> String {
         &module,
         &NumericProofs::default(),
         &string_table,
-        JsLoweringConfig::direct_js(false, profile),
+        JsLoweringConfig::direct_js(false),
         &type_environment,
         &path_fork.snapshot_table(),
     )
@@ -774,28 +768,17 @@ fn run_javascript(source: &str) -> String {
 }
 
 /// Verifies that emitted collection, map, and Core IO errors retain their unsigned code records
-/// and exact messages under both Int profiles. [collection] [map] [io-input-helper]
+/// and exact messages. [collection] [map] [io-input-helper]
 #[test]
-fn emitted_error_producers_preserve_u32_codes_across_int_profiles() {
-    let profiles = [
-        NumericProfile::STANDARD,
-        NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits64,
-        },
-    ];
+fn emitted_error_producers_preserve_u32_codes() {
+    let source = lower_error_runtime_module();
     let code_field = format!(
         "{:?}",
         crate::backends::js::builtin_error_code_js_field_name(false)
     );
-
-    for profile in profiles {
-        let source = lower_error_runtime_module(profile);
-        let (zero_index, out_of_bounds_index) = match profile.int_width {
-            IntWidth::Bits32 => ("0", "1"),
-            IntWidth::Bits64 => ("0n", "1n"),
-        };
-        let driver = r#"
+    // Collection positions are exactly I32, so the driver passes Number indexes.
+    let (zero_index, out_of_bounds_index) = ("0", "1");
+    let driver = r#"
 delete globalThis.window;
 delete globalThis.document;
 if (typeof window !== "undefined" || typeof document !== "undefined") {
@@ -827,26 +810,25 @@ for (const result of results) {
     ]));
 }
 "#
-        .replace("INDEX_ZERO", zero_index)
-        .replace("INDEX_OUT_OF_BOUNDS", out_of_bounds_index)
-        .replace("ERROR_CODE_FIELD", &code_field);
+    .replace("INDEX_ZERO", zero_index)
+    .replace("INDEX_OUT_OF_BOUNDS", out_of_bounds_index)
+    .replace("ERROR_CODE_FIELD", &code_field);
 
-        let output = run_javascript(&format!("{source}\n{driver}"));
-        assert_eq!(
-            output.lines().collect::<Vec<_>>(),
-            vec![
-                r#"["err","Collection operation expects an ordered collection","number","100","number","101",100]"#,
-                r#"["err","Collection operation expects an ordered collection","number","100","number","101",100]"#,
-                r#"["err","Collection index out of bounds","number","101","number","102",101]"#,
-                r#"["err","Collection index out of bounds","number","101","number","102",101]"#,
-                r#"["err","Collection index out of bounds","number","101","number","102",101]"#,
-                r#"["err","Map operation expects an ordered map","number","110","number","111",110]"#,
-                r#"["err","Map key not found","number","111","number","112",111]"#,
-                r#"["err","Map operation expects an ordered map","number","110","number","111",110]"#,
-                r#"["err","Map key not found","number","111","number","112",111]"#,
-                r#"["err","Unsupported operation","number","1","number","2",1]"#,
-            ],
-            "generated error records must retain U32-number codes under {profile}"
-        );
-    }
+    let output = run_javascript(&format!("{source}\n{driver}"));
+    assert_eq!(
+        output.lines().collect::<Vec<_>>(),
+        vec![
+            r#"["err","Collection operation expects an ordered collection","number","100","number","101",100]"#,
+            r#"["err","Collection operation expects an ordered collection","number","100","number","101",100]"#,
+            r#"["err","Collection index out of bounds","number","101","number","102",101]"#,
+            r#"["err","Collection index out of bounds","number","101","number","102",101]"#,
+            r#"["err","Collection index out of bounds","number","101","number","102",101]"#,
+            r#"["err","Map operation expects an ordered map","number","110","number","111",110]"#,
+            r#"["err","Map key not found","number","111","number","112",111]"#,
+            r#"["err","Map operation expects an ordered map","number","110","number","111",110]"#,
+            r#"["err","Map key not found","number","111","number","112",111]"#,
+            r#"["err","Unsupported operation","number","1","number","2",1]"#,
+        ],
+        "generated error records must retain U32-number codes"
+    );
 }

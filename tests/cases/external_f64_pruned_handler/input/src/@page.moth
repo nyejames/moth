@@ -1,0 +1,20 @@
+@dead_float.js discarded_float
+
+left || -> I32:
+    return 1
+;
+right || -> I32:
+    return 1
+;
+
+compare || -> Bool:
+    result = left() is right() catch:
+        ignored = discarded_float(5)
+        then false
+    ;
+    return result
+;
+
+comparison = compare()
+assert(comparison is true)
+[: pruned external float]

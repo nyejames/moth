@@ -389,7 +389,7 @@ fn comma_continued_into_declaration_reports_continuation_entered_statement() {
         ),
         (
             "function declaration",
-            "@html/tables data,\nrow |value Int| -> String:\n    return value\n;\n",
+            "@html/tables data,\nrow |value I32| -> String:\n    return value\n;\n",
             "row",
         ),
         (
@@ -399,7 +399,7 @@ fn comma_continued_into_declaration_reports_continuation_entered_statement() {
         ),
         (
             "struct declaration",
-            "@html/tables data,\nRow = |value Int|\n",
+            "@html/tables data,\nRow = |value I32|\n",
             "Row",
         ),
         (

@@ -14,5 +14,5 @@ text[^1]
 [^1]: footnote note
 
 ```bst
-x #Int = 1
+x #I32 = 1
 ```

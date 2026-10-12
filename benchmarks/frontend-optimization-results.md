@@ -5329,3 +5329,137 @@ evidence and five-run Phase 10 batch, with their existing qualifications; it
 replaces neither baseline. Raw history and frozen recording artefacts remain
 local. These timings are performance observations. Correctness validation is
 recorded separately.
+
+## Exact numeric types: Phase 10 matched comparison (2026-10-11)
+
+The baseline is `c1203d686`, captured in Phase 0 as five `just bench-frontend-check`
+and five `just bench-check` invocations (`tmp/exact-numerics/phase0b-full-fidelity-baseline/`).
+The final tree is `d056000b2`, captured the same way on a clean tree
+(`git_dirty = false`) with `tmp/exact-numerics/phase10/run-final-capture.sh`. An
+earlier capture of the intermediate tree `eb8b526bb` gave matching conclusions (medians
+1.000 and 1.017, with no case above +5%) and is kept in `phase10/final-capture-eb8b526bb/`.
+Both used the same machine (macOS Apple Silicon `6D851D`), Rust 1.99.0, Node 24.21.0,
+benchmark protocol 4, timing schema 2, one warmup, ten measured iterations and default
+thread identity. For each matched case, the estimator takes the median of the five
+invocation medians. No invocation was excluded, and the only excluded cases are
+`docs_frontend` and `docs_check`, as at activation. The baseline's first two frontend
+invocations kept their unexplained variance; the median estimator absorbs it, but it
+limits precision. Per-case values, ranges and stage medians are in
+`tmp/exact-numerics/phase10/comparison.json`.
+
+| Suite | Matched cases | Median final/baseline | Highest | Lowest | Cases above +5% |
+| --- | ---: | ---: | --- | --- | ---: |
+| In-process frontend | 41 | 0.998 | `generic_scaling_40_frontend` 1.029 | `constant_chain_32_frontend` 0.915 | 0 |
+| CLI | 39 | 1.013 | `type_stress_check` 1.031 | `module_root_stress_check` 0.965 | 0 |
+
+No matched case crosses the 5% materiality threshold. The CLI drift is small but
+consistent: a median of about 0.06 ms more in `frontend.ast.total` and about 0.09 ms
+more in `frontend.module.semantic_total` per case. Even `root_single_file_check`
+spends 0.029 ms more in `frontend.ast.environment`, which is consistent with the larger
+builtin environment (cast evidence for every fixed numeric target). In
+`constant_chain_512_check`, constant header resolution grows 5.8% (0.930 → 0.985 ms)
+because declaration-owned constants now resolve through bounded numeric construction.
+Both costs come from the new language surface rather than repeated work.
+
+Workload adaptations: 28 of the 41 frontend cases and 35 of the 39 CLI cases changed
+source fingerprints. The Phase 8 migration replaced convenience `Int`/`Float` with the
+widths that the baseline profile (`Int32`/`Float64`) selected, I32 and F64, and added
+`divisor I32 = 1` in `collection-stress.moth` and `adversarial/expression-rpn-churn.moth`.
+No casts were added to change measured work, and no workload became narrower than its
+baseline width. Under D15, equal-width I32 arithmetic keeps its type, so these
+workloads perform the same checks as before. They are matched comparisons with that
+qualification, not like-for-like source bytes.
+
+### New-semantics scaling workloads
+
+Phase 10 added eight `benchmarks/numeric-scaling` series (sizes 32/128/512, CLI and
+frontend cases) for the shapes in plan Section 11.4. The baseline compiler cannot
+compile them, so they measure the new feature's cost rather than a comparison.
+`just bench-scaling` fits every declared series within budget on `frontend.ast.total`:
+
+| Series | Fitted exponent (budget n^1.25) |
+| --- | ---: |
+| `numeric_copy_chain` | 0.81 |
+| `numeric_origin_fanout` | 0.85 |
+| `numeric_grouped_arithmetic` | 0.61 |
+| `numeric_independent_regions` | 0.89 |
+| `numeric_aggregate_forwarding` | 0.96 |
+| `numeric_safety_pruning` | 0.95 |
+| `numeric_mutable_cycles` | 0.97 |
+| `numeric_narrow_chains` | 0.90 |
+
+End-to-end CLI medians at size 512 are superlinear for `aggregate_forwarding`
+(515 ms), `mutable_cycles` (2,134 ms) and `narrow_chains` (1,063 ms). Profiles
+attribute that growth to borrow analysis: initial call-argument conflict scans, and
+the untimed `check_borrows` refresh after private failure lanes are installed
+(`module_compilation/generated/convergence.rs::refresh_private_failure_lanes`), which
+clones the dense per-local `LocalState` matrix per block. The baseline borrow engine
+has the same cost. A concrete I32 chain of 1,024 statements takes 5,046 ms on the
+baseline and 5,080 ms on the final tree. This cost belongs to the borrow-analysis
+owner and is outside the numeric construction budget.
+
+Two migration-owned costs were found and removed during Phase 10:
+
+- Expression-policy scope contexts cloned every visible body-local declaration. The
+  numeric frame slots had enlarged those declarations. Policy frames are now empty and
+  linked to their parent. Concrete I32 chains returned to baseline parity (512:
+  797 → 420 ms; baseline 422 ms).
+- Grouped expression parsing and retained-group numeric completion had grown their
+  recursive frames. The debug parse recursion went from 32,992 to 2,336 bytes per
+  nesting level, and `complete_nested_items` from 18,992 to 3,168 bytes. With a 1 MiB
+  stack, release builds now accept 512 nested groups; the baseline accepted 384.
+  `check_tests.rs` holds a 1 MiB regression for 64 nested groups with a late `U64`
+  receiver.
+
+Raw evidence: `tmp/exact-numerics/phase10/` (capture logs, comparison and scaling
+output) and `tmp/exact-numerics/p10-scaling-cost/`. These are local performance
+observations. Correctness validation is recorded separately.
+
+## Exact numeric types: review follow-up (2026-10-12)
+
+An implementation review found repeated alias-origin walks, whole-module failure-summary
+reclassification each convergence round, and diagnostic witness selection by storage order.
+Further review lanes found full receiver-list scans per class query, exponential re-expansion of
+shared known-shape nodes, quadratic declared-binding matching, an owning diagnostic spelling built
+per completed binding operand and a whole `ExternalFunctionDef` clone per retained host call.
+All are corrected. Deterministic `AstCounter` tests bound each fix:
+
+| Fix | Workload sizes | Counter before | Counter after |
+|---|---|---:|---:|
+| Birth-time binding origin facts | alias chain 32 / 128 / 512 | 3,276 / 31,068 / 418,716 steps | 195 / 483 / 1,635 |
+| Incremental class receiver summaries | sibling loops 32 / 128 / 512 | 3,072 / 49,152 / 786,432 witnesses | 63 / 255 / 1,023 |
+| Dependency-driven failure convergence | private chain 8 / 32 / 128 | 99 / 1,155 / 16,899 bodies | 11 / 35 / 131 |
+| Shared-shape visit marks | nested pair depth 8 / 12 / 16 | 511 / 8,191 / 131,071 pins | 9 / 13 / 17 |
+| Canonical declared-binding order | 64 / 128 parameters | 2,144 / 8,384 lookups | 455 / 1,032 |
+
+Release `--features detailed_timers` builds of `43c72330f` and the corrected tree ran
+interleaved on the same machine. Each value is the median of five runs, in milliseconds:
+
+| Workload | AST before | AST after | Check before | Check after |
+|---|---:|---:|---:|---:|
+| `alias-receiver-chain-4096` | 218.50 | 20.82 | 324.21 | 126.61 |
+| `alias-receiver-chain` at 8,192 | 821.66 | 42.17 | 1,218.14 | 432.43 |
+| `generic-failure-chain-512` | 45.51 | 4.79 | 569.65 | 475.25 |
+| Nested `Pair` depth 20 | 1,316.92 | 325.70 | 1,786.43 | 748.00 |
+| `speed-test.moth` | 6.85 | 6.74 | 22.15 | 22.59 |
+| `collection-stress.moth` | 1.69 | 1.68 | 51.61 | 51.45 |
+| `aggregate-forwarding-512` | 16.55 | 16.10 | 520.43 | 522.88 |
+
+For `generic-failure-chain-512`, AST finalisation went from 41.54 ms to 0.80 ms. The nested
+`Pair` chain stays exponential, because nested generic type identities and diagnostic spellings
+are owning trees. The pre-numeric checkpoint `9a416ab67` takes 768 ms of AST time at depth 20, so
+the corrected tree is now below the pre-numeric cost.
+
+The private-failure lane refresh now reports under `frontend.borrow.converge` and
+`frontend.generated.borrow_recheck`, so check totals no longer hide most borrow time. The
+remaining end-to-end growth in the failure chain, sibling-loop and narrow-chain shapes is that
+refresh's dense per-block `LocalState` cloning. For example, 512 sibling loops over one
+collection take 4,380 ms, of which 2,269 ms is borrow convergence; `9a416ab67` takes 5,213 ms
+on the equivalent `Int` source. That cost stays with the borrow-analysis owner.
+
+Two series join the scaling budget: `numeric_alias_receiver_chain` at 256, 1,024 and 4,096,
+where smaller sizes hide per-query cost under constant overhead, and
+`numeric_generic_failure_chain` at 32, 128 and 512. On `frontend.ast.total`, `43c72330f`
+would fit exponents of about 1.66 and 1.44, above the `n^1.25` budget. The corrected tree fits
+0.98 and 0.87 under `just validate-full`, which passes with all 13 series within budget. Raw
+evidence is in `tmp/exact-numerics/review-followup/`.

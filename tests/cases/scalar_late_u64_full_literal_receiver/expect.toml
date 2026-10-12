@@ -1,0 +1,11 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "scalar late u64 received=18446744073709551615 above_i32=2147483648"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "scalar late u64 received=18446744073709551615 above_i32=2147483648"

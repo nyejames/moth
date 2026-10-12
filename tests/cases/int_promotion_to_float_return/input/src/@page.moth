@@ -1,11 +1,11 @@
--- Validates that Int expressions can be contextually promoted to Float
--- when returned from a function with a Float return signature.
+-- Raw whole literals and literal expressions take the immediate F64 return receiver.
+-- Bound I32 expressions instead require an explicit cast.
 
-get_float || -> Float:
+get_float || -> F64:
     return 1
 ;
 
-get_float_expr || -> Float:
+get_float_expr || -> F64:
     return 2 + 3
 ;
 

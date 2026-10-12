@@ -1,4 +1,4 @@
-check_range_aliases |ascending_start Int, ascending_end Int, ascending_step Int, descending_start Int, descending_end Int, descending_step Int, negative_descending_step Int| -> String:
+check_range_aliases |ascending_start I32, ascending_end I32, ascending_step I32, descending_start I32, descending_end I32, descending_step I32, negative_descending_step I32| -> String:
     ascending_values ~= 0
     ascending_indices ~= 0
     loop ascending_start to ascending_end by ascending_step |ascending_value, ascending_index|:

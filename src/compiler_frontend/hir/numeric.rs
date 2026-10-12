@@ -30,8 +30,8 @@ pub enum NumericFailureMode {
     ///
     /// WHAT: a builtin-accepting catch or the builtin `Error!` return slot receives the
     ///       failure through the normal fallible-carrier path.
-    /// WHY: this keeps recoverable numeric failures in the same control-flow shape as explicit
-    ///      `cast!` propagation and lets later lowering emit `HirTerminator::FallibleBranch`.
+    /// WHY: this keeps recoverable numeric failures in the established Error-return control-flow
+    ///      shape, which later lowering emits as `HirTerminator::FallibleBranch`.
     ReturnError,
 
     /// Stop execution on failure.
@@ -42,7 +42,7 @@ pub enum NumericFailureMode {
     ///       ordinary arithmetic lowers to `ReturnError`; only its float integrity guards
     ///       (`FormatFloat`, `ValidateFloat`) use `Trap` because they are not implicit
     ///       failures. The result local receives only the scalar success value; failure is a
-    ///       runtime trap/throw. Operations with an empty shared code set (`Float` negation,
+    ///       runtime trap/throw. Operations with an empty shared code set (binary-float negation,
     ///       exact `Dec` arithmetic) never become lane producers, so their `Trap` is final.
     /// WHY: without a builtin delivery edge the failure cannot be represented as a
     ///      user-visible value, so the backend must halt.
@@ -76,8 +76,8 @@ impl RangeStepFailureCause {
 
 /// A checked numeric operation: a backend-neutral operator plus its canonical numeric domain.
 ///
-/// WHAT: identifies scalar arithmetic and its result domain (`Int`, `Uint`, `Float`, a fixed
-///       scalar, or one exact `Dec` scale).
+/// WHAT: identifies scalar arithmetic and its result domain (one exact fixed scalar or one exact
+///       `Dec` scale).
 /// WHY: backends consume one operator/domain fact rather than a target-specific operation family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HirNumericOp {
@@ -103,7 +103,7 @@ impl Display for HirNumericOp {
 /// WHAT: represents either a unary or binary numeric operation in one HIR-local shape.
 /// WHY: keeps `HirStatementKind::NumericOp` a single variant while still distinguishing unary
 ///      negation from binary arithmetic. Lowering converts operands to the domain except for the
-///      profile-`Int` exponent of a Dec power operation.
+///      exact `I32` exponent of a Dec power operation.
 #[derive(Debug, Clone)]
 pub enum HirNumericOperands {
     Unary { operand: HirValueId },

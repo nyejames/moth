@@ -1,50 +1,50 @@
-format_int |value Int| -> String:
+format_int |value I64| -> String:
     return cast value
 ;
 
-increment |value Int| -> Int, Error!:
+increment |value I64| -> I64, Error!:
     return value + 1
 ;
 
-negate |value Int| -> Int, Error!:
+negate |value I64| -> I64, Error!:
     return -value
 ;
 
-multiply |left Int, right Int| -> Int, Error!:
+multiply |left I64, right I64| -> I64, Error!:
     return left * right
 ;
 
-divide |dividend Int, divisor Int| -> Int, Error!:
+divide |dividend I64, divisor I64| -> I64, Error!:
     return dividend // divisor
 ;
 
-remainder |dividend Int, divisor Int| -> Int, Error!:
+remainder |dividend I64, divisor I64| -> I64, Error!:
     return dividend % divisor
 ;
 
-power |base Int, exponent Int| -> Int, Error!:
+power |base I64, exponent I64| -> I64, Error!:
     return base ^ exponent
 ;
 
-parse_int |text String| -> Int, Error!:
-    return cast! text
+parse_int |text String| -> I64, Error!:
+    return cast text
 ;
 
-float_to_int |value Float| -> Int, Error!:
-    return cast! value
+float_to_int |value F32| -> I64, Error!:
+    return cast value
 ;
 
-assign_divide |target ~Int| -> Int, Error!:
+assign_divide |target ~I64| -> I64, Error!:
     target /= 1
     return target
 ;
 
-assign_integer_divide |target ~Int| -> Int, Error!:
+assign_integer_divide |target ~I64| -> I64, Error!:
     target //= 1
     return target
 ;
 
-int_to_float |value Int| -> Float:
+int_to_float |value I64| -> F32:
     return cast value
 ;
 

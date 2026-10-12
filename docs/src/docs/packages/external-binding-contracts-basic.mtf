@@ -1,12 +1,12 @@
-External binding packages give you typed functions and opaque types from code
-written outside Moth. The HTML builder supports annotated JavaScript imports
-and will support WIT component imports in the future.
+External binding packages give you typed functions, constants and opaque types
+from code written outside Moth. The HTML builder supports annotated JavaScript
+imports. WIT component imports remain deferred.
 
 ### Annotated JavaScript
 
-You can import `.js` files that use `@moth.opaque` and `@moth.sig`
-annotations. The annotations tell the compiler what Moth names and types to
-expose.
+You can import `.js` files that use `@moth.opaque`, `@moth.sig` and
+`@moth.const` annotations. The annotations tell the compiler what Moth names
+and exact types to expose.
 
 [codeblock, $code("moth"):
     @vendor/drawing.js as drawing
@@ -19,6 +19,18 @@ annotations, not from the JavaScript export.
 
 The builder accepts `export function name(...) { ... }` and block-bodied
 arrow exports. `@moth.sig` annotations expose free functions.
+
+Numeric signatures accept `I32`, `I64`, `U32`, `U64`, `F32` and `F64`.
+`@moth.const` exposes a flat `U32` name from one unsigned decimal literal:
+
+[codeblock, $code("js"):
+    /** @moth.const primitive_triangles U32 */
+    export const TRIANGLES = 4;
+]
+
+The compiler reads that literal without executing JavaScript. It rejects an
+out-of-range value rather than wrapping it. This subset doesn't include every
+@../numbers/#numeric-types (Moth numeric type).
 
 ### What JavaScript can't export
 

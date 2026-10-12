@@ -12,9 +12,9 @@ fn missing_default_value_after_assign_points_at_member_boundary() {
         // function parameter ending at the closing pipe
         ("label |prefix String =| -> String:\n;\n", Some(("|", 1))),
         // struct field ending at a comma
-        ("Options = |\n    width Int =,\n|\n", Some((",", 0))),
+        ("Options = |\n    width I32 =,\n|\n", Some((",", 0))),
         // struct field ending at the closing pipe
-        ("Options = |\n    width Int =|\n", Some(("|", 1))),
+        ("Options = |\n    width I32 =|\n", Some(("|", 1))),
         // newline immediately after the authored `=`
         ("label |prefix String =\n| -> String:\n;\n", Some(("\n", 0))),
         // block end (`;`) immediately after the authored `=`
@@ -63,7 +63,7 @@ fn missing_default_value_after_assign_points_at_member_boundary() {
 #[test]
 fn special_member_default_reasons_win_over_missing_default_value() {
     let trait_requirement = parse_single_file_headers_with_entry(
-        "BAD must:\n    wrong |This, value Int =|\n;\n",
+        "BAD must:\n    wrong |This, value I32 =|\n;\n",
         "src/@page.moth",
         "src/@page.moth",
     );

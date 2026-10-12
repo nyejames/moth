@@ -1,4 +1,4 @@
--- Multiline expression should produce a type error when Float is assigned to Int
-bad Int = 6
+-- Multiline expression should produce a type error when F64 is assigned to I32
+bad I32 = 6
 /
 5

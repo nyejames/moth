@@ -1,4 +1,4 @@
-remainder || -> Int, Error!:
+remainder || -> I32, Error!:
     return 10 % 0
 ;
 

@@ -4,12 +4,12 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0059"]
-message_contains = ["Range step type 'Int'", "Uint or Int"]
+message_contains = ["Range step type 'I64'", "no shared numeric domain"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0059"
 reason = "invalid_range_operand.incompatible_domain"
 path = "input/@page.moth"
-line = 7
+line = 8
 column = 24
 count = 1

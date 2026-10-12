@@ -1,0 +1,86 @@
+-- Independent branch sources stay eligible; inline literals retain distinct collection/map shapes.
+
+read_u64 |value U64| -> U64:
+    return value
+;
+read_f32 |value F32| -> F32:
+    return value
+;
+
+named_collection |choose_first Bool| -> String, Error!:
+    left = {18_446_744_073_709_551_613}
+    right = {18_446_744_073_709_551_612}
+    chosen, count = if choose_first:
+        then copy left, 0
+    else
+        then copy right, 1
+    ;
+    selected = read_u64(chosen.get(0)!)
+    return [:selected=[selected] count=[count]]
+;
+
+inline_collection |choose_first Bool| -> String, Error!:
+    chosen, count = if choose_first:
+        then {18_446_744_073_709_551_611}, 0
+    else
+        then {18_446_744_073_709_551_610}, 1
+    ;
+    selected = read_u64(chosen.get(0)!)
+    return [:selected=[selected] count=[count]]
+;
+
+named_map |choose_first Bool| -> String, Error!:
+    left = {0 = 18_446_744_073_709_551_609}
+    right = {1 = 18_446_744_073_709_551_608}
+    chosen, count = if choose_first:
+        then copy left, 0
+    else
+        then copy right, 1
+    ;
+    selected = read_u64(chosen.get(count)!)
+    return [:selected=[selected] count=[count]]
+;
+
+inline_map |choose_first Bool| -> String, Error!:
+    chosen, count = if choose_first:
+        then {0 = 18_446_744_073_709_551_607}, 0
+    else
+        then {1 = 18_446_744_073_709_551_606}, 1
+    ;
+    selected = read_u64(chosen.get(count)!)
+    return [:selected=[selected] count=[count]]
+;
+
+inline_mixed_collection |choose_first Bool| -> String, Error!:
+    chosen, count = if choose_first:
+        then {1}, 0
+    else
+        then {2.5}, 1
+    ;
+    selected = read_f32(chosen.get(0)!)
+    return [:selected=[selected] count=[count]]
+;
+
+inline_mixed_map |choose_first Bool| -> String, Error!:
+    chosen, count = if choose_first:
+        then {0 = 1}, 0
+    else
+        then {1 = 2.5}, 1
+    ;
+    selected = read_f32(chosen.get(count)!)
+    return [:selected=[selected] count=[count]]
+;
+
+named_first = named_collection(true) catch then "failed"
+named_second = named_collection(false) catch then "failed"
+inline_first = inline_collection(true) catch then "failed"
+inline_second = inline_collection(false) catch then "failed"
+named_map_first = named_map(true) catch then "failed"
+named_map_second = named_map(false) catch then "failed"
+inline_map_first = inline_map(true) catch then "failed"
+inline_map_second = inline_map(false) catch then "failed"
+mixed_first = inline_mixed_collection(true) catch then "failed"
+mixed_second = inline_mixed_collection(false) catch then "failed"
+mixed_map_first = inline_mixed_map(true) catch then "failed"
+mixed_map_second = inline_mixed_map(false) catch then "failed"
+[:multi_bind_known_leaves named_first=[named_first] named_second=[named_second] inline_first=[inline_first] inline_second=[inline_second] named_map_first=[named_map_first] named_map_second=[named_map_second] inline_map_first=[inline_map_first] inline_map_second=[inline_map_second] mixed_first=[mixed_first] mixed_second=[mixed_second] mixed_map_first=[mixed_map_first] mixed_map_second=[mixed_map_second]]

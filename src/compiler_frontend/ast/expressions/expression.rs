@@ -42,8 +42,7 @@ use crate::compiler_frontend::datatypes::{DataType, ReceiverKey, diagnostic_type
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -97,7 +96,7 @@ pub struct Expression {
 
     /// Tracks whether this value was derived from regular division (`/`).
     ///
-    /// WHY: explicit `Int` contexts should emit a targeted diagnostic when a
+    /// WHY: explicit integer contexts should emit a targeted diagnostic when a
     /// value comes from `/`, even when constant folding removed the original
     /// operator node.
     pub contains_regular_division: bool,
@@ -161,6 +160,7 @@ pub(crate) struct HandledFallibleHostFunctionCallInput {
     pub(crate) id: ExternalFunctionId,
     pub(crate) args: Vec<CallArgument>,
     pub(crate) result_type_ids: Vec<TypeId>,
+    pub(crate) requires_external_float_validation: bool,
     pub(crate) error_type_id: TypeId,
     pub(crate) handling: FallibleExpressionHandling,
     pub(crate) span: Option<SourceSpan>,
@@ -192,9 +192,6 @@ impl ResolvedCallTypes {
 pub(crate) fn type_id_hint_for_diagnostic_type(data_type: &DataType) -> TypeId {
     match data_type {
         DataType::Bool | DataType::True | DataType::False => builtin_type_ids::BOOL,
-        DataType::Int => builtin_type_ids::INT,
-        DataType::Uint => builtin_type_ids::UINT,
-        DataType::Float => builtin_type_ids::FLOAT,
         // Dec scales are lazily interned in the receiving environment, so a diagnostic
         // spelling alone cannot supply a canonical hint.
         DataType::Number(_) => builtin_type_ids::NONE,
@@ -295,12 +292,14 @@ impl Expression {
 
     /// Adopt the authored metadata of the expression a substitution replaces.
     ///
-    /// WHAT: copies the authored span, diagnostic type, receiver, value mode, const-record state
-    ///       and division provenance, and unions the synthetic-interface
+    /// WHAT: copies the authored span, diagnostic type, receiver, value mode, const-record state,
+    ///       division provenance and occurrence failure facts, and unions the synthetic-interface
     ///       provenance of the authored operand into the replacement.
     /// WHY: substituted compile-time operands must stay indistinguishable from their authored
     ///      node for diagnostics and identity; one owner prevents repeated clones between a
-    ///      projection helper and the general evaluator.
+    ///      projection helper and the general evaluator. Eligibility is occurrence-local, so the
+    ///      copied constant content must adopt the reference site's failure facts instead of
+    ///      lending it its initializer's authored cast, checked arithmetic or call count.
     pub(crate) fn preserve_authored_metadata(&mut self, authored: &Expression) {
         self.span = authored.span;
         self.diagnostic_type = authored.diagnostic_type.clone();
@@ -311,6 +310,9 @@ impl Expression {
         self.synthetic_interface_provenance = self
             .synthetic_interface_provenance
             .union(&authored.synthetic_interface_provenance);
+        // Initializer eligibility and witnesses stay at the initializer's occurrence: an
+        // unrelated reference must not inherit its authored cast, checked arithmetic or calls.
+        self.failure_facts = authored.failure_facts.clone();
     }
 
     /// Marks whether this expression originates from a regular division operator.
@@ -392,39 +394,6 @@ impl Expression {
         .with_regular_division_provenance(contains_regular_division)
     }
 
-    /// Constructs an integer literal expression.
-    pub fn int(value: i64, span: Option<SourceSpan>, value_mode: ValueMode) -> Self {
-        Self::scalar_literal(
-            ExpressionKind::Int(value),
-            builtin_type_ids::INT,
-            DataType::Int,
-            span,
-            value_mode,
-        )
-    }
-
-    /// Constructs one profile-sized unsigned integer literal expression.
-    pub fn uint(value: u64, span: Option<SourceSpan>, value_mode: ValueMode) -> Self {
-        Self::scalar_literal(
-            ExpressionKind::Uint(value),
-            builtin_type_ids::UINT,
-            DataType::Uint,
-            span,
-            value_mode,
-        )
-    }
-
-    /// Constructs a floating-point literal expression.
-    pub fn float(value: f64, span: Option<SourceSpan>, value_mode: ValueMode) -> Self {
-        Self::scalar_literal(
-            ExpressionKind::Float(value),
-            builtin_type_ids::FLOAT,
-            DataType::Float,
-            span,
-            value_mode,
-        )
-    }
-
     /// Constructs one exact decimal `Dec` value with its resolved receiving identity.
     ///
     /// WHAT: carries the immutable materialised value and the explicit `TypeId` selected by the
@@ -467,34 +436,29 @@ impl Expression {
         )
     }
 
-    /// Constructs a `Float` expression from a host-package constant.
+    /// Constructs one fixed `F64` expression from a host-package constant.
     ///
-    /// WHAT: rounds the foreign `f64` payload once at the boundary precision and rejects a
-    ///       non-finite result, reporting the constant's name and reference site.
-    /// WHY: `ExpressionKind::Float` must hold a value exactly representable at the profile
-    ///      precision and `Float` is finite by contract, so every external projection shares one
-    ///      rounding rule and one diagnostic instead of each parse site re-deriving them.
+    /// WHAT: validates the foreign `f64` payload once and materializes it as the exact `F64`
+    ///       identity, reporting the constant's name and reference site for a non-finite value.
+    /// WHY: the language's only unconstrained binary-float identity is `F64`, which holds every
+    ///      finite `f64` exactly, so every external projection shares one finiteness rule and one
+    ///      diagnostic instead of each parse site re-deriving them.
     pub(crate) fn float_from_external_constant(
         value: f64,
-        numeric_profile: NumericProfile,
         constant_name: StringId,
         span: Option<SourceSpan>,
         value_mode: ValueMode,
     ) -> Result<Self, CompilerDiagnostic> {
-        let rounded = numeric_profile.float_precision.round(value);
-
-        if !rounded.is_finite() {
-            // `operation` carries the constant name; the typed profile retains the selected
-            // boundary that made this external value unrepresentable.
+        let Some(materialised) = FixedScalarValue::binary_float(FixedScalar::F64, value) else {
+            // `operation` carries the constant name for the diagnostic.
             return Err(CompilerDiagnostic::compile_time_evaluation_error(
                 CompileTimeEvaluationErrorReason::FloatOverflow,
                 Some(constant_name),
                 span,
-                Some(numeric_profile),
             ));
-        }
+        };
 
-        Ok(Self::float(rounded, span, value_mode))
+        Ok(Self::fixed_scalar(materialised, span, value_mode))
     }
 
     /// Constructs a string slice literal expression.
@@ -696,6 +660,7 @@ impl Expression {
         id: ExternalFunctionId,
         args: Vec<CallArgument>,
         result_type_ids: Vec<TypeId>,
+        requires_external_float_validation: bool,
         type_environment: &mut TypeEnvironment,
         span: Option<SourceSpan>,
     ) -> Self {
@@ -707,6 +672,7 @@ impl Expression {
                 id,
                 args,
                 result_type_ids,
+                requires_external_float_validation,
             },
             resolved_types,
             span,
@@ -722,6 +688,7 @@ impl Expression {
             id,
             args,
             result_type_ids,
+            requires_external_float_validation,
             error_type_id,
             handling,
             span,
@@ -734,6 +701,7 @@ impl Expression {
                 id,
                 args,
                 result_type_ids,
+                requires_external_float_validation,
                 error_type_id,
                 handling,
                 propagation_span: None,
@@ -774,7 +742,7 @@ impl Expression {
     ///
     /// WHAT: wraps `value` in a `Coerced` expression kind that carries the
     /// target type explicitly in the AST.
-    /// WHY: contextual conversions such as `Int` → `Float` and `T` → `T?` must
+    /// WHY: contextual conversions such as optional wrapping (`T` → `T?`) must
     ///      be represented deliberately so lowering stages can emit the correct
     ///      conversion rather than silently mistyping the inner value.
     ///      An explicit `Coerced` node makes the coercion visible and auditable.
@@ -1106,7 +1074,7 @@ impl Expression {
     /// Constructs the final AST-owned payload for an ordinary runtime template.
     #[allow(
         dead_code,
-        reason = "Phase 11 introduces the final expression shape before finalization cutover wires production callers"
+        reason = "AST-owned runtime-template payload constructor retained for handoff consumers"
     )]
     pub(crate) fn runtime_template_handoff(
         handoff: OwnedRuntimeTemplateHandoff,
@@ -1125,7 +1093,7 @@ impl Expression {
     /// Constructs the final AST-owned payload for a runtime slot application.
     #[allow(
         dead_code,
-        reason = "Phase 11 introduces the final expression shape before finalization cutover wires production callers"
+        reason = "AST-owned runtime-slot payload constructor retained for handoff consumers"
     )]
     pub(crate) fn runtime_slot_application_handoff(
         handoff: OwnedRuntimeSlotApplicationHandoff,
@@ -1246,10 +1214,7 @@ impl Expression {
         classify_template: &mut impl FnMut(&Template) -> Result<TemplateConstValueKind, TemplateError>,
     ) -> Result<ConstValueKind, TemplateError> {
         let kind = match &self.kind {
-            ExpressionKind::Int(_)
-            | ExpressionKind::Uint(_)
-            | ExpressionKind::Float(_)
-            | ExpressionKind::FixedScalar(_)
+            ExpressionKind::FixedScalar(_)
             | ExpressionKind::Number(_)
             | ExpressionKind::StringSlice(_)
             | ExpressionKind::StructuralString { .. }

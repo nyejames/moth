@@ -1,0 +1,9 @@
+-- A bound whole-number row cannot be retagged beside a raw decimal peer.
+render || -> String:
+    loop {{1}} |row|:
+        mixed = {row, {2.5}}
+        return "unexpected"
+    ;
+    return "empty"
+;
+[:[render()]]

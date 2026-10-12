@@ -4,7 +4,7 @@ Pair type Left, Right = |
 |
 
 pair = Pair(right = "two", left = 1)
-left Int = pair.left
+left I32 = pair.left
 right String = pair.right
 
 [: named struct generic inference]

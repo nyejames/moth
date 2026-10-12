@@ -1,6 +1,6 @@
 -- A map literal stores a non-copy key through shared storage; the source remains usable.
 key ~= "Priya"
-scores ~{String = Int} = {key = 10}
+scores ~{String = I32} = {key = 10}
 stored = scores.get(key) catch:
     then 0
 ;

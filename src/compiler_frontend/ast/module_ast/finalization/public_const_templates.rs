@@ -34,7 +34,6 @@ use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
-use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Stable const-template projections consumed by generated materialisation.
@@ -177,7 +176,6 @@ impl AstFinalizer<'_, '_> {
             store,
             string_table,
             self.context.template_const_loop_iteration_limit,
-            self.context.numeric_profile,
             resources.as_deref(),
         )
     }
@@ -284,7 +282,6 @@ pub(super) fn project_const_template_value(
     store: &crate::compiler_frontend::ast::templates::tir::TemplateIrStore,
     string_table: &mut StringTable,
     template_const_loop_iteration_limit: usize,
-    numeric_profile: NumericProfile,
     module_resources: Option<&ModuleResourceTable>,
 ) -> Result<ProjectedConstTemplateValue, TemplateNormalizationError> {
     let reference = template.tir_reference;
@@ -311,11 +308,7 @@ pub(super) fn project_const_template_value(
         });
     }
     let (public, emission, provenance) = {
-        let mut fold_context = make_fold_context(
-            string_table,
-            template_const_loop_iteration_limit,
-            numeric_profile,
-        );
+        let mut fold_context = make_fold_context(string_table, template_const_loop_iteration_limit);
         let mut visiting = FxHashSet::default();
         let projected = project_const_template_view(
             view,

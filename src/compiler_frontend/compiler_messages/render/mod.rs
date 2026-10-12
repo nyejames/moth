@@ -167,7 +167,7 @@ pub(crate) fn invalid_collection_type_message(reason: InvalidCollectionTypeReaso
         }
         InvalidCollectionTypeReason::CapacityNotInt => "Collection capacity must be an integer.",
         InvalidCollectionTypeReason::CapacityNotConstant => {
-            "Collection capacity must be a positive integer literal or the bare name of a visible compile-time `Int` constant."
+            "Collection capacity must be a positive integer literal or the bare name of a visible compile-time integer constant."
         }
         InvalidCollectionTypeReason::CapacityOverflow => "Collection capacity is too large.",
         InvalidCollectionTypeReason::InitializerExceedsFixedCapacity { .. } => {
@@ -193,7 +193,7 @@ pub(crate) fn invalid_map_type_message(
         InvalidMapTypeReason::UnsupportedKeyType { key_type } => {
             let type_name = diagnostic_type_name(key_type, context);
             format!(
-                "Map key type '{type_name}' is not supported. Builtin hashmap keys are limited to String, Int, Uint, Bool, Char, I8, I16, I32, I64, U8, U16, U32, U64, and Byte. Use a package or user-defined map type for custom key behavior."
+                "Map key type '{type_name}' is not supported. Builtin hashmap keys are limited to String, Bool, Char, I8, I16, I32, I64, U8, U16, U32, U64, and Byte. Use a package or user-defined map type for custom key behavior."
             )
         }
         InvalidMapTypeReason::ExcessiveInlineNesting { depth } => {
@@ -407,7 +407,7 @@ pub(crate) fn unsupported_operator_types_message(
         );
     }
 
-    // Fixed-width values do not implicitly mix with Int/Uint/Float or the other fixed numeric family.
+    // Fixed-width integer and binary-float values do not implicitly mix with each other.
     if (is_arithmetic_operator(operator) || is_comparison_operator(operator))
         && let Some(rhs) = rhs
         && implicitly_mixed_numeric_pair(lhs, rhs)
@@ -470,26 +470,14 @@ fn is_fixed_integer(scalar: FixedScalar) -> bool {
     )
 }
 
-fn is_fixed_numeric(scalar: FixedScalar) -> bool {
-    is_fixed_integer(scalar) || scalar.class() == FixedScalarClass::BinaryFloat
-}
-
 fn implicitly_mixed_numeric_pair(lhs: TypeId, rhs: TypeId) -> bool {
     match (diagnostic_fixed_scalar(lhs), diagnostic_fixed_scalar(rhs)) {
         (Some(left), Some(right)) => {
             (is_fixed_integer(left) && right.class() == FixedScalarClass::BinaryFloat)
                 || (left.class() == FixedScalarClass::BinaryFloat && is_fixed_integer(right))
         }
-        (Some(scalar), None) => is_fixed_numeric(scalar) && is_profile_numeric(rhs),
-        (None, Some(scalar)) => is_fixed_numeric(scalar) && is_profile_numeric(lhs),
-        (None, None) => false,
+        (Some(_), None) | (None, Some(_)) | (None, None) => false,
     }
-}
-
-fn is_profile_numeric(type_id: TypeId) -> bool {
-    type_id == builtin_type_ids::INT
-        || type_id == builtin_type_ids::UINT
-        || type_id == builtin_type_ids::FLOAT
 }
 
 fn generic_parameter_operator_message(
@@ -774,11 +762,11 @@ pub(crate) fn invalid_range_operand_message(
     match reason {
         InvalidRangeOperandReason::NotNumeric => {
             format!(
-                "Range {operand_name} must be numeric (Int, Uint or Float). Found '{type_name}'"
+                "Range {operand_name} must be an integer or binary-float type. Found '{type_name}'"
             )
         }
         InvalidRangeOperandReason::IncompatibleDomain => format!(
-            "Range {operand_name} type '{type_name}' has no shared numeric domain with the other range operands. Uint or Int bounds and steps do not mix unless a Float operand selects Float, and explicit-width types stay in their own family. Convert the operand explicitly with `cast` at a typed declaration."
+            "Range {operand_name} type '{type_name}' has no shared numeric domain with the other range operands. Integer and binary-float operands do not mix, and integer operands need one type that holds every operand's range. Convert the operand explicitly with `cast` at a typed declaration."
         ),
     }
 }

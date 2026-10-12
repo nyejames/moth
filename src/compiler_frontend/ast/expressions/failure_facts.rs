@@ -7,7 +7,10 @@
 use super::expression::ExpressionKind;
 use super::expression_rpn::ExpressionRpnItem;
 use super::expression_types::{CastHandling, FallibleExpressionHandling, ResolvedCastEvidence};
-use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::builtins::casts::policies::builtin_cast_failure_codes;
+use crate::compiler_frontend::builtins::casts::targets::{
+    BuiltinCastFallibility, BuiltinCastPolicyId,
+};
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_messages::BuiltinFailureWitness;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -27,9 +30,13 @@ pub(crate) struct ExpressionFailureFacts {
     pub(crate) typed_error: Option<TypedErrorProducer>,
     /// Stored at the protected expression; candidates are collected there during projection.
     pub(crate) deferred_custom_catch: Option<DeferredCustomCatchCheck>,
-    /// A checked operation remains catch-eligible even when constant folding discharges it.
+    /// An authored arithmetic operation remains eligible after folding proves it safe.
     pub(crate) checked_numeric_operation: bool,
-    /// Explicit `!`, `cast!` and `?` leave the function, never target an enclosing catch.
+    /// An authored cast remains eligible even when it is infallible or folded away.
+    pub(crate) authored_cast: bool,
+    /// Saturated count of calls at this expression's selected evaluation level.
+    pub(crate) safety_call_count: u8,
+    /// Explicit `!` and `?` leave the function, never target an enclosing catch.
     pub(crate) postfix_exit_span: Option<SourceSpan>,
     pub(crate) disposition: FailureDisposition,
 }
@@ -72,6 +79,8 @@ pub(crate) enum ImplicitFailureSource {
         /// The compound operator's exact identity, never an unrelated RHS or prior statement.
         arithmetic_span: Option<SourceSpan>,
     },
+    /// A source-authored fallible cast; it delivers builtin `Error` through the ordinary path.
+    AuthoredCastConversion,
     PrivateCall(PathId),
 }
 
@@ -202,7 +211,10 @@ pub(crate) enum FailureWitnessSite {
 impl ImplicitFailureContributor {
     pub(crate) fn witness_site(&self) -> FailureWitnessSite {
         match self.source {
-            ImplicitFailureSource::NumericOperation => FailureWitnessSite::Arithmetic(self.span),
+            ImplicitFailureSource::NumericOperation
+            | ImplicitFailureSource::AuthoredCastConversion => {
+                FailureWitnessSite::Arithmetic(self.span)
+            }
             ImplicitFailureSource::CompoundWriteBack {
                 arithmetic_span, ..
             } => FailureWitnessSite::WriteBack(arithmetic_span),
@@ -238,6 +250,7 @@ impl FailureSummary {
         self.first_implicit = self.first_implicit.or(witness);
         match contributor.source {
             ImplicitFailureSource::NumericOperation
+            | ImplicitFailureSource::AuthoredCastConversion
             | ImplicitFailureSource::CompoundWriteBack { .. } => {
                 self.first_numeric = self.first_numeric.or(witness);
             }
@@ -268,12 +281,30 @@ impl ExpressionFailureFacts {
             return;
         }
         self.checked_numeric_operation |= other.checked_numeric_operation;
+        self.authored_cast |= other.authored_cast;
         self.summary.merge_from(&other.summary);
     }
 
     pub(crate) fn record_implicit(&mut self, contributor: ImplicitFailureContributor) {
         self.summary.record_implicit(contributor);
         self.implicit.push(contributor);
+    }
+
+    /// Rebuild implicit summaries after constant folding discharges checked operators.
+    ///
+    /// Eligibility metadata is deliberately left untouched: an authored operation remains
+    /// catch-eligible even when its runtime failure origin was folded away.
+    pub(crate) fn retain_implicit_contributors(
+        &mut self,
+        mut retain: impl FnMut(&ImplicitFailureContributor) -> bool,
+    ) {
+        self.implicit.retain(|contributor| retain(contributor));
+        self.summary.first_implicit = None;
+        self.summary.first_numeric = None;
+        self.summary.first_private_call = None;
+        for contributor in &self.implicit {
+            self.summary.record_implicit(*contributor);
+        }
     }
 
     pub(crate) fn record_typed_error(&mut self, producer: TypedErrorProducer) {
@@ -284,29 +315,33 @@ impl ExpressionFailureFacts {
         self.typed_error = Some(producer);
     }
 
-    /// Folding transfers surviving operator witnesses to the reduced expression by move.
+    /// Folding transfers surviving authored eligibility and witnesses to the reduced expression.
     pub(crate) fn take_origin_work_from(&mut self, mut other: Self) {
         self.checked_numeric_operation |= other.checked_numeric_operation;
+        self.authored_cast |= other.authored_cast;
+        self.safety_call_count = self.safety_call_count.max(other.safety_call_count);
         for contributor in other.implicit.drain(..) {
             self.record_implicit(contributor);
         }
     }
 
-    /// The caller retains eligibility while discarding folded operator witnesses.
-    pub(crate) fn refresh_origin_summary(&mut self) {
-        self.summary = FailureSummary::default();
-        for contributor in &self.implicit {
-            self.summary.record_implicit(*contributor);
-        }
-        if let Some(producer) = self.typed_error {
-            self.summary.first_typed = Some(producer);
-        }
+    pub(crate) fn has_authored_safety_catch_eligibility(&self) -> bool {
+        self.checked_numeric_operation
+            || self.authored_cast
+            || self.safety_call_count >= 2
+            || self.summary.first_implicit.is_some()
+            || self.summary.first_typed.is_some()
     }
 
-    pub(crate) fn is_folded_numeric_catch_success(&self) -> bool {
-        self.checked_numeric_operation
+    pub(crate) fn is_statically_infallible_catch(&self) -> bool {
+        self.has_authored_safety_catch_eligibility()
             && self.summary.first_implicit.is_none()
             && self.summary.first_typed.is_none()
+            && self.summary.first_private_call.is_none()
+    }
+
+    fn add_call_count(&mut self, count: u8) {
+        self.safety_call_count = self.safety_call_count.saturating_add(count).min(2);
     }
 
     pub(crate) fn record_numeric_operation(
@@ -343,11 +378,11 @@ impl ExpressionFailureFacts {
                 for item in &rpn.items {
                     // Pending syntax never survives evaluation. This infallible aggregation runs
                     // inside `Expression::new` for every constructed expression, so it ignores
-                    // pending items like operators; the fallible consumers (type validation,
-                    // failure classification, constant folding, const resolution) report the
-                    // broken invariant with `pending_expression_item_bug` when they visit it.
+                    // pending items like operators; fallible consumers report the broken
+                    // invariant when they visit them.
                     if let ExpressionRpnItem::Operand(value) = item {
                         facts.merge_pending_from(&value.failure_facts);
+                        facts.add_call_count(value.failure_facts.safety_call_count);
                     }
                 }
             }
@@ -355,6 +390,7 @@ impl ExpressionFailureFacts {
             | ExpressionKind::HostFunctionCall { args, .. }
             | ExpressionKind::HandledFallibleFunctionCall { args, .. }
             | ExpressionKind::HandledFallibleHostFunctionCall { args, .. } => {
+                facts.safety_call_count = 1;
                 for argument in args {
                     facts.merge_pending_from(&argument.value.failure_facts);
                 }
@@ -362,6 +398,8 @@ impl ExpressionFailureFacts {
             ExpressionKind::MethodCall { receiver, args, .. }
             | ExpressionKind::CollectionBuiltinCall { receiver, args, .. }
             | ExpressionKind::MapBuiltinCall { receiver, args, .. } => {
+                facts.safety_call_count = receiver.failure_facts.safety_call_count;
+                facts.add_call_count(1);
                 facts.merge_pending_from(&receiver.failure_facts);
                 for argument in args {
                     facts.merge_pending_from(&argument.value.failure_facts);
@@ -370,75 +408,96 @@ impl ExpressionFailureFacts {
             ExpressionKind::FieldAccess { base, .. }
             | ExpressionKind::Coerced { value: base, .. }
             | ExpressionKind::OptionPropagation { value: base } => {
+                facts.safety_call_count = base.failure_facts.safety_call_count;
                 facts.merge_pending_from(&base.failure_facts);
             }
             ExpressionKind::HandledFallibleExpression { value, .. } => {
+                facts.safety_call_count = value.failure_facts.safety_call_count;
                 facts.merge_pending_from(&value.failure_facts);
             }
             ExpressionKind::Cast(cast) => {
-                // Retain the compound operator identity, so both witness builders prefer this
-                // write-back only to arithmetic from the same update, not earlier statements.
-                if matches!(cast.handling, CastHandling::StoreConversion)
-                    && let ResolvedCastEvidence::Builtin {
-                        policy: BuiltinCastPolicyId::NumericConversion { target, .. },
-                    } = &cast.evidence
-                {
-                    // Compound stores check the numeric destination domain after the compound
-                    // arithmetic. The contributor keeps the canonical target so the witness
-                    // names the write-back instead of the already-handled RHS work. Explicit
-                    // casts keep their distinct typed Error producer rather than this lane.
-                    let codes = if target.is_binary_float() {
-                        &[BuiltinErrorCode::FloatNonFinite][..]
+                let is_store_conversion = matches!(cast.handling, CastHandling::StoreConversion);
+                facts.authored_cast = !is_store_conversion;
+                facts.safety_call_count = cast.source.failure_facts.safety_call_count;
+
+                if cast.fallibility == BuiltinCastFallibility::Fallible {
+                    if is_store_conversion {
+                        if let ResolvedCastEvidence::Builtin { policy } = &cast.evidence
+                            && matches!(policy, BuiltinCastPolicyId::NumericConversion { .. })
+                        {
+                            let codes = builtin_cast_failure_codes(*policy, cast.fallibility);
+                            if !codes.is_empty() {
+                                facts.record_implicit(ImplicitFailureContributor {
+                                    span,
+                                    codes,
+                                    source: ImplicitFailureSource::CompoundWriteBack {
+                                        target: cast.target_type_id,
+                                        arithmetic_span: cast
+                                            .source
+                                            .failure_facts
+                                            .implicit
+                                            .iter()
+                                            .rev()
+                                            .find(|contributor| {
+                                                matches!(
+                                                    contributor.source,
+                                                    ImplicitFailureSource::NumericOperation
+                                                )
+                                            })
+                                            .and_then(|contributor| contributor.span),
+                                    },
+                                });
+                            }
+                        }
                     } else {
-                        &[BuiltinErrorCode::IntOverflow][..]
-                    };
-                    facts.record_implicit(ImplicitFailureContributor {
-                        span,
-                        codes,
-                        source: ImplicitFailureSource::CompoundWriteBack {
-                            target: cast.target_type_id,
-                            arithmetic_span: cast
-                                .source
-                                .failure_facts
-                                .implicit
-                                .iter()
-                                .rev()
-                                .find(|contributor| {
-                                    matches!(
-                                        contributor.source,
-                                        ImplicitFailureSource::NumericOperation
-                                    )
-                                })
-                                .and_then(|contributor| contributor.span),
-                        },
-                    });
+                        let codes = match &cast.evidence {
+                            ResolvedCastEvidence::Builtin { policy } => {
+                                builtin_cast_failure_codes(*policy, cast.fallibility)
+                            }
+                            ResolvedCastEvidence::UserDefined { .. }
+                            | ResolvedCastEvidence::GenericBound { .. } => &[],
+                        };
+                        facts.record_implicit(ImplicitFailureContributor {
+                            span,
+                            codes,
+                            source: ImplicitFailureSource::AuthoredCastConversion,
+                        });
+                    }
                 }
                 facts.merge_pending_from(&cast.source.failure_facts);
             }
             ExpressionKind::Collection(values) => {
                 for value in values {
                     facts.merge_pending_from(&value.failure_facts);
+                    facts.add_call_count(value.failure_facts.safety_call_count);
                 }
             }
             ExpressionKind::MapLiteral(entries) => {
                 for entry in entries {
                     facts.merge_pending_from(&entry.key.failure_facts);
+                    facts.add_call_count(entry.key.failure_facts.safety_call_count);
                     facts.merge_pending_from(&entry.value.failure_facts);
+                    facts.add_call_count(entry.value.failure_facts.safety_call_count);
                 }
             }
             ExpressionKind::StructInstance(fields)
             | ExpressionKind::AnonymousConstRecord { fields }
             | ExpressionKind::ChoiceConstruct { fields, .. } => {
+                // Constructor fields are arguments: an argument expression keeps its own
+                // call-count level, so calls inside one never raise this occurrence's count.
                 for field in fields {
                     facts.merge_pending_from(&field.value.failure_facts);
                 }
             }
             ExpressionKind::Range(start, end) => {
                 facts.merge_pending_from(&start.failure_facts);
+                facts.add_call_count(start.failure_facts.safety_call_count);
                 facts.merge_pending_from(&end.failure_facts);
+                facts.add_call_count(end.failure_facts.safety_call_count);
             }
             #[cfg(test)]
             ExpressionKind::FallibleCarrierConstruct { value, .. } => {
+                facts.safety_call_count = value.failure_facts.safety_call_count;
                 facts.merge_pending_from(&value.failure_facts);
             }
             // Template and value-block payloads need their owning store-aware completion walker.
@@ -461,9 +520,6 @@ impl ExpressionFailureFacts {
                 ..
             } => propagation_span.or(span),
             ExpressionKind::OptionPropagation { .. } => span,
-            ExpressionKind::Cast(cast) if matches!(cast.handling, CastHandling::Propagate) => {
-                cast.span.or(span)
-            }
             _ => None,
         };
         facts.postfix_exit_span = facts.postfix_exit_span.or(own_exit_span);

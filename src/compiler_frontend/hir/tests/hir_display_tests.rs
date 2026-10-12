@@ -19,6 +19,7 @@ use crate::compiler_frontend::hir::terminators::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 #[test]
 fn assertion_failure_message_display_escapes_debug_text() {
@@ -71,7 +72,10 @@ fn runtime_failure_message_display_escapes_debug_text() {
 
 fn float_expression(value: f64) -> HirExpression {
     HirExpression {
-        kind: HirExpressionKind::Float(value),
+        kind: HirExpressionKind::FixedScalar(
+            FixedScalarValue::binary_float(FixedScalar::F64, value)
+                .expect("test value is finite and exactly representable at F64"),
+        ),
         ty: TypeId(0),
         value_kind: ValueKind::RValue,
         region: RegionId(0),
@@ -119,7 +123,7 @@ fn hir_display_renders_format_float_trap() {
         &expressions,
     );
 
-    assert_eq!(rendered, "define l9000 = format_float_trap(1.5)");
+    assert_eq!(rendered, "define l9000 = format_float_trap(F64(1.5))");
 }
 
 #[test]
@@ -141,7 +145,7 @@ fn hir_display_renders_format_float_return_error() {
         &expressions,
     );
 
-    assert_eq!(rendered, "define l9001 = format_float_err(-0.25)");
+    assert_eq!(rendered, "define l9001 = format_float_err(F64(-0.25))");
 }
 
 #[test]
@@ -163,7 +167,7 @@ fn hir_display_renders_validate_float_trap() {
         &expressions,
     );
 
-    assert_eq!(rendered, "define l9002 = validate_float_trap(2.5)");
+    assert_eq!(rendered, "define l9002 = validate_float_trap(F64(2.5))");
 }
 
 #[test]
@@ -185,7 +189,7 @@ fn hir_display_renders_validate_float_return_error() {
         &expressions,
     );
 
-    assert_eq!(rendered, "define l9003 = validate_float_err(0)");
+    assert_eq!(rendered, "define l9003 = validate_float_err(F64(0.0))");
 }
 
 #[test]
@@ -213,8 +217,8 @@ fn hir_display_marks_local_definitions_and_place_updates() {
         &expressions,
     );
 
-    assert_eq!(definition, "define l9010 = 1.5");
-    assert_eq!(update, "update l9011 = 1.5");
+    assert_eq!(definition, "define l9010 = F64(1.5)");
+    assert_eq!(update, "update l9011 = F64(1.5)");
 }
 
 #[test]

@@ -481,11 +481,8 @@ fn core_trait_requirement(
 fn canonical_builtin_for_cast_target(target: BuiltinCastTarget) -> CanonicalBuiltinType {
     match target {
         BuiltinCastTarget::Bool => CanonicalBuiltinType::Bool,
-        BuiltinCastTarget::Int => CanonicalBuiltinType::Int,
-        BuiltinCastTarget::Uint => CanonicalBuiltinType::Uint,
         BuiltinCastTarget::String => CanonicalBuiltinType::String,
         BuiltinCastTarget::Char => CanonicalBuiltinType::Char,
-        BuiltinCastTarget::Float => CanonicalBuiltinType::Float,
         BuiltinCastTarget::Error => CanonicalBuiltinType::Error,
         BuiltinCastTarget::Fixed(scalar) => CanonicalBuiltinType::FixedScalar(scalar),
         BuiltinCastTarget::Number(scale) => CanonicalBuiltinType::Number(scale),

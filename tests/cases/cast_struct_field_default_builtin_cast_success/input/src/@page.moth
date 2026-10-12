@@ -1,6 +1,6 @@
 Point = |
-    x Int = cast 'A',
-    y Int,
+    x I32 = cast 'A',
+    y I32,
 |
 
 value = Point(y = 5)

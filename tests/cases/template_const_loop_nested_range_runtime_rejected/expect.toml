@@ -8,4 +8,5 @@ code = "MOTH-SYNTAX-0022"
 reason = "invalid_template_structure.template_loop_range_bounds_not_const"
 path = "input/@page.moth"
 line = 4
+column = 10
 count = 1

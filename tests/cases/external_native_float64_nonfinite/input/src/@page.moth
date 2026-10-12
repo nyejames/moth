@@ -1,6 +1,10 @@
-@bad_float.js unsafe_float
+-- Plan section 5.2: the external binary-float boundary uses the resolved destination precision.
+-- Under the binary64 destination a finite high-range host value stays finite and is accepted
+-- unchanged, while raw NaN and both infinities are rejected with code 304 through the declared
+-- builtin Error! channel.
+@bad_float.js unsafe_float, float_payload, fallible_payload
 
-load_code || -> Int, Error!:
+load_code || -> I32, Error!:
     value = unsafe_float()
 
     if value > 0.0:
@@ -17,3 +21,115 @@ ignored = load_code() catch |err|:
 ;
 
 io.line([: external_native_float64_nonfinite code=[code]])
+
+payload_code |selector U32| -> U32, Error!:
+    value = float_payload(selector)
+    if value is 1.5:
+        return 1
+    ;
+    if value is 0.1:
+        return 2
+    ;
+    if value is 3.5e38:
+        return 3
+    ;
+    if value is 0.0:
+        return 4
+    ;
+    if value > 0.0:
+        return 5
+    ;
+    return 6
+;
+
+payload_class |selector U32| -> U32:
+    classified = payload_code(selector) catch:
+        then 0
+    ;
+    return classified
+;
+
+payload_failure |selector U32| -> U32:
+    failure ~U32 = 0
+    ignored = payload_code(selector) catch |err|:
+        failure = err.code
+        then 0
+    ;
+    return failure
+;
+
+nan_code = payload_failure(5)
+positive_inf_code = payload_failure(6)
+negative_inf_code = payload_failure(7)
+half_class = payload_class(1)
+tenth_class = payload_class(2)
+large_class = payload_class(3)
+maximum_class = payload_class(4)
+zero_class = payload_class(8)
+
+io.line([: external_native_float64_nonfinite raw-class=[half_class]/[tenth_class]/[large_class]/[maximum_class]/[zero_class] raw-codes=[nan_code]/[positive_inf_code]/[negative_inf_code]])
+
+forward |value F64| -> F64:
+    return value
+;
+
+-- Each consumer receives a runtime host call, not a foldable numeric expression.
+observe |selector U32, consumer I32| -> I32, Error!:
+    if consumer is 1:
+        stored {F64} = {float_payload(selector)}
+        return stored.length()
+    ;
+    if consumer is 2:
+        text String = cast float_payload(selector)
+        if text is "1.5":
+            return 1
+        ;
+        return 0
+    ;
+    if consumer is 3:
+        if float_payload(selector) is 1.5:
+            return 1
+        ;
+        return 0
+    ;
+    if consumer is 4:
+        value = forward(float_payload(selector))
+        if value is 1.5:
+            return 1
+        ;
+        return 0
+    ;
+    value = forward(fallible_payload(selector)) catch |err|:
+        return! err
+    ;
+    if value is 1.5:
+        return 1
+    ;
+    return 0
+;
+
+observation_code |selector U32, consumer I32| -> U32:
+    code ~U32 = 0
+    ignored = observe(selector, consumer) catch |err|:
+        if selector is 9:
+            assert(err.message is "Priya's host failure")
+        ;
+        code = err.code
+        then 0
+    ;
+    if selector is 1:
+        assert(ignored is 1)
+    ;
+    return code
+;
+
+loop 1 to & 5 |consumer|:
+    finite = observation_code(1, consumer)
+    nan = observation_code(5, consumer)
+    positive = observation_code(6, consumer)
+    negative = observation_code(7, consumer)
+    io.line([: consumer=[consumer] finite=[finite] invalid=[nan]/[positive]/[negative]])
+;
+
+returned_error = observation_code(9, 5)
+io.line([: nested returned-error=[returned_error]])

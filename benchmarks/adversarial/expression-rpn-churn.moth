@@ -3,7 +3,7 @@
 -- reverse-Polish-notation interpreter that churns many binary operations.
 
 Op ::
-    Push | value Float |,
+    Push | value F64 |,
     Add,
     Sub,
     Mul,
@@ -15,7 +15,7 @@ Token = |
     kind Op,
 |
 
-push |value Float| -> Token:
+push |value F64| -> Token:
     return Token(Op::Push(value))
 ;
 
@@ -40,8 +40,8 @@ neg_token || -> Token:
 ;
 
 -- Evaluates a token stream against a mutable value stack.
-eval_tokens |tokens {Token}| -> Float:
-    stack ~{Float} = {}
+eval_tokens |tokens {Token}| -> F64:
+    stack ~{F64} = {}
     loop tokens |token|:
         if token.kind is:
             Push(value) =>
@@ -68,7 +68,7 @@ eval_tokens |tokens {Token}| -> Float:
     return value
 ;
 
-apply_binary |stack ~{Float}, op_name String|:
+apply_binary |stack ~{F64}, op_name String|:
     if stack.length() >= 2:
         b = stack.get(1) catch:
             then 0.0
@@ -87,7 +87,7 @@ apply_binary |stack ~{Float}, op_name String|:
     ;
 ;
 
-compute_binary |a Float, b Float, op_name String| -> Float:
+compute_binary |a F64, b F64, op_name String| -> F64:
     if op_name is "add":
         return a + b
     ;
@@ -106,7 +106,7 @@ compute_binary |a Float, b Float, op_name String| -> Float:
     return 0.0
 ;
 
-apply_neg |stack ~{Float}|:
+apply_neg |stack ~{F64}|:
     if stack.length() > 0:
         a = stack.get(0) catch:
             then 0.0
@@ -148,8 +148,9 @@ build_expression_b || -> {Token}:
 -- Longer churn expression.
 build_long_expression || -> {Token}:
     tokens ~{Token} = {}
+    divisor I32 = 1
     loop 1 to 20 |i|:
-        ~tokens.push(push(i / 1.0))
+        ~tokens.push(push(i / divisor))
         if i > 1:
             ~tokens.push(add_token())
         ;

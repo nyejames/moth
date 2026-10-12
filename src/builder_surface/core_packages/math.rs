@@ -2,12 +2,13 @@
 
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::{
-    ExternalAccessKind, ExternalReturnAlias, ExternalSignatureType,
+    ExternalAbiType, ExternalAccessKind, ExternalReturnAlias, ExternalSignatureType,
 };
 use crate::compiler_frontend::external_packages::{
     ExternalConstantDef, ExternalConstantValue, ExternalFunctionLowerings, ExternalFunctionSpec,
     ExternalJsLowering, ExternalParameter, external_success_returns,
 };
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 struct MathFunctionSpec {
     name: &'static str,
@@ -21,7 +22,7 @@ pub fn register_core_math_package(registry: &mut ExternalPackageRegistry) {
         .expect("builtin package registration should not collide");
 
     let math_float_param = || ExternalParameter {
-        language_type: ExternalSignatureType::NativeFloat,
+        language_type: ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::F64)),
         access_kind: ExternalAccessKind::Shared,
     };
 
@@ -195,7 +196,7 @@ pub fn register_core_math_package(registry: &mut ExternalPackageRegistry) {
                     name: function.name.to_owned(),
                     parameters,
                     returns: external_success_returns(
-                        ExternalSignatureType::NativeFloat,
+                        ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::F64)),
                         ExternalReturnAlias::Fresh,
                     ),
                     error_return_type: None,
@@ -211,18 +212,12 @@ pub fn register_core_math_package(registry: &mut ExternalPackageRegistry) {
     }
 
     let math_constants = [
-        ("PI", ExternalConstantValue::Float(std::f64::consts::PI)),
-        ("TAU", ExternalConstantValue::Float(std::f64::consts::TAU)),
-        ("E", ExternalConstantValue::Float(std::f64::consts::E)),
-        (
-            "SQRT_2",
-            ExternalConstantValue::Float(std::f64::consts::SQRT_2),
-        ),
-        ("LN_2", ExternalConstantValue::Float(std::f64::consts::LN_2)),
-        (
-            "LN_10",
-            ExternalConstantValue::Float(std::f64::consts::LN_10),
-        ),
+        ("PI", std::f64::consts::PI),
+        ("TAU", std::f64::consts::TAU),
+        ("E", std::f64::consts::E),
+        ("SQRT_2", std::f64::consts::SQRT_2),
+        ("LN_2", std::f64::consts::LN_2),
+        ("LN_10", std::f64::consts::LN_10),
     ];
 
     for (name, value) in math_constants {
@@ -231,8 +226,11 @@ pub fn register_core_math_package(registry: &mut ExternalPackageRegistry) {
                 package_id,
                 ExternalConstantDef {
                     name: name.to_owned(),
-                    data_type: ExternalSignatureType::NativeFloat,
-                    value,
+                    data_type: ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::F64)),
+                    value: ExternalConstantValue::Fixed(
+                        FixedScalarValue::binary_float(FixedScalar::F64, value)
+                            .expect("standard mathematical constants are finite binary64 values"),
+                    ),
                 },
             )
             .expect("builtin math constant registration should not collide");

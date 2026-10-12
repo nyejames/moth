@@ -133,7 +133,7 @@ impl<'hir> JsEmitter<'hir> {
         self.collect_used_cast_policies(&functions)?;
         for policy in &self.used_cast_policies {
             if let BuiltinCastPolicyId::NumericToString(scalar) = *policy
-                && let Some(precision) = scalar.binary_float_precision(self.config.numeric_profile)
+                && let Some(precision) = scalar.binary_float_precision()
             {
                 emitted_code_uses_numeric_helpers.require_float_formatter(precision);
             }
@@ -229,7 +229,7 @@ impl<'hir> JsEmitter<'hir> {
     /// Records the carrier families needed by reachable numeric statements.
     ///
     /// WHAT: scans the emitted function/block subset and selects each checked operation family
-    ///       through the same profile-aware carrier owner used by expression and cast lowering.
+    ///       through the same exact-scalar carrier owner used by expression and cast lowering.
     /// WHY: a BigInt operator must not inherit a Number helper merely because both domains are
     ///      semantically integers.
     fn emitted_functions_use_numeric_helpers(
@@ -245,16 +245,13 @@ impl<'hir> JsEmitter<'hir> {
                 for statement in &block.statements {
                     match &statement.kind {
                         HirStatementKind::NumericOp { op, .. } => {
-                            let carrier = JsNumericCarrier::for_scalar(
-                                op.domain,
-                                self.config.numeric_profile,
-                            )
-                            .ok_or_else(|| {
-                                CompilerError::compiler_error(format!(
-                                    "JS backend has no numeric carrier for {:?}",
-                                    op.domain
-                                ))
-                            })?;
+                            let carrier =
+                                JsNumericCarrier::for_scalar(op.domain).ok_or_else(|| {
+                                    CompilerError::compiler_error(format!(
+                                        "JS backend has no numeric carrier for {:?}",
+                                        op.domain
+                                    ))
+                                })?;
                             let helper_family = carrier.helper_family();
                             // WHAT: proven-safe integer operations lower to exact native carrier
                             //       arithmetic without any checked helper call — Trap mode as a
@@ -264,27 +261,26 @@ impl<'hir> JsEmitter<'hir> {
                             //       families used exclusively by proven statements stay out of
                             //       the prelude while genuinely unsafe sibling uses keep their
                             //       demand.
-                            let proven_safe = matches!(
-                                op.operator,
-                                NumericOperator::Add
-                                    | NumericOperator::Subtract
-                                    | NumericOperator::Multiply
-                                    | NumericOperator::IntegerDivide
-                                    | NumericOperator::Remainder
-                                    | NumericOperator::Negate
-                            ) && matches!(
-                                carrier,
-                                JsNumericCarrier::ExactInteger { .. }
-                                    | JsNumericCarrier::BigInteger { .. }
-                            ) && self.numeric_proofs.integer_operation_is_safe(
-                                statement.id,
-                                self.config.numeric_profile,
-                            );
+                            let proven_safe =
+                                matches!(
+                                    op.operator,
+                                    NumericOperator::Add
+                                        | NumericOperator::Subtract
+                                        | NumericOperator::Multiply
+                                        | NumericOperator::IntegerDivide
+                                        | NumericOperator::Remainder
+                                        | NumericOperator::Negate
+                                ) && matches!(
+                                    carrier,
+                                    JsNumericCarrier::ExactInteger { .. }
+                                        | JsNumericCarrier::BigInteger { .. }
+                                ) && self.numeric_proofs.integer_operation_is_safe(statement.id);
                             if !proven_safe {
                                 match helper_family {
                                     Some("int") => usage.number_integer_ops = true,
                                     Some("number") => usage.number_decimal_ops = true,
                                     Some("bigint") => usage.big_integer_ops = true,
+                                    Some("float16") => usage.binary16_ops = true,
                                     Some("float32") => usage.binary32_ops = true,
                                     Some("float") => usage.binary64_ops = true,
                                     _ => {
@@ -296,14 +292,21 @@ impl<'hir> JsEmitter<'hir> {
                                 }
                             }
                             if op.operator == NumericOperator::Power
-                                && matches!(helper_family, Some("float32") | Some("float"))
+                                && matches!(
+                                    helper_family,
+                                    Some("float16") | Some("float32") | Some("float")
+                                )
                             {
                                 usage.binary_float_power = true;
                             }
                         }
-                        HirStatementKind::FormatFloat { .. } => usage.require_float_formatter(
-                            self.config.numeric_profile.float_precision.into(),
-                        ),
+                        HirStatementKind::FormatFloat { source, .. } => {
+                            // The formatted source's own exact precision selects the formatter the
+                            // prelude must carry, exactly like statement lowering.
+                            let (_scalar, precision) =
+                                self.float_source_scalar(*source, "FormatFloat")?;
+                            usage.require_float_formatter(precision);
+                        }
                         HirStatementKind::ValidateFloat { .. } => usage.validate_float = true,
                         HirStatementKind::RangeStepFailure { .. } => {
                             usage.range_step_failure = true
@@ -566,10 +569,7 @@ impl<'hir> JsEmitter<'hir> {
                 self.expression_uses_maps(*source)
             }
 
-            HirExpressionKind::Int(_)
-            | HirExpressionKind::Uint(_)
-            | HirExpressionKind::Float(_)
-            | HirExpressionKind::FixedScalar(_)
+            HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Number(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
@@ -759,10 +759,7 @@ fn collect_expression_cast_policies(
                 collect_expression_cast_policies(hir, entry.value, policies);
             }
         }
-        HirExpressionKind::Int(_)
-        | HirExpressionKind::Uint(_)
-        | HirExpressionKind::Float(_)
-        | HirExpressionKind::FixedScalar(_)
+        HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Number(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)

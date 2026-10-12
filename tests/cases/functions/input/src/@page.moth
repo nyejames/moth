@@ -1,10 +1,10 @@
 -- Validate function declarations/calls by rendering computed results.
 
-add |x Int, y Int| -> Int:
+add |x I32, y I32| -> I32:
     return x + y
 ;
 
-multiply |x Int, y Int| -> Int:
+multiply |x I32, y I32| -> I32:
     return x * y
 ;
 
@@ -12,7 +12,7 @@ greet |name String| -> String:
     return [:Hello, [name]]
 ;
 
-factorial |n Int| -> Int:
+factorial |n I32| -> I32:
     if n <= 1:
         return 1
     ;

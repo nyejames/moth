@@ -1,7 +1,7 @@
 render_nested || -> String:
-    rows #Int = 2
-    cols #Int = 3
-    grid {rows {cols Int}} = {{1}, {2}}
+    rows #I32 = 2
+    cols #I32 = 3
+    grid {rows {cols I32}} = {{1}, {2}}
     second = grid.get(1) catch:
         then {0}
     ;

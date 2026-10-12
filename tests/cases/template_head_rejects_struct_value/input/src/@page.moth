@@ -1,8 +1,8 @@
 -- AST rejects struct value in template head expression
 
 Point = |
-    x Int,
-    y Int,
+    x I32,
+    y I32,
 |
 
 point = Point(1, 2)

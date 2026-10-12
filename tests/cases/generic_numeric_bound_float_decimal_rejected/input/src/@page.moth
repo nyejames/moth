@@ -1,0 +1,9 @@
+identity type T |value T| -> T:
+    return value
+;
+read_decimal |value Dec2| -> String:
+    return "decimal"
+;
+forwarded = identity(1.25)
+text = read_decimal(forwarded)
+[:[text]]

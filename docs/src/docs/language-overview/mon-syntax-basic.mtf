@@ -8,8 +8,8 @@ values or group an expression.
 
 [codeblock, $code("moth"):
     Size = |
-        width Int,
-        height Int,
+        width I32,
+        height I32,
     |
 
     size = Size(width = 1280, height = 720)

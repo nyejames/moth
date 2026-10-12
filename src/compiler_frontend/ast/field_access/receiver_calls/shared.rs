@@ -70,7 +70,7 @@ pub(super) fn receiver_result_type_ids_for_call(
 /// The existing carrier stays inside the handled node for HIR's error-channel lowering. The outer
 /// node exposes only success types, so receiver and argument typing never sees a first-class result.
 pub(in crate::compiler_frontend::ast::field_access) fn finish_pending_receiver_call_expression(
-    mut expression: Expression,
+    expression: Expression,
     builtin_name: StringId,
     token_stream: &AstCursor<'_>,
     type_interner: &mut AstTypeInterner<'_>,
@@ -78,7 +78,22 @@ pub(in crate::compiler_frontend::ast::field_access) fn finish_pending_receiver_c
     if token_stream_starts_typed_propagation_suffix(token_stream) {
         return expression;
     }
+    recover_unhandled_carrier(expression, builtin_name, type_interner)
+}
 
+/// Recovers an unhandled fallible carrier so its success slot is the value a further step consumes.
+///
+/// WHAT: wraps a fallible carrier in the `Recover` handled node, exposing only its success type and
+///       keeping the error producer typed. Expressions that are not fallible carriers are returned
+///       unchanged.
+/// WHY: the carrier type is already fixed by the call's own signature. This only moves the carrier
+///      behind the handled node, so a later member step or the completed value sees success types
+///      only. Retained completion uses this same owner, so no authored token is reparsed for it.
+pub(in crate::compiler_frontend::ast::field_access) fn recover_unhandled_carrier(
+    mut expression: Expression,
+    builtin_name: StringId,
+    type_interner: &mut AstTypeInterner<'_>,
+) -> Expression {
     let Some((success_type_id, error_type_id)) = type_interner
         .environment()
         .fallible_carrier_slots(expression.type_id)

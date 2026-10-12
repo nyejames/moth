@@ -1,30 +1,30 @@
--- Task 2B under Int64/Float64: Uint64 values above i64::MAX compare
--- exactly, convert exactly to Dec and reject Float sources at 2^64.
+-- Task 2B under I64/F64: U64 values above i64::MAX compare
+-- exactly, convert exactly to Dec and reject F64 sources at 2^64.
 
-above_less |value Uint, huge Uint| -> Bool:
+above_less |value U64, huge U64| -> Bool:
     return value < huge
 ;
 
-huge_greater |huge Uint, value Uint| -> Bool:
+huge_greater |huge U64, value U64| -> Bool:
     return huge > value
 ;
 
-signed_below |limit Int, value Uint| -> Bool:
+signed_below |limit I64, value U64| -> Bool:
     return limit < value
 ;
 
-signed_above |value Uint, limit Int| -> Bool:
+signed_above |value U64, limit I64| -> Bool:
     return value > limit
 ;
 
-neg_below |floor Int, value Uint| -> Bool:
+neg_below |floor I64, value U64| -> Bool:
     return floor < value
 ;
 
-huge Uint = 18446744073709551615
-above Uint = 9223372036854775808
-max_signed Int = 9223372036854775807
-min_signed Int = -9223372036854775808
+huge U64 = 18446744073709551615
+above U64 = 9223372036854775808
+max_signed I64 = 9223372036854775807
+min_signed I64 = -9223372036854775808
 
 uint_above_less Bool = above_less(above, huge)
 uint_above_greater Bool = huge_greater(huge, above)
@@ -33,114 +33,118 @@ signed_greater Bool = signed_above(above, max_signed)
 neg_less_than Bool = neg_below(min_signed, above)
 huge_equal Bool = huge is 18446744073709551615
 
-add_above |a Uint, b Uint| -> Uint, Error!:
+add_above |a U64, b U64| -> U64, Error!:
     return a + b
 ;
 
-mul_above |a Uint, b Uint| -> Uint, Error!:
+mul_above |a U64, b U64| -> U64, Error!:
     return a * b
 ;
 
-sub_above |a Uint, b Uint| -> Uint, Error!:
+sub_above |a U64, b U64| -> U64, Error!:
     return a - b
 ;
 
-floordiv_above |a Uint, b Uint| -> Uint, Error!:
+floordiv_above |a U64, b U64| -> U64, Error!:
     return a // b
 ;
 
-sum_above Uint = add_above(above, 100) catch:
+sum_above U64 = add_above(above, 100) catch:
     then 0
 ;
-sum_overflow Uint = add_above(huge, 1) catch:
+sum_overflow U64 = add_above(huge, 1) catch:
     then 1
 ;
-prod_overflow Uint = mul_above(above, 2) catch:
+prod_overflow U64 = mul_above(above, 2) catch:
     then 2
 ;
-diff_above Uint = sub_above(above, 100) catch:
+diff_above U64 = sub_above(above, 100) catch:
     then 3
 ;
-quot_above Uint = floordiv_above(huge, above) catch:
+quot_above U64 = floordiv_above(huge, above) catch:
     then 4
 ;
 
-float_to_uint |value Float| -> Uint, Error!:
-    return cast! value
-;
-
-two_pow_64 Float = 18446744073709551616.0
-limit_fail Uint = float_to_uint(two_pow_64) catch:
-    then 5
-;
-just_below Uint = float_to_uint(18446744073709549568.0) catch:
-    then 6
-;
-
-uint_to_scaled |value Uint| -> Dec2:
+float_to_uint |value F64| -> U64, Error!:
     return cast value
 ;
 
-scaled_to_uint |value Dec2| -> Uint, Error!:
-    return cast! value
+two_pow_64 F64 = 18446744073709551616.0
+limit_fail U64 = float_to_uint(two_pow_64) catch:
+    then 5
+;
+just_below U64 = float_to_uint(18446744073709549568.0) catch:
+    then 6
+;
+
+uint_to_scaled |value U64| -> Dec2:
+    return cast value
+;
+
+scaled_to_uint |value Dec2| -> U64, Error!:
+    return cast value
 ;
 
 scaled Dec2 = uint_to_scaled(huge)
-scaled_back Uint = scaled_to_uint(scaled) catch:
+scaled_back U64 = scaled_to_uint(scaled) catch:
     then 0
 ;
 
-as_float Float = huge * 1.0
+rounded_huge_value F64 = cast huge
+as_float F64 = rounded_huge_value * 1.0
 as_float32 F32 = cast huge
 
--- Task 3: implicit Uint and Int returns convert at the profile Float precision
+-- Task 3: explicit U64 and I64 returns convert at the declared F64 precision
 -- through the same direct rounding as explicit casts.
-implicit_to_float |value Uint| -> Float:
-    return value
+converted_to_float |value U64| -> F64:
+    return cast value
 ;
 
-implicit_int_to_float |value Int| -> Float:
-    return value
+converted_int_to_float |value I64| -> F64:
+    return cast value
 ;
 
-implicit_above Float = implicit_to_float(above)
-implicit_huge Float = implicit_to_float(huge)
-implicit_max_signed Float = implicit_int_to_float(max_signed)
+converted_above F64 = converted_to_float(above)
+converted_huge F64 = converted_to_float(huge)
+converted_max_signed F64 = converted_int_to_float(max_signed)
 
--- 1000000000 * 18446744073 lands below the Uint64 maximum exactly.
-exact_product Uint = mul_above(1000000000, 18446744073) catch:
+-- 1000000000 * 18446744073 lands below the U64 maximum exactly.
+exact_product U64 = mul_above(1000000000, 18446744073) catch:
     then 8
 ;
-exact_square Uint = mul_above(4294967296, 4294967296) catch:
+exact_square U64 = mul_above(4294967296, 4294967296) catch:
     then 9
 ;
 
 -- Folded and dynamic evaluation of the same above-signed-max value agree.
-folded_above #Uint = 9223372036854775808
-folded_above_plus Uint = folded_above + 0
-dynamic_above Uint = add_above(above, 0) catch:
+folded_above #U64 = 9223372036854775808
+folded_above_plus U64 = folded_above + 0
+dynamic_above U64 = add_above(above, 0) catch:
     then 0
 ;
 folded_dynamic_agree Bool = folded_above_plus is dynamic_above
 
-witness_to_f32 |value Uint| -> F32:
+witness_to_f32 |value U64| -> F32:
     return cast value
 ;
--- 9007199791611905 rounds directly to Float32 bits 0x5a000001, which the
+-- 9007199791611905 rounds directly to F32 bits 0x5a000001, which the
 -- formatter spells 9007200000000000 (the forbidden f64 two-step would give
 -- bits 0x5a000000, spelled 9007199000000000).
 witness_f32 F32 = witness_to_f32(9007199791611905)
 
-runtime_eq |a Uint, b Float| -> Bool:
-    return a is b
+runtime_eq |a U64, b F64| -> Bool:
+    converted F64 = cast a
+    return converted is b
 ;
-runtime_lt |b Float, a Uint| -> Bool:
-    return b < a
+runtime_lt |b F64, a U64| -> Bool:
+    converted F64 = cast a
+    return b < converted
 ;
-folded_huge #Uint = 18446744073709551615
-folded_eq #Bool = folded_huge is 18446744073709551616.0
-folded_lt #Bool = 18446744073709551616.0 < folded_huge
+folded_huge #U64 = 18446744073709551615
+rounded_huge #F64 = cast folded_huge
+folded_eq #Bool = rounded_huge is 18446744073709551616.0
+folded_lt #Bool = 18446744073709551616.0 < rounded_huge
 cmp_runtime_eq Bool = runtime_eq(huge, 18446744073709551616.0)
 cmp_runtime_lt Bool = runtime_lt(18446744073709551616.0, huge)
 
-[:uint int64 less=[uint_above_less] greater=[uint_above_greater] signed=[signed_less]/[signed_greater] neg=[neg_less_than] equal=[huge_equal] arith=[sum_above]/[sum_overflow]/[prod_overflow]/[diff_above]/[quot_above] limit=[limit_fail]/[just_below] dec=[scaled]/[scaled_back] float=[as_float]/[as_float32] witness=[witness_f32] cmp=[folded_eq]/[folded_lt]/[cmp_runtime_eq]/[cmp_runtime_lt] implicit=[implicit_above]/[implicit_huge]/[implicit_max_signed] prod=[exact_product]/[exact_square] agree=[folded_dynamic_agree]]
+[:uint int64 less=[uint_above_less] greater=[uint_above_greater] signed=[signed_less]/[signed_greater] neg=[neg_less_than] equal=[huge_equal] arith=[sum_above]/[sum_overflow]/[prod_overflow]/[diff_above]/[quot_above] limit=[limit_fail]/[just_below] dec=[scaled]/[scaled_back] float=[as_float]/[as_float32] witness=[witness_f32] cmp=[folded_eq]/[folded_lt]/[cmp_runtime_eq]/[cmp_runtime_lt] converted=[converted_above]/[converted_huge]/[converted_max_signed] prod=[exact_product]/[exact_square] agree=[folded_dynamic_agree]]

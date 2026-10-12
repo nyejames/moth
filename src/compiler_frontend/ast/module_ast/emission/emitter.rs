@@ -17,7 +17,7 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::generic_functions::{
     GenericFunctionBodyValidationInput, GenericFunctionInstance, GenericFunctionInstanceKey,
-    GenericFunctionInstantiationRequest, GenericInstantiationDiagnosticContext,
+    GenericFunctionInstantiationRequest, GenericInstantiationDiagnosticContext, GenericRequestSlot,
     recursive_generic_function_instantiation, substitute_function_signature,
     validate_generic_function_body as validate_generic_body_template,
     with_generic_instantiation_context,
@@ -26,6 +26,7 @@ use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
 use crate::compiler_frontend::ast::module_ast::environment::AstModuleEnvironment;
 use crate::compiler_frontend::ast::module_ast::environment::TopLevelDeclarationTable;
 use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
+use crate::compiler_frontend::ast::statements::body_dispatch::ParsedBody;
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, ReturnChannel, ReturnSlot,
 };
@@ -90,10 +91,11 @@ pub(in crate::compiler_frontend::ast) struct AstEmission {
         FxHashMap<PathId, FoldedConstTemplateResult>,
     /// Concrete generic function instances emitted while lowering visible calls.
     pub(in crate::compiler_frontend::ast) generic_instance_count: usize,
-    /// Imported generic calls are inferred here but materialised by the generated-function
-    /// transaction from the declaring module's retained context.
-    pub(in crate::compiler_frontend::ast) deferred_generic_requests:
-        Vec<GenericFunctionInstantiationRequest>,
+    /// Every generic request slot recorded during emission, in ledger order (concrete, dropped
+    /// and pending). Static specialisation addresses slots by position; the finalizer commits
+    /// only the exact concrete survivors. Imported generic calls are materialised by the
+    /// generated-function transaction from the declaring module's retained context.
+    pub(in crate::compiler_frontend::ast) deferred_generic_requests: Vec<GenericRequestSlot>,
     /// Fully validated generic template bodies retained only through static specialisation and
     /// terminality. They never enter executable HIR.
     pub(in crate::compiler_frontend::ast) validated_generic_template_bodies: Vec<AstNode>,
@@ -198,11 +200,10 @@ pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'en
     source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners,
     const_templates_by_path: FxHashMap<PathId, FoldedConstTemplateResult>,
     compatibility_cache: TypeCompatibilityCache,
-    generic_function_instantiation_requests: Rc<RefCell<Vec<GenericFunctionInstantiationRequest>>>,
+    generic_function_instantiation_requests: Rc<RefCell<Vec<GenericRequestSlot>>>,
     known_infallible_functions: Rc<RefCell<FxHashSet<PathId>>>,
     generic_function_instances_by_key:
         FxHashMap<GenericFunctionInstanceKey, GenericFunctionInstance>,
-    deferred_generic_requests: Vec<GenericFunctionInstantiationRequest>,
     validated_generic_template_bodies: Vec<AstNode>,
     generic_call_site_identity_handle: Option<FrozenIdentityHandle>,
 }
@@ -227,7 +228,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             generic_function_instantiation_requests: Rc::new(RefCell::new(Vec::new())),
             known_infallible_functions: Rc::new(RefCell::new(FxHashSet::default())),
             generic_function_instances_by_key: FxHashMap::default(),
-            deferred_generic_requests: Vec::new(),
             validated_generic_template_bodies: Vec::new(),
             generic_call_site_identity_handle: None,
         }
@@ -256,14 +256,14 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         string_table: &mut StringTable,
     ) -> Result<AstEmission, CompilerMessages> {
         self.emit_generic_function_instance(request, &[], string_table)?;
-        self.defer_requested_generic_function_instances();
+        let deferred_generic_requests = self.take_generic_request_ledger();
 
         Ok(AstEmission {
             ast: self.ast,
             warnings: self.warnings,
             const_templates_by_path: self.const_templates_by_path,
             generic_instance_count: self.generic_function_instances_by_key.len(),
-            deferred_generic_requests: self.deferred_generic_requests,
+            deferred_generic_requests,
             validated_generic_template_bodies: self.validated_generic_template_bodies,
         })
     }
@@ -283,7 +283,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             Arc::clone(&self.context.external_package_registry),
             input.scope_frame_capacity,
             self.context.template_ir_store.clone(),
-            self.context.numeric_profile,
         )
         .with_style_directives(self.context.style_directives)
         .with_build_profile(self.context.build_profile)
@@ -513,7 +512,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             }
         }
 
-        self.defer_requested_generic_function_instances();
+        let deferred_generic_requests = self.take_generic_request_ledger();
 
         #[cfg(feature = "detailed_timers")]
         {
@@ -540,7 +539,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             warnings: self.warnings,
             const_templates_by_path: self.const_templates_by_path,
             generic_instance_count: self.generic_function_instances_by_key.len(),
-            deferred_generic_requests: self.deferred_generic_requests,
+            deferred_generic_requests,
             validated_generic_template_bodies: self.validated_generic_template_bodies,
         })
     }
@@ -549,20 +548,23 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     //  Emit function bodies
     // --------------------------
 
-    /// Move inferred generic calls into the generated-function transaction without parsing their
-    /// bodies.
+    /// Drains the module-wide generic request ledger exactly once, at emission finish.
     ///
-    /// The dedicated generated-function materialiser invokes `emit_generic_function_instance`
-    /// for one selected request. Ordinary module emission only records stable requests, including
-    /// nested calls discovered while that selected generated body is parsed.
-    fn defer_requested_generic_function_instances(&mut self) {
-        let requests =
-            std::mem::take(&mut *self.generic_function_instantiation_requests.borrow_mut());
+    /// WHAT: returns every ledger slot in recording order (concrete, dropped and pending) and
+    ///       registers each concrete request's key as a known instance.
+    /// WHY: static-if ranges and ticket indices address the ledger by position, so the ledger is
+    ///      never drained mid-emission; a mid-body drain would restart those positions. Dropped
+    ///      and pending slots keep their positions so those ranges stay valid. Every provisional
+    ///      origin survives until static specialisation removes inactive ranges, because
+    ///      deduplicating first would lose an active duplicate when its first call was inactive.
+    fn take_generic_request_ledger(&mut self) -> Vec<GenericRequestSlot> {
+        let slots = std::mem::take(&mut *self.generic_function_instantiation_requests.borrow_mut());
 
-        for request in requests {
-            if !self
-                .generic_function_instances_by_key
-                .contains_key(&request.key)
+        for slot in &slots {
+            if let GenericRequestSlot::Concrete(request) = slot
+                && !self
+                    .generic_function_instances_by_key
+                    .contains_key(&request.key)
             {
                 self.generic_function_instances_by_key.insert(
                     request.key.clone(),
@@ -572,11 +574,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     },
                 );
             }
-
-            // Keep every provisional origin until static specialisation removes inactive ranges.
-            // Deduplicating first would lose an active duplicate when its first call was inactive.
-            self.deferred_generic_requests.push(request);
         }
+
+        slots
     }
 
     /// Rebuilds the body-local generic type context from canonical type metadata.
@@ -722,7 +722,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             };
             self.generic_function_instances_by_key
                 .insert(request.key.clone(), instance);
-            self.deferred_generic_requests.push(request);
+            self.generic_function_instantiation_requests
+                .borrow_mut()
+                .push(GenericRequestSlot::Concrete(request));
             return Ok(());
         };
         let parse_owner = body
@@ -831,7 +833,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             string_table,
             &mut *self.path_fork,
         ) {
-            Ok(body) => {
+            Ok(ParsedBody::Complete(body)) => {
                 if let Some(frozen_identity_handle) = frozen_identity_handle.as_ref() {
                     for warning in &mut self.warnings[warning_start..] {
                         attach_frozen_identity_handle_to_diagnostic(
@@ -841,6 +843,14 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                     }
                 }
                 body
+            }
+            Ok(ParsedBody::Draft(_)) => {
+                return Err(self.error_messages(
+                    CompilerError::compiler_error(
+                        "a materialised generic function body returned an unresolved numeric draft",
+                    ),
+                    string_table,
+                ));
             }
             Err(ExpressionParseError::Diagnostic(diagnostic)) => {
                 let diagnostic = with_generic_instantiation_context(
@@ -859,14 +869,11 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 );
                 return Err(self.diagnostic_messages(diagnostic, string_table));
             }
-            Err(ExpressionParseError::Infrastructure(error)) => {
-                return Err(self.error_messages(*error, string_table));
-            }
+            Err(error) => return Err(self.expression_error_messages(error, string_table)),
         };
 
         // Nested calls remain stable requests. The generated-function transaction materialises
         // their bodies, records dependency edges and detects indirect request cycles.
-        self.defer_requested_generic_function_instances();
 
         // --------------------------
         //  Register instance and emit AST node
@@ -1070,8 +1077,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut *self.path_fork,
         );
 
-        let body =
-            body_result.map_err(|error| self.expression_error_messages(error, string_table))?;
+        let body = body_result
+            .and_then(|parsed| parsed.expect_complete_nodes("a source function body"))
+            .map_err(|error| self.expression_error_messages(error, string_table))?;
 
         // AST symbol IDs are stored as complete PathId values and are unique
         // module-wide, not only within a local scope.
@@ -1160,8 +1168,9 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut *self.path_fork,
         );
 
-        let body =
-            body_result.map_err(|error| self.expression_error_messages(error, string_table))?;
+        let body = body_result
+            .and_then(|parsed| parsed.expect_complete_nodes("the implicit start function body"))
+            .map_err(|error| self.expression_error_messages(error, string_table))?;
 
         // --------------------------
         // Emit the module-owned start without changing root selection or activation.
@@ -1355,18 +1364,17 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
     }
 
     /// Converts the AST parser's two-lane failure without downgrading retained-data errors.
+    ///
+    /// A numeric deferral must never reach the emitter: every retaining lane completes at its
+    /// body root, so a leak here is a precise invariant failure naming the boundary.
     fn expression_error_messages(
         &self,
         error: ExpressionParseError,
         string_table: &StringTable,
     ) -> CompilerMessages {
-        match error {
-            ExpressionParseError::Diagnostic(diagnostic) => {
-                self.diagnostic_messages(diagnostic, string_table)
-            }
-            ExpressionParseError::Infrastructure(error) => {
-                self.error_messages(*error, string_table)
-            }
+        match error.at_boundary_without_numeric_retention("the module emitter body boundary") {
+            Ok(diagnostic) => self.diagnostic_messages(diagnostic, string_table),
+            Err(error) => self.error_messages(error, string_table),
         }
     }
 }

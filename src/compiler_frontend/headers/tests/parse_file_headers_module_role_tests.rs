@@ -84,7 +84,7 @@ fn struct_fields_retain_local_ordering_hints_for_named_field_types() {
     // root `PathId`, so struct identity must be resolved structurally rather than by comparing
     // against `PathId::ROOT`.
     let (output, _span_builder) = prepare_single_file_with_fork(
-        "Point = |x Int, y Int|\nSpan = |start Point, end Point|\n",
+        "Point = |x I32, y I32|\nSpan = |start Point, end Point|\n",
         &file_path,
         &file_path,
         &mut string_table,
@@ -132,7 +132,7 @@ fn function_error_return_retains_local_ordering_hint_for_named_type() {
     // WHY: final `T!` error slots are part of the declaration surface. Their named types must
     // participate in local declaration ordering before AST resolves function signatures.
     let (headers, _string_table) = parse_single_file_headers_with_table(
-        "AppError = |message String|\nparse || -> Int, AppError!:\n    return 1\n;\n",
+        "AppError = |message String|\nparse || -> I32, AppError!:\n    return 1\n;\n",
     );
 
     let parse_header = headers
@@ -157,7 +157,7 @@ fn function_error_return_retains_local_ordering_hint_for_named_type() {
 fn constant_header_with_declared_type_captures_type_in_declaration() {
     // Confirms the header-stage contract: declared type annotation is present in the
     // Constant header's declaration, proving initializer resolution is deferred to AST.
-    let headers = parse_single_file_headers("threshold #Int = 42\n");
+    let headers = parse_single_file_headers("threshold #I32 = 42\n");
 
     let constant_header = headers
         .headers

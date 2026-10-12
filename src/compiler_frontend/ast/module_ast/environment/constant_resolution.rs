@@ -33,7 +33,7 @@ use crate::compiler_frontend::ast::module_ast::scope_context::{
     ContextKind, FileValueResolutionServices, ScopeContext,
 };
 use crate::compiler_frontend::ast::statements::declarations::{
-    DeclarationLoweringTables, resolve_declaration_syntax,
+    DeclarationLowering, DeclarationLoweringTables, resolve_declaration_syntax,
 };
 use crate::compiler_frontend::ast::templates::template::{TemplateConstValueKind, TemplateType};
 use crate::compiler_frontend::ast::templates::template_folding::TemplateEmission;
@@ -65,7 +65,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -95,8 +94,6 @@ pub(crate) struct ConstantResolutionSessionInput {
     pub source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners,
     pub build_profile: FrontendBuildProfile,
     pub template_const_loop_iteration_limit: usize,
-    /// The compilation boundary's numeric widths constant folding and materialisation read.
-    pub numeric_profile: NumericProfile,
 }
 /// State that changes between constants, supplied by the environment builder per call.
 ///
@@ -361,9 +358,12 @@ impl ConstantResolutionSession {
                 })
                 .transpose()?;
                 let declaration_syntax = declaration.clone();
-                resolve_declaration_syntax(
+                match resolve_declaration_syntax(
                     declaration_syntax,
                     header.declaration_path.to_owned(),
+                    // The top-level constant's binding anchor is its header name token; the
+                    // lowering path itself leaves the anchor empty for every `Ready` outcome.
+                    header.name_span,
                     body_cursor.as_ref(),
                     &mut scope_context,
                     &mut type_interner,
@@ -371,7 +371,18 @@ impl ConstantResolutionSession {
                         string_table,
                         path_fork,
                     },
-                )?
+                )? {
+                    DeclarationLowering::Ready(declaration) => declaration,
+                    // A constant header is parsed in `ContextKind::ConstantHeader`, so its
+                    // declaration lowering never retains a pending numeric origin: compile-time
+                    // constants fold at their own boundary and cannot return pending state.
+                    DeclarationLowering::PendingNumeric(_) => {
+                        return Err(ExpressionParseError::from(CompilerError::compiler_error(
+                            "a numeric-dependent declaration outcome reached a constant header \
+                             boundary, which cannot retain or complete it before the body root",
+                        )));
+                    }
+                }
             }
         };
 
@@ -405,7 +416,6 @@ impl ConstantResolutionSession {
                 non_constant_initializer_fold_refusal(constant_fold(
                     rpn.items.clone(),
                     string_table,
-                    self.module_view.numeric_profile,
                     Some(&scope_context),
                 ))?;
             }
@@ -414,7 +424,6 @@ impl ConstantResolutionSession {
                 CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
                 path_fork.component(declaration.id),
                 header.name_span,
-                None,
             )
             .into());
         }
@@ -456,7 +465,6 @@ impl ConstantResolutionSession {
             Arc::clone(&module_view.external_package_registry),
             0,
             Rc::clone(&module_view.template_ir_store),
-            module_view.numeric_profile,
         )
         .with_style_directives(&module_view.style_directives)
         .with_build_profile(module_view.build_profile)

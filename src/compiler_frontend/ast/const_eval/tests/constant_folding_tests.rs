@@ -1,9 +1,7 @@
 //! Regression tests for constant-expression folding helpers.
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use super::*;
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::ast::expressions::expression::Operator;
 use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExpression;
@@ -13,14 +11,15 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
 };
 use crate::compiler_frontend::ast::statements::fallible_handling::wrap_catch_expression;
 use crate::compiler_frontend::ast::statements::value_production::ProducedValues;
-use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
-use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
+use crate::compiler_frontend::builtins::casts::targets::{
+    BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget,
+};
 use crate::compiler_frontend::compiler_messages::render::{DiagnosticRenderContext, terminal};
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, DiagnosticPayload, InvalidCastReason,
 };
 use crate::compiler_frontend::datatypes::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
+use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
@@ -29,17 +28,11 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
-use crate::compiler_frontend::tests::ast_fixture_support::test_if_branch_metadata;
 use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass, FixedScalarValue};
 use moth_lexical::numeric::grammar::NumericLiteralSign;
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
-
-fn test_template_ir_store() -> Rc<RefCell<TemplateIrStore>> {
-    Rc::new(RefCell::new(TemplateIrStore::new()))
-}
 
 fn assert_compile_time_error(
     error: &ConstantFoldError,
@@ -56,27 +49,12 @@ fn assert_compile_time_error(
 
     match &diagnostic.payload {
         DiagnosticPayload::CompileTimeEvaluationError {
-            reason,
-            operation,
-            numeric_profile,
+            reason, operation, ..
         } => {
             assert_eq!(*reason, expected_reason);
 
             let operation_text = operation.map(|operation| string_table.resolve(operation));
             assert_eq!(operation_text, expected_operation);
-            if matches!(
-                &expected_reason,
-                CompileTimeEvaluationErrorReason::IntegerOverflow
-                    | CompileTimeEvaluationErrorReason::FloatOverflow
-                    | CompileTimeEvaluationErrorReason::DivideByZero
-                    | CompileTimeEvaluationErrorReason::InvalidExponent
-                    | CompileTimeEvaluationErrorReason::IntegerDivisionOnlyIntInt
-            ) {
-                assert!(
-                    numeric_profile.is_some(),
-                    "numeric compile-time errors retain their selected profile"
-                );
-            }
         }
         payload => panic!("expected compile-time evaluation payload, found {payload:?}"),
     }
@@ -98,15 +76,31 @@ fn assert_invalid_cast_error(error: &ConstantFoldError, expected_reason: Invalid
     }
 }
 
-fn cast_expression(
+/// Explicit cast facts for one test-built `ResolvedCastExpression`; the source type and span
+/// come from `source`.
+struct CastExpressionInput {
     source: Expression,
     target: BuiltinCastTarget,
     target_type_id: TypeId,
     evidence: ResolvedCastEvidence,
+    fallibility: BuiltinCastFallibility,
     handling: CastHandling,
     requires_optional_wrap_after_cast: bool,
+}
+
+fn cast_expression(
+    input: CastExpressionInput,
     type_environment: &mut TypeEnvironment,
 ) -> Expression {
+    let CastExpressionInput {
+        source,
+        target,
+        target_type_id,
+        evidence,
+        fallibility,
+        handling,
+        requires_optional_wrap_after_cast,
+    } = input;
     let source_type_id = source.type_id;
     let span = source.span;
     let cast = ResolvedCastExpression {
@@ -115,6 +109,7 @@ fn cast_expression(
         target_type_id,
         target,
         requires_optional_wrap_after_cast,
+        fallibility,
         evidence,
         handling,
         span,
@@ -226,13 +221,7 @@ fn expect_folded_boolean(
     operator: Operator,
     string_table: &mut StringTable,
 ) -> bool {
-    let folded = expect_folded_operator(lhs.evaluate_operator(
-        &rhs,
-        &operator,
-        string_table,
-        NumericProfile::STANDARD,
-        None,
-    ));
+    let folded = expect_folded_operator(lhs.evaluate_operator(&rhs, &operator, string_table, None));
     match folded.kind {
         ExpressionKind::Bool(value) => value,
         other => panic!("expected a boolean comparison result, got {other:?}"),
@@ -321,13 +310,7 @@ fn structural_string_equality_reports_text_unavailable_outcome() {
     );
 
     let outcome = lhs
-        .evaluate_operator(
-            &rhs,
-            &Operator::Equality,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
+        .evaluate_operator(&rhs, &Operator::Equality, &mut string_table, None)
         .expect("structural equality should be a typed fold refusal");
 
     let OperatorFoldOutcome::TextUnavailable { diagnostic } = outcome else {
@@ -367,7 +350,7 @@ fn constant_fold_propagates_structural_string_text_unavailable_outcome() {
         },
     ];
 
-    let outcome = constant_fold(nodes, &mut string_table, NumericProfile::STANDARD, None)
+    let outcome = constant_fold(nodes, &mut string_table, None)
         .expect("structural equality should return a typed fold outcome");
     let ConstantFoldOutcome::TextUnavailable { diagnostic, .. } = outcome else {
         panic!("expected constant folding to preserve text-unavailable outcome");
@@ -420,7 +403,7 @@ fn text_unavailable_refusal_keeps_the_items_that_follow_it() {
     ];
     let authored_items = nodes.len();
 
-    let outcome = constant_fold(nodes, &mut string_table, NumericProfile::STANDARD, None)
+    let outcome = constant_fold(nodes, &mut string_table, None)
         .expect("structural equality should return a typed fold outcome");
     let ConstantFoldOutcome::TextUnavailable { items, .. } = outcome else {
         panic!("expected constant folding to report unavailable text");
@@ -461,13 +444,7 @@ fn evaluate_operator_rejects_string_concatenation() {
     );
 
     let error = lhs
-        .evaluate_operator(
-            &rhs,
-            &Operator::Add,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
+        .evaluate_operator(&rhs, &Operator::Add, &mut string_table, None)
         .expect_err("string concatenation should not fold at compile time");
     assert_compile_time_error(
         &error,
@@ -481,17 +458,11 @@ fn evaluate_operator_rejects_string_concatenation() {
 fn evaluate_operator_rejects_negative_integer_exponent() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
-    let rhs = Expression::int(-1, Default::default(), ValueMode::ImmutableOwned);
+    let lhs = fixed_integer_expression(FixedScalar::I32, 2);
+    let rhs = fixed_integer_expression(FixedScalar::I32, -1);
 
     let error = lhs
-        .evaluate_operator(
-            &rhs,
-            &Operator::Exponent,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
+        .evaluate_operator(&rhs, &Operator::Exponent, &mut string_table, None)
         .expect_err("negative integer exponent should fail during fold");
     assert_compile_time_error(
         &error,
@@ -505,17 +476,11 @@ fn evaluate_operator_rejects_negative_integer_exponent() {
 fn evaluate_operator_returns_not_constant_for_mismatched_constant_types() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
+    let lhs = fixed_integer_expression(FixedScalar::I32, 2);
     let rhs = Expression::bool(true, Default::default(), ValueMode::ImmutableOwned);
 
     let result = lhs
-        .evaluate_operator(
-            &rhs,
-            &Operator::Add,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
+        .evaluate_operator(&rhs, &Operator::Add, &mut string_table, None)
         .expect("mismatched types should not error");
 
     assert!(matches!(result, OperatorFoldOutcome::NotConstant));
@@ -525,22 +490,24 @@ fn evaluate_operator_returns_not_constant_for_mismatched_constant_types() {
 fn evaluate_operator_divides_ints_to_float() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::int(5, Default::default(), ValueMode::ImmutableOwned);
-    let rhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
+    let lhs = fixed_integer_expression(FixedScalar::I32, 5);
+    let rhs = fixed_integer_expression(FixedScalar::I32, 2);
 
     let result = expect_folded_operator(lhs.evaluate_operator(
         &rhs,
         &Operator::Divide,
         &mut string_table,
-        NumericProfile::STANDARD,
         None,
     ));
 
     assert!(matches!(
         result.kind,
-        ExpressionKind::Float(value) if (value - 2.5).abs() < f64::EPSILON
+        ExpressionKind::FixedScalar(value) if value.as_f64() == Some(2.5)
     ));
-    assert_eq!(result.diagnostic_type, DataType::Float);
+    assert_eq!(
+        result.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::F64)
+    );
     assert!(
         result.contains_regular_division,
         "folded regular division should preserve provenance"
@@ -551,36 +518,35 @@ fn evaluate_operator_divides_ints_to_float() {
 fn evaluate_operator_integer_division_truncates_toward_zero() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::int(-5, Default::default(), ValueMode::ImmutableOwned);
-    let rhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
+    let lhs = fixed_integer_expression(FixedScalar::I32, -5);
+    let rhs = fixed_integer_expression(FixedScalar::I32, 2);
 
     let result = expect_folded_operator(lhs.evaluate_operator(
         &rhs,
         &Operator::IntDivide,
         &mut string_table,
-        NumericProfile::STANDARD,
         None,
     ));
 
-    assert!(matches!(result.kind, ExpressionKind::Int(-2)));
-    assert_eq!(result.diagnostic_type, DataType::Int);
+    assert!(matches!(
+        result.kind,
+        ExpressionKind::FixedScalar(value) if value.as_i64() == Some(-2)
+    ));
+    assert_eq!(
+        result.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::I32)
+    );
 }
 
 #[test]
 fn evaluate_operator_rejects_divide_by_zero_for_both_division_operators() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::int(5, Default::default(), ValueMode::ImmutableOwned);
-    let zero = Expression::int(0, Default::default(), ValueMode::ImmutableOwned);
+    let lhs = fixed_integer_expression(FixedScalar::I32, 5);
+    let zero = fixed_integer_expression(FixedScalar::I32, 0);
 
     let divide_error = lhs
-        .evaluate_operator(
-            &zero,
-            &Operator::Divide,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
+        .evaluate_operator(&zero, &Operator::Divide, &mut string_table, None)
         .expect_err("regular division by zero should fail during fold");
     assert_compile_time_error(
         &divide_error,
@@ -590,13 +556,7 @@ fn evaluate_operator_rejects_divide_by_zero_for_both_division_operators() {
     );
 
     let int_divide_error = lhs
-        .evaluate_operator(
-            &zero,
-            &Operator::IntDivide,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
+        .evaluate_operator(&zero, &Operator::IntDivide, &mut string_table, None)
         .expect_err("integer division by zero should fail during fold");
     assert_compile_time_error(
         &int_divide_error,
@@ -610,21 +570,11 @@ fn evaluate_operator_rejects_divide_by_zero_for_both_division_operators() {
 fn evaluate_operator_rejects_integer_add_overflow() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::int(
-        i64::from(i32::MAX),
-        Default::default(),
-        ValueMode::ImmutableOwned,
-    );
-    let rhs = Expression::int(1, Default::default(), ValueMode::ImmutableOwned);
+    let lhs = fixed_integer_expression(FixedScalar::I32, i128::from(i32::MAX));
+    let rhs = fixed_integer_expression(FixedScalar::I32, 1);
 
     let error = lhs
-        .evaluate_operator(
-            &rhs,
-            &Operator::Add,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
+        .evaluate_operator(&rhs, &Operator::Add, &mut string_table, None)
         .expect_err("integer add overflow should fail during fold");
     assert_compile_time_error(
         &error,
@@ -635,109 +585,55 @@ fn evaluate_operator_rejects_integer_add_overflow() {
 }
 
 #[test]
-fn evaluate_operator_folds_int_add_at_the_profile_width() {
-    let int64_profile = NumericProfile {
-        int_width: IntWidth::Bits64,
-        ..NumericProfile::STANDARD
-    };
+fn evaluate_operator_folds_i64_add_beyond_i32_range() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::int(
-        i64::from(i32::MAX),
-        Default::default(),
-        ValueMode::ImmutableOwned,
-    );
-    let rhs = Expression::int(1, Default::default(), ValueMode::ImmutableOwned);
-
-    let error = lhs
-        .evaluate_operator(
-            &rhs,
-            &Operator::Add,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
-        .expect_err("i32::MAX + 1 exceeds the Int32 boundary");
-    assert_compile_time_error(
-        &error,
-        CompileTimeEvaluationErrorReason::IntegerOverflow,
-        Some("+"),
-        &string_table,
-    );
+    let lhs = fixed_integer_expression(FixedScalar::I64, i128::from(i32::MAX));
+    let rhs = fixed_integer_expression(FixedScalar::I64, 1);
 
     let folded = expect_folded_operator(lhs.evaluate_operator(
         &rhs,
         &Operator::Add,
         &mut string_table,
-        int64_profile,
         None,
     ));
-    assert!(matches!(folded.kind, ExpressionKind::Int(v) if v == 2_147_483_648));
-    assert_eq!(folded.diagnostic_type, DataType::Int);
+    assert!(matches!(
+        folded.kind,
+        ExpressionKind::FixedScalar(value) if value.as_i64() == Some(2_147_483_648)
+    ));
+    assert_eq!(
+        folded.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::I64)
+    );
 }
 
 #[test]
 fn evaluate_operator_rejects_int64_add_overflow() {
-    let int64_profile = NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: FloatPrecision::Bits64,
-    };
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::int(i64::MAX, Default::default(), ValueMode::ImmutableOwned);
-    let rhs = Expression::int(1, Default::default(), ValueMode::ImmutableOwned);
+    let lhs = fixed_integer_expression(FixedScalar::I64, i128::from(i64::MAX));
+    let rhs = fixed_integer_expression(FixedScalar::I64, 1);
 
     let error = lhs
-        .evaluate_operator(&rhs, &Operator::Add, &mut string_table, int64_profile, None)
-        .expect_err("i64::MAX + 1 overflows even the Int64 boundary");
+        .evaluate_operator(&rhs, &Operator::Add, &mut string_table, None)
+        .expect_err("i64::MAX + 1 overflows the I64 boundary");
     assert_compile_time_error(
         &error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("+"),
         &string_table,
     );
-
-    // The diagnostic payload must report the exact profile the operator was folded
-    // under, not merely some numeric profile.
-    match &error {
-        ConstantFoldError::Diagnostic(diagnostic) => {
-            let DiagnosticPayload::CompileTimeEvaluationError {
-                numeric_profile: Some(profile),
-                ..
-            } = &diagnostic.payload
-            else {
-                panic!("integer overflow must retain its selected numeric profile");
-            };
-            assert_eq!(
-                *profile, int64_profile,
-                "the diagnostic must report the exact selected Int64 profile"
-            );
-        }
-        ConstantFoldError::Infrastructure(error) => {
-            panic!("expected compile-time diagnostic, found infrastructure error: {error:?}")
-        }
-    }
 }
 
 #[test]
 fn evaluate_operator_rejects_integer_subtract_overflow() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::int(
-        i64::from(i32::MIN),
-        Default::default(),
-        ValueMode::ImmutableOwned,
-    );
-    let rhs = Expression::int(1, Default::default(), ValueMode::ImmutableOwned);
+    let lhs = fixed_integer_expression(FixedScalar::I32, i128::from(i32::MIN));
+    let rhs = fixed_integer_expression(FixedScalar::I32, 1);
 
     let error = lhs
-        .evaluate_operator(
-            &rhs,
-            &Operator::Subtract,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
+        .evaluate_operator(&rhs, &Operator::Subtract, &mut string_table, None)
         .expect_err("integer subtract overflow should fail during fold");
     assert_compile_time_error(
         &error,
@@ -751,21 +647,11 @@ fn evaluate_operator_rejects_integer_subtract_overflow() {
 fn evaluate_operator_rejects_integer_multiply_overflow() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::int(
-        i64::from(i32::MAX),
-        Default::default(),
-        ValueMode::ImmutableOwned,
-    );
-    let rhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
+    let lhs = fixed_integer_expression(FixedScalar::I32, i128::from(i32::MAX));
+    let rhs = fixed_integer_expression(FixedScalar::I32, 2);
 
     let error = lhs
-        .evaluate_operator(
-            &rhs,
-            &Operator::Multiply,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
+        .evaluate_operator(&rhs, &Operator::Multiply, &mut string_table, None)
         .expect_err("integer multiply overflow should fail during fold");
     assert_compile_time_error(
         &error,
@@ -779,17 +665,11 @@ fn evaluate_operator_rejects_integer_multiply_overflow() {
 fn evaluate_operator_rejects_integer_exponent_overflow() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
-    let rhs = Expression::int(31, Default::default(), ValueMode::ImmutableOwned);
+    let lhs = fixed_integer_expression(FixedScalar::I32, 2);
+    let rhs = fixed_integer_expression(FixedScalar::I32, 31);
 
     let error = lhs
-        .evaluate_operator(
-            &rhs,
-            &Operator::Exponent,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
+        .evaluate_operator(&rhs, &Operator::Exponent, &mut string_table, None)
         .expect_err("integer exponent overflow should fail during fold");
     assert_compile_time_error(
         &error,
@@ -801,13 +681,8 @@ fn evaluate_operator_rejects_integer_exponent_overflow() {
 
 #[test]
 fn evaluate_operator_folds_trivial_base_exponent_despite_oversized_exponent() {
-    // Only Int64 can materialise an exponent that does not narrow to u32, so the
-    // oversized exponent runs under that width. Trivial bases still fold to their
-    // exact result; |base| >= 2 keeps reporting IntegerOverflow.
-    let profile = NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: FloatPrecision::Bits64,
-    };
+    // Only I64 can materialise an exponent that does not narrow to u32. Trivial bases still
+    // fold to their exact result; |base| >= 2 keeps reporting IntegerOverflow.
     let oversized: i64 = i64::from(u32::MAX) + 1;
 
     for (base, exponent, expected) in [
@@ -817,28 +692,28 @@ fn evaluate_operator_folds_trivial_base_exponent_despite_oversized_exponent() {
         (-1, oversized + 1, -1),
     ] {
         let mut string_table = StringTable::new();
-        let lhs = Expression::int(base, Default::default(), ValueMode::ImmutableOwned);
-        let rhs = Expression::int(exponent, Default::default(), ValueMode::ImmutableOwned);
+        let lhs = fixed_integer_expression(FixedScalar::I64, i128::from(base));
+        let rhs = fixed_integer_expression(FixedScalar::I64, i128::from(exponent));
 
         let outcome = lhs
-            .evaluate_operator(&rhs, &Operator::Exponent, &mut string_table, profile, None)
+            .evaluate_operator(&rhs, &Operator::Exponent, &mut string_table, None)
             .unwrap_or_else(|_| panic!("{base}^{exponent} should fold"));
         let OperatorFoldOutcome::Folded(folded) = outcome else {
             panic!("{base}^{exponent} should fold to a constant");
         };
         assert!(
-            matches!(folded.kind, ExpressionKind::Int(value) if value == expected),
+            matches!(folded.kind, ExpressionKind::FixedScalar(value) if value.as_i64() == Some(expected)),
             "{base}^{exponent} should fold to {expected}, got {:?}",
             folded.kind
         );
     }
 
     let mut string_table = StringTable::new();
-    let lhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
-    let rhs = Expression::int(oversized, Default::default(), ValueMode::ImmutableOwned);
+    let lhs = fixed_integer_expression(FixedScalar::I64, 2);
+    let rhs = fixed_integer_expression(FixedScalar::I64, i128::from(oversized));
 
     let error = lhs
-        .evaluate_operator(&rhs, &Operator::Exponent, &mut string_table, profile, None)
+        .evaluate_operator(&rhs, &Operator::Exponent, &mut string_table, None)
         .expect_err("oversized exponent on base 2 should fail during fold");
     assert_compile_time_error(
         &error,
@@ -852,39 +727,24 @@ fn evaluate_operator_folds_trivial_base_exponent_despite_oversized_exponent() {
 fn evaluate_operator_folds_truncated_int_remainder_at_both_widths() {
     // Remainder keeps the dividend's sign, and `% -1` is zero even for the width's
     // signed minimum, whose paired quotient is the only overflowing case.
-    for int_width in [IntWidth::Bits32, IntWidth::Bits64] {
-        let profile = NumericProfile {
-            int_width,
-            ..NumericProfile::STANDARD
-        };
-
-        for (lhs, rhs, expected) in [
-            (7, 3, 1),
-            (-7, 3, -1),
-            (7, -3, 1),
-            (int_width.min_value(), -1, 0),
-        ] {
+    for (scalar, minimum) in [
+        (FixedScalar::I32, i128::from(i32::MIN)),
+        (FixedScalar::I64, i128::from(i64::MIN)),
+    ] {
+        for (lhs, rhs, expected) in [(7, 3, 1), (-7, 3, -1), (7, -3, 1), (minimum, -1, 0)] {
             let mut string_table = StringTable::new();
-            let lhs_expression =
-                Expression::int(lhs, Default::default(), ValueMode::ImmutableOwned);
-            let rhs_expression =
-                Expression::int(rhs, Default::default(), ValueMode::ImmutableOwned);
+            let lhs_expression = fixed_integer_expression(scalar, lhs);
+            let rhs_expression = fixed_integer_expression(scalar, rhs);
 
             let outcome = lhs_expression
-                .evaluate_operator(
-                    &rhs_expression,
-                    &Operator::Modulus,
-                    &mut string_table,
-                    profile,
-                    None,
-                )
-                .unwrap_or_else(|_| panic!("{lhs} % {rhs} should fold under {int_width:?}"));
+                .evaluate_operator(&rhs_expression, &Operator::Modulus, &mut string_table, None)
+                .unwrap_or_else(|_| panic!("{lhs} % {rhs} should fold under {scalar:?}"));
             let OperatorFoldOutcome::Folded(folded) = outcome else {
-                panic!("{lhs} % {rhs} should fold to a constant under {int_width:?}");
+                panic!("{lhs} % {rhs} should fold to a constant under {scalar:?}");
             };
             assert!(
-                matches!(folded.kind, ExpressionKind::Int(value) if value == expected),
-                "{lhs} % {rhs} should fold to {expected} under {int_width:?}, got {:?}",
+                matches!(folded.kind, ExpressionKind::FixedScalar(value) if value.as_i64() == Some(expected)),
+                "{lhs} % {rhs} should fold to {expected} under {scalar:?}, got {:?}",
                 folded.kind
             );
         }
@@ -895,21 +755,11 @@ fn evaluate_operator_folds_truncated_int_remainder_at_both_widths() {
 fn evaluate_operator_rejects_integer_division_overflow() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::int(
-        i64::from(i32::MIN),
-        Default::default(),
-        ValueMode::ImmutableOwned,
-    );
-    let rhs = Expression::int(-1, Default::default(), ValueMode::ImmutableOwned);
+    let lhs = fixed_integer_expression(FixedScalar::I32, i128::from(i32::MIN));
+    let rhs = fixed_integer_expression(FixedScalar::I32, -1);
 
     let error = lhs
-        .evaluate_operator(
-            &rhs,
-            &Operator::IntDivide,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
+        .evaluate_operator(&rhs, &Operator::IntDivide, &mut string_table, None)
         .expect_err("integer division overflow should fail during fold");
     assert_compile_time_error(
         &error,
@@ -922,28 +772,23 @@ fn evaluate_operator_rejects_integer_division_overflow() {
 #[test]
 fn evaluate_operator_folds_signed_minimum_remainder_by_negative_one_to_zero() {
     // The quotient overflows, but the remainder is zero and must not inherit that check.
-    for int_width in [IntWidth::Bits32, IntWidth::Bits64] {
+    for (scalar, minimum) in [
+        (FixedScalar::I32, i128::from(i32::MIN)),
+        (FixedScalar::I64, i128::from(i64::MIN)),
+    ] {
         let mut string_table = StringTable::new();
-        let profile = NumericProfile {
-            int_width,
-            float_precision: FloatPrecision::Bits64,
-        };
-        let lhs = Expression::int(
-            int_width.min_value(),
-            Default::default(),
-            ValueMode::ImmutableOwned,
-        );
-        let rhs = Expression::int(-1, Default::default(), ValueMode::ImmutableOwned);
+        let lhs = fixed_integer_expression(scalar, minimum);
+        let rhs = fixed_integer_expression(scalar, -1);
 
         let outcome = lhs
-            .evaluate_operator(&rhs, &Operator::Modulus, &mut string_table, profile, None)
-            .unwrap_or_else(|_| panic!("{int_width:?} minimum % -1 should fold"));
+            .evaluate_operator(&rhs, &Operator::Modulus, &mut string_table, None)
+            .unwrap_or_else(|_| panic!("{scalar:?} minimum % -1 should fold"));
         let OperatorFoldOutcome::Folded(folded) = outcome else {
-            panic!("{int_width:?} minimum % -1 should fold to a constant");
+            panic!("{scalar:?} minimum % -1 should fold to a constant");
         };
         assert!(
-            matches!(folded.kind, ExpressionKind::Int(0)),
-            "{int_width:?} minimum % -1 should be zero, got {:?}",
+            matches!(folded.kind, ExpressionKind::FixedScalar(value) if value.as_i64() == Some(0)),
+            "{scalar:?} minimum % -1 should be zero, got {:?}",
             folded.kind
         );
     }
@@ -953,17 +798,11 @@ fn evaluate_operator_folds_signed_minimum_remainder_by_negative_one_to_zero() {
 fn evaluate_operator_rejects_non_finite_float_exponent_result() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::float(1.0e308, Default::default(), ValueMode::ImmutableOwned);
-    let rhs = Expression::float(2.0, Default::default(), ValueMode::ImmutableOwned);
+    let lhs = fixed_float_expression(FixedScalar::F64, 1.0e308);
+    let rhs = fixed_float_expression(FixedScalar::F64, 2.0);
 
     let error = lhs
-        .evaluate_operator(
-            &rhs,
-            &Operator::Exponent,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
+        .evaluate_operator(&rhs, &Operator::Exponent, &mut string_table, None)
         .expect_err("non-finite float exponent result should fail during fold");
     assert_compile_time_error(
         &error,
@@ -977,17 +816,11 @@ fn evaluate_operator_rejects_non_finite_float_exponent_result() {
 fn evaluate_operator_rejects_non_finite_float_multiply_result() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::float(1.0e308, Default::default(), ValueMode::ImmutableOwned);
-    let rhs = Expression::float(1.0e308, Default::default(), ValueMode::ImmutableOwned);
+    let lhs = fixed_float_expression(FixedScalar::F64, 1.0e308);
+    let rhs = fixed_float_expression(FixedScalar::F64, 1.0e308);
 
     let error = lhs
-        .evaluate_operator(
-            &rhs,
-            &Operator::Multiply,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
+        .evaluate_operator(&rhs, &Operator::Multiply, &mut string_table, None)
         .expect_err("non-finite float multiply result should fail during fold");
     assert_compile_time_error(
         &error,
@@ -1002,15 +835,14 @@ fn constant_fold_rejects_integer_unary_negation_overflow() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let nodes = vec![
-        rvalue_item(Expression::int(
-            i64::from(i32::MIN),
-            None,
-            ValueMode::ImmutableOwned,
+        rvalue_item(fixed_integer_expression(
+            FixedScalar::I32,
+            i128::from(i32::MIN),
         )),
         operator_item(Operator::Negate),
     ];
 
-    let error = constant_fold(nodes, &mut string_table, NumericProfile::STANDARD, None)
+    let error = constant_fold(nodes, &mut string_table, None)
         .expect_err("unary negation of i32::MIN should fail during fold");
     assert_compile_time_error(
         &error,
@@ -1024,17 +856,11 @@ fn constant_fold_rejects_integer_unary_negation_overflow() {
 fn evaluate_operator_rejects_float_modulo_by_zero() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::float(1.0, Default::default(), ValueMode::ImmutableOwned);
-    let rhs = Expression::float(0.0, Default::default(), ValueMode::ImmutableOwned);
+    let lhs = fixed_float_expression(FixedScalar::F64, 1.0);
+    let rhs = fixed_float_expression(FixedScalar::F64, 0.0);
 
     let error = lhs
-        .evaluate_operator(
-            &rhs,
-            &Operator::Modulus,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
+        .evaluate_operator(&rhs, &Operator::Modulus, &mut string_table, None)
         .expect_err("float modulo by zero should fail during fold");
     assert_compile_time_error(
         &error,
@@ -1045,23 +871,30 @@ fn evaluate_operator_rejects_float_modulo_by_zero() {
 }
 
 #[test]
-fn evaluate_operator_folds_fixed_integer_results_in_the_promoted_domain() {
+fn evaluate_operator_folds_fixed_integer_results_in_the_operand_domain() {
     let _path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let cases = [
         (
-            "U8 addition promotes to U32",
-            fixed_integer_expression(FixedScalar::U8, 255),
-            fixed_integer_expression(FixedScalar::U8, 255),
+            "equal U8 addition keeps U8",
+            fixed_integer_expression(FixedScalar::U8, 100),
+            fixed_integer_expression(FixedScalar::U8, 100),
+            Operator::Add,
+            FixedScalarValue::unsigned(FixedScalar::U8, 200).expect("200 fits U8"),
+        ),
+        (
+            "explicit U32 addition retains the wide sum",
+            fixed_integer_expression(FixedScalar::U32, 255),
+            fixed_integer_expression(FixedScalar::U32, 255),
             Operator::Add,
             FixedScalarValue::unsigned(FixedScalar::U32, 510).expect("510 fits U32"),
         ),
         (
-            "mixed signedness selects I32",
+            "mixed signedness selects I16",
             fixed_integer_expression(FixedScalar::I8, -1),
             fixed_integer_expression(FixedScalar::U8, 255),
             Operator::Add,
-            FixedScalarValue::signed(FixedScalar::I32, 254).expect("254 fits I32"),
+            FixedScalarValue::signed(FixedScalar::I16, 254).expect("254 fits I16"),
         ),
         (
             "U64 maximum survives a no-op addition",
@@ -1071,9 +904,16 @@ fn evaluate_operator_folds_fixed_integer_results_in_the_promoted_domain() {
             FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64 maximum fits"),
         ),
         (
-            "I8 minimum division uses the promoted I32 range",
+            "equal narrow integer division keeps I8",
             fixed_integer_expression(FixedScalar::I8, -128),
-            fixed_integer_expression(FixedScalar::I8, -1),
+            fixed_integer_expression(FixedScalar::I8, 2),
+            Operator::IntDivide,
+            FixedScalarValue::signed(FixedScalar::I8, -64).expect("-64 fits I8"),
+        ),
+        (
+            "explicit I32 integer division retains the former promoted quotient",
+            fixed_integer_expression(FixedScalar::I32, -128),
+            fixed_integer_expression(FixedScalar::I32, -1),
             Operator::IntDivide,
             FixedScalarValue::signed(FixedScalar::I32, 128).expect("128 fits I32"),
         ),
@@ -1106,26 +946,53 @@ fn evaluate_operator_folds_fixed_integer_results_in_the_promoted_domain() {
             FixedScalarValue::signed(FixedScalar::I32, 1).expect("1 fits I32"),
         ),
         (
-            "U8 exponentiation promotes to U32",
+            "U8 exponentiation keeps U8",
             fixed_integer_expression(FixedScalar::U8, 2),
-            fixed_integer_expression(FixedScalar::U8, 31),
+            fixed_integer_expression(FixedScalar::U8, 7),
             Operator::Exponent,
-            FixedScalarValue::unsigned(FixedScalar::U32, 2_147_483_648).expect("2^31 fits U32"),
+            FixedScalarValue::unsigned(FixedScalar::U8, 128).expect("2^7 fits U8"),
         ),
     ];
 
     for (case, lhs, rhs, operator, expected) in cases {
-        let folded = expect_folded_operator(lhs.evaluate_operator(
-            &rhs,
-            &operator,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        ));
+        let folded =
+            expect_folded_operator(lhs.evaluate_operator(&rhs, &operator, &mut string_table, None));
         assert_eq!(
             expect_fixed_scalar(folded),
             expected,
-            "{case} must preserve its promoted fixed scalar"
+            "{case} must fold in the operand-derived domain"
+        );
+    }
+
+    // These exact inputs folded through a wider carrier before D15 (`U8 + U8` into U32,
+    // `I8::MIN // -1` into I32). They must now fail at the operand width, so a carrier-width
+    // overflow check cannot accept them. The wider 510/128 calculations are retained above
+    // with explicit U32/I32 operands.
+    for (case, lhs, rhs, operator, operation) in [
+        (
+            "U8 255 + 255 overflows U8",
+            fixed_integer_expression(FixedScalar::U8, 255),
+            fixed_integer_expression(FixedScalar::U8, 255),
+            Operator::Add,
+            "+",
+        ),
+        (
+            "I8 minimum divided by -1 overflows I8",
+            fixed_integer_expression(FixedScalar::I8, -128),
+            fixed_integer_expression(FixedScalar::I8, -1),
+            Operator::IntDivide,
+            "//",
+        ),
+    ] {
+        let error = match lhs.evaluate_operator(&rhs, &operator, &mut string_table, None) {
+            Err(error) => error,
+            Ok(_) => panic!("{case} should fail during folding"),
+        };
+        assert_compile_time_error(
+            &error,
+            CompileTimeEvaluationErrorReason::IntegerOverflow,
+            Some(operation),
+            &string_table,
         );
     }
 }
@@ -1154,7 +1021,6 @@ fn evaluate_operator_folds_fixed_integer_division_to_f64() {
             &rhs,
             &Operator::Divide,
             &mut string_table,
-            NumericProfile::STANDARD,
             None,
         ));
         assert_eq!(expect_fixed_scalar(folded), expected, "{case}");
@@ -1185,7 +1051,6 @@ fn evaluate_operator_handles_huge_fixed_integer_exponents_without_host_overflow(
             &rhs,
             &Operator::Exponent,
             &mut string_table,
-            NumericProfile::STANDARD,
             None,
         ));
         assert_eq!(expect_fixed_scalar(folded), expected, "{case}");
@@ -1197,7 +1062,6 @@ fn evaluate_operator_handles_huge_fixed_integer_exponents_without_host_overflow(
             &fixed_integer_expression(FixedScalar::U64, i128::from(u64::MAX)),
             &Operator::Exponent,
             &mut string_table,
-            NumericProfile::STANDARD,
             None,
         )
         .expect_err("a huge non-trivial power should overflow without a host-sized loop");
@@ -1228,7 +1092,7 @@ fn evaluate_operator_reports_fixed_integer_overflow_and_invalid_exponents() {
             CompileTimeEvaluationErrorReason::IntegerOverflow,
         ),
         (
-            "I32 minimum quotient overflows its promoted result domain",
+            "I32 minimum quotient overflows its own domain",
             fixed_integer_expression(FixedScalar::I32, i128::from(i32::MIN)),
             fixed_integer_expression(FixedScalar::I32, -1),
             Operator::IntDivide,
@@ -1252,13 +1116,7 @@ fn evaluate_operator_reports_fixed_integer_overflow_and_invalid_exponents() {
 
     for (case, lhs, rhs, operator, reason) in cases {
         let mut string_table = StringTable::new();
-        let error = match lhs.evaluate_operator(
-            &rhs,
-            &operator,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        ) {
+        let error = match lhs.evaluate_operator(&rhs, &operator, &mut string_table, None) {
             Err(error) => error,
             Ok(_) => panic!("{case} should fail during folding"),
         };
@@ -1304,13 +1162,7 @@ fn evaluate_operator_reports_fixed_integer_and_float_zero_divisors() {
 
     for (case, lhs, rhs, operator) in cases {
         let mut string_table = StringTable::new();
-        let error = match lhs.evaluate_operator(
-            &rhs,
-            &operator,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        ) {
+        let error = match lhs.evaluate_operator(&rhs, &operator, &mut string_table, None) {
             Err(error) => error,
             Ok(_) => panic!("{case} should fail during folding"),
         };
@@ -1324,12 +1176,12 @@ fn evaluate_operator_reports_fixed_integer_and_float_zero_divisors() {
 }
 
 #[test]
-fn evaluate_operator_rounds_fixed_float_results_once_in_the_promoted_domain() {
+fn evaluate_operator_rounds_fixed_float_results_once_in_the_operand_domain() {
     let _path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let half = fixed_float_value(FixedScalar::F16, 0.1);
     let half_product = fixed_float_value(
-        FixedScalar::F32,
+        FixedScalar::F16,
         half.as_f64().expect("F16 has a float value")
             * half.as_f64().expect("F16 has a float value"),
     );
@@ -1337,7 +1189,7 @@ fn evaluate_operator_rounds_fixed_float_results_once_in_the_promoted_domain() {
     let f64_value = fixed_float_value(FixedScalar::F64, 0.2);
     let cases = [
         (
-            "F16 product rounds once to F32",
+            "F16 product rounds once to F16",
             Expression::fixed_scalar(half, None, ValueMode::ImmutableOwned),
             Expression::fixed_scalar(half, None, ValueMode::ImmutableOwned),
             Operator::Multiply,
@@ -1355,28 +1207,81 @@ fn evaluate_operator_rounds_fixed_float_results_once_in_the_promoted_domain() {
             ),
         ),
         (
-            "F16 and F16 promote to F32",
+            "F16 and F16 keep F16",
             fixed_float_expression(FixedScalar::F16, 0.5),
             fixed_float_expression(FixedScalar::F16, 0.5),
             Operator::Add,
-            fixed_float_value(FixedScalar::F32, 1.0),
+            fixed_float_value(FixedScalar::F16, 1.0),
         ),
     ];
 
     for (case, lhs, rhs, operator, expected) in cases {
-        let folded = expect_folded_operator(lhs.evaluate_operator(
-            &rhs,
-            &operator,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        ));
+        let folded =
+            expect_folded_operator(lhs.evaluate_operator(&rhs, &operator, &mut string_table, None));
         assert_eq!(
             expect_fixed_scalar(folded),
             expected,
             "{case} must retain the semantic precision"
         );
     }
+
+    // B20: F16 completes every operation before the next one starts. The ulp at 2048 is 2, so
+    // `2048 + 1` is a binary16 midpoint whose ties-to-even result is 2048, and the following
+    // subtraction then cancels the chain to zero. A carrier that postponed the F16 rounding
+    // until after the chain would keep 2049 and end at 1 instead.
+    let intermediate = expect_folded_stack(constant_fold(
+        vec![
+            rvalue_item(fixed_float_expression(FixedScalar::F16, 2048.0)),
+            rvalue_item(fixed_float_expression(FixedScalar::F16, 1.0)),
+            operator_item(Operator::Add),
+        ],
+        &mut string_table,
+        None,
+    ));
+    let [ExpressionRpnItem::Operand(intermediate)] = intermediate.as_slice() else {
+        panic!("F16 `2048 + 1` should fold to one operand");
+    };
+    let intermediate_value = match &intermediate.kind {
+        ExpressionKind::FixedScalar(value) => *value,
+        other => panic!("F16 `2048 + 1` should fold to a fixed scalar, got {other:?}"),
+    };
+    assert_eq!(intermediate_value.scalar(), FixedScalar::F16);
+    assert_eq!(
+        intermediate_value
+            .as_f64()
+            .expect("F16 has a float value")
+            .to_bits(),
+        2048.0f64.to_bits(),
+        "F16 `2048 + 1` must round to 2048 before the next operation"
+    );
+
+    let chained = expect_folded_stack(constant_fold(
+        vec![
+            rvalue_item(fixed_float_expression(FixedScalar::F16, 2048.0)),
+            rvalue_item(fixed_float_expression(FixedScalar::F16, 1.0)),
+            operator_item(Operator::Add),
+            rvalue_item(fixed_float_expression(FixedScalar::F16, 2048.0)),
+            operator_item(Operator::Subtract),
+        ],
+        &mut string_table,
+        None,
+    ));
+    let [ExpressionRpnItem::Operand(chained)] = chained.as_slice() else {
+        panic!("chained F16 fold should reduce to one operand");
+    };
+    let chained_value = match &chained.kind {
+        ExpressionKind::FixedScalar(value) => *value,
+        other => panic!("chained F16 fold should fold to a fixed scalar, got {other:?}"),
+    };
+    assert_eq!(chained_value.scalar(), FixedScalar::F16);
+    assert_eq!(
+        chained_value
+            .as_f64()
+            .expect("F16 has a float value")
+            .to_bits(),
+        0.0f64.to_bits(),
+        "chained F16 `(2048 + 1) - 2048` must cancel to zero"
+    );
 }
 
 #[test]
@@ -1391,7 +1296,6 @@ fn evaluate_operator_rounds_fixed_f32_arithmetic_to_f32_bits() {
         &rhs,
         &Operator::Add,
         &mut string_table,
-        NumericProfile::STANDARD,
         None,
     ));
     let actual = expect_fixed_scalar(folded);
@@ -1417,7 +1321,6 @@ fn evaluate_operator_preserves_signed_zero_result_bits() {
         &rhs,
         &Operator::Multiply,
         &mut string_table,
-        NumericProfile::STANDARD,
         None,
     ));
     let actual = expect_fixed_scalar(folded);
@@ -1435,24 +1338,36 @@ fn evaluate_operator_preserves_signed_zero_result_bits() {
 #[test]
 fn evaluate_operator_rejects_fixed_float_overflow() {
     let _path_fork = PathInternerFork::empty();
-    let mut string_table = StringTable::new();
-    let lhs = fixed_float_expression(FixedScalar::F32, 3.0e38);
-    let rhs = fixed_float_expression(FixedScalar::F32, 10.0);
-    let error = lhs
-        .evaluate_operator(
-            &rhs,
-            &Operator::Multiply,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
-        .expect_err("F32 multiplication overflow should fail during fold");
-    assert_compile_time_error(
-        &error,
-        CompileTimeEvaluationErrorReason::FloatOverflow,
-        Some("*"),
-        &string_table,
-    );
+    let cases = [
+        (
+            "F32 multiplication overflow",
+            fixed_float_expression(FixedScalar::F32, 3.0e38),
+            fixed_float_expression(FixedScalar::F32, 10.0),
+            Operator::Multiply,
+            "*",
+        ),
+        (
+            "F16 maximum plus itself overflows finite F16",
+            fixed_float_expression(FixedScalar::F16, 65504.0),
+            fixed_float_expression(FixedScalar::F16, 65504.0),
+            Operator::Add,
+            "+",
+        ),
+    ];
+
+    for (case, lhs, rhs, operator, operation) in cases {
+        let mut string_table = StringTable::new();
+        let error = match lhs.evaluate_operator(&rhs, &operator, &mut string_table, None) {
+            Err(error) => error,
+            Ok(_) => panic!("{case} should fail during folding"),
+        };
+        assert_compile_time_error(
+            &error,
+            CompileTimeEvaluationErrorReason::FloatOverflow,
+            Some(operation),
+            &string_table,
+        );
+    }
 }
 
 #[test]
@@ -1460,14 +1375,14 @@ fn constant_fold_uses_fixed_integer_and_float_negation_domains() {
     let _path_fork = PathInternerFork::empty();
     let successes = [
         (
-            "I8 negates in I32",
-            fixed_integer_expression(FixedScalar::I8, -128),
-            FixedScalarValue::signed(FixedScalar::I32, 128).expect("128 fits I32"),
+            "I8 negates in I8",
+            fixed_integer_expression(FixedScalar::I8, 127),
+            FixedScalarValue::signed(FixedScalar::I8, -127).expect("-127 fits I8"),
         ),
         (
-            "F16 negates in F32",
+            "F16 negates in F16",
             fixed_float_expression(FixedScalar::F16, 0.5),
-            fixed_float_value(FixedScalar::F32, -0.5),
+            fixed_float_value(FixedScalar::F16, -0.5),
         ),
     ];
 
@@ -1476,7 +1391,6 @@ fn constant_fold_uses_fixed_integer_and_float_negation_domains() {
         let folded = expect_folded_stack(constant_fold(
             vec![rvalue_item(operand), operator_item(Operator::Negate)],
             &mut string_table,
-            NumericProfile::STANDARD,
             None,
         ));
         let [ExpressionRpnItem::Operand(folded)] = folded.as_slice() else {
@@ -1489,26 +1403,31 @@ fn constant_fold_uses_fixed_integer_and_float_negation_domains() {
         assert_eq!(actual, expected, "{case}");
     }
 
-    let mut string_table = StringTable::new();
-    let error = constant_fold(
-        vec![
-            rvalue_item(fixed_integer_expression(
-                FixedScalar::I64,
-                i128::from(i64::MIN),
-            )),
-            operator_item(Operator::Negate),
-        ],
-        &mut string_table,
-        NumericProfile::STANDARD,
-        None,
-    )
-    .expect_err("negating I64 minimum should overflow I64");
-    assert_compile_time_error(
-        &error,
-        CompileTimeEvaluationErrorReason::IntegerOverflow,
-        Some("-"),
-        &string_table,
-    );
+    // Negating a signed minimum fails in the operand's own type, including the narrow I8.
+    for (case, operand) in [
+        (
+            "negating I64 minimum should overflow I64",
+            fixed_integer_expression(FixedScalar::I64, i128::from(i64::MIN)),
+        ),
+        (
+            "negating I8 minimum should overflow I8",
+            fixed_integer_expression(FixedScalar::I8, -128),
+        ),
+    ] {
+        let mut string_table = StringTable::new();
+        let error = constant_fold(
+            vec![rvalue_item(operand), operator_item(Operator::Negate)],
+            &mut string_table,
+            None,
+        )
+        .expect_err(case);
+        assert_compile_time_error(
+            &error,
+            CompileTimeEvaluationErrorReason::IntegerOverflow,
+            Some("-"),
+            &string_table,
+        );
+    }
 }
 
 #[test]
@@ -1571,47 +1490,39 @@ fn evaluate_operator_compares_fixed_scalars_without_losing_value_identity() {
 }
 
 #[test]
-fn evaluate_operator_folds_mixed_int_float_addition() {
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::int(2, Default::default(), ValueMode::ImmutableOwned);
-    let rhs = Expression::float(1.5, Default::default(), ValueMode::ImmutableOwned);
+fn evaluate_operator_rejects_mixed_fixed_integer_and_float_operands() {
+    // D15: fixed integers and binary floats require an explicit conversion to mix, so the
+    // operand pair reports the invalid-operator diagnostic instead of folding.
+    let cases = [
+        (
+            fixed_integer_expression(FixedScalar::I32, 2),
+            fixed_float_expression(FixedScalar::F64, 1.5),
+            Operator::Add,
+        ),
+        (
+            fixed_integer_expression(FixedScalar::I32, 5),
+            fixed_float_expression(FixedScalar::F64, 2.0),
+            Operator::Divide,
+        ),
+        (
+            fixed_integer_expression(FixedScalar::I32, 16_777_217),
+            fixed_float_expression(FixedScalar::F32, 0.5),
+            Operator::Add,
+        ),
+    ];
 
-    let result = expect_folded_operator(lhs.evaluate_operator(
-        &rhs,
-        &Operator::Add,
-        &mut string_table,
-        NumericProfile::STANDARD,
-        None,
-    ));
-
-    assert!(matches!(
-        result.kind,
-        ExpressionKind::Float(value) if (value - 3.5).abs() < f64::EPSILON
-    ));
-    assert_eq!(result.diagnostic_type, DataType::Float);
-}
-
-#[test]
-fn evaluate_operator_folds_mixed_int_float_division() {
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::int(5, Default::default(), ValueMode::ImmutableOwned);
-    let rhs = Expression::float(2.0, Default::default(), ValueMode::ImmutableOwned);
-
-    let result = expect_folded_operator(lhs.evaluate_operator(
-        &rhs,
-        &Operator::Divide,
-        &mut string_table,
-        NumericProfile::STANDARD,
-        None,
-    ));
-
-    assert!(matches!(
-        result.kind,
-        ExpressionKind::Float(value) if (value - 2.5).abs() < f64::EPSILON
-    ));
-    assert_eq!(result.diagnostic_type, DataType::Float);
+    for (lhs, rhs, operator) in cases {
+        let mut string_table = StringTable::new();
+        let error = lhs
+            .evaluate_operator(&rhs, &operator, &mut string_table, None)
+            .expect_err("mixed fixed integer and binary float operands cannot fold");
+        assert_compile_time_error(
+            &error,
+            CompileTimeEvaluationErrorReason::InvalidOperatorForType,
+            Some(operator.to_str()),
+            &string_table,
+        );
+    }
 }
 
 #[test]
@@ -1628,7 +1539,6 @@ fn evaluate_operator_folds_number_arithmetic_once_and_retains_canonical_type() {
         &rhs,
         &Operator::Multiply,
         &mut string_table,
-        NumericProfile::STANDARD,
         None,
     ));
     assert_eq!(product.type_id, number_type_id);
@@ -1644,7 +1554,6 @@ fn evaluate_operator_folds_number_arithmetic_once_and_retains_canonical_type() {
         &fraction,
         &Operator::Add,
         &mut string_table,
-        NumericProfile::STANDARD,
         None,
     ));
     assert_eq!(mixed_sum.type_id, number_type_id);
@@ -1655,12 +1564,11 @@ fn evaluate_operator_folds_number_arithmetic_once_and_retains_canonical_type() {
     ));
 
     let base = number_expression("1.5", NumericLiteralSign::Positive, 1, number_type_id);
-    let exponent = Expression::int(3, None, ValueMode::ImmutableOwned);
+    let exponent = fixed_integer_expression(FixedScalar::I32, 3);
     let power = expect_folded_operator(base.evaluate_operator(
         &exponent,
         &Operator::Exponent,
         &mut string_table,
-        NumericProfile::STANDARD,
         None,
     ));
     assert_eq!(power.type_id, number_type_id);
@@ -1680,7 +1588,6 @@ fn evaluate_operator_folds_number_arithmetic_once_and_retains_canonical_type() {
             operator_item(Operator::Negate),
         ],
         &mut string_table,
-        NumericProfile::STANDARD,
         None,
     ));
     let [ExpressionRpnItem::Operand(negated)] = negated.as_slice() else {
@@ -1704,13 +1611,7 @@ fn number_folding_reports_checked_division_and_exponent_failures() {
     let lhs = number_expression("1.0", NumericLiteralSign::Positive, 1, number_type_id);
     let zero = number_expression("0.0", NumericLiteralSign::Positive, 1, number_type_id);
     let error = lhs
-        .evaluate_operator(
-            &zero,
-            &Operator::Divide,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
+        .evaluate_operator(&zero, &Operator::Divide, &mut string_table, None)
         .expect_err("a known Dec zero divisor must be a compile-time failure");
     assert_compile_time_error(
         &error,
@@ -1720,13 +1621,7 @@ fn number_folding_reports_checked_division_and_exponent_failures() {
     );
 
     let error = lhs
-        .evaluate_operator(
-            &zero,
-            &Operator::Modulus,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
+        .evaluate_operator(&zero, &Operator::Modulus, &mut string_table, None)
         .expect_err("a known Dec remainder-by-zero must be a compile-time failure");
     assert_compile_time_error(
         &error,
@@ -1736,13 +1631,12 @@ fn number_folding_reports_checked_division_and_exponent_failures() {
     );
 
     let base = number_expression("1.5", NumericLiteralSign::Positive, 1, number_type_id);
-    let negative_exponent = Expression::int(-1, None, ValueMode::ImmutableOwned);
+    let negative_exponent = fixed_integer_expression(FixedScalar::I32, -1);
     let error = base
         .evaluate_operator(
             &negative_exponent,
             &Operator::Exponent,
             &mut string_table,
-            NumericProfile::STANDARD,
             None,
         )
         .expect_err("a negative Dec exponent must use the checked exponent failure");
@@ -1805,158 +1699,79 @@ fn mixed_number_integer_comparisons_preserve_values_beyond_float_precision() {
 }
 
 #[test]
-fn evaluate_operator_rounds_float_add_at_the_profile_precision() {
+fn evaluate_operator_rounds_float_add_at_the_operand_domain_precision() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    // Carriers as `Float32` materialisation leaves them: inexact binary values widened to f64.
-    let float32_lhs = Expression::float(
-        f64::from(0.1f32),
-        Default::default(),
-        ValueMode::ImmutableOwned,
-    );
-    let float32_rhs = Expression::float(
-        f64::from(0.2f32),
-        Default::default(),
-        ValueMode::ImmutableOwned,
-    );
 
-    let folded = expect_folded_operator(float32_lhs.evaluate_operator(
-        &float32_rhs,
+    // F32 operands fold at F32 precision: the sum of the widened carriers rounds once.
+    let f32_lhs = fixed_float_expression(FixedScalar::F32, f64::from(0.1f32));
+    let f32_rhs = fixed_float_expression(FixedScalar::F32, f64::from(0.2f32));
+    let folded = expect_folded_operator(f32_lhs.evaluate_operator(
+        &f32_rhs,
         &Operator::Add,
         &mut string_table,
-        NumericProfile {
-            float_precision: FloatPrecision::Bits32,
-            ..NumericProfile::STANDARD
-        },
         None,
     ));
     assert!(matches!(
         folded.kind,
-        ExpressionKind::Float(v) if v == f64::from(0.1f32 + 0.2f32)
+        ExpressionKind::FixedScalar(value) if value.as_f64() == Some(f64::from(0.1f32 + 0.2f32))
     ));
-    assert_eq!(folded.diagnostic_type, DataType::Float);
+    assert_eq!(
+        folded.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::F32)
+    );
 
-    // Float64 keeps the exact f64 sum instead of the single f32 rounding above.
-    let folded = expect_folded_operator(float32_lhs.evaluate_operator(
-        &float32_rhs,
+    // The same carrier values under the F64 domain keep the exact f64 sum.
+    let f64_lhs = fixed_float_expression(FixedScalar::F64, f64::from(0.1f32));
+    let f64_rhs = fixed_float_expression(FixedScalar::F64, f64::from(0.2f32));
+    let folded = expect_folded_operator(f64_lhs.evaluate_operator(
+        &f64_rhs,
         &Operator::Add,
         &mut string_table,
-        NumericProfile::STANDARD,
         None,
     ));
     assert!(matches!(
         folded.kind,
-        ExpressionKind::Float(v) if v == f64::from(0.1f32) + f64::from(0.2f32)
+        ExpressionKind::FixedScalar(value) if value.as_f64() == Some(f64::from(0.1f32) + f64::from(0.2f32))
     ));
 
-    // Digits materialised at Float64 fold to the plain f64 sum.
-    let float64_lhs = Expression::float(0.1_f64, Default::default(), ValueMode::ImmutableOwned);
-    let float64_rhs = Expression::float(0.2_f64, Default::default(), ValueMode::ImmutableOwned);
-    let folded = expect_folded_operator(float64_lhs.evaluate_operator(
-        &float64_rhs,
+    // Digits materialised at F64 fold to the plain f64 sum.
+    let f64_lhs = fixed_float_expression(FixedScalar::F64, 0.1_f64);
+    let f64_rhs = fixed_float_expression(FixedScalar::F64, 0.2_f64);
+    let folded = expect_folded_operator(f64_lhs.evaluate_operator(
+        &f64_rhs,
         &Operator::Add,
         &mut string_table,
-        NumericProfile::STANDARD,
         None,
     ));
-    assert!(matches!(folded.kind, ExpressionKind::Float(v) if v == 0.1 + 0.2));
+    assert!(matches!(
+        folded.kind,
+        ExpressionKind::FixedScalar(value) if value.as_f64() == Some(0.1 + 0.2)
+    ));
 }
 
 #[test]
-fn evaluate_operator_promotes_int_to_float_at_the_profile_precision() {
-    let float32_profile = NumericProfile {
-        float_precision: FloatPrecision::Bits32,
-        ..NumericProfile::STANDARD
-    };
-
-    // Int + Float promotes the Int at Float32 precision: 16_777_217 widens to
-    // 16_777_216, so the sum is 16_777_216.0. A buggy `*value as f64` promotion
-    // would keep 16_777_217.0 and fold to 16_777_217.5, rounded to 16_777_218.0.
+fn evaluate_operator_folds_int_division_quotient_in_f64() {
+    // Integer real division computes in F64: both operands convert exactly, and the
+    // quotient rounds once at binary64 precision.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::int(16_777_217, Default::default(), ValueMode::ImmutableOwned);
-    let rhs = Expression::float(0.5, Default::default(), ValueMode::ImmutableOwned);
-    let folded = expect_folded_operator(lhs.evaluate_operator(
-        &rhs,
-        &Operator::Add,
-        &mut string_table,
-        float32_profile,
-        None,
-    ));
-    assert!(
-        matches!(folded.kind, ExpressionKind::Float(value) if value == 16_777_216.0),
-        "Int + Float under Float32 must widen 16_777_217 to 16_777_216, got {:?}",
-        folded.kind
-    );
-    assert_eq!(folded.diagnostic_type, DataType::Float);
-
-    // Float + Int promotes the right-hand Int the same way; the mirrored arm
-    // must not keep the exact f64 widening either.
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::float(0.5, Default::default(), ValueMode::ImmutableOwned);
-    let rhs = Expression::int(16_777_217, Default::default(), ValueMode::ImmutableOwned);
-    let folded = expect_folded_operator(lhs.evaluate_operator(
-        &rhs,
-        &Operator::Add,
-        &mut string_table,
-        float32_profile,
-        None,
-    ));
-    assert!(
-        matches!(folded.kind, ExpressionKind::Float(value) if value == 16_777_216.0),
-        "Float + Int under Float32 must widen 16_777_217 to 16_777_216, got {:?}",
-        folded.kind
-    );
-    assert_eq!(folded.diagnostic_type, DataType::Float);
-}
-
-#[test]
-fn evaluate_operator_folds_int_division_quotient_at_the_profile_precision() {
-    let float32_profile = NumericProfile {
-        float_precision: FloatPrecision::Bits32,
-        ..NumericProfile::STANDARD
-    };
-
-    // Int / Int converts both operands at Float32 precision before dividing:
-    // 16_777_217 and 10 widen to 16_777_216 and 10, whose rounded quotient is
-    // 1_677_721.625. A buggy `*value as f64` widening would divide the exact
-    // f64 values and round 1_677_721.7 to 1_677_721.75 instead.
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::int(16_777_217, Default::default(), ValueMode::ImmutableOwned);
-    let rhs = Expression::int(10, Default::default(), ValueMode::ImmutableOwned);
+    let lhs = fixed_integer_expression(FixedScalar::I32, 16_777_217);
+    let rhs = fixed_integer_expression(FixedScalar::I32, 10);
     let folded = expect_folded_operator(lhs.evaluate_operator(
         &rhs,
         &Operator::Divide,
         &mut string_table,
-        float32_profile,
         None,
     ));
     assert!(
-        matches!(folded.kind, ExpressionKind::Float(value) if value == 1_677_721.625),
-        "Int / Int under Float32 must divide the widened operands, got {:?}",
+        matches!(folded.kind, ExpressionKind::FixedScalar(value) if value.as_f64() == Some(1_677_721.7)),
+        "I32 / I32 must fold to the exact f64 quotient, got {:?}",
         folded.kind
     );
-    assert_eq!(folded.diagnostic_type, DataType::Float);
-
-    // STANDARD keeps the exact f64 quotient, proving the Float32 expectation
-    // above is a precision effect and not the operator's plain value.
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let lhs = Expression::int(16_777_217, Default::default(), ValueMode::ImmutableOwned);
-    let rhs = Expression::int(10, Default::default(), ValueMode::ImmutableOwned);
-    let folded = expect_folded_operator(lhs.evaluate_operator(
-        &rhs,
-        &Operator::Divide,
-        &mut string_table,
-        NumericProfile::STANDARD,
-        None,
-    ));
-    assert!(
-        matches!(folded.kind, ExpressionKind::Float(value) if value == 1_677_721.7),
-        "Int / Int under STANDARD must keep the exact f64 quotient, got {:?}",
-        folded.kind
+    assert_eq!(
+        folded.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::F64)
     );
 }
 
@@ -1968,12 +1783,20 @@ fn constant_fold_reports_static_failure_at_authored_operator_inside_runtime_expr
         path_fork
             .try_intern_portable_path("runtime_var", &mut string_table)
             .expect("test path fits"),
-        DataType::Int,
+        DataType::FixedScalar(FixedScalar::I32),
         None,
         ValueMode::ImmutableReference,
     );
-    let one = Expression::int(1, Some(marked_span(100)), ValueMode::ImmutableOwned);
-    let zero = Expression::int(0, Some(marked_span(140)), ValueMode::ImmutableOwned);
+    let one = Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, 1).expect("1 fits I32"),
+        Some(marked_span(100)),
+        ValueMode::ImmutableOwned,
+    );
+    let zero = Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, 0).expect("0 fits I32"),
+        Some(marked_span(140)),
+        ValueMode::ImmutableOwned,
+    );
     let operator_span = marked_span(230);
 
     let nodes = vec![
@@ -1987,7 +1810,7 @@ fn constant_fold_reports_static_failure_at_authored_operator_inside_runtime_expr
         operator_item(Operator::Add),
     ];
 
-    let error = constant_fold(nodes, &mut string_table, NumericProfile::STANDARD, None)
+    let error = constant_fold(nodes, &mut string_table, None)
         .expect_err("divide by zero inside a runtime expression should still be diagnosed");
     assert_compile_time_error(
         &error,
@@ -2009,12 +1832,12 @@ fn constant_fold_partially_folds_runtime_expression() {
         path_fork
             .try_intern_portable_path("runtime_var", &mut string_table)
             .expect("test path fits"),
-        DataType::Int,
+        DataType::FixedScalar(FixedScalar::I32),
         None,
         ValueMode::ImmutableReference,
     );
-    let two = Expression::int(2, None, ValueMode::ImmutableOwned);
-    let three = Expression::int(3, None, ValueMode::ImmutableOwned);
+    let two = fixed_integer_expression(FixedScalar::I32, 2);
+    let three = fixed_integer_expression(FixedScalar::I32, 3);
 
     let nodes = vec![
         rvalue_item(runtime_var),
@@ -2024,12 +1847,7 @@ fn constant_fold_partially_folds_runtime_expression() {
         operator_item(Operator::Multiply),
     ];
 
-    let folded = expect_not_constant_stack(constant_fold(
-        nodes,
-        &mut string_table,
-        NumericProfile::STANDARD,
-        None,
-    ));
+    let folded = expect_not_constant_stack(constant_fold(nodes, &mut string_table, None));
 
     assert_eq!(folded.len(), 3);
     assert!(matches!(
@@ -2042,9 +1860,9 @@ fn constant_fold_partially_folds_runtime_expression() {
     assert!(matches!(
         &folded[1],
         ExpressionRpnItem::Operand(Expression {
-            kind: ExpressionKind::Int(5),
+            kind: ExpressionKind::FixedScalar(value),
             ..
-        })
+        }) if value.as_i64() == Some(5)
     ));
     assert!(matches!(
         &folded[2],
@@ -2063,38 +1881,19 @@ fn fold_int_cast_rejects_out_of_range_float_with_dedicated_code() {
     };
     use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 
-    let source = BuiltinCastLiteral::Float(9_223_372_036_854_775_808.0);
+    let source = BuiltinCastLiteral::Fixed(
+        FixedScalarValue::binary_float(FixedScalar::F64, 9_223_372_036_854_775_808.0)
+            .expect("2^63 is a finite F64"),
+    );
     let error = apply_builtin_cast_policy(
         BuiltinCastPolicyId::NumericConversion {
-            source: NumericScalar::Float,
-            target: NumericScalar::Int,
+            source: NumericScalar::Fixed(FixedScalar::F64),
+            target: NumericScalar::Fixed(FixedScalar::I64),
         },
         &source,
-        NumericProfile::STANDARD,
     )
-    .expect_err("out-of-range float to int cast should fail");
+    .expect_err("out-of-range float to I64 cast should fail");
     assert_eq!(error.code, BuiltinErrorCode::FloatCastToIntOutOfRange);
-}
-
-#[test]
-fn fold_int_cast_rejects_non_finite_float_with_dedicated_code() {
-    use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
-    use crate::compiler_frontend::builtins::casts::{
-        BuiltinCastLiteral, apply_builtin_cast_policy,
-    };
-    use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-
-    let source = BuiltinCastLiteral::Float(f64::INFINITY);
-    let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::NumericConversion {
-            source: NumericScalar::Float,
-            target: NumericScalar::Int,
-        },
-        &source,
-        NumericProfile::STANDARD,
-    )
-    .expect_err("non-finite float to int cast should fail");
-    assert_eq!(error.code, BuiltinErrorCode::FloatCastToIntInvalidValue);
 }
 
 #[test]
@@ -2105,18 +1904,31 @@ fn fold_int_cast_truncates_toward_zero() {
     };
 
     let policy = BuiltinCastPolicyId::NumericConversion {
-        source: NumericScalar::Float,
-        target: NumericScalar::Int,
+        source: NumericScalar::Fixed(FixedScalar::F64),
+        target: NumericScalar::Fixed(FixedScalar::I32),
     };
-    let source = BuiltinCastLiteral::Float(1.9);
-    let result = apply_builtin_cast_policy(policy, &source, NumericProfile::STANDARD)
-        .expect("float to int cast should fold");
-    assert_eq!(result, BuiltinCastLiteral::Int(1));
+    let source = BuiltinCastLiteral::Fixed(
+        FixedScalarValue::binary_float(FixedScalar::F64, 1.9).expect("1.9 is a finite F64"),
+    );
+    let result = apply_builtin_cast_policy(policy, &source).expect("float to int cast should fold");
+    assert_eq!(
+        result,
+        BuiltinCastLiteral::Fixed(
+            FixedScalarValue::signed(FixedScalar::I32, 1).expect("1 fits I32")
+        )
+    );
 
-    let source = BuiltinCastLiteral::Float(-1.9);
-    let result = apply_builtin_cast_policy(policy, &source, NumericProfile::STANDARD)
-        .expect("negative float to int cast should fold");
-    assert_eq!(result, BuiltinCastLiteral::Int(-1));
+    let source = BuiltinCastLiteral::Fixed(
+        FixedScalarValue::binary_float(FixedScalar::F64, -1.9).expect("-1.9 is a finite F64"),
+    );
+    let result =
+        apply_builtin_cast_policy(policy, &source).expect("negative float to int cast should fold");
+    assert_eq!(
+        result,
+        BuiltinCastLiteral::Fixed(
+            FixedScalarValue::signed(FixedScalar::I32, -1).expect("-1 fits I32")
+        )
+    );
 }
 
 #[test]
@@ -2130,9 +1942,8 @@ fn fold_float_cast_rejects_non_finite_string_value() {
     let huge = format!("{}.0", "9".repeat(400));
     let source = BuiltinCastLiteral::String(huge);
     let error = apply_builtin_cast_policy(
-        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float),
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Fixed(FixedScalar::F64)),
         &source,
-        NumericProfile::STANDARD,
     )
     .expect_err("non-finite float string cast should fail");
     assert_eq!(error.code, BuiltinErrorCode::FloatParseOutOfRange);
@@ -2142,70 +1953,66 @@ fn fold_float_cast_rejects_non_finite_string_value() {
 fn fold_string_to_int_cast_uses_string_policy_row() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("42".to_string());
     let source = Expression::string_slice(text, Default::default(), ValueMode::ImmutableOwned);
-    let target_type_id = type_environment.builtins().int;
+    let target_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
+    let policy = BuiltinCastPolicyId::StringToNumeric(NumericScalar::Fixed(FixedScalar::I32));
     let cast = cast_expression(
-        source,
-        BuiltinCastTarget::Int,
-        target_type_id,
-        ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
+        CastExpressionInput {
+            source,
+            target: BuiltinCastTarget::Fixed(FixedScalar::I32),
+            target_type_id,
+            evidence: ResolvedCastEvidence::Builtin { policy },
+            fallibility: BuiltinCastFallibility::Fallible,
+            handling: CastHandling::Implicit,
+            requires_optional_wrap_after_cast: false,
         },
-        CastHandling::Propagate,
-        false,
         &mut type_environment,
     );
 
-    let folded = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect("valid string to int cast should fold");
+    let folded = fold_compile_time_expression(&cast, &mut string_table, true)
+        .expect("valid string to int cast should fold");
 
     assert_eq!(folded.type_id, target_type_id);
-    assert!(matches!(folded.kind, ExpressionKind::Int(42)));
+    assert!(matches!(
+        folded.kind,
+        ExpressionKind::FixedScalar(value) if value.as_i64() == Some(42)
+    ));
 }
 
 #[test]
 fn fold_string_to_float_cast_uses_string_policy_row() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("3.5e2".to_string());
     let source = Expression::string_slice(text, Default::default(), ValueMode::ImmutableOwned);
-    let target_type_id = type_environment.builtins().float;
+    let target_type_id = builtin_type_ids::fixed_scalar(FixedScalar::F64);
 
+    let policy = BuiltinCastPolicyId::StringToNumeric(NumericScalar::Fixed(FixedScalar::F64));
     let cast = cast_expression(
-        source,
-        BuiltinCastTarget::Float,
-        target_type_id,
-        ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float),
+        CastExpressionInput {
+            source,
+            target: BuiltinCastTarget::Fixed(FixedScalar::F64),
+            target_type_id,
+            evidence: ResolvedCastEvidence::Builtin { policy },
+            fallibility: BuiltinCastFallibility::Fallible,
+            handling: CastHandling::Implicit,
+            requires_optional_wrap_after_cast: false,
         },
-        CastHandling::Propagate,
-        false,
         &mut type_environment,
     );
 
-    let folded = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect("valid string to float cast should fold");
+    let folded = fold_compile_time_expression(&cast, &mut string_table, true)
+        .expect("valid string to float cast should fold");
 
     assert_eq!(folded.type_id, target_type_id);
-    assert!(matches!(folded.kind, ExpressionKind::Float(value) if value == 350.0));
+    assert!(matches!(
+        folded.kind,
+        ExpressionKind::FixedScalar(value) if value.as_f64() == Some(350.0)
+    ));
 }
 
 fn rvalue_item(expression: Expression) -> ExpressionRpnItem {
@@ -2241,20 +2048,26 @@ fn constant_fold_reports_escaped_pending_items_as_infrastructure() {
         nodes: Vec::new(),
         span: None,
     };
+    let mut path_fork = PathInternerFork::empty();
+    let pending_binding = pending_binding_item(&mut string_table, &mut path_fork);
+    let pending_cast = pending_cast_item();
+    let pending_call = pending_call_item(&mut string_table, &mut path_fork);
 
-    for pending in [pending_literal, pending_group] {
+    for pending in [
+        pending_literal,
+        pending_group,
+        pending_binding,
+        pending_cast,
+        pending_call,
+    ] {
         // A foldable peer and operator around the pending item would fold or preserve it if the
         // guard were removed, so only the infrastructure lane satisfies this assertion.
         let nodes = vec![
-            rvalue_item(Expression::int(
-                2,
-                Default::default(),
-                ValueMode::ImmutableOwned,
-            )),
+            rvalue_item(fixed_integer_expression(FixedScalar::I32, 2)),
             pending,
             operator_item(Operator::Add),
         ];
-        match constant_fold(nodes, &mut string_table, NumericProfile::STANDARD, None) {
+        match constant_fold(nodes, &mut string_table, None) {
             Err(ConstantFoldError::Infrastructure(error)) => assert!(
                 error
                     .msg
@@ -2266,24 +2079,110 @@ fn constant_fold_reports_escaped_pending_items_as_infrastructure() {
     }
 }
 
+/// One construction-only pending binding item for escaped-pending guard coverage.
+///
+/// WHAT: mints a real `NumericBindingId` through the construction owner instead of fabricating
+///       an ID, so the guard test exercises the exact carrier body parsing builds.
+fn pending_binding_item(
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> ExpressionRpnItem {
+    use crate::compiler_frontend::ast::module_ast::scope_context::ScopeArena;
+    use crate::compiler_frontend::ast::numeric_construction::{
+        NumericConstructionState, NumericFamily, NumericRecipe, PendingBindingRow,
+    };
+
+    let name = string_table.intern("pending_binding");
+    let path = path_fork
+        .try_intern_components(&[name])
+        .expect("test path fits")
+        .to_owned();
+    let mut state = NumericConstructionState::new();
+    let class = state.create_class().expect("test class allocation fits");
+    let frame = ScopeArena::new().alloc_root_frame_with_capacity(0);
+    let binding = state
+        .register_binding(PendingBindingRow {
+            name,
+            path,
+            span: None,
+            binding_span: None,
+            value_mode: ValueMode::ImmutableOwned,
+            mutable: false,
+            class,
+            recipe: Some(NumericRecipe::Raw {
+                items: Vec::new(),
+                family: NumericFamily::Whole,
+            }),
+            origin: Default::default(),
+            frame,
+        })
+        .expect("test binding allocation fits");
+
+    ExpressionRpnItem::PendingNumericBinding {
+        binding,
+        span: None,
+        value_mode: ValueMode::ImmutableOwned,
+        is_copy: false,
+    }
+}
+
+/// One construction-only pending cast item for escaped-pending guard coverage.
+fn pending_cast_item() -> ExpressionRpnItem {
+    ExpressionRpnItem::PendingNumericCast {
+        target_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        target: BuiltinCastTarget::Fixed(FixedScalar::I32),
+        requires_optional_wrap_after_cast: false,
+        handling: CastHandling::Implicit,
+        source: Vec::new(),
+        span: None,
+    }
+}
+
+/// One construction-only pending call item for escaped-pending guard coverage.
+fn pending_call_item(
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> ExpressionRpnItem {
+    use crate::compiler_frontend::ast::numeric_construction::{
+        DeferredCall, DeferredCallHandling, DeferredSourceCall,
+    };
+    use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+
+    let name = string_table.intern("pending_call");
+    let function_path = path_fork
+        .try_intern_components(&[name])
+        .expect("test path fits")
+        .to_owned();
+    let call = DeferredCall::Source(Box::new(DeferredSourceCall {
+        function_path,
+        signature: FunctionSignature {
+            parameters: Vec::new(),
+            returns: Vec::new(),
+        },
+        arguments: Vec::new(),
+        call_span: None,
+        authored_handling: DeferredCallHandling::Unhandled,
+    }));
+
+    ExpressionRpnItem::PendingNumericCall {
+        call: Box::new(call),
+        span: None,
+    }
+}
+
 #[test]
 fn constant_fold_folds_comparison_then_boolean_chain() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let nodes = vec![
-        rvalue_item(Expression::int(1, None, ValueMode::ImmutableOwned)),
-        rvalue_item(Expression::int(2, None, ValueMode::ImmutableOwned)),
+        rvalue_item(fixed_integer_expression(FixedScalar::I32, 1)),
+        rvalue_item(fixed_integer_expression(FixedScalar::I32, 2)),
         operator_item(Operator::LessThan),
         rvalue_item(Expression::bool(true, None, ValueMode::ImmutableOwned)),
         operator_item(Operator::And),
     ];
 
-    let folded = expect_folded_stack(constant_fold(
-        nodes,
-        &mut string_table,
-        NumericProfile::STANDARD,
-        None,
-    ));
+    let folded = expect_folded_stack(constant_fold(nodes, &mut string_table, None));
     assert_eq!(folded.len(), 1);
     assert!(matches!(
         folded[0],
@@ -2299,23 +2198,18 @@ fn constant_fold_keeps_unary_not_when_operand_is_not_bool_literal() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let nodes = vec![
-        rvalue_item(Expression::int(1, None, ValueMode::ImmutableOwned)),
+        rvalue_item(fixed_integer_expression(FixedScalar::I32, 1)),
         operator_item(Operator::Not),
     ];
 
-    let folded = expect_not_constant_stack(constant_fold(
-        nodes,
-        &mut string_table,
-        NumericProfile::STANDARD,
-        None,
-    ));
+    let folded = expect_not_constant_stack(constant_fold(nodes, &mut string_table, None));
     assert_eq!(folded.len(), 2);
     assert!(matches!(
         folded[0],
         ExpressionRpnItem::Operand(Expression {
-            kind: ExpressionKind::Int(1),
+            kind: ExpressionKind::FixedScalar(value),
             ..
-        })
+        }) if value.as_i64() == Some(1)
     ));
     assert!(matches!(
         folded[1],
@@ -2344,12 +2238,7 @@ fn constant_fold_preserves_runtime_operands_in_partial_fold() {
         operator_item(Operator::And),
     ];
 
-    let folded = expect_not_constant_stack(constant_fold(
-        nodes,
-        &mut string_table,
-        NumericProfile::STANDARD,
-        None,
-    ));
+    let folded = expect_not_constant_stack(constant_fold(nodes, &mut string_table, None));
 
     assert_eq!(folded.len(), 3);
     assert!(matches!(
@@ -2416,12 +2305,7 @@ fn partial_fold_moves_non_foldable_operands_back_without_rebuilding_them() {
         },
     ];
 
-    let folded = expect_not_constant_stack(constant_fold(
-        nodes,
-        &mut string_table,
-        NumericProfile::STANDARD,
-        None,
-    ));
+    let folded = expect_not_constant_stack(constant_fold(nodes, &mut string_table, None));
 
     assert_eq!(folded.len(), 3);
 
@@ -2459,17 +2343,17 @@ fn partial_fold_keeps_the_folded_half_and_the_moved_half_distinct() {
     let nodes = vec![
         rvalue_item(Expression::reference(
             counter_name,
-            DataType::Int,
+            DataType::FixedScalar(FixedScalar::I32),
             Some(counter_span),
             ValueMode::ImmutableReference,
         )),
-        rvalue_item(Expression::int(
-            2,
+        rvalue_item(Expression::fixed_scalar(
+            FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 fits I32"),
             Some(left_literal_span),
             ValueMode::ImmutableOwned,
         )),
-        rvalue_item(Expression::int(
-            3,
+        rvalue_item(Expression::fixed_scalar(
+            FixedScalarValue::signed(FixedScalar::I32, 3).expect("3 fits I32"),
             Some(marked_span(60)),
             ValueMode::ImmutableOwned,
         )),
@@ -2477,12 +2361,7 @@ fn partial_fold_keeps_the_folded_half_and_the_moved_half_distinct() {
         operator_item(Operator::Multiply),
     ];
 
-    let folded = expect_not_constant_stack(constant_fold(
-        nodes,
-        &mut string_table,
-        NumericProfile::STANDARD,
-        None,
-    ));
+    let folded = expect_not_constant_stack(constant_fold(nodes, &mut string_table, None));
 
     assert_eq!(folded.len(), 3);
 
@@ -2494,7 +2373,10 @@ fn partial_fold_keeps_the_folded_half_and_the_moved_half_distinct() {
     let ExpressionRpnItem::Operand(computed) = &folded[1] else {
         panic!("the constant half should fold to one operand");
     };
-    assert!(matches!(computed.kind, ExpressionKind::Int(5)));
+    assert!(matches!(
+        computed.kind,
+        ExpressionKind::FixedScalar(value) if value.as_i64() == Some(5)
+    ));
     // The folded operand inherits the left operand's anchor, so the reduction stays
     // attributable to authored source rather than to a synthesized position.
     assert_eq!(computed.span, Some(left_literal_span));
@@ -2509,31 +2391,29 @@ fn full_fold_returns_the_folded_operand_with_its_source_anchor() {
     let left_span = marked_span(130);
 
     let nodes = vec![
-        rvalue_item(Expression::int(
-            20,
+        rvalue_item(Expression::fixed_scalar(
+            FixedScalarValue::signed(FixedScalar::I32, 20).expect("20 fits I32"),
             Some(left_span),
             ValueMode::ImmutableOwned,
         )),
-        rvalue_item(Expression::int(
-            22,
+        rvalue_item(Expression::fixed_scalar(
+            FixedScalarValue::signed(FixedScalar::I32, 22).expect("22 fits I32"),
             Some(marked_span(140)),
             ValueMode::ImmutableOwned,
         )),
         operator_item(Operator::Add),
     ];
 
-    let folded = expect_folded_stack(constant_fold(
-        nodes,
-        &mut string_table,
-        NumericProfile::STANDARD,
-        None,
-    ));
+    let folded = expect_folded_stack(constant_fold(nodes, &mut string_table, None));
 
     assert_eq!(folded.len(), 1);
     let ExpressionRpnItem::Operand(result) = &folded[0] else {
         panic!("a fully folded expression should be one operand");
     };
-    assert!(matches!(result.kind, ExpressionKind::Int(42)));
+    assert!(matches!(
+        result.kind,
+        ExpressionKind::FixedScalar(value) if value.as_i64() == Some(42)
+    ));
     assert_eq!(result.span, Some(left_span));
 }
 
@@ -2541,36 +2421,35 @@ fn full_fold_returns_the_folded_operand_with_its_source_anchor() {
 fn fold_cast_infallible_int_to_string_folds_to_string_literal() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
-    let source = Expression::int(42, None, ValueMode::ImmutableOwned);
+    let source = Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, 42).expect("42 fits I32"),
+        None,
+        ValueMode::ImmutableOwned,
+    );
     let target_type_id = type_environment.builtins().string;
 
+    let policy = BuiltinCastPolicyId::NumericToString(NumericScalar::Fixed(FixedScalar::I32));
     let cast = cast_expression(
-        source,
-        BuiltinCastTarget::String,
-        target_type_id,
-        ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Int),
+        CastExpressionInput {
+            source,
+            target: BuiltinCastTarget::String,
+            target_type_id,
+            evidence: ResolvedCastEvidence::Builtin { policy },
+            fallibility: BuiltinCastFallibility::Infallible,
+            handling: CastHandling::Implicit,
+            requires_optional_wrap_after_cast: false,
         },
-        CastHandling::Infallible,
-        false,
         &mut type_environment,
     );
 
-    let folded = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect("infallible builtin cast should fold");
+    let folded = fold_compile_time_expression(&cast, &mut string_table, true)
+        .expect("infallible builtin cast should fold");
 
     assert_eq!(folded.type_id, target_type_id);
 
     let ExpressionKind::StringSlice(interned) = folded.kind else {
-        panic!("expected folded Int -> String cast to produce a string slice");
+        panic!("expected folded I32 -> String cast to produce a string slice");
     };
 
     assert_eq!(string_table.resolve(interned), "42");
@@ -2580,32 +2459,27 @@ fn fold_cast_infallible_int_to_string_folds_to_string_literal() {
 fn fold_structural_string_cast_reports_text_unavailable_rule() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let source =
         Expression::structural_string(vec![ConstStringPiece::SiteRoot], Default::default());
-    let target_type_id = type_environment.builtins().int;
+    let target_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
+    let policy = BuiltinCastPolicyId::StringToNumeric(NumericScalar::Fixed(FixedScalar::I32));
     let cast = cast_expression(
-        source,
-        BuiltinCastTarget::Int,
-        target_type_id,
-        ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
+        CastExpressionInput {
+            source,
+            target: BuiltinCastTarget::Fixed(FixedScalar::I32),
+            target_type_id,
+            evidence: ResolvedCastEvidence::Builtin { policy },
+            fallibility: BuiltinCastFallibility::Fallible,
+            handling: CastHandling::Implicit,
+            requires_optional_wrap_after_cast: false,
         },
-        CastHandling::Propagate,
-        false,
         &mut type_environment,
     );
 
-    let error = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect_err("structural string cast should require final text");
+    let error = fold_compile_time_expression(&cast, &mut string_table, true)
+        .expect_err("structural string cast should require final text");
     assert_compile_time_error(
         &error,
         CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
@@ -2618,31 +2492,30 @@ fn fold_structural_string_cast_reports_text_unavailable_rule() {
 fn fold_cast_optional_wrap_coerces_value_to_optional() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
-    let source = Expression::int(7, None, ValueMode::ImmutableOwned);
+    let source = Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, 7).expect("7 fits I32"),
+        None,
+        ValueMode::ImmutableOwned,
+    );
     let target_type_id = type_environment.builtins().string;
 
+    let policy = BuiltinCastPolicyId::NumericToString(NumericScalar::Fixed(FixedScalar::I32));
     let cast = cast_expression(
-        source,
-        BuiltinCastTarget::String,
-        target_type_id,
-        ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Int),
+        CastExpressionInput {
+            source,
+            target: BuiltinCastTarget::String,
+            target_type_id,
+            evidence: ResolvedCastEvidence::Builtin { policy },
+            fallibility: BuiltinCastFallibility::Infallible,
+            handling: CastHandling::Implicit,
+            requires_optional_wrap_after_cast: true,
         },
-        CastHandling::Infallible,
-        true,
         &mut type_environment,
     );
 
-    let folded = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect("optional-wrapped infallible cast should fold");
+    let folded = fold_compile_time_expression(&cast, &mut string_table, true)
+        .expect("optional-wrapped infallible cast should fold");
 
     assert_eq!(
         folded.type_id,
@@ -2664,67 +2537,60 @@ fn fold_cast_optional_wrap_coerces_value_to_optional() {
 fn fold_cast_fallible_string_to_int_success_folds_to_int() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("123".to_string());
     let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned);
-    let target_type_id = type_environment.builtins().int;
+    let target_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
+    let policy = BuiltinCastPolicyId::StringToNumeric(NumericScalar::Fixed(FixedScalar::I32));
     let cast = cast_expression(
-        source,
-        BuiltinCastTarget::Int,
-        target_type_id,
-        ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
+        CastExpressionInput {
+            source,
+            target: BuiltinCastTarget::Fixed(FixedScalar::I32),
+            target_type_id,
+            evidence: ResolvedCastEvidence::Builtin { policy },
+            fallibility: BuiltinCastFallibility::Fallible,
+            handling: CastHandling::Implicit,
+            requires_optional_wrap_after_cast: false,
         },
-        CastHandling::Propagate,
-        false,
         &mut type_environment,
     );
 
-    let folded = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect("successful fallible builtin cast should fold");
+    let folded = fold_compile_time_expression(&cast, &mut string_table, true)
+        .expect("successful fallible builtin cast should fold");
 
     assert_eq!(folded.type_id, target_type_id);
-    assert!(matches!(folded.kind, ExpressionKind::Int(123)));
+    assert!(matches!(
+        folded.kind,
+        ExpressionKind::FixedScalar(value) if value.as_i64() == Some(123)
+    ));
 }
 
 #[test]
 fn fold_cast_fallible_string_to_int_failure_reports_builtin_cast_failed_in_const() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("not a number".to_string());
     let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned);
-    let target_type_id = type_environment.builtins().int;
+    let target_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
+    let policy = BuiltinCastPolicyId::StringToNumeric(NumericScalar::Fixed(FixedScalar::I32));
     let cast = cast_expression(
-        source,
-        BuiltinCastTarget::Int,
-        target_type_id,
-        ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
+        CastExpressionInput {
+            source,
+            target: BuiltinCastTarget::Fixed(FixedScalar::I32),
+            target_type_id,
+            evidence: ResolvedCastEvidence::Builtin { policy },
+            fallibility: BuiltinCastFallibility::Fallible,
+            handling: CastHandling::Implicit,
+            requires_optional_wrap_after_cast: false,
         },
-        CastHandling::Propagate,
-        false,
         &mut type_environment,
     );
 
-    let error = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect_err("failed fallible builtin cast should report a const diagnostic");
+    let error = fold_compile_time_expression(&cast, &mut string_table, true)
+        .expect_err("failed fallible builtin cast should report a const diagnostic");
 
     assert_invalid_cast_error(&error, InvalidCastReason::BuiltinCastFailedInConst);
 }
@@ -2733,35 +2599,35 @@ fn fold_cast_fallible_string_to_int_failure_reports_builtin_cast_failed_in_const
 fn fold_cast_user_defined_evidence_rejected_in_const_context() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
-    let source = Expression::int(42, None, ValueMode::ImmutableOwned);
+    let source = Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, 42).expect("42 fits I32"),
+        None,
+        ValueMode::ImmutableOwned,
+    );
     let target_type_id = type_environment.builtins().string;
     let method_path = path_fork
         .try_intern_portable_path("to_string", &mut string_table)
         .expect("test path fits");
 
     let cast = cast_expression(
-        source,
-        BuiltinCastTarget::String,
-        target_type_id,
-        ResolvedCastEvidence::UserDefined {
-            evidence_id: TraitEvidenceId(0),
-            method_path,
+        CastExpressionInput {
+            source,
+            target: BuiltinCastTarget::String,
+            target_type_id,
+            evidence: ResolvedCastEvidence::UserDefined {
+                evidence_id: TraitEvidenceId(0),
+                method_path,
+            },
+            fallibility: BuiltinCastFallibility::Infallible,
+            handling: CastHandling::Implicit,
+            requires_optional_wrap_after_cast: false,
         },
-        CastHandling::Infallible,
-        false,
         &mut type_environment,
     );
 
-    let error = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect_err("user-defined evidence should not fold in a const context");
+    let error = fold_compile_time_expression(&cast, &mut string_table, true)
+        .expect_err("user-defined evidence should not fold in a const context");
 
     assert_invalid_cast_error(
         &error,
@@ -2773,32 +2639,32 @@ fn fold_cast_user_defined_evidence_rejected_in_const_context() {
 fn fold_cast_generic_bound_evidence_rejected_in_const_context() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
-    let source = Expression::int(42, None, ValueMode::ImmutableOwned);
+    let source = Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, 42).expect("42 fits I32"),
+        None,
+        ValueMode::ImmutableOwned,
+    );
     let target_type_id = type_environment.builtins().string;
 
     let cast = cast_expression(
-        source,
-        BuiltinCastTarget::String,
-        target_type_id,
-        ResolvedCastEvidence::GenericBound {
-            trait_id: TraitId(0),
-            parameter_id: GenericParameterId(0),
+        CastExpressionInput {
+            source,
+            target: BuiltinCastTarget::String,
+            target_type_id,
+            evidence: ResolvedCastEvidence::GenericBound {
+                trait_id: TraitId(0),
+                parameter_id: GenericParameterId(0),
+            },
+            fallibility: BuiltinCastFallibility::Infallible,
+            handling: CastHandling::Implicit,
+            requires_optional_wrap_after_cast: false,
         },
-        CastHandling::Infallible,
-        false,
         &mut type_environment,
     );
 
-    let error = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect_err("generic-bound evidence should not fold in a const context");
+    let error = fold_compile_time_expression(&cast, &mut string_table, true)
+        .expect_err("generic-bound evidence should not fold in a const context");
 
     assert_invalid_cast_error(
         &error,
@@ -2828,12 +2694,15 @@ fn fallible_builtin_cast_with_catch(
     type_environment: &mut TypeEnvironment,
 ) -> Expression {
     let cast = cast_expression(
-        source,
-        target,
-        target_type_id,
-        ResolvedCastEvidence::Builtin { policy },
-        CastHandling::Recover,
-        false,
+        CastExpressionInput {
+            source,
+            target,
+            target_type_id,
+            evidence: ResolvedCastEvidence::Builtin { policy },
+            fallibility: BuiltinCastFallibility::Fallible,
+            handling: CastHandling::Recover,
+            requires_optional_wrap_after_cast: false,
+        },
         type_environment,
     );
 
@@ -2847,65 +2716,83 @@ fn fallible_builtin_cast_with_catch(
     )
 }
 
-#[test]
-fn fold_cast_fallible_builtin_failure_with_catch_folds_to_handler_value() {
+fn fold_invalid_string_cast_with_catch(
+    constant_context: bool,
+) -> Result<Expression, ConstantFoldError> {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("nope".to_string());
-    let source_member = SyntheticInterfaceMemberIdentity::new(
-        SyntheticInterfaceClass::ProjectContext,
-        "render",
-        "source",
-    );
-    let handler_member = SyntheticInterfaceMemberIdentity::new(
-        SyntheticInterfaceClass::Builder,
-        "render",
-        "fallback",
-    );
-    let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned)
-        .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
-            source_member.clone(),
-        ));
-    let target_type_id = type_environment.builtins().int;
-    let handler_value = Expression::int(0, None, ValueMode::ImmutableOwned)
-        .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::from_members(vec![
-            handler_member.clone(),
-            handler_member.clone(),
-        ]));
-
+    let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned);
+    let target_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let cast = fallible_builtin_cast_with_catch(
         source,
-        BuiltinCastTarget::Int,
+        BuiltinCastTarget::Fixed(FixedScalar::I32),
         target_type_id,
-        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
-        catch_handler_body(handler_value),
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Fixed(FixedScalar::I32)),
+        catch_handler_body(Expression::fixed_scalar(
+            FixedScalarValue::signed(FixedScalar::I32, 0).expect("0 fits I32"),
+            None,
+            ValueMode::ImmutableOwned,
+        )),
         &mut type_environment,
     );
 
-    let folded = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect("failed builtin cast with foldable catch handler should fold to handler value");
+    fold_compile_time_expression(&cast, &mut string_table, constant_context)
+}
 
-    assert_eq!(folded.type_id, target_type_id);
-    assert!(matches!(folded.kind, ExpressionKind::Int(0)));
-    assert_eq!(
-        folded.synthetic_interface_provenance.members(),
-        &[source_member, handler_member]
+#[test]
+fn known_invalid_cast_under_catch_is_diagnostic_in_constant_context() {
+    let error = fold_invalid_string_cast_with_catch(true)
+        .expect_err("a known invalid cast must not use its catch fallback");
+
+    assert_invalid_cast_error(&error, InvalidCastReason::BuiltinCastFailedInConst);
+}
+
+#[test]
+fn known_invalid_cast_under_catch_is_diagnostic_in_runtime_context() {
+    let error = fold_invalid_string_cast_with_catch(false)
+        .expect_err("a known invalid cast must not fall back to runtime catch delivery");
+
+    assert_invalid_cast_error(&error, InvalidCastReason::BuiltinCastFailedInConst);
+}
+
+#[test]
+fn runtime_parameter_cast_under_catch_remains_runtime() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut type_environment = TypeEnvironment::new();
+    let source_path = path_fork
+        .try_intern_portable_path("source", &mut string_table)
+        .expect("test path fits");
+    let source = Expression::reference(
+        source_path,
+        DataType::StringSlice,
+        None,
+        ValueMode::ImmutableReference,
     );
+    let target_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let cast = fallible_builtin_cast_with_catch(
+        source,
+        BuiltinCastTarget::Fixed(FixedScalar::I32),
+        target_type_id,
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Fixed(FixedScalar::I32)),
+        catch_handler_body(Expression::fixed_scalar(
+            FixedScalarValue::signed(FixedScalar::I32, 0).expect("0 fits I32"),
+            None,
+            ValueMode::ImmutableOwned,
+        )),
+        &mut type_environment,
+    );
+    let folded = fold_compile_time_expression(&cast, &mut string_table, false)
+        .expect("an unknown parameter value must remain a runtime cast");
+
+    assert!(matches!(folded.kind, ExpressionKind::ValueBlock { .. }));
 }
 
 #[test]
 fn fold_cast_fallible_builtin_success_with_catch_ignores_handler() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
     let mut type_environment = TypeEnvironment::new();
     let text = string_table.get_or_intern("123".to_string());
     let source_member = SyntheticInterfaceMemberIdentity::new(
@@ -2922,30 +2809,31 @@ fn fold_cast_fallible_builtin_success_with_catch_ignores_handler() {
         .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
             source_member.clone(),
         ));
-    let target_type_id = type_environment.builtins().int;
-    let handler_value = Expression::int(999, None, ValueMode::ImmutableOwned)
-        .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(handler_member));
+    let target_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let handler_value = Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, 999).expect("999 fits I32"),
+        None,
+        ValueMode::ImmutableOwned,
+    )
+    .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(handler_member));
 
     let cast = fallible_builtin_cast_with_catch(
         source,
-        BuiltinCastTarget::Int,
+        BuiltinCastTarget::Fixed(FixedScalar::I32),
         target_type_id,
-        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Fixed(FixedScalar::I32)),
         catch_handler_body(handler_value),
         &mut type_environment,
     );
 
-    let folded = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect("successful builtin cast should fold to success value even with catch handler");
+    let folded = fold_compile_time_expression(&cast, &mut string_table, true)
+        .expect("successful builtin cast should fold to success value even with catch handler");
 
     assert_eq!(folded.type_id, target_type_id);
-    assert!(matches!(folded.kind, ExpressionKind::Int(123)));
+    assert!(matches!(
+        folded.kind,
+        ExpressionKind::FixedScalar(value) if value.as_i64() == Some(123)
+    ));
     assert_eq!(
         folded.synthetic_interface_provenance.members(),
         &[source_member]
@@ -2953,148 +2841,31 @@ fn fold_cast_fallible_builtin_success_with_catch_ignores_handler() {
 }
 
 #[test]
-fn fold_cast_fallible_builtin_failure_with_non_foldable_catch_rejects_handler() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
-    let mut type_environment = TypeEnvironment::new();
-    let text = string_table.get_or_intern("nope".to_string());
-    let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned);
-    let target_type_id = type_environment.builtins().int;
-
-    let handler_value = Expression::reference(
-        path_fork
-            .try_intern_portable_path("runtime_value", &mut string_table)
-            .expect("test path fits"),
-        DataType::Int,
-        None,
-        ValueMode::ImmutableReference,
-    );
-
-    let cast = fallible_builtin_cast_with_catch(
-        source,
-        BuiltinCastTarget::Int,
-        target_type_id,
-        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
-        catch_handler_body(handler_value),
-        &mut type_environment,
-    );
-
-    let error = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect_err("non-foldable catch handler should be rejected in const context");
-
-    assert_invalid_cast_error(&error, InvalidCastReason::CatchHandlerNotConstFoldable);
-}
-
-#[test]
-fn fold_cast_fallible_builtin_failure_with_empty_catch_rejects_handler() {
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
-    let mut type_environment = TypeEnvironment::new();
-    let text = string_table.get_or_intern("nope".to_string());
-    let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned);
-    let target_type_id = type_environment.builtins().int;
-
-    let cast = fallible_builtin_cast_with_catch(
-        source,
-        BuiltinCastTarget::Int,
-        target_type_id,
-        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
-        Vec::new(),
-        &mut type_environment,
-    );
-
-    let error = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect_err("empty catch handler should be rejected in const context");
-
-    assert_invalid_cast_error(&error, InvalidCastReason::CatchHandlerNotConstFoldable);
-}
-
-#[test]
-fn fold_cast_fallible_builtin_failure_with_branching_catch_rejects_handler() {
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let template_ir_store = test_template_ir_store();
-    let mut type_environment = TypeEnvironment::new();
-    let text = string_table.get_or_intern("nope".to_string());
-    let source = Expression::string_slice(text, None, ValueMode::ImmutableOwned);
-    let target_type_id = type_environment.builtins().int;
-    let span = None;
-
-    let then_body = catch_handler_body(Expression::int(1, None, ValueMode::ImmutableOwned));
-    let else_body = catch_handler_body(Expression::int(2, None, ValueMode::ImmutableOwned));
-    let branching_handler = vec![AstNode {
-        kind: NodeKind::If(
-            Expression::bool(false, span, ValueMode::ImmutableOwned),
-            then_body,
-            Some(else_body),
-            test_if_branch_metadata(true),
-        ),
-        span,
-        scope: PathId::ROOT,
-    }];
-
-    let cast = fallible_builtin_cast_with_catch(
-        source,
-        BuiltinCastTarget::Int,
-        target_type_id,
-        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Int),
-        branching_handler,
-        &mut type_environment,
-    );
-
-    let error = fold_compile_time_expression(
-        &cast,
-        &template_ir_store,
-        &mut string_table,
-        true,
-        NumericProfile::STANDARD,
-    )
-    .expect_err("branching catch handler needs real const statement evaluation");
-
-    assert_invalid_cast_error(&error, InvalidCastReason::CatchHandlerNotConstFoldable);
-}
-
-#[test]
-fn evaluate_operator_folds_uint_arithmetic_and_rejects_overflow() {
-    // Uint leaves fold in their own domain; overflow, underflow and
+fn evaluate_operator_folds_u32_arithmetic_and_rejects_overflow() {
+    // U32 leaves fold in their own domain; overflow, underflow and
     // zero divisors report the stable integer failure codes at compile time.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let uint = |value: u64| Expression::uint(value, None, ValueMode::ImmutableOwned);
+    let uint = |value: u64| fixed_integer_expression(FixedScalar::U32, i128::from(value));
 
     let folded = expect_folded_operator(uint(1).evaluate_operator(
         &uint(2),
         &Operator::Add,
         &mut string_table,
-        NumericProfile::STANDARD,
         None,
     ));
-    assert!(matches!(folded.kind, ExpressionKind::Uint(3)));
-    assert_eq!(folded.diagnostic_type, DataType::Uint);
+    assert!(matches!(
+        folded.kind,
+        ExpressionKind::FixedScalar(value) if value.as_u64() == Some(3)
+    ));
+    assert_eq!(
+        folded.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::U32)
+    );
 
     let error = uint(u32::MAX as u64)
-        .evaluate_operator(
-            &uint(1),
-            &Operator::Add,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
-        .expect_err("u32::MAX + 1 exceeds the Uint32 boundary");
+        .evaluate_operator(&uint(1), &Operator::Add, &mut string_table, None)
+        .expect_err("u32::MAX + 1 exceeds the U32 boundary");
     assert_compile_time_error(
         &error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
@@ -3107,20 +2878,16 @@ fn evaluate_operator_folds_uint_arithmetic_and_rejects_overflow() {
         &uint(0),
         &Operator::Exponent,
         &mut string_table,
-        NumericProfile::STANDARD,
         None,
     ));
-    assert!(matches!(folded.kind, ExpressionKind::Uint(1)));
+    assert!(matches!(
+        folded.kind,
+        ExpressionKind::FixedScalar(value) if value.as_u64() == Some(1)
+    ));
 
     let error = uint(2)
-        .evaluate_operator(
-            &uint(32),
-            &Operator::Exponent,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
-        .expect_err("2 ^ 32 exceeds the Uint32 boundary");
+        .evaluate_operator(&uint(32), &Operator::Exponent, &mut string_table, None)
+        .expect_err("2 ^ 32 exceeds the U32 boundary");
     assert_compile_time_error(
         &error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
@@ -3129,14 +2896,8 @@ fn evaluate_operator_folds_uint_arithmetic_and_rejects_overflow() {
     );
 
     let error = uint(0)
-        .evaluate_operator(
-            &uint(1),
-            &Operator::Subtract,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
-        .expect_err("0 - 1 underflows Uint");
+        .evaluate_operator(&uint(1), &Operator::Subtract, &mut string_table, None)
+        .expect_err("0 - 1 underflows U32");
     assert_compile_time_error(
         &error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
@@ -3145,14 +2906,8 @@ fn evaluate_operator_folds_uint_arithmetic_and_rejects_overflow() {
     );
 
     let error = uint(7)
-        .evaluate_operator(
-            &uint(0),
-            &Operator::IntDivide,
-            &mut string_table,
-            NumericProfile::STANDARD,
-            None,
-        )
-        .expect_err("Uint // 0 must fail at compile time");
+        .evaluate_operator(&uint(0), &Operator::IntDivide, &mut string_table, None)
+        .expect_err("U32 // 0 must fail at compile time");
     assert_compile_time_error(
         &error,
         CompileTimeEvaluationErrorReason::DivideByZero,
@@ -3160,26 +2915,35 @@ fn evaluate_operator_folds_uint_arithmetic_and_rejects_overflow() {
         &string_table,
     );
 
-    // Uint `/` folds in Float directly, never through an Int intermediary.
+    // U32 `/` folds in F64 directly, never through an integer carrier.
     let folded = expect_folded_operator(uint(7).evaluate_operator(
         &uint(2),
         &Operator::Divide,
         &mut string_table,
-        NumericProfile::STANDARD,
         None,
     ));
-    assert!(matches!(folded.kind, ExpressionKind::Float(_)));
-    assert_eq!(folded.diagnostic_type, DataType::Float);
+    assert_eq!(expect_fixed_scalar(folded).scalar(), FixedScalar::F64);
+
+    let folded = expect_folded_operator(uint(7).evaluate_operator(
+        &uint(2),
+        &Operator::Divide,
+        &mut string_table,
+        None,
+    ));
+    assert_eq!(
+        folded.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::F64)
+    );
 }
 
 #[test]
-fn evaluate_operator_folds_uint_comparisons_and_dec_mixed_pairs() {
-    // Uint compares exactly with Uint and Int, and Dec mixes with
-    // Uint through the shared exact rule used by `k2 #Dec2 = cu + 0.5`.
+fn evaluate_operator_folds_u32_comparisons_and_dec_mixed_pairs() {
+    // U32 compares exactly with U32 and I32, and Dec mixes with
+    // U32 through the shared exact rule used by `k2 #Dec2 = cu + 0.5`.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let uint = |value: u64| Expression::uint(value, None, ValueMode::ImmutableOwned);
-    let int = |value: i64| Expression::int(value, None, ValueMode::ImmutableOwned);
+    let uint = |value: u64| fixed_integer_expression(FixedScalar::U32, i128::from(value));
+    let int = |value: i64| fixed_integer_expression(FixedScalar::I32, i128::from(value));
 
     assert!(expect_folded_boolean(
         uint(3),
@@ -3213,37 +2977,31 @@ fn evaluate_operator_folds_uint_comparisons_and_dec_mixed_pairs() {
 }
 
 #[test]
-fn evaluate_operator_folds_uint64_at_full_bounds_and_rejects_overflow() {
-    // Under Int64/Float64 the Uint domain spans the whole u64
-    // range, so values above i64::MAX fold exactly and u64::MAX + 1, 2 ^ 64
-    // and underflowing products report the stable integer failures.
-    let int64_profile = NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: FloatPrecision::Bits64,
-    };
+fn evaluate_operator_folds_u64_at_full_bounds_and_rejects_overflow() {
+    // The U64 domain spans the whole u64 range, so values above i64::MAX fold exactly
+    // and u64::MAX + 1, 2 ^ 64 and underflowing products report the stable integer failures.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let uint = |value: u64| Expression::uint(value, None, ValueMode::ImmutableOwned);
+    let uint = |value: u64| fixed_integer_expression(FixedScalar::U64, i128::from(value));
 
     let folded = expect_folded_operator(uint(u64::MAX).evaluate_operator(
         &uint(0),
         &Operator::Subtract,
         &mut string_table,
-        int64_profile,
         None,
     ));
-    assert!(matches!(folded.kind, ExpressionKind::Uint(u64::MAX)));
-    assert_eq!(folded.diagnostic_type, DataType::Uint);
+    assert!(matches!(
+        folded.kind,
+        ExpressionKind::FixedScalar(value) if value.as_u64() == Some(u64::MAX)
+    ));
+    assert_eq!(
+        folded.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::U64)
+    );
 
     let error = uint(u64::MAX)
-        .evaluate_operator(
-            &uint(1),
-            &Operator::Add,
-            &mut string_table,
-            int64_profile,
-            None,
-        )
-        .expect_err("u64::MAX + 1 exceeds the Uint64 boundary");
+        .evaluate_operator(&uint(1), &Operator::Add, &mut string_table, None)
+        .expect_err("u64::MAX + 1 exceeds the U64 boundary");
     assert_compile_time_error(
         &error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
@@ -3252,14 +3010,8 @@ fn evaluate_operator_folds_uint64_at_full_bounds_and_rejects_overflow() {
     );
 
     let error = uint(2)
-        .evaluate_operator(
-            &uint(64),
-            &Operator::Exponent,
-            &mut string_table,
-            int64_profile,
-            None,
-        )
-        .expect_err("2 ^ 64 exceeds the Uint64 boundary");
+        .evaluate_operator(&uint(64), &Operator::Exponent, &mut string_table, None)
+        .expect_err("2 ^ 64 exceeds the U64 boundary");
     assert_compile_time_error(
         &error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,
@@ -3268,14 +3020,8 @@ fn evaluate_operator_folds_uint64_at_full_bounds_and_rejects_overflow() {
     );
 
     let error = uint(9_223_372_036_854_775_808)
-        .evaluate_operator(
-            &uint(2),
-            &Operator::Multiply,
-            &mut string_table,
-            int64_profile,
-            None,
-        )
-        .expect_err("2^63 * 2 exceeds the Uint64 boundary");
+        .evaluate_operator(&uint(2), &Operator::Multiply, &mut string_table, None)
+        .expect_err("2^63 * 2 exceeds the U64 boundary");
     assert_compile_time_error(
         &error,
         CompileTimeEvaluationErrorReason::IntegerOverflow,

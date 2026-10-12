@@ -9,6 +9,7 @@
 
 use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_kind::{ExpressionKind, Operator};
+use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
 use crate::compiler_frontend::ast::expressions::failure_facts::FailureDisposition;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::datatypes::DataType;
@@ -70,7 +71,11 @@ impl ExpressionRpn {
             // validation like any other non-lowered shape; the fallible HIR lowering arm
             // reports the broken invariant with its span.
             ExpressionRpnItem::PendingNumericLiteral { .. }
-            | ExpressionRpnItem::PendingGroup { .. } => false,
+            | ExpressionRpnItem::PendingGroup { .. }
+            | ExpressionRpnItem::PendingNumericBinding { .. }
+            | ExpressionRpnItem::PendingNumericCall { .. }
+            | ExpressionRpnItem::PendingNumericCast { .. }
+            | ExpressionRpnItem::PendingNumericExpression { .. } => false,
             ExpressionRpnItem::Operator { .. } => true,
         })
     }
@@ -106,6 +111,65 @@ pub enum ExpressionRpnItem {
         nodes: Vec<ExpressionRpnItem>,
         span: Option<SourceSpan>,
     },
+    /// A reference to a body-owned pending numeric binding.
+    ///
+    /// WHAT: retains the binding ID, authored span and value mode between parsing and body
+    ///       completion. The binding's single static type is selected from every permitted
+    ///       use at the function root, so no `TypeId`, `Declaration` or default value exists yet.
+    /// WHY: a numeric-dependent expression position must keep its authored RPN structure
+    ///      without fabricating a placeholder type or a second untyped AST. Body completion
+    ///      replaces this item with the canonical reference operand before publication; any
+    ///      later stage treats its presence as a broken compiler invariant.
+    PendingNumericBinding {
+        binding: crate::compiler_frontend::ast::numeric_construction::NumericBindingId,
+        span: Option<SourceSpan>,
+        value_mode: ValueMode,
+        /// Whether the author wrote `copy` in front of the reference.
+        ///
+        /// WHY: completion must build the exact authored shape (a value copy of a place versus a
+        ///      plain reference) once the binding's type is selected.
+        is_copy: bool,
+    },
+    /// A call-shaped expression whose numeric arguments must resolve first.
+    ///
+    /// WHAT: retains the parsed callee identity, argument routing and spans of one call whose
+    ///       argument list contains construction-only numeric items.
+    /// WHY: argument compatibility cannot run before numeric selection, and the parser must not
+    ///      parse the argument list again. Body completion resumes the retained call in place and
+    ///      replaces this item with one operand.
+    PendingNumericCall {
+        call: Box<crate::compiler_frontend::ast::numeric_construction::DeferredCall>,
+        span: Option<SourceSpan>,
+    },
+    /// A cast whose source must resolve before its pair can be classified.
+    ///
+    /// WHAT: carries the retained source fragment in one operand position plus the already-known
+    ///       concrete cast target and authored recovery ownership. The source is resolved
+    ///       independently; the cast target never constrains or defaults it.
+    /// WHY: `cast` is a prefix keyword whose pair classification needs a concrete source type.
+    ///      Body completion materialises the source, resumes the existing cast constructor and
+    ///      replaces this item with one operand.
+    PendingNumericCast {
+        target_type_id: TypeId,
+        target: crate::compiler_frontend::builtins::casts::targets::BuiltinCastTarget,
+        requires_optional_wrap_after_cast: bool,
+        handling: CastHandling,
+        source: Vec<ExpressionRpnItem>,
+        span: Option<SourceSpan>,
+    },
+    /// A retained expression constructor whose statement bodies hold numeric continuations.
+    ///
+    /// WHAT: one operand position holding a value-producing block or handled fallible expression
+    ///       that must rebuild through its owning module's constructor once the body root has
+    ///       resolved the numeric origins.
+    /// WHY: an expression-level constructor owns statement bodies, so it cannot build at its
+    ///      receiving site while those bodies still hold continuations. Body completion replaces
+    ///      this item with one completed operand, and any later stage treats its presence as a
+    ///      broken compiler invariant.
+    PendingNumericExpression {
+        expression: Box<crate::compiler_frontend::ast::numeric_construction::DeferredExpression>,
+        span: Option<SourceSpan>,
+    },
     /// A symbolic or keyword operator with its exact source span preserved for diagnostics.
     Operator {
         operator: Operator,
@@ -119,7 +183,11 @@ impl ExpressionRpnItem {
         match self {
             ExpressionRpnItem::Operand(expression) => expression.span,
             ExpressionRpnItem::PendingNumericLiteral { span, .. }
-            | ExpressionRpnItem::PendingGroup { span, .. } => *span,
+            | ExpressionRpnItem::PendingGroup { span, .. }
+            | ExpressionRpnItem::PendingNumericBinding { span, .. }
+            | ExpressionRpnItem::PendingNumericCall { span, .. }
+            | ExpressionRpnItem::PendingNumericCast { span, .. }
+            | ExpressionRpnItem::PendingNumericExpression { span, .. } => *span,
             ExpressionRpnItem::Operator { span, .. } => *span,
         }
     }
@@ -133,6 +201,10 @@ impl ExpressionRpnItem {
             ExpressionRpnItem::Operand(_)
                 | ExpressionRpnItem::PendingNumericLiteral { .. }
                 | ExpressionRpnItem::PendingGroup { .. }
+                | ExpressionRpnItem::PendingNumericBinding { .. }
+                | ExpressionRpnItem::PendingNumericCall { .. }
+                | ExpressionRpnItem::PendingNumericCast { .. }
+                | ExpressionRpnItem::PendingNumericExpression { .. }
         )
     }
 }

@@ -19,8 +19,8 @@ use crate::compiler_frontend::hir::numeric::{
 };
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, HirWriteTarget};
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
-use moth_lexical::numeric::profile::NumericProfile;
 
 pub(crate) fn lower_statement(
     context: &mut WasmFunctionLoweringContext<'_, '_>,
@@ -217,14 +217,13 @@ fn lower_checked_integer_operation(
         )));
     }
 
-    let profile = context.module_context.request.numeric_profile;
-    let kind = integer_operation_kind(op.domain, profile)?;
+    let kind = integer_operation_kind(op.domain)?;
     // Proven-safe operations keep evaluation order, domain and signedness while losing only
     // the redundant runtime predicates. Every other mode retains the checked lowering below.
     let check_mode = if context
         .module_context
         .numeric_proofs
-        .integer_operation_is_safe(statement, profile)
+        .integer_operation_is_safe(statement)
     {
         IntegerCheckMode::ProvenSafe
     } else {
@@ -352,22 +351,25 @@ fn lower_validate_float(
 ) -> Result<(), CompilerError> {
     if failure_mode != NumericFailureMode::Trap {
         return Err(lir_transformation_error(format!(
-            "Wasm lowering does not support Float validation in {failure_mode:?} mode"
+            "Wasm lowering does not support binary-float validation in {failure_mode:?} mode"
         )));
     }
 
     let type_environment = context.module_context.type_environment;
-    let float_type = type_environment.builtins().float;
     let source_type = expression_type(context, source);
-    if source_type != float_type {
-        return Err(lir_transformation_error(format!(
-            "Wasm Float validation source has type {:?}, expected Float",
-            source_type
-        )));
-    }
-
-    let precision = NumericScalar::Float
-        .binary_float_precision(context.module_context.request.numeric_profile)
+    // WHAT: the validated source owns the precision, so the guard reads the source's exact
+    //       binary-float type instead of a compilation-boundary width.
+    // WHY: a fixed F32/F64 boundary value must not be validated at another type's precision,
+    //      and F16 stays an explicit unsupported route instead of being lowered as F32.
+    let source_scalar = NumericScalar::from_type_id(source_type, type_environment)
+        .filter(|scalar| scalar.is_binary_float())
+        .ok_or_else(|| {
+            lir_transformation_error(format!(
+                "Wasm binary-float validation source has type {source_type:?}, which is not a binary float"
+            ))
+        })?;
+    let precision = source_scalar
+        .binary_float_precision()
         .filter(|precision| {
             matches!(
                 precision,
@@ -375,7 +377,9 @@ fn lower_validate_float(
             )
         })
         .ok_or_else(|| {
-            lir_transformation_error("Wasm Float validation requires F32 or F64 precision")
+            lir_transformation_error(format!(
+                "Wasm binary-float validation requires an F32 or F64 source, found {source_scalar}"
+            ))
         })?;
     let expected_carrier = match precision {
         BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
@@ -385,12 +389,12 @@ fn lower_validate_float(
 
     let destination = context.local_map.get(&result).copied().ok_or_else(|| {
         lir_transformation_error(format!(
-            "Wasm lowering could not resolve Float validation result local {result:?}"
+            "Wasm lowering could not resolve binary-float validation result local {result:?}"
         ))
     })?;
     if context.local_type_by_id.get(&destination).copied() != Some(expected_carrier) {
         return Err(lir_transformation_error(format!(
-            "Wasm Float validation result does not use the profile carrier {expected_carrier:?}"
+            "Wasm binary-float validation destination does not use the {expected_carrier:?} carrier of the source precision"
         )));
     }
 
@@ -399,7 +403,7 @@ fn lower_validate_float(
     let lowered_source = lower_expression(context, source, statements)?;
     if context.local_type_by_id.get(&lowered_source.value).copied() != Some(expected_carrier) {
         return Err(lir_transformation_error(format!(
-            "Wasm Float validation source does not use the profile carrier {expected_carrier:?}"
+            "Wasm binary-float validation source does not use the {expected_carrier:?} carrier of its own precision"
         )));
     }
 
@@ -420,52 +424,58 @@ fn lower_format_float(
 ) -> Result<(), CompilerError> {
     if failure_mode != NumericFailureMode::Trap {
         return Err(lir_transformation_error(format!(
-            "Wasm lowering does not support Float formatting in {failure_mode:?} mode"
+            "Wasm lowering does not support binary-float formatting in {failure_mode:?} mode"
         )));
     }
 
     let type_environment = context.module_context.type_environment;
     let source_type = expression_type(context, source);
-    if source_type != type_environment.builtins().float {
-        return Err(lir_transformation_error(format!(
-            "Wasm Float formatting source has type {:?}, expected Float",
-            source_type
-        )));
-    }
-
-    let precision = NumericScalar::Float
-        .binary_float_precision(context.module_context.request.numeric_profile)
+    // WHAT: the formatted source owns its exact binary-float precision, so F16 formats through
+    //       its F32 carrier at binary16 precision.
+    // WHY: each binary-float type owns its exact precision.
+    let source_scalar = NumericScalar::from_type_id(source_type, type_environment)
+        .filter(|scalar| scalar.is_binary_float())
+        .ok_or_else(|| {
+            lir_transformation_error(format!(
+                "Wasm binary-float formatting source has type {source_type:?}, which is not a binary float"
+            ))
+        })?;
+    let precision = source_scalar
+        .binary_float_precision()
         .filter(|precision| {
             matches!(
                 precision,
-                BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64
+                BinaryFloatPrecision::Binary16
+                    | BinaryFloatPrecision::Binary32
+                    | BinaryFloatPrecision::Binary64
             )
         })
         .ok_or_else(|| {
-            lir_transformation_error("Wasm Float formatting requires F32 or F64 precision")
+            lir_transformation_error(format!(
+                "Wasm binary-float formatting requires a binary float source, found {source_scalar}"
+            ))
         })?;
     let expected_carrier = match precision {
-        BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
+        BinaryFloatPrecision::Binary16 | BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
         BinaryFloatPrecision::Binary64 => WasmAbiType::F64,
-        BinaryFloatPrecision::Binary16 => unreachable!("F16 precision was filtered above"),
     };
 
     let destination = context.local_map.get(&result).copied().ok_or_else(|| {
         lir_transformation_error(format!(
-            "Wasm lowering could not resolve Float formatting result local {result:?}"
+            "Wasm lowering could not resolve binary-float formatting result local {result:?}"
         ))
     })?;
     if context.local_type_by_id.get(&destination).copied() != Some(WasmAbiType::Handle) {
         return Err(lir_transformation_error(
-            "Wasm Float formatting result does not use the String handle carrier",
+            "Wasm binary-float formatting result does not use the String handle carrier",
         ));
     }
 
-    // Evaluate the source once; its semantic Float precision remains explicit in LIR.
+    // Evaluate the source once; its exact float precision remains explicit in LIR.
     let lowered_source = lower_expression(context, source, statements)?;
     if context.local_type_by_id.get(&lowered_source.value).copied() != Some(expected_carrier) {
         return Err(lir_transformation_error(format!(
-            "Wasm Float formatting source does not use the profile carrier {expected_carrier:?}"
+            "Wasm binary-float formatting source does not use the carrier {expected_carrier:?} of its own precision"
         )));
     }
 
@@ -491,10 +501,9 @@ fn lower_checked_float_operation(
         )));
     }
 
-    let profile = context.module_context.request.numeric_profile;
     let precision = op
         .domain
-        .binary_float_precision(profile)
+        .binary_float_precision()
         .filter(|precision| {
             matches!(
                 precision,
@@ -594,9 +603,8 @@ fn lower_float_range_candidate(
 ) -> Result<(), CompilerError> {
     let [current, step, end, ascending] = inputs;
     let [candidate_result, in_range_result] = output_ids;
-    let profile = context.module_context.request.numeric_profile;
     let precision = domain
-        .binary_float_precision(profile)
+        .binary_float_precision()
         .filter(|precision| {
             matches!(
                 precision,
@@ -702,43 +710,23 @@ fn lower_float_range_candidate(
     Ok(())
 }
 
+/// Map one exact checked-integer domain onto the LIR kind Wasm implements.
+///
+/// The checked lowering emits 32/64-bit range predicates, so the supported domain set is exactly
+/// `I32`/`U32`/`I64`/`U64`; narrower fixed integers have no checked path and stay behind the
+/// backend capability gate.
 fn integer_operation_kind(
     domain: NumericScalar,
-    profile: NumericProfile,
 ) -> Result<WasmIntegerOperationKind, CompilerError> {
-    let Some((minimum, maximum)) = domain.integer_range(profile) else {
-        return Err(lir_transformation_error(format!(
-            "Wasm checked integer lowering received a non-integer domain {}",
-            domain
-        )));
-    };
-
-    let kind = match (minimum, maximum) {
-        (minimum, maximum)
-            if minimum == i128::from(i32::MIN) && maximum == i128::from(i32::MAX) =>
-        {
-            WasmIntegerOperationKind::Signed32
-        }
-        (minimum, maximum) if minimum == 0 && maximum == i128::from(u32::MAX) => {
-            WasmIntegerOperationKind::Unsigned32
-        }
-        (minimum, maximum)
-            if minimum == i128::from(i64::MIN) && maximum == i128::from(i64::MAX) =>
-        {
-            WasmIntegerOperationKind::Signed64
-        }
-        (minimum, maximum) if minimum == 0 && maximum == i128::from(u64::MAX) => {
-            WasmIntegerOperationKind::Unsigned64
-        }
-        _ => {
-            return Err(lir_transformation_error(format!(
-                "Wasm checked integer domain {} does not match an exact I32/U32/I64/U64 range",
-                domain
-            )));
-        }
-    };
-
-    Ok(kind)
+    match domain {
+        NumericScalar::Fixed(FixedScalar::I32) => Ok(WasmIntegerOperationKind::Signed32),
+        NumericScalar::Fixed(FixedScalar::U32) => Ok(WasmIntegerOperationKind::Unsigned32),
+        NumericScalar::Fixed(FixedScalar::I64) => Ok(WasmIntegerOperationKind::Signed64),
+        NumericScalar::Fixed(FixedScalar::U64) => Ok(WasmIntegerOperationKind::Unsigned64),
+        _ => Err(lir_transformation_error(format!(
+            "Wasm checked integer lowering does not implement the exact domain {domain}"
+        ))),
+    }
 }
 
 /// Whether the widened I64 product scratch exists only for check-only range predicates.

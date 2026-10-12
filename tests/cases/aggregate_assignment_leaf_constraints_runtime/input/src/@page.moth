@@ -1,0 +1,48 @@
+-- Inferred mutable leaves take exact types from later concrete assignments, not from direct exact arguments.
+-- Each first get is cast to String before its binding is reassigned, so no shared get alias crosses the assignment.
+-- Explicit copies provide independent assignment RHS values without changing alias access policy.
+
+render_assignment_leaf_constraints || -> String:
+    items ~= {4_294_967_296}
+    before = items.get(0) catch:
+        then 0
+    ;
+    before_text String = cast before
+
+    replacement {U64} = {18_446_744_073_709_551_615, 7}
+    items = copy replacement
+
+    first = items.get(0) catch:
+        then 0
+    ;
+    second = items.get(1) catch:
+        then 0
+    ;
+    missing = items.get(2) catch:
+        then 0
+    ;
+    first_text String = cast first
+    second_text String = cast second
+    len = items.length()
+
+    scores ~= {1 = 4_294_967_296}
+    old = scores.get(1) catch:
+        then 0
+    ;
+    old_text String = cast old
+
+    map_replacement {U32 = U64} = {4_294_967_295 = 18_446_744_073_709_551_615}
+    scores = copy map_replacement
+
+    top = scores.get(4_294_967_295) catch:
+        then 0
+    ;
+    top_text String = cast top
+    absent = scores.get(1) catch:
+        then 0
+    ;
+    map_len = scores.length
+    return [:assignment_leaf_constraints collection_before=[before_text] collection_first=[first_text] collection_second=[second_text] collection_missing=[missing] collection_len=[len] map_before=[old_text] map_top=[top_text] map_absent=[absent] map_len=[map_len]]
+;
+
+[:[render_assignment_leaf_constraints()]]

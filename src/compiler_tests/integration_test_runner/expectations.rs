@@ -17,7 +17,6 @@ use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::compiler_messages::is_well_formed_reason_key;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
 use crate::compiler_tests::integration_test_runner::errors::FixtureLoadError;
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -28,7 +27,6 @@ use std::path::Path;
 struct ExpectationToml {
     mode: Option<ExpectationMode>,
     entry: Option<String>,
-    numeric_profile: Option<String>,
     #[serde(default)]
     flags: Vec<String>,
     builder: Option<String>,
@@ -147,7 +145,6 @@ pub(crate) fn parse_expectation_file(
             path.display()
         ))
     })?;
-    let numeric_profile = parse_numeric_profile(path, parsed.numeric_profile.as_deref())?;
 
     if let Some(builder) = &parsed.builder
         && builder != "html"
@@ -165,49 +162,12 @@ pub(crate) fn parse_expectation_file(
         )));
     }
 
-    parse_matrix_expectation_file(path, parsed, numeric_profile)
-}
-
-const NUMERIC_PROFILE_SPELLINGS: &str =
-    "\"Int32/Float32\", \"Int32/Float64\", \"Int64/Float32\", \"Int64/Float64\"";
-
-fn parse_numeric_profile(
-    path: &Path,
-    raw_profile: Option<&str>,
-) -> Result<NumericProfile, FixtureLoadError> {
-    let Some(raw_profile) = raw_profile else {
-        return Ok(NumericProfile::STANDARD);
-    };
-
-    let profile = match raw_profile {
-        "Int32/Float32" => NumericProfile {
-            int_width: IntWidth::Bits32,
-            float_precision: FloatPrecision::Bits32,
-        },
-        "Int32/Float64" => NumericProfile::STANDARD,
-        "Int64/Float32" => NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits32,
-        },
-        "Int64/Float64" => NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits64,
-        },
-        _ => {
-            return Err(FixtureLoadError::expectation_contract(format!(
-                "Expectation file '{}' has invalid numeric_profile value {raw_profile:?}; accepted spellings are {NUMERIC_PROFILE_SPELLINGS}.",
-                path.display()
-            )));
-        }
-    };
-
-    Ok(profile)
+    parse_matrix_expectation_file(path, parsed)
 }
 
 fn parse_matrix_expectation_file(
     path: &Path,
     parsed: ExpectationToml,
-    numeric_profile: NumericProfile,
 ) -> Result<ParsedExpectationFile, FixtureLoadError> {
     // In matrix mode, all mode/outcome keys must be declared inside explicit
     // backend sections so each backend can evolve independently.
@@ -406,7 +366,6 @@ fn parse_matrix_expectation_file(
 
     Ok(ParsedExpectationFile {
         entry: parsed.entry,
-        numeric_profile,
         backend_expectations,
     })
 }

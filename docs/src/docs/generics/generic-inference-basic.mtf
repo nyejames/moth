@@ -1,4 +1,6 @@
-You call a generic function like any other function. The compiler figures out the concrete type from the immediate context.
+Generic calls use ordinary syntax. Immediate evidence selects generic types.
+An existing numeric origin can also stay linked through a generic signature
+until an exact receiving use resolves it within the same body.
 
 ### Inference from an argument
 
@@ -10,7 +12,8 @@ You call a generic function like any other function. The compiler figures out th
     value = identity(42)
 ]
 
-Because `42` is an `Int`, `A` becomes `Int` for this call.
+With no other exact numeric constraint in the body, the whole-number origin
+defaults to `I32`, so `A` resolves to `I32`.
 
 ### Inference from the result type
 
@@ -19,7 +22,7 @@ Because `42` is an `Int`, `A` becomes `Int` for this call.
         return {}
     ;
 
-    items {Int} = empty()
+    items {I32} = empty()
 ]
 
-The left-hand side says the result is `{Int}`, so `A` becomes `Int`.
+The immediate receiving type says the result is `{I32}`, so `A` becomes `I32`.

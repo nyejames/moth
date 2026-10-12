@@ -89,7 +89,7 @@ pub(crate) fn invalid_config_message(
             "`#Config` is valid only on a top-level source compile-time declaration.".to_owned()
         }
         InvalidConfigReason::ConfigQualifierUnsupportedType => {
-            "`#Config` accepts only String, Int, Float, Bool, Char and matching optional forms."
+            "`#Config` accepts only String, Bool, Char, exact integer and binary-float types, and their optional forms."
                 .to_owned()
         }
         InvalidConfigReason::ConfigContractConflict {
@@ -131,6 +131,19 @@ pub(crate) fn invalid_config_message(
             };
             format!(
                 "Config input for '{key_label}' has type {provided_name}, but the contract requires {expected_name}.{location}{string_hint}"
+            )
+        }
+        InvalidConfigReason::ConfigInputOutOfRange {
+            literal,
+            reason,
+            provided_argument_index,
+        } => {
+            let location = provided_argument_index
+                .map(|index| format!(" The supplied value came from --input argument position {index}."))
+                .unwrap_or_default();
+            format!(
+                "Config input for '{key_label}' is rejected by its contract. {}{location}",
+                invalid_number_literal_message(*literal, *reason, string_table)
             )
         }
         InvalidConfigReason::MissingConfigInput => {

@@ -1,12 +1,12 @@
 Bucket = |
-    values {Int},
+    values {I32},
 |
 
 snapshot |this Bucket| -> Bucket:
     return copy this
 ;
 
-snapshot_values |this Bucket| -> {Int}:
+snapshot_values |this Bucket| -> {I32}:
     return copy this.values
 ;
 

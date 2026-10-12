@@ -77,8 +77,8 @@ use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TestSourceTokensBuilder, TokenIndex, TokenRange, TokenTag, TokenViewError,
 };
 use crate::compiler_frontend::traits::ids::TraitId;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use moth_lexical::numeric::grammar::{NumericExponentSign, NumericLiteralKind, NumericLiteralSign};
-use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::path::Path;
@@ -467,7 +467,11 @@ fn non_string_content_fold_fails_loudly_during_capture() {
         Some(&donor_identity),
         Some(&facts),
         FrozenIdentityHandle::new(),
-        &|_| Ok(PublicFoldedValue::Int(7)),
+        &|_| {
+            Ok(PublicFoldedValue::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, 7).expect("7 fits I32"),
+            ))
+        },
     ) {
         Ok(_) => panic!("capture must reject a non-string content value"),
         Err(error) => error,
@@ -1530,7 +1534,9 @@ fn generated_identity(name: &str) -> GeneratedFunctionIdentity {
             name.to_owned(),
             None,
         )),
-        Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]),
+        Box::new([CanonicalTypeIdentity::Builtin(
+            CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+        )]),
         Box::new([]),
     )
 }
@@ -1622,7 +1628,6 @@ fn preparing_sidecar_environment(
         entry_dir: preparation.entry_dir,
         root_role: ModuleRootRole::Support,
         build_profile: preparation.build_profile,
-        numeric_profile: preparation.numeric_profile,
         file_value_resolution: None,
         config_resolution: None,
         build_config_values: Arc::new(Default::default()),
@@ -1833,7 +1838,6 @@ fn published_siblings_materialise_independently_and_leave_the_retained_context_f
             .materialise_ast_at(
                 0,
                 ModuleMaterialisationInput {
-                    numeric_profile: NumericProfile::STANDARD,
                     identity,
                     requester_context: &fixture.preparation,
                     requester_call_span: None,
@@ -1872,7 +1876,10 @@ fn published_siblings_materialise_independently_and_leave_the_retained_context_f
             })
             .expect("the sidecar emits draw with its concrete parameter")
     };
-    assert_eq!(parameter_type(&int_sibling), builtin_type_ids::INT);
+    assert_eq!(
+        parameter_type(&int_sibling),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
     assert_eq!(parameter_type(&string_sibling), builtin_type_ids::STRING);
 
     // The retained context and the preparation's own templates must stay frozen: sibling
@@ -2005,7 +2012,9 @@ fn resource_default_materialisation_fixture() -> ResourceDefaultMaterialisationF
         .expect("the retained generic should produce a materialisation context");
     let identity = GeneratedFunctionIdentity::new(
         declaration_identity,
-        Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]),
+        Box::new([CanonicalTypeIdentity::Builtin(
+            CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+        )]),
         Box::new([]),
     );
 
@@ -2245,7 +2254,9 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
         .expect("the retained generic should produce a materialisation context");
     let identity = GeneratedFunctionIdentity::new(
         declaration_identity,
-        Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]),
+        Box::new([CanonicalTypeIdentity::Builtin(
+            CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+        )]),
         Box::new([]),
     );
 
@@ -2331,7 +2342,6 @@ fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
         .materialise_ast_at(
             0,
             ModuleMaterialisationInput {
-                numeric_profile: NumericProfile::STANDARD,
                 identity: &fixture.identity,
                 requester_context: &fixture.preparation,
                 requester_call_span: None,
@@ -2549,7 +2559,6 @@ fn frozen_resource_body_materialises_into_a_sidecar_local_table() {
         .materialise_ast_at(
             0,
             ModuleMaterialisationInput {
-                numeric_profile: NumericProfile::STANDARD,
                 identity: &fixture.identity,
                 requester_context: &fixture.preparation,
                 requester_call_span: None,
@@ -2641,7 +2650,6 @@ fn repeated_frozen_resource_body_materialisations_preserve_stable_origin() {
             .materialise_ast_at(
                 0,
                 ModuleMaterialisationInput {
-                    numeric_profile: NumericProfile::STANDARD,
                     identity: &fixture.identity,
                     requester_context: &fixture.preparation,
                     requester_call_span: None,
@@ -2814,7 +2822,6 @@ fn repeated_frozen_resource_default_materialisations_preserve_stable_origin_acro
             .materialise_ast_at(
                 0,
                 ModuleMaterialisationInput {
-                    numeric_profile: NumericProfile::STANDARD,
                     identity: &fixture.identity,
                     requester_context: &fixture.preparation,
                     requester_call_span: None,
@@ -3083,16 +3090,17 @@ fn stale_in_range_template_row_fails_declaration_identity_validation() {
 #[test]
 fn generated_evidence_authorization_requires_the_selected_trait_pair() {
     let type_environment = TypeEnvironment::new();
-    let selected = FxHashSet::from_iter([(builtin_type_ids::INT, TraitId(7))]);
+    let selected =
+        FxHashSet::from_iter([(builtin_type_ids::fixed_scalar(FixedScalar::I32), TraitId(7))]);
 
     assert!(generated_evidence_pair_is_selected(
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         TraitId(7),
         &type_environment,
         &selected,
     ));
     assert!(!generated_evidence_pair_is_selected(
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         TraitId(8),
         &type_environment,
         &selected,

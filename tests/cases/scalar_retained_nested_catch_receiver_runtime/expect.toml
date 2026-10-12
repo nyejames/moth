@@ -1,0 +1,12 @@
+entry = "."
+
+# HTML-only by design: this fixture asserts exact runtime values through the
+# retained nested catch handler of checked U64 arithmetic and typed runnable
+# `Error!` recovery. Checked U64 arithmetic and typed runnable `Error!`
+# recovery have no observed Wasm success fixture under the capability
+# validation, so only the backend whose output is asserted is declared.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "scalar nested catch return failure=0/1 success=42\nscalar nested catch assignment failure=0/1 success=42"

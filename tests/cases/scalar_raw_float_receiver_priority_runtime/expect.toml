@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "scalar raw float receiver raw-f16=1024 named-f16=1024 f32-result=1024.5"

@@ -19,17 +19,18 @@ use crate::compiler_frontend::ast::expressions::expression::{Expression, Express
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandling;
 use crate::compiler_frontend::ast::generic_functions::{
-    GenericFunctionInstantiationRequest, GenericRequestRange, IfGenericRequestRanges,
+    GenericFunctionInstantiationRequest, GenericRequestRange, GenericRequestSlot,
+    IfGenericRequestRanges,
 };
 use crate::compiler_frontend::ast::statements::value_production::analyze_branch_exits;
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueLexicalScope,
 };
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
-use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::normalize_ast::TemplateNormalizationError;
@@ -46,16 +47,10 @@ impl StaticIfCandidate {
         const_values: &ConstValueStore,
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
         string_table: &mut StringTable,
-        numeric_profile: NumericProfile,
     ) -> Result<Self, TemplateNormalizationError> {
         let mut ast = authored_ast.to_vec();
-        let specialization = StaticIfSpecialization::run(
-            &mut ast,
-            const_values,
-            template_ir_store,
-            string_table,
-            numeric_profile,
-        )?;
+        let specialization =
+            StaticIfSpecialization::run(&mut ast, const_values, template_ir_store, string_table)?;
 
         Ok(Self {
             ast,
@@ -117,15 +112,9 @@ impl StaticIfSpecialization {
         const_values: &ConstValueStore,
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
         string_table: &mut StringTable,
-        numeric_profile: NumericProfile,
     ) -> Result<Self, TemplateNormalizationError> {
         let module_environment = module_const_environment(const_values);
-        let resolver = ConstValueResolver::new(
-            string_table,
-            const_values,
-            template_ir_store,
-            numeric_profile,
-        );
+        let resolver = ConstValueResolver::new(string_table, const_values, template_ir_store);
         let mut specializer = StaticIfSpecializer {
             resolver,
             inactive_generic_requests: Vec::new(),
@@ -146,22 +135,52 @@ impl StaticIfSpecialization {
         })
     }
 
+    /// Selects the generic requests that survive static Bool specialisation.
+    ///
+    /// WHAT: tombstones every inactive if-branch range in the ledger, then keeps the first
+    ///       concrete request per key in ledger order.
+    /// WHY: pruning runs before deduplication, so an inactive duplicate never claims a key ahead
+    ///      of an active one. Every pending call completes before emission returns, so a pending
+    ///      slot means a numeric completion was skipped, whether or not its branch is active.
     pub(super) fn commit_active_generic_requests(
         self,
-        requests: Vec<GenericFunctionInstantiationRequest>,
-    ) -> Vec<GenericFunctionInstantiationRequest> {
-        let mut seen = FxHashSet::default();
-        requests
+        mut slots: Vec<GenericRequestSlot>,
+    ) -> Result<Vec<GenericFunctionInstantiationRequest>, CompilerError> {
+        for range in &self.inactive_generic_requests {
+            let inactive = slots.get_mut(range.start..range.end).ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "static-if inactive generic request range falls outside the request ledger",
+                )
+            })?;
+            for slot in inactive {
+                if matches!(slot, GenericRequestSlot::Pending) {
+                    return Err(pending_generic_request_error());
+                }
+                *slot = GenericRequestSlot::Dropped;
+            }
+        }
+
+        let kept = {
+            let mut seen = FxHashSet::default();
+            let mut kept = Vec::with_capacity(slots.len());
+            for slot in &slots {
+                kept.push(match slot {
+                    GenericRequestSlot::Pending => return Err(pending_generic_request_error()),
+                    GenericRequestSlot::Dropped => false,
+                    GenericRequestSlot::Concrete(request) => seen.insert(&request.key),
+                });
+            }
+            kept
+        };
+
+        Ok(slots
             .into_iter()
-            .enumerate()
-            .filter(|(index, _)| {
-                !self
-                    .inactive_generic_requests
-                    .iter()
-                    .any(|range| range.start <= *index && *index < range.end)
+            .zip(kept)
+            .filter_map(|(slot, kept)| match slot {
+                GenericRequestSlot::Concrete(request) if kept => Some(request),
+                _ => None,
             })
-            .filter_map(|(_, request)| seen.insert(request.key.clone()).then_some(request))
-            .collect()
+            .collect())
     }
 }
 
@@ -363,7 +382,11 @@ impl StaticIfSpecializer<'_> {
                         // Pending syntax never survives evaluation; this fallible specialization
                         // reports the broken invariant instead of silently keeping it.
                         ExpressionRpnItem::PendingNumericLiteral { .. }
-                        | ExpressionRpnItem::PendingGroup { .. } => {
+                        | ExpressionRpnItem::PendingGroup { .. }
+                        | ExpressionRpnItem::PendingNumericBinding { .. }
+                        | ExpressionRpnItem::PendingNumericCast { .. }
+                        | ExpressionRpnItem::PendingNumericCall { .. }
+                        | ExpressionRpnItem::PendingNumericExpression { .. } => {
                             return Err(
                                 pending_expression_item_bug("static-if specialization").into()
                             );
@@ -434,9 +457,6 @@ impl StaticIfSpecializer<'_> {
             }
             ExpressionKind::NoValue
             | ExpressionKind::OptionNone
-            | ExpressionKind::Uint(_)
-            | ExpressionKind::Int(_)
-            | ExpressionKind::Float(_)
             | ExpressionKind::FixedScalar(_)
             | ExpressionKind::Number(_)
             | ExpressionKind::StringSlice(_)
@@ -633,6 +653,13 @@ impl StaticIfSpecializer<'_> {
             ranges.then_branch
         });
     }
+}
+
+/// Error for a ledger slot that survived body completion without publishing its request.
+fn pending_generic_request_error() -> CompilerError {
+    CompilerError::compiler_error(
+        "generic request ledger kept a pending call after body completion",
+    )
 }
 
 /// Removes a closed receiver when its selected value body terminates on every path.

@@ -1,4 +1,4 @@
-pair || -> String, Int, Error!:
+pair || -> String, I32, Error!:
     return "ok", 1
 ;
 

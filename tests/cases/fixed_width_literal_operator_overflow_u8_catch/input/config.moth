@@ -1,0 +1,5 @@
+project #= (
+    name = "fixed_width_literal_operator_overflow_u8_catch",
+    entry_root = "src",
+)
+html #= ()

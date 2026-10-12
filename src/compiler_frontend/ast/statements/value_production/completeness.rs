@@ -1,9 +1,12 @@
-//! All-path value-production exit analysis and produced-value traversal.
+//! All-path value-production exit analysis and `then` group traversal.
 //!
 //! WHAT: summarises whether a statement sequence can fall through, produce values
-//! or terminate, and visits every reachable `ThenValue` group.
+//! or terminate. Reachable traversal feeds inference and completeness. Authored
+//! traversal visits every `ThenValue` group, including groups after a terminal
+//! statement, so receiving validation and coercion still apply to dead groups.
 //! WHY: value-producing `if`, match and catch share one completeness contract.
-//! Mixed produce/terminate paths are complete; any real fallthrough is not.
+//! Mixed produce/terminate paths are complete; any real fallthrough is not. Dead
+//! values must not constrain an inferred type, so inference keeps reachable-only traversal.
 //!
 //! This module does not own missing-`else` syntax checks.
 
@@ -94,20 +97,48 @@ pub fn visit_reachable_then_values<E>(
     Ok(())
 }
 
-/// Mutably visits every reachable `ThenValue` group for post-inference coercion.
-pub fn visit_reachable_then_values_mut<E>(
+/// Mutably visits every authored `ThenValue` group, including groups after a terminal statement.
+///
+/// WHAT: walks each statement body in authored order and recurses through `if`, `match` and
+///       lexical-scope bodies. Loop bodies are not searched: `then` is rejected inside a loop body
+///       because loop contexts never inherit a value target.
+/// WHY: a statically inactive branch or a tail after a terminal statement keeps its authored group
+///      until module finalization erases it, so every group still receives receiving validation.
+///      Reachability still governs inference contributions, which use the reachable visitors.
+pub fn visit_authored_then_values_mut<E>(
     body: &mut [AstNode],
     visitor: &mut impl FnMut(&mut ProducedValues) -> Result<(), E>,
 ) -> Result<(), E> {
-    let mut reachable = true;
-
     for statement in body {
-        if !reachable {
-            break;
-        }
+        match &mut statement.kind {
+            NodeKind::ThenValue(produced_values) => visitor(produced_values)?,
 
-        visit_statement_then_values_mut(statement, visitor)?;
-        reachable = statement_exits(statement).can_fall_through;
+            NodeKind::If(_, then_body, Some(else_body), _) => {
+                visit_authored_then_values_mut(then_body, visitor)?;
+                visit_authored_then_values_mut(else_body, visitor)?;
+            }
+
+            NodeKind::If(_, then_body, None, _) => {
+                visit_authored_then_values_mut(then_body, visitor)?;
+            }
+
+            NodeKind::Match {
+                arms,
+                default: maybe_default_body,
+                ..
+            } => {
+                for arm in arms {
+                    visit_authored_then_values_mut(&mut arm.body, visitor)?;
+                }
+                if let Some(default_body) = maybe_default_body {
+                    visit_authored_then_values_mut(default_body, visitor)?;
+                }
+            }
+
+            NodeKind::LexicalScope { body } => visit_authored_then_values_mut(body, visitor)?,
+
+            _ => {}
+        }
     }
 
     Ok(())
@@ -195,40 +226,6 @@ fn visit_statement_then_values<E>(
         }
 
         NodeKind::LexicalScope { body } => visit_reachable_then_values(body, visitor),
-
-        _ => Ok(()),
-    }
-}
-
-fn visit_statement_then_values_mut<E>(
-    statement: &mut AstNode,
-    visitor: &mut impl FnMut(&mut ProducedValues) -> Result<(), E>,
-) -> Result<(), E> {
-    match &mut statement.kind {
-        NodeKind::ThenValue(produced_values) => visitor(produced_values),
-
-        NodeKind::If(_, then_body, Some(else_body), _) => {
-            visit_reachable_then_values_mut(then_body, visitor)?;
-            visit_reachable_then_values_mut(else_body, visitor)
-        }
-
-        NodeKind::If(_, then_body, None, _) => visit_reachable_then_values_mut(then_body, visitor),
-
-        NodeKind::Match {
-            arms,
-            default: maybe_default_body,
-            ..
-        } => {
-            for arm in arms {
-                visit_reachable_then_values_mut(&mut arm.body, visitor)?;
-            }
-            if let Some(default_body) = maybe_default_body {
-                visit_reachable_then_values_mut(default_body, visitor)?;
-            }
-            Ok(())
-        }
-
-        NodeKind::LexicalScope { body } => visit_reachable_then_values_mut(body, visitor),
 
         _ => Ok(()),
     }

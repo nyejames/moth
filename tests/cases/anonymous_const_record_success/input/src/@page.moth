@@ -7,8 +7,8 @@ inner #= (x = 3)
 nested #= (inner = inner)
 x_value #= nested.inner.x
 Size = |
-    width Int,
-    height Int,
+    width I32,
+    height I32,
 |
 settings #= (
     window = (

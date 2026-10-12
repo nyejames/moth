@@ -1,6 +1,6 @@
 //! Common language-mismatch mistakes in declaration/signature position.
 //!
-//! WHAT: Detects patterns like `name(a, b)` and `name(a: Int)` that users from
+//! WHAT: Detects patterns like `name(a, b)` and `name(a: I32)` that users from
 //! C-family languages write when declaring functions or structs in Moth,
 //! and misplaced `as` in variable declarations.
 //!

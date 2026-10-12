@@ -8,7 +8,7 @@ Item = |
     label String,
 |
 
-mutate_computed_int |value ~Int| -> Int:
+mutate_computed_int |value ~I32| -> I32:
     value = value + 1
     return value
 ;
@@ -18,7 +18,7 @@ mutate_template_string |value ~String| -> String:
     return value
 ;
 
-mutate_collection |values ~{Int}| -> Int:
+mutate_collection |values ~{I32}| -> I32:
     ~values.push(4)
     return values.length()
 ;

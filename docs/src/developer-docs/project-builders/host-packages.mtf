@@ -22,10 +22,11 @@ implicit template scope. It doesn't inject arbitrary Rust functions, expose
 private constants or change Moth's no-shadowing rules. Ambiguous visible names
 are errors.
 
-Packages compile in their own semantic boundaries under the selected numeric
-profile. Builder source packages don't inherit the application's private
-project globals. Project-specific compile-time inputs use an explicitly
-registered synthetic interface with tracked provenance, not ambient state.
+Packages compile in their own semantic boundaries with the same exact numeric
+identities and language-owned defaults. Builder source packages don't inherit
+the application's private project globals. Project-specific compile-time inputs
+use an explicitly registered synthetic interface with tracked provenance, not
+ambient state.
 
 ### Derive a host interface from a Rust signature
 
@@ -86,10 +87,6 @@ the same layout or ownership model.
         [: Nominal `Byte`, distinct from `U8`]
     ]
     [td:
-        [: `moth::host::Int` and `moth::host::Float`]
-        [: Profile-selected `Int` and `Float`]
-    ]
-    [td:
         [: `&str` parameter]
         [: Shared string input with call-scoped Rust access]
     ]
@@ -115,9 +112,11 @@ the same layout or ownership model.
     ]
 ]
 
-Rust `i32` means `I32`, even when Moth's selected `Int` happens to be 32 bits.
-Rust `u8` means `U8`, never `Byte`. The host wrappers express those distinct
-Moth types without asking the adapter to guess from a machine word size.
+Rust integer and float types name their matching exact Moth types. Rust `i32`
+means `I32`, `f64` means `F64` and `u8` means `U8`, never `Byte`.
+The `Byte` wrapper preserves that separate octet identity. No adapter selects a
+type from a machine word size or builder setting. See
+@../../docs/numbers/#numeric-types (Numeric types).
 
 `Result<(), moth::host::Error>` has zero success slots and an error channel.
 `Result<Option<T>, moth::host::Error>` keeps absence distinct from failure.

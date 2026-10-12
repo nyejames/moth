@@ -414,7 +414,7 @@ pub(crate) struct ReachableRangeStepFailureUse {
     pub(crate) span: Option<SourceSpan>,
 }
 
-/// A reachable compiler-owned Float formatting or validation statement.
+/// A reachable compiler-owned binary-float formatting or validation statement.
 ///
 /// WHY: backend feature validation needs the statement's exact failure mode and source span to
 ///      distinguish supported trap-mode boundary checks from unsupported formatting/recovery.
@@ -1076,10 +1076,7 @@ impl<'hir> RuntimeFeatureUseCollector<'hir> {
                     }
                 }
             }
-            HirExpressionKind::Uint(_)
-            | HirExpressionKind::Int(_)
-            | HirExpressionKind::Float(_)
-            | HirExpressionKind::FixedScalar(_)
+            HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
             | HirExpressionKind::StringLiteral(_)

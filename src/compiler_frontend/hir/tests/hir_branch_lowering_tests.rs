@@ -29,6 +29,7 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use crate::compiler_frontend::hir::hir_builder::{
     assert_no_placeholder_terminators, build_ast_with_registered_types, lower_ast,
@@ -36,6 +37,21 @@ use crate::compiler_frontend::hir::hir_builder::{
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     runtime_expr, runtime_function_call_item, runtime_operand_item, runtime_operator_item,
 };
+
+/// One exact `I32` literal expression.
+///
+/// WHY: these fixtures pin the exact `I32` width explicitly at the scalar carrier.
+fn i32_literal(
+    value: i64,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
+    value_mode: ValueMode,
+) -> Expression {
+    Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+        span,
+        value_mode,
+    )
+}
 
 fn blocks_with_user_function_call(module: &HirModule, function_id: FunctionId) -> Vec<BlockId> {
     module
@@ -105,14 +121,14 @@ fn lowers_if_to_then_else_merge_blocks() {
             vec![node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, None, ValueMode::ImmutableOwned),
+                    i32_literal(1, None, ValueMode::ImmutableOwned),
                 )),
                 None,
             )],
             Some(vec![node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
-                    Expression::int(2, None, ValueMode::ImmutableOwned),
+                    i32_literal(2, None, ValueMode::ImmutableOwned),
                 )),
                 None,
             )]),
@@ -235,7 +251,7 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
             NodeKind::If(
                 condition,
                 vec![node(
-                    NodeKind::ExpressionStatement(Expression::int(
+                    NodeKind::ExpressionStatement(i32_literal(
                         1,
                         location,
                         ValueMode::ImmutableOwned,
@@ -372,7 +388,7 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
             NodeKind::If(
                 condition,
                 vec![node(
-                    NodeKind::ExpressionStatement(Expression::int(
+                    NodeKind::ExpressionStatement(i32_literal(
                         1,
                         location,
                         ValueMode::ImmutableOwned,
@@ -510,7 +526,7 @@ fn short_circuit_place_rhs_materializes_value_load_before_edge_transfer() {
                 NodeKind::If(
                     condition,
                     vec![node(
-                        NodeKind::ExpressionStatement(Expression::int(
+                        NodeKind::ExpressionStatement(i32_literal(
                             1,
                             location,
                             ValueMode::ImmutableOwned,
@@ -588,7 +604,7 @@ fn value_if_then_place_materializes_value_load_before_result_definition() {
         NodeKind::ThenValue(ProducedValues {
             expressions: vec![reference_expr_with_type_id(
                 left_name,
-                builtin_type_ids::INT,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 location,
                 ValueMode::ImmutableReference,
             )],
@@ -601,7 +617,7 @@ fn value_if_then_place_materializes_value_load_before_result_definition() {
         NodeKind::ThenValue(ProducedValues {
             expressions: vec![reference_expr_with_type_id(
                 right_name,
-                builtin_type_ids::INT,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 location,
                 ValueMode::ImmutableReference,
             )],
@@ -629,11 +645,11 @@ fn value_if_then_place_materializes_value_load_before_result_definition() {
                 else_scope: entry_path,
                 span: location,
                 generic_request_ranges: Default::default(),
-                result_type_ids: vec![builtin_type_ids::INT],
+                result_type_ids: vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
             })),
         },
         location,
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         DataType::Inferred,
         ValueMode::ImmutableOwned,
     );
@@ -648,14 +664,14 @@ fn value_if_then_place_materializes_value_load_before_result_definition() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     left_name,
-                    Expression::int(1, location, ValueMode::ImmutableOwned),
+                    i32_literal(1, location, ValueMode::ImmutableOwned),
                 )),
                 location,
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     right_name,
-                    Expression::int(2, location, ValueMode::ImmutableOwned),
+                    i32_literal(2, location, ValueMode::ImmutableOwned),
                 )),
                 location,
             ),
@@ -1052,7 +1068,7 @@ fn non_unit_function_with_terminal_if_does_not_report_fallthrough() {
         chooser,
         FunctionSignature {
             parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
         },
         vec![node(
             NodeKind::If(
@@ -1067,11 +1083,11 @@ fn non_unit_function_with_terminal_if_does_not_report_fallthrough() {
                     ValueMode::ImmutableOwned,
                 ),
                 vec![node(
-                    NodeKind::Return(vec![Expression::int(1, None, ValueMode::ImmutableOwned)]),
+                    NodeKind::Return(vec![i32_literal(1, None, ValueMode::ImmutableOwned)]),
                     None,
                 )],
                 Some(vec![node(
-                    NodeKind::Return(vec![Expression::int(2, None, ValueMode::ImmutableOwned)]),
+                    NodeKind::Return(vec![i32_literal(2, None, ValueMode::ImmutableOwned)]),
                     None,
                 )]),
                 test_if_branch_metadata(true),

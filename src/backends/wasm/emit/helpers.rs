@@ -222,6 +222,18 @@ pub(crate) fn emit_helper_function(
             function.instruction(&Instruction::I32Add);
             function.instruction(&Instruction::LocalSet(NEW_LEN));
 
+            // Trap when content_len + src_len wraps u32, before any header or buffer write.
+            // The doubling bound is checked only on the growth path, where new_len * 2 is computed.
+            function.instruction(&Instruction::LocalGet(NEW_LEN));
+            function.instruction(&Instruction::LocalGet(BUFFER));
+            function.instruction(&Instruction::I32Load(memarg(4)));
+            function.instruction(&Instruction::I32LtU);
+            function.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+            {
+                function.instruction(&Instruction::Unreachable);
+            }
+            function.instruction(&Instruction::End);
+
             // if new_len > capacity, grow
             function.instruction(&Instruction::LocalGet(NEW_LEN));
             function.instruction(&Instruction::LocalGet(BUFFER));
@@ -229,6 +241,17 @@ pub(crate) fn emit_helper_function(
             function.instruction(&Instruction::I32GtU);
             function.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
             {
+                // Trap before the growth product new_len * 2 is computed, when it would wrap u32.
+                // Growth keeps the doubling policy; this bounds only the physical capacity product.
+                function.instruction(&Instruction::LocalGet(NEW_LEN));
+                function.instruction(&Instruction::I32Const(0x7FFF_FFFF));
+                function.instruction(&Instruction::I32GtU);
+                function.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+                {
+                    function.instruction(&Instruction::Unreachable);
+                }
+                function.instruction(&Instruction::End);
+
                 // new_cap = new_len * 2 (simple growth policy)
                 function.instruction(&Instruction::LocalGet(NEW_LEN));
                 function.instruction(&Instruction::I32Const(2));
@@ -260,6 +283,20 @@ pub(crate) fn emit_helper_function(
                 function.instruction(&Instruction::LocalGet(BUFFER));
                 function.instruction(&Instruction::LocalGet(NEW_CAP));
                 function.instruction(&Instruction::I32Store(memarg(8)));
+            }
+            function.instruction(&Instruction::End);
+
+            // Trap when content_ptr + new_len wraps u32, before the append copy writes the tail.
+            function.instruction(&Instruction::LocalGet(BUFFER));
+            function.instruction(&Instruction::I32Load(memarg(0)));
+            function.instruction(&Instruction::LocalGet(NEW_LEN));
+            function.instruction(&Instruction::I32Add);
+            function.instruction(&Instruction::LocalGet(BUFFER));
+            function.instruction(&Instruction::I32Load(memarg(0)));
+            function.instruction(&Instruction::I32LtU);
+            function.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+            {
+                function.instruction(&Instruction::Unreachable);
             }
             function.instruction(&Instruction::End);
 
@@ -310,6 +347,18 @@ pub(crate) fn emit_helper_function(
             function.instruction(&Instruction::I32Add);
             function.instruction(&Instruction::LocalSet(NEW_LEN));
 
+            // Trap when content_len + src_len wraps u32, before any header or buffer write.
+            // The doubling bound is checked only on the growth path, where new_len * 2 is computed.
+            function.instruction(&Instruction::LocalGet(NEW_LEN));
+            function.instruction(&Instruction::LocalGet(BUFFER));
+            function.instruction(&Instruction::I32Load(memarg(4)));
+            function.instruction(&Instruction::I32LtU);
+            function.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+            {
+                function.instruction(&Instruction::Unreachable);
+            }
+            function.instruction(&Instruction::End);
+
             // if new_len > capacity, grow
             function.instruction(&Instruction::LocalGet(NEW_LEN));
             function.instruction(&Instruction::LocalGet(BUFFER));
@@ -317,6 +366,17 @@ pub(crate) fn emit_helper_function(
             function.instruction(&Instruction::I32GtU);
             function.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
             {
+                // Trap before the growth product new_len * 2 is computed, when it would wrap u32.
+                // Growth keeps the doubling policy; this bounds only the physical capacity product.
+                function.instruction(&Instruction::LocalGet(NEW_LEN));
+                function.instruction(&Instruction::I32Const(0x7FFF_FFFF));
+                function.instruction(&Instruction::I32GtU);
+                function.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+                {
+                    function.instruction(&Instruction::Unreachable);
+                }
+                function.instruction(&Instruction::End);
+
                 function.instruction(&Instruction::LocalGet(NEW_LEN));
                 function.instruction(&Instruction::I32Const(2));
                 function.instruction(&Instruction::I32Mul);
@@ -343,6 +403,20 @@ pub(crate) fn emit_helper_function(
                 function.instruction(&Instruction::LocalGet(BUFFER));
                 function.instruction(&Instruction::LocalGet(NEW_CAP));
                 function.instruction(&Instruction::I32Store(memarg(8)));
+            }
+            function.instruction(&Instruction::End);
+
+            // Trap when content_ptr + new_len wraps u32, before the append copy writes the tail.
+            function.instruction(&Instruction::LocalGet(BUFFER));
+            function.instruction(&Instruction::I32Load(memarg(0)));
+            function.instruction(&Instruction::LocalGet(NEW_LEN));
+            function.instruction(&Instruction::I32Add);
+            function.instruction(&Instruction::LocalGet(BUFFER));
+            function.instruction(&Instruction::I32Load(memarg(0)));
+            function.instruction(&Instruction::I32LtU);
+            function.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+            {
+                function.instruction(&Instruction::Unreachable);
             }
             function.instruction(&Instruction::End);
 

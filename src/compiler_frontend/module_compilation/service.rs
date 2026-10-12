@@ -820,11 +820,7 @@ fn run_semantic_stages(
         context.builder_runtime_packages,
     );
 
-    let numeric_proofs = analyse_numeric_proofs(
-        &hir_module,
-        &type_environment,
-        context.options.numeric_profile,
-    );
+    let numeric_proofs = analyse_numeric_proofs(&hir_module, &type_environment);
 
     Ok(SemanticStageOutput::Complete(Box::new(
         CompleteSemanticStage {

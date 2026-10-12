@@ -1,4 +1,4 @@
-recover_product |left Int, right Int| -> Int:
+recover_product |left I32, right I32| -> I32:
     product = left * right catch:
         then -7
     ;

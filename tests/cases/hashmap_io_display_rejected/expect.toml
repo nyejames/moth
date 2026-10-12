@@ -4,4 +4,4 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-TYPE-0001"]
-message_contains = ["String", "{String = Int}"]
+message_contains = ["String", "{String = I32}"]

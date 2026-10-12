@@ -1,0 +1,8 @@
+entry = "."
+
+# The bound whole collection keeps its integer family beside the raw nested decimal collection.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]

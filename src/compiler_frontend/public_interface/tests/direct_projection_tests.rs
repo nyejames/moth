@@ -39,6 +39,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::datatypes::ReceiverKey;
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::datatype::DataType;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
@@ -63,8 +64,14 @@ use crate::compiler_frontend::tokenizer::tokens::TestSourceTokensBuilder;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use rustc_hash::FxHashMap;
+
+/// One materialised `I32` fixture value; panics when the fixture literal is out of range.
+fn i32_value(value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range")
+}
 
 fn alias_origin(name: &str) -> OriginTypeId {
     OriginTypeId::new(
@@ -206,7 +213,7 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     // Register a struct and a choice so the type-surface projection can resolve them.
     let (_, struct_type_id) = register_struct(
@@ -235,7 +242,7 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
         &mut path_fork,
     );
     let choice_root = choice_root("Status", choice_type_id, &mut string_table, &mut path_fork);
-    let alias_root = alias_root("IntAlias", int_id, &mut string_table, &mut path_fork);
+    let alias_root = alias_root("I32Alias", int_id, &mut string_table, &mut path_fork);
     let constant_root = constant_root("MaxSize", int_id, &mut string_table, &mut path_fork);
 
     let root_table = ResolvedPublicTypeRootTable {
@@ -263,8 +270,8 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
         ),
         ExportBinding::new(
             module_origin(),
-            "IntAlias".to_owned(),
-            OriginDeclarationId::Type(alias_origin("IntAlias")),
+            "I32Alias".to_owned(),
+            OriginDeclarationId::Type(alias_origin("I32Alias")),
         ),
         ExportBinding::new(
             module_origin(),
@@ -311,7 +318,7 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
         id: path_fork
             .try_intern_portable_path("MaxSize", &mut string_table)
             .expect("test path fits"),
-        value: Expression::int(256, None, ValueMode::ImmutableOwned),
+        value: Expression::fixed_scalar(i32_value(256), None, ValueMode::ImmutableOwned),
         binding_span: None,
         config_qualifier: None,
     };
@@ -364,7 +371,7 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
     assert!(categories.contains(&"constant"));
     assert!(categories.contains(&"trait"));
 
-    // The constant record carries the canonical builtin int type.
+    // The constant record carries the canonical fixed-scalar identity.
     let constant_record = draft
         .declarations
         .iter()
@@ -373,11 +380,11 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
     if let PublicDeclarationSemantics::Constant(semantics) = &constant_record.semantics {
         assert_eq!(
             semantics.type_identity,
-            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)
+            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(FixedScalar::I32))
         );
     }
 
-    // The alias record carries the canonical builtin int target.
+    // The alias record carries the canonical fixed-scalar target.
     let alias_record = draft
         .declarations
         .iter()
@@ -391,7 +398,7 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
     if let PublicDeclarationSemantics::TransparentAlias(semantics) = &alias_record.semantics {
         assert_eq!(
             semantics.target_type_identity,
-            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)
+            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(FixedScalar::I32))
         );
     }
 
@@ -772,7 +779,7 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let string_id = env.builtins().string;
     let default_member = SyntheticInterfaceMemberIdentity::new(
         SyntheticInterfaceClass::ProjectContext,
@@ -801,7 +808,7 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
         field_declaration_with_default(
             "count",
             int_id,
-            Expression::int(42, None, ValueMode::ImmutableOwned),
+            Expression::fixed_scalar(i32_value(42), None, ValueMode::ImmutableOwned),
             &mut string_table,
             &mut path_fork,
         ),
@@ -877,7 +884,7 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
     assert_eq!(semantics.parameters[1].name.as_deref(), Some("count"));
     assert_eq!(
         &semantics.parameters[1].folded_default,
-        &Some(PublicFoldedValue::Int(42))
+        &Some(PublicFoldedValue::FixedScalar(i32_value(42)))
     );
 
     assert_eq!(semantics.parameters[2].name.as_deref(), Some("subject"));
@@ -889,7 +896,7 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let bool_id = env.builtins().bool;
     let string_id = env.builtins().string;
 
@@ -912,7 +919,7 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
         field_declaration_with_default(
             "x",
             int_id,
-            Expression::int(10, None, ValueMode::ImmutableOwned),
+            Expression::fixed_scalar(i32_value(10), None, ValueMode::ImmutableOwned),
             &mut string_table,
             &mut path_fork,
         ),
@@ -990,7 +997,7 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
     assert_eq!(semantics.fields[0].name.as_str(), "x");
     assert_eq!(
         &semantics.fields[0].folded_default,
-        &Some(PublicFoldedValue::Int(10))
+        &Some(PublicFoldedValue::FixedScalar(i32_value(10)))
     );
 
     assert_eq!(semantics.fields[1].name.as_str(), "flag");
@@ -1008,7 +1015,7 @@ fn choice_payload_fields_remain_default_free() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let variant = ChoiceVariantDefinition {
         name: string_table.intern("Some"),

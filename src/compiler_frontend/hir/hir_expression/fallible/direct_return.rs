@@ -100,8 +100,15 @@ impl<'a> HirBuilder<'a> {
         if result_carrier.validate_float_success {
             success_payload = self.emit_validated_float_value(success_payload, span)?;
         }
+
+        // Recoverable float validation branches its own carrier and terminates the original
+        // carrier success block, continuing in a fresh success block. The authored return and
+        // the restored current block must use that continuation; trap-mode validation creates
+        // no block, so the continuation is the original branch block.
+        let success_continuation = self.current_block_id_or_error(span)?;
+
         self.emit_terminator_with_span(
-            branch.success_block,
+            success_continuation,
             HirTerminator::ReturnSuccess(success_payload),
             span,
             authored_span,
@@ -115,6 +122,6 @@ impl<'a> HirBuilder<'a> {
             authored_span,
         )?;
 
-        Ok(self.set_current_block(branch.success_block, span)?)
+        Ok(self.set_current_block(success_continuation, span)?)
     }
 }

@@ -3,7 +3,22 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["external_native_float64_nonfinite code=304"]
+rendered_output_contains = [
+    "external_native_float64_nonfinite code=304",
+    "raw-class=1/2/3/5/4",
+    "raw-codes=304/304/304",
+    "consumer=1 finite=0 invalid=304/304/304",
+    "consumer=2 finite=0 invalid=304/304/304",
+    "consumer=3 finite=0 invalid=304/304/304",
+    "consumer=4 finite=0 invalid=304/304/304",
+    "consumer=5 finite=0 invalid=304/304/304",
+    "nested returned-error=73",
+]
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["function __moth_float_validate("]
 
 [backends.html_wasm]
 mode = "failure"

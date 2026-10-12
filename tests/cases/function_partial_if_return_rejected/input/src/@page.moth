@@ -1,6 +1,6 @@
 -- non-unit function with only one runtime branch returning must be rejected during AST emission
 
-returns_int |condition Bool| -> Int:
+returns_int |condition Bool| -> I32:
     if condition:
         return 1
     ;

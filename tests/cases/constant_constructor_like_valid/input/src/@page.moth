@@ -1,4 +1,4 @@
-Point = |x Int, y Int|
+Point = |x I32, y I32|
 
 origin #= Point(0, 0)
 

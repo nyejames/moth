@@ -7,7 +7,7 @@
 
 use super::error::ExpressionParseError;
 use super::expression_rpn::ExpressionRpnItem;
-use super::parse_expression_dispatch::push_expression_operand;
+use super::parse_expression_dispatch::{push_expression_operand, push_pending_numeric_binding};
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression::{
@@ -17,10 +17,12 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
     PlaceExpression, PlaceExpressionKind,
 };
 use crate::compiler_frontend::ast::field_access::{
-    PostfixChainAccess, parse_field_access_expression_with_receiver_access,
-    parse_postfix_chain_expression, reference_expression_from_declaration,
+    ParsedPostfixExpression, PostfixChainAccess, RetainedOperandInput,
+    parse_field_access_expression_with_receiver_access, parse_postfix_chain_expression,
+    reference_expression_from_declaration, retain_pending_operand_member_access,
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeDeclarationRef;
+use crate::compiler_frontend::ast::numeric_construction::NumericBindingId;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
@@ -36,11 +38,28 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
+use crate::compiler_frontend::value_mode::ValueMode;
 
-pub(super) struct ParsedCopyPlace {
-    pub(super) place: PlaceExpression,
-    pub(super) diagnostic_type: DataType,
-    pub(super) type_id: TypeId,
+/// One parsed `copy` operand.
+///
+/// WHAT: either a ready place payload with its concrete type, or an eligible body-local numeric
+///       binding whose single static type is not selected yet.
+/// WHY: `copy` must retain the authored shape (a value copy of a place) until the body root
+///      selects the binding's type; a place payload would require fabricating a `TypeId` and a
+///      default value that the language has not selected.
+pub(super) enum ParsedCopyPlace {
+    /// A ready place payload with its concrete type.
+    Ready {
+        place: PlaceExpression,
+        diagnostic_type: DataType,
+        type_id: TypeId,
+    },
+    /// A pending numeric binding reference whose copy completes at the body root.
+    PendingNumeric {
+        binding: NumericBindingId,
+        span: Option<SourceSpan>,
+    },
 }
 
 // WHAT: parses a mutable receiver expression rooted at a name or `this`.
@@ -109,16 +128,66 @@ pub(super) fn parse_mutable_receiver_expression(
         .into());
     }
 
+    // A pending numeric binding has no declaration or selected type yet: retain the authored
+    // receiver so the expression entry raises the body-root deferral for the whole fragment.
+    // Member access on it is reported by the ordinary member diagnostic, never by a field,
+    // method or trait search against a type that does not exist yet.
+    if let Some(pending_binding) = receiver_declaration.pending_binding() {
+        let receiver_span = current_span(token_stream);
+        token_stream.advance();
+        push_pending_numeric_binding(context, expression, pending_binding, receiver_span, false)?;
+        // The authored `~` opened a mutable receiver chain over a real place: the retained member
+        // steps keep that access and the operand completes as a mutable reference, so the existing
+        // receiver-access policy validates them against the binding instead of a temporary.
+        if token_stream.current_tag() == TokenTag::DOT {
+            retain_pending_operand_member_access(
+                token_stream,
+                expression,
+                RetainedOperandInput {
+                    chain_access: PostfixChainAccess::mutable_marker(marker_span),
+                    expected: ExpectedType::Infer,
+                    value_mode: &ValueMode::MutableReference,
+                },
+                context,
+                type_interner,
+                string_table,
+                path_fork,
+            )?;
+        }
+        return Ok(());
+    }
+
+    // A ready root needs its declaration for the field-access chain below; the pending case
+    // above is the only shape without one.
+    let Some(receiver) = receiver_declaration.ready_declaration() else {
+        return Err(CompilerError::compiler_error(
+            "a mutable receiver root carried neither a ready declaration nor a pending numeric \
+             binding",
+        )
+        .into());
+    };
+
     token_stream.advance();
     let receiver_expression = parse_field_access_expression_with_receiver_access(
         token_stream,
-        receiver_declaration.as_declaration(),
+        receiver,
         context,
         PostfixChainAccess::mutable_marker(marker_span),
+        allow_boundary_catch,
         type_interner,
         string_table,
         path_fork,
     )?;
+
+    // A retained receiver call keeps its authored operand position: the enclosing expression
+    // boundary decides whether the fragment completes here or defers to the body root.
+    let receiver_expression = match receiver_expression {
+        ParsedPostfixExpression::Value(value) => value,
+        ParsedPostfixExpression::RetainedOperand(item) => {
+            expression.push(item);
+            return Ok(());
+        }
+    };
 
     push_expression_operand(
         token_stream,
@@ -174,14 +243,42 @@ pub(super) fn parse_copy_place_expression(
             }
 
             token_stream.advance();
-            parsed_place.place.span = open_span;
+            // The authored place expression began at the opening parenthesis; both shapes keep
+            // that boundary so diagnostics point at the whole place.
+            match &mut parsed_place {
+                ParsedCopyPlace::Ready { place, .. } => place.span = open_span,
+                ParsedCopyPlace::PendingNumeric { span, .. } => *span = open_span,
+            }
             Ok(parsed_place)
         }
 
         TokenTag::SYMBOL | TokenTag::THIS => {
             let place_declaration = resolve_place_root(token_stream, context, string_table)?;
+
+            // An eligible body-local numeric binding has no declaration, place payload or
+            // `TypeId` yet: retain the authored `copy` of the reference so the expression entry
+            // raises the body-root deferral for the whole fragment.
+            if let Some(pending_binding) = place_declaration.pending_binding() {
+                let reference_span = current_span(token_stream);
+                token_stream.advance();
+                return Ok(ParsedCopyPlace::PendingNumeric {
+                    binding: pending_binding,
+                    span: reference_span,
+                });
+            }
+
+            // A ready root needs its declaration for the place payload below; the pending case
+            // above is the only shape without one.
+            let Some(place_declaration) = place_declaration.ready_declaration() else {
+                return Err(CompilerError::compiler_error(
+                    "a copy-place root carried neither a ready declaration nor a pending numeric \
+                     binding",
+                )
+                .into());
+            };
+
             if context
-                .source_callable_signature(place_declaration.as_declaration())
+                .source_callable_signature(place_declaration)
                 .is_some()
             {
                 let reason = if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS) {
@@ -196,7 +293,7 @@ pub(super) fn parse_copy_place_expression(
             } else {
                 let reference_span = current_span(token_stream);
                 let reference_expression = reference_expression_from_declaration(
-                    place_declaration.as_declaration(),
+                    place_declaration,
                     context,
                     type_interner,
                     reference_span,
@@ -206,16 +303,29 @@ pub(super) fn parse_copy_place_expression(
                 let copied_expression = if token_stream.position() < token_stream.length()
                     && token_stream.current_tag() == TokenTag::DOT
                 {
-                    parse_postfix_chain_expression(
+                    match parse_postfix_chain_expression(
                         token_stream,
                         reference_expression,
                         reference_span,
                         PostfixChainAccess::shared(),
+                        // A `copy` operand is a place: an authored boundary catch never attaches to
+                        // a retained receiver call here.
+                        false,
                         context,
                         type_interner,
                         string_table,
                         path_fork,
-                    )?
+                    )? {
+                        ParsedPostfixExpression::Value(value) => value,
+                        // A retained receiver call has no value and can never be a place.
+                        ParsedPostfixExpression::RetainedOperand(item) => {
+                            return Err(CompilerDiagnostic::invalid_copy_target(
+                                InvalidCopyTargetReason::NonPlace,
+                                item.source_span(),
+                            )
+                            .into());
+                        }
+                    }
                 } else {
                     reference_expression
                 };
@@ -228,7 +338,7 @@ pub(super) fn parse_copy_place_expression(
                     .into());
                 };
 
-                Ok(ParsedCopyPlace {
+                Ok(ParsedCopyPlace::Ready {
                     place,
                     diagnostic_type: copied_expression.diagnostic_type,
                     type_id: copied_expression.type_id,

@@ -1,5 +1,11 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-RULE-0083"]
-message_contains = ['requires the current function to have an `Error!` return slot']
+diagnostic_codes = ["MOTH-RULE-0051"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0051"
+reason = "invalid_fallible_handling.unhandled_builtin_failure_in_exported_function"
+path = "input/@page.moth"
+line = 2
+count = 1

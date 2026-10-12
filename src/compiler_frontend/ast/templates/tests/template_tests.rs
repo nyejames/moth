@@ -35,7 +35,6 @@ use crate::compiler_frontend::tests::parse_support::{
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
-use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -83,7 +82,6 @@ fn collect_and_strip_comment_templates_for_tests_with_store(
         ast_nodes,
         string_table,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        NumericProfile::STANDARD,
         template_ir_store,
     )
 }

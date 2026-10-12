@@ -5,9 +5,9 @@
 //!     (`+=`, `-=`, `*=`, `/=`, `//=`, `%=`, `^=`) after a place
 //!     expression has been resolved.
 //!   - Validates mutability and type compatibility for the target.
-//!   - Parses compound RHSs with numeric-literal peer hints for fixed scalars, bare `Float`,
-//!     non-power `Dec` and every `Uint` target, evaluates `target op rhs` in its promoted
-//!     domain and converts incompatible numeric results back through builtin cast evidence.
+//!   - Parses compound RHSs with numeric-literal peer hints for fixed scalars and non-power
+//!     `Dec` targets, evaluates `target op rhs` in its promoted domain and converts incompatible
+//!     numeric results back through builtin cast evidence.
 //!
 //! WHY:  Mutation is a distinct expression kind in the AST; centralising
 //!       the parsing, validation, and compound-value construction here
@@ -16,7 +16,9 @@
 //!
 //! Use `handle_mutation` when the statement parser has only a variable
 //! reference, or `handle_mutation_target` when the caller has already
-//! resolved the place target (e.g. after field-access parsing).
+//! resolved the place target (e.g. after field-access parsing). Both return
+//! [`MutationOutcome`]: a finished node, or the ordered continuation the body
+//! root resumes when the right-hand side still holds numeric origins.
 //!
 //! DOES NOT OWN:
 //!   - Value-block / receiver-block mutation. Those live in
@@ -39,9 +41,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::{
 use crate::compiler_frontend::ast::expressions::expression_types::{
     CastHandling, ResolvedCastEvidence,
 };
-use crate::compiler_frontend::ast::expressions::parse_expression::{
-    create_expression, create_expression_with_trailing_newline_policy,
-};
+use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_with_trailing_newline_policy;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
@@ -49,14 +49,18 @@ use crate::compiler_frontend::ast::expressions::parse_expression_places::{
     expression_from_place_expression, place_expression_from_expression,
     place_expression_is_mutable, root_binding_name_of_place,
 };
-use crate::compiler_frontend::ast::field_access::parse_field_access;
+use crate::compiler_frontend::ast::field_access::{ParsedPostfixExpression, parse_field_access};
+use crate::compiler_frontend::ast::numeric_construction::{
+    AssignmentContinuation, CompoundAssignmentContinuation, DeferredAssignmentTarget,
+    NumericContinuation, NumericContinuationId, StatementExpression, deferred_numeric_expression,
+};
 use crate::compiler_frontend::ast::statements::value_production::receiver::try_parse_value_block_at_receiver;
-use crate::compiler_frontend::ast::statements::value_production::types::ValueReceiverKind;
+use crate::compiler_frontend::ast::statements::value_production::types::{
+    ParsedReceiverValue, ValueReceiverKind,
+};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::casts::evidence::lookup_builtin_evidence;
-use crate::compiler_frontend::builtins::casts::targets::{
-    BuiltinCastFallibility, builtin_cast_target_for_type,
-};
+use crate::compiler_frontend::builtins::casts::targets::builtin_cast_target_for_type;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::{
@@ -68,12 +72,28 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
-use crate::compiler_frontend::type_coercion::compatibility::is_declaration_compatible;
+use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{
-    ExpectedType, cast_target_context_for_type_id, is_numeric_literal_destination_type_id,
-    parse_expectation_for_type_id,
+    CastTargetContext, ExpectedType, cast_target_context_for_type_id,
+    is_numeric_literal_destination_type_id, parse_expectation_for_type_id,
 };
+use crate::compiler_frontend::value_mode::ValueMode;
+
+/// One parsed mutation: a finished node, or a continuation waiting for its retained value.
+///
+/// WHAT: reports whether the mutation completed at parse time or must resume at the body root.
+/// WHY: a right-hand side that still holds numeric origins cannot be evaluated at the receiving
+///      site, but the target place and the statement's authored position are already known, so
+///      the statement owner records one ordered continuation instead of a fabricated node.
+// `Ready` is a one-shot statement node pushed straight into the draft, so it stays inline;
+// boxing it would add a heap allocation to every parsed mutation.
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum MutationOutcome {
+    Ready(AstNode),
+    /// The statement waits for its retained right-hand side at the body root.
+    Retained(NumericContinuationId),
+}
 
 /// Build the existing assignment mismatch diagnostic for a compound store.
 ///
@@ -101,8 +121,11 @@ fn assignment_type_mismatch(
 ///       `Operator` variant and a human-readable label used in diagnostics.
 /// WHY: compound assignments are desugared into `target = target op rhs`;
 ///      the stable `TokenTag` taxonomy is the canonical operator authority, so
-///      the cursor classifies the operator tag directly.
-fn compound_assignment_operator_for_tag(tag: TokenTag) -> Option<(Operator, &'static str)> {
+///      the cursor classifies the operator tag directly. Also consumed by the
+///      statement parser so pending-target mutations record the same operator.
+pub(crate) fn compound_assignment_operator_for_tag(
+    tag: TokenTag,
+) -> Option<(Operator, &'static str)> {
     match tag {
         TokenTag::ADD_ASSIGN => Some((Operator::Add, "Compound assignment '+='")),
         TokenTag::SUBTRACT_ASSIGN => Some((Operator::Subtract, "Compound assignment '-='")),
@@ -129,12 +152,123 @@ struct CompoundAssignmentInput<'a> {
     operator: Operator,
 }
 
-/// WHAT: gives existing fixed-scalar targets, bare `Float` targets, non-power `Dec` targets
-///       and every `Uint` target a numeric literal hint, then evaluates `target op rhs` in the
-///       promoted domain.
-/// WHY: `Dec ^ Int` must keep the exponent in the profile `Int` domain even when the compound
-///      assignment's receiving type is a Dec scale, while `Uint ^ Uint` keeps its exponent in
-///      the `Uint` domain.
+/// Input bundle for `evaluate_compound_assignment_with_ready_rhs`.
+///
+/// WHAT: carries the target declaration, the resolved place target and an already-evaluated
+///       right-hand operand.
+/// WHY: numeric-dependent statements retain their compound RHS until the body root has selected
+///      the target's single static type; resuming must not need the token stream that produced it.
+pub(crate) struct CompoundAssignmentReadyInput<'a, 'env> {
+    /// The authored declaration's value mode: every compound tag is an arithmetic operator, so
+    /// the promoted evaluation runs in the declared binding's mode.
+    pub(crate) declaration_value_mode: &'a ValueMode,
+    pub(crate) target: &'a PlaceExpression,
+    pub(crate) target_type_id: TypeId,
+    pub(crate) operator: Operator,
+    pub(crate) rhs: Expression,
+    pub(crate) context: &'a ScopeContext,
+    pub(crate) type_interner: &'a mut AstTypeInterner<'env>,
+    pub(crate) string_table: &'a mut StringTable,
+    pub(crate) path_fork: &'a mut PathInternerFork,
+}
+
+/// Complete a compound assignment whose right-hand operand is already evaluated.
+///
+/// WHAT: evaluates `target op rhs` in the promoted domain, then applies the established store
+///       conversion back to the target's exact type.
+/// WHY: the promoted arithmetic and the receiving conversion are the same rules whether the RHS
+///      arrives straight from the cursor or from body-root numeric completion.
+pub(crate) fn evaluate_compound_assignment_with_ready_rhs(
+    input: CompoundAssignmentReadyInput<'_, '_>,
+) -> Result<Expression, ExpressionParseError> {
+    let CompoundAssignmentReadyInput {
+        declaration_value_mode,
+        target,
+        target_type_id,
+        operator,
+        rhs,
+        context,
+        type_interner,
+        string_table,
+        path_fork,
+    } = input;
+
+    let target_expression = expression_from_place_expression(target);
+    let operator_item = ExpressionRpnItem::Operator {
+        operator,
+        span: target.span,
+    };
+    let mut inferred = ExpectedType::Infer;
+    let value = evaluate_expression(
+        context,
+        vec![
+            ExpressionRpnItem::Operand(target_expression),
+            ExpressionRpnItem::Operand(rhs),
+            operator_item,
+        ],
+        type_interner,
+        &mut inferred,
+        declaration_value_mode,
+        string_table,
+        path_fork,
+    )?;
+
+    if is_type_compatible(target_type_id, value.type_id, type_interner.environment()) {
+        return Ok(value);
+    }
+
+    let type_environment = type_interner.environment();
+    // The promoted arithmetic result is always numeric: every compound tag is an arithmetic
+    // operator and `+` never concatenates strings, so the arithmetic evaluation already proved
+    // the source supports a cast classification. Let the builtin pair evidence owner decide the
+    // destination conversion, including exact `Dec` scales.
+    let source_target =
+        builtin_cast_target_for_type(value.type_id, type_environment, string_table, path_fork);
+    let destination_target =
+        builtin_cast_target_for_type(target_type_id, type_environment, string_table, path_fork);
+    let cast_targets = source_target.zip(destination_target);
+    let evidence = cast_targets.and_then(|(source, target)| {
+        lookup_builtin_evidence(source, target).map(|evidence| (target, evidence))
+    });
+    let Some((target, evidence)) = evidence else {
+        return Err(assignment_type_mismatch(target_type_id, &value));
+    };
+
+    let source_type_id = value.type_id;
+    let cast_span = value.span;
+    let cast = ResolvedCastExpression {
+        source: Box::new(value),
+        source_type_id,
+        target_type_id,
+        target,
+        requires_optional_wrap_after_cast: false,
+        evidence: ResolvedCastEvidence::Builtin {
+            policy: evidence.policy,
+        },
+        fallibility: evidence.fallibility,
+        handling: CastHandling::StoreConversion,
+        span: cast_span,
+    };
+    let cast_value = Expression::cast(cast, target_type_id, type_interner.environment());
+    let mut inferred = ExpectedType::Infer;
+    let converted_value = evaluate_expression(
+        context,
+        vec![ExpressionRpnItem::Operand(cast_value)],
+        type_interner,
+        &mut inferred,
+        declaration_value_mode,
+        string_table,
+        path_fork,
+    )?;
+
+    Ok(converted_value)
+}
+
+/// WHAT: gives fixed-scalar and non-power `Dec` targets a numeric literal hint, then evaluates
+///       `target op rhs` in the promoted domain.
+/// WHY: `Dec ^ I32` keeps the exponent in the `I32` domain even when the compound assignment's
+///      receiving type is a Dec scale, while unsigned fixed-scalar powers keep the exponent in
+///      their unsigned peer domain.
 fn evaluate_compound_assignment_value(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
@@ -151,14 +285,10 @@ fn evaluate_compound_assignment_value(
     } = input;
     let type_environment = type_interner.environment();
     let target_is_number = type_environment.number_scale(target_type_id).is_some();
-    // Dec power alone keeps a pending compound RHS in profile Int instead of its Dec peer.
+    // Dec power keeps a pending compound RHS in I32 instead of its Dec peer.
     let number_power_exponent = target_is_number && matches!(operator, Operator::Exponent);
     let peer_numeric_literal =
         is_numeric_literal_destination_type_id(target_type_id, type_environment)
-            && (type_environment.fixed_scalar(target_type_id).is_some()
-                || target_type_id == type_environment.builtins().float
-                || target_type_id == type_environment.builtins().uint
-                || target_is_number)
             && !number_power_exponent;
     let mut expr_type = if peer_numeric_literal {
         ExpectedType::NumericLiteral(target_type_id)
@@ -174,95 +304,40 @@ fn evaluate_compound_assignment_value(
         .component(variable_declaration.id)
         .map(|target_name| context.with_pending_catch_assignment_targets(&[target_name]))
         .unwrap_or_else(|| context.clone());
-    let rhs = create_expression(
-        token_stream,
-        &rhs_context,
-        type_interner,
-        &mut expr_type,
-        &variable_declaration.value.value_mode,
+    // The compound right-hand side is this statement's whole authored operand, so a deferral
+    // raised here is a complete fragment the statement owner can retain.
+    let mut cast_target_context = CastTargetContext::None;
+    let rhs_input = ExpressionParseInput::ordinary(
+        ExpressionParseResources {
+            token_stream,
+            scope_context: &rhs_context,
+            type_interner,
+            expected_type: &mut expr_type,
+            cast_target_context: &mut cast_target_context,
+            value_mode: &variable_declaration.value.value_mode,
+            string_table,
+            path_fork,
+        },
         false,
-        string_table,
-        path_fork,
-    )?;
+    )
+    .with_numeric_deferral_owner();
+    let rhs = create_expression_with_trailing_newline_policy(rhs_input)?;
 
     // -------------------------------------------
     //  Evaluate `target op rhs` in its promoted
     //  domain before applying the store conversion
     // -------------------------------------------
-    let target_expression = expression_from_place_expression(target);
-
-    let operator_item = ExpressionRpnItem::Operator {
-        operator,
-        span: target.span,
-    };
-    let mut inferred = ExpectedType::Infer;
-    let value = evaluate_expression(
-        context,
-        vec![
-            ExpressionRpnItem::Operand(target_expression),
-            ExpressionRpnItem::Operand(rhs),
-            operator_item,
-        ],
-        type_interner,
-        &mut inferred,
-        &variable_declaration.value.value_mode,
-        string_table,
-        path_fork,
-    )?;
-
-    if is_declaration_compatible(target_type_id, value.type_id, type_interner.environment()) {
-        return Ok(value);
-    }
-
-    let type_environment = type_interner.environment();
-    // The promoted arithmetic result is always numeric: every compound tag is an arithmetic
-    // operator and `+` never concatenates strings, so the arithmetic evaluation already proved
-    // the source supports a cast classification. Let the builtin pair evidence owner decide the
-    // destination conversion, including exact `Dec` scales.
-    let source_target =
-        builtin_cast_target_for_type(value.type_id, type_environment, string_table, path_fork);
-    let destination_target =
-        builtin_cast_target_for_type(target_type_id, type_environment, string_table, path_fork);
-    let cast_targets = source_target.zip(destination_target);
-    let evidence = cast_targets.and_then(|(source, target)| {
-        lookup_builtin_evidence(source, target, context.numeric_profile)
-            .map(|evidence| (target, evidence))
-    });
-    let Some((target, evidence)) = evidence else {
-        return Err(assignment_type_mismatch(target_type_id, &value));
-    };
-
-    let source_type_id = value.type_id;
-    let cast_span = value.span;
-    let handling = match evidence.fallibility {
-        BuiltinCastFallibility::Infallible => CastHandling::Infallible,
-        BuiltinCastFallibility::Fallible => CastHandling::StoreConversion,
-    };
-    let cast = ResolvedCastExpression {
-        source: Box::new(value),
-        source_type_id,
-        target_type_id,
+    evaluate_compound_assignment_with_ready_rhs(CompoundAssignmentReadyInput {
+        declaration_value_mode: &variable_declaration.value.value_mode,
         target,
-        requires_optional_wrap_after_cast: false,
-        evidence: ResolvedCastEvidence::Builtin {
-            policy: evidence.policy,
-        },
-        handling,
-        span: cast_span,
-    };
-    let cast_value = Expression::cast(cast, target_type_id, type_interner.environment());
-    let mut inferred = ExpectedType::Infer;
-    let converted_value = evaluate_expression(
+        target_type_id,
+        operator,
+        rhs,
         context,
-        vec![ExpressionRpnItem::Operand(cast_value)],
         type_interner,
-        &mut inferred,
-        &variable_declaration.value.value_mode,
         string_table,
         path_fork,
-    )?;
-
-    Ok(converted_value)
+    })
 }
 
 /// Parse and validate a mutation given an already-resolved place target.
@@ -286,7 +361,7 @@ fn build_mutation_from_target(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<AstNode, ExpressionParseError> {
+) -> Result<MutationOutcome, ExpressionParseError> {
     let span = Some(token_stream.current_span());
     let target_type_id = target.type_id;
 
@@ -334,9 +409,8 @@ fn build_mutation_from_target(
     let value = match token_stream.current_tag() {
         TokenTag::ASSIGN => {
             // Simple assignment keeps the receiver hint for context-sensitive values. Compound
-            // RHSs peer numeric literals for fixed scalars, bare Float and Uint before
-            // promoted evaluation; Dec and Uint arithmetic resolve through their receiving
-            // and peer contexts.
+            // RHSs peer numeric literals for fixed scalars and non-power Dec targets before
+            // promoted evaluation.
             token_stream.advance();
 
             let mut expr_type =
@@ -352,7 +426,7 @@ fn build_mutation_from_target(
                 .map(|target_name| context.with_pending_catch_assignment_targets(&[target_name]))
                 .unwrap_or_else(|| context.clone());
 
-            let rhs = if let Some(value_block_result) = try_parse_value_block_at_receiver(
+            let rhs_result = if let Some(value_block_result) = try_parse_value_block_at_receiver(
                 token_stream,
                 &rhs_context,
                 type_interner,
@@ -361,7 +435,16 @@ fn build_mutation_from_target(
                 string_table,
                 path_fork,
             ) {
-                value_block_result?
+                match value_block_result {
+                    Ok(ParsedReceiverValue::Complete(expression)) => Ok(expression),
+                    Ok(ParsedReceiverValue::Retained(retained)) => {
+                        Err(retained.into_deferral(&variable_declaration.value.value_mode))
+                    }
+                    Ok(ParsedReceiverValue::NeedsSlotInference { .. }) => unreachable!(
+                        "an assignment receiver knows its target type; a value block cannot ask for slot inference"
+                    ),
+                    Err(error) => Err(error),
+                }
             } else {
                 let input = ExpressionParseInput::ordinary(
                     ExpressionParseResources {
@@ -375,8 +458,23 @@ fn build_mutation_from_target(
                         path_fork,
                     },
                     false,
-                );
-                create_expression_with_trailing_newline_policy(input)?
+                )
+                .with_numeric_deferral_owner();
+                create_expression_with_trailing_newline_policy(input)
+            };
+            let rhs = match rhs_result {
+                Ok(rhs) => rhs,
+                Err(error) => {
+                    return retain_ready_target_mutation(
+                        error,
+                        target,
+                        variable_declaration,
+                        declaration_span,
+                        None,
+                        span,
+                        context,
+                    );
+                }
             };
 
             // Direct option fallback is rejected at each closed receiver so the
@@ -400,7 +498,6 @@ fn build_mutation_from_target(
                 rhs,
                 target_type_id,
                 type_interner.environment(),
-                context.numeric_profile.float_precision,
                 TypeMismatchContext::Assignment,
             )?
         }
@@ -422,27 +519,92 @@ fn build_mutation_from_target(
 
             token_stream.advance();
 
-            evaluate_compound_assignment_value(
+            match evaluate_compound_assignment_value(
                 token_stream,
                 context,
                 CompoundAssignmentInput {
                     variable_declaration,
                     target: &target,
                     target_type_id,
-                    operator,
+                    // The operator is a fieldless enum: the evaluation input takes it by value,
+                    // and the retention arm below still needs the authored operator.
+                    operator: operator.clone(),
                 },
                 type_interner,
                 string_table,
                 path_fork,
-            )?
+            ) {
+                Ok(value) => value,
+                Err(error) => {
+                    return retain_ready_target_mutation(
+                        error,
+                        target,
+                        variable_declaration,
+                        declaration_span,
+                        Some(operator),
+                        span,
+                        context,
+                    );
+                }
+            }
         }
     };
 
-    Ok(AstNode {
+    Ok(MutationOutcome::Ready(AstNode {
         kind: NodeKind::Assignment { target, value },
         span,
         scope: context.scope,
-    })
+    }))
+}
+
+/// Retain a mutation whose ready target's right-hand side still needs numeric resolution.
+///
+/// WHAT: converts a raised numeric deferral into the ordered continuation the body root resumes,
+///       carrying the authored target place, the declaration facts the store boundary needs and
+///       the retained right-hand side.
+/// WHY: the target place already exists, so only the value is numeric-dependent; the statement
+///      must resume in its authored position instead of fabricating a node or refusing legal
+///      source, and the store boundary keeps the authored declaration's value mode and span
+///      rather than a synthetic declaration.
+fn retain_ready_target_mutation(
+    error: ExpressionParseError,
+    target: PlaceExpression,
+    variable_declaration: &Declaration,
+    declaration_span: Option<SourceSpan>,
+    operator: Option<Operator>,
+    span: Option<SourceSpan>,
+    context: &ScopeContext,
+) -> Result<MutationOutcome, ExpressionParseError> {
+    let deferral = error.take_numeric_deferral("the right-hand side of an assignment")?;
+    let value = StatementExpression::Retained(deferred_numeric_expression(
+        deferral.items,
+        deferral.expected,
+        deferral.value_mode,
+        deferral.span,
+        deferral.suffix,
+    ));
+    let assignment_target = DeferredAssignmentTarget::Ready {
+        target,
+        declaration_value_mode: variable_declaration.value.value_mode.to_owned(),
+        declaration_span,
+    };
+    let continuation = match operator {
+        Some(operator) => NumericContinuation::CompoundAssignment(CompoundAssignmentContinuation {
+            target: assignment_target,
+            operator,
+            value,
+            span,
+            scope: context.scope,
+        }),
+        None => NumericContinuation::Assignment(AssignmentContinuation {
+            target: assignment_target,
+            value,
+            span,
+            scope: context.scope,
+        }),
+    };
+    let continuation = context.register_numeric_continuation(continuation)?;
+    Ok(MutationOutcome::Retained(continuation))
 }
 
 /// Parse a mutation when the place target has already been parsed.
@@ -464,7 +626,7 @@ pub(crate) fn handle_mutation_target(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<AstNode, ExpressionParseError> {
+) -> Result<MutationOutcome, ExpressionParseError> {
     build_mutation_from_target(
         token_stream,
         variable_declaration,
@@ -489,7 +651,7 @@ pub fn handle_mutation(
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<AstNode, ExpressionParseError> {
+) -> Result<MutationOutcome, ExpressionParseError> {
     let target_expression = parse_field_access(
         token_stream,
         variable_declaration,
@@ -498,6 +660,23 @@ pub fn handle_mutation(
         string_table,
         path_fork,
     )?;
+    let target_expression = match target_expression {
+        ParsedPostfixExpression::Value(expression) => expression,
+        // A pending receiver call has no value or place yet and can never be a mutation target; the
+        // authored operator is the source boundary that reports it.
+        ParsedPostfixExpression::RetainedOperand(_) => {
+            return Err(CompilerDiagnostic::invalid_assignment_target(
+                InvalidAssignmentTargetReason::TemporaryNotAssignable,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(token_stream.current_span()),
+            )
+            .into());
+        }
+    };
 
     let Some(target) = place_expression_from_expression(&target_expression) else {
         return Err(CompilerDiagnostic::invalid_assignment_target(

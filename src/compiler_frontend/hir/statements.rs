@@ -166,8 +166,9 @@ pub enum HirStatementKind {
     /// Perform a checked numeric operation and capture the result.
     ///
     /// WHAT: evaluates `operands` according to `op` and stores the produced value in `result`.
-    /// WHY: arithmetic failures (overflow, divide by zero, invalid exponent, non-finite `Float`)
-    ///      are semantic effects that must be visible to HIR validation and backend lowering.
+    /// WHY: arithmetic failures (overflow, divide by zero, invalid exponent, non-finite binary
+    ///      float) are semantic effects that must be visible to HIR validation and backend
+    ///      lowering.
     ///
     /// Result-local contract:
     /// - In `NumericFailureMode::Trap` the result local receives the scalar success value.
@@ -199,13 +200,13 @@ pub enum HirStatementKind {
 
     /// Compute the next candidate for a compiler-generated binary-float range loop.
     ///
-    /// WHAT: performs exactly one profile-precision add/subtract into a backend-local scratch,
+    /// WHAT: performs exactly one domain-precision add/subtract into a backend-local scratch,
     ///       then reports whether that finite candidate satisfies the authored range endpoint.
     /// WHY: the rounded step-vs-distance precheck can reject an inclusive endpoint reached by
     ///      rounding. The candidate destination is written only when the result is finite and in
     ///      range; the Bool result is always written.
     ///
-    /// `domain` is limited to profile `Float` and fixed `F32`/`F64` ranges. The expressions are
+    /// `domain` is any exact binary-float range (`F16`/`F32`/`F64`). The expressions are
     /// already converted to that domain by HIR lowering.
     FloatRangeCandidate {
         current: HirValueId,
@@ -219,14 +220,14 @@ pub enum HirStatementKind {
     },
 
     // -------------------------
-    //  Float Formatting & Validation
+    //  Binary-float Formatting & Validation
     // -------------------------
-    /// Format a finite `Float` into a `String` using Moth's formatting contract.
+    /// Format a finite binary float into a `String` using Moth's formatting contract.
     ///
-    /// WHAT: evaluates `source` (which must be a valid Moth `Float`) and stores the formatted
+    /// WHAT: evaluates `source` (which must be a valid Moth binary float) and stores the formatted
     ///      string in `result`.
-    /// WHY: `Float -> String` casts and runtime Float template interpolation must share one
-    ///      Moth-owned formatter instead of relying on target-native stringification.
+    /// WHY: binary-float template interpolation must share one Moth-owned formatter instead of
+    ///      relying on target-native stringification.
     ///
     /// Result-local contract:
     /// - In `NumericFailureMode::Trap` the result local receives the scalar `String` success value.
@@ -236,7 +237,7 @@ pub enum HirStatementKind {
     ///   branch with `HirTerminator::FallibleBranch` and unwrap success/error before borrow
     ///   validation.
     FormatFloat {
-        /// The `Float` expression to format.
+        /// The binary-float expression to format.
         source: HirValueId,
         /// How the operation should behave on failure.
         failure_mode: NumericFailureMode,
@@ -244,26 +245,27 @@ pub enum HirStatementKind {
         result: HirLocalDestination,
     },
 
-    /// Validate that a `Float` value is finite before exposing it as an ordinary Moth `Float`.
+    /// Validate that a binary-float value is finite before ordinary Moth code observes it.
     ///
-    /// WHAT: evaluates `source` (a `Float` value coming from an external/backend boundary) and
-    ///      stores the validated finite `Float` in `result`.
-    /// WHY: Moth `Float` is finite `f64`; values entering from external functions or backend
-    ///      boundaries must be checked explicitly rather than trusted implicitly.
+    /// WHAT: evaluates `source` (an exact binary-float value coming from an external/backend
+    ///      boundary) and stores the validated finite value in `result`.
+    /// WHY: supported binary floats are finite by language contract, so values entering from
+    ///      external functions or backend boundaries must be rounded at their resolved precision
+    ///      and checked explicitly rather than trusted implicitly.
     ///
     /// Result-local contract:
-    /// - In `NumericFailureMode::Trap` the result local receives the scalar `Float` success value.
-    ///   Failure (a non-finite input) is a runtime trap/throw.
+    /// - In `NumericFailureMode::Trap` the result local receives the scalar success value at the
+    ///   source's exact type. Failure (a non-finite input) is a runtime trap/throw.
     /// - In `NumericFailureMode::ReturnError` the result local receives the internal fallible
-    ///   carrier (`Float` success value or builtin `Error`). A later lowering helper is expected to
-    ///   branch with `HirTerminator::FallibleBranch` and unwrap success/error before borrow
-    ///   validation.
+    ///   carrier (success value at the source's exact type or builtin `Error`). A later lowering
+    ///   helper is expected to branch with `HirTerminator::FallibleBranch` and unwrap
+    ///   success/error before borrow validation.
     ValidateFloat {
-        /// The `Float` expression to validate.
+        /// The exact binary-float expression to validate.
         source: HirValueId,
         /// How the operation should behave on failure.
         failure_mode: NumericFailureMode,
-        /// Local that receives the validated float or fallible carrier.
+        /// Local that receives the validated binary-float value or fallible carrier.
         result: HirLocalDestination,
     },
 }

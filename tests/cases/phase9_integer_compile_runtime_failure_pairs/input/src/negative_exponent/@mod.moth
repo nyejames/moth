@@ -1,0 +1,3 @@
+base #I32 = 2
+exponent #I32 = -1
+result #I32 = base ^ exponent

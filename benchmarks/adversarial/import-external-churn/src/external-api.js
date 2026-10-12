@@ -10,7 +10,7 @@ export function createHandle(name) {
 }
 
 /**
- * @moth.sig call_handle |handle ~ApiHandle| -> Int
+ * @moth.sig call_handle |handle ~ApiHandle| -> I32
  */
 export function callHandle(handle) {
     handle.calls += 1;

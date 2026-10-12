@@ -1,0 +1,21 @@
+-- A declared generic choice whose unit variant supplies no constructor evidence
+-- is not inferred from a later typed consumer. Argument inference stays closed.
+
+Outcome type T ::
+    Some |value T|,
+    Empty,
+;
+
+read_u64 |value U64| -> String:
+    return cast value
+;
+read_outcome |value Outcome of U64| -> String:
+    return if value is:
+        Some(value as payload) => then read_u64(payload)
+        Empty => then "missing"
+    ;
+;
+
+empty = Outcome::Empty
+text = read_outcome(empty)
+[:[text]]

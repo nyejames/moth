@@ -12,20 +12,17 @@
 //! - [`decode_document`] validates a complete document, applies defaults, and returns an owned
 //!   schema-checked record.
 //! - [`decode_document_bytes`] also accepts raw bytes and reports invalid UTF-8 with a byte span.
-//! - [`Schema::with_profile`] selects any of the four combinations of 32/64-bit `Int` width and
-//!   32/64-bit `Float` precision. `Uint` follows the profile's `Int` width, so the default is
-//!   Uint32. Schemas prepared without an explicit profile use
-//!   [`NumericProfile::STANDARD`] (`Int32`/`Float64`). Preparation captures the profile and validated
-//!   defaults in an immutable [`PreparedSchema`] reusable across reading and writing calls.
-//!   Fixed widths and `Byte` remain profile-independent and distinct from `Int`, `Uint` and `Float`.
+//! - Fixed-width integers (`I8` through `I64`, `U8` through `U64`), `F16`, `F32`, `F64` and `Byte`
+//!   each name one exact scalar identity. Preparation captures validated defaults in an immutable
+//!   [`PreparedSchema`] reusable across reading and writing calls.
 //! - [`SchemaType::Integer`] preserves arbitrary-precision whole-number text. [`SchemaType::Decimal`]
 //!   carries an exact scale in `0..=256`; a scale-two target accepts `1.2` and rejects `1.239`.
 //!   These Rust data-family names do not introduce source types or numeric constructors.
 //! - Integer schemas and `Byte` require whole-number spelling. Binary floats round to nearest with
 //!   ties to even at their own precision and reject non-finite results.
-//! - Map keys follow one declared schema type: `String`, `Bool`, `Char`, `Int`, `Uint`, a
-//!   fixed-width integer, or `Byte`. Duplicate decoded keys and duplicate field or variant
-//!   names fail rather than keeping a first or last value.
+//! - Map keys follow one declared schema type: `String`, `Bool`, `Char`, a fixed-width integer,
+//!   or `Byte`. Duplicate decoded keys and duplicate field or variant names fail rather than
+//!   keeping a first or last value.
 //!
 //! Encoding a [`Value::String`] always encodes string data. It never guesses that text resembles
 //! MON and should be inserted raw or decoded. Decoded values own their trees and outlive input text.
@@ -46,26 +43,21 @@
 //!
 //! ```
 //! use moth_mon::{
-//!     Field, FloatPrecision, IntWidth, MonErrorCode, NumericProfile, Schema, SchemaType,
-//!     Value, decode_document, decode_document_bytes, encode_document,
+//!     Field, MonErrorCode, Schema, SchemaType, Value, decode_document, decode_document_bytes,
+//!     encode_document,
 //! };
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let profile = NumericProfile {
-//!     int_width: IntWidth::Bits64,
-//!     float_precision: FloatPrecision::Bits32,
-//! };
 //! let schema = Schema::record(vec![
 //!     Field::with_default("title", SchemaType::String, Value::String("Strategy".into())),
-//!     Field::required("count", SchemaType::Int),
-//!     Field::required("ratio", SchemaType::Float),
+//!     Field::required("count", SchemaType::I64),
+//!     Field::required("ratio", SchemaType::F32),
 //!     Field::required("serial", SchemaType::U64),
 //!     Field::required("channel", SchemaType::Byte),
 //!     Field::required("half", SchemaType::F16),
 //!     Field::required("single", SchemaType::F32),
 //!     Field::required("price", SchemaType::Decimal { scale: 2 }),
 //! ])
-//! .with_profile(profile)
 //! .prepare()?;
 //!
 //! let input = String::from(
@@ -78,8 +70,8 @@
 //!     decoded,
 //!     Value::Record(vec![
 //!         ("title".into(), Value::String("Strategy".into())),
-//!         ("count".into(), Value::Int(3_000_000_000)),
-//!         ("ratio".into(), Value::Float(0.5)),
+//!         ("count".into(), Value::I64(3_000_000_000)),
+//!         ("ratio".into(), Value::F32(0.5)),
 //!         ("serial".into(), Value::U64(u64::MAX)),
 //!         ("channel".into(), Value::Byte(255)),
 //!         ("half".into(), Value::F16(0.5)),
@@ -89,13 +81,12 @@
 //! );
 //! let encoded = encode_document(&decoded, &schema)?;
 //! assert_eq!(decode_document_bytes(encoded.as_bytes(), &schema)?, decoded);
-//! assert_eq!(schema.profile(), profile);
 //!
 //! // Reserved words remain invalid even with different case and leading underscores.
 //! let failure = decode_document("__LoOp = 1", &schema).expect_err("reserved label");
 //! assert_eq!(failure.code, MonErrorCode::InvalidIdentifier);
 //! println!("{failure}");
-//! let invalid_schema = Schema::record(vec![Field::required("_U64", SchemaType::Int)]);
+//! let invalid_schema = Schema::record(vec![Field::required("_U64", SchemaType::I32)]);
 //! assert_eq!(
 //!     invalid_schema.prepare().expect_err("reserved schema field").code,
 //!     MonErrorCode::InvalidSchema,
@@ -124,6 +115,5 @@ use numeric::{fixed_scalar_to_value, materialize_fixed_value};
 pub use budget::Limits;
 pub use error::{MonError, MonErrorCode, PathSegment, Span};
 pub use model::{Field, PreparedSchema, Schema, SchemaType, Value, Variant};
-pub use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 pub use reader::{decode_document, decode_document_bytes};
 pub use writer::{encode_document, encode_value};

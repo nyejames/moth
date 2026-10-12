@@ -1,0 +1,18 @@
+receive_u64 |value U64| -> String:
+    return cast value
+;
+
+-- The independent use of base arrives after twice's receiver. Base still
+-- resolves to U64, so the completed addition forwards its U64 result.
+base = 1
+twice = base + base
+received_twice = receive_u64(twice)
+received_base = receive_u64(base)
+
+-- Reversing the independent receiver order must select the same domain.
+other_base = 1
+other_twice = other_base + other_base
+other_received_base = receive_u64(other_base)
+other_received_twice = receive_u64(other_twice)
+
+[:scalar independent base twice=[received_twice] base=[received_base] reversed_twice=[other_received_twice] reversed_base=[other_received_base]]

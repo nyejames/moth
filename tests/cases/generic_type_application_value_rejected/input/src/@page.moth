@@ -2,4 +2,4 @@ Box type T = |
     value T,
 |
 
-value = Box of Int
+value = Box of I32

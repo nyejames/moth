@@ -2,11 +2,11 @@ Grid type Item = |
     values {Item},
 |
 
-put type Item |this ~Grid of Item, index Int, value Item| -> Error!:
+put type Item |this ~Grid of Item, index I32, value Item| -> Error!:
     ~this.values.set(index, value)!
 ;
 
-run || -> Int, Error!:
+run || -> I32, Error!:
     grid ~= Grid({0})
     ~grid.put(0, 7)!
     return grid.values.get(0)!

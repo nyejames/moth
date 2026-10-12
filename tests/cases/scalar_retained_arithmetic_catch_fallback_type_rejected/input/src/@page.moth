@@ -1,0 +1,15 @@
+-- A concrete mismatched fallback value on a retained whole arithmetic catch is
+-- ordinary invalid source. Once completion resolves the fragment's I32 slot,
+-- the String fallback must be rejected through the ordinary authored type
+-- diagnostic instead of reaching HIR write-back as an internal invariant
+-- failure.
+--
+-- `pending` stays unannotated so the origin is genuinely pending and the catch
+-- fragment is retained rather than a concrete equivalent.
+
+failing |value I32| -> I32, Error!:
+    return! Error("mismatched fallback")
+;
+
+pending = 1
+value = failing(pending) + 10 catch then "wrong"

@@ -27,7 +27,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use moth_lexical::numeric::profile::NumericProfile;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -39,14 +38,12 @@ pub(in crate::compiler_frontend::ast::templates) fn collect_and_strip_comment_te
     ast_nodes: &mut [AstNode],
     string_table: &mut StringTable,
     template_const_loop_iteration_limit: usize,
-    numeric_profile: NumericProfile,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
 ) -> Result<Vec<AstDocFragment>, TemplateError> {
     let mut fragments = Vec::new();
     let mut context = DocFragmentCollectionContext {
         string_table,
         template_const_loop_iteration_limit,
-        numeric_profile,
         template_ir_store,
     };
 
@@ -90,7 +87,6 @@ pub(in crate::compiler_frontend::ast::templates) fn collect_and_strip_comment_te
 struct DocFragmentCollectionContext<'strings> {
     string_table: &'strings mut StringTable,
     template_const_loop_iteration_limit: usize,
-    numeric_profile: NumericProfile,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
 }
 
@@ -131,7 +127,6 @@ fn collect_doc_fragments(
         let mut fold_context = TirFoldContext {
             string_table: context.string_table,
             template_const_loop_iteration_limit: context.template_const_loop_iteration_limit,
-            numeric_profile: context.numeric_profile,
             bindings: Vec::new(),
             source_scope: None,
         };
@@ -210,7 +205,6 @@ fn flatten_documentation_string(
                     CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
                     Some(operation),
                     span,
-                    None,
                 )
                 .into());
             }

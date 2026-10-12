@@ -5,8 +5,8 @@ current compiler until Phase 6.
 
 [codeblock, $code("moth"):
     TodoMessage ::
-        Rename | id Int, text String |,
-        Delete | id Int |,
+        Rename | id I32, text String |,
+        Delete | id I32 |,
     ;
 
     offer_rename |on_rename Route of String -> TodoMessage| -> String:
@@ -31,7 +31,7 @@ construction outside that context must provide every field.
 Rows can use the same zero-input shape to retain their own item identity:
 
 [codeblock, $code("moth"):
-    make_row_delete_offer |id Int| -> String:
+    make_row_delete_offer |id I32| -> String:
         return offer_delete(TodoMessage::Delete(id))
     ;
 ]
@@ -47,8 +47,8 @@ function receives an ordinary choice value and does not use Wire or Route:
 
 [codeblock, $code("moth"):
     TodoMessage ::
-        Rename | id Int, text String |,
-        Delete | id Int |,
+        Rename | id I32, text String |,
+        Delete | id I32 |,
     ;
 
     update |state String, message TodoMessage| -> String:
@@ -68,7 +68,7 @@ leading field:
     ;
 
     AppMessage ::
-        Editor | editor_id Int, message EditorMessage |,
+        Editor | editor_id I32, message EditorMessage |,
     ;
 
     receive_editor_route |on_message Route of EditorMessage -> AppMessage| -> String:

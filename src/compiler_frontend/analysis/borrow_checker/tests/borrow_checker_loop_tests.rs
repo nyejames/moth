@@ -37,7 +37,7 @@ fn borrow_check_source(source: &str) {
 #[test]
 fn collection_loop_mutation_of_iterable_reports_shared_mutable_conflict() {
     let source = r#"
-items ~{Int} = {1, 2, 3}
+items ~{I32} = {1, 2, 3}
 loop items |item|:
 ~items.push(4)
 ;
@@ -54,10 +54,10 @@ loop items |item|:
 #[test]
 fn collection_loop_mutable_helper_call_on_iterable_reports_shared_mutable_conflict() {
     let source = r#"
-mutate |values ~{Int}|:
+mutate |values ~{I32}|:
 ~values.push(4)
 ;
-items ~{Int} = {1, 2, 3}
+items ~{I32} = {1, 2, 3}
 loop items |item|:
 mutate(~items)
 ;
@@ -75,7 +75,7 @@ after = items.length()
 #[test]
 fn collection_loop_mutation_through_iterable_alias_reports_shared_mutable_conflict() {
     let source = r#"
-items ~{Int} = {1, 2, 3}
+items ~{I32} = {1, 2, 3}
 alias ~= items
 loop items |item|:
 ~alias.push(4)
@@ -93,8 +93,8 @@ loop items |item|:
 #[test]
 fn nested_collection_loop_mutation_of_outer_iterable_reports_shared_mutable_conflict() {
     let source = r#"
-outer ~{Int} = {1, 2, 3}
-inner ~{Int} = {4, 5, 6}
+outer ~{I32} = {1, 2, 3}
+inner ~{I32} = {4, 5, 6}
 loop outer |outer_item|:
 loop inner |inner_item|:
     ~outer.push(7)
@@ -113,8 +113,8 @@ loop inner |inner_item|:
 #[test]
 fn nested_collection_loop_mutation_of_inner_iterable_reports_shared_mutable_conflict() {
     let source = r#"
-outer ~{Int} = {1, 2, 3}
-inner ~{Int} = {4, 5, 6}
+outer ~{I32} = {1, 2, 3}
+inner ~{I32} = {4, 5, 6}
 loop outer |outer_item|:
 loop inner |inner_item|:
     ~inner.push(7)
@@ -134,7 +134,7 @@ loop inner |inner_item|:
 fn collection_loop_mutation_after_exit_is_valid() {
     borrow_check_source(
         r#"
-items ~{Int} = {1, 2, 3}
+items ~{I32} = {1, 2, 3}
 loop items |item|:
 ;
 ~items.push(4)
@@ -146,8 +146,8 @@ loop items |item|:
 fn collection_loop_mutation_of_unrelated_root_is_valid() {
     borrow_check_source(
         r#"
-items ~{Int} = {1, 2, 3}
-other ~{Int} = {4, 5}
+items ~{I32} = {1, 2, 3}
+other ~{I32} = {4, 5}
 loop items |item|:
 ~other.push(6)
 ;
@@ -295,7 +295,7 @@ return [: [output]</section>]
 fn collection_loop_mutation_of_source_copy_is_valid() {
     borrow_check_source(
         r#"
-items ~{Int} = {1, 2, 3}
+items ~{I32} = {1, 2, 3}
 copied = copy items
 loop copied |item|:
 ~items.push(4)
@@ -310,8 +310,8 @@ fn loop_body_rebinding_its_alias_allows_source_mutation() {
     // mutation is dead on every path, including the one that arrives over the back-edge.
     borrow_check_source(
         r#"
-accumulate |keys {String}| -> {String = Int}, Error!:
-totals ~{String = Int} = {}
+accumulate |keys {String}| -> {String = I32}, Error!:
+totals ~{String = I32} = {}
 loop keys |key|:
     current = totals.get(key) catch then 0
     next = current + 1
@@ -325,8 +325,8 @@ return totals
 
 #[test]
 fn loop_definition_replaces_a_carried_alias_with_fresh_slot() {
-    let source = r#"probe || -> Int:
-left ~{Int} = {1}
+    let source = r#"probe || -> I32:
+left ~{I32} = {1}
 writer ~= left
 again ~= true
 loop again:
@@ -482,7 +482,7 @@ first = shared.get(0) catch then "missing"
 #[test]
 fn branch_join_future_use_preserves_alias_conflict_after_linear_expiry() {
     let source = r#"
-items ~{Int} = {1, 2, 3}
+items ~{I32} = {1, 2, 3}
 alias = items
 outer ~= true
 inner ~= true
@@ -530,7 +530,7 @@ fn projected_assignment_rooted_in_compiler_temp_uses_linear_expiry() {
 fn projected_assignment_branch_fixture() -> (HirModule, StringTable, LocalId, PathInternerFork) {
     let source = r#"
 Point = |
-    value Int,
+    value I32,
 |
 point ~= Point(1)
 alias = point

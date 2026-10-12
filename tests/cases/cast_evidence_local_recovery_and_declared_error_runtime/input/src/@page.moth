@@ -1,0 +1,37 @@
+HandledCount = |value U8|
+
+to_u8 |this HandledCount| -> U8:
+    return this.value + this.value catch then 0
+;
+
+HandledCount must CASTABLE_TO_U8
+
+GenericCount type T = |value U16, tag T|
+
+to_u16 type T |this GenericCount of T| -> U16:
+    return this.value + this.value catch then 0
+;
+
+GenericCount must CASTABLE_TO_U16
+
+FallibleCount = |value U8|
+
+try_to_u8 |this FallibleCount| -> U8, Error!:
+    return this.value + this.value
+;
+
+FallibleCount must TRY_CASTABLE_TO_U8
+
+handled U8 = cast HandledCount(200) catch then 99
+generic_handled U16 = cast GenericCount(40000, true) catch then 99
+code ~U32 = 0
+recovered U8 = cast FallibleCount(200) catch |err|:
+    code = err.code
+    then 0
+;
+
+assert(handled is 0)
+assert(recovered is 0)
+assert(generic_handled is 0)
+assert(code is 301)
+[:handled [handled], recovered [recovered], code [code]]

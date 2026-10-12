@@ -484,14 +484,14 @@ mod detailed {
     static CENSUS_CALL_ASSERTION_DEFAULT_FILLS: AtomicUsize = AtomicUsize::new(0);
     #[cfg(test)]
     thread_local! {
-        /// Whether this test thread is intentionally capturing global frontend counters.
+        /// Whether this test thread is intentionally capturing instrumentation counters.
         ///
         /// WHAT: exact counter tests opt in before mutating the process-global
-        ///      frontend counter atomics.
+        ///      frontend counter atomics or logging counters into a collection session.
         /// WHY: most unit tests compile frontend snippets under `benchmark_counters`
         ///      without caring about counters. Letting those unrelated tests update
-        ///      the same atomics makes reset/read assertions race under parallel
-        ///      `cargo test`.
+        ///      the same atomics, or log their AST counters into the shared collector,
+        ///      makes exact assertions race under parallel `cargo test`.
         static TEST_COUNTER_CAPTURE_ACTIVE: Cell<bool> = const { Cell::new(false) };
     }
 
@@ -500,26 +500,26 @@ mod detailed {
     /// exists with `timers`. Without the extra gate the counters-only lane compiles a guard no
     /// caller in that configuration can reach, and reports it as dead code.
     #[cfg(all(test, feature = "timers"))]
-    pub(crate) struct FrontendCounterTestCaptureGuard {
+    pub(crate) struct CounterTestCaptureGuard {
         previous: bool,
     }
 
     #[cfg(all(test, feature = "timers"))]
-    impl Drop for FrontendCounterTestCaptureGuard {
+    impl Drop for CounterTestCaptureGuard {
         fn drop(&mut self) {
             TEST_COUNTER_CAPTURE_ACTIVE.with(|active| active.set(self.previous));
         }
     }
 
     #[cfg(all(test, feature = "timers"))]
-    pub(crate) fn capture_frontend_counters_for_test() -> FrontendCounterTestCaptureGuard {
+    pub(crate) fn capture_counters_for_test() -> CounterTestCaptureGuard {
         let previous = TEST_COUNTER_CAPTURE_ACTIVE.with(|active| {
             let previous = active.get();
             active.set(true);
             previous
         });
 
-        FrontendCounterTestCaptureGuard { previous }
+        CounterTestCaptureGuard { previous }
     }
 
     pub(crate) fn reset_frontend_counters() {
@@ -777,7 +777,7 @@ mod detailed {
     }
 
     #[cfg(test)]
-    fn test_counter_capture_active() -> bool {
+    pub(crate) fn test_counter_capture_active() -> bool {
         TEST_COUNTER_CAPTURE_ACTIVE.with(Cell::get)
     }
 
@@ -1671,7 +1671,10 @@ pub(crate) use detailed::{
 };
 
 #[cfg(all(test, feature = "benchmark_counters", feature = "timers"))]
-pub(crate) use detailed::{capture_frontend_counters_for_test, frontend_counter_test_values};
+pub(crate) use detailed::{capture_counters_for_test, frontend_counter_test_values};
+
+#[cfg(all(test, feature = "benchmark_counters"))]
+pub(crate) use detailed::test_counter_capture_active;
 
 #[cfg(not(feature = "benchmark_counters"))]
 pub(crate) fn reset_frontend_counters() {}

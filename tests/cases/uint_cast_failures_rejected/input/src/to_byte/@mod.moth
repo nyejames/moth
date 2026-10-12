@@ -1,3 +1,3 @@
-bad |value Uint| -> Byte:
+bad |value U32| -> Byte:
     return cast value
 ;

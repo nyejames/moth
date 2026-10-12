@@ -9,10 +9,13 @@ use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::ast_nodes::MatchExhaustiveness;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, FallibleHandling};
 use crate::compiler_frontend::ast::generic_functions::IfGenericRequestRanges;
+use crate::compiler_frontend::ast::numeric_construction::StatementExpression;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
+
+use super::receiver::RetainedValueBlock;
 
 /// Values produced by a `then` statement inside a value-producing block.
 ///
@@ -40,7 +43,7 @@ pub struct ActiveValueProductionTarget {
     pub receiver_kind: ValueReceiverKind,
     /// When `result_type_ids` is empty but the receiver still expects a specific
     /// number of produced values (e.g. multi-bind with some inferred slots), this
-    /// tells `parse_produced_values_typed` how many expressions to read after `then`.
+    /// tells `parse_retained_produced_values` how many expressions to read after `then`.
     pub expected_arity: Option<usize>,
     /// Per-slot expected types for mixed known/inferred multi-bind.
     ///
@@ -75,8 +78,58 @@ impl ActiveValueProductionTarget {
         }
     }
 
+    /// The provisional target for a catch handler whose receiving site is not resolved yet.
+    ///
+    /// WHAT: `slot_count` inferred produced values under the catch receiver, so a raw numeric
+    ///       fallback is retained and typed by the site that resolves later. An unresolved fragment
+    ///       passes one slot; a pending generic call passes its declared arity.
+    /// WHY: a retained fragment's success contract is unknown when its handler body is parsed, so
+    ///      the body must parse through the inferred path instead of a known or empty slot list —
+    ///      completion revalidates arity and slot types against the resolved site. A zero count is
+    ///      a zero-success known contract, never an inferred list.
+    pub fn provisional_catch_handler(slot_count: usize) -> Self {
+        if slot_count == 0 {
+            return Self::known(Vec::new(), ValueReceiverKind::CatchHandler);
+        }
+        Self {
+            result_type_ids: Vec::new(),
+            receiver_kind: ValueReceiverKind::CatchHandler,
+            expected_arity: Some(slot_count),
+            known_slot_types: vec![None; slot_count],
+        }
+    }
+
     pub fn needs_slot_inference(&self) -> bool {
         self.result_type_ids.is_empty() && self.expected_arity.is_some()
+    }
+
+    /// The receiving contract per produced value.
+    ///
+    /// WHAT: the known slots when the receiver type is already established, otherwise the
+    ///       per-slot expectations (`None` for a slot that only resolves later).
+    /// WHY: a value-producing position derives its per-value expectations from one place, so a
+    ///      known slot keeps the ordinary receiver expectation and an inferred slot stays
+    ///      unresolved instead of being mistaken for an error-only contract.
+    pub fn slot_expected_types(&self) -> Vec<Option<TypeId>> {
+        if self.result_type_ids.is_empty() {
+            if self.receiver_kind == ValueReceiverKind::Declaration && self.expected_arity.is_none()
+            {
+                // An unannotated declaration's initializer infers its single type from the
+                // authored value, so its one slot is genuinely unknown — never an error-only
+                // contract and never zero values.
+                return vec![None];
+            }
+
+            self.known_slot_types.clone()
+        } else {
+            self.result_type_ids.iter().copied().map(Some).collect()
+        }
+    }
+
+    /// How many produced values this target expects.
+    pub fn expected_value_count(&self) -> usize {
+        self.expected_arity
+            .unwrap_or_else(|| self.slot_expected_types().len())
     }
 }
 
@@ -92,6 +145,45 @@ pub enum ValueReceiverKind {
     Return,
     MultiBind,
     CatchHandler,
+}
+
+/// One produced value while its body-root continuation is live.
+///
+/// WHAT: a retained statement expression, a value already completed for a receiving slot, or
+///       the short-lived state while body-root completion owns that expression.
+/// WHY: a multi-bind target may need the result type of a forward producer before its enclosing
+///      value block can finish; moving the expression through `Taken` keeps one evaluation and
+///      returns the completed value to the authored `then` node.
+#[derive(Clone, Debug)]
+pub enum ThenValueSlot {
+    Pending(StatementExpression),
+    Taken,
+    Completed(Expression),
+}
+
+/// Continuation for a `then` statement whose fallback values still hold numeric origins.
+///
+/// WHAT: the authored values in slot order, with the authored receiver kind, statement span and
+///       scope, so the body root completes each value at its resolved receiver slot and rebuilds
+///       the authored `then` node at its position.
+/// WHY: the receiving site may not be resolved when the fallback is authored (a catch protecting
+///      a fragment whose contract is unresolved), so each value must resume where the resolved
+///      slot decides its type instead of materialising at the language default first.
+#[derive(Clone, Debug)]
+pub struct ThenValueContinuation {
+    /// The authored fallback values in slot order, or a value already completed for its receiver.
+    pub values: Vec<ThenValueSlot>,
+    /// `Some` for a slot whose type the receiving site already knows and `None` for a slot that
+    /// only resolves at the body root.
+    ///
+    /// WHY: completion must materialise each fallback at its real receiver — the stored contract
+    /// for a known site, or the resolved slots when the site was provisional — so the two cases
+    /// are never conflated with "no expectation".
+    pub slot_expected_types: Vec<Option<TypeId>>,
+    /// The authored receiver kind, for the slot-mismatch diagnostic once slots resolve.
+    pub receiver_kind: ValueReceiverKind,
+    pub span: Option<SourceSpan>,
+    pub scope: PathId,
 }
 
 /// A value-producing control-flow block used as an expression at closed receiving sites.
@@ -112,8 +204,11 @@ pub enum ValueBlock {
 ///
 /// WHAT: known and single-inferred receivers wrap a finished expression.
 /// Mixed multi-bind returns the structural block so slot inference can finish
-/// before construction wraps once.
-/// WHY: `expression_build` must only see final `result_type_ids`.
+/// before construction wraps once. A block whose nested bodies still hold numeric
+/// continuations returns the retained record instead, so its receiving site can
+/// splice it into that position's own fragment.
+/// WHY: `expression_build` must only see final `result_type_ids`, and no position
+/// may observe an unresolved origin or a fabricated block.
 #[derive(Debug)]
 pub enum ParsedReceiverValue {
     Complete(Expression),
@@ -121,6 +216,8 @@ pub enum ParsedReceiverValue {
         block: ValueBlock,
         span: Option<SourceSpan>,
     },
+    /// The block's nested bodies retained numeric continuations for the enclosing body root.
+    Retained(Box<RetainedValueBlock>),
 }
 
 /// Single `if` value-producing block.

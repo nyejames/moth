@@ -43,8 +43,8 @@ use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, 
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
-use moth_lexical::numeric::profile::NumericProfile;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -59,15 +59,14 @@ pub enum BackendFeatureValidationError {
 
 /// Explicit build-owned selection consumed by backend feature validation.
 ///
-/// WHAT: backend-neutral validation receives the exact reachable union, active target, selected
-///       numeric profile, and optional module type environment.
+/// WHAT: backend-neutral validation receives the exact reachable union, active target, and
+///       optional module type environment.
 #[derive(Clone, Debug)]
 pub struct BackendFeatureValidationInput<'a> {
     pub hir: &'a HirModule,
     pub reachability: &'a HirReachability,
     pub target: BackendTarget,
     pub type_environment: Option<&'a TypeEnvironment>,
-    pub numeric_profile: NumericProfile,
 }
 
 /// Validates HIR runtime features that are target-specific after frontend semantics are complete.
@@ -118,20 +117,18 @@ pub fn validate_hir_backend_feature_support(
             validate_wasm_cross_module_calls(input.hir, reachability, input.target, string_table)?;
             // Wasm still gates hashmaps, recoverable numeric
             // failure, statement casts, unsupported formatting, generic values and later
-            // Error-value/fallible-control-flow checks. Trap-mode Float formatting and
+            // Error-value/fallible-control-flow checks. Trap-mode binary-float formatting and
             // finite validation run natively. Supported trap-mode arithmetic is not a
             // stand-in for recoverable failure delivery.
             validate_wasm_maps(&reachability.reachable_map_uses, input.target, string_table)?;
             validate_wasm_runtime_casts(
                 &reachability.reachable_runtime_casts,
                 input.target,
-                input.numeric_profile,
                 string_table,
             )?;
             validate_wasm_checked_numeric_ops(
                 &reachability.reachable_numeric_ops,
                 input.target,
-                input.numeric_profile,
                 string_table,
             )?;
             validate_wasm_float_statements(
@@ -190,7 +187,8 @@ pub fn validate_hir_backend_feature_support(
 /// WHAT: direct fixed scalars and compiler-internal carriers of those success values are accepted,
 ///       but user aggregates containing fixed scalars remain unsupported. Canonical builtin Error
 ///       representation belongs to its own Error-value gate.
-/// WHY: reject early with a structured target diagnostic rather than an internal lowering error.
+/// WHY: Wasm lowering has no aggregate field storage yet, so reject early with a structured target
+///      diagnostic rather than an internal lowering error.
 fn validate_fixed_width_scalar_values(
     hir: &HirModule,
     type_environment: Option<&TypeEnvironment>,
@@ -411,19 +409,18 @@ fn validate_wasm_maps(
 /// Reports the first reachable runtime cast outside Wasm's supported expression conversions.
 ///
 /// WHAT: accepts evidence-approved infallible integer and F16/F32/F64 numeric conversions,
-///       integer and fixed-binary-float-to-String casts, plus Byte/U8; fallible pairs, profile
-///       `Float` expression casts and statement casts remain gated.
+///       integer and fixed-binary-float-to-String casts, plus Byte/U8; fallible pairs and
+///       statement casts remain gated.
 /// WHY: target validation consumes retained cast evidence before lowering, preserving authored
 ///      spans and keeping fallible conversion semantics out of the trap-only Wasm path.
 fn validate_wasm_runtime_casts(
     runtime_casts: &[ReachableRuntimeCastUse],
     target: BackendTarget,
-    numeric_profile: NumericProfile,
     string_table: &mut StringTable,
 ) -> Result<(), BackendFeatureValidationError> {
     let Some(runtime_cast) = runtime_casts
         .iter()
-        .find(|runtime_cast| !wasm_supports_runtime_cast(runtime_cast, numeric_profile))
+        .find(|runtime_cast| !wasm_supports_runtime_cast(runtime_cast))
     else {
         return Ok(());
     };
@@ -437,43 +434,34 @@ fn validate_wasm_runtime_casts(
     Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
-fn wasm_supports_runtime_cast(
-    runtime_cast: &ReachableRuntimeCastUse,
-    numeric_profile: NumericProfile,
-) -> bool {
+fn wasm_supports_runtime_cast(runtime_cast: &ReachableRuntimeCastUse) -> bool {
     if runtime_cast.form != ReachableRuntimeCastForm::Expression {
         return false;
     }
 
     match runtime_cast.policy {
         BuiltinCastPolicyId::NumericConversion { source, target } => {
-            wasm_supports_numeric_conversion(source, target, numeric_profile)
+            wasm_supports_numeric_conversion(source, target)
         }
         BuiltinCastPolicyId::NumericToString(source) => {
             source.is_integer()
-                || (source != NumericScalar::Float
-                    && matches!(
-                        source.binary_float_precision(numeric_profile),
-                        Some(
-                            BinaryFloatPrecision::Binary16
-                                | BinaryFloatPrecision::Binary32
-                                | BinaryFloatPrecision::Binary64
-                        )
-                    ))
+                || matches!(
+                    source.binary_float_precision(),
+                    Some(
+                        BinaryFloatPrecision::Binary16
+                            | BinaryFloatPrecision::Binary32
+                            | BinaryFloatPrecision::Binary64
+                    )
+                )
         }
         BuiltinCastPolicyId::ByteToU8 | BuiltinCastPolicyId::U8ToByte => true,
         _ => false,
     }
 }
 
-fn wasm_supports_numeric_conversion(
-    source: NumericScalar,
-    target: NumericScalar,
-    numeric_profile: NumericProfile,
-) -> bool {
+fn wasm_supports_numeric_conversion(source: NumericScalar, target: NumericScalar) -> bool {
     if source == target
-        || numeric_conversion_fallibility(source, target, numeric_profile)
-            != BuiltinCastFallibility::Infallible
+        || numeric_conversion_fallibility(source, target) != BuiltinCastFallibility::Infallible
     {
         return false;
     }
@@ -482,13 +470,13 @@ fn wasm_supports_numeric_conversion(
         return true;
     }
 
-    if source.is_integer() && wasm_has_float_carrier(target, numeric_profile) {
+    if source.is_integer() && wasm_has_float_carrier(target) {
         return true;
     }
 
     match (
-        source.binary_float_precision(numeric_profile),
-        target.binary_float_precision(numeric_profile),
+        source.binary_float_precision(),
+        target.binary_float_precision(),
     ) {
         (Some(source_precision), Some(target_precision)) => {
             target_precision >= source_precision
@@ -508,9 +496,9 @@ fn wasm_supports_numeric_conversion(
     }
 }
 
-fn wasm_has_float_carrier(domain: NumericScalar, numeric_profile: NumericProfile) -> bool {
+fn wasm_has_float_carrier(domain: NumericScalar) -> bool {
     matches!(
-        domain.binary_float_precision(numeric_profile),
+        domain.binary_float_precision(),
         Some(
             BinaryFloatPrecision::Binary16
                 | BinaryFloatPrecision::Binary32
@@ -521,19 +509,18 @@ fn wasm_has_float_carrier(domain: NumericScalar, numeric_profile: NumericProfile
 
 /// Reports the first reachable checked numeric operation Wasm cannot deliver.
 ///
-/// WHAT: trap-mode operations outside integer and binary32/binary64 paths stay
-///       `CheckedNumericOperations`. Recoverable failure on an otherwise supported
-///       operation is rejected as its own failure shape.
+/// WHAT: trap-mode operations outside the exact supported integer and binary32/binary64
+///       domains stay `CheckedNumericOperations`. Recoverable failure on an otherwise
+///       supported operation is rejected as its own failure shape.
 /// WHY: Wasm implements those trap-mode operations. Reporting recoverable delivery
 ///      as a numeric-operation limit disguises the unsupported failure shape as a trap.
 fn validate_wasm_checked_numeric_ops(
     numeric_ops: &[ReachableNumericOpUse],
     target: BackendTarget,
-    numeric_profile: NumericProfile,
     string_table: &mut StringTable,
 ) -> Result<(), BackendFeatureValidationError> {
     let Some((numeric_op, reason)) = numeric_ops.iter().find_map(|numeric_op| {
-        wasm_numeric_rejection(numeric_op, numeric_profile).map(|reason| (numeric_op, reason))
+        wasm_numeric_rejection(numeric_op).map(|reason| (numeric_op, reason))
     }) else {
         return Ok(());
     };
@@ -551,13 +538,13 @@ fn validate_wasm_checked_numeric_ops(
 ///
 /// WHAT: an unimplemented trap-mode domain or operator keeps the operation limit.
 ///       `ReturnError` on a supported operation is a recoverable-failure rejection.
-/// WHY: operation limits retain priority when both apply, such as F16 in `ReturnError`
-///      mode. Supported trap-mode arithmetic is not reported as unsupported.
+/// WHY: operation limits retain priority when both apply, such as F16 or a narrow integer
+///      domain in `ReturnError` mode. Supported trap-mode arithmetic is not reported as
+///      unsupported.
 fn wasm_numeric_rejection(
     numeric_op: &ReachableNumericOpUse,
-    numeric_profile: NumericProfile,
 ) -> Option<UnsupportedBackendFeatureReason> {
-    if !wasm_supports_trap_numeric_op(numeric_op, numeric_profile) {
+    if !wasm_supports_trap_numeric_op(numeric_op) {
         return Some(UnsupportedBackendFeatureReason::CheckedNumericOperations);
     }
     if !matches!(
@@ -569,23 +556,36 @@ fn wasm_numeric_rejection(
     None
 }
 
-fn wasm_supports_trap_numeric_op(
-    numeric_op: &ReachableNumericOpUse,
-    numeric_profile: NumericProfile,
-) -> bool {
+/// Whether the checked-integer lowering implements this exact domain.
+///
+/// WHAT: the LIR checked-integer kinds are the 32/64-bit signed and unsigned forms, so
+///       `I8`/`I16`/`U8`/`U16` results have no checked path even though their carriers exist.
+/// WHY: D15 keeps a narrow operand pair in its own type, so a formerly widened operation can
+///      now select a domain the target cannot deliver. That is a capability limit with its own
+///      diagnostic, never a trap substitution or a silently widened result.
+fn wasm_supports_checked_integer_domain(domain: NumericScalar) -> bool {
+    matches!(
+        domain,
+        NumericScalar::Fixed(
+            FixedScalar::I32 | FixedScalar::U32 | FixedScalar::I64 | FixedScalar::U64
+        )
+    )
+}
+
+fn wasm_supports_trap_numeric_op(numeric_op: &ReachableNumericOpUse) -> bool {
     if numeric_op.op.domain.is_integer() {
-        return true;
+        return wasm_supports_checked_integer_domain(numeric_op.op.domain);
     }
 
     matches!(
-        numeric_op.op.domain.binary_float_precision(numeric_profile),
+        numeric_op.op.domain.binary_float_precision(),
         Some(BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64)
     ) && numeric_op.op.operator != NumericOperator::IntegerDivide
 }
 
-/// Reports the first reachable Float formatting or unsupported validation statement for Wasm.
+/// Reports the first reachable binary-float formatting or unsupported validation statement for Wasm.
 ///
-/// WHAT: trap-mode Float formatting and boundary validation are supported, while recoverable
+/// WHAT: trap-mode binary-float formatting and boundary validation are supported, while recoverable
 ///       validation and formatting remain target-gated.
 /// WHY: target validation consumes the exact failure mode retained by HIR reachability so Wasm
 ///      never substitutes a trap for a recoverable `ReturnError` contract.
@@ -1458,9 +1458,6 @@ where
             .iter()
             .find_map(|field| first_unsupported_expression_occurrence(field.value, module, search)),
         HirExpressionKind::Number(_)
-        | HirExpressionKind::Int(_)
-        | HirExpressionKind::Uint(_)
-        | HirExpressionKind::Float(_)
         | HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)

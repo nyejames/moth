@@ -59,7 +59,6 @@ use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{
     TokenCursor, TokenRef, TokenTag, TokenizerEntryMode,
 };
-use moth_lexical::numeric::profile::NumericProfile;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -307,7 +306,6 @@ fn ast_from_moth_template_source(source: &str) -> (Ast, StringTable, PathInterne
             source_build_config_contract_names: Arc::new(Default::default()),
         },
         AstBuildContext {
-            numeric_profile: NumericProfile::STANDARD,
             root_role: ModuleRootRole::Normal,
             external_package_registry: Arc::clone(&external_package_registry),
             style_directives: &style_directives,
@@ -540,7 +538,6 @@ impl MothTemplateScopeFixture {
                 source_build_config_contract_names: Arc::new(Default::default()),
             },
             AstBuildContext {
-                numeric_profile: NumericProfile::STANDARD,
                 root_role: ModuleRootRole::Normal,
                 external_package_registry: Arc::clone(&external_package_registry),
                 style_directives: &style_directives,
@@ -1945,7 +1942,6 @@ fn moth_template_folded_output_matches_authored_markdown_template() {
             source_build_config_contract_names: Arc::new(Default::default()),
         },
         AstBuildContext {
-            numeric_profile: NumericProfile::STANDARD,
             root_role: ModuleRootRole::Normal,
             external_package_registry,
             style_directives: &StyleDirectiveRegistry::built_ins(),

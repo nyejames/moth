@@ -1,12 +1,12 @@
-inner || -> Int, Error!:
+inner || -> I32, Error!:
     return 1
 ;
 
-outer || -> Int, Error!:
+outer || -> I32, Error!:
     return! Error("outer_boom")
 ;
 
-recover || -> Int, Error!:
+recover || -> I32, Error!:
     return outer() catch:
         then inner()!
     ;

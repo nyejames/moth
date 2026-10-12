@@ -1,4 +1,15 @@
-real_value = 5 / 2
-int_value = 5 // 2
+divide |left I8, right I8| -> F64:
+    return left / right
+;
 
-[: real=[real_value], int=[int_value] ]
+truncate |left I8, right I8| -> I8:
+    return left // right
+;
+
+real_value = divide(5, 2)
+int_value = truncate(5, 2)
+negative_real = divide(-5, 2)
+negative_int = truncate(-5, 2)
+negative_divisor = truncate(5, -2)
+
+[: real=[real_value], int=[int_value], negative=[negative_real]/[negative_int]/[negative_divisor] ]

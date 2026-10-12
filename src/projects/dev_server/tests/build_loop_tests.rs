@@ -1505,25 +1505,25 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
     .expect("write independent page");
 
     const PUBLIC_API: &str = "\nexport:\n\
-        product |value Int| -> Int, Error!:\n\
+        product |value I32| -> I32, Error!:\n\
             return multiply(value)\n\
         ;\n\
-        success_only |value Int| -> Int:\n\
+        success_only |value I32| -> I32:\n\
             return plain(value)\n\
         ;\n\
     ;\n";
     let helper_path = source.join("support/+package.moth");
     let successful = format!(
-        "multiply |value Int| -> Int:\n    return value\n;\n\
-         plain |value Int| -> Int:\n    return value\n;\n{PUBLIC_API}"
+        "multiply |value I32| -> I32:\n    return value\n;\n\
+         plain |value I32| -> I32:\n    return value\n;\n{PUBLIC_API}"
     );
     let failing_entry = format!(
-        "multiply |value Int| -> Int:\n    return value * value\n;\n\
-         plain |value Int| -> Int:\n    return value\n;\n{PUBLIC_API}"
+        "multiply |value I32| -> I32:\n    return value * value\n;\n\
+         plain |value I32| -> I32:\n    return value\n;\n{PUBLIC_API}"
     );
     let invalid_export = format!(
-        "multiply |value Int| -> Int:\n    return value\n;\n\
-         plain |value Int| -> Int:\n    return value * value\n;\n{PUBLIC_API}"
+        "multiply |value I32| -> I32:\n    return value\n;\n\
+         plain |value I32| -> I32:\n    return value * value\n;\n{PUBLIC_API}"
     );
     fs::write(&helper_path, &successful).expect("write successful private helpers");
     let state = Arc::new(DevServerState::new(root.join("dev")));

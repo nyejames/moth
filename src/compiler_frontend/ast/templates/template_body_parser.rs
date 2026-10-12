@@ -17,8 +17,8 @@ use crate::compiler_frontend::ast::templates::template::{
 };
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    TemplateBodyParseMode, TemplateControlFlowValidationMode, TemplateIfBodyParseInput,
-    TemplateLoopBodyParseInput,
+    TemplateBodyParseMode, TemplateBranchSelectorDraft, TemplateControlFlowValidationMode,
+    TemplateIfBodyParseInput, TemplateLoopBodyParseInput, TemplateLoopHeaderDraft,
 };
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateConstructionContext, TemplateIrNodeId, TemplatePreparationMode, TemplateTirPhase,
@@ -344,7 +344,35 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
             build_state.kind.clone(),
             body_construction_context,
         )?;
-        construction_context.record_conditional(input.selector, body_node_id, conditional_span);
+        match input.selector {
+            TemplateBranchSelectorDraft::Concrete(selector) => {
+                construction_context.record_conditional(selector, body_node_id, conditional_span);
+            }
+
+            TemplateBranchSelectorDraft::RetainedBool { domain, deferred } => {
+                construction_context.record_retained_conditional_selector(
+                    domain,
+                    *deferred,
+                    None,
+                    body_node_id,
+                    conditional_span,
+                )?;
+            }
+
+            TemplateBranchSelectorDraft::RetainedOptionPresent {
+                domain,
+                deferred,
+                pattern,
+            } => {
+                construction_context.record_retained_conditional_selector(
+                    domain,
+                    *deferred,
+                    Some(pattern),
+                    body_node_id,
+                    conditional_span,
+                )?;
+            }
+        }
 
         Ok(())
     }
@@ -374,7 +402,45 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
             body_construction_context,
         )?;
 
-        construction_context.record_loop(input.header, body_node_id, input.span);
+        match input.header {
+            TemplateLoopHeaderDraft::Concrete(header) => {
+                construction_context.record_loop(header, body_node_id, input.span);
+            }
+
+            TemplateLoopHeaderDraft::RetainedCondition { domain, deferred } => {
+                construction_context.record_retained_loop_condition(
+                    domain,
+                    *deferred,
+                    body_node_id,
+                    input.span,
+                )?;
+            }
+
+            TemplateLoopHeaderDraft::RetainedRange { domain, header } => {
+                construction_context.record_retained_loop_range(
+                    domain,
+                    *header,
+                    body_node_id,
+                    input.span,
+                )?;
+            }
+
+            TemplateLoopHeaderDraft::RetainedCollection {
+                domain,
+                bindings,
+                pending_item,
+                deferred,
+            } => {
+                construction_context.record_retained_loop_collection(
+                    domain,
+                    bindings,
+                    pending_item,
+                    *deferred,
+                    body_node_id,
+                    input.span,
+                )?;
+            }
+        }
 
         Ok(())
     }

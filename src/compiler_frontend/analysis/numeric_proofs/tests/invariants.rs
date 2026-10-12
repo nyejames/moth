@@ -7,7 +7,7 @@
 //! Fixture calls are always bound to locals before being combined: the helpers take `&mut
 //! fixture`, so nested calls in one expression would fight over the borrow.
 
-use crate::compiler_frontend::analysis::numeric_proofs::{NumericProofs, analyse_numeric_proofs};
+use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
@@ -43,12 +43,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::hir_fixture_support::{expression, local};
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
-
-const PROFILE: NumericProfile = NumericProfile {
-    int_width: IntWidth::Bits32,
-    float_precision: FloatPrecision::Bits64,
-};
 
 /// One analysis fixture: a fresh type environment, id counters and the module under build.
 struct ProofFixture {
@@ -77,19 +71,20 @@ impl ProofFixture {
     }
 
     fn int(&self) -> TypeId {
-        self.environment.builtins().int
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
     }
 
     fn uint(&self) -> TypeId {
-        self.environment.builtins().uint
+        builtin_type_ids::fixed_scalar(FixedScalar::U32)
     }
 
     fn uint_literal(&mut self, value: u64, ty: TypeId) -> HirValueId {
-        self.expression(HirExpressionKind::Uint(value), ty, ValueKind::Const)
+        let value = FixedScalarValue::unsigned(FixedScalar::U32, value).expect("literal fits U32");
+        self.fixed_literal(value, ty)
     }
 
     fn float(&self) -> TypeId {
-        self.environment.builtins().float
+        builtin_type_ids::fixed_scalar(FixedScalar::F64)
     }
 
     fn fixed(&self, scalar: FixedScalar) -> TypeId {
@@ -134,7 +129,7 @@ impl ProofFixture {
     }
 
     /// A real single-field record type: one interned struct path, one interned field path, one
-    /// `Int` field, plus the paired HIR layout entry bound in `finish`.
+    /// `I32` field, plus the paired HIR layout entry bound in `finish`.
     fn record_with_int_field(&mut self) -> TypeId {
         let record_path = self.path("record");
         let value_field_path = self.path("value");
@@ -183,11 +178,17 @@ impl ProofFixture {
     }
 
     fn int_literal(&mut self, value: i64, ty: TypeId) -> HirValueId {
-        self.expression(HirExpressionKind::Int(value), ty, ValueKind::Const)
+        let value = FixedScalarValue::signed(FixedScalar::I32, value).expect("literal fits I32");
+        self.fixed_literal(value, ty)
     }
 
     fn float_literal(&mut self, value: f64, ty: TypeId) -> HirValueId {
-        self.expression(HirExpressionKind::Float(value), ty, ValueKind::Const)
+        let scalar = self
+            .environment
+            .fixed_scalar(ty)
+            .expect("float literal type must be a fixed scalar");
+        let value = FixedScalarValue::binary_float(scalar, value).expect("literal fits its scalar");
+        self.fixed_literal(value, ty)
     }
 
     fn number_literal(&mut self, value: i128, ty: TypeId) -> HirValueId {
@@ -385,14 +386,14 @@ fn declared(local_id: LocalId, ty: TypeId) -> HirLocal {
 fn int_op(operator: NumericOperator) -> HirNumericOp {
     HirNumericOp {
         operator,
-        domain: NumericScalar::Int,
+        domain: NumericScalar::Fixed(FixedScalar::I32),
     }
 }
 
 fn uint_op(operator: NumericOperator) -> HirNumericOp {
     HirNumericOp {
         operator,
-        domain: NumericScalar::Uint,
+        domain: NumericScalar::Fixed(FixedScalar::U32),
     }
 }
 
@@ -450,10 +451,10 @@ fn proven_trap_results_retain_their_exact_intervals() {
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(proofs.integer_operation_is_safe(first_id, PROFILE));
-    assert!(proofs.integer_operation_is_safe(second_id, PROFILE));
+    assert!(proofs.integer_operation_is_safe(first_id));
+    assert!(proofs.integer_operation_is_safe(second_id));
 }
 
 #[test]
@@ -481,11 +482,11 @@ fn operand_facts_are_derived_before_the_destination_write() {
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    // Canonical Int bounds minus four still overflow, so this only proves through the
+    // Canonical I32 bounds minus four still overflow, so this only proves through the
     // pre-invalidation operand fact.
-    assert!(proofs.integer_operation_is_safe(operation_id, PROFILE));
+    assert!(proofs.integer_operation_is_safe(operation_id));
 }
 
 // ---------------------------------------------------------------------------
@@ -497,7 +498,7 @@ fn canonical_bounds_cannot_prove_unchecked_parameter_addition() {
     let mut fixture = ProofFixture::new();
     let int = fixture.int();
     let (x, y, sum) = (LocalId(0), LocalId(1), LocalId(2));
-    // Parameters have no interval facts: complete Int bounds can overflow.
+    // Parameters have no interval facts: complete I32 bounds can overflow.
     let left = fixture.load(x, int);
     let right = fixture.load(y, int);
     let operation = fixture.numeric_op(
@@ -514,9 +515,9 @@ fn canonical_bounds_cannot_prove_unchecked_parameter_addition() {
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(!proofs.integer_operation_is_safe(operation_id, PROFILE));
+    assert!(!proofs.integer_operation_is_safe(operation_id));
 }
 
 #[test]
@@ -547,9 +548,9 @@ fn unsigned_subtraction_below_zero_is_never_proven() {
     )]);
     validate_hir_module(&module, &environment).expect("ordinary subtraction fixture is valid HIR");
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(!proofs.integer_operation_is_safe(operation_id, PROFILE));
+    assert!(!proofs.integer_operation_is_safe(operation_id));
 }
 
 #[test]
@@ -582,9 +583,9 @@ fn division_with_possible_zero_divisor_keeps_its_check() {
     )]);
     validate_hir_module(&module, &environment).expect("ordinary division fixture is valid HIR");
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(!proofs.integer_operation_is_safe(operation_id, PROFILE));
+    assert!(!proofs.integer_operation_is_safe(operation_id));
 }
 
 #[test]
@@ -616,9 +617,9 @@ fn division_with_nonzero_literal_divisor_is_proven() {
     validate_hir_module(&module, &environment)
         .expect("ordinary literal-divisor fixture is valid HIR");
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(proofs.integer_operation_is_safe(operation_id, PROFILE));
+    assert!(proofs.integer_operation_is_safe(operation_id));
 }
 
 #[test]
@@ -664,10 +665,10 @@ fn signed_minimum_divided_by_minus_one_keeps_its_check_while_remainder_stays_exa
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(!proofs.integer_operation_is_safe(division_id, PROFILE));
-    assert!(proofs.integer_operation_is_safe(remainder_id, PROFILE));
+    assert!(!proofs.integer_operation_is_safe(division_id));
+    assert!(proofs.integer_operation_is_safe(remainder_id));
 }
 
 #[test]
@@ -718,10 +719,10 @@ fn product_bounds_overflowing_the_domain_or_i128_never_prove() {
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(!proofs.integer_operation_is_safe(wide_id, PROFILE));
-    assert!(!proofs.integer_operation_is_safe(signed_id, PROFILE));
+    assert!(!proofs.integer_operation_is_safe(wide_id));
+    assert!(!proofs.integer_operation_is_safe(signed_id));
 }
 
 #[test]
@@ -761,10 +762,10 @@ fn u64_interval_arithmetic_is_exact_at_the_domain_edge() {
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(proofs.integer_operation_is_safe(exact_id, PROFILE));
-    assert!(!proofs.integer_operation_is_safe(overflow_id, PROFILE));
+    assert!(proofs.integer_operation_is_safe(exact_id));
+    assert!(!proofs.integer_operation_is_safe(overflow_id));
 }
 
 #[test]
@@ -819,10 +820,10 @@ fn negate_is_proven_only_for_signed_domains_inside_their_range() {
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(!proofs.integer_operation_is_safe(signed_id, PROFILE));
-    assert!(!proofs.integer_operation_is_safe(unsigned_id, PROFILE));
+    assert!(!proofs.integer_operation_is_safe(signed_id));
+    assert!(!proofs.integer_operation_is_safe(unsigned_id));
 }
 
 #[test]
@@ -855,7 +856,7 @@ fn power_float_and_number_domains_always_stay_checked() {
     let float_left = fixture.float_literal(1.0, float);
     let float_right = fixture.float_literal(2.0, float);
     let float_operation = fixture.numeric_op(
-        fixed_op(NumericOperator::Add, NumericScalar::Float),
+        fixed_op(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::F64)),
         binary(float_left, float_right),
         HirLocalDestination::Define(float_result),
         NumericFailureMode::Trap,
@@ -904,12 +905,12 @@ fn power_float_and_number_domains_always_stay_checked() {
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(!proofs.integer_operation_is_safe(power_id, PROFILE));
-    assert!(!proofs.integer_operation_is_safe(float_id, PROFILE));
-    assert!(!proofs.integer_operation_is_safe(f32_id, PROFILE));
-    assert!(!proofs.integer_operation_is_safe(number_id, PROFILE));
+    assert!(!proofs.integer_operation_is_safe(power_id));
+    assert!(!proofs.integer_operation_is_safe(float_id));
+    assert!(!proofs.integer_operation_is_safe(f32_id));
+    assert!(!proofs.integer_operation_is_safe(number_id));
 }
 
 // ---------------------------------------------------------------------------
@@ -951,10 +952,10 @@ fn narrowing_is_proven_only_when_the_source_interval_fits_the_target() {
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(proofs.integer_narrowing_is_safe(proven_id, PROFILE));
-    assert!(!proofs.integer_narrowing_is_safe(unproven_id, PROFILE));
+    assert!(proofs.integer_narrowing_is_safe(proven_id));
+    assert!(!proofs.integer_narrowing_is_safe(unproven_id));
 }
 
 #[test]
@@ -993,10 +994,10 @@ fn narrowing_skips_non_integer_conversion_policies() {
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(!proofs.integer_narrowing_is_safe(float_id, PROFILE));
-    assert!(!proofs.integer_narrowing_is_safe(number_id, PROFILE));
+    assert!(!proofs.integer_narrowing_is_safe(float_id));
+    assert!(!proofs.integer_narrowing_is_safe(number_id));
 }
 
 #[test]
@@ -1040,9 +1041,9 @@ fn infallible_cast_expressions_preserve_operand_intervals() {
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(proofs.integer_operation_is_safe(operation_id, PROFILE));
+    assert!(proofs.integer_operation_is_safe(operation_id));
 }
 
 // ---------------------------------------------------------------------------
@@ -1078,9 +1079,9 @@ fn reassignment_replaces_the_cached_interval() {
             terminator,
         )]);
 
-        let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+        let proofs = analyse_numeric_proofs(&module, &environment);
 
-        assert!(!proofs.integer_operation_is_safe(operation_id, PROFILE));
+        assert!(!proofs.integer_operation_is_safe(operation_id));
     }
 
     // Large-to-small: x = U32::MAX; x = 3; sum = x + 1; — the newest [3, 3] interval proves
@@ -1109,9 +1110,9 @@ fn reassignment_replaces_the_cached_interval() {
             terminator,
         )]);
 
-        let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+        let proofs = analyse_numeric_proofs(&module, &environment);
 
-        assert!(proofs.integer_operation_is_safe(operation_id, PROFILE));
+        assert!(proofs.integer_operation_is_safe(operation_id));
     }
 }
 
@@ -1148,9 +1149,9 @@ fn an_intermediate_write_to_another_local_drops_the_single_entry_cache() {
     validate_hir_module(&module, &environment)
         .expect("ordinary cache-displacement fixture is valid HIR");
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(!proofs.integer_operation_is_safe(operation_id, PROFILE));
+    assert!(!proofs.integer_operation_is_safe(operation_id));
 }
 
 #[test]
@@ -1161,7 +1162,7 @@ fn alias_copies_carry_intervals_until_the_next_call() {
     // x = 3; alias = copy(x); alias = alias + alias; call(); after_sum = alias + alias;
     // The first operation is proven [6, 6] and writes back into the alias itself, so the
     // cache entry the call must evict is the only thing standing between the post-call
-    // operands and canonical Int bounds. Without call invalidation the retained [6, 6]
+    // operands and canonical I32 bounds. Without call invalidation the retained [6, 6]
     // would prove the post-call operation too and flip the second assertion.
     let literal = fixture.int_literal(3, int);
     let write = fixture.define_local(x, literal);
@@ -1197,10 +1198,10 @@ fn alias_copies_carry_intervals_until_the_next_call() {
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(proofs.integer_operation_is_safe(first_id, PROFILE));
-    assert!(!proofs.integer_operation_is_safe(after_id, PROFILE));
+    assert!(proofs.integer_operation_is_safe(first_id));
+    assert!(!proofs.integer_operation_is_safe(after_id));
 }
 
 #[test]
@@ -1239,9 +1240,9 @@ fn projection_writes_invalidate_the_cached_interval() {
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(!proofs.integer_operation_is_safe(operation_id, PROFILE));
+    assert!(!proofs.integer_operation_is_safe(operation_id));
 }
 
 #[test]
@@ -1283,10 +1284,10 @@ fn return_error_results_never_propagate_carrier_success_facts() {
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(proofs.integer_operation_is_safe(operation_id, PROFILE));
-    assert!(!proofs.integer_operation_is_safe(follow_up_id, PROFILE));
+    assert!(proofs.integer_operation_is_safe(operation_id));
+    assert!(!proofs.integer_operation_is_safe(follow_up_id));
 }
 
 #[test]
@@ -1296,7 +1297,7 @@ fn unwrapped_success_values_fall_back_to_canonical_bounds() {
     let carrier_type = fixture.carrier(int);
     let (x, carrier, sum) = (LocalId(0), LocalId(1), LocalId(2));
     // x = 3; carrier = x + 1 (ReturnError); sum = unwrap(carrier) + unwrap(carrier);
-    // unwraps have no interval fact, so complete Int bounds overflow and keep the check.
+    // unwraps have no interval fact, so complete I32 bounds overflow and keep the check.
     let literal = fixture.int_literal(3, int);
     let write = fixture.define_local(x, literal);
     let left = fixture.load(x, int);
@@ -1329,13 +1330,13 @@ fn unwrapped_success_values_fall_back_to_canonical_bounds() {
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(!proofs.integer_operation_is_safe(follow_up_id, PROFILE));
+    assert!(!proofs.integer_operation_is_safe(follow_up_id));
 }
 
 // ---------------------------------------------------------------------------
-//  Block independence and profile pairing
+//  Block independence
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -1379,10 +1380,10 @@ fn joined_blocks_reset_value_specific_state() {
         ),
     ]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(proofs.integer_operation_is_safe(entry_id, PROFILE));
-    assert!(!proofs.integer_operation_is_safe(join_id, PROFILE));
+    assert!(proofs.integer_operation_is_safe(entry_id));
+    assert!(!proofs.integer_operation_is_safe(join_id));
 }
 
 #[test]
@@ -1391,9 +1392,9 @@ fn loop_headers_reset_state_against_back_edge_writes() {
     let int = fixture.int();
     let (counter, doubled) = (LocalId(0), LocalId(1));
     // Entry: counter = 3; jump header.
-    // Header: doubled = counter + counter; counter = Int::MAX; jump self. The header walk
+    // Header: doubled = counter + counter; counter = I32::MAX; jump self. The header walk
     // resets state, so the doubling cannot lean on the entry's [3, 3] singleton even though
-    // the back edge later writes the Int maximum into the very same local.
+    // the back edge later writes the I32 maximum into the very same local.
     let literal = fixture.int_literal(3, int);
     let write = fixture.define_local(counter, literal);
     let left = fixture.load(counter, int);
@@ -1404,7 +1405,7 @@ fn loop_headers_reset_state_against_back_edge_writes() {
         HirLocalDestination::Define(doubled),
         NumericFailureMode::Trap,
     );
-    let back_edge_write = fixture.int_literal(IntWidth::Bits32.max_value(), int);
+    let back_edge_write = fixture.int_literal(i64::from(i32::MAX), int);
     let counter_write = fixture.update_local(counter, back_edge_write);
     let header_id = header_operation.id;
     let (module, environment) = fixture.finish(vec![
@@ -1416,9 +1417,9 @@ fn loop_headers_reset_state_against_back_edge_writes() {
         ),
     ]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(!proofs.integer_operation_is_safe(header_id, PROFILE));
+    assert!(!proofs.integer_operation_is_safe(header_id));
 }
 
 #[test]
@@ -1447,57 +1448,19 @@ fn loop_body_writes_prove_operations_within_the_same_block_walk() {
     validate_hir_module(&module, &environment)
         .expect("ordinary same-block loop fixture is valid HIR");
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(proofs.integer_operation_is_safe(operation_id, PROFILE));
-}
-
-#[test]
-fn profile_mismatch_returns_false_and_empty_tables_retain_everything() {
-    let mut fixture = ProofFixture::new();
-    let int = fixture.int();
-    let (x, sum) = (LocalId(0), LocalId(1));
-    let literal = fixture.int_literal(3, int);
-    let write = fixture.define_local(x, literal);
-    let left = fixture.load(x, int);
-    let right = fixture.int_literal(1, int);
-    let operation = fixture.numeric_op(
-        int_op(NumericOperator::Add),
-        binary(left, right),
-        HirLocalDestination::Define(sum),
-        NumericFailureMode::Trap,
-    );
-    let operation_id = operation.id;
-    let terminator = fixture.return_unit();
-    let (module, environment) = fixture.finish(vec![(
-        vec![declared(x, int), declared(sum, int)],
-        vec![write, operation],
-        terminator,
-    )]);
-
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
-    let other_profile = NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: FloatPrecision::Bits64,
-    };
-
-    assert!(proofs.integer_operation_is_safe(operation_id, PROFILE));
-    assert!(!proofs.integer_operation_is_safe(operation_id, other_profile));
-    assert!(!proofs.integer_narrowing_is_safe(operation_id, PROFILE));
-    assert!(!NumericProofs::default().integer_operation_is_safe(operation_id, PROFILE));
-    assert!(!NumericProofs::default().integer_narrowing_is_safe(operation_id, PROFILE));
+    assert!(proofs.integer_operation_is_safe(operation_id));
 }
 
 #[test]
 fn uint_singletons_prove_exact_arithmetic_and_reject_overflow() {
-    // Uint literals are exact singletons, so `1 + 2` proves while
-    // `profile_max - 1 + 2` keeps its check, mirroring the U64 edge test.
-    // `PROFILE` is Int32/Float64, so the overflowing operand is
-    // `u32::MAX - 1`; the Int64-profile test below covers the full Uint64
+    // U32 literals are exact singletons, so `1 + 2` proves while
+    // `u32::MAX - 1 + 2` keeps its check; the U64 test below covers the
     // bounds above `i64::MAX`.
     let mut fixture = ProofFixture::new();
     let uint = fixture.uint();
-    let profile_max = PROFILE.int_width.unsigned_max_value();
+    let u32_max = u64::from(u32::MAX);
     let (exact, overflow) = (LocalId(0), LocalId(1));
     let exact_left = fixture.uint_literal(1, uint);
     let exact_right = fixture.uint_literal(2, uint);
@@ -1507,7 +1470,7 @@ fn uint_singletons_prove_exact_arithmetic_and_reject_overflow() {
         HirLocalDestination::Define(exact),
         NumericFailureMode::Trap,
     );
-    let overflow_left = fixture.uint_literal(profile_max - 1, uint);
+    let overflow_left = fixture.uint_literal(u32_max - 1, uint);
     let overflow_right = fixture.uint_literal(2, uint);
     let overflow_operation = fixture.numeric_op(
         uint_op(NumericOperator::Add),
@@ -1524,36 +1487,31 @@ fn uint_singletons_prove_exact_arithmetic_and_reject_overflow() {
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(proofs.integer_operation_is_safe(exact_id, PROFILE));
-    assert!(!proofs.integer_operation_is_safe(overflow_id, PROFILE));
+    assert!(proofs.integer_operation_is_safe(exact_id));
+    assert!(!proofs.integer_operation_is_safe(overflow_id));
 }
 
 #[test]
 fn uint64_singletons_prove_exact_arithmetic_above_i64_max() {
-    // Under Int64/Float64 the Uint domain spans the whole u64
-    // range, so `u64::MAX - 1 + 1` proves exactly while `+ 2` overflows —
-    // the i128 interval path above `i64::MAX`.
-    let int64_profile = NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: FloatPrecision::Bits64,
-    };
+    // U64 spans the whole u64 range, so `u64::MAX - 1 + 1` proves exactly while
+    // `+ 2` overflows — the i128 interval path above `i64::MAX`.
     let mut fixture = ProofFixture::new();
-    let uint = fixture.uint();
+    let uint = fixture.fixed(FixedScalar::U64);
     let (exact, overflow) = (LocalId(0), LocalId(1));
-    let exact_left = fixture.uint_literal(u64::MAX - 1, uint);
-    let exact_right = fixture.uint_literal(1, uint);
+    let exact_left = fixture.unsigned_literal(FixedScalar::U64, u64::MAX - 1);
+    let exact_right = fixture.unsigned_literal(FixedScalar::U64, 1);
     let exact_operation = fixture.numeric_op(
-        uint_op(NumericOperator::Add),
+        fixed_op(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::U64)),
         binary(exact_left, exact_right),
         HirLocalDestination::Define(exact),
         NumericFailureMode::Trap,
     );
-    let overflow_left = fixture.uint_literal(u64::MAX - 1, uint);
-    let overflow_right = fixture.uint_literal(2, uint);
+    let overflow_left = fixture.unsigned_literal(FixedScalar::U64, u64::MAX - 1);
+    let overflow_right = fixture.unsigned_literal(FixedScalar::U64, 2);
     let overflow_operation = fixture.numeric_op(
-        uint_op(NumericOperator::Add),
+        fixed_op(NumericOperator::Add, NumericScalar::Fixed(FixedScalar::U64)),
         binary(overflow_left, overflow_right),
         HirLocalDestination::Define(overflow),
         NumericFailureMode::Trap,
@@ -1567,15 +1525,15 @@ fn uint64_singletons_prove_exact_arithmetic_above_i64_max() {
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, int64_profile);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(proofs.integer_operation_is_safe(exact_id, int64_profile));
-    assert!(!proofs.integer_operation_is_safe(overflow_id, int64_profile));
+    assert!(proofs.integer_operation_is_safe(exact_id));
+    assert!(!proofs.integer_operation_is_safe(overflow_id));
 }
 
 #[test]
 fn uint_subtraction_below_zero_is_never_proven() {
-    // `0 - 1` underflows Uint exactly like the unsigned fixed case.
+    // `0 - 1` underflows U32 exactly like the unsigned fixed case.
     let mut fixture = ProofFixture::new();
     let uint = fixture.uint();
     let difference = LocalId(0);
@@ -1595,23 +1553,23 @@ fn uint_subtraction_below_zero_is_never_proven() {
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(!proofs.integer_operation_is_safe(operation_id, PROFILE));
+    assert!(!proofs.integer_operation_is_safe(operation_id));
 }
 
 #[test]
 fn uint_narrowing_is_proven_only_when_the_source_interval_fits() {
-    // A known-small Uint narrows to Int exactly; an unknown parameter
-    // Uint keeps its CastOp check.
+    // A known-small U32 narrows to I32 exactly; an unknown parameter
+    // U32 keeps its CastOp check.
     let mut fixture = ProofFixture::new();
     let uint = fixture.uint();
     let int = fixture.int();
     let (source, carrier, wide_source, wide_carrier) =
         (LocalId(0), LocalId(1), LocalId(2), LocalId(3));
     let policy = BuiltinCastPolicyId::NumericConversion {
-        source: NumericScalar::Uint,
-        target: NumericScalar::Int,
+        source: NumericScalar::Fixed(FixedScalar::U32),
+        target: NumericScalar::Fixed(FixedScalar::I32),
     };
     let carrier_type = fixture.carrier(int);
     let literal = fixture.uint_literal(5, uint);
@@ -1634,10 +1592,10 @@ fn uint_narrowing_is_proven_only_when_the_source_interval_fits() {
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(proofs.integer_narrowing_is_safe(proven_id, PROFILE));
-    assert!(!proofs.integer_narrowing_is_safe(unproven_id, PROFILE));
+    assert!(proofs.integer_narrowing_is_safe(proven_id));
+    assert!(!proofs.integer_narrowing_is_safe(unproven_id));
 }
 
 #[test]
@@ -1667,7 +1625,7 @@ fn uint_proof_marks_recoverable_operation_safe_but_gate_still_rejects_delivery()
         terminator,
     )]);
 
-    let proofs = analyse_numeric_proofs(&module, &environment, PROFILE);
+    let proofs = analyse_numeric_proofs(&module, &environment);
 
-    assert!(proofs.integer_operation_is_safe(operation_id, PROFILE));
+    assert!(proofs.integer_operation_is_safe(operation_id));
 }

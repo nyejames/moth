@@ -62,6 +62,7 @@ pub(crate) struct GenericNominalConstructorContext<'a> {
 ///
 /// WHAT: retains partial generic substitutions for constructor parse expectations and inference.
 /// WHY: one seed must govern literal materialisation and later argument compatibility/conflicts.
+#[derive(Debug, Clone)]
 pub(crate) struct GenericNominalConstructorSeed {
     bindings: GenericTypeBindings,
     evidence_locations: NominalBindingEvidenceLocations,
@@ -81,9 +82,38 @@ impl GenericNominalConstructorSeed {
     ) {
         let mapping = self.bindings.replacement_map();
         for expectation in expectations {
-            if let ExpectedParameterType::Known(type_id) = &mut expectation.expected_type {
-                *type_id = type_environment.substitute_type_id(*type_id, mapping);
-            }
+            let ExpectedParameterType::Known(type_id) = &expectation.expected_type else {
+                continue;
+            };
+            let substituted = type_environment.substitute_type_id(*type_id, mapping);
+            expectation.expected_type = if type_environment.contains_generic_parameter(substituted)
+            {
+                ExpectedParameterType::GenericParameter(substituted)
+            } else {
+                ExpectedParameterType::Known(substituted)
+            };
+        }
+    }
+
+    /// The contextual bindings this seed carries into argument inference or retained completion.
+    pub(crate) fn bindings(&self) -> &GenericTypeBindings {
+        &self.bindings
+    }
+
+    /// Binds one materialised instance edge into the seed when no context binding names the parameter.
+    ///
+    /// WHAT: records the concrete type a retained constructor edge resolved to. A parameter the seed
+    ///       already binds keeps its context type.
+    /// WHY: slots read receiving types from this one binding map, so an edge's type is never held in a
+    ///      second parameter map. A context conflict surfaces in argument inference, which owns its evidence.
+    pub(crate) fn bind_materialised_edge(
+        &mut self,
+        parameter_id: GenericParameterId,
+        type_id: TypeId,
+    ) {
+        if self.bindings.get(parameter_id).is_none() {
+            let inserted = self.bindings.insert_consistent(parameter_id, type_id);
+            debug_assert!(inserted.is_ok(), "an unbound parameter cannot conflict");
         }
     }
 }
@@ -130,6 +160,9 @@ pub(crate) struct GenericNominalInference {
     pub instance_type_id: TypeId,
     /// HIR/diagnostic bridge key derived from the canonical inferred TypeId arguments.
     pub instance_key: Option<GenericInstantiationKey>,
+    /// Canonical parameter bindings the instance arguments were read from. The declared payload is
+    /// substituted through `replacement_map()`, so the instance keeps no second parameter map.
+    pub bindings: GenericTypeBindings,
 }
 
 pub(crate) fn infer_generic_nominal_constructor(
@@ -218,7 +251,6 @@ pub(crate) fn infer_generic_nominal_constructor(
 
     let evidence_context = GenericBoundEvidenceContext {
         type_environment: type_interner.environment(),
-        numeric_profile: context.shared.numeric_profile,
         trait_environment: Some(context.trait_environment()),
         trait_evidence_environment: Some(context.trait_evidence_environment()),
         generated_evidence_pairs: Some(context.shared.generated_evidence_pairs.as_ref()),
@@ -252,6 +284,7 @@ pub(crate) fn infer_generic_nominal_constructor(
     Ok(GenericNominalInference {
         instance_type_id,
         instance_key,
+        bindings,
     })
 }
 
@@ -260,6 +293,7 @@ pub(crate) fn infer_generic_nominal_constructor(
 /// WHAT: uses entry-or-insert so only the first span is retained for each parameter.
 /// WHY: later evidence for the same parameter must not overwrite the first evidence span,
 /// which is the one needed for the secondary conflict label.
+#[derive(Debug, Clone)]
 struct NominalBindingEvidenceLocations {
     spans_by_parameter: FxHashMap<GenericParameterId, Option<SourceSpan>>,
 }

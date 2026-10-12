@@ -137,9 +137,6 @@ impl<'a> HirBuilder<'a> {
         store.fold_value(value_id, &mut |metadata, visit| {
             increment_frontend_counter(FrontendCounter::HirConstValueConversions);
             match visit {
-                ConstValueVisit::Int(value) => Ok(HirConstValue::Int(value)),
-                ConstValueVisit::Uint(value) => Ok(HirConstValue::Uint(value)),
-                ConstValueVisit::Float(value) => Ok(HirConstValue::Float(value)),
                 ConstValueVisit::Number(value) => {
                     self.validate_number_value_type(value, metadata.type_id, &metadata.span)?;
                     Ok(HirConstValue::Number(value.clone()))
@@ -233,19 +230,6 @@ impl<'a> HirBuilder<'a> {
             let region = self.current_region_or_error(span)?;
             let ty = self.lower_type_id(metadata.type_id, span)?;
             match visit {
-                ConstValueVisit::Int(value) => {
-                    self.make_expression(span, HirExpressionKind::Int(value), ty, ValueKind::Const, region)
-                }
-                ConstValueVisit::Uint(value) => {
-                    self.make_expression(span, HirExpressionKind::Uint(value), ty, ValueKind::Const, region)
-                }
-                ConstValueVisit::Float(value) => self.make_expression(
-                    span,
-                    HirExpressionKind::Float(value),
-                    ty,
-                    ValueKind::Const,
-                    region,
-                ),
                 ConstValueVisit::Number(value) => {
                     self.validate_number_value_type(value, metadata.type_id, &metadata.span)?;
                     self.make_expression(

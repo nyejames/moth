@@ -1,8 +1,10 @@
-add_u8 |left U8, right U8| -> U32:
-    return left + right
+add_u8_in_u16 |left U8, right U8| -> U16:
+    wide_left U16 = cast left
+    wide_right U16 = cast right
+    return wide_left + wide_right
 ;
 
-add_i8_i16 |left I8, right I16| -> I32:
+add_i8_i16 |left I8, right I16| -> I16:
     return left + right
 ;
 
@@ -31,7 +33,8 @@ remainder_by_negative_three |value I32| -> I32, Error!:
 ;
 
 divide_fixed |value U8| -> F64, Error!:
-    return value / 2
+    divisor U8 = 2
+    return value / divisor
 ;
 
 equal_u8_i64 |left U8, right I64| -> Bool:
@@ -46,16 +49,41 @@ less_u32_u64 |left U32, right U64| -> Bool:
     return left < right
 ;
 
+-- Parameters prevent the extrema witnesses from becoming literal-only folds.
+-- Compare directly in both orders: subtraction can overflow and F64 can erase
+-- the difference between 2^53 and 2^53 + 1.
+signed_below_unsigned |signed I64, unsigned U64| -> Bool:
+    return signed < unsigned and unsigned > signed and signed <= unsigned and unsigned >= signed and signed is not unsigned and unsigned is not signed
+;
+
+signed_above_unsigned |signed I64, unsigned U64| -> Bool:
+    return signed > unsigned and unsigned < signed and signed >= unsigned and unsigned <= signed and signed is not unsigned and unsigned is not signed
+;
+
+equal_signed_unsigned |signed I64, unsigned U64| -> Bool:
+    return signed is unsigned and unsigned is signed and signed <= unsigned and unsigned >= signed and signed >= unsigned and unsigned <= signed
+;
+
+signed_extrema_order |low I64, high I64| -> Bool:
+    return low < high and high > low and low is not high
+;
+
+unsigned_extrema_order |low U64, high U64| -> Bool:
+    return low < high and high > low and low is not high
+;
+
 u8_left #U8 = 200
 u8_right #U8 = 100
-u8_sum = add_u8(u8_left, u8_right)
-u8_folded #U32 = u8_left + u8_right
+u8_sum = add_u8_in_u16(u8_left, u8_right)
+u8_wide_left #U16 = cast u8_left
+u8_wide_right #U16 = cast u8_right
+u8_folded #U16 = u8_wide_left + u8_wide_right
 u8_matches_folded = u8_sum is u8_folded
 
 signed_left #I8 = -120
 signed_right #I16 = -300
 signed_sum = add_i8_i16(signed_left, signed_right)
-signed_folded #I32 = signed_left + signed_right
+signed_folded #I16 = signed_left + signed_right
 signed_matches_folded = signed_sum is signed_folded
 
 i64_min #I64 = -9223372036854775808
@@ -89,6 +117,17 @@ mixed_equal = equal_u8_i64(255, 255)
 negative_i64_less = less_i64_u64(-1, a_u64_max)
 u32_less = less_u32_u64(4294967295, 4294967296)
 
+minimum_below_zero = signed_below_unsigned(-9223372036854775808, 0)
+minimum_below_maximum = signed_below_unsigned(-9223372036854775808, 18446744073709551615)
+maximum_below_maximum = signed_below_unsigned(9223372036854775807, 18446744073709551615)
+maximum_above_zero = signed_above_unsigned(9223372036854775807, 0)
+adjacent_signed_above = signed_above_unsigned(9007199254740993, 9007199254740992)
+adjacent_unsigned_above = signed_below_unsigned(9007199254740992, 9007199254740993)
+zero_equal = equal_signed_unsigned(0, 0)
+maximum_equal = equal_signed_unsigned(9223372036854775807, 9223372036854775807)
+signed_full_range = signed_extrema_order(-9223372036854775808, 9223372036854775807)
+unsigned_full_range = unsigned_extrema_order(0, 18446744073709551615)
+
 u8_text String = cast u8_sum
 signed_text String = cast signed_sum
 i64_text String = cast i64_next
@@ -99,4 +138,4 @@ positive_quotient_text String = cast positive_quotient
 positive_remainder_text String = cast positive_remainder
 fixed_quotient_text String = cast fixed_quotient
 
-[:fixed integer runtime u8=[u8_text] promoted=[u8_matches_folded] signed=[signed_text] promotion=[signed_matches_folded] i64=[i64_text] u64=[u64_text] signed-div=[negative_quotient_text]/[negative_remainder_text]/[positive_quotient_text]/[positive_remainder_text] fixed-div=[fixed_quotient_text] mixed=[mixed_equal]/[negative_i64_less]/[u32_less]]
+[:fixed integer runtime u8=[u8_text] wide=[u8_matches_folded] signed=[signed_text] mixed-domain=[signed_matches_folded] i64=[i64_text] u64=[u64_text] signed-div=[negative_quotient_text]/[negative_remainder_text]/[positive_quotient_text]/[positive_remainder_text] fixed-div=[fixed_quotient_text] mixed=[mixed_equal]/[negative_i64_less]/[u32_less] exact-comparison=[minimum_below_zero]/[minimum_below_maximum]/[maximum_below_maximum]/[maximum_above_zero]/[adjacent_signed_above]/[adjacent_unsigned_above]/[zero_equal]/[maximum_equal]/[signed_full_range]/[unsigned_full_range]]

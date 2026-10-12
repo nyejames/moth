@@ -1,6 +1,6 @@
 @test/nested
 
-bad |value nested.tools.Missing| -> Int:
+bad |value nested.tools.Missing| -> I32:
     return 1
 ;
 

@@ -11,7 +11,6 @@ use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass};
 use moth_lexical::numeric::grammar::NumericLiteralKind;
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 use moth_lexical::numeric::parse::parse_numeric_literal;
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 
 use super::{
     BudgetState, Field, Limits, MapKeyIndex, MonError, MonErrorCode, PathSegment, PreparedSchema,
@@ -20,25 +19,13 @@ use super::{
 
 /// A schema type after eligibility, names, scales and defaults have been checked.
 ///
-/// `Int`, `Uint` and `Float` capture the profile the schema was prepared under, so every later
-/// walk reads the captured width or precision from the prepared node instead of re-deriving it.
-/// `Uint` follows the profile's `Int` width. Explicit-width members collapse into one `Fixed`
-/// arm carrying their own scalar identity.
+/// Every explicit-width member collapses into one `Fixed` arm carrying its own scalar identity.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum PreparedType {
     None,
     Bool,
     Char,
     String,
-    Int {
-        width: IntWidth,
-    },
-    Uint {
-        width: IntWidth,
-    },
-    Float {
-        precision: FloatPrecision,
-    },
     Integer,
     Decimal {
         scale: NumberScale,
@@ -190,11 +177,7 @@ impl std::ops::Index<usize> for PreparedVariants {
 /// rejects a non-record root only for the document entry point; nested-value callers use
 /// the same prepared representation without that document-only restriction.
 pub(super) fn prepare_schema(schema: Schema) -> Result<PreparedSchema, MonError> {
-    let Schema {
-        root,
-        limits,
-        profile,
-    } = schema;
+    let Schema { root, limits } = schema;
     if limits.max_depth > Limits::MAX_SAFE_DEPTH {
         let requested = limits.max_depth;
         drop_schema_type_tree(root);
@@ -211,14 +194,10 @@ pub(super) fn prepare_schema(schema: Schema) -> Result<PreparedSchema, MonError>
     let mut path = Vec::new();
     let root = {
         let mut budget = BudgetState::new(&limits);
-        prepare_type(root, profile, &mut budget, &mut path, 0)?
+        prepare_type(root, &mut budget, &mut path, 0)?
     };
 
-    Ok(PreparedSchema {
-        root,
-        limits,
-        profile,
-    })
+    Ok(PreparedSchema { root, limits })
 }
 
 /// Validate a borrowed value against a prepared type and complete it into an owned value,
@@ -255,7 +234,6 @@ enum RecordContext {
 
 fn prepare_type(
     schema_type: SchemaType,
-    profile: NumericProfile,
     budget: &mut BudgetState<'_>,
     path: &mut Vec<PathSegment>,
     depth: usize,
@@ -274,9 +252,7 @@ fn prepare_type(
         SchemaType::Bool => Ok(PreparedType::Bool),
         SchemaType::Char => Ok(PreparedType::Char),
         SchemaType::String => Ok(PreparedType::String),
-        // Explicit-width spellings are profile-independent identities, so their prepared node is
-        // the scalar identity itself. `Int`, `Uint` and `Float` are deliberately absent: a matching
-        // profile width never makes them alias `I32`, `U32` or `F64`.
+        // Every scalar is an explicit fixed identity, so its prepared node is the scalar itself.
         SchemaType::I8 => Ok(PreparedType::Fixed(FixedScalar::I8)),
         SchemaType::I16 => Ok(PreparedType::Fixed(FixedScalar::I16)),
         SchemaType::I32 => Ok(PreparedType::Fixed(FixedScalar::I32)),
@@ -289,15 +265,6 @@ fn prepare_type(
         SchemaType::F32 => Ok(PreparedType::Fixed(FixedScalar::F32)),
         SchemaType::F64 => Ok(PreparedType::Fixed(FixedScalar::F64)),
         SchemaType::Byte => Ok(PreparedType::Fixed(FixedScalar::Byte)),
-        SchemaType::Int => Ok(PreparedType::Int {
-            width: profile.int_width,
-        }),
-        SchemaType::Uint => Ok(PreparedType::Uint {
-            width: profile.int_width,
-        }),
-        SchemaType::Float => Ok(PreparedType::Float {
-            precision: profile.float_precision,
-        }),
         SchemaType::Integer => Ok(PreparedType::Integer),
 
         SchemaType::Decimal { scale } => {
@@ -318,7 +285,7 @@ fn prepare_type(
         }
 
         SchemaType::Optional(inner) => {
-            let inner = prepare_type(*inner, profile, budget, path, depth + 1)?;
+            let inner = prepare_type(*inner, budget, path, depth + 1)?;
             if accepts_none(&inner) {
                 return Err(schema_error(
                     MonErrorCode::InvalidSchema,
@@ -330,7 +297,7 @@ fn prepare_type(
         }
 
         SchemaType::Record { fields } => Ok(PreparedType::Record {
-            fields: prepare_fields(fields, profile, budget, path, true, depth)?,
+            fields: prepare_fields(fields, budget, path, true, depth)?,
         }),
 
         SchemaType::Struct { name, fields } => {
@@ -344,16 +311,16 @@ fn prepare_type(
             }
             Ok(PreparedType::Struct {
                 name,
-                fields: prepare_fields(fields, profile, budget, path, true, depth)?,
+                fields: prepare_fields(fields, budget, path, true, depth)?,
             })
         }
 
         SchemaType::Collection { element } => Ok(PreparedType::Collection {
-            element: Box::new(prepare_type(*element, profile, budget, path, depth + 1)?),
+            element: Box::new(prepare_type(*element, budget, path, depth + 1)?),
         }),
 
         SchemaType::Map { key, value } => {
-            let key = match prepare_type(*key, profile, budget, path, depth + 1) {
+            let key = match prepare_type(*key, budget, path, depth + 1) {
                 Ok(prepared) => prepared,
                 Err(error) => {
                     drop_schema_type_tree(*value);
@@ -365,11 +332,11 @@ fn prepare_type(
                 return Err(schema_error(
                     MonErrorCode::InvalidMapKey,
                     path,
-                    "map keys must be String, Bool, Char, Int, Uint, a fixed-width integer or Byte",
+                    "map keys must be String, Bool, Char, a fixed-width integer or Byte",
                 ));
             }
 
-            let value = prepare_type(*value, profile, budget, path, depth + 1)?;
+            let value = prepare_type(*value, budget, path, depth + 1)?;
             Ok(PreparedType::Map {
                 key: Box::new(key),
                 value: Box::new(value),
@@ -437,7 +404,7 @@ fn prepare_type(
                     drop_fields_tree(variant_fields);
                     Err(error)
                 } else {
-                    prepare_fields(variant_fields, profile, budget, path, false, depth)
+                    prepare_fields(variant_fields, budget, path, false, depth)
                 };
                 path.pop();
                 match prepared_fields {
@@ -514,7 +481,6 @@ fn duplicate_candidates<T>(
 
 fn prepare_fields(
     fields: Vec<Field>,
-    profile: NumericProfile,
     budget: &mut BudgetState<'_>,
     path: &mut Vec<PathSegment>,
     allow_defaults: bool,
@@ -575,7 +541,7 @@ fn prepare_fields(
             ));
         }
 
-        match prepare_field(field, profile, budget, path, depth + 1) {
+        match prepare_field(field, budget, path, depth + 1) {
             Ok(prepared) => prepared_fields.push(prepared),
             Err(error) => {
                 for (_, remaining) in fields {
@@ -591,7 +557,6 @@ fn prepare_fields(
 
 fn prepare_field(
     field: Field,
-    profile: NumericProfile,
     budget: &mut BudgetState<'_>,
     path: &mut Vec<PathSegment>,
     depth: usize,
@@ -600,7 +565,7 @@ fn prepare_field(
 
     // The field name was charged by `prepare_fields` before validation.
     path.push(PathSegment::Field(name.clone()));
-    let ty = match prepare_type(ty, profile, budget, path, depth) {
+    let ty = match prepare_type(ty, budget, path, depth) {
         Ok(prepared) => prepared,
         Err(error) => {
             path.pop();
@@ -648,11 +613,7 @@ fn validate_identifier(name: &str, path: &[PathSegment], kind: &str) -> Result<(
 
 fn is_supported_map_key(ty: &PreparedType) -> bool {
     match ty {
-        PreparedType::String
-        | PreparedType::Bool
-        | PreparedType::Char
-        | PreparedType::Int { .. }
-        | PreparedType::Uint { .. } => true,
+        PreparedType::String | PreparedType::Bool | PreparedType::Char => true,
         // Fixed integers and `Byte` are data keys; fixed binary floats are not key families.
         PreparedType::Fixed(scalar) => scalar.class() != FixedScalarClass::BinaryFloat,
         _ => false,
@@ -739,35 +700,6 @@ fn complete_value(
         )),
 
         (Value::Bool(value), PreparedType::Bool) => Ok(Value::Bool(*value)),
-        (Value::Int(value), PreparedType::Int { width }) => {
-            // The carrier is `i64` so an `Int64` prepared node can hold its whole range; the
-            // captured profile decides which values this receiving boundary accepts.
-            if width.contains(*value) {
-                Ok(Value::Int(*value))
-            } else {
-                Err(value_error(
-                    context,
-                    MonErrorCode::NumericRange,
-                    path,
-                    "Int value is outside the captured profile width",
-                ))
-            }
-        }
-        (Value::Uint(value), PreparedType::Uint { width }) => {
-            // The carrier is `u64` so a `Uint64` prepared node keeps values above `i64::MAX`
-            // exact; the captured profile width decides which values this receiving boundary
-            // accepts, so a Uint32 node rejects a supplied value above `u32::MAX`.
-            if *value <= width.unsigned_max_value() {
-                Ok(Value::Uint(*value))
-            } else {
-                Err(value_error(
-                    context,
-                    MonErrorCode::NumericRange,
-                    path,
-                    "Uint value is outside the captured profile width",
-                ))
-            }
-        }
         (Value::Char(value), PreparedType::Char) => {
             charge_decoded_bytes(budget, value.len_utf8(), path)?;
             Ok(Value::Char(*value))
@@ -775,23 +707,6 @@ fn complete_value(
         (Value::String(value), PreparedType::String) => {
             charge_decoded_bytes(budget, value.len(), path)?;
             Ok(Value::String(value.clone()))
-        }
-        (Value::Float(value), PreparedType::Float { precision }) => {
-            // A `Float` value materialises at the captured profile, exactly as a decoded literal
-            // does: the `f64` carrier is rounded once at the profile precision, and a value whose
-            // magnitude is outside that precision's finite range is rejected instead of being
-            // written as text that would not read back.
-            let rounded = precision.round(*value);
-            if rounded.is_finite() {
-                Ok(Value::Float(rounded))
-            } else {
-                Err(value_error(
-                    context,
-                    MonErrorCode::NonFiniteFloat,
-                    path,
-                    "Float values must be finite",
-                ))
-            }
         }
         (value, PreparedType::Fixed(scalar)) => {
             if value.fixed_scalar() != Some(*scalar) {
@@ -1112,9 +1027,6 @@ pub(super) fn clone_default(
                 .map_err(|error| with_budget_path(error, path))?;
             Ok(Value::String(value.clone()))
         }
-        Value::Int(value) => Ok(Value::Int(*value)),
-        Value::Uint(value) => Ok(Value::Uint(*value)),
-        Value::Float(value) => Ok(Value::Float(*value)),
         // Fixed-scalar payloads are `Copy` and their prepared defaults were range- and
         // rounding-checked when the schema was prepared, so the copy owns no new storage.
         Value::I8(value) => Ok(Value::I8(*value)),
@@ -1318,19 +1230,16 @@ fn check_numeric_budget(
     Ok(())
 }
 
+/// Integer and Decimal schema text only reaches the shared syntax parser, so every rejection
+/// here is a spelling error; destination materialisation failures belong to the fixed readers.
 fn numeric_value_error(
     path: &[PathSegment],
     reason: NumberLiteralErrorReason,
     context: CompletionContext,
 ) -> MonError {
-    let code = match reason {
-        NumberLiteralErrorReason::OutsideIntRange => MonErrorCode::NumericRange,
-        NumberLiteralErrorReason::NonFiniteFloat => MonErrorCode::NonFiniteFloat,
-        _ => MonErrorCode::NumericSyntax,
-    };
     value_error(
         context,
-        code,
+        MonErrorCode::NumericSyntax,
         path,
         format!("invalid MON numeric literal ({reason:?})"),
     )
@@ -1385,9 +1294,6 @@ fn drop_schema_type_tree(root: SchemaType) {
             | SchemaType::Bool
             | SchemaType::Char
             | SchemaType::String
-            | SchemaType::Int
-            | SchemaType::Uint
-            | SchemaType::Float
             | SchemaType::Integer
             | SchemaType::Decimal { .. }
             | SchemaType::I8
@@ -1452,9 +1358,6 @@ fn drop_value_tree(root: Value) {
             | Value::Bool(_)
             | Value::Char(_)
             | Value::String(_)
-            | Value::Int(_)
-            | Value::Uint(_)
-            | Value::Float(_)
             | Value::Integer(_)
             | Value::Decimal(_)
             | Value::I8(_)

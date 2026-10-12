@@ -1,0 +1,24 @@
+read_u64 |value U64| -> U64:
+    return value
+;
+
+render_default || -> String, Error!:
+    values ~= {1}
+    ~values.push(values.get(0)! + 1)
+    first = values.get(0)!
+    second = values.get(1)!
+    return [:default_first=[first] default_second=[second]]
+;
+
+render_u64 || -> String, Error!:
+    values ~= {18_446_744_073_709_551_614}
+    ~values.push(values.get(0)! + 1)
+    first = values.get(0)!
+    first_text String = cast read_u64(first)
+    second = values.get(1)!
+    return [:u64_first=[first_text] u64_second=[second]]
+;
+
+default_text = render_default() catch then "failed"
+u64_text = render_u64() catch then "failed"
+[:cyclic_forward [default_text] [u64_text]]

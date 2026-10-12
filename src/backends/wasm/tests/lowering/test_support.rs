@@ -3,7 +3,7 @@ use crate::compiler_frontend::analysis::borrow_checker::{
 };
 use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
@@ -15,14 +15,13 @@ use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(crate) use crate::compiler_frontend::tests::hir_fixture_support::{
-    bool_expression, expression, int_expression, local, statement, string_expression,
-    unit_expression,
+    bool_expression, expression, local, statement, string_expression, unit_expression,
 };
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 #[derive(Clone, Copy)]
 pub(crate) struct TypeIds {
     pub unit: TypeId,
-    pub int: TypeId,
     pub boolean: TypeId,
     pub string: TypeId,
 }
@@ -37,7 +36,6 @@ pub(crate) fn build_type_environment() -> (TypeEnvironment, TypeIds) {
     let builtins = env.builtins();
 
     let unit = builtins.none;
-    let int = builtins.int;
     let boolean = builtins.bool;
     let string = builtins.string;
 
@@ -45,10 +43,48 @@ pub(crate) fn build_type_environment() -> (TypeEnvironment, TypeIds) {
         env,
         TypeIds {
             unit,
-            int,
             boolean,
             string,
         },
+    )
+}
+
+/// Deterministic `TypeId` for one exact fixed scalar in this lane's fixture environment.
+///
+/// WHY: tests materialise exact scalars, so every fixture names its scalar rather than reading a
+///      removed compilation-boundary width.
+pub(crate) fn fixed_scalar_type(scalar: FixedScalar) -> TypeId {
+    builtin_type_ids::fixed_scalar(scalar)
+}
+
+/// Materialise one exact fixed-scalar constant whose semantic type is its own scalar.
+///
+/// WHY: deriving the type from the value keeps the payload width and the expression type in
+///      agreement by construction.
+pub(crate) fn fixed_scalar_expression(
+    value: FixedScalarValue,
+    region: RegionId,
+    expressions: &mut HirExpressionStore,
+) -> HirValueId {
+    expression(
+        HirExpressionKind::FixedScalar(value),
+        fixed_scalar_type(value.scalar()),
+        region,
+        ValueKind::Const,
+        expressions,
+    )
+}
+
+/// Materialise one `I32` constant, the default exact integer of the scalar fixtures.
+pub(crate) fn i32_expression(
+    value: i32,
+    region: RegionId,
+    expressions: &mut HirExpressionStore,
+) -> HirValueId {
+    fixed_scalar_expression(
+        FixedScalarValue::signed(FixedScalar::I32, i64::from(value)).expect("i32 test value fits"),
+        region,
+        expressions,
     )
 }
 

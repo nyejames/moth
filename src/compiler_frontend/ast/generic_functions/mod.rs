@@ -10,14 +10,18 @@ mod calls;
 mod diagnostics;
 mod instances;
 mod materialisation;
+pub(crate) mod numeric_origins;
+mod receiver_method_instantiation;
 mod templates;
 
 pub(crate) use body_rules::{GenericFunctionBodyValidationInput, validate_generic_function_body};
 pub(crate) use calls::{
     GenericCallExpectedContext, GenericFunctionCallParseInput, GenericFunctionInferenceInput,
+    choose_retained_argument_destination, complete_deferred_generic_call,
     infer_generic_function_call, parse_generic_function_call_expression,
     substitute_function_signature, validate_generic_function_bound_evidence,
-    validate_generic_function_template_call_expression,
+    validate_generic_function_template_call_expression, verify_completed_error_return,
+    verify_retained_propagation_error,
 };
 pub(crate) use diagnostics::{
     GenericInstantiationDiagnosticContext, recursive_generic_function_instantiation,
@@ -25,12 +29,16 @@ pub(crate) use diagnostics::{
 };
 pub(crate) use instances::{
     GenericFunctionInstance, GenericFunctionInstanceKey, GenericFunctionInstantiationRequest,
-    GenericRequestRange, IfGenericRequestRanges,
+    GenericRequestRange, GenericRequestSlot, GenericRequestTicket, IfGenericRequestRanges,
 };
 pub(crate) use materialisation::{
     MaterialisedGenericAst, ModuleMaterialisationContext, ModuleMaterialisationEnvironmentInput,
     ModuleMaterialisationInput, ModuleMaterialisationPreparation,
     ModuleMaterialisationPreparationBuilder, bootstrap_call_summary_from_signature,
+};
+pub(crate) use receiver_method_instantiation::{
+    GenericReceiverMethodInstantiationInput, GenericReceiverMethodReceiver,
+    instantiate_generic_cast_evidence_method, instantiate_generic_receiver_method,
 };
 pub(crate) use templates::{
     GenericFunctionBody, GenericFunctionTemplate, MaterialisedDonorContext,

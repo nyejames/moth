@@ -3,4 +3,4 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["cast_generic_imported_user_evidence_success provider"]
+rendered_output_contains = ["cast_generic_imported_user_evidence_success provider", "imported generic nominal box: boxed", "imported same-name receiver evidence: ticket|neighbour(note)"]

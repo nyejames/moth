@@ -1,5 +1,5 @@
-max_value #Int = 2147483647
+max_value #I32 = 2147483647
 
-overflow || -> Int, Error!:
+overflow || -> I32, Error!:
     return max_value + 1
 ;

@@ -1,6 +1,6 @@
 Build configuration values let a project or source module receive typed primitive values before its modules are compiled.
 
-**Current support versus accepted design.** Declaration-owned `#Config of T` inputs and typed `--input` values are supported. `$config` prefixes and explicit-only providers are accepted queued design. See @../progress (Progress).
+CLI numeric spelling stays raw until the exact contract selects its type. Declaration-owned `#Config of T` inputs use these exact numeric rules. **Separate directive migration.** `$config` prefixes and explicit-only providers stay queued. See @../progress (Progress) for implementation status.
 
 ### Accepted `$config`
 
@@ -33,6 +33,6 @@ Declaration-owned `#Config of T` is current; the `$config` prefix and explicit-o
     moth build . --input api_url=https://example.com
 ]
 
-Bare `true` and `false` infer as `Bool`, whole numbers as `Int`, decimal values as `Float`, and other text falls back to `String`. Quote `"true"` when a String is intended.
+Raw CLI numeric spelling keeps its category until the exact input contract is known. A whole literal can materialise directly as `U64` or `F32`. Decimal/exponent spelling cannot satisfy an integer contract, and every numeric value must fit its destination's range or finite precision. Already typed programmatic inputs keep their exact type: an `I32` value cannot satisfy `I64` or `F64`. Inputs accept all eleven fixed numeric types, but not `Byte` or `Dec`. See @../numbers/#numeric-types (Numeric types) for the exact inventory.
 
 Build configuration cannot inspect operating-system, architecture, backend or target identity.

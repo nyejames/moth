@@ -1,0 +1,3 @@
+@provider fallback
+
+value = 1 + 2 catch then fallback()

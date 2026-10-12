@@ -6,7 +6,7 @@ StringBox as ImportedBox of String
 item StringBox = ImportedBox("text")
 raw ImportedBox of String = item
 
-maybe ImportedMaybe of Int = ImportedMaybe::Some(7)
+maybe ImportedMaybe of I32 = ImportedMaybe::Some(7)
 
 io.line([: [raw.value]])
 

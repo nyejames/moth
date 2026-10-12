@@ -35,14 +35,38 @@ pub(crate) enum ScopeDeclarationRef<'a> {
         binding_span: Option<SourceSpan>,
     },
     Shared(&'a Declaration),
+    /// An eligible body-local numeric binding whose single static type is not selected yet.
+    ///
+    /// WHAT: exposes the construction-owned binding ID plus the authored binding span.
+    /// WHY: a pending binding must be visible to lookup — never treated as an unknown name —
+    ///      while no `Declaration`, `TypeId` or default value exists for it. Callers that need
+    ///      a ready declaration use `ready_declaration()` and must handle the pending case
+    ///      explicitly; there is no implicit deref and no placeholder type.
+    PendingNumeric {
+        binding: crate::compiler_frontend::ast::numeric_construction::NumericBindingId,
+        binding_span: Option<SourceSpan>,
+    },
 }
 
 impl<'a> ScopeDeclarationRef<'a> {
-    /// Return a borrowed view of the underlying declaration.
-    pub(crate) fn as_declaration(&self) -> &Declaration {
+    /// Return a borrowed view of the underlying ready declaration.
+    ///
+    /// `None` for `PendingNumeric`: an unresolved numeric binding has no declaration yet.
+    pub(crate) fn ready_declaration(&self) -> Option<&Declaration> {
         match self {
-            ScopeDeclarationRef::Local { declaration, .. } => declaration.as_ref(),
-            ScopeDeclarationRef::Shared(declaration) => declaration,
+            ScopeDeclarationRef::Local { declaration, .. } => Some(declaration.as_ref()),
+            ScopeDeclarationRef::Shared(declaration) => Some(declaration),
+            ScopeDeclarationRef::PendingNumeric { .. } => None,
+        }
+    }
+
+    /// The construction-owned pending binding ID, if this reference is unresolved.
+    pub(crate) fn pending_binding(
+        &self,
+    ) -> Option<crate::compiler_frontend::ast::numeric_construction::NumericBindingId> {
+        match self {
+            ScopeDeclarationRef::PendingNumeric { binding, .. } => Some(*binding),
+            _ => None,
         }
     }
 
@@ -51,18 +75,15 @@ impl<'a> ScopeDeclarationRef<'a> {
     pub(crate) fn binding_span(&self) -> Option<SourceSpan> {
         match self {
             ScopeDeclarationRef::Local { binding_span, .. } => *binding_span,
+            ScopeDeclarationRef::PendingNumeric { binding_span, .. } => *binding_span,
             ScopeDeclarationRef::Shared(_) => None,
         }
     }
 }
 
-impl<'a> std::ops::Deref for ScopeDeclarationRef<'a> {
-    type Target = Declaration;
-
-    fn deref(&self) -> &Declaration {
-        self.as_declaration()
-    }
-}
+// NOTE: there is intentionally no `Deref<Target = Declaration>` for
+// `ScopeDeclarationRef`. A `PendingNumeric` reference has no declaration, so callers that
+// need one must go through `ready_declaration()` and handle the pending case explicitly.
 
 /// Resolved struct constructor metadata for identifier-led expression dispatch.
 ///
@@ -84,13 +105,28 @@ impl ScopeContext {
 
     pub(crate) fn get_reference<'a>(&'a self, name: &StringId) -> Option<ScopeDeclarationRef<'a>> {
         // 1. Body-local declarations shadow every source-visible declaration.
-        if let Some((declaration, binding_span)) =
-            self.arena.borrow().lookup(self.current_frame_id, name)
+        if let Some((slot, binding_span)) = self.arena.borrow().lookup(self.current_frame_id, name)
         {
-            return Some(ScopeDeclarationRef::Local {
-                declaration,
-                binding_span,
-            });
+            match slot {
+                LocalDeclarationSlot::Ready(declaration) => {
+                    return Some(ScopeDeclarationRef::Local {
+                        declaration,
+                        binding_span,
+                    });
+                }
+                LocalDeclarationSlot::Pending { binding, domain } => {
+                    // A pending binding from another independent body root is not visible here:
+                    // its dense ID indexes that body's construction tables. The name keeps
+                    // resolving through the ordinary module-visible path below, exactly as if the
+                    // foreign body-local declaration did not shadow it.
+                    if domain == self.numeric_domain_id() {
+                        return Some(ScopeDeclarationRef::PendingNumeric {
+                            binding,
+                            binding_span,
+                        });
+                    }
+                }
+            }
         }
 
         // 2. Source-visible names → canonical declaration path.
@@ -210,6 +246,17 @@ impl ScopeContext {
             .lookups
             .as_ref()
             .is_some_and(|lookups| lookups.resolved_module_constants.contains(declaration_id))
+    }
+
+    /// Whether a declaration is a top-level constant header whose folded value is still pending.
+    ///
+    /// WHAT: delegates to the shared top-level table, which owns the constant header role.
+    /// WHY: deferred struct-shell and constant-context checks must recognise pending constants
+    ///     by header role, not by declared type.
+    pub(crate) fn is_unresolved_constant_placeholder(&self, declaration: &Declaration) -> bool {
+        self.shared
+            .top_level_declarations
+            .is_unresolved_constant_placeholder(declaration)
     }
 
     pub(crate) fn lookup_generic_function_template(

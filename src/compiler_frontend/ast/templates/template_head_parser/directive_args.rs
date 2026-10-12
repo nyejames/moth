@@ -35,6 +35,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use moth_lexical::numeric::fixed_scalar::{FixedScalarClass, FixedScalarValue};
 
 /// Typed result shared by directive-argument parsing helpers.
 type DirectiveArgsResult<T> = Result<T, TemplateError>;
@@ -314,20 +315,20 @@ pub(crate) fn parse_optional_slot_target_argument(
         crate::compiler_frontend::ast::expressions::expression::ExpressionKind::StringSlice(
             name,
         ) => Ok(SlotKey::Named(name)),
-        crate::compiler_frontend::ast::expressions::expression::ExpressionKind::Int(index) => {
-            match usize::try_from(index) {
-                Ok(position) if position > 0 => Ok(SlotKey::Positional(position)),
-                _ => Err(with_current_token_span(
-                    token_stream,
-                    CompilerDiagnostic::invalid_template_directive(
-                        Some(directive_name),
-                        InvalidTemplateDirectiveReason::InvalidSlotTarget,
-                        expression.span,
-                    ),
-                )
-                .into()),
-            }
-        }
+        crate::compiler_frontend::ast::expressions::expression::ExpressionKind::FixedScalar(
+            value,
+        ) => match fixed_slot_position(value) {
+            Some(position) => Ok(SlotKey::Positional(position)),
+            None => Err(with_current_token_span(
+                token_stream,
+                CompilerDiagnostic::invalid_template_directive(
+                    Some(directive_name),
+                    InvalidTemplateDirectiveReason::InvalidSlotTarget,
+                    expression.span,
+                ),
+            )
+            .into()),
+        },
         _ => Err(with_current_token_span(
             token_stream,
             CompilerDiagnostic::invalid_template_directive(
@@ -338,6 +339,22 @@ pub(crate) fn parse_optional_slot_target_argument(
         )
         .into()),
     }
+}
+
+/// Converts one positional slot-target literal into its positive position.
+///
+/// WHY: positions are authored as exact fixed-integer literals, so any integer width is
+///      accepted while binary floats, `Byte` and non-positive values keep the ordinary
+///      slot-target diagnostic.
+fn fixed_slot_position(value: FixedScalarValue) -> Option<usize> {
+    let position = match value.scalar().class() {
+        FixedScalarClass::SignedInteger => i128::from(value.as_i64()?),
+        FixedScalarClass::UnsignedInteger => i128::from(value.as_u64()?),
+        FixedScalarClass::BinaryFloat | FixedScalarClass::Octet => return None,
+    };
+    usize::try_from(position)
+        .ok()
+        .filter(|position| *position > 0)
 }
 
 /// Parses the required named target argument to `$insert("name")`.

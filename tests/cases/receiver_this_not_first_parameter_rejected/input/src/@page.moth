@@ -1,7 +1,7 @@
 Point = |
-    x Int,
+    x I32,
 |
 
-bad |a Int, this Point| -> Int:
+bad |a I32, this Point| -> I32:
     return a
 ;

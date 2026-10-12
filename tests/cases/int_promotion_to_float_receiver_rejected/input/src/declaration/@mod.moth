@@ -1,0 +1,2 @@
+value I32 = 5
+received F64 = value

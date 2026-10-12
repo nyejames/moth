@@ -1,7 +1,7 @@
--- Task 5A: Uint and Int keys are distinct types; an Int key does not
--- satisfy a Uint-keyed map lookup.
+-- Task 5A: U32 and I32 keys are distinct types; an I32 key does not
+-- satisfy a U32-keyed map lookup.
 
-wide_map {Uint = Int} = {7 = 1}
-i64_key Int = 7
+wide_map {U32 = I32} = {7 = 1}
+i64_key I32 = 7
 bad = wide_map.contains(i64_key)
 [:test]

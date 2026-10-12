@@ -66,7 +66,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
-use moth_lexical::numeric::profile::NumericProfile;
 
 fn assert_project_context_diagnostic(
     error: ProjectAssemblyError,
@@ -411,7 +410,6 @@ fn package_facade_rejects_project_context_declaration_provenance() {
         project,
         source_packages,
         resource_inputs,
-        NumericProfile::STANDARD,
     ) {
         Ok(_) => {
             panic!("project facade assembly should reject ProjectContext declaration provenance")
@@ -541,7 +539,6 @@ fn source_package_facade_rejects_project_context_reachable_private_helper() {
         ),
         source_packages,
         ResourceInputRegistry::new(),
-        NumericProfile::STANDARD,
     );
     let error = match result {
         Ok(_) => panic!("source-package facade should reject ProjectContext helper provenance"),
@@ -616,7 +613,6 @@ fn source_package_facade_rejects_project_context_public_declaration() {
         ),
         source_packages,
         ResourceInputRegistry::new(),
-        NumericProfile::STANDARD,
     );
     let error = match result {
         Ok(_) => {
@@ -701,7 +697,6 @@ fn entry_union_keeps_entry_fragment_and_excludes_linked_module_fragment() {
         project_boundary,
         source_packages,
         ResourceInputRegistry::new(),
-        NumericProfile::STANDARD,
     )
     .expect("synthetic entry boundaries should assemble");
     let entry = compilation
@@ -824,7 +819,6 @@ fn package_facade_rejects_project_context_reachable_private_helper() {
         project_boundary,
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
-        NumericProfile::STANDARD,
     );
     let error = match result {
         Ok(_) => panic!("project facade should reject ProjectContext helper provenance"),
@@ -925,7 +919,6 @@ fn package_union_follows_facade_export_and_excludes_hidden_child_export() {
         project_boundary,
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
-        NumericProfile::STANDARD,
     )
     .expect("synthetic package boundary should assemble");
     let paths = compilation
@@ -1056,7 +1049,6 @@ fn package_union_roots_receiver_method_from_facade_closed_nominal() {
         project_boundary,
         CompletedSourcePackageRegistry::new(),
         ResourceInputRegistry::new(),
-        NumericProfile::STANDARD,
     )
     .expect("synthetic nominal package should assemble");
     let paths = compilation

@@ -8,7 +8,11 @@
 and MON: LF and CR are the only line breaks, with CRLF forming one break.
 Other Unicode whitespace remains horizontal trivia.
 
-`moth_lexical::numeric` accepts literal text and caller-selected destination facts. It owns shared parsing, materialisation and formatting for fixed-width integers, Byte, F16/F32/F64 and profile-dependent Int/Uint/Float, plus exact Dec/DecN scale-text facts from 0 through 256. All four combinations of 32/64-bit Int and 32/64-bit Float remain supported, with Int32/Float64 as the default. Compiler/build policy selects compilation profiles and MON schemas capture their caller-selected profile.
+`moth_lexical::numeric` accepts literal text and caller-selected destination facts. It owns shared parsing, materialisation and formatting for fixed-width integers, Byte, F16/F32/F64, plus exact Dec/DecN scale-text facts from 0 through 256. Callers pass the exact destination scalar, and MON schemas name the exact scalar of each field.
+
+Numeric destination facts never come from a semantic profile. Whole-number text materialises directly at the requested exact range, including the full `U64` range. Decimal/exponent spelling cannot satisfy an integer destination. Binary-float text rounds directly to the requested precision using nearest, ties-to-even, with finite-result checks and no default `F64` value followed by narrowing. The `f64` carrier preserves completed `F16` and `F32` values without changing their scalar identity.
+
+The compiler owns source inference and the fixed `I32`/`F64` defaults. MON owns explicit schemas and its lossless `Integer` and `Decimal` data families. This crate selects neither. See the [numeric reference](../../docs/src/docs/numbers/numeric-literals.mtf) for source semantics and the [MON reference](../../docs/src/docs/mon/mon-format.mtf) for schema-directed data.
 
 The crate provides no file I/O, document parsing, compiler token storage, type lookup, expression evaluation, arbitrary-precision coefficient arithmetic or numeric runtime. Its numeric operations return structured failure reasons for consumers to project into their own error boundary. Immutable prepared schemas, owned document values and `MonError` with `Display`/`std::error::Error` belong to `moth-mon`.
 

@@ -34,8 +34,24 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
     runtime_operand_item, runtime_operator_item,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
+
+/// One exact `I32` literal expression.
+///
+/// WHY: these fixtures pin the exact `I32` width explicitly at the scalar carrier.
+fn i32_literal(
+    value: i64,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
+    value_mode: ValueMode,
+) -> Expression {
+    Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+        span,
+        value_mode,
+    )
+}
 
 #[test]
 fn statement_result_propagation_with_unit_success_lowers_to_explicit_error_edge() {
@@ -545,7 +561,7 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
             parameters: vec![],
             returns: vec![
                 success_return_slot(builtin_type_ids::STRING),
-                success_return_slot(builtin_type_ids::INT),
+                success_return_slot(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                 error_return_slot(builtin_type_ids::STRING),
             ],
         },
@@ -556,7 +572,7 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
                     location,
                     ValueMode::ImmutableOwned,
                 ),
-                Expression::int(2, location, ValueMode::ImmutableOwned),
+                i32_literal(2, location, ValueMode::ImmutableOwned),
             ]),
             location,
         )],
@@ -567,7 +583,10 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
     let propagated_call = Expression::handled_fallible_function_call_with_typed_arguments(
         pair_name,
         vec![],
-        vec![builtin_type_ids::STRING, builtin_type_ids::INT],
+        vec![
+            builtin_type_ids::STRING,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        ],
         FallibleExpressionHandling::Propagate,
         &mut expression_types,
         location,
@@ -579,7 +598,7 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
             parameters: vec![],
             returns: vec![
                 success_return_slot(builtin_type_ids::STRING),
-                success_return_slot(builtin_type_ids::INT),
+                success_return_slot(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                 error_return_slot(builtin_type_ids::STRING),
             ],
         },
@@ -596,7 +615,7 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
                         ),
                         multi_bind_target(
                             count_id,
-                            builtin_type_ids::INT,
+                            builtin_type_ids::fixed_scalar(FixedScalar::I32),
                             ValueMode::ImmutableOwned,
                             MultiBindTargetKind::Declaration,
                             location,
@@ -616,7 +635,7 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
                     ),
                     reference_expr_with_type_id(
                         count_id,
-                        builtin_type_ids::INT,
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         location,
                         ValueMode::ImmutableReference,
                     ),
@@ -905,16 +924,12 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
         FunctionSignature {
             parameters: vec![],
             returns: vec![
-                success_return_slot(builtin_type_ids::INT),
+                success_return_slot(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                 error_return_slot(builtin_type_ids::STRING),
             ],
         },
         vec![node(
-            NodeKind::Return(vec![Expression::int(
-                41,
-                location,
-                ValueMode::ImmutableOwned,
-            )]),
+            NodeKind::Return(vec![i32_literal(41, location, ValueMode::ImmutableOwned)]),
             location,
         )],
         location,
@@ -924,14 +939,14 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
         vec![
             runtime_handled_function_call_item(
                 can_fail_name,
-                vec![builtin_type_ids::INT],
+                vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
                 FallibleHandling::Propagate,
                 location,
             ),
-            runtime_operand_item(Expression::int(1, location, ValueMode::ImmutableOwned)),
+            runtime_operand_item(i32_literal(1, location, ValueMode::ImmutableOwned)),
             runtime_operator_item(Operator::Add, location),
         ],
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         location,
         ValueMode::MutableOwned,
     );
@@ -941,7 +956,7 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
         FunctionSignature {
             parameters: vec![],
             returns: vec![
-                success_return_slot(builtin_type_ids::INT),
+                success_return_slot(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                 error_return_slot(builtin_type_ids::STRING),
             ],
         },
@@ -953,7 +968,7 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
             node(
                 NodeKind::Return(vec![reference_expr_with_type_id(
                     value_name,
-                    builtin_type_ids::INT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     location,
                     ValueMode::ImmutableReference,
                 )]),
@@ -1017,7 +1032,7 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
             HirStatementKind::NumericOp {
                 op: HirNumericOp {
                     operator: NumericOperator::Add,
-                    domain: NumericScalar::Int
+                    domain: NumericScalar::Fixed(FixedScalar::I32)
                 },
                 ..
             }
@@ -1261,11 +1276,14 @@ fn multi_bind_lowering_projects_tuple_slots_from_single_rhs_call() {
         pair_name,
         FunctionSignature {
             parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT, builtin_type_ids::STRING]),
+            returns: fresh_success_returns(vec![
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                builtin_type_ids::STRING,
+            ]),
         },
         vec![node(
             NodeKind::Return(vec![
-                Expression::int(1, location, ValueMode::ImmutableOwned),
+                i32_literal(1, location, ValueMode::ImmutableOwned),
                 Expression::string_slice(
                     string_table.intern("value"),
                     location,
@@ -1295,7 +1313,7 @@ fn multi_bind_lowering_projects_tuple_slots_from_single_rhs_call() {
                 targets: vec![
                     multi_bind_target(
                         left_id,
-                        builtin_type_ids::INT,
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         ValueMode::ImmutableOwned,
                         MultiBindTargetKind::Declaration,
                         location,
@@ -1311,7 +1329,10 @@ fn multi_bind_lowering_projects_tuple_slots_from_single_rhs_call() {
                 value: Expression::function_call(
                     pair_name,
                     vec![],
-                    vec![builtin_type_ids::INT, builtin_type_ids::STRING],
+                    vec![
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                        builtin_type_ids::STRING,
+                    ],
                     location,
                 ),
             },

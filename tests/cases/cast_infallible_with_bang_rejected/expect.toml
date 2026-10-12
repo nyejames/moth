@@ -2,4 +2,11 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0083"]
-message_contains = ["only valid for fallible casts"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+reason = "invalid_cast.cast_propagation_removed"
+path = "input/@page.moth"
+line = 2
+column = 16
+count = 1

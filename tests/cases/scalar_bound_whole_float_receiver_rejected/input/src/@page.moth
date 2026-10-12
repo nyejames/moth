@@ -1,0 +1,11 @@
+accept_f64 |value F64| -> F64:
+    return value
+;
+
+-- A raw whole literal can materialise at the F64 receiver. Once bound, the
+-- unannotated whole origin remains integer-family and cannot change to F64.
+raw = accept_f64(1)
+whole = 1
+accept_f64(whole)
+
+[:unreachable]

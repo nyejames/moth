@@ -1,0 +1,9 @@
+-- Reversing only the outer entries keeps the same nested family conflict. The raw nested
+-- decimal collection now comes first and the bound whole collection is the later entry.
+render_nested_bound_decimal_reverse || -> String:
+    whole = {1}
+    rows = {{2.5}, whole}
+    return [:unreachable]
+;
+
+[:[render_nested_bound_decimal_reverse()]]

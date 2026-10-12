@@ -1,3 +1,3 @@
-process |items {0 Int}| -> String:
+process |items {0 I32}| -> String:
     return ""
 ;

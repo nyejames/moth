@@ -5,17 +5,23 @@
 //! WHY: header classification, scrutinee parsing and pattern eligibility live
 //! in the shared single-predicate owner so this file does not rescan `if`.
 
-use super::inline_then_else::{InlineThenElseInput, parse_inline_then_else, same_logical_line};
+use super::block_body::ValueBlockBranchBody;
+use super::inline_then_else::{
+    InlineThenElseInput, InlineThenElseOutcome, parse_inline_then_else, same_logical_line,
+};
+use super::retained::{DeferredValueBlock, DeferredValueBlockForm, RetainedValueBlock};
 use super::single_predicate::{SinglePredicateHeaderInput, try_parse_single_predicate_header};
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::MatchExhaustiveness;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::numeric_construction::{
+    DeferredArmPattern, StatementExpression,
+};
 use crate::compiler_frontend::ast::statements::if_headers::{
     IfHeaderClassification, IfHeaderDelimiter,
 };
-use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
+use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::ast::statements::value_production::expression_build::{
     build_value_match_expression, then_value_node,
 };
@@ -114,8 +120,8 @@ struct InlineValueMatchParseInput<'a, 'b, 'tokens> {
     type_interner: &'a mut AstTypeInterner<'b>,
     target: ActiveValueProductionTarget,
     string_table: &'a mut StringTable,
-    scrutinee: Expression,
-    pattern: MatchPattern,
+    scrutinee: StatementExpression,
+    pattern: DeferredArmPattern,
     span: Option<SourceSpan>,
     path_fork: &'a mut PathInternerFork,
 }
@@ -140,15 +146,43 @@ fn parse_inline_value_match(
         path_fork,
     } = input;
 
-    let output = parse_inline_then_else(InlineThenElseInput {
+    let output = match parse_inline_then_else(InlineThenElseInput {
         token_stream,
         then_context,
         else_context: context,
         type_interner,
-        target,
+        // The target still rides on the retained form when the subject or pattern has to resolve,
+        // so the authored inline bodies parse against a copy of the same receiving context.
+        target: target.clone(),
         string_table,
         path_fork,
-    })?;
+    })? {
+        InlineThenElseOutcome::Complete(output) => output,
+        InlineThenElseOutcome::Retained {
+            then_body,
+            else_body,
+            generic_request_ranges: _,
+        } => {
+            // A branch still depends on an unresolved numeric origin, so the committed header and
+            // the authored inline bodies travel together to the enclosing body root.
+            return Ok(ParsedReceiverValue::Retained(Box::new(
+                RetainedValueBlock::value_block(
+                    DeferredValueBlock {
+                        form: DeferredValueBlockForm::SinglePredicate {
+                            scrutinee,
+                            pattern,
+                            then_body: then_body.into_value_block_body(),
+                            else_body: else_body.into_value_block_body(),
+                        },
+                        span,
+                        target,
+                        resolved_slot_types: None,
+                    },
+                    span,
+                ),
+            )));
+        }
+    };
 
     let then_body = vec![then_value_node(
         output.then_values,
@@ -160,6 +194,39 @@ fn parse_inline_value_match(
         output.else_span,
         context.scope,
     )];
+
+    // A subject or pattern that still holds numeric continuations cannot build the match here:
+    // the committed header, the authored inline bodies and the match's own form travel to the
+    // enclosing body root, where the block's constructor runs once with the resolved inputs.
+    let (scrutinee, pattern) = match (scrutinee, pattern) {
+        (StatementExpression::Built(scrutinee), DeferredArmPattern::Ready(pattern)) => {
+            (scrutinee, pattern)
+        }
+        (scrutinee, pattern) => {
+            return Ok(ParsedReceiverValue::Retained(Box::new(
+                RetainedValueBlock::value_block(
+                    DeferredValueBlock {
+                        form: DeferredValueBlockForm::SinglePredicate {
+                            scrutinee,
+                            pattern,
+                            then_body: ValueBlockBranchBody::Nodes {
+                                nodes: then_body,
+                                scope: then_context.scope,
+                            },
+                            else_body: ValueBlockBranchBody::Nodes {
+                                nodes: else_body,
+                                scope: context.scope,
+                            },
+                        },
+                        span,
+                        target,
+                        resolved_slot_types: None,
+                    },
+                    span,
+                ),
+            )));
+        }
+    };
 
     let value_match = ValueMatchBlock {
         scrutinee,

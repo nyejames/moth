@@ -4,8 +4,8 @@ use crate::{Field, Limits, MonErrorCode, PathSegment, Schema, SchemaType, Value,
 fn malformed_schema_and_defaults_fail_during_preparation() {
     let invalid_default = Schema::record(vec![Field::with_default(
         "value",
-        SchemaType::Int,
-        Value::String("not an Int".into()),
+        SchemaType::I32,
+        Value::String("not an I32".into()),
     )])
     .prepare()
     .expect_err("schema defaults are checked before use");
@@ -14,12 +14,12 @@ fn malformed_schema_and_defaults_fail_during_preparation() {
     let duplicate_map_key_default = Schema::record(vec![Field::with_default(
         "values",
         SchemaType::Map {
-            key: Box::new(SchemaType::Int),
-            value: Box::new(SchemaType::Int),
+            key: Box::new(SchemaType::I32),
+            value: Box::new(SchemaType::I32),
         },
         Value::Map(vec![
-            (Value::Int(1), Value::Int(2)),
-            (Value::Int(1), Value::Int(3)),
+            (Value::I32(1), Value::I32(2)),
+            (Value::I32(1), Value::I32(3)),
         ]),
     )])
     .prepare()
@@ -37,9 +37,9 @@ fn malformed_schema_and_defaults_fail_during_preparation() {
         "values",
         SchemaType::Map {
             key: Box::new(SchemaType::Collection {
-                element: Box::new(SchemaType::Int),
+                element: Box::new(SchemaType::I32),
             }),
-            value: Box::new(SchemaType::Int),
+            value: Box::new(SchemaType::I32),
         },
     )])
     .prepare()
@@ -59,30 +59,7 @@ fn malformed_schema_and_defaults_fail_during_preparation() {
 }
 
 #[test]
-fn preparation_captures_the_numeric_profile_and_widened_capacity() {
-    use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
-
-    let profile = NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: FloatPrecision::Bits32,
-    };
-    let prepared = Schema::record(vec![Field::required("value", SchemaType::Int)])
-        .with_profile(profile)
-        .prepare()
-        .expect("profile schema prepares");
-    assert_eq!(prepared.profile(), profile);
-    assert_eq!(
-        Schema::record(Vec::new())
-            .prepare()
-            .expect("default schema prepares")
-            .profile(),
-        NumericProfile::STANDARD
-    );
-    assert_eq!(
-        Schema::record(Vec::new()).with_profile(profile).profile(),
-        profile
-    );
-
+fn preparation_checks_decimal_capacity_defaults_and_key_families() {
     // Exact-decimal scale capacity reaches the shared 256 owner and stops there.
     assert!(
         Schema::value(SchemaType::Decimal { scale: 256 })
@@ -94,46 +71,36 @@ fn preparation_captures_the_numeric_profile_and_widened_capacity() {
         .expect_err("a scale above the capacity fails");
     assert_eq!(too_wide.code, MonErrorCode::NumericScale);
 
-    // Profile-selected `Int` and `Float` defaults are checked when the schema is prepared.
+    // An I64 default carries its exact scalar, so a value beyond the I32 range prepares.
     let above_int32 = i64::from(i32::MAX) + 1;
-    let out_of_range = Schema::record(vec![Field::with_default(
-        "value",
-        SchemaType::Int,
-        Value::Int(above_int32),
-    )])
-    .prepare()
-    .expect_err("an Int default outside the captured width fails");
-    assert_eq!(out_of_range.code, MonErrorCode::InvalidDefault);
     assert!(
         Schema::record(vec![Field::with_default(
             "value",
-            SchemaType::Int,
-            Value::Int(above_int32),
+            SchemaType::I64,
+            Value::I64(above_int32),
         )])
-        .with_profile(profile)
         .prepare()
         .is_ok()
     );
 
     let non_finite = Schema::record(vec![Field::with_default(
         "value",
-        SchemaType::Float,
-        Value::Float(f64::INFINITY),
+        SchemaType::F64,
+        Value::F64(f64::INFINITY),
     )])
     .prepare()
-    .expect_err("a non-finite Float default fails");
+    .expect_err("a non-finite F64 default fails");
     assert_eq!(non_finite.code, MonErrorCode::InvalidDefault);
     let above_float32 = Schema::record(vec![Field::with_default(
         "value",
-        SchemaType::Float,
-        Value::Float(1.0e300),
+        SchemaType::F32,
+        Value::F32(1.0e300),
     )])
-    .with_profile(profile)
     .prepare()
-    .expect_err("a Float default outside the profile precision fails");
+    .expect_err("an F32 default outside the single-precision range fails");
     assert_eq!(above_float32.code, MonErrorCode::InvalidDefault);
 
-    // Explicit widths stay independent of the captured profile and check their own family.
+    // Fixed defaults must match their own width family.
     let mismatched_family = Schema::record(vec![Field::with_default(
         "value",
         SchemaType::I8,
@@ -142,15 +109,6 @@ fn preparation_captures_the_numeric_profile_and_widened_capacity() {
     .prepare()
     .expect_err("a fixed default must match its own width");
     assert_eq!(mismatched_family.code, MonErrorCode::InvalidDefault);
-    let fixed_default = Schema::record(vec![Field::with_default(
-        "value",
-        SchemaType::I8,
-        Value::I8(i8::MIN),
-    )])
-    .with_profile(profile)
-    .prepare()
-    .expect("a matching fixed default prepares under any profile");
-    assert_eq!(fixed_default.profile(), profile);
 
     // Fixed integers and Byte are key families; fixed binary floats are not.
     assert!(
@@ -168,7 +126,7 @@ fn preparation_captures_the_numeric_profile_and_widened_capacity() {
         "values",
         SchemaType::Map {
             key: Box::new(SchemaType::F32),
-            value: Box::new(SchemaType::Int),
+            value: Box::new(SchemaType::I32),
         },
     )])
     .prepare()
@@ -180,11 +138,11 @@ fn preparation_captures_the_numeric_profile_and_widened_capacity() {
         "values",
         SchemaType::Map {
             key: Box::new(SchemaType::Byte),
-            value: Box::new(SchemaType::Int),
+            value: Box::new(SchemaType::I32),
         },
         Value::Map(vec![
-            (Value::Byte(1), Value::Int(2)),
-            (Value::Byte(1), Value::Int(3)),
+            (Value::Byte(1), Value::I32(2)),
+            (Value::Byte(1), Value::I32(3)),
         ]),
     )])
     .prepare()
@@ -204,7 +162,7 @@ fn preparation_rejects_malformed_and_reserved_names_in_schema_shapes() {
     let invalid_schemas = vec![
         (
             "reserved root field",
-            Schema::record(vec![Field::required("__LoOp", SchemaType::Int)]),
+            Schema::record(vec![Field::required("__LoOp", SchemaType::I32)]),
         ),
         (
             "fixed-width nominal name",
@@ -212,7 +170,7 @@ fn preparation_rejects_malformed_and_reserved_names_in_schema_shapes() {
                 "value",
                 SchemaType::Struct {
                     name: "_U64".into(),
-                    fields: vec![Field::required("inner", SchemaType::Int)],
+                    fields: vec![Field::required("inner", SchemaType::I32)],
                 },
             )]),
         ),
@@ -241,7 +199,7 @@ fn preparation_rejects_malformed_and_reserved_names_in_schema_shapes() {
             Schema::record(vec![Field::required(
                 "outer",
                 SchemaType::Record {
-                    fields: vec![Field::required("true", SchemaType::Int)],
+                    fields: vec![Field::required("true", SchemaType::I32)],
                 },
             )]),
         ),
@@ -253,14 +211,14 @@ fn preparation_rejects_malformed_and_reserved_names_in_schema_shapes() {
                     name: "Theme".into(),
                     variants: vec![Variant::payload(
                         "Ready",
-                        vec![Field::required("none", SchemaType::Int)],
+                        vec![Field::required("none", SchemaType::I32)],
                     )],
                 },
             )]),
         ),
         (
             "malformed field",
-            Schema::record(vec![Field::required("not-a-name", SchemaType::Int)]),
+            Schema::record(vec![Field::required("not-a-name", SchemaType::I32)]),
         ),
     ];
 
@@ -280,7 +238,7 @@ fn preparation_rejects_malformed_and_reserved_names_in_schema_shapes() {
 
 #[test]
 fn reserved_schema_field_names_are_charged_before_their_diagnostic() {
-    let error = Schema::record(vec![Field::required("____________if", SchemaType::Int)])
+    let error = Schema::record(vec![Field::required("____________if", SchemaType::I32)])
         .with_limits(Limits {
             max_decoded_bytes: 4,
             ..Limits::default()
@@ -299,7 +257,7 @@ fn preparation_charges_each_schema_name_exactly_once() {
             Field::required(
                 "outer",
                 SchemaType::Record {
-                    fields: vec![Field::required("a", SchemaType::Int)],
+                    fields: vec![Field::required("a", SchemaType::I32)],
                 },
             ),
             Field::required(
@@ -308,7 +266,7 @@ fn preparation_charges_each_schema_name_exactly_once() {
                     name: "T".into(),
                     variants: vec![Variant::payload(
                         "V",
-                        vec![Field::required("p", SchemaType::Int)],
+                        vec![Field::required("p", SchemaType::I32)],
                     )],
                 },
             ),
@@ -329,9 +287,9 @@ fn defaults_reject_reserved_names_with_the_invalid_default_projection() {
     let invalid_record_default = Schema::record(vec![Field::with_default(
         "group",
         SchemaType::Record {
-            fields: vec![Field::required("known", SchemaType::Int)],
+            fields: vec![Field::required("known", SchemaType::I32)],
         },
-        Value::Record(vec![("__LoOp".into(), Value::Int(1))]),
+        Value::Record(vec![("__LoOp".into(), Value::I32(1))]),
     )])
     .prepare()
     .expect_err("default record field names must use the shared reservation policy");
@@ -348,7 +306,7 @@ fn defaults_reject_reserved_names_with_the_invalid_default_projection() {
         name: "Theme".into(),
         variants: vec![
             Variant::unit("Ready"),
-            Variant::payload("Payload", vec![Field::required("value", SchemaType::Int)]),
+            Variant::payload("Payload", vec![Field::required("value", SchemaType::I32)]),
         ],
     };
     let invalid_choice_defaults = [
@@ -375,7 +333,7 @@ fn defaults_reject_reserved_names_with_the_invalid_default_projection() {
             Value::Choice {
                 qualifier: None,
                 variant: "Payload".into(),
-                fields: vec![("none".into(), Value::Int(1))],
+                fields: vec![("none".into(), Value::I32(1))],
             },
             vec![
                 PathSegment::Field("choice".into()),

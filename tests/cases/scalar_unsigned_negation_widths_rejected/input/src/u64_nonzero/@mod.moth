@@ -1,0 +1,4 @@
+value #U64 = 1
+reject ||:
+    negated = -value
+;

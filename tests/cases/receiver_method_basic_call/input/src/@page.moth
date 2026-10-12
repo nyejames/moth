@@ -1,6 +1,6 @@
 Point = |
-    x Int,
-    y Int,
+    x I32,
+    y I32,
 |
 
 describe |this Point| -> String:

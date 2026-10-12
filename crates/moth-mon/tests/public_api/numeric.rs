@@ -1,4 +1,4 @@
-//! Public API coverage for profile-selected and explicit-width numeric behavior.
+//! Public API coverage for explicit-width numeric behaviour.
 
 use super::*;
 
@@ -6,21 +6,21 @@ use super::*;
 fn negative_ints_preserve_signed_i32_boundaries() {
     use moth_mon::{Field, MonErrorCode, Schema, SchemaType, Value, decode_document};
 
-    let schema = Schema::record(vec![Field::required("whole", SchemaType::Int)])
+    let schema = Schema::record(vec![Field::required("whole", SchemaType::I32)])
         .prepare()
-        .expect("the Int schema prepares");
+        .expect("the I32 schema prepares");
 
     assert_eq!(
-        decode_document("whole = -2147483648", &schema).expect("the smallest Int is accepted"),
-        Value::Record(vec![("whole".into(), Value::Int(i64::from(i32::MIN)))]),
+        decode_document("whole = -2147483648", &schema).expect("the smallest I32 is accepted"),
+        Value::Record(vec![("whole".into(), Value::I32(i32::MIN))]),
     );
     assert_eq!(
-        decode_document("whole = -5", &schema).expect("negative Int values keep their sign"),
-        Value::Record(vec![("whole".into(), Value::Int(-5))]),
+        decode_document("whole = -5", &schema).expect("negative I32 values keep their sign"),
+        Value::Record(vec![("whole".into(), Value::I32(-5))]),
     );
     assert_eq!(
         decode_document("whole = -2147483649", &schema)
-            .expect_err("values below the Int range are rejected")
+            .expect_err("values below the I32 range are rejected")
             .code,
         MonErrorCode::NumericRange,
     );
@@ -50,7 +50,7 @@ fn decimal_exponents_preserve_scale_and_exact_text() {
 fn extreme_float_exponent_reports_non_finite_float() {
     use moth_mon::{Field, Limits, MonErrorCode, Schema, SchemaType, Value, decode_document};
 
-    let schema = Schema::record(vec![Field::required("v", SchemaType::Float)])
+    let schema = Schema::record(vec![Field::required("v", SchemaType::F64)])
         .with_limits(Limits {
             max_numeric_digits: 10_000,
             ..Limits::default()
@@ -59,7 +59,7 @@ fn extreme_float_exponent_reports_non_finite_float() {
         .expect("the exponent schema fits its limits");
 
     let value = decode_document("v = 1e+21", &schema).expect("large finite exponent decodes");
-    assert_eq!(value, Value::Record(vec![("v".into(), Value::Float(1e21))]));
+    assert_eq!(value, Value::Record(vec![("v".into(), Value::F64(1e21))]));
     let error = decode_document("v = 1e10000", &schema)
         .expect_err("a non-finite exponent must fail as float range");
     assert_eq!(error.code, MonErrorCode::NonFiniteFloat);
@@ -134,56 +134,44 @@ fn explicit_width_and_byte_values_round_trip_through_public_paths() {
 }
 
 #[test]
-fn error_code_u32_round_trips_independently_of_native_int_profile() {
-    use moth_mon::{FloatPrecision, IntWidth, NumericProfile};
+fn error_code_u32_round_trips_through_public_paths() {
+    let schema = Schema::record(vec![
+        Field::required("message", SchemaType::String),
+        Field::with_default("code", SchemaType::U32, Value::U32(0)),
+    ])
+    .prepare()
+    .expect("runtime Error field schema prepares");
 
-    for int_width in [IntWidth::Bits32, IntWidth::Bits64] {
-        let schema = Schema::record(vec![
-            Field::required("message", SchemaType::String),
-            Field::with_default("code", SchemaType::U32, Value::U32(0)),
-        ])
-        .with_profile(NumericProfile {
-            int_width,
-            float_precision: FloatPrecision::Bits64,
-        })
-        .prepare()
-        .expect("runtime Error field schema prepares");
+    for code in [0, i32::MAX as u32 + 1, u32::MAX] {
+        let source = format!("message = \"wide code\", code = {code}");
+        let decoded = decode_document(&source, &schema).expect("U32 code decodes");
+        drop(source);
+        let expected = Value::Record(vec![
+            ("message".into(), Value::String("wide code".into())),
+            ("code".into(), Value::U32(code)),
+        ]);
+        assert_eq!(decoded, expected, "code={code}");
 
-        for code in [0, i32::MAX as u32 + 1, u32::MAX] {
-            let source = format!("message = \"wide code\", code = {code}");
-            let decoded = decode_document(&source, &schema).expect("U32 code decodes");
-            drop(source);
-            let expected = Value::Record(vec![
-                ("message".into(), Value::String("wide code".into())),
-                ("code".into(), Value::U32(code)),
-            ]);
-            assert_eq!(decoded, expected, "{int_width:?}, code={code}");
+        let encoded = encode_document(&decoded, &schema).expect("U32 code encodes");
+        let round_trip =
+            decode_document_bytes(encoded.as_bytes(), &schema).expect("U32 bytes decode");
+        drop(encoded);
+        drop(decoded);
+        assert_eq!(round_trip, expected, "code={code}");
+    }
 
-            let encoded = encode_document(&decoded, &schema).expect("U32 code encodes");
-            let round_trip =
-                decode_document_bytes(encoded.as_bytes(), &schema).expect("U32 bytes decode");
-            drop(encoded);
-            drop(decoded);
-            assert_eq!(round_trip, expected, "{int_width:?}, code={code}");
-        }
-
-        assert_eq!(
-            decode_document("message = \"default\"", &schema).expect("omitted code completes"),
-            Value::Record(vec![
-                ("message".into(), Value::String("default".into())),
-                ("code".into(), Value::U32(0)),
-            ]),
-        );
-        for code in ["-1", "4294967296"] {
-            let source = format!("message = \"invalid\", code = {code}");
-            let error = decode_document(&source, &schema).expect_err("code must fit U32");
-            assert_eq!(
-                error.code,
-                MonErrorCode::NumericRange,
-                "{int_width:?}, {code}"
-            );
-            assert_eq!(error.path, vec![PathSegment::Field("code".into())]);
-        }
+    assert_eq!(
+        decode_document("message = \"default\"", &schema).expect("omitted code completes"),
+        Value::Record(vec![
+            ("message".into(), Value::String("default".into())),
+            ("code".into(), Value::U32(0)),
+        ]),
+    );
+    for code in ["-1", "4294967296"] {
+        let source = format!("message = \"invalid\", code = {code}");
+        let error = decode_document(&source, &schema).expect_err("code must fit U32");
+        assert_eq!(error.code, MonErrorCode::NumericRange, "{code}");
+        assert_eq!(error.path, vec![PathSegment::Field("code".into())]);
     }
 }
 
@@ -279,152 +267,119 @@ fn f16_edge_values_round_trip_bits_through_public_paths() {
 }
 
 #[test]
-fn profile_selected_int_and_float_bind_through_public_paths() {
+fn signed_bounds_bind_through_public_paths() {
     use moth_mon::{
-        Field, FloatPrecision, IntWidth, MonErrorCode, NumericProfile, Schema, SchemaType, Value,
-        decode_document, encode_document,
+        Field, MonErrorCode, Schema, SchemaType, Value, decode_document, encode_document,
     };
 
-    for int_width in [IntWidth::Bits32, IntWidth::Bits64] {
-        for float_precision in [FloatPrecision::Bits32, FloatPrecision::Bits64] {
-            let profile = NumericProfile {
-                int_width,
-                float_precision,
-            };
-            let schema = Schema::record(vec![
-                Field::required("selected_int", SchemaType::Int),
-                Field::required("selected_float", SchemaType::Float),
-                Field::required("explicit_i64", SchemaType::I64),
-                Field::required("explicit_f64", SchemaType::F64),
-            ])
-            .with_profile(profile)
+    type Carrier = fn(i64) -> Value;
+
+    // Each width pairs its schema type with its bounds, its carrier and the spellings one step
+    // outside either bound.
+    let widths: [(&str, SchemaType, i64, i64, Carrier, &str, &str); 2] = [
+        (
+            "I32",
+            SchemaType::I32,
+            i64::from(i32::MIN),
+            i64::from(i32::MAX),
+            |value: i64| Value::I32(i32::try_from(value).expect("I32 bounds fit")),
+            "2147483648",
+            "-2147483649",
+        ),
+        (
+            "I64",
+            SchemaType::I64,
+            i64::MIN,
+            i64::MAX,
+            Value::I64,
+            "9223372036854775808",
+            "-9223372036854775809",
+        ),
+    ];
+
+    for (name, schema_type, min, max, carrier, above_max, below_min) in widths {
+        let schema = Schema::record(vec![Field::required("whole", schema_type)])
             .prepare()
-            .expect("every numeric profile prepares");
-            assert_eq!(schema.profile(), profile);
-
-            // The captured profile alone bounds the selected Int and rounds the selected
-            // Float; the explicit I64/F64 controls keep their own widths under it.
-            let (min, max) = match int_width {
-                IntWidth::Bits32 => (i64::from(i32::MIN), i64::from(i32::MAX)),
-                IntWidth::Bits64 => (i64::MIN, i64::MAX),
-            };
-            let (above_max, below_min) = match int_width {
-                IntWidth::Bits32 => ("2147483648", "-2147483649"),
-                IntWidth::Bits64 => ("9223372036854775808", "-9223372036854775809"),
-            };
-            let rounded = match float_precision {
-                FloatPrecision::Bits32 => f64::from(0.1f32),
-                FloatPrecision::Bits64 => 0.1,
-            };
-            let document = |int_text: &str, float_text: &str| {
-                format!(
-                    "selected_int = {int_text}, selected_float = {float_text}, \
-                     explicit_i64 = {}, explicit_f64 = 0.1",
-                    i64::MAX,
-                )
-            };
-            let record = |int_value: i64, float_value: f64| {
-                Value::Record(vec![
-                    ("selected_int".into(), Value::Int(int_value)),
-                    ("selected_float".into(), Value::Float(float_value)),
-                    ("explicit_i64".into(), Value::I64(i64::MAX)),
-                    ("explicit_f64".into(), Value::F64(0.1)),
-                ])
-            };
-
-            // Both text receive and encode->decode bind the exact width bounds and the
-            // exact rounding through the same prepared schema.
-            for (name, bound) in [("min", min), ("max", max)] {
-                let expected = record(bound, rounded);
-                let received = decode_document(&document(&bound.to_string(), "0.1"), &schema)
-                    .unwrap_or_else(|error| panic!("{profile:?} {name} receive: {error:?}"));
-                assert_eq!(
-                    received, expected,
-                    "{profile:?}: the {name} bound receives profile-typed values",
-                );
-                let Value::Record(fields) = &received else {
-                    panic!("{profile:?} {name} receives a record");
-                };
-                let Some((_, Value::Float(number))) =
-                    fields.iter().find(|(field, _)| field == "selected_float")
-                else {
-                    panic!("{profile:?} {name} receives a Float field");
-                };
-                assert_eq!(
-                    number.to_bits(),
-                    rounded.to_bits(),
-                    "{profile:?}: 0.1 rounds at the captured float precision",
-                );
-                let encoded = encode_document(&expected, &schema)
-                    .unwrap_or_else(|error| panic!("{profile:?} {name} encode: {error:?}"));
-                let round_trip = decode_document(&encoded, &schema)
-                    .unwrap_or_else(|error| panic!("{profile:?} {name} redecode: {error:?}"));
-                assert_eq!(
-                    round_trip, expected,
-                    "{profile:?}: the {name} bound round-trips"
-                );
-            }
-
-            // One step outside either bound fails with the range code.
-            for (name, outside) in [("above the max", above_max), ("below the min", below_min)] {
-                assert_eq!(
-                    decode_document(&document(outside, "0.1"), &schema)
-                        .expect_err("outside the captured Int width")
-                        .code,
-                    MonErrorCode::NumericRange,
-                    "{profile:?}: {name} is rejected with the range code",
-                );
-            }
-
-            // A finite source outside the Float32 finite range fails there but stays an
-            // ordinary finite Float64 value.
-            let huge = document(&min.to_string(), "1.0e40");
-            match float_precision {
-                FloatPrecision::Bits32 => assert_eq!(
-                    decode_document(&huge, &schema)
-                        .expect_err("above Float32 fails")
-                        .code,
-                    MonErrorCode::NonFiniteFloat,
-                    "{profile:?}: 1e40 is outside the Float32 finite range",
-                ),
-                FloatPrecision::Bits64 => assert_eq!(
-                    decode_document(&huge, &schema).expect("Float64 keeps finite 1e40"),
-                    record(min, 1.0e40),
-                    "{profile:?}: 1e40 is an ordinary finite Float64",
-                ),
-            }
-
-            // Programmatic encode follows the same captured width: an out-of-range Int32
-            // payload fails, while the Int64 payload above is the max bound.
-            if int_width == IntWidth::Bits32 {
-                assert_eq!(
-                    encode_document(&record(i64::MAX, rounded), &schema)
-                        .expect_err("above Int32 fails to encode")
-                        .code,
-                    MonErrorCode::NumericRange,
-                    "{profile:?}: programmatic Int32 overflow fails to encode",
-                );
-            }
+            .expect("the signed schema prepares");
+        for bound in [min, max] {
+            let source = format!("whole = {bound}");
+            let expected = Value::Record(vec![("whole".into(), carrier(bound))]);
+            assert_eq!(
+                decode_document(&source, &schema),
+                Ok(expected.clone()),
+                "{name}, {bound}"
+            );
+            let encoded = encode_document(&expected, &schema).expect("bound encodes");
+            assert_eq!(
+                decode_document(&encoded, &schema),
+                Ok(expected),
+                "{name}, {bound}"
+            );
+        }
+        // One step outside either bound fails with the range code.
+        for outside in [above_max, below_min] {
+            let error = decode_document(&format!("whole = {outside}"), &schema)
+                .expect_err("outside the bounds rejects");
+            assert_eq!(error.code, MonErrorCode::NumericRange, "{name}, {outside}");
         }
     }
 
-    // The default profile is its own public contract: STANDARD stays Int32/Float64.
-    let standard = Schema::record(vec![Field::required("value", SchemaType::Int)])
+    // A carrier of another width is a family mismatch, not a range error.
+    let narrow = Schema::record(vec![Field::required("whole", SchemaType::I32)])
         .prepare()
-        .expect("default schema prepares");
-    assert_eq!(standard.profile(), NumericProfile::STANDARD);
+        .expect("the I32 schema prepares");
+    let wide = Value::Record(vec![("whole".into(), Value::I64(i64::from(i32::MAX) + 1))]);
     assert_eq!(
-        decode_document("value = 2147483648", &standard)
-            .expect_err("above Int32 fails")
+        encode_document(&wide, &narrow)
+            .expect_err("an I64 carrier rejects in an I32 field")
             .code,
-        MonErrorCode::NumericRange,
+        MonErrorCode::TypeMismatch,
     );
-    let wide = Value::Record(vec![("value".into(), Value::Int(i64::MAX))]);
+}
+
+#[test]
+fn float_widths_bind_through_public_paths() {
+    use moth_mon::{
+        Field, MonErrorCode, Schema, SchemaType, Value, decode_document, encode_document,
+    };
+
+    type Carrier = fn(f64) -> Value;
+
+    // F32 rounds `0.1` to single precision; F64 keeps the double value.
+    let widths: [(&str, SchemaType, f64, Carrier); 2] = [
+        ("F32", SchemaType::F32, f64::from(0.1f32), Value::F32),
+        ("F64", SchemaType::F64, 0.1, Value::F64),
+    ];
+    for (name, schema_type, rounded, carrier) in widths {
+        let schema = Schema::record(vec![Field::required("value", schema_type)])
+            .prepare()
+            .expect("the float schema prepares");
+        let expected = Value::Record(vec![("value".into(), carrier(rounded))]);
+        assert_eq!(
+            decode_document("value = 0.1", &schema),
+            Ok(expected.clone()),
+            "{name}"
+        );
+        let encoded = encode_document(&expected, &schema).expect("float value encodes");
+        assert_eq!(decode_document(&encoded, &schema), Ok(expected), "{name}");
+    }
+
+    // A finite source beyond the F32 range fails there, while F64 keeps it as a finite value.
+    let single = Schema::record(vec![Field::required("value", SchemaType::F32)])
+        .prepare()
+        .expect("the F32 schema prepares");
     assert_eq!(
-        encode_document(&wide, &standard)
-            .expect_err("above Int32 fails to encode")
+        decode_document("value = 1.0e40", &single)
+            .expect_err("beyond F32 fails")
             .code,
-        MonErrorCode::NumericRange,
+        MonErrorCode::NonFiniteFloat,
+    );
+    let double = Schema::record(vec![Field::required("value", SchemaType::F64)])
+        .prepare()
+        .expect("the F64 schema prepares");
+    assert_eq!(
+        decode_document("value = 1.0e40", &double),
+        Ok(Value::Record(vec![("value".into(), Value::F64(1.0e40))])),
     );
 }
 
@@ -456,20 +411,6 @@ fn map_key_families_preserve_order_and_reject_duplicates_and_mismatches() {
             "{'b' = 20, 'a' = 10}",
             r#"{'b' = 20, '\u{62}' = 10}"#,
             "b",
-        ),
-        (
-            SchemaType::Int,
-            [Value::Int(2), Value::Int(1)],
-            "{2 = 20, 1 = 10}",
-            "{10 = 20, 1_0 = 10}",
-            "10",
-        ),
-        (
-            SchemaType::Uint,
-            [Value::Uint(2), Value::Uint(1)],
-            "{2 = 20, 1 = 10}",
-            "{10 = 20, 1_0 = 10}",
-            "10",
         ),
         (
             SchemaType::I8,
@@ -539,11 +480,11 @@ fn map_key_families_preserve_order_and_reject_duplicates_and_mismatches() {
     for (key_type, keys, literal, duplicate_literal, duplicate_name) in &cases {
         let map_type = SchemaType::Map {
             key: Box::new(key_type.clone()),
-            value: Box::new(SchemaType::Int),
+            value: Box::new(SchemaType::I32),
         };
         let map = Value::Map(vec![
-            (keys[0].clone(), Value::Int(20)),
-            (keys[1].clone(), Value::Int(10)),
+            (keys[0].clone(), Value::I32(20)),
+            (keys[1].clone(), Value::I32(10)),
         ]);
         let expected = Value::Record(vec![("values".into(), map.clone())]);
         let schema = Schema::record(vec![Field::required("values", map_type.clone())])
@@ -588,8 +529,8 @@ fn map_key_families_preserve_order_and_reject_duplicates_and_mismatches() {
         );
 
         let duplicate_map = Value::Map(vec![
-            (keys[0].clone(), Value::Int(20)),
-            (keys[0].clone(), Value::Int(10)),
+            (keys[0].clone(), Value::I32(20)),
+            (keys[0].clone(), Value::I32(10)),
         ]);
         let duplicate_value = Value::Record(vec![("values".into(), duplicate_map.clone())]);
         assert_eq!(
@@ -617,8 +558,8 @@ fn map_key_families_preserve_order_and_reject_duplicates_and_mismatches() {
                 continue;
             }
             let mixed_map = Value::Map(vec![
-                (keys[1].clone(), Value::Int(20)),
-                (other_keys[1].clone(), Value::Int(10)),
+                (keys[1].clone(), Value::I32(20)),
+                (other_keys[1].clone(), Value::I32(10)),
             ]);
             let mixed = Value::Record(vec![("values".into(), mixed_map.clone())]);
             let error = encode_document(&mixed, &schema)
@@ -648,7 +589,7 @@ fn map_key_families_preserve_order_and_reject_duplicates_and_mismatches() {
         "values",
         SchemaType::Map {
             key: Box::new(SchemaType::Byte),
-            value: Box::new(SchemaType::Int),
+            value: Box::new(SchemaType::I32),
         },
     )])
     .prepare()
@@ -661,7 +602,7 @@ fn map_key_families_preserve_order_and_reject_duplicates_and_mismatches() {
     );
     let float_key_error = Schema::value(SchemaType::Map {
         key: Box::new(SchemaType::F32),
-        value: Box::new(SchemaType::Int),
+        value: Box::new(SchemaType::I32),
     })
     .prepare()
     .unwrap_err();
@@ -841,10 +782,7 @@ fn widened_scale_large_exact_values_round_trip_through_public_paths() {
 
 #[test]
 fn fixed_and_byte_programmatic_defaults_validate_through_public_paths() {
-    use moth_mon::{
-        Field, FloatPrecision, IntWidth, MonErrorCode, NumericProfile, PathSegment, Schema,
-        SchemaType, Value, decode_document,
-    };
+    use moth_mon::{Field, MonErrorCode, PathSegment, Schema, SchemaType, Value, decode_document};
 
     let schema = Schema::record(vec![
         Field::with_default("code", SchemaType::I8, Value::I8(i8::MIN)),
@@ -873,11 +811,11 @@ fn fixed_and_byte_programmatic_defaults_validate_through_public_paths() {
         "values",
         SchemaType::Map {
             key: Box::new(SchemaType::Byte),
-            value: Box::new(SchemaType::Int),
+            value: Box::new(SchemaType::I32),
         },
         Value::Map(vec![
-            (Value::Byte(1), Value::Int(2)),
-            (Value::Byte(1), Value::Int(3)),
+            (Value::Byte(1), Value::I32(2)),
+            (Value::Byte(1), Value::I32(3)),
         ]),
     )])
     .prepare()
@@ -892,43 +830,25 @@ fn fixed_and_byte_programmatic_defaults_validate_through_public_paths() {
     );
 
     let above_int32 = i64::from(i32::MAX) + 1;
-    let out_of_range = Schema::record(vec![Field::with_default(
-        "value",
-        SchemaType::Int,
-        Value::Int(above_int32),
-    )])
-    .prepare()
-    .expect_err("an Int default outside the captured width fails");
-    assert_eq!(out_of_range.code, MonErrorCode::InvalidDefault);
-    let int64_profile = NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: FloatPrecision::Bits64,
-    };
     let in_range = Schema::record(vec![Field::with_default(
         "value",
-        SchemaType::Int,
-        Value::Int(above_int32),
+        SchemaType::I64,
+        Value::I64(above_int32),
     )])
-    .with_profile(int64_profile)
     .prepare()
-    .expect("an Int default inside the Int64 width prepares");
+    .expect("an I64 default above the I32 range prepares");
     assert_eq!(
-        decode_document("", &in_range).expect("the Int64 default applies"),
-        Value::Record(vec![("value".into(), Value::Int(above_int32))]),
+        decode_document("", &in_range).expect("the I64 default applies"),
+        Value::Record(vec![("value".into(), Value::I64(above_int32))]),
     );
 
-    let float32_profile = NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: FloatPrecision::Bits32,
-    };
     let above_float32 = Schema::record(vec![Field::with_default(
         "value",
-        SchemaType::Float,
-        Value::Float(1.0e300),
+        SchemaType::F32,
+        Value::F32(1.0e300),
     )])
-    .with_profile(float32_profile)
     .prepare()
-    .expect_err("a Float default outside the profile precision fails");
+    .expect_err("an F32 default outside single precision fails");
     assert_eq!(above_float32.code, MonErrorCode::InvalidDefault);
 }
 
@@ -1025,22 +945,17 @@ fn explicit_width_numerics_preserve_budgets_and_categories() {
 
 /// Outside-crate end-to-end example using only `moth_mon` public paths.
 ///
-/// A host crate selects its numeric profile once, builds an explicit schema
-/// with fixed-width, `Byte` and widened-scale members, then round-trips owned
-/// values through the public encode/decode adapters.
-fn profiled_telemetry_round_trip() -> Value {
+/// A host crate builds an explicit schema with fixed-width, `Byte` and
+/// widened-scale members, then round-trips owned values through the public
+/// encode/decode adapters.
+fn telemetry_round_trip() -> Value {
     use moth_mon::{
-        Field, FloatPrecision, IntWidth, NumericProfile, Schema, SchemaType, Value,
-        decode_document, decode_document_bytes, encode_document,
+        Field, Schema, SchemaType, Value, decode_document, decode_document_bytes, encode_document,
     };
 
-    let profile = NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: FloatPrecision::Bits32,
-    };
     let schema = Schema::record(vec![
         Field::required("seq", SchemaType::U64),
-        Field::required("sample", SchemaType::Float),
+        Field::required("sample", SchemaType::F32),
         Field::required("half", SchemaType::F16),
         Field::required(
             "flags",
@@ -1051,14 +966,12 @@ fn profiled_telemetry_round_trip() -> Value {
         ),
         Field::required("total", SchemaType::Decimal { scale: 256 }),
     ])
-    .with_profile(profile)
     .prepare()
     .expect("example schema prepares");
-    assert_eq!(schema.profile(), profile);
 
     let document = Value::Record(vec![
         ("seq".into(), Value::U64(u64::MAX)),
-        ("sample".into(), Value::Float(f64::from(0.1f32))),
+        ("sample".into(), Value::F32(f64::from(0.1f32))),
         ("half".into(), Value::F16(0.099_975_585_937_5)),
         (
             "flags".into(),
@@ -1081,8 +994,8 @@ fn profiled_telemetry_round_trip() -> Value {
 }
 
 #[test]
-fn outside_crate_profiled_round_trip_example() {
-    let value = profiled_telemetry_round_trip();
+fn outside_crate_telemetry_round_trip_example() {
+    let value = telemetry_round_trip();
     let Value::Record(fields) = value else {
         panic!("example produces a record");
     };
@@ -1094,90 +1007,76 @@ fn outside_crate_profiled_round_trip_example() {
 }
 
 #[test]
-fn uint_captures_the_profile_int_width_through_public_paths() {
+fn unsigned_widths_bind_through_public_paths() {
     use moth_mon::{
-        Field, FloatPrecision, IntWidth, MonErrorCode, NumericProfile, PathSegment, Schema,
-        SchemaType, Span, Value, decode_document, decode_document_bytes, encode_document,
+        Field, MonErrorCode, PathSegment, Schema, SchemaType, Span, Value, decode_document,
+        decode_document_bytes, encode_document,
     };
 
-    let profiles = [
+    type Carrier = fn(u64) -> Value;
+    type Spellings = &'static [&'static str];
+
+    // Each width pairs its schema type with its maximum, its carrier, the spellings it accepts
+    // and the spellings it rejects for range.
+    let widths: [(&str, SchemaType, u64, Carrier, Spellings, Spellings); 2] = [
         (
-            "int32_float64",
-            NumericProfile {
-                int_width: IntWidth::Bits32,
-                float_precision: FloatPrecision::Bits64,
-            },
+            "U32",
+            SchemaType::U32,
+            u64::from(u32::MAX),
+            |value: u64| Value::U32(u32::try_from(value).expect("U32 spellings fit")),
+            &["0", "4_294_967_295", "2147483648", "4294967295"],
+            &["4294967296", "9223372036854775808", "18446744073709551615"],
         ),
         (
-            "int32_float32",
-            NumericProfile {
-                int_width: IntWidth::Bits32,
-                float_precision: FloatPrecision::Bits32,
-            },
-        ),
-        (
-            "int64_float64",
-            NumericProfile {
-                int_width: IntWidth::Bits64,
-                float_precision: FloatPrecision::Bits64,
-            },
-        ),
-        (
-            "int64_float32",
-            NumericProfile {
-                int_width: IntWidth::Bits64,
-                float_precision: FloatPrecision::Bits32,
-            },
+            "U64",
+            SchemaType::U64,
+            u64::MAX,
+            Value::U64,
+            &[
+                "0",
+                "4_294_967_295",
+                "2147483648",
+                "18446744073709551615",
+                "9007199254740993",
+                "9223372036854775807",
+                "9223372036854775808",
+            ],
+            &["18446744073709551616"],
         ),
     ];
 
-    for (name, profile) in profiles {
-        let schema = Schema::record(vec![Field::required("count", SchemaType::Uint)])
-            .with_profile(profile)
+    for (name, schema_type, maximum, carrier, accepted, rejected) in widths {
+        let schema = Schema::record(vec![Field::required("count", schema_type)])
             .prepare()
-            .expect("Uint schema prepares");
-        assert_eq!(schema.profile(), profile, "{name}");
-        let maximum = profile.int_width.unsigned_max_value();
+            .expect("the unsigned width schema prepares");
 
-        // Zero, separators, signed-max-plus-one and the profile maximum decode exactly.
-        let mut accepted: Vec<(String, u64)> = vec![
-            ("0".into(), 0),
-            ("4_294_967_295".into(), u32::MAX as u64),
-            ("2147483648".into(), 2_147_483_648),
-            (maximum.to_string(), maximum),
-        ];
-        if profile.int_width == IntWidth::Bits64 {
-            accepted.push(("9007199254740993".into(), 9_007_199_254_740_993));
-            accepted.push(("9223372036854775807".into(), i64::MAX as u64));
-            accepted.push(("9223372036854775808".into(), 9_223_372_036_854_775_808));
-        }
-        for (spelling, expected) in &accepted {
+        // Zero, separators, signed-max-plus-one and the width maximum decode exactly.
+        for spelling in accepted {
             let source = format!("count = {spelling}");
-            let decoded = decode_document(&source, &schema).expect("in-range Uint decodes");
+            let decoded = decode_document(&source, &schema).expect("in-range unsigned decodes");
             drop(source);
-            let expected_value = Value::Record(vec![("count".into(), Value::Uint(*expected))]);
-            assert_eq!(decoded, expected_value, "{name}, {spelling}");
-            let encoded = encode_document(&decoded, &schema).expect("Uint encodes");
+            let expected = Value::Record(vec![(
+                "count".into(),
+                carrier(
+                    spelling
+                        .replace('_', "")
+                        .parse::<u64>()
+                        .expect("accepted spelling fits u64"),
+                ),
+            )]);
+            assert_eq!(decoded, expected, "{name}, {spelling}");
+            let encoded = encode_document(&decoded, &schema).expect("unsigned encodes");
             let round_trip =
-                decode_document_bytes(encoded.as_bytes(), &schema).expect("Uint bytes decode");
+                decode_document_bytes(encoded.as_bytes(), &schema).expect("unsigned bytes decode");
             drop(encoded);
             drop(decoded);
-            assert_eq!(round_trip, expected_value, "{name}, {spelling}");
+            assert_eq!(round_trip, expected, "{name}, {spelling}");
         }
 
-        // The other width's maximum and text overflow reject with range, path and span.
-        let mut range_rejected: Vec<String> = vec![
-            maximum
-                .checked_add(1)
-                .map_or("18446744073709551616".to_string(), |next| next.to_string()),
-        ];
-        if profile.int_width == IntWidth::Bits32 {
-            range_rejected.push(u64::MAX.to_string());
-            range_rejected.push("9223372036854775808".into());
-        }
-        for spelling in &range_rejected {
+        // Text overflow past the width maximum rejects with range, path and span.
+        for spelling in rejected {
             let source = format!("count = {spelling}");
-            let error = decode_document(&source, &schema).expect_err("Uint overflow rejects");
+            let error = decode_document(&source, &schema).expect_err("unsigned overflow rejects");
             assert_eq!(error.code, MonErrorCode::NumericRange, "{name}, {spelling}");
             assert_eq!(
                 error.path,
@@ -1197,7 +1096,8 @@ fn uint_captures_the_profile_int_width_through_public_paths() {
         // Negative spellings, including `-0`, and non-whole spellings reject.
         for spelling in ["-1", "-0", "1.0", "1e2"] {
             let source = format!("count = {spelling}");
-            let error = decode_document(&source, &schema).expect_err("non-Uint spelling rejects");
+            let error =
+                decode_document(&source, &schema).expect_err("non-unsigned spelling rejects");
             let expected_code = if spelling.starts_with('-') {
                 MonErrorCode::NumericRange
             } else {
@@ -1219,31 +1119,23 @@ fn uint_captures_the_profile_int_width_through_public_paths() {
             );
         }
 
-        // Programmatic values validate against the captured profile too.
-        let supplied = Value::Record(vec![("count".into(), Value::Uint(maximum))]);
+        // Programmatic values at the width maximum validate and round trip.
+        let supplied = Value::Record(vec![("count".into(), carrier(maximum))]);
         assert_eq!(
             encode_document(&supplied, &schema).and_then(|text| decode_document(&text, &schema)),
             Ok(supplied.clone()),
             "{name}",
         );
-        let overflow = maximum
-            .checked_add(1)
-            .map(|next| Value::Record(vec![("count".into(), Value::Uint(next))]));
-        if profile.int_width == IntWidth::Bits32 {
-            let overflow = overflow.expect("Uint32 maximum has a successor");
-            let error =
-                encode_document(&overflow, &schema).expect_err("Uint32 rejects u64 above max");
-            assert_eq!(error.code, MonErrorCode::NumericRange, "{name}");
-            assert_eq!(
-                error.path,
-                vec![PathSegment::Field("count".into())],
-                "{name}"
-            );
-            assert_eq!(error.span, None, "{name}");
-        } else {
-            assert!(overflow.is_none(), "{name}");
-        }
     }
+
+    // A U64 value in a U32 field is a family mismatch, not a range error.
+    let narrow = Schema::record(vec![Field::required("count", SchemaType::U32)])
+        .prepare()
+        .expect("the U32 schema prepares");
+    let wide = Value::Record(vec![("count".into(), Value::U64(u64::from(u32::MAX) + 1))]);
+    let error = encode_document(&wide, &narrow).expect_err("a U64 value rejects in a U32 field");
+    assert_eq!(error.code, MonErrorCode::TypeMismatch);
+    assert_eq!(error.path, vec![PathSegment::Field("count".into())]);
 }
 
 #[test]
@@ -1254,16 +1146,14 @@ fn uint_keeps_strict_category_identity_through_public_paths() {
     };
 
     let schema = Schema::record(vec![
-        Field::required("profiled", SchemaType::Uint),
-        Field::required("signed", SchemaType::Int),
+        Field::required("signed", SchemaType::I32),
         Field::required("fixed", SchemaType::U64),
         Field::required("narrow", SchemaType::U32),
     ])
     .prepare()
     .expect("mixed integer schema prepares");
     let document = Value::Record(vec![
-        ("profiled".into(), Value::Uint(2_147_483_648)),
-        ("signed".into(), Value::Int(2_147_483_647)),
+        ("signed".into(), Value::I32(2_147_483_647)),
         ("fixed".into(), Value::U64(u64::MAX)),
         ("narrow".into(), Value::U32(u32::MAX)),
     ]);
@@ -1271,11 +1161,10 @@ fn uint_keeps_strict_category_identity_through_public_paths() {
     assert_eq!(decode_document(&encoded, &schema), Ok(document));
 
     // Equal carriers never alias another integer family, in either direction.
-    let families: [(SchemaType, Value); 4] = [
-        (SchemaType::Uint, Value::Uint(7)),
-        (SchemaType::Int, Value::Int(7)),
-        (SchemaType::U64, Value::U64(7)),
+    let families: [(SchemaType, Value); 3] = [
+        (SchemaType::I32, Value::I32(7)),
         (SchemaType::U32, Value::U32(7)),
+        (SchemaType::U64, Value::U64(7)),
     ];
     for (index, (own_type, own_value)) in families.iter().enumerate() {
         let own_schema = Schema::record(vec![Field::required("value", own_type.clone())])
@@ -1316,167 +1205,154 @@ fn uint_keeps_strict_category_identity_through_public_paths() {
         }
     }
 
-    // Explicit U32/U64 stay distinct and profile-independent.
-    for int_width in [moth_mon::IntWidth::Bits32, moth_mon::IntWidth::Bits64] {
-        let profile = moth_mon::NumericProfile {
-            int_width,
-            float_precision: moth_mon::FloatPrecision::Bits64,
-        };
-        let explicit = Schema::record(vec![
-            Field::required("narrow", SchemaType::U32),
-            Field::required("wide", SchemaType::U64),
-        ])
-        .with_profile(profile)
-        .prepare()
-        .expect("explicit widths prepare under any profile");
-        let source = "narrow = 4294967295, wide = 18446744073709551615";
-        assert_eq!(
-            decode_document(source, &explicit),
-            Ok(Value::Record(vec![
-                ("narrow".into(), Value::U32(u32::MAX)),
-                ("wide".into(), Value::U64(u64::MAX)),
-            ])),
-            "{int_width:?}",
-        );
-    }
+    // Explicit U32 and U64 fields keep their own maxima.
+    let explicit = Schema::record(vec![
+        Field::required("narrow", SchemaType::U32),
+        Field::required("wide", SchemaType::U64),
+    ])
+    .prepare()
+    .expect("explicit widths prepare");
+    let source = "narrow = 4294967295, wide = 18446744073709551615";
+    assert_eq!(
+        decode_document(source, &explicit),
+        Ok(Value::Record(vec![
+            ("narrow".into(), Value::U32(u32::MAX)),
+            ("wide".into(), Value::U64(u64::MAX)),
+        ])),
+    );
 }
 
 #[test]
 fn uint_defaults_optionals_nesting_and_map_keys_round_trip_through_public_paths() {
     use moth_mon::{
-        Field, IntWidth, MonErrorCode, NumericProfile, PathSegment, Schema, SchemaType, Value,
-        decode_document, encode_document,
+        Field, MonErrorCode, PathSegment, Schema, SchemaType, Value, decode_document,
+        encode_document,
     };
 
     let schema = Schema::record(vec![
-        Field::with_default("total", SchemaType::Uint, Value::Uint(2_147_483_648)),
-        Field::required("maybe", SchemaType::Optional(Box::new(SchemaType::Uint))),
+        Field::with_default("total", SchemaType::U32, Value::U32(2_147_483_648)),
+        Field::required("maybe", SchemaType::Optional(Box::new(SchemaType::U32))),
         Field::required(
             "pair",
             SchemaType::Record {
-                fields: vec![Field::required("inner", SchemaType::Uint)],
+                fields: vec![Field::required("inner", SchemaType::U32)],
             },
         ),
         Field::required(
             "counts",
             SchemaType::Map {
-                key: Box::new(SchemaType::Uint),
-                value: Box::new(SchemaType::Uint),
+                key: Box::new(SchemaType::U32),
+                value: Box::new(SchemaType::U32),
             },
         ),
         Field::required(
             "batch",
             SchemaType::Collection {
-                element: Box::new(SchemaType::Uint),
+                element: Box::new(SchemaType::U32),
             },
         ),
     ])
     .prepare()
-    .expect("Uint default/optional/nested/map schema prepares");
+    .expect("the U32 default/optional/nested/map schema prepares");
     let expected = Value::Record(vec![
-        ("total".into(), Value::Uint(2_147_483_648)),
+        ("total".into(), Value::U64(2_147_483_648)),
         ("maybe".into(), Value::None),
         (
             "pair".into(),
-            Value::Record(vec![("inner".into(), Value::Uint(0))]),
+            Value::Record(vec![("inner".into(), Value::U64(0))]),
         ),
         (
             "counts".into(),
             Value::Map(vec![
-                (Value::Uint(u64::MAX), Value::Uint(1)),
-                (Value::Uint(0), Value::Uint(2)),
+                (Value::U64(u64::MAX), Value::U64(1)),
+                (Value::U64(0), Value::U64(2)),
             ]),
         ),
-        ("batch".into(), Value::Collection(vec![Value::Uint(3)])),
+        ("batch".into(), Value::Collection(vec![Value::U64(3)])),
     ]);
-    // The delivered default is Uint32: the `u64::MAX` map key is out of range here, so this
-    // first decode must fail before the profiled schema below. The `2147483648` default is
-    // signed-max-plus-one and fits Uint32, so preparation already accepted it.
+    // The U32 schema rejects the `u64::MAX` map key, so this decode fails before the U64 schema
+    // below. The `2147483648` default fits U32, so preparation already accepted it.
     let standard_error = decode_document(
         "maybe = none, pair = (inner = 0), counts = {18446744073709551615 = 1, 0 = 2}, batch = {3}",
         &schema,
     )
-    .expect_err("Uint64-scale keys reject under the Uint32 default");
+    .expect_err("U64-scale keys reject under the U32 schema");
     assert_eq!(standard_error.code, MonErrorCode::NumericRange);
 
-    let profiled = Schema::record(vec![
-        Field::with_default("total", SchemaType::Uint, Value::Uint(2_147_483_648)),
-        Field::required("maybe", SchemaType::Optional(Box::new(SchemaType::Uint))),
+    let wide = Schema::record(vec![
+        Field::with_default("total", SchemaType::U64, Value::U64(2_147_483_648)),
+        Field::required("maybe", SchemaType::Optional(Box::new(SchemaType::U64))),
         Field::required(
             "pair",
             SchemaType::Record {
-                fields: vec![Field::required("inner", SchemaType::Uint)],
+                fields: vec![Field::required("inner", SchemaType::U64)],
             },
         ),
         Field::required(
             "counts",
             SchemaType::Map {
-                key: Box::new(SchemaType::Uint),
-                value: Box::new(SchemaType::Uint),
+                key: Box::new(SchemaType::U64),
+                value: Box::new(SchemaType::U64),
             },
         ),
         Field::required(
             "batch",
             SchemaType::Collection {
-                element: Box::new(SchemaType::Uint),
+                element: Box::new(SchemaType::U64),
             },
         ),
     ])
-    .with_profile(NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: moth_mon::FloatPrecision::Bits64,
-    })
     .prepare()
-    .expect("Uint64-scale schema prepares");
+    .expect("the U64 default/optional/nested/map schema prepares");
     let decoded = decode_document(
         "maybe = none, pair = (inner = 0), counts = {18446744073709551615 = 1, 0 = 2}, batch = {3}",
-        &profiled,
+        &wide,
     )
-    .expect("Uint64-scale document decodes");
+    .expect("U64-scale document decodes");
     assert_eq!(decoded, expected);
-    let encoded = encode_document(&decoded, &profiled).expect("Uint document encodes");
-    assert_eq!(decode_document(&encoded, &profiled), Ok(expected.clone()));
+    let encoded = encode_document(&decoded, &wide).expect("U64 document encodes");
+    assert_eq!(decode_document(&encoded, &wide), Ok(expected.clone()));
     // The same prepared schema decodes again unchanged.
     assert_eq!(
         decode_document(
             "total = 1, maybe = 2, pair = (inner = 3), counts = {=}, batch = {}",
-            &profiled
+            &wide
         ),
         Ok(Value::Record(vec![
-            ("total".into(), Value::Uint(1)),
-            ("maybe".into(), Value::Uint(2)),
+            ("total".into(), Value::U64(1)),
+            ("maybe".into(), Value::U64(2)),
             (
                 "pair".into(),
-                Value::Record(vec![("inner".into(), Value::Uint(3))]),
+                Value::Record(vec![("inner".into(), Value::U64(3))]),
             ),
             ("counts".into(), Value::Map(vec![])),
             ("batch".into(), Value::Collection(vec![])),
         ])),
     );
-    // An omitted field completes from its prepared Uint default.
+    // An omitted field completes from its prepared U64 default.
     assert_eq!(
         decode_document(
             "maybe = 2, pair = (inner = 3), counts = {=}, batch = {}",
-            &profiled
+            &wide
         ),
         Ok(Value::Record(vec![
-            ("total".into(), Value::Uint(2_147_483_648)),
-            ("maybe".into(), Value::Uint(2)),
+            ("total".into(), Value::U64(2_147_483_648)),
+            ("maybe".into(), Value::U64(2)),
             (
                 "pair".into(),
-                Value::Record(vec![("inner".into(), Value::Uint(3))]),
+                Value::Record(vec![("inner".into(), Value::U64(3))]),
             ),
             ("counts".into(), Value::Map(vec![])),
             ("batch".into(), Value::Collection(vec![])),
         ])),
     );
 
-    // Duplicate Uint keys report the decoded key path.
+    // Duplicate U64 keys report the decoded key path.
     let duplicate = decode_document(
         "maybe = none, pair = (inner = 0), counts = {7 = 1, 0_7 = 2}, batch = {3}",
-        &profiled,
+        &wide,
     )
-    .expect_err("decoded-equivalent Uint keys are duplicates");
+    .expect_err("decoded-equivalent U64 keys are duplicates");
     assert_eq!(duplicate.code, MonErrorCode::DuplicateMapKey);
     assert_eq!(
         duplicate.path,
@@ -1486,14 +1362,14 @@ fn uint_defaults_optionals_nesting_and_map_keys_round_trip_through_public_paths(
         ],
     );
 
-    // An out-of-range Uint default fails during preparation, not at first use.
+    // A U64 default in a U32 field is a family mismatch, so it fails during preparation.
     let invalid_default = Schema::record(vec![Field::with_default(
         "total",
-        SchemaType::Uint,
-        Value::Uint(u64::MAX),
+        SchemaType::U32,
+        Value::U64(u64::MAX),
     )])
     .prepare()
-    .expect_err("Uint default above Uint32 rejects");
+    .expect_err("a U64 default in a U32 field rejects");
     assert_eq!(invalid_default.code, MonErrorCode::InvalidDefault);
     assert_eq!(
         invalid_default.path,
@@ -1501,50 +1377,39 @@ fn uint_defaults_optionals_nesting_and_map_keys_round_trip_through_public_paths(
     );
     assert_eq!(invalid_default.span, None);
 
-    // A Uint64 default prepares under a 64-bit profile and completes on omission.
+    // A U64 default prepares and completes on omission.
     let widened = Schema::record(vec![Field::with_default(
         "total",
-        SchemaType::Uint,
-        Value::Uint(u64::MAX),
+        SchemaType::U64,
+        Value::U64(u64::MAX),
     )])
-    .with_profile(NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: moth_mon::FloatPrecision::Bits64,
-    })
     .prepare()
-    .expect("Uint64-scale default prepares");
+    .expect("the U64 default prepares");
     assert_eq!(
         decode_document("", &widened),
-        Ok(Value::Record(vec![("total".into(), Value::Uint(u64::MAX))])),
+        Ok(Value::Record(vec![("total".into(), Value::U64(u64::MAX))])),
     );
 }
 
 #[test]
 fn uint_scalar_value_encodes_through_public_paths() {
-    use moth_mon::{
-        IntWidth, MonErrorCode, NumericProfile, Schema, SchemaType, Value, encode_value,
-    };
+    use moth_mon::{MonErrorCode, Schema, SchemaType, Value, encode_value};
 
-    let profile = NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: moth_mon::FloatPrecision::Bits64,
-    };
-    let scalar = Schema::value(SchemaType::Uint)
-        .with_profile(profile)
+    let scalar = Schema::value(SchemaType::U64)
         .prepare()
-        .expect("scalar Uint schema prepares");
+        .expect("scalar U64 schema prepares");
     assert_eq!(
-        encode_value(&Value::Uint(u64::MAX), &scalar),
+        encode_value(&Value::U64(u64::MAX), &scalar),
         Ok(u64::MAX.to_string()),
     );
-    let narrow = Schema::value(SchemaType::Uint)
+    let narrow = Schema::value(SchemaType::U32)
         .prepare()
-        .expect("scalar Uint32 schema prepares");
+        .expect("scalar U32 schema prepares");
     assert_eq!(
-        encode_value(&Value::Uint(u64::MAX), &narrow)
-            .expect_err("scalar Uint32 rejects u64 above max")
+        encode_value(&Value::U64(u64::MAX), &narrow)
+            .expect_err("scalar U32 rejects a U64 value")
             .code,
-        MonErrorCode::NumericRange,
+        MonErrorCode::TypeMismatch,
     );
 }
 
@@ -1552,9 +1417,9 @@ fn uint_scalar_value_encodes_through_public_paths() {
 fn uint_rejects_source_arithmetic_and_keeps_bounded_failures_through_public_paths() {
     use moth_mon::{Field, Limits, MonErrorCode, Schema, SchemaType, decode_document};
 
-    let schema = Schema::record(vec![Field::required("count", SchemaType::Uint)])
+    let schema = Schema::record(vec![Field::required("count", SchemaType::U32)])
         .prepare()
-        .expect("Uint schema prepares");
+        .expect("U32 schema prepares");
 
     // Source arithmetic is literal data here, not an expression to evaluate. The first input
     // fails while scanning the root entry, so it carries no field path; the parenthesised
@@ -1585,7 +1450,7 @@ fn uint_rejects_source_arithmetic_and_keeps_bounded_failures_through_public_path
     let tight = Schema::record(vec![Field::required(
         "values",
         SchemaType::Collection {
-            element: Box::new(SchemaType::Uint),
+            element: Box::new(SchemaType::U32),
         },
     )])
     .with_limits(Limits {
@@ -1593,7 +1458,7 @@ fn uint_rejects_source_arithmetic_and_keeps_bounded_failures_through_public_path
         ..Limits::default()
     })
     .prepare()
-    .expect("tight Uint schema prepares");
+    .expect("tight U32 schema prepares");
     let input = "values = {1, 2, 3, 4, 5, 6, 7, 8}";
     let budget_error = decode_document(input, &tight).expect_err("node budget binds reuse");
     assert_eq!(budget_error.code, MonErrorCode::NodeBudget);
@@ -1603,17 +1468,17 @@ fn uint_rejects_source_arithmetic_and_keeps_bounded_failures_through_public_path
             .code,
         MonErrorCode::NodeBudget,
     );
-    // A long Uint spelling charges its own unsigned-token bytes before range checking.
-    let byte_tight = Schema::record(vec![Field::required("count", SchemaType::Uint)])
+    // A long U32 spelling charges its own unsigned-token bytes before range checking.
+    let byte_tight = Schema::record(vec![Field::required("count", SchemaType::U32)])
         .with_limits(Limits {
             max_decoded_bytes: 8,
             ..Limits::default()
         })
         .prepare()
-        .expect("byte-tight Uint schema prepares");
+        .expect("byte-tight U32 schema prepares");
     assert_eq!(
         decode_document("count = 18446744073709551615", &byte_tight)
-            .expect_err("decoded-byte budget binds Uint input")
+            .expect_err("decoded-byte budget binds U32 input")
             .code,
         MonErrorCode::DecodedBudget,
     );

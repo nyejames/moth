@@ -5,7 +5,7 @@ export:
 
     ExportedChoice ::
         VariantA,
-        VariantB | payload Int |,
+        VariantB | payload I32 |,
     ;
 
     ExportedAlias as String

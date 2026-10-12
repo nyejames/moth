@@ -18,12 +18,17 @@ use super::directive_args::directive_has_arguments;
 use super::handler_directives::apply_handler_style_directive;
 use super::head_expressions::{
     TemplateHeadExpressionContext, handle_template_value_in_template_head,
-    push_template_head_expression, push_template_head_path_expression,
+    push_parsed_template_head_expression, push_template_head_path_expression,
 };
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
+use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_with_trailing_newline_policy;
+use crate::compiler_frontend::ast::expressions::parse_expression_input::{
+    ExpressionParseInput, ExpressionParseResources,
+};
+use crate::compiler_frontend::ast::module_ast::scope_context::ScopeDeclarationRef;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
@@ -45,9 +50,10 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::{
     StyleDirectiveKind, StyleDirectiveSpec, TemplateHeadCompatibility, TemplateHeadTag,
 };
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
-use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
+use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -129,15 +135,6 @@ fn with_source_span(
         diagnostic.primary_span = source_span;
     }
     diagnostic
-}
-
-fn with_source_span_error(source_span: Option<SourceSpan>, error: TemplateError) -> TemplateError {
-    error.map_diagnostic(|mut diagnostic| {
-        if diagnostic.primary_span.is_none() {
-            diagnostic.primary_span = source_span;
-        }
-        diagnostic
-    })
 }
 
 fn apply_head_compatibility(
@@ -428,7 +425,10 @@ pub fn parse_template_head(
                 // Extract an inlinable template before the mutable expression parse.
                 // The borrow from get_reference is released once the template is cloned.
                 let inlined_template = context.get_reference(&name).and_then(|reference| {
-                    let declaration = reference.as_declaration();
+                    // A pending numeric binding has no declaration and is never an inlinable
+                    // template value, so it keeps the ordinary expression path below and
+                    // stays pending for body completion.
+                    let declaration = reference.ready_declaration()?;
                     match &declaration.value.kind {
                         ExpressionKind::Template(inserted_template)
                             if should_inline_template_head_reference(
@@ -453,33 +453,31 @@ pub fn parse_template_head(
                 } else {
                     // Resolve value_mode from the reference before the mutable
                     // expression parse so the context borrow does not overlap.
-                    let value_mode = context
-                        .get_reference(&name)
-                        .map(|reference| reference.value.value_mode.to_owned())
-                        .unwrap_or(ValueMode::ImmutableOwned);
+                    let value_mode = match context.get_reference(&name) {
+                        Some(reference) => head_reference_value_mode(context, &reference)?,
+                        // Unknown names keep the ordinary parse path, which reports the
+                        // structured unknown-name diagnostic for the authored token.
+                        None => ValueMode::ImmutableOwned,
+                    };
 
-                    let mut inferred = ExpectedType::Infer;
-                    let expression = create_expression(
+                    let expression = parse_head_expression(
                         token_stream,
                         context,
                         type_interner,
-                        &mut inferred,
                         &value_mode,
                         false,
                         string_table,
                         path_fork,
-                    )
-                    .map_err(|error| {
-                        with_source_span_error(value_span, TemplateError::from(error))
-                    })?;
+                    );
 
-                    push_template_head_expression(
+                    push_parsed_template_head_expression(
                         expression,
                         TemplateHeadExpressionContext {
                             context,
                             type_environment: type_interner.environment(),
                             construction_context,
                             path_fork: &*path_fork,
+                            value_mode,
                         },
                         value_span,
                         string_table,
@@ -493,34 +491,44 @@ pub fn parse_template_head(
             // Receiver self-reference
             TokenTag::THIS => {
                 let this_id = string_table.intern("this");
-                if let Some(reference) = context.get_reference(&this_id) {
+                // `this` names the reserved receiver binding, which is never a pending numeric
+                // body local, so a pending reference here is a broken invariant rather than an
+                // absent name.
+                let receiver_value_mode = context
+                    .get_reference(&this_id)
+                    .map(|reference| {
+                        let declaration = reference.ready_declaration().ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "template-head `this` resolved to a pending numeric binding",
+                            )
+                        })?;
+                        Ok::<ValueMode, CompilerError>(declaration.value.value_mode.to_owned())
+                    })
+                    .transpose()?;
+                if let Some(value_mode) = receiver_value_mode {
                     enforce_head_compatibility(
                         &head_state,
                         &meaningful_item_compatibility,
                         token_stream,
                     )?;
                     let value_span = current_source_span(token_stream);
-                    let mut inferred = ExpectedType::Infer;
-                    let expression = create_expression(
+                    let expression = parse_head_expression(
                         token_stream,
                         context,
                         type_interner,
-                        &mut inferred,
-                        &reference.value.value_mode,
+                        &value_mode,
                         false,
                         string_table,
                         path_fork,
-                    )
-                    .map_err(|error| {
-                        with_source_span_error(value_span, TemplateError::from(error))
-                    })?;
-                    push_template_head_expression(
+                    );
+                    push_parsed_template_head_expression(
                         expression,
                         TemplateHeadExpressionContext {
                             context,
                             type_environment: type_interner.environment(),
                             construction_context,
                             path_fork: &*path_fork,
+                            value_mode,
                         },
                         value_span,
                         string_table,
@@ -560,26 +568,24 @@ pub fn parse_template_head(
                     token_stream,
                 )?;
                 let value_span = current_source_span(token_stream);
-                let mut inferred = ExpectedType::Infer;
-                let expression = create_expression(
+                let expression = parse_head_expression(
                     token_stream,
                     context,
                     type_interner,
-                    &mut inferred,
                     &ValueMode::ImmutableOwned,
                     false,
                     string_table,
                     path_fork,
-                )
-                .map_err(|error| with_source_span_error(value_span, TemplateError::from(error)))?;
+                );
 
-                push_template_head_expression(
+                push_parsed_template_head_expression(
                     expression,
                     TemplateHeadExpressionContext {
                         context,
                         type_environment: type_interner.environment(),
                         construction_context,
                         path_fork: &*path_fork,
+                        value_mode: ValueMode::ImmutableOwned,
                     },
                     value_span,
                     string_table,
@@ -629,26 +635,24 @@ pub fn parse_template_head(
                     token_stream,
                 )?;
                 let value_span = current_source_span(token_stream);
-                let mut inferred = ExpectedType::Infer;
-                let expression = create_expression(
+                let expression = parse_head_expression(
                     token_stream,
                     context,
                     type_interner,
-                    &mut inferred,
                     &ValueMode::ImmutableOwned,
                     true,
                     string_table,
                     path_fork,
-                )
-                .map_err(|error| with_source_span_error(value_span, TemplateError::from(error)))?;
+                );
 
-                push_template_head_expression(
+                push_parsed_template_head_expression(
                     expression,
                     TemplateHeadExpressionContext {
                         context,
                         type_environment: type_interner.environment(),
                         construction_context,
                         path_fork: &*path_fork,
+                        value_mode: ValueMode::ImmutableOwned,
                     },
                     value_span,
                     string_table,
@@ -864,6 +868,67 @@ fn parse_style_directive_from_spec(
     directive_result?;
 
     Ok(had_arguments)
+}
+
+/// Parses one template-head expression as the owner of its complete fragment.
+///
+/// WHAT: builds the ordinary expression input marked as the numeric-deferral owner, so an
+///       unresolvable numeric fragment is returned as a retainable deferral.
+/// WHY: the head position owns the whole authored expression syntax, and only this boundary can
+///      retain that fragment for body-root completion. Nested parses keep raising non-owning
+///      deferrals, which the enclosing construct must reject rather than mis-retain.
+fn parse_head_expression(
+    token_stream: &mut AstCursor<'_>,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    value_mode: &ValueMode,
+    consume_closing_parenthesis: bool,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> Result<Expression, ExpressionParseError> {
+    let mut inferred = ExpectedType::Infer;
+    let mut cast_target_context = CastTargetContext::None;
+    let input = ExpressionParseInput::ordinary(
+        ExpressionParseResources {
+            token_stream,
+            scope_context: context,
+            type_interner,
+            expected_type: &mut inferred,
+            cast_target_context: &mut cast_target_context,
+            value_mode,
+            string_table,
+            path_fork,
+        },
+        consume_closing_parenthesis,
+    )
+    .with_numeric_deferral_owner();
+
+    create_expression_with_trailing_newline_policy(input)
+}
+
+/// Resolves the value mode for one template-head symbol reference.
+///
+/// WHAT: reads the authored mode from a ready declaration, or from the body-owned pending
+///       numeric row that owns an unresolved binding.
+/// WHY: a pending numeric binding has no declaration and must not be treated as an absent
+///      name or defaulted before body completion, so the construction row owns the mode.
+fn head_reference_value_mode(
+    context: &ScopeContext,
+    reference: &ScopeDeclarationRef<'_>,
+) -> Result<ValueMode, CompilerError> {
+    match reference {
+        ScopeDeclarationRef::Local { declaration, .. } => {
+            Ok(declaration.value.value_mode.to_owned())
+        }
+        ScopeDeclarationRef::Shared(declaration) => Ok(declaration.value.value_mode.to_owned()),
+        ScopeDeclarationRef::PendingNumeric { binding, .. } => {
+            context.pending_numeric_value_mode(*binding).ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "pending numeric binding reference had no construction row value mode",
+                )
+            })
+        }
+    }
 }
 
 /// Find a control-flow suffix that follows a head item without a separating comma.

@@ -1,0 +1,5 @@
+hidden ||:
+    left U64 = 2
+    right I32 = 2
+    value = left + right
+;

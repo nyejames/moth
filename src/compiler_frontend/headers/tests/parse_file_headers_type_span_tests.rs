@@ -9,7 +9,7 @@ fn parsed_type_and_capacity_spans_retain_exact_ranges_after_remapping_and_rebind
     let long_capacity = format!("capacity_{}", "c".repeat(1100));
     let source = format!(
         "-- é🦋\n\
-{long_capacity} #Int = 7\n\
+{long_capacity} #I32 = 7\n\
 NamedAlias as {long_named}\n\
 QualifiedAlias as {long_qualified}.Child\n\
 AppliedAlias as {long_generic} of Child, String\n\
@@ -20,8 +20,8 @@ MapAlias as {{Key = Value}}\n\
 NestedAlias as {{Key = {{Child}}}}\n\
 OptionalAlias as Child?\n\
 BoolAlias as Bool\n\
-IntAlias as Int\n\
-FloatAlias as Float\n\
+IntAlias as I32\n\
+FloatAlias as F64\n\
 StringAlias as String\n\
 CharAlias as Char\n\
 INFERRED #= 1\n"
@@ -110,7 +110,7 @@ INFERRED #= 1\n"
         "the snapshot should cover every authored constructor and child type anchor"
     );
     let expected_texts = vec![
-        "Int".to_owned(),
+        "I32".to_owned(),
         long_named.clone(),
         long_qualified.clone(),
         "of".to_owned(),
@@ -135,8 +135,8 @@ INFERRED #= 1\n"
         "?".to_owned(),
         "Child".to_owned(),
         "Bool".to_owned(),
-        "Int".to_owned(),
-        "Float".to_owned(),
+        "I32".to_owned(),
+        "F64".to_owned(),
         "String".to_owned(),
         "Char".to_owned(),
     ];

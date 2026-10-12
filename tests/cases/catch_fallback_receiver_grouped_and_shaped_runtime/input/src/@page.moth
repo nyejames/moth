@@ -1,0 +1,252 @@
+-- A later U64 use of a signature-linked, grouped, generic-shaped, collection,
+-- multi-result, concrete-result, named-origin or receiver-method generic fallback must
+-- type the pending protected arithmetic. The generic signatures `T -> T` and
+-- `T -> T, Error!` supply the link only; their bodies are not searched.
+
+identity type T |value T| -> T:
+    return value
+;
+
+fallible_identity type T |value T| -> T, Error!:
+    return value
+;
+
+fallible_pair type T |value T| -> T, T, Error!:
+    return value, value
+;
+
+fixed_result type T |value T| -> U64:
+    return 0
+;
+
+Packet type T = |value T|
+
+pair type T |this Packet of T| -> T, T, Error!:
+    return this.value, this.value
+;
+
+mirror type T |this Packet of T, other T| -> T, T:
+    return this.value, other
+;
+
+fixed_u64 |value I32| -> U64:
+    return 0
+;
+
+plain_pair type T |value T| -> T, T:
+    return value, value
+;
+
+fallible_fixed_result type T |value T| -> U64, Error!:
+    return 0
+;
+
+fixed_pair type T |value T| -> U64, U64, Error!:
+    return 0, 0
+;
+
+partial_pair type T |value T| -> U64, T, Error!:
+    return 0, value
+;
+
+consume_u64 |value U64| -> String:
+    return [:[value]]
+;
+
+probe_signature || -> String:
+    fallback U64 = 0
+    value ~= fallible_identity(1) catch then fallback
+    value = 4294967301
+    return [:[value]]
+;
+
+probe_protected_group || -> String:
+    fallback U64 = 0
+    value ~= (fallible_identity(1)) catch then fallback
+    value = 4294967304
+    return [:[value]]
+;
+
+probe_grouped || -> String:
+    fallback = 1
+    rendered = consume_u64(fallback)
+    value ~= 1 + 2 catch then (fallback)
+    value = 4294967302
+    return [:[value]]
+;
+
+probe_shaped || -> String:
+    fallback = identity(1)
+    rendered = consume_u64(fallback)
+    value ~= 1 + 2 catch then fallback
+    value = 4294967303
+    return [:[value]]
+;
+
+probe_container || -> String:
+    fallback ~{U64} = {0}
+    values ~= fallible_identity({1}) catch then fallback
+    ~values.push(4294967305)
+    text ~= [:]
+    loop values |item|:
+        text = [:[text][item],]
+    ;
+    return text
+;
+
+probe_multi || -> String:
+    fallback U64 = 0
+    first, second = fallible_pair(1) catch:
+        then fallback, fallback
+    ;
+    return [:[first],[second]]
+;
+
+probe_concrete_fallback || -> String:
+    value ~= 1 + 2 catch then fixed_result(1)
+    value = 4294967307
+    return [:[value]]
+;
+
+probe_named_origin || -> String:
+    origin = 1
+    fallback U64 = 0
+    value ~= fallible_identity(origin) catch then fallback
+    value = 4294967308
+    return [:[value]]
+;
+
+probe_method_multi || -> String:
+    packet = Packet(1)
+    fallback U64 = 0
+    first, second = packet.pair() catch:
+        then fallback, fallback
+    ;
+    return [:[first],[second]]
+;
+
+probe_branch |pick Bool| -> String:
+    left = identity(1)
+    right = identity(2)
+    value ~= fallible_identity(1) catch:
+        if pick:
+            then left
+        else
+            then right
+        ;
+    ;
+    rendered = consume_u64(right)
+    value = 4294967311
+    return [:[value]]
+;
+
+probe_raw_branch |pick Bool| -> String:
+    left = identity(1)
+    right = identity(2)
+    value ~= 1 + 2 catch:
+        if pick:
+            then left
+        else
+            then right
+        ;
+    ;
+    rendered = consume_u64(right)
+    value = 4294967312
+    return [:[value]]
+;
+
+-- The inline generic signature fallback keeps its generic call in the then arm. Its
+-- argument origin is later constrained by an independent U64 use.
+probe_inline_generic || -> String:
+    origin = 1
+    value ~= 1 + 2 catch then identity(origin)
+    rendered = consume_u64(origin)
+    value = 4294967313
+    return [:[value]]
+;
+
+-- A pending argument does not hide the non-generic fallback's fixed U64 success slot.
+-- Its I32 parameter completes the argument independently of that result.
+probe_fixed_u64_fallback || -> String:
+    origin = 1
+    value ~= 1 + 2 catch then fixed_u64(origin)
+    value = 4294967314
+    return [:[value]]
+;
+
+-- A raw literal receiver chooses the fallback's F32 or Dec2 family before operator
+-- selection.
+probe_raw_f32 || -> String:
+    fallback F32 = 0
+    value = 1 + 2 catch then fallback
+    return [:[value]]
+;
+
+probe_raw_dec2 || -> String:
+    fallback Dec2 = 0
+    value = 1 + 2 catch then fallback
+    return [:[value]]
+;
+
+-- An error-free generic pair takes its arity from the success slots. The grouped inline
+-- safety catch fallback is validated but not selected.
+probe_error_free_pair || -> String:
+    first, second = (plain_pair(1 + 2)) catch then 0, 0
+    return [:[first],[second]]
+;
+
+-- An error-free method on the same `Packet` takes its arity from the success slots
+-- through a separate receiver-call terminal path. Its fallback is validated but not selected.
+probe_error_free_method || -> String:
+    packet = Packet(1)
+    first, second = packet.mirror(1 + 2) catch then 0, 0
+    return [:[first],[second]]
+;
+
+-- The explicit U64 receiver supplies the immediate cast target for the U8 fallback
+-- source in inline and block handlers. The protected call succeeds with 0.
+probe_cast_inline || -> String:
+    origin = 1
+    small U8 = 2
+    result U64 = fallible_fixed_result(origin) catch then cast small
+    return [:[result]]
+;
+
+probe_cast_block || -> String:
+    origin = 1
+    small U8 = 2
+    result U64 = fallible_fixed_result(origin) catch:
+        then cast small
+    ;
+    return [:[result]]
+;
+
+-- The protected generic call's U64 success slot types the fallback cast even without an outer
+-- annotation. Its pending argument does not affect that slot's type.
+probe_cast_untyped || -> String:
+    origin = 1
+    small U8 = 2
+    result = fallible_fixed_result(origin) catch then cast small
+    return [:[result]]
+;
+
+-- Both success slots of the generic fixed pair are static U64 receivers, so each multi-bind
+-- cast target is concrete. The generic argument does not feed either slot.
+probe_cast_fixed_pair || -> String:
+    origin = 1
+    small U8 = 2
+    first, second = fixed_pair(origin) catch then cast small, cast small
+    return [:[first],[second]]
+;
+
+-- The first slot is a static U64 receiver and sets its cast target immediately. The second
+-- slot is the numeric unknown T; the later independent consume_u64(origin) forces T = U64.
+probe_cast_partial_pair || -> String:
+    origin = 1
+    small U8 = 2
+    first, second = partial_pair(origin) catch then cast small, 0
+    rendered = consume_u64(origin)
+    return [:[first],[second]]
+;
+
+[:signature=[probe_signature()] protected_group=[probe_protected_group()] grouped=[probe_grouped()] shaped=[probe_shaped()] container=[probe_container()] multi=[probe_multi()] concrete_fallback=[probe_concrete_fallback()] named_origin=[probe_named_origin()] method_multi=[probe_method_multi()] branch=[probe_branch(false)] raw_branch=[probe_raw_branch(false)] inline_generic=[probe_inline_generic()] fixed_u64=[probe_fixed_u64_fallback()] raw_f32=[probe_raw_f32()] raw_dec2=[probe_raw_dec2()] error_free_pair=[probe_error_free_pair()] error_free_method=[probe_error_free_method()] cast_inline=[probe_cast_inline()] cast_block=[probe_cast_block()] cast_untyped=[probe_cast_untyped()] cast_fixed_pair=[probe_cast_fixed_pair()] cast_partial_pair=[probe_cast_partial_pair()]]

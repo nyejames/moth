@@ -1,24 +1,23 @@
-//! Executable behavior tests for `Uint` JavaScript runtime helpers.
+//! Executable behavior tests for unsigned exact-width JavaScript runtime helpers.
 //!
-//! WHAT: executes the shared integer helper families with `Uint` bounds, the
+//! WHAT: executes the shared integer helper families with `U32`/`U64` bounds, the
 //!       direct `BigInt` to binary-float rounding and the integer cast helpers
 //!       in Node.js using adversarial boundary values.
-//! WHY: `Uint32` rides the exact `Number` family and `Uint64` the exact `BigInt`
+//! WHY: `U32` rides the exact `Number` family and `U64` the exact `BigInt`
 //!      family with their own unsigned bounds; only execution proves values
 //!      above the signed maxima stay exact and out-of-range results fail.
 
 use super::support::*;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::ids::RegionId;
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::process::Command;
 
 fn run_javascript(source: &str) -> String {
@@ -34,70 +33,56 @@ fn run_javascript(source: &str) -> String {
     String::from_utf8(output.stdout).expect("Node.js output is UTF-8")
 }
 
-fn profile(int_width: IntWidth) -> NumericProfile {
-    NumericProfile {
-        int_width,
-        float_precision: FloatPrecision::Bits64,
-    }
+fn unsigned_literal(scalar: FixedScalar, value: u64) -> FixedScalarValue {
+    FixedScalarValue::unsigned(scalar, value).expect("fixture value fits its unsigned scalar")
 }
 
-/// Lowers one `Uint` addition so the prelude carries the profile-selected
-/// integer helper family with `Uint` bounds.
-fn lower_uint_operation_source(numeric_profile: NumericProfile) -> String {
+/// Lowers one exact-width unsigned addition so the prelude carries the integer
+/// helper family for that scalar's carrier with its unsigned bounds.
+fn lower_uint_operation_source(scalar: FixedScalar) -> String {
     let mut expressions = HirExpressionStore::default();
-    let (type_environment, _) = build_type_environment();
-    let uint_type: TypeId = type_environment.builtins().uint;
+    let uint_type: TypeId = builtin_type_ids::fixed_scalar(scalar);
     let region = RegionId(0);
-    lower_minimal_module_with_numeric_op_for_profile(
+    lower_minimal_module_with_numeric_op(
         HirNumericOp {
             operator: NumericOperator::Add,
-            domain: NumericScalar::Uint,
+            domain: NumericScalar::Fixed(scalar),
         },
         NumericFailureMode::Trap,
         HirNumericOperands::Binary {
-            left: expression(
-                HirExpressionKind::Uint(1),
+            left: fixed_scalar_expression(
+                unsigned_literal(scalar, 1),
                 uint_type,
                 region,
-                ValueKind::Const,
                 &mut expressions,
             ),
-            right: expression(
-                HirExpressionKind::Uint(2),
+            right: fixed_scalar_expression(
+                unsigned_literal(scalar, 2),
                 uint_type,
                 region,
-                ValueKind::Const,
                 &mut expressions,
             ),
         },
         uint_type,
-        numeric_profile,
         expressions,
     )
 }
 
-fn emit_uint_cast_helpers(
-    policies: &[BuiltinCastPolicyId],
-    numeric_profile: NumericProfile,
-) -> String {
-    emit_cast_helpers_for_profile(policies, numeric_profile)
-}
-
 #[test]
 fn uint32_operations_use_shared_int_helpers_with_unsigned_bounds() {
-    let source = lower_uint_operation_source(profile(IntWidth::Bits32));
+    let source = lower_uint_operation_source(FixedScalar::U32);
 
     assert!(
         source.contains("__moth_int_add(1, 2, 0, 4294967295)"),
-        "Uint32 addition must demand the shared int helper with unsigned bounds"
+        "U32 addition must demand the shared int helper with unsigned bounds"
     );
     assert!(
         !source.contains("__moth_bigint_add"),
-        "Uint32 programs must not gain BigInt helpers or global state"
+        "U32 programs must not gain BigInt helpers or global state"
     );
     assert!(
         !source.contains("__moth_bigint_to_binary_float"),
-        "Uint32 arithmetic must not demand binary-float conversion helpers"
+        "U32 arithmetic must not demand binary-float conversion helpers"
     );
 
     let mut script = source;
@@ -135,11 +120,11 @@ fn uint32_operations_use_shared_int_helpers_with_unsigned_bounds() {
 
 #[test]
 fn uint64_operations_use_shared_bigint_helpers_with_unsigned_bounds() {
-    let source = lower_uint_operation_source(profile(IntWidth::Bits64));
+    let source = lower_uint_operation_source(FixedScalar::U64);
 
     assert!(
         source.contains("__moth_bigint_add(1n, 2n, 0n, 18446744073709551615n)"),
-        "Uint64 addition must demand the shared bigint helper with unsigned bounds"
+        "U64 addition must demand the shared bigint helper with unsigned bounds"
     );
 
     let mut script = source;
@@ -175,16 +160,10 @@ fn uint64_operations_use_shared_bigint_helpers_with_unsigned_bounds() {
 
 #[test]
 fn uint64_to_float32_rounds_directly_without_binary64_detour() {
-    let mut script = emit_uint_cast_helpers(
-        &[BuiltinCastPolicyId::NumericConversion {
-            source: NumericScalar::Uint,
-            target: NumericScalar::Float,
-        }],
-        NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits32,
-        },
-    );
+    let mut script = emit_cast_helpers(&[BuiltinCastPolicyId::NumericConversion {
+        source: NumericScalar::Fixed(FixedScalar::U64),
+        target: NumericScalar::Fixed(FixedScalar::F32),
+    }]);
     script.push_str(
         "\nconst direct = __moth_bigint_to_binary_float(9007199791611905n, 32);\n\
          const bits = new Uint32Array(new Float32Array([direct]).buffer)[0];\n\
@@ -198,40 +177,37 @@ fn uint64_to_float32_rounds_directly_without_binary64_detour() {
 
 #[test]
 fn uint_integer_casts_check_complete_ranges_across_carriers() {
-    let mut script = emit_uint_cast_helpers(
-        &[
-            BuiltinCastPolicyId::NumericConversion {
-                source: NumericScalar::Uint,
-                target: NumericScalar::Int,
-            },
-            BuiltinCastPolicyId::NumericConversion {
-                source: NumericScalar::Int,
-                target: NumericScalar::Uint,
-            },
-            BuiltinCastPolicyId::NumericConversion {
-                source: NumericScalar::Float,
-                target: NumericScalar::Uint,
-            },
-            BuiltinCastPolicyId::StringToNumeric(NumericScalar::Uint),
-            BuiltinCastPolicyId::NumericToString(NumericScalar::Uint),
-        ],
-        profile(IntWidth::Bits64),
-    );
+    let mut script = emit_cast_helpers(&[
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Fixed(FixedScalar::U64),
+            target: NumericScalar::Fixed(FixedScalar::I64),
+        },
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Fixed(FixedScalar::I64),
+            target: NumericScalar::Fixed(FixedScalar::U64),
+        },
+        BuiltinCastPolicyId::NumericConversion {
+            source: NumericScalar::Fixed(FixedScalar::F64),
+            target: NumericScalar::Fixed(FixedScalar::U64),
+        },
+        BuiltinCastPolicyId::StringToNumeric(NumericScalar::Fixed(FixedScalar::U64)),
+        BuiltinCastPolicyId::NumericToString(NumericScalar::Fixed(FixedScalar::U64)),
+    ]);
     script.push_str(
         "\nconst summarize = result => result.tag + \":\" + String(result.value);\n\
          const fail = result => result.tag + \":\" + __moth_error_code(result.value);\n",
     );
     script.push_str(
         "console.log(JSON.stringify([\
-            summarize(__moth_cast_integer_to_integer(100n, -9223372036854775808n, 9223372036854775807n, \"Uint\", \"Int\")),\
-            fail(__moth_cast_integer_to_integer(18446744073709551615n, -9223372036854775808n, 9223372036854775807n, \"Uint\", \"Int\")),\
-            summarize(__moth_cast_integer_to_integer(41, 0n, 18446744073709551615n, \"Int\", \"Uint\")),\
-            fail(__moth_cast_integer_to_integer(-1, 0n, 18446744073709551615n, \"Int\", \"Uint\")),\
-            summarize(__moth_cast_float_to_int(-0.5, 0n, 18446744073709551615n, \"Float\", \"Uint\")),\
-            fail(__moth_cast_float_to_int(-1.0, 0n, 18446744073709551615n, \"Float\", \"Uint\")),\
-            summarize(__moth_cast_int(\"18446744073709551615\", 0n, 18446744073709551615n, \"Uint\")),\
-            fail(__moth_cast_int(\"-0\", 0n, 18446744073709551615n, \"Uint\")),\
-            fail(__moth_cast_int(\"4a\", 0n, 18446744073709551615n, \"Uint\")),\
+            summarize(__moth_cast_integer_to_integer(100n, -9223372036854775808n, 9223372036854775807n, \"U64\", \"I64\")),\
+            fail(__moth_cast_integer_to_integer(18446744073709551615n, -9223372036854775808n, 9223372036854775807n, \"U64\", \"I64\")),\
+            summarize(__moth_cast_integer_to_integer(41, 0n, 18446744073709551615n, \"I64\", \"U64\")),\
+            fail(__moth_cast_integer_to_integer(-1, 0n, 18446744073709551615n, \"I64\", \"U64\")),\
+            summarize(__moth_cast_float_to_int(-0.5, 0n, 18446744073709551615n, \"F64\", \"U64\")),\
+            fail(__moth_cast_float_to_int(-1.0, 0n, 18446744073709551615n, \"F64\", \"U64\")),\
+            summarize(__moth_cast_int(\"18446744073709551615\", 0n, 18446744073709551615n, \"U64\")),\
+            fail(__moth_cast_int(\"-0\", 0n, 18446744073709551615n, \"U64\")),\
+            fail(__moth_cast_int(\"4a\", 0n, 18446744073709551615n, \"U64\")),\
             __moth_cast_int_to_string(18446744073709551615n)\
         ]));",
     );

@@ -71,10 +71,6 @@ pub(crate) struct MapShape {
 #[derive(Debug, Clone, Copy)]
 pub struct BuiltinTypes {
     pub bool: TypeId,
-    pub int: TypeId,
-    /// Seeded profile-sized unsigned integer, following the selected `Int` width.
-    pub uint: TypeId,
-    pub float: TypeId,
     pub string: TypeId,
     pub char: TypeId,
     pub range: TypeId,
@@ -291,9 +287,6 @@ impl TypeEnvironment {
             next_generic_parameter_list_id: 0,
             builtins: BuiltinTypes {
                 bool: TypeId(0),
-                int: TypeId(0),
-                uint: TypeId(0),
-                float: TypeId(0),
                 string: TypeId(0),
                 char: TypeId(0),
                 range: TypeId(0),
@@ -307,26 +300,16 @@ impl TypeEnvironment {
 
         // Seed builtins. The order here is arbitrary but deterministic.
         let bool_id = env.intern_builtin_key(BuiltinTypeKey::Bool);
-        let int_id = env.intern_builtin_key(BuiltinTypeKey::Int);
-        let float_id = env.intern_builtin_key(BuiltinTypeKey::Float);
         let string_id = env.intern_builtin_key(BuiltinTypeKey::String);
         let char_id = env.intern_builtin_key(BuiltinTypeKey::Char);
         let range_id = env.intern_builtin_key(BuiltinTypeKey::Range);
         let none_id = env.intern_builtin_key(BuiltinTypeKey::None);
-        // `Uint` seeds immediately after `None` so the profile-sized unsigned identity stays
-        // with the other seeded builtins; `builtin_type_ids::UINT` mirrors this position.
-        let uint_id = env.intern_builtin_key(BuiltinTypeKey::Uint);
-        debug_assert_eq!(
-            uint_id,
-            builtin_type_ids::UINT,
-            "uint seeding order must match builtin_type_ids::UINT"
-        );
 
-        // Explicit-width scalars are profile-independent identities, so they are seeded once
-        // with the other builtins. Seeding happens after `Uint` to keep the builtin `TypeId`
-        // layout stable; `builtin_type_ids::fixed_scalar` mirrors this sequence and the
-        // invariant check below fails loudly if the two ever drift apart. `Dec` scales are
-        // deliberately absent: they intern lazily through `intern_number` with no seeded ids.
+        // Explicit-width scalars are the only bounded numeric identities, so they are seeded
+        // once with the other builtins immediately after `None`; `builtin_type_ids::fixed_scalar`
+        // mirrors this sequence and the invariant check below fails loudly if the two ever drift
+        // apart. `Dec` scales are deliberately absent: they intern lazily through `intern_number`
+        // with no seeded ids.
         for scalar in FixedScalar::ALL {
             let fixed_scalar_id = env.intern_builtin_key(BuiltinTypeKey::FixedScalar(scalar));
             debug_assert_eq!(
@@ -338,9 +321,6 @@ impl TypeEnvironment {
 
         env.builtins = BuiltinTypes {
             bool: bool_id,
-            int: int_id,
-            uint: uint_id,
-            float: float_id,
             string: string_id,
             char: char_id,
             range: range_id,
@@ -1022,7 +1002,7 @@ impl TypeEnvironment {
         id
     }
 
-    /// Interns a generic nominal instance (e.g. `Box of Int`).
+    /// Interns a generic nominal instance (e.g. `Box of I32`).
     pub fn intern_generic_instance(
         &mut self,
         base: NominalTypeId,
@@ -1458,6 +1438,84 @@ impl TypeEnvironment {
             .and_then(|shape| shape.fixed_capacity)
     }
 
+    /// Returns true when a type mentions a declared generic parameter in any nested position.
+    ///
+    /// WHAT: walks constructed, nominal generic-instance, and function type arguments.
+    /// WHY: numeric origin linking and call-slot routing must see parameters inside nominal
+    ///      instances and function signatures before the call's exact argument types are known.
+    pub(crate) fn contains_generic_parameter(&self, id: TypeId) -> bool {
+        match self.get(id) {
+            Some(TypeDefinition::GenericParameter(..)) => true,
+            Some(TypeDefinition::Constructed(constructed)) => constructed
+                .arguments
+                .iter()
+                .any(|argument| self.contains_generic_parameter(*argument)),
+            Some(TypeDefinition::GenericInstance(instance)) => instance
+                .arguments
+                .iter()
+                .any(|argument| self.contains_generic_parameter(*argument)),
+            Some(TypeDefinition::Function(function)) => {
+                function
+                    .parameters
+                    .iter()
+                    .any(|parameter| self.contains_generic_parameter(parameter.type_id))
+                    || function
+                        .returns
+                        .iter()
+                        .any(|returned| self.contains_generic_parameter(*returned))
+                    || function
+                        .error_return
+                        .is_some_and(|error| self.contains_generic_parameter(error))
+            }
+            _ => false,
+        }
+    }
+
+    /// Appends each generic parameter a type mentions, once, in first-seen order.
+    ///
+    /// WHAT: walks the same positions as `contains_generic_parameter`.
+    /// WHY: a declared substitution binds exactly the parameters its declared type mentions,
+    ///      so template parameters the declared type never names stay out of its range.
+    pub(crate) fn collect_generic_parameters(&self, id: TypeId, out: &mut Vec<GenericParameterId>) {
+        match self.get(id) {
+            Some(TypeDefinition::GenericParameter(parameter)) => {
+                if !out.contains(&parameter.id) {
+                    out.push(parameter.id);
+                }
+            }
+            Some(TypeDefinition::Constructed(constructed)) => {
+                for argument in constructed.arguments.iter() {
+                    self.collect_generic_parameters(*argument, out);
+                }
+            }
+            Some(TypeDefinition::GenericInstance(instance)) => {
+                for argument in instance.arguments.iter() {
+                    self.collect_generic_parameters(*argument, out);
+                }
+            }
+            Some(TypeDefinition::Function(function)) => {
+                for parameter in function.parameters.iter() {
+                    self.collect_generic_parameters(parameter.type_id, out);
+                }
+                for returned in function.returns.iter() {
+                    self.collect_generic_parameters(*returned, out);
+                }
+                if let Some(error) = function.error_return {
+                    self.collect_generic_parameters(error, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Returns the generic parameter a type is exactly, when the type is a bare parameter.
+    pub(crate) fn bare_generic_parameter(&self, id: TypeId) -> Option<GenericParameterId> {
+        match self.get(id) {
+            Some(TypeDefinition::GenericParameter(parameter)) => Some(parameter.id),
+            _ => None,
+        }
+    }
+
     /// Interns the canonical built-in collection type for an element semantic type.
     ///
     /// WHAT: gives collection construction a named owner in `TypeEnvironment`.
@@ -1609,9 +1667,6 @@ impl TypeEnvironment {
             Some(TypeDefinition::Builtin(builtin)) => matches!(
                 builtin.key,
                 BuiltinTypeKey::Bool
-                    | BuiltinTypeKey::Int
-                    | BuiltinTypeKey::Uint
-                    | BuiltinTypeKey::Float
                     | BuiltinTypeKey::Char
                     | BuiltinTypeKey::Number(_)
                     | BuiltinTypeKey::String
@@ -1825,13 +1880,6 @@ impl TypeEnvironment {
     pub fn receiver_key_for_type_id(&self, id: TypeId) -> Option<ReceiverKey> {
         match self.get(id)? {
             TypeDefinition::Builtin(builtin) => match builtin.key {
-                BuiltinTypeKey::Int => Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Int)),
-                BuiltinTypeKey::Uint => {
-                    Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Uint))
-                }
-                BuiltinTypeKey::Float => {
-                    Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Float))
-                }
                 BuiltinTypeKey::Bool => {
                     Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Bool))
                 }
@@ -1884,11 +1932,6 @@ impl TypeEnvironment {
         match self.get(id)? {
             TypeDefinition::Builtin(builtin) => match builtin.key {
                 BuiltinTypeKey::Bool => Some(TypeIdentityKey::Builtin(BridgeBuiltinTypeKey::Bool)),
-                BuiltinTypeKey::Int => Some(TypeIdentityKey::Builtin(BridgeBuiltinTypeKey::Int)),
-                BuiltinTypeKey::Uint => Some(TypeIdentityKey::Builtin(BridgeBuiltinTypeKey::Uint)),
-                BuiltinTypeKey::Float => {
-                    Some(TypeIdentityKey::Builtin(BridgeBuiltinTypeKey::Float))
-                }
                 BuiltinTypeKey::String => {
                     Some(TypeIdentityKey::Builtin(BridgeBuiltinTypeKey::String))
                 }
@@ -1992,15 +2035,55 @@ impl TypeEnvironment {
         }
     }
 
-    /// Recursive structural walker that mutates only the staged binding map.
+    /// Recursive structural walker that matches one template position against one concrete type.
     ///
-    /// WHAT: walks template and concrete `TypeId` trees in lock-step, recording each
-    ///       generic-parameter binding in `staged` and returning whether the structure
-    ///       matched.
-    /// WHY: keeping recursion on a private helper means nested arguments share one
-    ///      staged transaction instead of cloning and committing independently at
-    ///      every level, so a deep mismatch rolls back the whole walk atomically.
+    /// WHAT: applies at every structural position. A declared `T?` whose payload mentions a
+    ///       parameter takes one present, non-optional concrete type as that payload, so one
+    ///       contextual wrap is consumed here. The payload is then matched by
+    ///       `collect_type_parameter_bindings_layer`, which never peels an optional layer again.
+    /// WHY: one present value fills one declared optional layer per structural position, so a
+    ///      nested `T??` never wraps the same value twice. Child positions reached through a
+    ///      matched constructor, generic instance, or function type open their own position and
+    ///      re-enter this function.
     fn collect_type_parameter_bindings_inner(
+        &self,
+        template_type_id: TypeId,
+        concrete_type_id: TypeId,
+        staged: &mut GenericTypeBindings,
+    ) -> Result<bool, BindingConflict> {
+        if let Some(payload) = self.present_payload_template(template_type_id, concrete_type_id) {
+            return self.collect_type_parameter_bindings_layer(payload, concrete_type_id, staged);
+        }
+        self.collect_type_parameter_bindings_layer(template_type_id, concrete_type_id, staged)
+    }
+
+    /// The payload layer one present concrete type fills, when the declared type is optional.
+    ///
+    /// WHAT: returns the payload only when the declared type is `Option<payload>`, the payload
+    ///       mentions a generic parameter, and the concrete type is neither `none` nor optional.
+    /// WHY: an optional concrete type matches its own layer structurally, and `none` is absent, so
+    ///      neither may fill a declared layer by wrapping.
+    fn present_payload_template(
+        &self,
+        template_type_id: TypeId,
+        concrete_type_id: TypeId,
+    ) -> Option<TypeId> {
+        let payload = self.option_inner_type(template_type_id)?;
+        (self.contains_generic_parameter(payload)
+            && concrete_type_id != self.builtins().none
+            && self.option_inner_type(concrete_type_id).is_none())
+        .then_some(payload)
+    }
+
+    /// Matches one template layer whose optional wrap, if any, has already been consumed.
+    ///
+    /// WHAT: records a generic-parameter binding, accepts an identical pair, or walks matching
+    ///       constructed, generic-instance and function structure. Every child position reads
+    ///       through `collect_type_parameter_bindings_inner`.
+    /// WHY: keeping recursion on private helpers means nested arguments share one staged
+    ///      transaction, so a deep mismatch rolls back the whole walk atomically. Layer matching
+    ///      never peels again, so one present value fills one declared optional layer.
+    fn collect_type_parameter_bindings_layer(
         &self,
         template_type_id: TypeId,
         concrete_type_id: TypeId,
@@ -2061,6 +2144,53 @@ impl TypeEnvironment {
                     )? {
                         return Ok(false);
                     }
+                }
+
+                true
+            }
+            (
+                Some(TypeDefinition::Function(template_function)),
+                Some(TypeDefinition::Function(concrete_function)),
+            ) if template_function.parameters.len() == concrete_function.parameters.len()
+                && template_function.returns.len() == concrete_function.returns.len()
+                && template_function.error_return.is_some()
+                    == concrete_function.error_return.is_some() =>
+            {
+                for (template_parameter, concrete_parameter) in template_function
+                    .parameters
+                    .iter()
+                    .zip(concrete_function.parameters.iter())
+                {
+                    if !self.collect_type_parameter_bindings_inner(
+                        template_parameter.type_id,
+                        concrete_parameter.type_id,
+                        staged,
+                    )? {
+                        return Ok(false);
+                    }
+                }
+                for (template_return, concrete_return) in template_function
+                    .returns
+                    .iter()
+                    .zip(concrete_function.returns.iter())
+                {
+                    if !self.collect_type_parameter_bindings_inner(
+                        *template_return,
+                        *concrete_return,
+                        staged,
+                    )? {
+                        return Ok(false);
+                    }
+                }
+                if let (Some(template_error), Some(concrete_error)) = (
+                    template_function.error_return,
+                    concrete_function.error_return,
+                ) && !self.collect_type_parameter_bindings_inner(
+                    template_error,
+                    concrete_error,
+                    staged,
+                )? {
+                    return Ok(false);
                 }
 
                 true

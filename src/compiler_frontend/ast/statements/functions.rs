@@ -151,6 +151,34 @@ impl FunctionSignature {
             .filter_map(|slot| slot.type_id)
             .collect()
     }
+    /// Canonical TypeId for exactly one success-channel return slot, if it is resolved.
+    ///
+    /// WHAT: projects one slot directly from the borrowed signature without allocating a result
+    ///       list.
+    /// WHY: callers that only need a scalar result shape must distinguish it from zero or multiple
+    ///      success slots without treating an unresolved type as semantic information.
+    pub(crate) fn single_success_return_type_id(&self) -> Option<TypeId> {
+        let mut success_slots = self
+            .returns
+            .iter()
+            .filter(|slot| slot.channel == ReturnChannel::Success);
+        let slot = success_slots.next()?;
+        if success_slots.next().is_some() {
+            return None;
+        }
+        slot.type_id
+    }
+
+    /// The number of success-channel return slots, counted without allocating a type list.
+    ///
+    /// WHAT: counts declared slots, whether or not their types are resolved yet.
+    /// WHY: an authored `!` needs only whether a value is declared, so a count avoids a Vec.
+    pub(crate) fn success_return_slot_count(&self) -> usize {
+        self.returns
+            .iter()
+            .filter(|slot| slot.channel == ReturnChannel::Success)
+            .count()
+    }
 
     /// Canonical TypeId for the error return slot, if any.
     /// Only meaningful after type resolution.
@@ -289,7 +317,6 @@ pub(crate) fn signature_member_to_declaration(
                 parsed,
                 type_id,
                 data_type,
-                expression_context,
                 type_interner,
                 member,
                 mismatch_context,
@@ -312,7 +339,6 @@ fn normalise_resolved_signature_default(
     expression: Expression,
     declared_type_id: TypeId,
     declared_spelling: DataType,
-    expression_context: &ScopeContext,
     type_interner: &AstTypeInterner<'_>,
     member: &SignatureMemberSyntax,
     mismatch_context: TypeMismatchContext,
@@ -321,7 +347,6 @@ fn normalise_resolved_signature_default(
         expression,
         declared_type_id,
         type_interner.environment(),
-        expression_context.numeric_profile.float_precision,
         mismatch_context,
     )
     .map_err(|diagnostic| {
@@ -378,7 +403,6 @@ fn resolve_signature_type_annotation(
         TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
             declaration_table: &expression_context.top_level_declarations,
             declaring_file_id: expression_context.shared.declaring_file_id,
-            numeric_profile: expression_context.numeric_profile,
             visible_declaration_ids: expression_context.visible_declaration_ids.as_ref(),
             visible_external_symbols: expression_context
                 .file_visibility

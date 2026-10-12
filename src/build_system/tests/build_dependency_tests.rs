@@ -429,7 +429,7 @@ fn build_html_project_local_js_import_emits_generated_glue() {
         .expect("should write page");
     fs::write(
         src.join("drawing.js"),
-        "/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 7; }\n",
+        "/**\n * @moth.sig draw || -> I32\n */\nexport function draw() { return 7; }\n",
     )
     .expect("should write js");
 
@@ -510,7 +510,7 @@ fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map()
     .expect("should write page");
     fs::write(
         src.join("drawing.js"),
-        "import { mothOk } from \"@moth/runtime\";\n/**\n * @moth.sig get_number || -> Int, Error!\n */\nexport function getNumber() { return mothOk(7); }\n",
+        "import { mothOk } from \"@moth/runtime\";\n/**\n * @moth.sig get_number || -> I32, Error!\n */\nexport function getNumber() { return mothOk(7); }\n",
     )
     .expect("should write js");
 
@@ -556,7 +556,7 @@ fn build_html_project_non_fallible_js_with_runtime_helper_emits_runtime_module()
     .expect("should write page");
     fs::write(
         src.join("drawing.js"),
-        "import { mothOk } from \"@moth/runtime\";\n/**\n * @moth.sig get_number || -> Int\n */\nexport function getNumber() { return mothOk(7).value; }\n",
+        "import { mothOk } from \"@moth/runtime\";\n/**\n * @moth.sig get_number || -> I32\n */\nexport function getNumber() { return mothOk(7).value; }\n",
     )
     .expect("should write js");
 
@@ -596,7 +596,7 @@ fn build_html_project_fallible_js_without_runtime_import_does_not_emit_runtime_m
     .expect("should write page");
     fs::write(
         src.join("drawing.js"),
-        "/**\n * @moth.sig get_number || -> Int, Error!\n */\nexport function getNumber() { return { ok: true, value: 7 }; }\n",
+        "/**\n * @moth.sig get_number || -> I32, Error!\n */\nexport function getNumber() { return { ok: true, value: 7 }; }\n",
     )
     .expect("should write js");
 
@@ -629,12 +629,12 @@ fn build_html_project_unreachable_provider_js_import_does_not_emit_runtime_artif
     .expect("should write config");
     fs::write(
         src.join("@page.moth"),
-        "@drawing.js get_number\nunused || -> Int, Error!:\n    return get_number()!\n;\nvalue = 1\n",
+        "@drawing.js get_number\nunused || -> I32, Error!:\n    return get_number()!\n;\nvalue = 1\n",
     )
     .expect("should write page");
     fs::write(
         src.join("drawing.js"),
-        "import { mothOk } from \"@moth/runtime\";\n/**\n * @moth.sig get_number || -> Int, Error!\n */\nexport function getNumber() { return mothOk(7); }\n",
+        "import { mothOk } from \"@moth/runtime\";\n/**\n * @moth.sig get_number || -> I32, Error!\n */\nexport function getNumber() { return mothOk(7); }\n",
     )
     .expect("should write js");
 

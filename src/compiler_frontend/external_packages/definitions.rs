@@ -9,7 +9,7 @@ use super::abi::{ExternalAbiType, ExternalParameter, ExternalReturnAlias, Extern
 use super::ids::{ExternalConstantId, ExternalFunctionId, ExternalPackageId, ExternalTypeId};
 use super::symbol_path::ExternalSymbolPath;
 use crate::compiler_frontend::datatypes::DataType;
-use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::collections::HashMap;
 
 /// Backend-specific lowering metadata for an external function.
@@ -180,22 +180,31 @@ pub struct ExternalTypeDef {
 }
 
 /// Compile-time value for an external package constant.
+///
+/// WHAT: separates materialised constants from raw host registration inputs.
+/// WHY: publication and literal bindings already own valid exact values, while raw host
+/// inputs need source-use range and finiteness diagnostics before becoming scalar values.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ExternalConstantValue {
-    /// Profile-selected `NativeFloat` payload, rounded at projection.
-    Float(f64),
-    /// `NativeInt` payload.
-    Int(i32),
-    /// Exact profile-sized unsigned payload for `NativeUint` constants, covering
-    /// the full `Uint64` range without signed reinterpretation.
-    Uint(u64),
-    /// Exact value of a fixed foreign scalar such as `I32`, `U32` or `F64`.
-    ///
-    /// The materialised carrier keeps the declared scalar and its exact bits, so publication,
-    /// re-export and projection never pass the value through a profile `Int` or `Float`.
+    /// Already validated scalar payload used by literal bindings and published constants.
     Fixed(FixedScalarValue),
+    /// Host boundary input retained until projection can report a diagnostic at its source use.
+    ///
+    /// Unlike `Fixed`, this is not a materialised value: its exact scalar identity and raw
+    /// payload may describe an out-of-range `U32` or a non-finite `F64`.
+    Registered {
+        scalar: FixedScalar,
+        raw: ExternalConstantRawValue,
+    },
     StringSlice(&'static str),
     Bool(bool),
+}
+
+/// Unvalidated host payload families accepted at the external constant registration boundary.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ExternalConstantRawValue {
+    Unsigned(u64),
+    BinaryFloat(f64),
 }
 
 impl ExternalConstantValue {
@@ -203,7 +212,7 @@ impl ExternalConstantValue {
     pub fn is_scalar(self) -> bool {
         matches!(
             self,
-            Self::Float(_) | Self::Int(_) | Self::Uint(_) | Self::Fixed(_) | Self::Bool(_)
+            Self::Fixed(_) | Self::Registered { .. } | Self::Bool(_)
         )
     }
 
@@ -213,14 +222,22 @@ impl ExternalConstantValue {
     /// `I32` value even when the number would fit.
     pub(crate) fn matches_signature_type(self, data_type: &ExternalSignatureType) -> bool {
         match (data_type, self) {
-            (ExternalSignatureType::NativeInt, Self::Int(_))
-            | (ExternalSignatureType::NativeUint, Self::Uint(_))
-            | (ExternalSignatureType::NativeFloat, Self::Float(_))
-            | (ExternalSignatureType::Abi(ExternalAbiType::Bool), Self::Bool(_))
+            (ExternalSignatureType::Abi(ExternalAbiType::Bool), Self::Bool(_))
             | (ExternalSignatureType::Abi(ExternalAbiType::Utf8Str), Self::StringSlice(_)) => true,
 
             (ExternalSignatureType::Abi(ExternalAbiType::Fixed(scalar)), Self::Fixed(value)) => {
                 value.scalar() == *scalar
+            }
+            (
+                ExternalSignatureType::Abi(ExternalAbiType::Fixed(signature_scalar)),
+                Self::Registered { scalar, raw },
+            ) => {
+                scalar == *signature_scalar
+                    && matches!(
+                        (scalar, raw),
+                        (FixedScalar::U32, ExternalConstantRawValue::Unsigned(_))
+                            | (FixedScalar::F64, ExternalConstantRawValue::BinaryFloat(_))
+                    )
             }
 
             _ => false,

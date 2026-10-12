@@ -14,9 +14,25 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+
+/// One exact `I32` literal expression.
+///
+/// WHY: these fixtures pin the exact `I32` width explicitly at the scalar carrier.
+fn i32_literal(
+    value: i64,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
+    value_mode: ValueMode,
+) -> Expression {
+    Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+        span,
+        value_mode,
+    )
+}
 
 fn local_by_name<'a>(
     module: &'a HirModule,
@@ -51,7 +67,7 @@ fn compiler_generated_scope_lowers_through_child_region_and_rejoins_parent() {
             body: vec![node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     inner,
-                    Expression::int(1, None, ValueMode::ImmutableOwned),
+                    i32_literal(1, None, ValueMode::ImmutableOwned),
                 )),
                 None,
             )],
@@ -61,7 +77,7 @@ fn compiler_generated_scope_lowers_through_child_region_and_rejoins_parent() {
     let after_declaration = node(
         NodeKind::VariableDeclaration(make_test_variable(
             after,
-            Expression::int(2, None, ValueMode::ImmutableOwned),
+            i32_literal(2, None, ValueMode::ImmutableOwned),
         )),
         None,
     );

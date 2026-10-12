@@ -9,11 +9,12 @@
 //!
 //! This module owns:
 //! - type-compatibility checks (what values are accepted in what contexts)
-//! - contextual coercion at explicit type boundaries (`Int` → `Float`, `T` → `T?`)
+//! - contextual coercion at explicit type boundaries (`T` → `T?`; numeric conversion is
+//!   explicit-only)
 //! - string coercion policy (what is renderable at template boundaries)
 //!
 //! This module does NOT own:
-//! - operator result typing (`eval_expression.rs` still decides `Int + Float → Float`)
+//! - operator result typing (`eval_expression` owns the exact result-domain policy)
 //! - explicit `cast` evidence selection or builtin cast policies (those live in `builtins/casts/`)
 //! - template formatting, composition, or slot mechanics
 

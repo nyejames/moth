@@ -1,10 +1,9 @@
 entry = "."
-numeric_profile = "Int32/Float64"
 
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = " composite first-failure first=-1 code=301 spent=1 second=-2 code2=301 spent2=11"
+rendered_output_exact = " composite first-failure first=-1 code=301 spent=1 second=-2 code2=301 spent2=11\nnumeric order overflow-first=301/1/0 zero-first=300/10/0"
 
 [backends.html_wasm]
 mode = "failure"

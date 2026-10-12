@@ -3,7 +3,7 @@ identity type A |value A| -> A:
 ;
 
 render_generic || -> String:
-    items {4 Int} = {1}
+    items {4 I32} = {1}
     same = identity(items)
     first = same.get(0) catch:
         then 0

@@ -1,6 +1,6 @@
 Person = |
     name String,
-    age Int,
+    age I32,
 |
 
 person ~= Person("Alice", 30)

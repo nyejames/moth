@@ -1,0 +1,14 @@
+# Authored for Phase 5B.2 and unobserved until the parent harness run. Probe bg921 (constructor-settled-correction-probes.json, bound-map-optional-entry-barrier.moth at 3:18) observed MOTH-TYPE-0001 with expected {String = U64?} found {String = U64} in a constructor argument; this fixture adds one comment line, so the origin argument is at line 4 column 18 here. No html_wasm block is declared.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]
+message_contains = ["expected {String = U64?}", "found {String = U64}"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+path = "input/@page.moth"
+line = 4
+column = 18
+count = 1

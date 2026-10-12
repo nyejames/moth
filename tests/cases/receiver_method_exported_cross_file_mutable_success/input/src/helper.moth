@@ -1,5 +1,5 @@
 Resettable = |
-    value Int,
+    value I32,
 |
 
 reset |this ~Resettable|:

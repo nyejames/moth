@@ -131,7 +131,7 @@ pub struct GenericParameterDefinition {
     pub name: StringId,
 }
 
-/// A concrete generic instance (e.g. `Box of Int`).
+/// A concrete generic instance (e.g. `Box of I32`).
 #[derive(Debug, Clone)]
 pub struct GenericInstanceDefinition {
     pub base: NominalTypeId,

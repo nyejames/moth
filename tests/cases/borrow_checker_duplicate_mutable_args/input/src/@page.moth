@@ -2,7 +2,7 @@
 -- Passing the same mutable place to two mutable parameters triggers
 -- MOTH-BORROW-0002: Multiple mutable borrows.
 
-touch |a ~Int, b ~Int|:
+touch |a ~I32, b ~I32|:
     io.line("ok")
 ;
 

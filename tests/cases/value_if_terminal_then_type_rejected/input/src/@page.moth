@@ -1,0 +1,10 @@
+probe || -> I32:
+    first, second = if true:
+        then 1, 2
+        then "bad", 2
+    else
+        then 3, 4
+    ;
+    return first
+;
+[:[probe()]]

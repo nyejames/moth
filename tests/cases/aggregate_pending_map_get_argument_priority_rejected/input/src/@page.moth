@@ -1,0 +1,2 @@
+scores = {1 = 2}
+scores.get(true) = missing_rhs

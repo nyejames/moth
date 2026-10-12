@@ -74,7 +74,7 @@ REC is the fifth of the six cooperating mechanisms described in the memory overv
 
 Builtin fixed and growable collections are Moth's trusted dynamic-storage substrate. Their memory effects are compiler-known.
 
-Each stored value contributes a retained-edge summary. A scalar such as `Int` can contribute zero obligations. An ordinary heap-backed value can contribute one direct obligation. An inline aggregate that physically stores several handles can contribute several direct obligations from one storage operation. A summary may also describe nested retention, such as the references a stored `Holder` itself holds, so the compiler knows what a value structurally contains.
+Each stored value contributes a retained-edge summary. A scalar such as `I32` can contribute zero obligations. An ordinary heap-backed value can contribute one direct obligation. An inline aggregate that physically stores several handles can contribute several direct obligations from one storage operation. A summary may also describe nested retention, such as the references a stored `Holder` itself holds, so the compiler knows what a value structurally contains.
 
 **Nested or transitive retention summaries are analysis descriptions. REC obligations count actual direct persistent edges between the final allocation families and retention domains. Reachability through a separately allocated child is never counted again.**
 

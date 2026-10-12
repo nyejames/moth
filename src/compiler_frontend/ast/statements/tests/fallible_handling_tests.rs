@@ -122,7 +122,7 @@ fn preserves_u32_peer_and_fallback_literal_types_in_expression_catch() {
 #[test]
 fn parses_inline_catch_fallback_as_value_block() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "can_error || -> Int, Error!:\n    return! Error(\"boom\")\n;\n\nrecover || -> Int:\n    value = can_error() catch then 0\n    return value\n;\n",
+        "can_error || -> I32, Error!:\n    return! Error(\"boom\")\n;\n\nrecover || -> I32:\n    value = can_error() catch then 0\n    return value\n;\n",
     );
 
     let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
@@ -322,7 +322,7 @@ fn accepts_catch_handler_with_mixed_produce_and_return_paths() {
 #[test]
 fn rejects_assignment_target_read_inside_catch_fallback() {
     assert_invalid_assignment_target(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    value ~= 0\n    value = can_error() catch:\n        then value\n    ;\n    return value\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value ~= 0\n    value = can_error() catch:\n        then value\n    ;\n    return value\n;\n",
         InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
     );
 }
@@ -330,7 +330,7 @@ fn rejects_assignment_target_read_inside_catch_fallback() {
 #[test]
 fn rejects_assignment_target_read_inside_inline_catch_fallback() {
     assert_invalid_assignment_target(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    value ~= 0\n    value = can_error() catch then value\n    return value\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value ~= 0\n    value = can_error() catch then value\n    return value\n;\n",
         InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
     );
 }
@@ -338,7 +338,7 @@ fn rejects_assignment_target_read_inside_inline_catch_fallback() {
 #[test]
 fn rejects_assignment_target_mutation_inside_catch_handler() {
     assert_invalid_assignment_target(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    value ~= 0\n    value = can_error() catch |err|:\n        value = 2\n        then 0\n    ;\n    return value\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value ~= 0\n    value = can_error() catch |err|:\n        value = 2\n        then 0\n    ;\n    return value\n;\n",
         InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
     );
 }
@@ -346,7 +346,7 @@ fn rejects_assignment_target_mutation_inside_catch_handler() {
 #[test]
 fn rejects_multiline_inline_catch_fallback_value() {
     assert_invalid_fallible_handling(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    value = can_error() catch then\n        0\n    return value\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value = can_error() catch then\n        0\n    return value\n;\n",
         InvalidFallibleHandlingReason::InlineCatchMultiline,
     );
 }
@@ -354,7 +354,7 @@ fn rejects_multiline_inline_catch_fallback_value() {
 #[test]
 fn rejects_bound_inline_catch_with_line_break_before_then() {
     assert_invalid_fallible_handling(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    value = can_error() catch |err|\n        then err.code\n    return value\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value = can_error() catch |err|\n        then err.code\n    return value\n;\n",
         InvalidFallibleHandlingReason::InlineCatchMultiline,
     );
 }
@@ -363,7 +363,7 @@ fn rejects_bound_inline_catch_with_line_break_before_then() {
 fn rejects_unbound_inline_catch_then_at_eof() {
     // A missing inline catch fallback at a real EOF boundary must report the shared
     // missing-value reason at the boundary, not the multiline recovery reason.
-    let source = "can_error || -> Int, Error!:\n    return 1\n;\n\nvalue = can_error() catch then";
+    let source = "can_error || -> I32, Error!:\n    return 1\n;\n\nvalue = can_error() catch then";
     let diagnostic = parse_single_file_ast_diagnostic(source);
 
     assert!(matches!(
@@ -379,7 +379,7 @@ fn rejects_bound_inline_catch_then_at_eof() {
     // own binding-parse path and must report the same missing-value reason at the EOF
     // boundary.
     let source =
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nvalue = can_error() catch |err| then";
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nvalue = can_error() catch |err| then";
     let diagnostic = parse_single_file_ast_diagnostic(source);
 
     assert!(matches!(
@@ -392,7 +392,7 @@ fn rejects_bound_inline_catch_then_at_eof() {
 #[test]
 fn rejects_string_literal_as_catch_handler_binding() {
     assert_invalid_fallible_handling(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    value = can_error() catch |\"oops\"|:\n        then 0\n    ;\n    return value\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value = can_error() catch |\"oops\"|:\n        then 0\n    ;\n    return value\n;\n",
         InvalidFallibleHandlingReason::ExpectedCatchHandlerIdentifier,
     );
 }
@@ -404,7 +404,7 @@ fn rejects_string_literal_as_catch_handler_binding() {
 #[test]
 fn rejects_fallback_arity_mismatch_for_multi_value_success_returns() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "pair_error |value String| -> String, Int, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String, Int:\n    first, count = pair_error(value) catch:\n        then \"fallback\", 0, 1\n    ;\n    return first, count\n;\n",
+        "pair_error |value String| -> String, I32, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String, I32:\n    first, count = pair_error(value) catch:\n        then \"fallback\", 0, 1\n    ;\n    return first, count\n;\n",
     );
 
     assert!(matches!(
@@ -418,7 +418,7 @@ fn rejects_fallback_arity_mismatch_for_multi_value_success_returns() {
 #[test]
 fn rejects_fallback_type_mismatch_before_hir_lowering() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    return can_error() catch:\n        then \"fallback\"\n    ;\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    return can_error() catch:\n        then \"fallback\"\n    ;\n;\n",
     );
 
     assert!(matches!(
@@ -433,7 +433,7 @@ fn rejects_fallback_type_mismatch_before_hir_lowering() {
 #[test]
 fn rejects_fallback_too_few_values_for_multi_success() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "pair_error |value String| -> String, Int, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String, Int:\n    first, count = pair_error(value) catch:\n        then \"fallback\"\n    ;\n    return first, count\n;\n",
+        "pair_error |value String| -> String, I32, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String, I32:\n    first, count = pair_error(value) catch:\n        then \"fallback\"\n    ;\n    return first, count\n;\n",
     );
 
     assert!(matches!(
@@ -450,7 +450,7 @@ fn rejects_fallback_too_few_values_for_multi_success() {
 #[test]
 fn rejects_fallback_too_many_values_for_single_success() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    return can_error() catch:\n        then 0, 1\n    ;\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    return can_error() catch:\n        then 0, 1\n    ;\n;\n",
     );
 
     assert!(matches!(
@@ -466,7 +466,7 @@ fn rejects_fallback_statement_after_then_multiline() {
     // A bare literal after `then` is still not a valid statement, even though
     // ordinary statements after `then` are now parsed as unreachable handler tails.
     let diagnostic = parse_single_file_ast_diagnostic(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    return can_error() catch:\n        then 0\n        1\n    ;\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    return can_error() catch:\n        then 0\n        1\n    ;\n;\n",
     );
 
     assert!(matches!(
@@ -512,7 +512,7 @@ fn accepts_then_string_for_optional_success() {
 #[test]
 fn rejects_empty_catch_on_success_producing_call_without_then() {
     assert_invalid_fallible_handling(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    return can_error() catch:\n    ;\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    return can_error() catch:\n    ;\n;\n",
         InvalidFallibleHandlingReason::CatchHandlerCanFallThrough,
     );
 }
@@ -547,7 +547,7 @@ fn accepts_empty_catch_on_zero_success_statement() {
 #[test]
 fn accepts_nested_postfix_propagation_in_fallback() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "inner || -> Int, Error!:\n    return 1\n;\n\nouter || -> Int, Error!:\n    return 2\n;\n\nrecover || -> Int, Error!:\n    return outer() catch:\n        then inner()!\n    ;\n;\n",
+        "inner || -> I32, Error!:\n    return 1\n;\n\nouter || -> I32, Error!:\n    return 2\n;\n\nrecover || -> I32, Error!:\n    return outer() catch:\n        then inner()!\n    ;\n;\n",
     );
 
     let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
@@ -564,14 +564,14 @@ fn accepts_nested_postfix_propagation_in_fallback() {
 #[test]
 fn accepts_then_inside_nested_catch_branch() {
     parse_single_file_ast(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover |route Bool| -> Int:\n    return can_error() catch:\n        if route:\n            then 0\n        else\n            then 1\n        ;\n    ;\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover |route Bool| -> I32:\n    return can_error() catch:\n        if route:\n            then 0\n        else\n            then 1\n        ;\n    ;\n;\n",
     );
 }
 
 #[test]
 fn accepts_statement_after_then_as_unreachable_handler_tail() {
     parse_single_file_ast(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    return can_error() catch:\n        then 0\n        io.line([: [\"late\"]])\n    ;\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    return can_error() catch:\n        then 0\n        io.line([: [\"late\"]])\n    ;\n;\n",
     );
 }
 
@@ -590,7 +590,7 @@ fn rejects_catch_inside_function_call_argument() {
 #[test]
 fn rejects_catch_inside_parenthesized_arithmetic_expression() {
     assert_invalid_fallible_handling(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    value = 1 + (can_error() catch:\n        then 0\n    ;)\n    return value\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value = 1 + (can_error() catch:\n        then 0\n    ;)\n    return value\n;\n",
         InvalidFallibleHandlingReason::CatchOutsideBoundary,
     );
 }
@@ -606,7 +606,7 @@ fn rejects_catch_inside_parenthesized_field_access_base() {
 #[test]
 fn rejects_catch_inside_collection_literal_item() {
     assert_invalid_fallible_handling(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> {Int}:\n    return {can_error() catch:\n        then 0\n    ;}\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> {I32}:\n    return {can_error() catch:\n        then 0\n    ;}\n;\n",
         InvalidFallibleHandlingReason::CatchOutsideBoundary,
     );
 }
@@ -622,7 +622,7 @@ fn rejects_catch_inside_if_condition() {
 #[test]
 fn rejects_catch_inside_loop_condition() {
     assert_invalid_fallible_handling(
-        "can_error || -> Bool, Error!:\n    return false\n;\n\nrecover || -> Int:\n    count ~= 0\n    loop can_error() catch:\n        then false\n    ;:\n        count = count + 1\n    ;\n    return count\n;\n",
+        "can_error || -> Bool, Error!:\n    return false\n;\n\nrecover || -> I32:\n    count ~= 0\n    loop can_error() catch:\n        then false\n    ;:\n        count = count + 1\n    ;\n    return count\n;\n",
         InvalidFallibleHandlingReason::CatchOutsideBoundary,
     );
 }
@@ -630,7 +630,7 @@ fn rejects_catch_inside_loop_condition() {
 #[test]
 fn rejects_catch_inside_range_loop_bound() {
     assert_invalid_fallible_handling(
-        "can_error || -> Int, Error!:\n    return 3\n;\n\nrecover || -> Int:\n    count ~= 0\n    loop 0 to can_error() catch:\n        then 3\n    ; |value|:\n        count = count + value\n    ;\n    return count\n;\n",
+        "can_error || -> I32, Error!:\n    return 3\n;\n\nrecover || -> I32:\n    count ~= 0\n    loop 0 to can_error() catch:\n        then 3\n    ; |value|:\n        count = count + value\n    ;\n    return count\n;\n",
         InvalidFallibleHandlingReason::CatchOutsideBoundary,
     );
 }
@@ -638,7 +638,7 @@ fn rejects_catch_inside_range_loop_bound() {
 #[test]
 fn rejects_catch_inside_collection_loop_source() {
     assert_invalid_fallible_handling(
-        "can_error || -> {Int}, Error!:\n    return {1, 2}\n;\n\nrecover || -> Int:\n    count ~= 0\n    loop can_error() catch:\n        then {0}\n    ; |value|:\n        count = count + value\n    ;\n    return count\n;\n",
+        "can_error || -> {I32}, Error!:\n    return {1, 2}\n;\n\nrecover || -> I32:\n    count ~= 0\n    loop can_error() catch:\n        then {0}\n    ; |value|:\n        count = count + value\n    ;\n    return count\n;\n",
         InvalidFallibleHandlingReason::CatchOutsideBoundary,
     );
 }

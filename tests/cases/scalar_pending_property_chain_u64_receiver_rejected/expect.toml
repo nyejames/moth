@@ -1,0 +1,26 @@
+entry = "."
+
+# The rejected member's syntax continues into a further property step whose argument list
+# holds the only real U64 use of `count`; that nested receiver must register before the
+# delayed unknown-member diagnostic, which then reports the resolved U64 receiver rather
+# than the literal's I32 range or a defaulted receiver.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0048"]
+message_contains = ["'U64'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0048"
+reason = "invalid_field_access.unknown_member"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0048"]
+message_contains = ["'U64'"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0048"
+reason = "invalid_field_access.unknown_member"

@@ -7,10 +7,9 @@
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 use super::{
-    AstCounter, FrontendCounter, add_ast_counter, add_frontend_counter,
-    capture_frontend_counters_for_test, frontend_counter_test_values, log_ast_counters,
-    log_frontend_counters, record_ast_counter_max, reset_ast_counters, reset_frontend_counters,
-    with_expression_census_counters,
+    AstCounter, FrontendCounter, add_ast_counter, add_frontend_counter, capture_counters_for_test,
+    frontend_counter_test_values, log_ast_counters, log_frontend_counters, record_ast_counter_max,
+    reset_ast_counters, reset_frontend_counters, with_expression_census_counters,
 };
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
@@ -23,6 +22,7 @@ use std::sync::{Arc, Barrier};
 #[test]
 fn ast_counters_record_stable_metrics_when_stdout_is_suppressed() {
     let _guard = super::lock_counter_test();
+    let _counter_capture = capture_counters_for_test();
 
     reset_ast_counters();
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
@@ -215,6 +215,7 @@ fn ast_counters_are_isolated_per_thread() {
     let barrier_b = Arc::clone(&barrier);
 
     let thread_a = std::thread::spawn(move || {
+        let _counter_capture = capture_counters_for_test();
         reset_ast_counters();
         add_ast_counter(AstCounter::ScopeContextsCreated, 3);
         barrier_a.wait();
@@ -222,6 +223,7 @@ fn ast_counters_are_isolated_per_thread() {
     });
 
     let thread_b = std::thread::spawn(move || {
+        let _counter_capture = capture_counters_for_test();
         reset_ast_counters();
         add_ast_counter(AstCounter::ScopeContextsCreated, 5);
         barrier_b.wait();
@@ -231,25 +233,37 @@ fn ast_counters_are_isolated_per_thread() {
     thread_a.join().expect("thread A panicked");
     thread_b.join().expect("thread B panicked");
 
+    // An unrelated AST build logs on its own thread without opting into capture,
+    // as an unguarded parser test does while this session is active.
+    std::thread::spawn(|| {
+        add_ast_counter(AstCounter::ScopeContextsCreated, 7);
+        log_ast_counters();
+    })
+    .join()
+    .expect("unopted thread should not panic");
+
     let observations = timing_session.finish();
 
-    let scope_values: Vec<f64> = observations
+    let mut scope_values: Vec<f64> = observations
         .counters
         .iter()
         .filter(|counter| counter.name == "ast_scope_contexts_created")
         .map(|counter| counter.value)
         .collect();
+    scope_values.sort_by(f64::total_cmp);
 
-    assert_eq!(scope_values.len(), 2, "expected both threads to log");
-    assert!(scope_values.contains(&3.0), "thread A value missing");
-    assert!(scope_values.contains(&5.0), "thread B value missing");
+    assert_eq!(
+        scope_values,
+        vec![3.0, 5.0],
+        "each capturing thread logs only its own value and unopted threads log nothing"
+    );
 }
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 #[test]
 fn frontend_counters_record_scheduling_and_path_ownership_metrics_when_stdout_is_suppressed() {
     let _guard = super::lock_counter_test();
-    let _counter_capture = capture_frontend_counters_for_test();
+    let _counter_capture = capture_counters_for_test();
 
     reset_frontend_counters();
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
@@ -390,7 +404,7 @@ fn frontend_counters_record_scheduling_and_path_ownership_metrics_when_stdout_is
 #[test]
 fn ast_body_root_and_scope_counters_record_stable_metrics() {
     let _guard = super::lock_counter_test();
-    let _counter_capture = capture_frontend_counters_for_test();
+    let _counter_capture = capture_counters_for_test();
 
     reset_frontend_counters();
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
@@ -418,7 +432,7 @@ fn ast_body_root_and_scope_counters_record_stable_metrics() {
 #[test]
 fn reset_and_log_ignore_threads_without_counter_capture() {
     let _guard = super::lock_counter_test();
-    let _counter_capture = capture_frontend_counters_for_test();
+    let _counter_capture = capture_counters_for_test();
 
     reset_frontend_counters();
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
@@ -461,6 +475,7 @@ fn reset_and_log_ignore_threads_without_counter_capture() {
 #[test]
 fn expression_census_snapshots_preserve_main_and_sidecar_without_overlay_contamination() {
     let _guard = super::lock_counter_test();
+    let _counter_capture = capture_counters_for_test();
 
     reset_ast_counters();
     let timing_session = start_benchmark_collection(true).expect("timing session should start");

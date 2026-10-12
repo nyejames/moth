@@ -2,4 +2,4 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0057"]
-message_contains = ["Generic parameter 'T'", "generic type", "Int", "String"]
+message_contains = ["Generic parameter 'T'", "generic type", "I32", "String"]

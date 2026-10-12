@@ -1,0 +1,11 @@
+-- A growable literal keeps its growable shape when a later fixed receiver uses it.
+-- The fixed receiver adds only its U64 element witness. Capacity is type identity,
+-- so the call stays an ordinary mismatch rather than a capacity retrofit.
+read_fixed |items {2 U64}| -> String:
+    return ""
+;
+
+values = {1, 2}
+message = read_fixed(values)
+
+[:unreachable]

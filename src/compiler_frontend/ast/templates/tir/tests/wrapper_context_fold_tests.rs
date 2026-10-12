@@ -57,7 +57,6 @@ use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_IT
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::NumericProfile;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -65,7 +64,6 @@ fn fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldContext<'a> {
     TirFoldContext {
         string_table,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         source_scope: None,
         bindings: vec![],
     }

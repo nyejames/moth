@@ -58,7 +58,6 @@ use crate::projects::html_project::wasm::artifacts::{
 };
 use crate::projects::routing::parse_html_site_config;
 use crate::projects::settings::{Config, HtmlSectionConfig, ProjectConfigError};
-use moth_lexical::numeric::profile::NumericProfile;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -91,30 +90,24 @@ const HTML_SOURCE_PACKAGE_PREFIX: &str = "html";
 #[derive(Debug)]
 pub struct HtmlProjectBuilder {
     include_test_packages: bool,
-    numeric_profile: NumericProfile,
 }
 
 impl HtmlProjectBuilder {
-    /// Constructs the production HTML project builder with the standard numeric profile.
+    /// Constructs the production HTML project builder.
     ///
-    /// WHAT: selects `Int32` and `Float64` for ordinary HTML builds.
-    /// WHY: production numeric types have one default, while the integration harness supplies
-    ///      an explicit profile through its dedicated constructor.
+    /// WHAT: builds ordinary HTML projects without the integration-test packages.
     pub fn new() -> Self {
         Self {
             include_test_packages: false,
-            numeric_profile: NumericProfile::STANDARD,
         }
     }
 
-    /// Constructs an HTML builder for an integration case and its selected numeric profile.
+    /// Constructs an HTML builder for an integration case.
     ///
-    /// WHAT: enables integration-test packages and reports the case profile to the build system.
-    /// WHY: every compiler stage must type numeric values under the profile declared by the case.
-    pub fn for_integration_tests(numeric_profile: NumericProfile) -> Self {
+    /// WHAT: enables the integration-test packages for the case build.
+    pub fn for_integration_tests() -> Self {
         Self {
             include_test_packages: true,
-            numeric_profile,
         }
     }
 }
@@ -122,10 +115,6 @@ impl HtmlProjectBuilder {
 impl BackendBuilder for HtmlProjectBuilder {
     fn builder_kind(&self) -> BuilderKind {
         BuilderKind::Html
-    }
-
-    fn numeric_profile(&self) -> NumericProfile {
-        self.numeric_profile
     }
 
     fn build_backend(
@@ -153,9 +142,6 @@ impl BackendBuilder for HtmlProjectBuilder {
 
         let wasm_enabled = flags.contains(&Flag::HtmlWasm);
         let entry_paths = HtmlEntryPathPlan::from_config(config, string_table)?;
-        // The compilation carries the profile its frontend already typed numbers under, so both
-        // backend paths below lower that settled value instead of re-asking the builder.
-        let numeric_profile = project_compilation.numeric_profile();
         let mut resource_inputs = project_compilation.take_resource_inputs();
 
         let mut output_files = Vec::new();
@@ -255,7 +241,6 @@ impl BackendBuilder for HtmlProjectBuilder {
                     document_config: &document_config,
                     build_profile,
                     wasm_enabled,
-                    numeric_profile,
                 },
                 string_table,
             )?;
@@ -515,7 +500,6 @@ impl HtmlProjectBuilder {
             document_config,
             build_profile,
             wasm_enabled,
-            numeric_profile,
         } = context;
 
         // Validate that every selected external call has lowering metadata for the target.
@@ -544,7 +528,6 @@ impl HtmlProjectBuilder {
                 reachability,
                 target: backend_target,
                 type_environment: Some(&module.executable.type_environment),
-                numeric_profile,
             },
             string_table,
         )
@@ -583,7 +566,6 @@ impl HtmlProjectBuilder {
                     reachability: linked.reachability,
                     target: backend_target,
                     type_environment: Some(&linked.module.executable.type_environment),
-                    numeric_profile,
                 },
                 string_table,
             )
@@ -622,7 +604,6 @@ impl HtmlProjectBuilder {
             build_profile,
             root_activity: &module.metadata.root_activity,
             external_package_registry: Arc::clone(&module.link_facts.external_package_registry),
-            numeric_profile,
         };
         if wasm_enabled {
             let compiled_wasm = compile_html_module_wasm(

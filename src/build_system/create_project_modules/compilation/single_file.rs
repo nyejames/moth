@@ -33,7 +33,6 @@ use crate::compiler_frontend::source_packages::root_file::file_name_is_normal_mo
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathInternError, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::projects::settings::{Config, LANGUAGE_SOURCE_EXTENSION};
 
@@ -73,7 +72,6 @@ use super::{
 pub(crate) fn compile_single_file_frontend_with_inputs(
     config: &Config,
     build_profile: FrontendBuildProfile,
-    numeric_profile: NumericProfile,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     extension: &OsStr,
@@ -85,7 +83,6 @@ pub(crate) fn compile_single_file_frontend_with_inputs(
     let result = match compile_single_file_frontend_with_target(
         config,
         build_profile,
-        numeric_profile,
         style_directives,
         builder_surface,
         extension,
@@ -126,7 +123,6 @@ pub(crate) fn compile_single_file_frontend_with_inputs(
 pub(crate) fn compile_single_file_boracle_frontend(
     config: &Config,
     build_profile: FrontendBuildProfile,
-    numeric_profile: NumericProfile,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     extension: &OsStr,
@@ -136,7 +132,6 @@ pub(crate) fn compile_single_file_boracle_frontend(
     let result = match compile_single_file_frontend_with_target(
         config,
         build_profile,
-        numeric_profile,
         style_directives,
         builder_surface,
         extension,
@@ -199,7 +194,6 @@ enum SingleFileFrontendTarget {
 fn compile_single_file_frontend_with_target(
     config: &Config,
     build_profile: FrontendBuildProfile,
-    numeric_profile: NumericProfile,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
     extension: &OsStr,
@@ -416,7 +410,6 @@ fn compile_single_file_frontend_with_target(
                 };
                 let mut inventories = discover_source_package_inventories(
                     config,
-                    numeric_profile,
                     &namespace_set,
                     &project_path_resolver,
                     style_directives,
@@ -446,7 +439,6 @@ fn compile_single_file_frontend_with_target(
         let (completed_source_packages, transient_batches) = compile_source_package_inventories(
             config,
             build_profile,
-            numeric_profile,
             style_directives,
             builder_surface,
             &external_packages,
@@ -533,14 +525,10 @@ fn compile_single_file_frontend_with_target(
             string_table,
         )?;
 
-        let source_facts = config_boundary::source_contract_facts_from_prepared(
-            &prepared,
-            string_table,
-            base_len,
-            numeric_profile,
-        )?;
+        let source_facts =
+            config_boundary::source_contract_facts_from_prepared(&prepared, string_table, base_len);
         let effective_project_fields =
-            config_boundary::effective_project_fields(config, string_table, numeric_profile)?;
+            config_boundary::effective_project_fields(config, string_table)?;
         let fixed_project_facts =
             config_boundary::fixed_project_contract_facts(&effective_project_fields);
         let direct_project_facts = config_boundary::input_contract_facts(&effective_project_fields);
@@ -558,7 +546,6 @@ fn compile_single_file_frontend_with_target(
             builder_surface.config_globals(),
             fallback_span,
             string_table,
-            numeric_profile,
         )?;
         let graph = ProjectModuleGraph::from_normal_roots(vec![(
             graph_stable_origin.clone(),
@@ -569,7 +556,6 @@ fn compile_single_file_frontend_with_target(
         let boundary_context = canonical::BoundaryCompilationContext::new(
             config,
             build_profile,
-            numeric_profile,
             &project_path_resolver,
             Arc::clone(source_files),
             style_directives,
@@ -613,7 +599,7 @@ fn compile_single_file_frontend_with_target(
             let source_provider_dependencies = module_context
                 .build_source_provider_dependencies(module_id, &prepared, None, None)?;
             let compile_context = ModuleCompilationContext {
-                options: config.frontend_options(numeric_profile),
+                options: config.frontend_options(),
                 build_profile,
                 root_role_override: None,
                 project_path_resolver: Some(&project_path_resolver),

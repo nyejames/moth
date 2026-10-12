@@ -29,7 +29,6 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
-use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -59,12 +58,6 @@ pub(crate) struct TypeResolutionContext<'a> {
     /// Resolved struct fields by canonical path, including generic struct templates.
     /// Required for lazy generic struct instantiation.
     pub resolved_struct_fields_by_path: Option<&'a FxHashMap<PathId, Vec<Declaration>>>,
-    /// The compilation boundary's `Int` width and `Float` precision.
-    ///
-    /// WHY: capacity folding reads the boundary width instead of assuming STANDARD, so
-    ///      struct-field defaults and collection capacities fold under the same widths
-    ///      literal materialisation and constant folding use.
-    pub numeric_profile: NumericProfile,
     /// Frontend type environment for canonical type identity.
     /// WHY: enables resolution directly to TypeId instead of going through DataType.
     ///      All production type resolution must have access to the canonical environment.
@@ -90,9 +83,6 @@ pub(crate) struct TypeResolutionContextInputs<'a> {
     pub resolved_type_aliases: Option<&'a FxHashMap<PathId, ResolvedTypeAlias>>,
     pub generic_declarations_by_path: Option<&'a FxHashMap<PathId, GenericDeclarationKind>>,
     pub resolved_struct_fields_by_path: Option<&'a FxHashMap<PathId, Vec<Declaration>>>,
-    /// The compilation boundary's `Int` width and `Float` precision, copied from the
-    /// surrounding scope or build context rather than defaulted.
-    pub numeric_profile: NumericProfile,
     pub type_environment: &'a mut TypeEnvironment,
     /// Visible namespace records for resolving namespace-qualified type names.
     pub visible_namespace_records: Option<&'a FxHashMap<StringId, NamespaceRecord>>,
@@ -113,9 +103,6 @@ impl<'a> TypeResolutionContext<'a> {
         Self {
             declaration_table,
             declaring_file_id: SourceId::COMPILATION_ROOT,
-            // Isolated tests own no boundary; profile-sensitive tests override this with
-            // `with_numeric_profile`.
-            numeric_profile: NumericProfile::STANDARD,
             visible_declaration_ids: None,
             visible_external_symbols: None,
             visible_source_bindings: None,
@@ -137,7 +124,6 @@ impl<'a> TypeResolutionContext<'a> {
         Self {
             declaration_table: inputs.declaration_table,
             declaring_file_id: inputs.declaring_file_id,
-            numeric_profile: inputs.numeric_profile,
             visible_declaration_ids: inputs.visible_declaration_ids,
             visible_external_symbols: inputs.visible_external_symbols,
             visible_source_bindings: inputs.visible_source_bindings,
@@ -153,16 +139,6 @@ impl<'a> TypeResolutionContext<'a> {
             trait_evidence_environment: inputs.trait_evidence_environment,
             visible_trait_names: inputs.visible_trait_names,
         }
-    }
-    /// Override the boundary numeric profile in tests.
-    ///
-    /// WHAT: lets profile-sensitive tests fold under a non-STANDARD boundary.
-    /// WHY: isolated test contexts own no boundary, so they start at STANDARD and opt
-    ///      into wider widths explicitly instead of threading full inputs.
-    #[cfg(test)]
-    pub(crate) fn with_numeric_profile(mut self, profile: NumericProfile) -> Self {
-        self.numeric_profile = profile;
-        self
     }
 
     pub(crate) fn with_generic_parameters(

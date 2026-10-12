@@ -2,5 +2,5 @@ accept_string |name String?| -> String?:
     return name
 ;
 
-maybe_count Int? = 42
+maybe_count I32? = 42
 accept_string(maybe_count)

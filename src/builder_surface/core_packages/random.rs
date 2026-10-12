@@ -6,12 +6,13 @@
 
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::external_packages::{
-    ExternalAccessKind, ExternalReturnAlias, ExternalSignatureType,
+    ExternalAbiType, ExternalAccessKind, ExternalReturnAlias, ExternalSignatureType,
 };
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionLowerings, ExternalFunctionSpec, ExternalJsLowering, ExternalParameter,
     external_success_returns,
 };
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 pub fn register_core_random_package(registry: &mut ExternalPackageRegistry) {
     let package_id = registry
@@ -25,7 +26,7 @@ pub fn register_core_random_package(registry: &mut ExternalPackageRegistry) {
                 name: "random_float".to_owned(),
                 parameters: Vec::new(),
                 returns: external_success_returns(
-                    ExternalSignatureType::NativeFloat,
+                    ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::F64)),
                     ExternalReturnAlias::Fresh,
                 ),
                 error_return_type: None,
@@ -40,7 +41,7 @@ pub fn register_core_random_package(registry: &mut ExternalPackageRegistry) {
         .expect("builtin random_float registration should not collide");
 
     let int_param = ExternalParameter {
-        language_type: ExternalSignatureType::NativeInt,
+        language_type: ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)),
         access_kind: ExternalAccessKind::Shared,
     };
 
@@ -51,7 +52,7 @@ pub fn register_core_random_package(registry: &mut ExternalPackageRegistry) {
                 name: "random_int".to_owned(),
                 parameters: vec![int_param.clone(), int_param],
                 returns: external_success_returns(
-                    ExternalSignatureType::NativeInt,
+                    ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)),
                     ExternalReturnAlias::Fresh,
                 ),
                 error_return_type: None,

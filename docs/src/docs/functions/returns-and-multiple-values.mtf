@@ -1,7 +1,7 @@
 `return` produces the success values declared by a function.
 
 [codeblock, $code("moth"):
-    double |value Int| -> Int:
+    double |value I32| -> I32:
         return value * 2
     ;
 ]
@@ -15,12 +15,17 @@
 - `return` with no values can leave a no-success function early.
 - `Void` is not an explicit return-slot type.
 
+Return slots are exact receivers for eligible numeric origins in the function
+body. They cannot retag an already concrete operation or infer named operands
+backwards. Completed function signatures and public interfaces contain no
+pending numeric identity.
+
 ### Multiple success values
 
 A function may declare and return more than one success value.
 
 [codeblock, $code("moth"):
-    pair || -> String, Int:
+    pair || -> String, I32:
         return "Priya", 2
     ;
 

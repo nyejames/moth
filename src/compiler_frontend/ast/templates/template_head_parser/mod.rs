@@ -25,4 +25,5 @@ mod head_parser;
 // -------------------------
 
 pub(crate) use core_directives::apply_doc_comment_defaults;
+pub(crate) use head_expressions::validate_template_head_value_type;
 pub(crate) use head_parser::{ParsedTemplateHead, TemplateHeadParseRequest, parse_template_head};

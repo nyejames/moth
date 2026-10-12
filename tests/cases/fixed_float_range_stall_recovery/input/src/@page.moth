@@ -1,29 +1,45 @@
-walk |start F32, end F32, step F32| -> Int, Error!:
+walk_f16 |start F16, end F16, step F16| -> I32, Error!:
+    count ~I32 = 0
+    loop start to & end by step |value|:
+        count += 1
+    ;
+    return count
+;
+
+walk_f64 |start F64, end F64, step F64| -> I32, Error!:
+    count ~I32 = 0
+    loop start to & end by step |value|:
+        count += 1
+    ;
+    return count
+;
+
+walk |start F32, end F32, step F32| -> I32, Error!:
     loop start to & end by step:
         ignored = start
     ;
     return 99
 ;
-private_walk |start F32, end F32, step F32| -> Int:
+private_walk |start F32, end F32, step F32| -> I32:
     loop start to & end by step:
         ignored = start
     ;
     return 99
 ;
-safe_walk |start F32, end F32, step F32| -> Int, Error!:
+safe_walk |start F32, end F32, step F32| -> I32, Error!:
     return private_walk(start, end, step)
 ;
-private_zero_walk |step Int| -> Int:
+private_zero_walk |step I32| -> I32:
     seen ~= 0
     loop 0 to 2 by step:
         seen = 99
     ;
     return seen
 ;
-safe_zero_walk |step Int| -> Int, Error!:
+safe_zero_walk |step I32| -> I32, Error!:
     return private_zero_walk(step)
 ;
-float_zero_walk |step Float| -> Int, Error!:
+float_zero_walk |step F64| -> I32, Error!:
     loop 0.0 to 2.0 by step:
         ignored = step
     ;
@@ -52,4 +68,22 @@ float_zero = float_zero_walk(0.0) catch |float_zero_error|:
     float_zero_code = float_zero_error.code
     then -1
 ;
+half_code ~U32 = 0
+half_seen = walk_f16(2048, 2050, 1) catch |half_error|:
+    half_code = half_error.code
+    then -1
+;
+double_code ~U32 = 0
+double_seen = walk_f64(9007199254740992, 9007199254740994, 1) catch |double_error|:
+    double_code = double_error.code
+    then -1
+;
+assert(half_seen is -1)
+assert(half_code is 307)
+assert(double_seen is -1)
+assert(double_code is 307)
+half_endpoint = walk_f16(2048, 2048, 1) catch then -1
+double_endpoint = walk_f64(9007199254740992, 9007199254740992, 1) catch then -1
+assert(half_endpoint is 1)
+assert(double_endpoint is 1)
 [: stall recovered=[seen]/[private_seen] code=[code]/[private_code] zero=[zero] code=[zero_code] float_zero=[float_zero] code=[float_zero_code]]

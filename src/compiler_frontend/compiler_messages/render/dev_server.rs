@@ -225,7 +225,13 @@ fn render_diagnostic_card(
                 } else {
                     format!("{label_line}:{label_column}")
                 };
-                format!("{style_name}: {location} - {escaped_message}")
+                // A location-only label carries an empty message, so the separator is omitted
+                // rather than trailing the location.
+                if message.is_empty() {
+                    format!("{style_name}: {location}")
+                } else {
+                    format!("{style_name}: {location} - {escaped_message}")
+                }
             }
             _ => continue,
         };

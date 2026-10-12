@@ -1,5 +1,5 @@
 render_remove || -> String:
-    items ~{2 Int} = {1, 2}
+    items ~{2 I32} = {1, 2}
     removed = ~items.remove(0) catch:
         then 0
     ;

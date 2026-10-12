@@ -69,15 +69,21 @@ pub(super) fn validate_catch_fallible_handler_conflict(
 /// Validates that a catch handler body cannot fall through when a value is required.
 ///
 /// WHAT: rejects handler bodies that can simply fall through when the call expression must
-/// still produce success values for the surrounding statement/expression.
+/// still produce success values for the surrounding statement/expression. `None` marks a
+/// contract that only resolves at completion: the requirement is unknown, never zero success
+/// values, so the body is revalidated against the resolved site instead of here.
 /// WHY: without fallback values, a fallthrough path would leave the handled call with no value
-/// continuation to merge back into.
+/// continuation to merge back into; a provisional site has no such decision to make yet.
 pub(super) fn validate_catch_fallible_handler_value_requirement(
     value_required: bool,
-    success_result_type_ids: &[TypeId],
+    success_result_type_ids: Option<&[TypeId]>,
     handler_body: &[AstNode],
     span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
+    let Some(success_result_type_ids) = success_result_type_ids else {
+        return Ok(());
+    };
+
     let body_exits = analyze_branch_exits(handler_body);
 
     if value_required && !success_result_type_ids.is_empty() && body_exits.can_fall_through {

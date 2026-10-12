@@ -206,11 +206,8 @@ pub(crate) fn append_public_folded_value(
             append_public_folded_value(union, end);
         }
         PublicFoldedValue::OptionSome(value) => append_public_folded_value(union, value),
-        PublicFoldedValue::Int(_)
-        | PublicFoldedValue::Uint(_)
-        | PublicFoldedValue::Float(_)
+        PublicFoldedValue::FixedScalar(_)
         | PublicFoldedValue::Number(_)
-        | PublicFoldedValue::FixedScalar(_)
         | PublicFoldedValue::Bool(_)
         | PublicFoldedValue::Char(_)
         | PublicFoldedValue::OptionNone => {}

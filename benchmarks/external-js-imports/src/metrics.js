@@ -5,7 +5,7 @@ import { mothOk, mothErr } from "@moth/runtime";
  */
 
 /**
- * @moth.sig create_metric |name String, value Int| -> MetricHandle
+ * @moth.sig create_metric |name String, value I32| -> MetricHandle
  */
 export function createMetric(name, value) {
     return { name, value };
@@ -19,7 +19,7 @@ export function metricLabel(metric) {
 }
 
 /**
- * @moth.sig set_metric_value |metric ~MetricHandle, value Int|
+ * @moth.sig set_metric_value |metric ~MetricHandle, value I32|
  */
 export function setMetricValue(metric, value) {
     metric.value = value;

@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "scalar f16 boundaries nested-subnormal=0 return-boundary=0 compound-subnormal=6e-8 max-finite=65500 min-subnormal=6e-8 signed-zero=0/true/0/false"

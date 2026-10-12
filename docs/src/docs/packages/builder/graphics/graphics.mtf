@@ -44,8 +44,14 @@ The current annotated JavaScript binding profile can't yet express the final API
 
 - a binding package signature naming an opaque type owned by another package, so context creation can take `@web/canvas`'s canvas handle
 - nested symbol paths for annotated JavaScript packages, so the API can live under `graphics.gl` and `graphics.frame`
-- a typed form for closed domains such as primitive modes and buffer usages, rather than raw numeric constants
+- richer closed-domain forms beyond flat named `U32` constants
 - bulk numeric and byte data crossing the binding boundary for buffer upload, texture upload, uniform arrays and readback, keeping numeric `U8` distinct from `Byte`
+
+The shared boundary provides exact `I32`, `I64`, `U32`, `U64`, `F32`
+and `F64` scalar slots, flat literal `U32` constants and compiler-owned error
+code exports. Those capabilities don't supply shared opaque identities, nested
+names or bulk data. See @../../#external-binding-contracts (External binding
+contracts) for their validation rules.
 
 Frame scheduling also waits for Moth to suspend and resume work or for another accepted host-reentry design. It won't be provided through a synchronous polling function.
 

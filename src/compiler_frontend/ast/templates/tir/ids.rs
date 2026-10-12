@@ -262,3 +262,39 @@ impl fmt::Display for ExpressionSiteId {
         write!(f, "ExpressionSiteId({})", self.0)
     }
 }
+
+// -------------------------
+//  Numeric Template Intake Site ID
+// -------------------------
+
+/// Dense identifier for one retained numeric template intake.
+///
+/// WHAT: a per-store counter assigns one `NumericTemplateIntakeSiteId` in
+/// registration order, and the site indexes the store's intake table.
+/// WHY: body-root completion moves the retained intake out and installs the
+/// completed value back at the authored intake position without relying on
+/// traversal order, node-vector positions or an expression placeholder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct NumericTemplateIntakeSiteId(u32);
+
+impl NumericTemplateIntakeSiteId {
+    /// Creates a new ID from a raw counter value.
+    pub(crate) fn new(index: usize) -> Self {
+        Self(
+            u32::try_from(index).expect(
+                "numeric template intake site index exceeds u32::MAX; this is a compiler bug",
+            ),
+        )
+    }
+
+    /// Returns the raw module-local counter value for store validation.
+    pub(crate) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl fmt::Display for NumericTemplateIntakeSiteId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "NumericTemplateIntakeSiteId({})", self.0)
+    }
+}

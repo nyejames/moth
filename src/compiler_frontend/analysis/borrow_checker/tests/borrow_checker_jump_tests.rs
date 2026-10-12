@@ -11,7 +11,7 @@ use crate::compiler_frontend::tests::type_id_fixture_support::lower_ast;
 
 #[test]
 fn jump_defines_explicit_reordered_destinations_as_value_backed_slots() {
-    let source = r#"probe || -> Int:
+    let source = r#"probe || -> I32:
 source_a ~= 1
 source_b ~= 2
 root_a ~= 3

@@ -1,0 +1,5 @@
+-- A typed U64 collection bound name passed into a generic CollectionSlot optional-entry field.
+CollectionSlot type T = |values {T?}|
+values {U64} = {1}
+origin = CollectionSlot(values)
+[:bound-collection-optional-entry-rejected]

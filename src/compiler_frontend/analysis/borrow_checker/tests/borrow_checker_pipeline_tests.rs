@@ -16,7 +16,7 @@ use crate::compiler_frontend::module_compilation::artefact::{
 use crate::compiler_frontend::module_compilation::{FrontendOptions, Module, ModuleRootActivity};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
-use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -30,6 +30,15 @@ use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_reg
 use std::sync::Arc;
 
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+fn i32_expression(value: i64, span: Option<SourceSpan>, mode: ValueMode) -> Expression {
+    Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range"),
+        span,
+        mode,
+    )
+}
 
 #[test]
 fn frontend_check_borrows_propagates_failures() {
@@ -51,7 +60,7 @@ fn frontend_check_borrows_propagates_failures() {
         node(
             NodeKind::VariableDeclaration(make_test_variable(
                 x,
-                Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                i32_expression(1, test_source_location(1), ValueMode::MutableOwned),
             )),
             test_source_location(1),
         ),
@@ -60,8 +69,8 @@ fn frontend_check_borrows_propagates_failures() {
                 y,
                 Expression::reference_with_type_id(
                     x,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(2),
                     ValueMode::MutableReference,
                     crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
@@ -74,8 +83,8 @@ fn frontend_check_borrows_propagates_failures() {
                 z,
                 reference_expr_with_datatype(
                     x,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(3),
                 ),
             )),
@@ -146,7 +155,7 @@ fn successful_borrow_report_can_be_stored_on_module() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     counter,
-                    Expression::int(0, test_source_location(1), ValueMode::MutableOwned),
+                    i32_expression(0, test_source_location(1), ValueMode::MutableOwned),
                 )),
                 test_source_location(1),
             ),
@@ -154,11 +163,11 @@ fn successful_borrow_report_can_be_stored_on_module() {
                 NodeKind::Assignment {
                     target: assignment_target(
                         counter,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(2),
                     ),
-                    value: Expression::int(1, test_source_location(2), ValueMode::ImmutableOwned),
+                    value: i32_expression(1, test_source_location(2), ValueMode::ImmutableOwned),
                 },
                 test_source_location(2),
             ),

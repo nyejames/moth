@@ -1,12 +1,12 @@
 //! Cast helpers for the JS runtime.
 //!
 //! WHAT: emits demand-driven implementations of the builtin cast policy table for the JS backend.
-//! WHY: each cast must preserve its source grammar, destination range, profile precision and
+//! WHY: each cast must preserve its source grammar, destination range, exact precision and
 //!      structured error result instead of inheriting JavaScript's implicit conversions.
 
 use crate::backends::js::JsEmitter;
 use crate::backends::js::numeric_carrier::{
-    JsNumericCarrier, JsNumericConversion, JsNumericRuntimeHelper, binary_float_precision_bits,
+    JsNumericConversion, JsNumericRuntimeHelper, binary_float_precision_bits,
 };
 use crate::compiler_frontend::builtins::casts::evidence::numeric_scalars;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
@@ -21,7 +21,6 @@ impl<'hir> JsEmitter<'hir> {
         // Retain the owned demand set locally while helper emission mutates the output.
         let policies = std::mem::take(&mut self.used_cast_policies);
         let mut emitted = HashSet::<&'static str>::new();
-        let profile = self.config.numeric_profile;
         let scalars = numeric_scalars().collect::<Vec<_>>();
         let mut float_parse_precisions = [false; 3];
 
@@ -29,7 +28,7 @@ impl<'hir> JsEmitter<'hir> {
             if policies.contains(&BuiltinCastPolicyId::StringToNumeric(*scalar)) {
                 if scalar.is_integer() {
                     self.emit_cast_int(&mut emitted);
-                } else if let Some(precision) = scalar.binary_float_precision(profile) {
+                } else if let Some(precision) = scalar.binary_float_precision() {
                     float_parse_precisions[float_precision_index(precision)] = true;
                 }
             }
@@ -51,7 +50,7 @@ impl<'hir> JsEmitter<'hir> {
                     continue;
                 }
 
-                let conversion = JsNumericConversion::classify(*scalar, *target, profile)
+                let conversion = JsNumericConversion::classify(*scalar, *target)
                     .expect("numeric cast policies contain supported numeric scalars");
                 self.emit_numeric_conversion_helpers(conversion, &mut emitted);
             }
@@ -72,7 +71,7 @@ impl<'hir> JsEmitter<'hir> {
                 && (matches!(source, NumericScalar::Number(_))
                     || matches!(target, NumericScalar::Number(_)))
             {
-                let conversion = JsNumericConversion::classify(source, target, profile)
+                let conversion = JsNumericConversion::classify(source, target)
                     .expect("Number cast policies contain supported numeric pairs");
                 match conversion {
                     JsNumericConversion::CheckedNumberScaleNarrow { .. } => {
@@ -829,21 +828,10 @@ impl<'hir> JsEmitter<'hir> {
             return;
         }
 
-        let carrier = JsNumericCarrier::for_scalar(NumericScalar::Int, self.config.numeric_profile)
-            .expect("Int always has a JavaScript numeric carrier");
-        let code_point = match carrier {
-            JsNumericCarrier::ExactInteger { .. } => "value.codePointAt(0)",
-            JsNumericCarrier::BigInteger { .. } => "BigInt(value.codePointAt(0))",
-            JsNumericCarrier::BinaryFloat { .. } => {
-                unreachable!("Int carrier cannot be a binary float")
-            }
-            JsNumericCarrier::ScaledInteger { .. } => {
-                unreachable!("Int carrier cannot be a Number")
-            }
-        };
-
+        // Char code points are exactly I32 (the static cast evidence owns that pair), whose JS
+        // carrier is the exact Number carrier, so the conversion has no BigInt path.
         self.emit_line("function __moth_cast_char_to_int(value) {");
-        self.with_indent(|emitter| emitter.emit_line(&format!("return {code_point};")));
+        self.with_indent(|emitter| emitter.emit_line("return value.codePointAt(0);"));
         self.emit_line("}");
         self.emit_line("");
     }
@@ -878,40 +866,12 @@ impl<'hir> JsEmitter<'hir> {
             return;
         }
 
+        // Char code points are exactly I32, whose JS carrier is the exact Number carrier: valid
+        // code points are 0 through 0x10FFFF excluding the UTF-16 surrogate range 0xD800-0xDFFF.
         let invalid_codepoint = BuiltinErrorCode::IntCastToCharInvalidCodepoint;
         let invalid_codepoint_code = error_code_js(invalid_codepoint);
         let invalid_codepoint_message = invalid_codepoint.default_message();
-        let carrier = JsNumericCarrier::for_scalar(NumericScalar::Int, self.config.numeric_profile)
-            .expect("Int always has a JavaScript numeric carrier");
-        let zero = JsNumericCarrier::int_literal(0, self.config.numeric_profile)
-            .expect("zero always fits the Int numeric profile");
-        let maximum = JsNumericCarrier::int_literal(0x10FFFF, self.config.numeric_profile)
-            .expect("maximum Unicode scalar fits the Int numeric profile");
-        let surrogate_start = JsNumericCarrier::int_literal(0xD800, self.config.numeric_profile)
-            .expect("surrogate boundary fits the Int numeric profile");
-        let surrogate_end = JsNumericCarrier::int_literal(0xDFFF, self.config.numeric_profile)
-            .expect("surrogate boundary fits the Int numeric profile");
-
-        let (validation, code_point) = match carrier {
-            JsNumericCarrier::ExactInteger { .. } => (
-                format!(
-                    "!Number.isInteger(value) || value < {zero} || value > {maximum} || (value >= {surrogate_start} && value <= {surrogate_end})"
-                ),
-                "value",
-            ),
-            JsNumericCarrier::BigInteger { .. } => (
-                format!(
-                    "typeof value !== \"bigint\" || value < {zero} || value > {maximum} || (value >= {surrogate_start} && value <= {surrogate_end})"
-                ),
-                "Number(value)",
-            ),
-            JsNumericCarrier::BinaryFloat { .. } => {
-                unreachable!("Int carrier cannot be a binary float")
-            }
-            JsNumericCarrier::ScaledInteger { .. } => {
-                unreachable!("Int carrier cannot be a Number")
-            }
-        };
+        let validation = "!Number.isInteger(value) || value < 0 || value > 1114111 || (value >= 55296 && value <= 57343)";
 
         self.emit_line("function __moth_cast_int_to_char(value) {");
         self.with_indent(|emitter| {
@@ -922,9 +882,7 @@ impl<'hir> JsEmitter<'hir> {
                 ));
             });
             emitter.emit_line("}");
-            emitter.emit_line(&format!(
-                "return {{ tag: \"ok\", value: String.fromCodePoint({code_point}) }};"
-            ));
+            emitter.emit_line("return { tag: \"ok\", value: String.fromCodePoint(value) };");
         });
         self.emit_line("}");
         self.emit_line("");

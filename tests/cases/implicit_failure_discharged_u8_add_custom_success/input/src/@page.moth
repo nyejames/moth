@@ -2,11 +2,11 @@ DomainError ::
     Missing,
 ;
 
-as_domain_value |left U8, right U8| -> U32, DomainError!:
+as_domain_value |left I8, right U8| -> I16, DomainError!:
     return left + right
 ;
 
-left U8 = 255
+left I8 = 127
 right U8 = 255
 result = as_domain_value(left, right) catch then 0
 

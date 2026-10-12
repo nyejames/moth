@@ -1,2 +1,2 @@
 x = 1
-value = x as Int
+value = x as I32

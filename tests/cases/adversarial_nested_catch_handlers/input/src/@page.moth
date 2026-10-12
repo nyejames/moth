@@ -1,4 +1,4 @@
-parse_user |name String| -> String, Float, Error!:
+parse_user |name String| -> String, F64, Error!:
     if name is "":
         return! Error("name is empty")
     ;

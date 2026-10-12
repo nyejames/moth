@@ -1,5 +1,5 @@
 @limits max_value
 
-overflow || -> Int:
+overflow || -> I32:
     return max_value + 1
 ;

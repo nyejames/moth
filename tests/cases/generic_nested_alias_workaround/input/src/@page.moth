@@ -7,7 +7,7 @@ Box type T = |
     value T,
 |
 
-IntStringPair as Pair of Int, String
+IntStringPair as Pair of I32, String
 
 value Box of IntStringPair = Box(Pair(1, "two"))
 

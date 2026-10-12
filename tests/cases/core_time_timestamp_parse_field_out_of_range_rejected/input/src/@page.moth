@@ -1,16 +1,16 @@
 @core/time Timestamp, timestamp_from_iso_string
 
-parse_hour || -> Int, Error!:
+parse_hour || -> I32, Error!:
     ts = timestamp_from_iso_string("1970-01-01T24:00:00Z")!
     return 0
 ;
 
-parse_offset_hour || -> Int, Error!:
+parse_offset_hour || -> I32, Error!:
     ts = timestamp_from_iso_string("1970-01-01T00:00:00+24:00")!
     return 0
 ;
 
-parse_offset_minute || -> Int, Error!:
+parse_offset_minute || -> I32, Error!:
     ts = timestamp_from_iso_string("1970-01-01T00:00:00+00:60")!
     return 0
 ;

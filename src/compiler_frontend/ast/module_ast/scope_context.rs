@@ -31,11 +31,21 @@
 
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::generic_functions::{
-    GenericFunctionInstanceKey, GenericFunctionInstantiationRequest,
+    GenericFunctionInstanceKey, GenericFunctionInstantiationRequest, GenericRequestSlot,
+    GenericRequestTicket,
 };
 use crate::compiler_frontend::ast::module_ast::environment::{
     AstModuleLookups, DeclarationSemanticKind, ResolvedConstantSet, TopLevelDeclarationTable,
+};
+use crate::compiler_frontend::ast::numeric_construction::{
+    NumericBindingId, NumericClassId, NumericConstructionState, NumericContinuation,
+    NumericContinuationId, NumericPin, NumericRecipe, PendingBindingRow,
+    join_protected_catch_class, raw_fragment_result_is_independently_fixed,
+};
+use crate::compiler_frontend::ast::numeric_known_shape::{
+    KnownShape, KnownShapeId, pin_numeric_shape,
 };
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::templates::template_folding::TirFoldContext;
@@ -70,7 +80,7 @@ use crate::compiler_frontend::paths::file_references::{
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
-use moth_lexical::numeric::profile::NumericProfile;
+use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::semantic_identity::StableModuleOriginIdentity;
@@ -101,7 +111,7 @@ mod lookup;
 mod required_services;
 mod scope_frame;
 
-use scope_frame::{ScopeArena, ScopeFrameId};
+pub(crate) use scope_frame::{LocalDeclarationSlot, ScopeArena, ScopeFrameId};
 
 /// Global counter for generating unique synthetic scope paths in child control-flow contexts.
 pub(super) static CONTROL_FLOW_SCOPE_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -401,11 +411,6 @@ pub struct ScopeShared {
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
     pub(crate) style_directives: StyleDirectiveRegistry,
     pub(crate) build_profile: FrontendBuildProfile,
-    /// The compilation boundary's `Int` width and `Float` precision for this scope chain.
-    ///
-    /// WHY: literal materialisation, constant folding, casts and template folding read the scope
-    ///      context, so the boundary profile travels on it rather than being re-derived per site.
-    pub(crate) numeric_profile: NumericProfile,
 
     // File-local visibility and resolved declarations.
     pub(crate) file_visibility: Option<Arc<FileVisibility>>,
@@ -417,8 +422,7 @@ pub struct ScopeShared {
     pub(crate) file_value_resolution: Option<Rc<FileValueResolutionServices>>,
     pub(crate) emitted_warnings: Rc<RefCell<Vec<CompilerDiagnostic>>>,
 
-    pub(crate) generic_function_instantiation_requests:
-        Rc<RefCell<Vec<GenericFunctionInstantiationRequest>>>,
+    pub(crate) generic_function_instantiation_requests: Rc<RefCell<Vec<GenericRequestSlot>>>,
     /// Emission-owned proof that a completed no-slot body has no pending failure contributors.
     /// Missing entries, including bodies still being parsed, remain conservative candidates.
     pub(crate) known_infallible_functions: Option<Rc<RefCell<FxHashSet<PathId>>>>,
@@ -519,6 +523,25 @@ pub struct ScopeContext {
     pub(crate) generic_template_validation: bool,
     pub(crate) generic_function_instantiation_stack: Vec<GenericFunctionInstanceKey>,
 
+    /// Body-owned numeric construction domain shared by this body and its child blocks.
+    ///
+    /// WHAT: one dense origin/equality/binding/continuation table per independent function,
+    ///       root or concrete-generic body. Child control-flow, expression and template scopes
+    ///       share the enclosing body's handle; `new_child_function` installs a fresh one.
+    /// WHY: a binding's single static type is selected from every permitted use in its body, so
+    ///      construction state must outlive any single statement and must never be shared with
+    ///      an independent body; the value concept exists only in this construction vocabulary,
+    ///      never as a semantic `TypeId` on a statement or expression.
+    pub(crate) numeric_construction: Rc<RefCell<NumericConstructionState>>,
+    /// Whether this context owns the numeric construction domain it carries.
+    ///
+    /// WHAT: true only for a context that begins an independent body (module/root construction
+    ///       and nested function bodies). Body completion releases the domain exactly once, at
+    ///       that root.
+    /// WHY: nested branches, loops, handlers and expression scopes share the enclosing domain
+    ///      and must never complete or release it themselves.
+    pub(crate) numeric_body_root: bool,
+
     // Control flow state.
     pub loop_depth: usize,
 }
@@ -555,6 +578,9 @@ impl Clone for ScopeContext {
             active_generic_type_context: self.active_generic_type_context.clone(),
             generic_template_validation: self.generic_template_validation,
             generic_function_instantiation_stack: self.generic_function_instantiation_stack.clone(),
+            // A clone is a sibling child of the same body; it shares the domain but never owns it.
+            numeric_construction: Rc::clone(&self.numeric_construction),
+            numeric_body_root: false,
             loop_depth: self.loop_depth,
         }
     }
@@ -622,25 +648,29 @@ impl ScopeContext {
             .len()
     }
 
-    /// Discards requests appended after a compiler-owned provisional boundary.
+    /// Tombstones requests appended after a compiler-owned provisional boundary.
     ///
-    /// The sink is shared by child scopes, so the operation is intentionally defined here rather
-    /// than in build orchestration. Callers must only pass a checkpoint obtained from the same
-    /// shared sink and must invoke this after validation has completed.
+    /// The ledger is shared by child scopes, so the operation is intentionally defined here rather
+    /// than in build orchestration. Slots are dropped in place rather than removed, so pending
+    /// tickets and static-if ranges keep their positions. Callers must only pass a checkpoint
+    /// obtained from the same shared ledger and must invoke this after validation has completed.
     pub(crate) fn discard_generic_requests_since(&self, checkpoint: usize) {
-        let mut requests = self
+        let mut slots = self
             .shared
             .generic_function_instantiation_requests
             .borrow_mut();
         debug_assert!(
-            checkpoint <= requests.len(),
-            "generic request checkpoint must belong to the current sink"
+            checkpoint <= slots.len(),
+            "generic request checkpoint must belong to the current ledger"
         );
-        if checkpoint <= requests.len() {
-            requests.truncate(checkpoint);
+        if let Some(discarded) = slots.get_mut(checkpoint..) {
+            for slot in discarded {
+                *slot = GenericRequestSlot::Dropped;
+            }
         }
     }
 
+    /// Records a request whose exact type and evidence are already concrete.
     pub(crate) fn record_generic_function_instantiation_request(
         &self,
         request: GenericFunctionInstantiationRequest,
@@ -648,7 +678,84 @@ impl ScopeContext {
         self.shared
             .generic_function_instantiation_requests
             .borrow_mut()
-            .push(request);
+            .push(GenericRequestSlot::Concrete(request));
+    }
+
+    /// Reserves an ordered ledger slot for a call whose request needs numeric completion first.
+    ///
+    /// WHAT: the reservation fixes the call's source-order position now. Completion publishes into
+    ///       the same slot with `publish_pending_generic_request`.
+    /// WHY: publication order follows parse order, not completion order, and checkpoints taken
+    ///      while the call is pending still bracket it.
+    pub(crate) fn reserve_pending_generic_request(&self) -> GenericRequestTicket {
+        let mut slots = self
+            .shared
+            .generic_function_instantiation_requests
+            .borrow_mut();
+        let ticket = GenericRequestTicket::new(slots.len());
+        slots.push(GenericRequestSlot::Pending);
+        ticket
+    }
+
+    /// Publishes a resolved request into the slot reserved for it.
+    ///
+    /// WHAT: a `Dropped` slot belongs to inactive work. Its validation has already run, so the
+    ///       request is accepted without publishing. A non-pending slot is a compiler bug.
+    pub(crate) fn publish_pending_generic_request(
+        &self,
+        ticket: GenericRequestTicket,
+        request: GenericFunctionInstantiationRequest,
+    ) -> Result<(), CompilerError> {
+        let mut slots = self
+            .shared
+            .generic_function_instantiation_requests
+            .borrow_mut();
+        let Some(slot) = slots.get_mut(ticket.index()) else {
+            return Err(CompilerError::compiler_error(
+                "generic request ticket is outside the ordered request ledger",
+            ));
+        };
+        match *slot {
+            GenericRequestSlot::Pending => {
+                *slot = GenericRequestSlot::Concrete(request);
+                Ok(())
+            }
+            GenericRequestSlot::Dropped => Ok(()),
+            GenericRequestSlot::Concrete(_) => Err(CompilerError::compiler_error(
+                "generic request ticket was published twice",
+            )),
+        }
+    }
+
+    /// Abandons the slot reserved for a call whose completion failed before publication.
+    ///
+    /// WHAT: a `Pending` slot becomes `Dropped`, keeping its source-order position without
+    ///       publishing a request. A `Dropped` slot is already inactive and stays as it is.
+    /// WHY: a failed retained call must not leave a pending slot behind, and discarding every
+    ///      later slot would drop unrelated work.
+    pub(crate) fn abandon_pending_generic_request(
+        &self,
+        ticket: GenericRequestTicket,
+    ) -> Result<(), CompilerError> {
+        let mut slots = self
+            .shared
+            .generic_function_instantiation_requests
+            .borrow_mut();
+        let Some(slot) = slots.get_mut(ticket.index()) else {
+            return Err(CompilerError::compiler_error(
+                "generic request ticket is outside the ordered request ledger",
+            ));
+        };
+        match *slot {
+            GenericRequestSlot::Pending => {
+                *slot = GenericRequestSlot::Dropped;
+                Ok(())
+            }
+            GenericRequestSlot::Dropped => Ok(()),
+            GenericRequestSlot::Concrete(_) => Err(CompilerError::compiler_error(
+                "generic request ticket was abandoned after it was published",
+            )),
+        }
     }
 
     pub(crate) fn is_generic_function_instantiation_active(
@@ -707,10 +814,6 @@ impl ScopeContext {
     /// The TIR store is a required input, not a scratch default: every production
     /// context must share the one module-level store allocated by
     /// `AstPhaseContext::from_build_context`.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "root construction keeps kind, scope, declarations, external registry, expected results, frame capacity, the shared TIR store and the required boundary numeric profile as separate inputs"
-    )]
     pub(crate) fn new(
         kind: ContextKind,
         scope: PathId,
@@ -718,7 +821,6 @@ impl ScopeContext {
         external_package_registry: Arc<ExternalPackageRegistry>,
         scope_frame_capacity: usize,
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
-        numeric_profile: NumericProfile,
     ) -> ScopeContext {
         increment_ast_counter(AstCounter::ScopeContextsCreated);
 
@@ -730,10 +832,6 @@ impl ScopeContext {
             external_package_registry,
             style_directives: StyleDirectiveRegistry::built_ins(),
             build_profile: FrontendBuildProfile::Dev,
-            // No silent width default: every production context receives the boundary
-            // profile from its `AstPhaseContext` module view, so a non-STANDARD boundary
-            // cannot silently re-fold as STANDARD.
-            numeric_profile,
             file_visibility: None,
             resolved_type_aliases: None,
             generic_declarations_by_path: None,
@@ -786,6 +884,10 @@ impl ScopeContext {
             active_generic_type_context: None,
             generic_template_validation: false,
             generic_function_instantiation_stack: Vec::new(),
+            // An independently constructed context begins its own inference boundary. It owns
+            // the fresh domain whether or not it later parses a body.
+            numeric_construction: Rc::new(RefCell::new(NumericConstructionState::new())),
+            numeric_body_root: true,
             loop_depth: 0,
         }
     }
@@ -851,6 +953,9 @@ impl ScopeContext {
             active_generic_type_context: self.active_generic_type_context.clone(),
             generic_template_validation: self.generic_template_validation,
             generic_function_instantiation_stack: self.generic_function_instantiation_stack.clone(),
+            // Block scopes join the enclosing body's numeric inference boundary.
+            numeric_construction: Rc::clone(&self.numeric_construction),
+            numeric_body_root: false,
             loop_depth,
         }
     }
@@ -897,6 +1002,10 @@ impl ScopeContext {
             active_generic_type_context: None,
             generic_template_validation: false,
             generic_function_instantiation_stack: self.generic_function_instantiation_stack.clone(),
+            // A nested function body is an independent inference boundary: it never shares the
+            // declaring body's numeric origins.
+            numeric_construction: Rc::new(RefCell::new(NumericConstructionState::new())),
+            numeric_body_root: true,
             loop_depth: 0,
         };
 
@@ -935,13 +1044,27 @@ impl ScopeContext {
             active_generic_type_context: self.active_generic_type_context.clone(),
             generic_template_validation: self.generic_template_validation,
             generic_function_instantiation_stack: self.generic_function_instantiation_stack.clone(),
+            numeric_construction: Rc::clone(&self.numeric_construction),
+            numeric_body_root: false,
             loop_depth: self.loop_depth,
         }
     }
 
+    /// Apply expression policy in an empty child frame rather than copying visible locals.
+    ///
+    /// WHAT: preserves the receiving scope's control state while isolating parser captures.
+    /// WHY: policy-only scopes do not introduce declarations; cloning the growing body frame
+    ///      for every numeric expression retains quadratic declaration storage.
+    pub(crate) fn new_expression_policy_context(&self) -> ScopeContext {
+        let mut context = self.new_child_expression(self.expected_result_type_ids.clone());
+        context.kind = self.kind.clone();
+        context.active_value_target = self.active_value_target.clone();
+        context
+    }
+
     /// Keeps the receiving scope's policy while nested operands retain typed producers.
     pub(crate) fn new_pending_typed_error_expression_context(&self) -> ScopeContext {
-        let mut context = self.clone();
+        let mut context = self.new_expression_policy_context();
         context.defer_typed_error_validation = true;
         context
     }
@@ -985,6 +1108,8 @@ impl ScopeContext {
             active_generic_type_context: self.active_generic_type_context.clone(),
             generic_template_validation: self.generic_template_validation,
             generic_function_instantiation_stack: self.generic_function_instantiation_stack.clone(),
+            numeric_construction: Rc::clone(&self.numeric_construction),
+            numeric_body_root: false,
             loop_depth: self.loop_depth,
         }
     }
@@ -1027,13 +1152,288 @@ impl ScopeContext {
             generic_function_instantiation_stack: parent
                 .generic_function_instantiation_stack
                 .clone(),
+            numeric_construction: Rc::clone(&parent.numeric_construction),
+            numeric_body_root: false,
             loop_depth: parent.loop_depth,
         }
     }
 }
 
-/// Update the recorded maximum scope-frame depth.
+/// Authored facts for one pending numeric binding, shared by every registration of that binding.
 ///
+/// WHAT: carries the name, interned path, source and binding spans, value mode and mutability
+///       the author wrote, before the scope owner derives the binding's numeric class and frame.
+/// WHY: declarations, multi-bind slots and loop items register the same authored facts, so one
+///      record keeps the registration signatures short and gives the row one construction path.
+pub(crate) struct AuthoredBindingFacts {
+    pub(crate) name: StringId,
+    pub(crate) path: PathId,
+    pub(crate) span: Option<SourceSpan>,
+    pub(crate) binding_span: Option<SourceSpan>,
+    pub(crate) value_mode: ValueMode,
+    pub(crate) mutable: bool,
+}
+
+impl ScopeContext {
+    /// Share the body-owned numeric construction domain.
+    ///
+    /// WHAT: returns the one handle every scope of this body (and its child blocks) uses.
+    /// WHY: statement builders register origins, witnesses and continuations through this handle;
+    ///      only the owning body root completes and releases it.
+    pub(crate) fn numeric_construction_handle(&self) -> Rc<RefCell<NumericConstructionState>> {
+        Rc::clone(&self.numeric_construction)
+    }
+
+    /// The identity of the construction domain this scope belongs to.
+    ///
+    /// WHAT: stable for every scope of one body root, including child blocks and nested
+    ///       functions declared by it never share it.
+    /// WHY: module-wide stores retain pending work from several bodies, and frame lookup walks
+    ///      parent chains; consumers must compare this key before using a dense binding ID.
+    pub(crate) fn numeric_domain_id(
+        &self,
+    ) -> crate::compiler_frontend::ast::numeric_construction::NumericConstructionDomainId {
+        self.numeric_construction.borrow().domain_id()
+    }
+
+    /// True when this context began an independent body and owns the numeric domain.
+    pub(crate) fn is_numeric_body_root(&self) -> bool {
+        self.numeric_body_root
+    }
+
+    /// Borrow the live construction state.
+    ///
+    /// Borrows must stay short and must not re-enter parsing: no parser call may run while a
+    /// guard from this accessor is alive.
+    pub(crate) fn numeric_state(&self) -> std::cell::Ref<'_, NumericConstructionState> {
+        self.numeric_construction.borrow()
+    }
+
+    /// Mutable borrow of the live construction state.
+    ///
+    /// Same re-entrancy rule as [`ScopeContext::numeric_state`].
+    pub(crate) fn numeric_state_mut(&self) -> std::cell::RefMut<'_, NumericConstructionState> {
+        self.numeric_construction.borrow_mut()
+    }
+
+    /// Register one retained numeric-dependent statement in this body's construction domain.
+    ///
+    /// WHAT: returns the dense continuation ID the statement's authored draft position records.
+    /// WHY: the frame slot is deliberately left unresolved until the body root has every use, so
+    ///      statement construction resumes through one ordered continuation list owned by the
+    ///      body root rather than a statement-local retry.
+    pub(crate) fn register_numeric_continuation(
+        &self,
+        continuation: NumericContinuation,
+    ) -> Result<NumericContinuationId, CompilerError> {
+        self.numeric_construction
+            .borrow_mut()
+            .register_continuation(continuation)
+    }
+
+    /// The authored value mode of a pending numeric binding row, if the row is live.
+    ///
+    /// WHAT: a checked lookup into the body-owned binding table. A row that does not belong to
+    ///       this body's live construction state returns `None`.
+    /// WHY: template heads must read a pending binding's declared value mode without defaulting
+    ///      it and without fabricating a `Declaration`. `None` means the ID is foreign or the
+    ///      domain has already completed, which callers must treat as a broken compiler
+    ///      invariant rather than as an immutable binding.
+    pub(crate) fn pending_numeric_value_mode(
+        &self,
+        binding: NumericBindingId,
+    ) -> Option<crate::compiler_frontend::value_mode::ValueMode> {
+        self.numeric_construction
+            .borrow()
+            .binding_value_mode(binding)
+    }
+
+    /// The authored mutability of a pending numeric binding row, if the row is live.
+    ///
+    /// WHAT: a checked lookup into the body-owned binding table mirroring
+    ///       [`ScopeContext::pending_numeric_value_mode`]. A row that does not belong to this
+    ///       body's live construction state returns `None`.
+    /// WHY: assignment validation must read a pending binding's authored mutability without a
+    ///      declaration; `None` means the ID is foreign or the domain has already completed,
+    ///      which callers must treat as a broken compiler invariant rather than as an immutable
+    ///      binding.
+    pub(crate) fn pending_numeric_is_mutable(&self, binding: NumericBindingId) -> Option<bool> {
+        self.numeric_construction
+            .borrow()
+            .bindings()
+            .get(binding.as_usize())
+            .map(|row| row.mutable)
+    }
+
+    /// Register one unannotated eligible numeric binding in this scope and body domain.
+    ///
+    /// WHAT: creates the body-owned binding row, then appends a `Pending` slot under the
+    ///       authored name in the current frame so the existing name index and parent walk
+    ///       resolve the binding exactly like a ready local.
+    /// WHY: a binding's single static type is only selected at the body root, so the binding must
+    ///      stay visible to later statements without a parallel pending-name lookup, without a
+    ///      fabricated `Declaration` and without a premature default value. The returned row ID is
+    ///      the only handle later constraints use; the frame slot is upgraded in place at
+    ///      completion.
+    pub(crate) fn declare_pending_numeric_binding(
+        &self,
+        facts: AuthoredBindingFacts,
+        recipe: NumericRecipe,
+    ) -> Result<NumericBindingId, CompilerError> {
+        // A raw literal's authored family is its origin family, except when the fragment's result
+        // is independently fixed (a comparison or real whole division): those resolve their type
+        // from the operator, so their origin keeps no family and cannot be pinned.
+        let authored_family = match &recipe {
+            NumericRecipe::Raw { items, family }
+                if !raw_fragment_result_is_independently_fixed(items, *family) =>
+            {
+                Some(*family)
+            }
+            _ => None,
+        };
+        let mut state = self.numeric_construction.borrow_mut();
+        let class = state.create_class()?;
+        if let Some(family) = authored_family {
+            state.note_class_family(class, family);
+        }
+        // A named directed origin is a forward producer: its natural result is registered on its
+        // class once it resolves, so later entries read that result instead of a default. A
+        // declared literal shape pins its bound numeric leaves at the origin, and a catch-protected
+        // literal joins the class its fallbacks already reached.
+        match &recipe {
+            NumericRecipe::Directed { shape: None, .. } => state.mark_forward(class),
+            NumericRecipe::Directed {
+                items,
+                shape: Some(shape),
+            } => {
+                pin_numeric_shape(&mut state, *shape, NumericPin::Bound);
+                join_protected_catch_class(&mut state, class, items);
+            }
+            NumericRecipe::MultiBindSlot {
+                shape: Some(shape), ..
+            } => {
+                pin_numeric_shape(&mut state, *shape, NumericPin::Bound);
+            }
+            NumericRecipe::Alias { source, .. }
+                if state.class_is_forward(state.binding(*source).class) =>
+            {
+                state.mark_forward(class);
+            }
+            _ => {}
+        }
+        self.register_pending_numeric_row(state, facts, class, recipe)
+    }
+
+    /// Register one pending loop item whose element descriptor comes from a source collection.
+    ///
+    /// WHAT: creates the item's body-owned row with a `CollectionElement` recipe over the source
+    ///       shape's element, then appends the same `Pending` frame slot a declaration uses.
+    /// WHY: a numeric element shares its leaf class with the source literal, so the item and the
+    ///      source constrain one class. A whole source is pinned as a loop item, so its integer
+    ///      family is fixed before any later peer. A non-numeric element keeps its own class.
+    pub(crate) fn declare_pending_collection_element(
+        &self,
+        source_collection: KnownShapeId,
+        facts: AuthoredBindingFacts,
+    ) -> Result<NumericBindingId, ExpressionParseError> {
+        let mut state = self.numeric_construction.borrow_mut();
+        let element = state.collection_element_shape(source_collection)?;
+        pin_numeric_shape(&mut state, element, NumericPin::LoopItem);
+        let class = state.collection_element_class(element)?;
+        self.register_pending_numeric_row(
+            state,
+            facts,
+            class,
+            NumericRecipe::CollectionElement { element },
+        )
+        .map_err(ExpressionParseError::from)
+    }
+
+    /// Register the pending error binding of a `catch` handler over a numeric-dependent error.
+    ///
+    /// WHAT: pins the protected call's generic error shape as a bound numeric value, then
+    ///       creates a type-only row whose recipe names that shape, and appends the same `Pending`
+    ///       frame slot a declaration uses.
+    /// WHY: the handler's error type is the producer's error type, which a numeric origin decides
+    ///      only after the protected call completes. A named catch binding is an ordinary immutable
+    ///      value bound to the existing origin, so it pins the shape like a named forwarded result:
+    ///      later reads cannot select a different width. A numeric error shares its leaf class, so
+    ///      `err` constrains the same origin as its producer; any other error keeps a fresh class
+    ///      that completion materialises once from the shape.
+    pub(crate) fn declare_pending_caught_error(
+        &self,
+        facts: AuthoredBindingFacts,
+        shape: KnownShapeId,
+    ) -> Result<NumericBindingId, ExpressionParseError> {
+        let mut state = self.numeric_construction.borrow_mut();
+        pin_numeric_shape(&mut state, shape, NumericPin::Bound);
+        let class = match state.shape(shape) {
+            KnownShape::Numeric(class) => class,
+            _ => state.create_class()?,
+        };
+        self.register_pending_numeric_row(state, facts, class, NumericRecipe::CaughtError { shape })
+            .map_err(ExpressionParseError::from)
+    }
+
+    /// Declare one payload capture of a pending `match` arm as a pending numeric binding.
+    ///
+    /// WHAT: the capture's class is the payload field's envelope class when that envelope is numeric,
+    ///       otherwise a fresh class; its type is the envelope shape materialised at body completion.
+    /// WHY: a numeric payload shares the subject's generic parameter class, so a later read of the
+    ///      capture witnesses the origin's width. Unlike a caught error, a capture does not pin the
+    ///      shape: the arm must not select the origin's width before a later witness does.
+    pub(crate) fn declare_pending_pattern_capture(
+        &self,
+        facts: AuthoredBindingFacts,
+        shape: KnownShapeId,
+    ) -> Result<NumericBindingId, ExpressionParseError> {
+        let mut state = self.numeric_construction.borrow_mut();
+        let class = match state.shape(shape) {
+            KnownShape::Numeric(class) => class,
+            _ => state.create_class()?,
+        };
+        self.register_pending_numeric_row(
+            state,
+            facts,
+            class,
+            NumericRecipe::PatternPayload { shape },
+        )
+        .map_err(ExpressionParseError::from)
+    }
+
+    /// Append a pending row's frame slot once its construction row is registered.
+    fn register_pending_numeric_row(
+        &self,
+        mut state: std::cell::RefMut<'_, NumericConstructionState>,
+        facts: AuthoredBindingFacts,
+        class: NumericClassId,
+        recipe: NumericRecipe,
+    ) -> Result<NumericBindingId, CompilerError> {
+        let name = facts.name;
+        let binding_span = facts.binding_span;
+        let binding = state.register_binding(PendingBindingRow {
+            name,
+            path: facts.path,
+            span: facts.span,
+            binding_span,
+            value_mode: facts.value_mode,
+            mutable: facts.mutable,
+            class,
+            recipe: Some(recipe),
+            origin: Default::default(),
+            frame: self.current_frame_id,
+        })?;
+        let domain = state.domain_id();
+        drop(state);
+        self.arena
+            .borrow_mut()
+            .frame_mut(self.current_frame_id)
+            .add_pending_numeric_var(name, binding, domain, binding_span);
+        Ok(binding)
+    }
+}
+
+/// Update the recorded maximum scope-frame depth.
 /// WHAT: records the deepest parent-linked frame observed during AST construction.
 /// WHY: the no-shadowing frame depth is an objective signal for how nested the
 ///      current input is, and it helps validate capacity estimates later.

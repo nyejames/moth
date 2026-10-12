@@ -174,10 +174,6 @@ impl ModulePrivateNominalIdentity {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum CanonicalBuiltinType {
     Bool,
-    Int,
-    /// Profile-sized unsigned integer, following the selected `Int` width.
-    Uint,
-    Float,
     String,
     Char,
     Range,
@@ -185,8 +181,7 @@ pub(crate) enum CanonicalBuiltinType {
     Error,
     /// Explicit-width builtin scalar or the `Byte` octet type.
     ///
-    /// Distinct from `Int`/`Float`: a fixed width is part of the identity, so a matching
-    /// `NumericProfile` width never unifies the two.
+    /// The width is part of the identity.
     FixedScalar(FixedScalar),
     /// Arbitrary-precision decimal identity at one canonical scale.
     ///
@@ -734,9 +729,6 @@ pub(crate) fn project_type_id_to_canonical_identity(
 pub(crate) fn canonical_builtin_for_key(key: BuiltinTypeKey) -> CanonicalBuiltinType {
     match key {
         BuiltinTypeKey::Bool => CanonicalBuiltinType::Bool,
-        BuiltinTypeKey::Int => CanonicalBuiltinType::Int,
-        BuiltinTypeKey::Uint => CanonicalBuiltinType::Uint,
-        BuiltinTypeKey::Float => CanonicalBuiltinType::Float,
         BuiltinTypeKey::String => CanonicalBuiltinType::String,
         BuiltinTypeKey::Char => CanonicalBuiltinType::Char,
         BuiltinTypeKey::Range => CanonicalBuiltinType::Range,
@@ -760,9 +752,6 @@ pub(crate) fn builtin_key_for_canonical_builtin(
 ) -> Option<BuiltinTypeKey> {
     Some(match builtin {
         CanonicalBuiltinType::Bool => BuiltinTypeKey::Bool,
-        CanonicalBuiltinType::Int => BuiltinTypeKey::Int,
-        CanonicalBuiltinType::Uint => BuiltinTypeKey::Uint,
-        CanonicalBuiltinType::Float => BuiltinTypeKey::Float,
         CanonicalBuiltinType::String => BuiltinTypeKey::String,
         CanonicalBuiltinType::Char => BuiltinTypeKey::Char,
         CanonicalBuiltinType::Range => BuiltinTypeKey::Range,

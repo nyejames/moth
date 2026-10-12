@@ -1,5 +1,5 @@
 @limits max_value
 
-overflow || -> Int, Error!:
+overflow || -> I64, Error!:
     return max_value + 1
 ;

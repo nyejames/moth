@@ -244,7 +244,11 @@ fn validate_expression(
                     // Pending syntax never survives evaluation; its presence here is a broken
                     // compiler invariant, not a source diagnostic.
                     ExpressionRpnItem::PendingNumericLiteral { .. }
-                    | ExpressionRpnItem::PendingGroup { .. } => {
+                    | ExpressionRpnItem::PendingGroup { .. }
+                    | ExpressionRpnItem::PendingNumericBinding { .. }
+                    | ExpressionRpnItem::PendingNumericCast { .. }
+                    | ExpressionRpnItem::PendingNumericCall { .. }
+                    | ExpressionRpnItem::PendingNumericExpression { .. } => {
                         return Err(pending_expression_item_bug("final type validation"));
                     }
                 }
@@ -372,9 +376,6 @@ fn validate_expression(
 
         ExpressionKind::NoValue
         | ExpressionKind::OptionNone
-        | ExpressionKind::Uint(_)
-        | ExpressionKind::Int(_)
-        | ExpressionKind::Float(_)
         | ExpressionKind::FixedScalar(_)
         | ExpressionKind::Number(_)
         | ExpressionKind::StringSlice(_)

@@ -1,5 +1,5 @@
 render_mutable_push || -> String:
-    items ~{2 Int} = {}
+    items ~{2 I32} = {}
     ~items.push(1) catch:
     ;
     ~items.push(2) catch:

@@ -1,10 +1,9 @@
 entry = "."
-numeric_profile = "Int32/Float64"
 
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = " number=0 label=fallback report= 301 Int operation overflowed exact=42 elabel=ok"
+rendered_output_exact = " number=0 label=fallback report= 301 Integer operation overflowed exact=42 elabel=ok"
 
 [backends.html_wasm]
 mode = "failure"
@@ -13,6 +12,7 @@ diagnostic_codes = ["MOTH-RULE-0064"]
 
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0064"
-reason = "unsupported_backend_feature.recoverable_numeric_failure"
+reason = "unsupported_backend_feature.fixed_width_scalar_values"
 path = "input/@page.moth"
-line = 2
+line = 6
+column = 17

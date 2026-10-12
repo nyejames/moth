@@ -157,6 +157,7 @@ impl<'a> HirBuilder<'a> {
                 id,
                 args,
                 result_type_ids,
+                requires_external_float_validation,
                 error_type_id,
                 handling: FallibleExpressionHandling::Propagate,
                 ..
@@ -165,6 +166,7 @@ impl<'a> HirBuilder<'a> {
                     *id,
                     args,
                     result_type_ids,
+                    *requires_external_float_validation,
                     *error_type_id,
                     &value.span,
                 )?,

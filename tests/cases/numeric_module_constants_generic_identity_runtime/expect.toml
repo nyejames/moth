@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "numeric_module direct=18446744073709551615 facade=18446744073709551615 constant=18446744073709551615 first=18446744073709551615 second=18446744073709551615 local=18446744073709551615 relayed=18446744073709551615 equal=true"

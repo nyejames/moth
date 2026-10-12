@@ -137,8 +137,8 @@ fn gap_cases() -> Vec<GapCase> {
         "expression-fragment",
         expression_literal,
         "",
-        Schema::record(vec![Field::required("result", SchemaType::Int)]),
-        SourceExpectation::AcceptObserved(Value::Int(5)),
+        Schema::record(vec![Field::required("result", SchemaType::I32)]),
+        SourceExpectation::AcceptObserved(Value::I32(5)),
         MonExpectation::Reject {
             code: MonErrorCode::RootNotRecord,
             span: mon_span(expression_literal, "2", 1),
@@ -153,21 +153,21 @@ fn gap_cases() -> Vec<GapCase> {
         "schema-versus-source-identity",
         "anonymous-record-under-struct-schema",
         "point = (x = 1)",
-        "Point = | x Int |\n",
+        "Point = | x I32 |\n",
         Schema::record(vec![Field::required(
             "point",
             SchemaType::Struct {
                 name: "Point".into(),
-                fields: vec![Field::required("x", SchemaType::Int)],
+                fields: vec![Field::required("x", SchemaType::I32)],
             },
         )]),
         SourceExpectation::AcceptObserved(Value::Record(vec![(
             "point".into(),
-            Value::Record(vec![("x".into(), Value::Int(1))]),
+            Value::Record(vec![("x".into(), Value::I32(1))]),
         )])),
         MonExpectation::Accept(Value::Record(vec![(
             "point".into(),
-            Value::Record(vec![("x".into(), Value::Int(1))]),
+            Value::Record(vec![("x".into(), Value::I32(1))]),
         )])),
     );
 
@@ -176,9 +176,9 @@ fn gap_cases() -> Vec<GapCase> {
         "literal-data-versus-source-syntax",
         "constant-reference",
         reference,
-        "base #Int = 4\n",
-        Schema::record(vec![Field::required("result", SchemaType::Int)]),
-        SourceExpectation::AcceptObserved(Value::Record(vec![("result".into(), Value::Int(4))])),
+        "base #I32 = 4\n",
+        Schema::record(vec![Field::required("result", SchemaType::I32)]),
+        SourceExpectation::AcceptObserved(Value::Record(vec![("result".into(), Value::I32(4))])),
         MonExpectation::Reject {
             code: MonErrorCode::UnexpectedToken,
             span: mon_span(reference, "base", 1),
@@ -209,8 +209,8 @@ fn gap_cases() -> Vec<GapCase> {
     // from an explicit declaration, not a constructor argument slot, so the map is bound first.
     let empty_map = "scores = {=}";
     let source_empty_map_source = concat!(
-        "MapHolder = | scores {String = Int} |\n",
-        "scores {String = Int} = {=}\n",
+        "MapHolder = | scores {String = I32} |\n",
+        "scores {String = I32} = {=}\n",
         "data = MapHolder(scores = scores)\n",
     );
     let source_empty_map = gap_fixture(
@@ -222,7 +222,7 @@ fn gap_cases() -> Vec<GapCase> {
             "scores",
             SchemaType::Map {
                 key: Box::new(SchemaType::String),
-                value: Box::new(SchemaType::Int),
+                value: Box::new(SchemaType::I32),
             },
         )]),
         source_invalid_map_literal(

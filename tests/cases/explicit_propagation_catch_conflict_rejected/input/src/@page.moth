@@ -1,7 +1,7 @@
-load |value Int| -> Int, Error!:
+load |value I32| -> I32, Error!:
     return value
 ;
 
-bad |value Int| -> Int, Error!:
+bad |value I32| -> I32, Error!:
     return load(value)! catch then 0
 ;

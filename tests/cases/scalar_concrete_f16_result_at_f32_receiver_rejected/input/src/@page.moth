@@ -1,0 +1,7 @@
+-- Both operands are concrete F16, so the completed addition stays F16 under
+-- D15. The exact F32 receiver rejects it; no hidden precision promotion.
+left F16 = 1.0
+right F16 = 0.5
+sum F32 = left + right
+
+[:unreachable]

@@ -1,0 +1,24 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0051"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0051"
+occurrence = 1
+reason = "invalid_fallible_handling.catch_on_non_fallible"
+path = "input/@page.moth"
+line = 2
+
+[backends.html_wasm]
+mode = "failure"
+flags = ["release"]
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0051"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0051"
+occurrence = 1
+reason = "invalid_fallible_handling.catch_on_non_fallible"
+path = "input/@page.moth"
+line = 2

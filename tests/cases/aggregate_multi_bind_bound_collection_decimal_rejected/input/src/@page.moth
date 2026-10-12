@@ -1,0 +1,10 @@
+render |choose_first Bool| -> String:
+    chosen, count = if choose_first:
+        then {1}, 0
+    else
+        then {2}, 1
+    ;
+    rows = {chosen, {2.5}}
+    return [:count=[count]]
+;
+[:[render(true)]]

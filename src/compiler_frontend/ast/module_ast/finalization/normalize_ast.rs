@@ -88,14 +88,12 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::rc::Rc;
 
 struct TemplateNormalizationContext<'strings> {
     template_const_loop_iteration_limit: usize,
-    numeric_profile: NumericProfile,
     string_table: &'strings mut StringTable,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
     module_resources:
@@ -120,7 +118,6 @@ impl AstFinalizer<'_, '_> {
                 template_const_loop_iteration_limit: self
                     .context
                     .template_const_loop_iteration_limit,
-                numeric_profile: self.context.numeric_profile,
                 string_table,
                 template_ir_store: Rc::clone(&self.context.template_ir_store),
                 module_resources: self
@@ -171,7 +168,6 @@ impl AstFinalizer<'_, '_> {
             &self.environment.lookups.generic_function_templates_by_path;
         let type_environment = &self.environment.type_environment;
         let template_const_loop_iteration_limit = self.context.template_const_loop_iteration_limit;
-        let numeric_profile = self.context.numeric_profile;
         let template_ir_store = Rc::clone(&self.context.template_ir_store);
 
         // Synchronize root table function and struct defaults. Branch on authoritative generic
@@ -215,7 +211,6 @@ impl AstFinalizer<'_, '_> {
                         normalize_retained_signature_defaults(
                             signature,
                             template_const_loop_iteration_limit,
-                            numeric_profile,
                             &template_ir_store,
                             string_table,
                         )?;
@@ -262,7 +257,6 @@ impl AstFinalizer<'_, '_> {
                         normalize_retained_field_defaults(
                             fields,
                             template_const_loop_iteration_limit,
-                            numeric_profile,
                             &template_ir_store,
                             string_table,
                         )?;
@@ -319,7 +313,6 @@ impl AstFinalizer<'_, '_> {
                 normalize_retained_signature_defaults(
                     &mut root_entry.signature,
                     template_const_loop_iteration_limit,
-                    numeric_profile,
                     &template_ir_store,
                     string_table,
                 )?;
@@ -381,7 +374,6 @@ impl AstFinalizer<'_, '_> {
             normalize_retained_signature_defaults(
                 &mut diagnostic_only_signature,
                 template_const_loop_iteration_limit,
-                numeric_profile,
                 &template_ir_store,
                 string_table,
             )?;
@@ -400,13 +392,11 @@ impl AstFinalizer<'_, '_> {
 fn normalize_retained_signature_defaults(
     signature: &mut FunctionSignature,
     template_const_loop_iteration_limit: usize,
-    numeric_profile: NumericProfile,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
 ) -> Result<(), TemplateNormalizationError> {
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit,
-        numeric_profile,
         string_table,
         template_ir_store: Rc::clone(template_ir_store),
         module_resources: None,
@@ -426,13 +416,11 @@ fn normalize_retained_signature_defaults(
 fn normalize_retained_field_defaults(
     fields: &mut [Declaration],
     template_const_loop_iteration_limit: usize,
-    numeric_profile: NumericProfile,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
 ) -> Result<(), TemplateNormalizationError> {
     let mut context = TemplateNormalizationContext {
         template_const_loop_iteration_limit,
-        numeric_profile,
         string_table,
         template_ir_store: Rc::clone(template_ir_store),
         module_resources: None,
@@ -991,7 +979,11 @@ fn discard_inactive_assertion_messages_in_expression(
                     // Pending syntax never survives evaluation; this fallible elision reports the
                     // broken invariant instead of silently keeping the malformed operand.
                     ExpressionRpnItem::PendingNumericLiteral { .. }
-                    | ExpressionRpnItem::PendingGroup { .. } => {
+                    | ExpressionRpnItem::PendingGroup { .. }
+                    | ExpressionRpnItem::PendingNumericBinding { .. }
+                    | ExpressionRpnItem::PendingNumericCast { .. }
+                    | ExpressionRpnItem::PendingNumericCall { .. }
+                    | ExpressionRpnItem::PendingNumericExpression { .. } => {
                         return Err(pending_expression_item_bug("assertion-message elision"));
                     }
                 }
@@ -1106,9 +1098,6 @@ fn discard_inactive_assertion_messages_in_expression(
         ExpressionKind::Template(_)
         | ExpressionKind::NoValue
         | ExpressionKind::OptionNone
-        | ExpressionKind::Uint(_)
-        | ExpressionKind::Int(_)
-        | ExpressionKind::Float(_)
         | ExpressionKind::FixedScalar(_)
         | ExpressionKind::Number(_)
         | ExpressionKind::StringSlice(_)
@@ -1335,7 +1324,11 @@ fn normalize_expression_templates_with_context(
                     // Pending syntax never survives evaluation; its presence here is a broken
                     // compiler invariant, not a normalizable template position.
                     ExpressionRpnItem::PendingNumericLiteral { .. }
-                    | ExpressionRpnItem::PendingGroup { .. } => {
+                    | ExpressionRpnItem::PendingGroup { .. }
+                    | ExpressionRpnItem::PendingNumericBinding { .. }
+                    | ExpressionRpnItem::PendingNumericCast { .. }
+                    | ExpressionRpnItem::PendingNumericCall { .. }
+                    | ExpressionRpnItem::PendingNumericExpression { .. } => {
                         return Err(pending_expression_item_bug("template normalization").into());
                     }
                 }
@@ -1425,7 +1418,6 @@ fn normalize_expression_templates_with_context(
                     string_table: context.string_table,
                     template_const_loop_iteration_limit: context
                         .template_const_loop_iteration_limit,
-                    numeric_profile: context.numeric_profile,
                     template_ir_store: &context.template_ir_store,
                 },
                 TemplatePreparationMode::Value,
@@ -1537,9 +1529,6 @@ fn normalize_expression_templates_with_context(
 
         ExpressionKind::NoValue
         | ExpressionKind::OptionNone
-        | ExpressionKind::Uint(_)
-        | ExpressionKind::Int(_)
-        | ExpressionKind::Float(_)
         | ExpressionKind::FixedScalar(_)
         | ExpressionKind::Number(_)
         | ExpressionKind::StringSlice(_)

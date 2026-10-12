@@ -15,51 +15,51 @@ a8 #= 8
 a9 #= 9
 
 -- Deeply nested function chain; each level adds locals and references outer constants.
-level_0 || -> Int:
+level_0 || -> I32:
     v0 = a0 + a1
     return level_1(v0)
 ;
 
-level_1 |p1 Int| -> Int:
+level_1 |p1 I32| -> I32:
     v1 = p1 + a2
     v2 = a3 * a4
     return level_2(v1, v2)
 ;
 
-level_2 |p1 Int, p2 Int| -> Int:
+level_2 |p1 I32, p2 I32| -> I32:
     v3 = p1 + p2
     v4 = a5 - a6
     return level_3(v3, v4, a7)
 ;
 
-level_3 |p1 Int, p2 Int, p3 Int| -> Int:
+level_3 |p1 I32, p2 I32, p3 I32| -> I32:
     v5 = p1 + p2 + p3
     v6 = a8 + a9
     return level_4(v5, v6, a0, a1)
 ;
 
-level_4 |p1 Int, p2 Int, p3 Int, p4 Int| -> Int:
+level_4 |p1 I32, p2 I32, p3 I32, p4 I32| -> I32:
     v7 = p1 + p2 + p3 + p4
     v8 = a2 * a3
     v9 = a4 + a5
     return level_5(v7, v8, v9, a6, a7)
 ;
 
-level_5 |p1 Int, p2 Int, p3 Int, p4 Int, p5 Int| -> Int:
+level_5 |p1 I32, p2 I32, p3 I32, p4 I32, p5 I32| -> I32:
     v10 = p1 + p2 + p3 + p4 + p5
     v11 = a8 - a9
     v12 = a0 * a1
     return level_6(v10, v11, v12, a2, a3, a4)
 ;
 
-level_6 |p1 Int, p2 Int, p3 Int, p4 Int, p5 Int, p6 Int| -> Int:
+level_6 |p1 I32, p2 I32, p3 I32, p4 I32, p5 I32, p6 I32| -> I32:
     v13 = p1 + p2 + p3 + p4 + p5 + p6
     v14 = a5 + a6
     v15 = a7 * a8
     return level_7(v13, v14, v15, a9, a0, a1, a2)
 ;
 
-level_7 |p1 Int, p2 Int, p3 Int, p4 Int, p5 Int, p6 Int, p7 Int| -> Int:
+level_7 |p1 I32, p2 I32, p3 I32, p4 I32, p5 I32, p6 I32, p7 I32| -> I32:
     v16 = p1 + p2 + p3 + p4 + p5 + p6 + p7
     v17 = a3 - a4
     v18 = a5 + a6
@@ -67,7 +67,7 @@ level_7 |p1 Int, p2 Int, p3 Int, p4 Int, p5 Int, p6 Int, p7 Int| -> Int:
     return level_8(v16, v17, v18, v19, a9, a0, a1, a2)
 ;
 
-level_8 |p1 Int, p2 Int, p3 Int, p4 Int, p5 Int, p6 Int, p7 Int, p8 Int| -> Int:
+level_8 |p1 I32, p2 I32, p3 I32, p4 I32, p5 I32, p6 I32, p7 I32, p8 I32| -> I32:
     v20 = p1 + p2 + p3 + p4 + p5 + p6 + p7 + p8
     v21 = a3 * a4
     v22 = a5 - a6
@@ -75,7 +75,7 @@ level_8 |p1 Int, p2 Int, p3 Int, p4 Int, p5 Int, p6 Int, p7 Int, p8 Int| -> Int:
     return level_9(v20, v21, v22, v23, a9, a0, a1, a2, a3)
 ;
 
-level_9 |p1 Int, p2 Int, p3 Int, p4 Int, p5 Int, p6 Int, p7 Int, p8 Int, p9 Int| -> Int:
+level_9 |p1 I32, p2 I32, p3 I32, p4 I32, p5 I32, p6 I32, p7 I32, p8 I32, p9 I32| -> I32:
     v24 = p1 + p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9
     v25 = a4 * a5
     v26 = a6 - a7
@@ -85,7 +85,7 @@ level_9 |p1 Int, p2 Int, p3 Int, p4 Int, p5 Int, p6 Int, p7 Int, p8 Int, p9 Int|
 ;
 
 -- Many nested local scopes inside a single function.
-nested_block_churn |seed Int| -> Int:
+nested_block_churn |seed I32| -> I32:
     l0 = seed + a0
     if l0 > 0:
         l1 = l0 + a1
@@ -127,7 +127,7 @@ nested_block_churn |seed Int| -> Int:
 ;
 
 -- Dense loop body scope churn.
-loop_scope_churn || -> Int:
+loop_scope_churn || -> I32:
     accumulator ~= 0
     loop 0 to 20 |i|:
         local_a = i + a0

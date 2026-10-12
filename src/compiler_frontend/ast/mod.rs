@@ -45,6 +45,10 @@ pub(crate) mod generic_functions;
 mod module_ast;
 mod receiver_methods;
 
+/// Body-owned numeric construction state for the Phase 4 scalar inference path.
+pub(crate) mod numeric_construction;
+pub(crate) mod numeric_known_shape;
+
 #[cfg(feature = "timers")]
 pub(crate) use module_ast::build_context::AstTimingMetricFamily;
 
@@ -79,6 +83,7 @@ pub(crate) mod expressions {
     pub(crate) mod failure_facts;
     pub(crate) mod function_calls;
     pub(crate) mod generic_nominal_inference;
+    pub(crate) mod generic_nominal_retention;
     pub(crate) mod mutation;
     pub(crate) mod namespace_access;
     pub(crate) mod option_propagation;
@@ -115,6 +120,7 @@ pub(crate) mod statements {
     pub(crate) mod match_headers;
     pub(crate) mod match_patterns;
     pub(crate) mod multi_bind;
+    pub(crate) mod numeric_body_completion;
     pub(crate) mod terminality;
     pub(crate) mod value_production;
 }
@@ -160,7 +166,9 @@ use crate::compiler_frontend::ast::module_ast::environment::{
 use crate::compiler_frontend::ast::module_ast::finalization::{
     AstFinalizer, MaterialisationContextRetention,
 };
-use crate::compiler_frontend::ast::statements::body_dispatch::parse_function_body_statements;
+use crate::compiler_frontend::ast::statements::body_dispatch::{
+    ParsedBody, parse_function_body_statements,
+};
 use crate::compiler_frontend::ast::templates::top_level_templates::AstConstTopLevelFragment;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::instrumentation::{log_ast_counters, reset_ast_counters};
@@ -184,6 +192,7 @@ use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
+use crate::compiler_frontend::traits::evidence::environment::InfallibleCastEvidenceContract;
 use crate::timing_scope_attributed;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
@@ -255,6 +264,8 @@ pub struct Ast {
     ///      const-ness without re-walking the AST.
     pub const_facts: AstConstFacts,
     pub(crate) imported_functions_by_local_path: FxHashMap<PathId, AstImportedFunctionContract>,
+    /// Canonical infallible cast requirements, projected onto local executable method paths.
+    pub(crate) infallible_cast_evidence: FxHashMap<PathId, InfallibleCastEvidenceContract>,
     /// Provenance introduced by static configuration branch selection, keyed by function path
     /// until HIR allocates the build-local function IDs.
     pub(crate) static_if_function_provenance: FxHashMap<PathId, SyntheticInterfaceProvenance>,
@@ -500,7 +511,15 @@ impl AstHeaderCounterSnapshot {
 
 // WHAT: public(crate) entrypoint for function/start-function body parsing.
 // WHY: callers should import one obvious `ast`-root function while detailed statement parsing
-// lives in focused helper modules.
+//      lives in focused helper modules.
+//
+// The result distinguishes the two body kinds explicitly:
+// - a caller that passed an independent body root receives `ParsedBody::Complete` (nodes only,
+//   after every numeric constraint, ordered resumption and construction-table release);
+// - a caller that passed a nested construct context receives `ParsedBody::Draft`, whose pending
+//   positions resolve when the enclosing root completes. Nested callers must retain the draft
+//   (`DeferredBody`/`DeferredConstruct`) or reject the position with `into_nodes_for_host`; they
+//   must never unwrap a draft into published nodes.
 pub(crate) fn function_body_to_ast(
     token_stream: &mut AstCursor,
     context: ScopeContext,
@@ -508,7 +527,7 @@ pub(crate) fn function_body_to_ast(
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<Vec<AstNode>, ExpressionParseError> {
+) -> Result<ParsedBody, ExpressionParseError> {
     parse_function_body_statements(
         token_stream,
         context,
@@ -542,3 +561,11 @@ mod file_value_resolution_tests;
 #[cfg(test)]
 #[path = "tests/cursor_tests.rs"]
 mod cursor_tests;
+
+#[cfg(test)]
+#[path = "tests/numeric_construction_tests.rs"]
+mod numeric_construction_tests;
+
+#[cfg(test)]
+#[path = "tests/numeric_known_shape_tests.rs"]
+mod numeric_known_shape_tests;

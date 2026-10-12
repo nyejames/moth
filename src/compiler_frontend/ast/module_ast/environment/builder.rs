@@ -589,11 +589,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let receiver_methods = self.build_receiver_catalog(sorted_headers, string_table)?;
         self.validate_receiver_method_visibility_invariants(&receiver_methods, string_table)?;
 
-        // Register compiler-owned builtin evidence rows for the profile-complete
-        // cast plan. Must run before `validate_trait_evidence` so user-declared
-        // conformances that would override builtin evidence or conflict with
-        // incompatible builtin evidence are rejected while trait ids are already
-        // stable.
+        // Register compiler-owned builtin evidence rows for the complete cast plan. Must run
+        // before `validate_trait_evidence` so user-declared conformances that would override
+        // builtin evidence or conflict with incompatible builtin evidence are rejected while
+        // trait ids are already stable.
         let mut trait_evidence_environment = TraitEvidenceEnvironment::new();
         Self::register_builtin_cast_evidence(
             &trait_environment,
@@ -601,7 +600,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &self.type_environment,
             string_table,
             self.path_fork,
-            self.context.numeric_profile,
         )?;
         self.project_imported_trait_evidence(
             &trait_environment,
@@ -910,7 +908,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             Arc::clone(&self.context.external_package_registry),
             0,
             Rc::clone(&self.context.template_ir_store),
-            self.context.numeric_profile,
         )
         .with_style_directives(self.context.style_directives)
         .with_build_profile(self.context.build_profile)
@@ -1060,7 +1057,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let mut context = TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
             declaration_table: &self.declaration_table,
             declaring_file_id,
-            numeric_profile: self.context.numeric_profile,
             visible_declaration_ids: Some(&visibility.visible_declaration_paths),
             visible_external_symbols: Some(&visibility.visible_external_symbols),
             visible_source_bindings: Some(&visibility.visible_source_names),
@@ -1223,13 +1219,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         error: ExpressionParseError,
         string_table: &StringTable,
     ) -> CompilerMessages {
-        match error {
-            ExpressionParseError::Diagnostic(diagnostic) => {
-                self.diagnostic_messages(diagnostic, string_table)
-            }
-            ExpressionParseError::Infrastructure(error) => {
-                self.error_messages(*error, string_table)
-            }
+        match error.at_boundary_without_numeric_retention("the module environment builder") {
+            Ok(diagnostic) => self.diagnostic_messages(diagnostic, string_table),
+            Err(error) => self.error_messages(error, string_table),
         }
     }
 }

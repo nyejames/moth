@@ -5,16 +5,19 @@
 //! WHY: identifier tokens fan out into the largest number of semantic cases and need isolated handling.
 
 use super::choice_constructor::parse_choice_construct;
+use super::constructor_views::ParsedConstructorExpression;
 use super::error::ExpressionParseError;
 use super::expression::ExpressionKind;
 use super::expression_rpn::ExpressionRpnItem;
 use super::external_namespace_members::project_external_constant;
 use super::function_calls::{
-    ExternalFunctionCallParseInput, parse_external_function_call_expression,
+    ExternalFunctionCallParseInput, ParsedFunctionCallExpression,
+    parse_external_function_call_expression,
 };
 use super::namespace_access::{NamespaceAccessInput, parse_namespace_access};
 use super::parse_expression_dispatch::{
     ExpressionOperandInput, push_expression_operand, push_expression_operand_with_span,
+    push_pending_numeric_binding,
 };
 use super::source_function_calls::{SourceCallableMemberInput, parse_source_callable_member};
 use super::struct_instance::{StructConstructorParseInput, parse_struct_constructor_expression};
@@ -90,9 +93,58 @@ pub(super) fn parse_identifier_or_call(
     //  Local binding: reference, constructor, or function call
     // ------------------------------------------------------------
     if let Some(binding) = context.get_reference(&identifier) {
+        // An eligible body-local numeric binding has no declaration, `TypeId` or default until
+        // the body root selects its single static type. Retain the authored reference as a
+        // construction-only operand item so the expression entry raises the body-root deferral
+        // for the whole fragment instead of fabricating a value or reporting an absent name.
+        if let Some(pending_binding) = binding.pending_binding() {
+            // A pending numeric binding is a runtime body-local value, and constants fold at
+            // their declaration boundary, so a constant context can never consume it.
+            if context.kind.is_constant_context() {
+                return Err(CompilerDiagnostic::compile_time_evaluation_error(
+                    CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
+                    Some(identifier),
+                    Some(token_stream.current_span()),
+                )
+                .into());
+            }
+
+            // Variant syntax names a choice type, and a pending numeric binding is a value.
+            if token_stream.peek_next_tag() == Some(TokenTag::DOUBLE_COLON) {
+                return Err(CompilerDiagnostic::namespace_misuse(
+                    identifier,
+                    NameNamespace::Type,
+                    NameNamespace::Value,
+                    Some(token_stream.current_span()),
+                )
+                .into());
+            }
+
+            let reference_span = Some(token_stream.current_span());
+            token_stream.advance();
+            push_pending_numeric_binding(
+                context,
+                expression,
+                pending_binding,
+                reference_span,
+                false,
+            )?;
+            return Ok(());
+        }
+
+        // A ready local or shared declaration: the reference path needs its declaration, and the
+        // pending case above is the only shape without one.
+        let Some(declaration) = binding.ready_declaration() else {
+            return Err(CompilerError::compiler_error(
+                "a local binding reference carried neither a ready declaration nor a pending \
+                 numeric binding",
+            )
+            .into());
+        };
+
         // Template slot inserts are only legal inside template bodies, constant
         // initializers, or constant headers.
-        if let ExpressionKind::Template(template_value) = &binding.value.kind {
+        if let ExpressionKind::Template(template_value) = &declaration.value.kind {
             let is_slot_insert = context
                 .template_ir_store
                 .borrow()
@@ -119,7 +171,7 @@ pub(super) fn parse_identifier_or_call(
         }
 
         // Const records are field-access-only in runtime contexts.
-        if binding.value.is_const_record_value()
+        if declaration.value.is_const_record_value()
             && token_stream.peek_next_tag() != Some(TokenTag::DOT)
             && !context.kind.is_constant_context()
         {
@@ -135,10 +187,10 @@ pub(super) fn parse_identifier_or_call(
         // record coercion can validate field values instead of rejecting the
         // struct symbol itself as a non-constant reference.
         if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS)
-            && let Some(struct_constructor) = context
-                .source_struct_constructor(binding.as_declaration(), type_interner.environment())?
+            && let Some(struct_constructor) =
+                context.source_struct_constructor(declaration, type_interner.environment())?
         {
-            let struct_instance = parse_struct_constructor_expression(
+            match parse_struct_constructor_expression(
                 token_stream,
                 StructConstructorParseInput {
                     struct_path: &struct_constructor.struct_path,
@@ -151,46 +203,57 @@ pub(super) fn parse_identifier_or_call(
                 type_interner,
                 path_fork,
                 string_table,
-            )?;
-
-            push_expression_operand(
-                token_stream,
-                context,
-                type_interner,
-                string_table,
-                expression,
-                allow_boundary_catch,
-                struct_instance,
-                path_fork,
-            )?;
+            )? {
+                ParsedConstructorExpression::Value(struct_instance) => {
+                    push_expression_operand(
+                        token_stream,
+                        context,
+                        type_interner,
+                        string_table,
+                        expression,
+                        allow_boundary_catch,
+                        struct_instance,
+                        path_fork,
+                    )?;
+                }
+                // A constructor whose numeric-dependent arguments were retained takes its
+                // authored operand position as one pending item; the enclosing fragment either
+                // completes where it was parsed or defers to the body root with this item in
+                // place, so the constructor resumes exactly once at its original position.
+                ParsedConstructorExpression::RetainedOperand(item) => expression.push(item),
+            }
 
             return Ok(());
         }
 
         // Choice constructors are routed through their own parser.
         if token_stream.peek_next_tag() == Some(TokenTag::DOUBLE_COLON) {
-            if context.is_source_choice_declaration(
-                binding.as_declaration(),
-                type_interner.environment(),
-            )? {
-                let choice_value = parse_choice_construct(
+            if context.is_source_choice_declaration(declaration, type_interner.environment())? {
+                match parse_choice_construct(
                     token_stream,
-                    binding.as_declaration(),
+                    declaration,
                     context,
                     type_interner,
                     path_fork,
                     string_table,
-                )?;
-                push_expression_operand(
-                    token_stream,
-                    context,
-                    type_interner,
-                    string_table,
-                    expression,
-                    allow_boundary_catch,
-                    choice_value,
-                    path_fork,
-                )?;
+                )? {
+                    ParsedConstructorExpression::Value(choice_value) => {
+                        push_expression_operand(
+                            token_stream,
+                            context,
+                            type_interner,
+                            string_table,
+                            expression,
+                            allow_boundary_catch,
+                            choice_value,
+                            path_fork,
+                        )?;
+                    }
+                    // A payload constructor whose numeric-dependent arguments were retained takes
+                    // its authored operand position as one pending item and resumes exactly once
+                    // at the body root, like the struct constructor lane above.
+                    ParsedConstructorExpression::RetainedOperand(item) => expression.push(item),
+                }
 
                 return Ok(());
             }
@@ -206,8 +269,8 @@ pub(super) fn parse_identifier_or_call(
 
         // Type declarations live in the type namespace. Constructor and variant syntax above are
         // the only expression-position routes that may start from a nominal type name.
-        if context.is_nominal_type_declaration_path(&binding.id)
-            && matches!(binding.value.kind, ExpressionKind::NoValue)
+        if context.is_nominal_type_declaration_path(&declaration.id)
+            && matches!(declaration.value.kind, ExpressionKind::NoValue)
         {
             return Err(CompilerDiagnostic::namespace_misuse(
                 identifier,
@@ -223,8 +286,10 @@ pub(super) fn parse_identifier_or_call(
         // placeholders that have not been folded yet are not rejected prematurely.
         // Template constness comes from preparation's exact effective view so composed
         // templates retain their module-local reference and overlays.
-        if context.kind.is_constant_context() && !binding.is_unresolved_constant_placeholder() {
-            let is_compile_time_constant = binding
+        if context.kind.is_constant_context()
+            && !context.is_unresolved_constant_placeholder(declaration)
+        {
+            let is_compile_time_constant = declaration
                 .value
                 .const_value_kind_with_template_classifier(&mut |template| {
                     classify_template_from_effective_tir(template, &context.template_ir_store)
@@ -236,20 +301,19 @@ pub(super) fn parse_identifier_or_call(
                     CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant,
                     Some(identifier),
                     Some(token_stream.current_span()),
-                    None,
                 )
                 .into());
             }
         }
 
-        match context.source_callable_signature(binding.as_declaration()) {
+        match context.source_callable_signature(declaration) {
             Some(signature) => {
-                let generic_template = context.lookup_generic_function_template(&binding.id);
+                let generic_template = context.lookup_generic_function_template(&declaration.id);
                 let call_span = Some(token_stream.current_span());
 
                 parse_source_callable_member(SourceCallableMemberInput {
                     token_stream,
-                    function_path: &binding.id,
+                    function_path: &declaration.id,
                     signature,
                     generic_template,
                     visible_name: identifier,
@@ -269,7 +333,7 @@ pub(super) fn parse_identifier_or_call(
             None => {
                 let reference_span = Some(token_stream.current_span());
                 let reference_expression = reference_expression_from_declaration(
-                    binding.as_declaration(),
+                    declaration,
                     context,
                     type_interner,
                     reference_span,
@@ -336,20 +400,13 @@ pub(super) fn parse_identifier_or_call(
                 CompileTimeEvaluationErrorReason::ExternalNonScalarConstantInConstantContext,
                 Some(identifier),
                 span,
-                None,
             )
             .into());
         }
 
         let value_mode = ValueMode::ImmutableOwned;
-        let const_expr = project_external_constant(
-            const_def,
-            identifier,
-            span,
-            context.numeric_profile,
-            value_mode,
-            string_table,
-        )?;
+        let const_expr =
+            project_external_constant(const_def, identifier, span, value_mode, string_table)?;
 
         push_expression_operand(
             token_stream,
@@ -375,7 +432,6 @@ pub(super) fn parse_identifier_or_call(
                 CompileTimeEvaluationErrorReason::ExternalFunctionCallInConstantContext,
                 Some(identifier),
                 Some(token_stream.current_span()),
-                None,
             )
             .into());
         }
@@ -384,7 +440,7 @@ pub(super) fn parse_identifier_or_call(
         // on the identifier itself.
         token_stream.advance();
 
-        let function_call_expression =
+        let parsed_call =
             parse_external_function_call_expression(ExternalFunctionCallParseInput {
                 token_stream,
                 external_function_id: function_id,
@@ -401,16 +457,27 @@ pub(super) fn parse_identifier_or_call(
                 path_fork,
             })?;
 
-        push_expression_operand(
-            token_stream,
-            context,
-            type_interner,
-            string_table,
-            expression,
-            allow_boundary_catch,
-            function_call_expression,
-            path_fork,
-        )?;
+        match parsed_call {
+            ParsedFunctionCallExpression::Value(function_call_expression) => {
+                push_expression_operand(
+                    token_stream,
+                    context,
+                    type_interner,
+                    string_table,
+                    expression,
+                    allow_boundary_catch,
+                    function_call_expression,
+                    path_fork,
+                )?;
+            }
+            // A call whose numeric-dependent arguments were retained takes its authored operand
+            // position as one pending item; the enclosing fragment either completes where it was
+            // parsed or defers to the body root with this item in place, so the call resumes
+            // exactly once at its original position.
+            ParsedFunctionCallExpression::RetainedOperand(item) => {
+                expression.push(item);
+            }
+        }
 
         return Ok(());
     }
@@ -437,7 +504,6 @@ pub(super) fn parse_identifier_or_call(
             CompileTimeEvaluationErrorReason::ExternalTypeConstructionNotSupported,
             Some(identifier),
             Some(token_stream.current_span()),
-            None,
         )
         .into());
     }
@@ -487,10 +553,15 @@ fn parse_this_reference(
     let this_id = string_table.intern("this");
     let receiver_declaration =
         context.resolve_this_reference(this_id, token_stream.current_span())?;
+    // `this` names the reserved receiver parameter, which is never a pending numeric body local,
+    // so a pending reference here is a broken invariant rather than an unresolved value.
+    let receiver_declaration = receiver_declaration.ready_declaration().ok_or_else(|| {
+        CompilerError::compiler_error("`this` resolved to a pending numeric binding")
+    })?;
 
     let reference_span = Some(token_stream.current_span());
     let reference_expression = reference_expression_from_declaration(
-        receiver_declaration.as_declaration(),
+        receiver_declaration,
         context,
         type_interner,
         reference_span,

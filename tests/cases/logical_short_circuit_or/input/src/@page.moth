@@ -1,6 +1,6 @@
 -- Prove short-circuit behavior by surfacing RHS invocation count.
 
-rhs_or |calls ~Int| -> Bool:
+rhs_or |calls ~I32| -> Bool:
     calls = calls + 1
     return false
 ;

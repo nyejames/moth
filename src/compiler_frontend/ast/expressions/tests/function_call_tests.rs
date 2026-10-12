@@ -37,7 +37,7 @@ use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{TokenTag, TokenizerEntryMode};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::FloatPrecision;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -258,6 +258,9 @@ fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
         ExpressionParseError::Diagnostic(diagnostic) => diagnostic,
         ExpressionParseError::Infrastructure(error) => {
             panic!("expected user diagnostic, found infrastructure error: {error:?}")
+        }
+        ExpressionParseError::NumericDeferral(deferral) => {
+            panic!("expected user diagnostic, found numeric deferral: {deferral:?}")
         }
     }
 }
@@ -516,23 +519,27 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
     );
 
     let mut type_environment = TypeEnvironment::new();
-    let int_type_id = type_environment.builtins().int;
+    let i32_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let expectations = [
         ParameterExpectation {
             name: Some(string_table.intern("first")),
-            expected_type: ExpectedParameterType::Known(int_type_id),
+            expected_type: ExpectedParameterType::Known(i32_type_id),
             access_mode: ExpectedAccessMode::Mutable,
             default_value: None,
         },
         ParameterExpectation {
             name: Some(string_table.intern("second")),
-            expected_type: ExpectedParameterType::Known(int_type_id),
+            expected_type: ExpectedParameterType::Known(i32_type_id),
             access_mode: ExpectedAccessMode::Shared,
-            default_value: Some(Expression::int(2, None, ValueMode::ImmutableOwned)),
+            default_value: Some(Expression::fixed_scalar(
+                FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 is an I32 value"),
+                None,
+                ValueMode::ImmutableOwned,
+            )),
         },
         ParameterExpectation {
             name: Some(string_table.intern("third")),
-            expected_type: ExpectedParameterType::Known(int_type_id),
+            expected_type: ExpectedParameterType::Known(i32_type_id),
             access_mode: ExpectedAccessMode::Shared,
             default_value: None,
         },
@@ -563,14 +570,25 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
             type_environment: type_check_context.type_environment,
             compatibility_cache: type_check_context.compatibility_cache,
             path_fork: &path_fork,
-            float_precision: FloatPrecision::Bits64,
         },
     )
     .unwrap_or_else(|_| panic!("retained slots should resolve without rerouting"));
 
-    assert!(matches!(resolved[0].value.kind, ExpressionKind::Int(1)));
-    assert!(matches!(resolved[1].value.kind, ExpressionKind::Int(2)));
-    assert!(matches!(resolved[2].value.kind, ExpressionKind::Int(3)));
+    assert!(matches!(
+        resolved[0].value.kind,
+        ExpressionKind::FixedScalar(value)
+            if value == FixedScalarValue::signed(FixedScalar::I32, 1).expect("1 is an I32 value")
+    ));
+    assert!(matches!(
+        resolved[1].value.kind,
+        ExpressionKind::FixedScalar(value)
+            if value == FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 is an I32 value")
+    ));
+    assert!(matches!(
+        resolved[2].value.kind,
+        ExpressionKind::FixedScalar(value)
+            if value == FixedScalarValue::signed(FixedScalar::I32, 3).expect("3 is an I32 value")
+    ));
     assert_eq!(resolved[0].passing_mode, CallPassingMode::FreshMutableValue);
 }
 
@@ -594,10 +612,12 @@ fn optional_call_context_is_limited_to_bare_none_arguments() {
 }
 
 #[test]
-fn whole_numeric_call_arguments_use_float_parameter_destinations() {
+fn whole_numeric_call_arguments_use_f64_parameter_destinations() {
     let expectation = [ParameterExpectation {
         name: None,
-        expected_type: ExpectedParameterType::Known(builtin_type_ids::FLOAT),
+        expected_type: ExpectedParameterType::Known(builtin_type_ids::fixed_scalar(
+            FixedScalar::F64,
+        )),
         access_mode: ExpectedAccessMode::Shared,
         default_value: None,
     }];
@@ -608,12 +628,18 @@ fn whole_numeric_call_arguments_use_float_parameter_destinations() {
         }),
         Some(&expectation),
     )
-    .expect("a Float parameter should receive an out-of-Int-range whole literal");
+    .expect("an F64 parameter should receive an out-of-I32-range whole literal");
 
-    assert_eq!(arguments[0].value.type_id, builtin_type_ids::FLOAT);
+    assert_eq!(
+        arguments[0].value.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::F64)
+    );
     assert!(
-        matches!(&arguments[0].value.kind, ExpressionKind::Float(value) if *value == 18_446_744_073_709_551_615_f64),
-        "expected the call argument to retain semantic Float identity"
+        matches!(
+            arguments[0].value.kind,
+            ExpressionKind::FixedScalar(value) if value.as_f64() == Some(18_446_744_073_709_551_615_f64)
+        ),
+        "expected the call argument to retain exact F64 identity"
     );
 }
 
@@ -645,7 +671,7 @@ fn generic_call_diagnostic_retains_exact_multibyte_callee_span() {
 fn rejects_mutable_marker_on_named_argument_target() {
     let diagnostic = parse_single_file_ast_diagnostic(
         r#"
-take |value ~Int|:
+take |value ~I32|:
 ;
 
 value ~= 1
@@ -682,7 +708,7 @@ fn rejects_tilde_on_left_side_of_named_arg() {
 fn mutable_marker_on_immutable_argument_uses_authored_marker_span() {
     let diagnostic = parse_single_file_ast_diagnostic(
         r#"
-mutate |value ~Int|:
+mutate |value ~I32|:
     value = 5
 ;
 
@@ -711,7 +737,7 @@ mutate(~x)
 fn mutable_marker_on_fresh_value_uses_authored_marker_span() {
     let diagnostic = parse_single_file_ast_diagnostic(
         r#"
-mutate |value ~Int|:
+mutate |value ~I32|:
     value = 5
 ;
 
@@ -739,7 +765,7 @@ mutate(~12)
 fn unmarked_immutable_argument_uses_value_expression_span() {
     let diagnostic = parse_single_file_ast_diagnostic(
         r#"
-mutate |value ~Int|:
+mutate |value ~I32|:
     value = 5
 ;
 

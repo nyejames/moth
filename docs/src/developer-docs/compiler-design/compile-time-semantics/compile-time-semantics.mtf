@@ -110,6 +110,13 @@ Base artefacts stay immutable. Generated functions carry their own HIR, borrow f
 
 HIR and backends never infer generic arguments or consume unresolved template state. Concrete code appears before they look.
 
+A generic signature can also connect an existing numeric origin through a
+declared parameter/result equality. Eligible exact uses in the same caller body
+resolve that origin before defaults. This bounded numeric rule adds neither
+callee-body inspection nor inference for a generic parameter without a numeric
+origin. Each concrete instance resolves its own body-local numeric state before
+HIR.
+
 ## Static trait evidence
 
 Traits and conformances are compile-time frontend metadata. AST validates requirements, explicit conformances, evidence visibility and bound-provided receiver calls.
@@ -124,9 +131,20 @@ Contextual coercion and explicit `cast` remain different paths.
 
 Coercion happens when a receiving boundary accepts a value under documented rules. The boundary owner applies it.
 
-Explicit `cast` is AST-owned conversion under compiler-defined policy and evidence. Foldable casts fold. Runtime casts become explicit operations. User-defined cast evidence becomes an ordinary direct function call before or during HIR lowering. Cast metadata itself does not tour HIR as a mini language.
+Plain `cast` supplies the only conversion spelling. Its immediate concrete
+typed receiver supplies the target, not a constraint on the operand. AST resolves
+the source from independent eligible uses or the language default before
+classifying the complete source-target pair.
 
-Failures belong at the cast site or boundary with structured diagnostics, not as a quiet backend surprise.
+AST owns conversion policy and evidence. Foldable casts fold. Builtin runtime
+casts become explicit HIR operations and source-authored evidence becomes an
+ordinary direct function call before or during HIR lowering. Evidence metadata
+does not enter HIR. `Char -> I32` produces the Unicode scalar code point,
+while `I32 -> Char` checks for a valid Unicode scalar.
+
+Invalid conversions diagnose at the cast site. Runtime conversion failure
+follows ordinary implicit failure delivery through a compatible `catch`,
+builtin `Error!` slot or private same-module lane, not a separate cast channel.
 
 ## Numeric ownership
 
@@ -134,24 +152,28 @@ Numbers look simple until every layer invents its own rules.
 
 Accepted ownership splits cleanly:
 
-- **`moth-lexical::numeric`** owns shared lexical grammar and destination materialisation facts for the compiler and MON. Compiler adapters retain type lookup, arithmetic and allocation-heavy decimal values.
-- **AST** owns semantic numeric typing, constant evaluation, checked failure rules and cast evidence
-- **HIR** records numeric domain, operator and failure mode without baking backend helper names into the IR as the semantic authority
-- compile-time and runtime operations agree on checked failures, range checks and value-to-string formatting
+- **`moth-lexical`** owns shared spelling grammar and category, direct destination materialisation, exact fixed scalar identities and precision-aware formatting for the compiler and MON. It owns neither compiler type lookup nor a numeric runtime.
+- **AST** owns body-local numeric inference, operator selection, constant evaluation, checked failure rules and cast evidence. Compiler-owned decimal coefficients and arithmetic keep their own allocation and dependencies.
+- **HIR** records the exact numeric domain, operator and actual failure mode, not backend helper names or target-selected numeric profiles.
+- Compile-time and runtime operations preserve the same selected-width checks, per-operation rounding and value-to-string formatting.
 
-The frontend/HIR implements fixed-width and `Byte` literal typing, fixed-width
-operator semantics, casts and numeric constant folding. HTML-JS executes
-fixed-width, `Byte` and `Dec` values and recovers checked numeric failures
-through builtin `Error!`. HTML-Wasm executes supported fixed integers,
-`Byte`, `F16`, `F32` and `F64` values, comparisons and supported infallible
-numeric expression casts; it rejects recoverable numeric failure with a
-capability diagnostic, and proven-unable-to-fail operations compile. HTML-Wasm
-rejects reachable `Dec` values and recoverable numeric failure. Its remaining
-builtin runtime casts stay gated, including fallible casts, conversions involving
-`Bool`, `Char` or `Error` (including `Char -> Int`), parsing from `String` and
-statement-form casts. Keep implementation coverage separate from this accepted
-ownership split; the canonical numeric and cast references and the progress matrix
-record current support.
+An unconstrained whole-number origin defaults to `I32` and a decimal/exponent
+origin defaults to `F64`. Exact receivers select a destination before direct
+materialisation, without an `i32` or `f64` intermediary. Constants finish that
+resolution at their declaration boundary, so later runtime uses cannot retype
+them. Completed AST and HIR retain no numeric unknowns or inference recipes.
+
+Equal fixed types preserve their eligible arithmetic domain. `I8 + I8` checks
+an `I8` result, while `F16 + F16` rounds and checks finiteness at `F16` before
+another operation consumes the result. A wider scratch carrier cannot defer
+those boundaries. `Dec` applies its exact scale and rounding rule at each
+operation result.
+
+The canonical numeric and cast references own language semantics. Target
+validation checks reachable operations against backend capabilities, including
+genuinely unsupported decimal, conversion or recovery paths. The
+@../../../docs/progress (Progress matrix) owns implementation and backend
+coverage rather than this ownership contract.
 
 ## What can fail here
 
@@ -175,7 +197,7 @@ Do not re-teach diagnostic transport here. The semantic rejection is the point.
 ## Roadmap and current status
 
 - **Accepted design:** AST owns constants, generic inference, traits, casts and concrete requests.
-- **Current implementation:** folded constants, typed build configuration values, immutable `@project` and anonymous const records are supported. Arithmetic and casts, generic functions and trait bounds are partial. The accepted numeric family follows the canonical numeric and cast references; the progress matrix records backend support.
+- **Implementation coverage:** the @../../../docs/progress (Progress matrix) records constants, casts, generics, trait evidence and backend support.
 - **Queued work:** the accepted general-directive/config and HTML page-purpose migrations.
 - **Deferred or outside scope:** structural `$feature` selection, trait objects and broad runtime reflection.
 

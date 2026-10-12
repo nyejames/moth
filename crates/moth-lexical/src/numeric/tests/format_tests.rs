@@ -1,4 +1,4 @@
-//! Tests for the Moth finite `Float` formatting contract.
+//! Tests for the Moth finite binary-float formatting contract.
 
 use crate::numeric::binary16::decimal_to_f16;
 use crate::numeric::format::{FloatFormatError, format_finite_float};

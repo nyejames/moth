@@ -185,10 +185,7 @@ impl<'a> HirValidator<'a> {
         let expression = self.expression_row(expression_id, anchor)?;
         if !matches!(
             expression.kind,
-            HirExpressionKind::Uint(_)
-                | HirExpressionKind::Int(_)
-                | HirExpressionKind::Float(_)
-                | HirExpressionKind::FixedScalar(_)
+            HirExpressionKind::FixedScalar(_)
                 | HirExpressionKind::Number(_)
                 | HirExpressionKind::Char(_)
         ) {
@@ -222,10 +219,7 @@ impl<'a> HirValidator<'a> {
 
         if !matches!(
             expression.kind,
-            HirExpressionKind::Uint(_)
-                | HirExpressionKind::Int(_)
-                | HirExpressionKind::Float(_)
-                | HirExpressionKind::FixedScalar(_)
+            HirExpressionKind::FixedScalar(_)
                 | HirExpressionKind::Number(_)
                 | HirExpressionKind::Bool(_)
                 | HirExpressionKind::Char(_)
@@ -343,25 +337,16 @@ impl<'a> HirValidator<'a> {
                 }
             }
 
-            // Leaf literals carry no sub-expressions; no further validation needed.
-            HirExpressionKind::Uint(_)
-            | HirExpressionKind::Int(_)
-            | HirExpressionKind::FixedScalar(_)
+            // Leaf literals carry no sub-expressions; no further validation needed. The fixed
+            // scalar carrier guarantees finite binary floats and exact-bit payloads at
+            // construction, so HIR never consumes an invalid numeric value.
+            HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
             | HirExpressionKind::StringLiteral(_) => {}
 
             HirExpressionKind::StructuralString { pieces } => {
                 let _ = self.string_pieces(*pieces, anchor)?;
-            }
-
-            // Float precision follows the numeric profile, while HIR stores literals in f64.
-            // Literal materialisation and folding own rounding. Reject non-finite payloads
-            // here so backend lowerers never consume an invalid Moth Float value.
-            HirExpressionKind::Float(value) => {
-                if !value.is_finite() {
-                    return Err(self.error_with_hir("HIR Float literal must be finite", anchor));
-                }
             }
 
             HirExpressionKind::VariantConstruct {

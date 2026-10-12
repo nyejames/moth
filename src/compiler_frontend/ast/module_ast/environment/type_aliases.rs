@@ -287,9 +287,6 @@ fn parsed_type_span(parsed_type: &ParsedTypeRef) -> Option<SourceSpan> {
         ParsedTypeRef::Named { span, .. }
         | ParsedTypeRef::Qualified { span, .. }
         | ParsedTypeRef::BuiltinBool { span, .. }
-        | ParsedTypeRef::BuiltinInt { span, .. }
-        | ParsedTypeRef::BuiltinUint { span, .. }
-        | ParsedTypeRef::BuiltinFloat { span, .. }
         | ParsedTypeRef::BuiltinString { span, .. }
         | ParsedTypeRef::BuiltinChar { span, .. }
         | ParsedTypeRef::BuiltinFixedScalar { span, .. }

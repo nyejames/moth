@@ -35,7 +35,7 @@ pub(crate) enum WasmRuntimeHelper {
     FloatPower,
     /// Compute exact binary64 remainder using significand shift/subtract.
     FloatRemainder,
-    /// Convert one finite Float/F16/F32/F64 value to a finalized decimal string handle.
+    /// Convert one finite F16/F32/F64 value to a finalised decimal string handle.
     StringFromFloat,
     /// Compute the Ryu shortest decimal pair for a finite positive binary float.
     FloatToDecimal,

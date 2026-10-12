@@ -3,10 +3,10 @@
 ## Status
 
 ```text
-STATUS: paused after Phase 3; template control-flow simplification complete
-CURRENT_SLICE: Phase 3 implementation, review corrections and 3M closeout accepted
-BLOCKERS: completion of the exact numeric migration and a fresh restart review
-NEXT_ACTION: after numeric completion, reassess owners, lifetimes, coverage and benchmarks; require explicit user resumption before further implementation
+STATUS: paused after accepted Phase 3M closeout; post-numeric restart reassessment complete
+CURRENT_SLICE: accepted dense HIR checkpoint retained; Phase 4 has not started
+BLOCKERS: explicit user resumption of expression implementation
+NEXT_ACTION: on explicit resumption, implement Phase 4A against completed numeric construction output, then deliver native results and their coupled consumers
 ```
 
 ## Purpose and authority
@@ -14,8 +14,9 @@ NEXT_ACTION: after numeric completion, reassess owners, lifetimes, coverage and 
 Replace the growing, recursively owned `Expression` record with compact typed
 semantic nodes addressed by IDs. Preserve Moth's architecture: AST construction
 resolves types, applies contextual coercion and folds constants, TIR stays
-AST-local, and HIR remains the first backend-facing semantic IR. This work
-changes representation and ownership, not the timing of those decisions.
+AST-local, and HIR remains the first backend-facing semantic IR. Bounded numeric
+construction now completes at the owning body root before semantic publication.
+This work changes representation and ownership, not that delivered timing.
 
 The plan also completes the dense HIR, bounded Wiring and native result/Core
 constant-evaluation foundations that would otherwise extend and then replace
@@ -110,7 +111,7 @@ activation tree before touching their owners.
 
 | Responsibility | Final owner and invariant |
 |---|---|
-| Parsing and contextual construction | Short-lived parser/builder state owns incomplete operands, numeric literal recipes and pending receiving context. Completed semantic nodes do not impersonate declaration shells or unresolved placeholders. |
+| Parsing and contextual construction | Short-lived parser/builder state and body-owned numeric construction own incomplete operands, literal recipes and receiving witnesses until root completion. Completed semantic nodes do not impersonate declaration shells or unresolved placeholders. |
 | Declarations and symbols | Dedicated records own identity, visibility, declared type and callable/constructor descriptors. A declaration without an initializer has an explicit absence, not a fake expression. |
 | Typed expressions | Compact IDs address stage-owned semantic nodes with resolved result shape, exact source location and the operation facts required by their consumers. Fixed children use IDs, variable payloads use typed ranges. |
 | Results and failure | One authoritative zero/single/multiple success shape per producer, with a separate typed error channel. Optional absence and divergence remain distinct concepts. |
@@ -164,15 +165,14 @@ the type system and folder, not merely make one `size_of` result smaller.
 
 ## Phase 0 - activation, contracts and baseline
 
-**Inputs:** merged Dec contextual-materialisation correction and the separately
-planned Uint addition, delivered MON syntax/tooling and the existing numeric
-profile contracts. Do not infer Uint's exact identity or width from its spelling.
-Read its merged contract, including literals, external signatures and profiles.
+**Historical activation inputs:** merged Dec contextual-materialisation,
+Uint and numeric profiles supplied the original baseline. Exact numeric types
+and body-local construction have since replaced those contracts. The completed
+Phase 0 checklist records that investigation, not a current profile dependency.
 
-**Deliverable:** a current owner/lifetime map, an obligation checklist tied to
-this plan, reproducible baseline evidence and concrete work packages for Phase 1.
-Keep baseline revision/toolchains/worktree details in working notes rather than
-pinning this plan to a specific commit.
+**Deliverable:** an owner/lifetime map, an obligation checklist tied to this plan,
+reproducible baseline evidence and concrete work packages for Phase 1. Preserve
+the old records and use the post-numeric reassessment below for resumption.
 
 - [x] Record the activation tree, effective Rust/Node/tool flags, build profiles,
   validation state, relevant existing failures and benchmark environment. Pin
@@ -228,6 +228,132 @@ work that already exists, not proposed extra abstraction layers.
 Paths shortened to `ast/` and `datatypes/` in this table are relative to
 `src/compiler_frontend/`. Confirm module ownership before adding files.
 
+### Post-numeric restart reassessment (2026-10-11)
+
+The reassessment uses compiler revision
+`ffb294956034dbe0efe59b5769ac014440c3e364`. Other Phase 11 lanes changed
+documentation during this work, not compiler sources. Stable benchmark records
+report `git_dirty=true`. Raw commands, outputs, cohort and toolchain provenance
+live in `tmp/exact-numerics/phase11/P11ExpressionReassess/`. No recording benchmark
+ran and no Phase 4 implementation started.
+
+#### Refreshed construction and completion owners
+
+Paths in this table start at `src/compiler_frontend/`.
+
+| Owner | Current contract and migration disposition |
+|---|---|
+| `ast/numeric_construction.rs` | `NumericConstructionState` owns body-domain origin classes, raw/directed/multi-bind/alias recipes, bindings, forward producers and one-shot continuations. Exact receiving witnesses precede I32/F64 defaults and retain authored conflict order. Keep this state outside the permanent expression store. |
+| `ast/numeric_known_shape.rs` | Construction-only concrete/numeric/collection/map/optional/declared-substitution shapes project receiving constraints before canonical type interning. Do not turn these symbolic shapes into semantic node payloads. |
+| `ast/statements/numeric_body_completion.rs` | `complete_numeric_body` links aliases, resolves classes and forward producers, completes TIR intake and resumes authored positions. It releases construction state on success and failure. Independent functions and concrete generic bodies own separate domains. |
+| `ast/expressions/{expression_rpn.rs,parse_expression_dispatch.rs,call_arguments.rs}` | Pending literals, groups, bindings, calls, casts and expressions remain parser/construction carriers. Ordinary evaluation, folding, failure classification and completed validation reject leaked pending items. Preserve the retained call's routing/access policy rather than creating a second completion path. |
+| `ast/templates/tir/numeric_intake.rs` | A module-shared TIR store queues intake by body domain. Authored positions carry no completed payload until one-shot installation. Completing one root doesn't drain a sibling root. Completed TIR retains typed values, not numeric recipes. |
+| `datatypes/{ids.rs,numeric_operators.rs}`, `builtins/casts/resolution.rs` | Exact identities cover I8–I64, U8–U64, F16/F32/F64, Dec and Byte. D15 supplies equal-type preservation, smallest mixed domains, narrow checks and per-operation F16 rounding. One plain cast resolves its source independently of its target. Compact nodes preserve the resolved operation/domain/conversion facts, never profile policy. |
+| `ast/generic_functions/numeric_origins.rs`, retained call finishers | Declared parameter and result shapes link origins without defaulting during retained-call parsing. Concrete inference and call completion resume after operands become concrete. Request reservation/publication remains distinct from numeric selection. Keep inactive branch requests inactive and preserve the current immediate expected-result boundary. |
+| `ast/expressions/failure_classification.rs`, `ast/statements/fallible_handling/parser.rs`, `hir/private_failure_lane.rs` | Authored safety eligibility, actual implicit/typed failure and deferred private-call eligibility have separate owners. Handler typing constrains origins before reachability pruning. Private summaries converge after AST release, then lane installation/pruning refreshes final CFG/link facts. |
+
+#### Phase 0 and Phase 2 dispositions
+
+The accepted safe enum/AoS reference, owner-local typed IDs/ranges, explicit
+zero/one/multiple result shape and scratch promotion with last-reader compaction
+remain the selected design. Numeric construction strengthens their separation:
+promote only completed reachable semantic nodes, never a body-origin ID, recipe,
+continuation, symbolic shape or TIR intake record. Keep the 64-byte projected-row
+ceiling as a decision aid, not a production measurement or permission to drop facts.
+The standalone Phase 2 models still prove only their stated domain/isolation/
+reclamation properties. They don't prove production release or native execution.
+
+Historical Phase 0 counts, clone traffic, 424-byte expression size and performance
+attribution no longer describe this compiler. In particular, zero pending items
+in a published-AST census never established eager literal resolution. Completed
+nodes still have canonical types, but a receiving context can now settle a
+body-local origin before publication. Retire the eager-timing conclusion, not the
+completed-node invariant. Preserve old measurement values and model limitations
+in the benchmark report as historical evidence.
+
+Preparation/default/constant/TIR overlap remains real. `ModuleMaterialisationPreparation`
+still retains shared signature/field/receiver tables and cloned generic/builtin/
+constant owners past emitted-AST lowering until generated convergence and
+`freeze`. The HIR constant owner and preparation constant copy have distinct last
+readers. Numeric-state release doesn't reclaim those completed expression graphs,
+and draining a TIR intake doesn't reclaim append-only TIR capacity. Phase 4 must
+project canonical syntax and stable inputs before releasing their expression store,
+then prove later materialisation. Phase 5 still owns descriptor/default clone
+removal and direct constant handoffs.
+
+Keep sparse completed catch/failure metadata needed for diagnostics and HIR
+convergence. Don't retain the construction witness graph to replace origin-owned
+failure snapshots. Type-check the handler before pruning, including fallback
+constraints, then reclaim unreachable handler graphs under the same last-reader
+policy as folded replacements. Deferred private-only eligibility waits for exact
+callee summaries. Neither authored safety eligibility nor a retained witness
+proves a reachable failure edge. Final publication still follows pruning and
+summary convergence in both base modules and generated sidecars.
+
+#### Accepted dense HIR and stack checkpoint
+
+All commands below used `cargo test -q -p moth --lib -- <filter>`. Counts record
+selected tests, not the crate's filtered-out total.
+
+| Filter | Selected passing tests | Checkpoint |
+|---|---:|---|
+| `typed_ranges_read_empty_and_nonempty_payloads` | 1 | Typed side stores and empty/nonempty ranges |
+| `growth_preserves_row_ids_and_previous_ranges` | 1 | Stable handles across growth |
+| `checked_side_ranges_accept_exact_u32_bounds_and_reject_overflow` | 1 | Checked range bounds |
+| `freeze_keeps_exact_capacity_and_rejects_every_append_family` | 1 | Exact-capacity freeze and structural mutation barrier |
+| `scalar_remapping_preserves_ids_and_ranges_before_and_after_freeze` | 1 | Owning scalar remapping preserves topology |
+| `lowers_fixed_scalar_module_constant_with_exact_bits_and_type` | 1 | Scalar payload bits and semantic identity |
+| `checked_numeric_lowering` | 27 | Delivered narrow-domain lowering |
+| `source_span` | 17 | Captured source locations and span invariants |
+| `completed_sidecars_publish_only_after_structural_freeze` | 1 | Generated publication barrier |
+| `generated_sidecar` | 9 | Generated resources and nonidentity remapping |
+| `private_failure` | 6 | Deferred private failure machinery |
+| `numeric_construction_tests` | 5 | One-shot construction and release |
+| `numeric_intake_tests` | 4 | TIR domain isolation and completion |
+| `default_windows_main_thread_stack` | 2 | Nested conditionals and numeric groups on a 1 MiB compiler thread |
+
+Initial `hir_expression_store_tests` and `hir_scalar` filters selected zero tests.
+Those logs remain excluded from evidence. The exact owner filters above replaced
+them. The stack checks retain the accepted bound, not measured dynamic high-water
+usage or new stack headroom. Phase 4 still owns broader nested-call/depth coverage.
+
+#### Fresh non-recording baseline
+
+The counter-on dev probe used
+`cargo build --quiet --locked --package moth --bin data_layout_memory_probe --features data_layout_memory_probe`,
+then `/usr/bin/time -l ./target/debug/data_layout_memory_probe <entry>` for the
+original sixteen Phase 0/2 inputs. Fourteen inputs retain expected outcomes,
+including the diagnosed data-layout input. Two historical scratch inputs,
+`profile-default-constructor-split.moth` and `unicode-crlf-long-line.moth`, first
+diagnosed removed `Int` spelling. Their excluded raw runs remain alongside
+successful exact-width copies under the capture directory. Replacing `Int` with
+`I32` preserves byte length, default/call volume, Unicode and CRLF bytes. These
+adapted observations complete the sixteen-input cohort with that source-change
+qualification, not a like-for-like source fingerprint.
+
+| Observation | Post-numeric value | Interpretation |
+|---|---:|---|
+| Expression / ExpressionKind / RPN stride | 360 / 88 / 360 bytes | Measured published layout, not whole-graph memory |
+| Declaration / HirExpression / HirExpressionKind / HirPlace | 440 / 56 / 32 / 12 bytes | No claim about aggregate payload capacity |
+| `generic_scaling_160` published expression occurrences / HIR rows | 10,251 (6,251 in the module plus 4,000 across 800 generated sidecars) / 15,549 | Different stage counts, not unique live nodes |
+| Adapted default/constructor cohort clone events | 3,000 default applications, 6,000 parameter-default views, 2,000 constructor-default views | Surviving Phase 5 work, not measured copy bytes or time |
+| `generic_scaling_160` live-report / peak allocator delta | 13,011,465 / 428,983,088 bytes | Counter-on allocator proxies, not owner attribution or throughput |
+| `constant_chain_512` live-report / peak allocator delta | 36,155 / 4,341,185 bytes | Completed folding retains its own lifetime costs |
+| `just span-census` | 6,031 walked, 5,947 tokenised, 554,506 spans | Expanded corpus, not the old span cohort |
+| Locked 22/10 span split | 348 extended rows, 2,784 bytes, zero start overflows | Preserve eight-byte SourceSpan and its existing snapshot owner |
+| `just bench-data-layout-check` | 2 cases ran, 1 comparable, 0 ms average delta | Diagnosed workload changed |
+| `just bench-frontend-check` | 66 cases ran, 13 shared, +1 ms average delta | 29 changed workloads and new numeric cases prevent old-source attribution |
+| `just bench-check` | 64 cases ran, 4 shared, 0 ms average delta | 36 changed workloads and new numeric cases prevent old-source attribution |
+
+Stable checks used Rust 1.99.0, Node 24.21.0, default thread identity, one shared
+preflight and ten measured iterations. Initial frontend/CLI attempts rejected
+concurrent documentation edits and remain excluded. Stable reruns passed without
+tracked edits in flight. These single-run observations establish a restart
+baseline, not a repeatable speedup/no-regression claim. The numeric migration's
+five-invocation qualified matched comparison remains in the benchmark report.
+At resumption, preserve these records and the adapted scratch inputs, then
+measure actual payload/reclamation overlap before revisiting the selected layout.
+
 **Exit check:** every transferred obligation has a phase and a test/documentation
 owner. Every ID domain has a defined lifetime, or a named Phase 2 experiment that
 will decide it before migration. No numeric, TIR, result or failure semantic
@@ -249,7 +375,7 @@ The activation inventory records physical carriers and their current lifetimes. 
 | Canonical signature and declaration tables | `ast/statements/functions.rs` (`FunctionSignature`), `ast/type_resolution/mod.rs` (`ResolvedFunctionSignature`), `ast/module_ast/environment/` (lookups, declaration table, receiver catalogues), `headers/module_symbols.rs` | Own resolved signatures, struct fields, choice shells, receiver entries and generic templates. Later phases borrow these resolved facts instead of re-resolving or re-cloning full signatures |
 | Choice and struct shells | `ast/module_ast/environment/{lookups,resolved_public_type_roots}.rs`, `builtins/error_type.rs` (`BuiltinErrorManifest`) | Struct field defaults stay retained for later projection. Accepted choice payload fields stay default-free. Both flow through preparation into sidecars |
 | `ScopeArena` and `ScopeFrame` | `ast/module_ast/scope_context/scope_frame.rs` | Transient parser-side arena for one parse context. Frames own body-local declarations through `Rc`, and frame clones copy `Rc` handles rather than declaration payloads. The arena dies with the emission and validation pass that built it |
-| Parser and header scratch | `ast/expressions/expression_rpn.rs`, `parse_expression*.rs`, call/header inputs | Pending literal recipes and groups resolve during evaluation. Evaluated operands and located operators may survive in runtime RPN content |
+| Parser and header scratch | `ast/expressions/expression_rpn.rs`, `parse_expression*.rs`, call/header inputs | Historical eager evaluation wording is superseded. Body-owned recipes, origin constraints and deferred operands complete at the root before ordinary evaluation/publication. Evaluated operands and located operators may survive in runtime RPN content |
 | TIR and template carriers | `ast/templates/tir/` (`store.rs`, `view.rs`, `overlays.rs`, `node.rs`), `ast/templates/runtime_handoff.rs` | `TemplateIrStore` plus `TirView` form the AST-local module-owned view authority. Structural children inherit the accepted expression overlay while nested value expressions take their own complete context. No TIR identity crosses the HIR handoff |
 | Match and value-production carriers | `ast/statements/match_patterns/types.rs`, `ast/statements/value_production/types.rs` | Guards, scrutinees, produced values and closed `ValueBlock` forms stay content and control flow. Parser receiving-context targets stay transient analysis |
 | Statement carriers | `ast/ast_nodes.rs` (`AstNode`, `NodeKind`, `Declaration`, `MultiBindTarget`) | Own declaration rows, call preludes, loop and branch payloads and multi-slot binders. Phases 3 and 4 migrate expression and place edges without indiscriminately flattening unrelated statement collections |
@@ -572,8 +698,8 @@ durable recursive expression/place representation.
   for reliably detectable forbidden durable recursive HIR ownership.
 
 **Checks:** growth and empty/nonempty range access, flat field/index places,
-remapping across base/generated stores, final-CFG validation/link facts, numeric
-profile parity, affected borrow/Boracle and both supported backend lanes. Use
+remapping across base/generated stores, final-CFG validation/link facts, exact
+numeric fidelity, affected borrow/Boracle and both supported backend lanes. Use
 source contracts for user behaviour and owner-local tests for store invariants.
 Run the affected frontend/end-to-end benchmark checks after the cutover.
 
@@ -728,14 +854,26 @@ borrow state during that cutover.
 **Produces:** the typed-expression/native-result checkpoint. Treat 4A–4D as
 bounded review packages within one coupled accepted representation checkpoint.
 
+The numeric prerequisite has delivered exact identities, I32/F64 defaults,
+body-local construction, receiving witnesses, D15 domains and checks, plain casts
+and authored safety-catch handling. Phase 4 consumes and mechanically preserves
+those capabilities. It does not reimplement numeric inference, add semantic
+profiles or broaden generic expected-type forwarding. Native results, Core
+constant evaluation and Wiring remain undelivered work in this plan.
+
 ### 4A. Semantic construction and values
 
 - [ ] Separate parser/RPN scratch, declarations, signatures, missing defaults,
-  places and constant content from completed semantic expressions. Preserve early
-  nominal registration, contextual numeric materialisation and AST-local folding.
+  places and constant content from completed semantic expressions. Keep the
+  delivered numeric construction owner transient and promote only its completed
+  typed output. Preserve nominal registration, receiving constraints and AST folding.
 - [ ] Construct resolved nodes through the selected compact store API. Publish
   child IDs/ranges, canonical result shape, exact spans and required operation
   facts. Move sparse occurrence/failure facts to their selected owner.
+- [ ] Retain canonical exact types and resolved D15 operation/conversion/failure
+  facts through compact nodes. Don't migrate origin classes, recipes, symbolic
+  known shapes, authored draft positions or generic numeric-link work into
+  permanent payloads. Keep source resolution independent of cast targets.
 - [ ] Replace fake `NoValue` declaration expressions and unresolved placeholder
   values at symbol/signature boundaries. Keep authored type/declaration syntax
   where diagnostics and later generic materialisation need it.
@@ -805,12 +943,12 @@ Complete these tests in the relevant owner before accepting the checkpoint:
 |---|---|
 | Store integrity | Growth preserves handles, typed ranges cover exact elements, empty ranges work, sibling-domain IDs cannot be confused, injected small limits exercise every compact overflow diagnostic without allocating billions of nodes. |
 | Results and control flow | Zero results versus one optional `none` versus divergence, per-slot arity/coercion, same-typed slots with different values to expose swaps, exactly-once producers, all RHS before writes, success/error dominance, catch joins and valid/invalid propagation contexts. |
-| Numeric fidelity | All current profiles and entry services preserve post-Dec/Uint literal rules, full integer extrema, F16/F32 rounding, signed zero, exact Dec payloads, numeric identity/carrier separation and U32 error codes. |
+| Numeric fidelity | Preserve all exact numeric identities and entry services, I32/F64 defaults, body-root completion, authored-order receiver conflicts, D15 narrow/mixed domains, per-operation F16 rounding, full integer extrema, signed zero, exact Dec payloads, source-independent casts and U32 error codes. Reuse delivered numeric tests and add only representation-boundary assertions. |
 | Immutable views | Two instantiations with different roots cannot contaminate one another. Structural TIR children inherit the selected overlay, nested values use their own context, runtime-dependent paths still undergo required validation and handoff materialises that same view. |
 | Static branches | Both authored branches validate. Inactive branches create no active concrete generic requests, emitted HIR/runtime capabilities or active resource uses, while graph-active resource validity/dependencies remain mandatory. |
 | Generic lifetime | Release unused validation AST/store, then instantiate later from retained canonical syntax. Base/generated/sibling local ID collisions cannot select the wrong object. |
 | Failure lifetime | Drop AST/TIR before base/generated recursive convergence. Retain origin-owned source order, skipped recursive backedges, bounded private witnesses including three private hops plus origin/elision facts and typed deferred-catch producer/handler locations. |
-| Subtle failure facts | Known-true assertions fully validate messages and retain private witnesses in inert replacements. Preserve post-discharge catch folding such as U8 arithmetic widened to U32, typed conflicts and error code zero. Checked compound write-back priority applies to its own arithmetic, not unrelated RHS recovery. |
+| Subtle failure facts | Known-true assertions fully validate messages and retain private witnesses in inert replacements. Preserve authored safety eligibility independently of actual failure, typed handler constraints before pruning, post-discharge catch folding under D15, typed conflicts and error code zero. Equal-type U8 arithmetic remains U8, not the historical widened U32 example. Checked compound write-back priority applies to its own arithmetic, not unrelated RHS recovery. |
 | Diagnostics | Render after expression/TIR release and source-file mutation using the captured source snapshot, donor labels, types and provenance. Retain the current required TypeEnv lifetime until the diagnostic owner changes. |
 | Final HIR/publication | Validate final CFG, dominance and link facts after lane install, handler pruning and unchanged reuse in base and generated modules. Check supported JS/Wasm output through existing contractual owners. |
 
@@ -830,7 +968,7 @@ and performance evidence follow the shared gate below.
 
 ## Phase 5 - reduce repeated type and folding work
 
-**Consumes:** final representations and updated profiles.
+**Consumes:** final representations and current type/fold profiles.
 **Produces:** direct semantic handoffs and measured reductions in repeated work.
 Representation adoption is mandatory. Optional optimisation mechanisms require
 current evidence and can be declined with their investigation recorded.
@@ -863,7 +1001,7 @@ current evidence and can be declined with their investigation recorded.
   it to an API that borrows and then copies it again.
 - [ ] Re-profile after each material change. Investigate further ideas, such as
   numeric factor reuse or narrow memoisation, only when remaining attribution
-  and complete semantic keys justify them. Keep key lifetime, profile, config,
+  and complete semantic keys justify them. Keep key lifetime, config,
   imported-constant and directive invalidation explicit. Do not repeat the
   rejected owned-folder/key experiments without a changed causal hypothesis.
 
@@ -974,7 +1112,7 @@ projection and the canonical external/Core Text contracts.
   and tests. No wall-clock budget framework, guessed resource URL, locale,
   normalisation, host-time/randomness/IO or fallible host-call evaluation.
 - [ ] Enable only existing `@core/text` `length`, `is_empty`, `contains`,
-  `starts_with` and `ends_with`. Read their actual post-Uint signatures. Cover
+  `starts_with` and `ends_with`. Read their current exact signatures. Cover
   empty strings/patterns, non-ASCII/non-BMP and combining sequences against the
   canonical contract. A UTF-8 byte count cannot replace its length semantics.
 - [ ] Test optional presence/absence and multiple success slots through the

@@ -1,0 +1,42 @@
+-- Each unannotated numeric slot must receive its later U64 constraint before
+-- defaulting, including the small literals beside the full-width U64 values.
+-- The mixed block also keeps its already-concrete String slot independent.
+-- Both branch paths must retain their ordered results.
+-- The terminal block's `if true` selects its first `then`. The later dead `then 7, 2`
+-- contributes no inference, yet its raw 7 must take the U64 that its first slot resolves
+-- from the live named `concrete` operand, not default to I32.
+
+render_count |value U64| -> String:
+    return cast value
+;
+
+numeric_slots |ready Bool| -> String:
+    first, second = if ready:
+        then 4_294_967_296, 7
+    else
+        then 4_294_967_297, 8
+    ;
+    return [:[render_count(first)]/[render_count(second)]]
+;
+
+mixed_slots |ready Bool| -> String:
+    label, count = if ready:
+        then "ready", 4_294_967_296
+    else
+        then "waiting", 4_294_967_297
+    ;
+    return [:[label]/[render_count(count)]]
+;
+
+terminal_then_slots || -> U64:
+    concrete U64 = 1
+    first, second = if true:
+        then concrete, 2
+        then 7, 2
+    else
+        then concrete, 4
+    ;
+    return first
+;
+
+[:numeric=[numeric_slots(true)]/[numeric_slots(false)] mixed=[mixed_slots(true)]/[mixed_slots(false)] terminal=[render_count(terminal_then_slots())]]

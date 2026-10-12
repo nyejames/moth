@@ -1,5 +1,5 @@
 Existing = |
-    value Int,
+    value I32,
 |
 
 Box type Existing = |

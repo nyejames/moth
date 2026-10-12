@@ -272,7 +272,11 @@ fn insert_from_expression(
                     // Pending syntax never survives evaluation; this fallible store walk reports
                     // the broken invariant instead of silently skipping the malformed operand.
                     ExpressionRpnItem::PendingNumericLiteral { .. }
-                    | ExpressionRpnItem::PendingGroup { .. } => {
+                    | ExpressionRpnItem::PendingGroup { .. }
+                    | ExpressionRpnItem::PendingNumericBinding { .. }
+                    | ExpressionRpnItem::PendingNumericCast { .. }
+                    | ExpressionRpnItem::PendingNumericCall { .. }
+                    | ExpressionRpnItem::PendingNumericExpression { .. } => {
                         return Err(pending_expression_item_bug(
                             "body-local const-record insertion",
                         )
@@ -428,10 +432,7 @@ fn insert_from_expression(
 
         ExpressionKind::NoValue
         | ExpressionKind::OptionNone
-        | ExpressionKind::Int(_)
-        | ExpressionKind::Uint(_)
         | ExpressionKind::Number(_)
-        | ExpressionKind::Float(_)
         | ExpressionKind::FixedScalar(_)
         | ExpressionKind::StringSlice(_)
         | ExpressionKind::StructuralString { .. }

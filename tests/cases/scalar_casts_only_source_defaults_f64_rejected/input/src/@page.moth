@@ -1,0 +1,15 @@
+receive_string |value String| -> String:
+    return value
+;
+
+receive_f64 |value F64| -> F64:
+    return value
+;
+
+-- These are the source's only uses. Cast destinations do not constrain it, so
+-- its decimal origin defaults to F64 and the last cast is same-type.
+source = 1.0
+text = receive_string(cast source)
+same_default = receive_f64(cast source)
+
+[:unreachable]

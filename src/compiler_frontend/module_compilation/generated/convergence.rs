@@ -14,6 +14,7 @@
 
 use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::ast::expressions::failure_facts::{
     WitnessCandidates, retain_bounded_witness_hops, select_failure_witness,
 };
@@ -590,14 +591,20 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
             Some(&source_owner),
         )?;
     }
+    discard_validated_failure_captures(hir_module);
     // Unchanged base HIR keeps the link facts the service collected before convergence.
-    let refreshed = refresh_private_failure_lanes(
-        compiler,
-        hir_module,
-        &borrow_analysis,
-        type_environment,
-        warnings,
-        None,
+    // The refresh re-runs borrow analysis over the installed lanes, so it is borrow convergence.
+    let refreshed = timed_stage_attributed!(
+        crate::timing::TimingMetric::FrontendBorrowConverge,
+        timing_context,
+        refresh_private_failure_lanes(
+            compiler,
+            hir_module,
+            &borrow_analysis,
+            type_environment,
+            warnings,
+            None,
+        )
     )?;
     if let Some(report) = refreshed {
         *function_link_facts = collect_module_function_link_facts(hir_module)
@@ -616,13 +623,18 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
             identity.declaration().module_origin().package().clone(),
         );
         let sidecar = generated_transaction.sidecar_mut(&identity)?;
-        let refreshed = refresh_private_failure_lanes(
-            compiler,
-            &mut sidecar.module.executable.hir,
-            &sidecar.module.executable.borrow_analysis,
-            &mut sidecar.module.executable.type_environment,
-            &sidecar.module.metadata.warnings,
-            Some(&source_owner),
+        discard_validated_failure_captures(&mut sidecar.module.executable.hir);
+        let refreshed = timed_stage_attributed!(
+            crate::timing::TimingMetric::FrontendGeneratedBorrowRecheck,
+            timing_context,
+            refresh_private_failure_lanes(
+                compiler,
+                &mut sidecar.module.executable.hir,
+                &sidecar.module.executable.borrow_analysis,
+                &mut sidecar.module.executable.type_environment,
+                &sidecar.module.metadata.warnings,
+                Some(&source_owner),
+            )
         )?;
         // Unchanged sidecar HIR keeps the link facts materialisation collected from it.
         if let Some(report) = refreshed {
@@ -631,11 +643,99 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                     .map_err(PremergeFailure::Infrastructure)?;
             sidecar.module.executable.borrow_analysis = report;
         }
+        retain_live_call_summaries(
+            &mut sidecar.module.executable.hir,
+            &sidecar.module.link_facts.functions,
+        );
+        // The publication owner computes the proof table once, from the final HIR after every
+        // rewrite and summary refresh above, so the paired facts match what gets published.
+        sidecar.module.executable.numeric_proofs = analyse_numeric_proofs(
+            &sidecar.module.executable.hir,
+            &sidecar.module.executable.type_environment,
+        );
         // The unchanged lane shares this barrier: every newly completed sidecar
         // releases spare construction capacity before the transaction publishes it.
         sidecar.module.executable.hir.expressions.freeze();
     }
+    retain_live_call_summaries(hir_module, function_link_facts);
+    let reachable_sidecars =
+        reachable_generated_sidecars(function_link_facts, generated_transaction);
+    generated_transaction
+        .retain_reachable_sidecars(&reachable_sidecars)
+        .map_err(PremergeFailure::Infrastructure)?;
     Ok(borrow_analysis)
+}
+
+/// Drop source-validation captures after convergence has checked them; runtime contributors remain.
+fn discard_validated_failure_captures(hir: &mut HirModule) {
+    for facts in hir.function_failure_facts.values_mut() {
+        facts.assertion_message_calls.clear();
+        facts.deferred_custom_catches.clear();
+    }
+}
+
+fn retain_live_call_summaries(hir: &mut HirModule, link_facts: &HirModuleLinkFacts) {
+    let mut live_imported = FxHashSet::default();
+    let mut live_private = FxHashSet::default();
+    let mut live_generated = FxHashSet::default();
+    for (_, target) in link_facts.direct_call_targets() {
+        match target {
+            CallTarget::CrossModule(identity) => {
+                live_imported.insert(identity);
+            }
+            CallTarget::ModulePrivate(identity) => {
+                live_private.insert(identity);
+            }
+            CallTarget::Generated(identity) => {
+                live_generated.insert(identity);
+            }
+            CallTarget::Local(_) | CallTarget::External(_) => {}
+        }
+    }
+    hir.imported_call_summaries
+        .retain(|identity, _| live_imported.contains(identity));
+    hir.module_private_call_summaries
+        .retain(|identity, _| live_private.contains(identity));
+    hir.generated_call_summaries
+        .retain(|identity, _| live_generated.contains(identity));
+}
+
+fn reachable_generated_sidecars(
+    base_link_facts: &HirModuleLinkFacts,
+    transaction: &GeneratedFunctionTransaction<'_>,
+) -> FxHashSet<GeneratedFunctionIdentity> {
+    let generated_callees = transaction
+        .completed_link_facts()
+        .map(|(identity, link_facts)| {
+            let callees = link_facts
+                .direct_call_targets()
+                .into_iter()
+                .filter_map(|(_, target)| match target {
+                    CallTarget::Generated(identity) => Some(identity),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            (identity.clone(), callees)
+        })
+        .collect::<FxHashMap<_, _>>();
+    let mut pending = base_link_facts
+        .direct_call_targets()
+        .into_iter()
+        .filter_map(|(_, target)| match target {
+            CallTarget::Generated(identity) => Some(identity),
+            _ => None,
+        })
+        .collect::<VecDeque<_>>();
+    let mut reachable = FxHashSet::default();
+    while let Some(identity) = pending.pop_front() {
+        if !reachable.insert(identity.clone()) {
+            continue;
+        }
+        if let Some(callees) = generated_callees.get(&identity) {
+            pending.extend(callees.iter().cloned());
+        }
+    }
+    reachable
 }
 
 /// Install private failure lanes and re-run analysis of the rewritten HIR.
@@ -900,24 +1000,48 @@ fn function_failure_facts(
     })
 }
 
-/// Numeric contributors are always active once their code set is validated; calls are active
-/// while their exact summary escapes builtin failure.
+/// Arithmetic and cast contributors are active once validated; calls are active while their
+/// exact summary escapes builtin failure.
 fn builtin_failure_contributor_is_active(
     hir: &HirModule,
     report: &BorrowCheckReport,
     contributor: &HirBuiltinFailureContributor,
 ) -> Result<bool, CompilerError> {
     match &contributor.source {
-        HirBuiltinFailureSource::NumericOperation
-        | HirBuiltinFailureSource::CompoundWriteBack { .. } => {
+        HirBuiltinFailureSource::NumericOperation => {
             if contributor.codes.is_empty()
                 || contributor
                     .codes
                     .iter()
-                    .any(|code| !code.is_implicit_failure())
+                    .any(|code| !code.is_implicit_numeric_or_range_failure())
             {
                 return Err(CompilerError::compiler_error(
                     "implicit numeric failure contributor must carry nonempty implicit builtin failure codes",
+                ));
+            }
+            Ok(true)
+        }
+        HirBuiltinFailureSource::CompoundWriteBack { .. } => {
+            if contributor.codes.is_empty()
+                || contributor
+                    .codes
+                    .iter()
+                    .any(|code| !code.is_implicit_cast_failure())
+            {
+                return Err(CompilerError::compiler_error(
+                    "implicit compound write-back failure contributor must carry nonempty cast failure codes",
+                ));
+            }
+            Ok(true)
+        }
+        HirBuiltinFailureSource::AuthoredCastConversion => {
+            if contributor
+                .codes
+                .iter()
+                .any(|code| !code.is_implicit_cast_failure())
+            {
+                return Err(CompilerError::compiler_error(
+                    "implicit cast failure contributor carries a non-implicit builtin failure code",
                 ));
             }
             Ok(true)
@@ -958,7 +1082,8 @@ fn builtin_failure_witness_search<'a>(
     loop {
         if let Some(contributor) = next.take() {
             let target = match &contributor.source {
-                HirBuiltinFailureSource::NumericOperation => {
+                HirBuiltinFailureSource::NumericOperation
+                | HirBuiltinFailureSource::AuthoredCastConversion => {
                     witness.codes = contributor.codes.clone();
                     witness.origin_span = contributor.span;
                     witness.origin = BuiltinFailureOriginKind::Operation;
@@ -1130,6 +1255,14 @@ pub(crate) fn builtin_failure_diagnostic(
     let Some(contributor) = active_builtin_failure_contributor(hir, report, function)? else {
         return Ok(None);
     };
+    // Evidence was selected before lowering. Discharge its promise only against the closed
+    // summaries, before private-lane installation can erase an apparently infallible catch.
+    if let Some(contract) = &facts.infallible_cast_evidence {
+        let witness = builtin_failure_witness(hir, report, function, contributor)?;
+        return Ok(Some(CompilerDiagnostic::infallible_cast_evidence_failure(
+            contract, &witness,
+        )));
+    }
     let reason = match facts.boundary {
         HirBuiltinFailureBoundary::InferPrivate | HirBuiltinFailureBoundary::BuiltinErrorSlot => {
             return Ok(None);

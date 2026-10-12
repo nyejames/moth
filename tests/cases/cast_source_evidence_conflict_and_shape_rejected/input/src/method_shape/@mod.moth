@@ -1,0 +1,7 @@
+Token = | raw I32 |
+
+to_i32 |this Token| -> I32:
+    return this.raw
+;
+
+value I32 = cast Token(7)

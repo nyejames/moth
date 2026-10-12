@@ -72,9 +72,7 @@ impl FixedScalar {
 
     /// Resolves an exact source spelling back to its fixed scalar identity.
     ///
-    /// `Int` and `Float` deliberately return `None`: they are profile-dependent identities with no
-    /// fixed width, so a matching `NumericProfile` width never makes them alias an `I*`/`U*`/`F*`
-    /// spelling.
+    /// Only exact fixed scalar spellings resolve; every other name returns `None`.
     pub fn from_name(name: &str) -> Option<FixedScalar> {
         FixedScalar::ALL
             .into_iter()
@@ -154,7 +152,7 @@ pub enum FixedScalarClass {
 ///       precision (every `F16`/`F32` value is exact in `f64`).
 /// WHY:  AST, const payloads, public folded values and HIR share one `Copy` carrier whose
 ///       equality and hash are exact-bit, so `U64` values above `i64::MAX` and signed zero
-///       survive every stage without an `Int`/`Float` intermediate.
+///       survive every stage without a lossy intermediate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FixedScalarValue {
     scalar: FixedScalar,

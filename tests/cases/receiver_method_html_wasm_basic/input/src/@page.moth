@@ -1,4 +1,4 @@
-double |this Int| -> Int:
+double |this I32| -> I32:
     return this + this
 ;
 

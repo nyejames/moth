@@ -1,7 +1,7 @@
 Response ::
     Success,
     Pending |
-        retry_count Int,
+        retry_count I32,
         message String,
     |,
 ;

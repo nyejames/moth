@@ -1,34 +1,34 @@
 DomainFailure = |
     detail String,
-    marker Int,
+    marker I32,
 |
 
-left_producer |hit Bool| -> Int, DomainFailure!:
+left_producer |hit Bool| -> I32, DomainFailure!:
     if hit:
         return! DomainFailure("left-detail", 11)
     ;
     return 101
 ;
-right_producer |hit Bool| -> Int, DomainFailure!:
+right_producer |hit Bool| -> I32, DomainFailure!:
     if hit:
         return! DomainFailure("right-detail", 22)
     ;
     return 202
 ;
-pick |first Int, second Int| -> Int:
+pick |first I32, second I32| -> I32:
     if first is 101:
         return second
     ;
     return first
 ;
-observe_left |hit Bool, seen ~String| -> Int:
+observe_left |hit Bool, seen ~String| -> I32:
     value = pick(left_producer(hit), right_producer(false)) catch |left_err|:
         seen = [: [left_err.marker] [left_err.detail]]
         then 0 - 1
     ;
     return value
 ;
-observe_right |hit Bool, seen ~String| -> Int:
+observe_right |hit Bool, seen ~String| -> I32:
     value = pick(left_producer(false), right_producer(hit)) catch |right_err|:
         seen = [: [right_err.marker] [right_err.detail]]
         then 0 - 2

@@ -1,5 +1,5 @@
 main ||:
-    value as Int = 1
+    value as I32 = 1
 ;
 
 main()

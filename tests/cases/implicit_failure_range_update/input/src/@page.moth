@@ -1,21 +1,21 @@
-walk |start Int, end Int, step Int| -> Int:
-    seen ~Int = 0
+walk |start I32, end I32, step I32| -> I32:
+    seen ~I32 = 0
     loop start to end by step |value|:
         seen = copy value
     ;
     return seen
 ;
-safe_walk |start Int, end Int, step Int| -> Int, Error!:
+safe_walk |start I32, end I32, step I32| -> I32, Error!:
     return walk(start, end, step)
 ;
-endpoint || -> Int:
-    visited ~Int = 0
+endpoint || -> I32:
+    visited ~I32 = 0
     loop 2147483645 to & 2147483647 |value|:
         visited = visited + 1
     ;
     return visited
 ;
-safe_endpoint || -> Int, Error!:
+safe_endpoint || -> I32, Error!:
     return endpoint()
 ;
 code ~U32 = 0

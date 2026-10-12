@@ -1,8 +1,8 @@
-can_error |value String| -> String, Int, Error!:
+can_error |value String| -> String, I32, Error!:
     return value, 1
 ;
 
-recover |value String| -> String, Int:
+recover |value String| -> String, I32:
     a, b = can_error(value) catch |err|:
         io.line([: [err.message]])
     ;

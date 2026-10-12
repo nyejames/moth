@@ -1,0 +1,11 @@
+receive_u64 |value U64| -> String:
+    return cast value
+;
+
+-- The template interpolation is a non-constraining formatting consumer. It
+-- must not default the binding before the later direct U64 receiver resolves it.
+value = 1
+[:scalar formatting before=[value]]
+received = receive_u64(value)
+
+[:scalar formatting after=[received]]

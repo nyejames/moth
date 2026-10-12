@@ -1,4 +1,4 @@
-use_value |value Int|:
+use_value |value I32|:
 ;
 
 use_value(if true then 1 else 0)

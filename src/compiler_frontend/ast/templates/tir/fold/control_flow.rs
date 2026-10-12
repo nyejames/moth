@@ -109,24 +109,36 @@ fn has_resolved_source_constant_reference(
         ExpressionKind::Coerced { value, .. } => {
             has_resolved_source_constant_reference(value, fold_context)
         }
-        ExpressionKind::Runtime(rpn) => rpn.items.iter().any(|item| match item {
-            ExpressionRpnItem::Operand(operand) => {
-                has_resolved_source_constant_reference(operand, fold_context)
+        ExpressionKind::Runtime(rpn) => {
+            // A retained numeric recipe must stay untouched until body completion replaces it,
+            // so the whole expression defers rather than folding constants around it.
+            let mut found = false;
+            for item in &rpn.items {
+                match item {
+                    ExpressionRpnItem::Operand(operand) => {
+                        found |= has_resolved_source_constant_reference(operand, fold_context);
+                    }
+                    ExpressionRpnItem::Operator { .. } => {}
+                    ExpressionRpnItem::PendingNumericBinding { .. }
+                    | ExpressionRpnItem::PendingNumericCast { .. }
+                    | ExpressionRpnItem::PendingNumericCall { .. }
+                    | ExpressionRpnItem::PendingNumericExpression { .. } => return false,
+                    // Pending syntax never survives evaluation. This predicate cannot return the
+                    // canonical error, so it flags the broken invariant in debug builds and reports
+                    // conservatively here; every fallible fold path below rejects the pending item
+                    // with `pending_expression_item_bug` once it is actually visited.
+                    ExpressionRpnItem::PendingNumericLiteral { .. }
+                    | ExpressionRpnItem::PendingGroup { .. } => {
+                        debug_assert!(
+                            false,
+                            "pending expression syntax reached TIR source-constant predicate"
+                        );
+                        return true;
+                    }
+                }
             }
-            ExpressionRpnItem::Operator { .. } => false,
-            // Pending syntax never survives evaluation. This predicate cannot return the
-            // canonical error, so it flags the broken invariant in debug builds and reports
-            // conservatively here; every fallible fold path below rejects the pending item
-            // with `pending_expression_item_bug` once it is actually visited.
-            ExpressionRpnItem::PendingNumericLiteral { .. }
-            | ExpressionRpnItem::PendingGroup { .. } => {
-                debug_assert!(
-                    false,
-                    "pending expression syntax reached TIR source-constant predicate"
-                );
-                true
-            }
-        }),
+            found
+        }
         _ => false,
     }
 }
@@ -164,11 +176,7 @@ fn fold_source_constant_initializer(
     fold_context: &mut TirFoldContext<'_>,
 ) -> Result<Option<Expression>, TemplateError> {
     match &expression.kind {
-        ExpressionKind::Int(_)
-        | ExpressionKind::Uint(_)
-        | ExpressionKind::Float(_)
-        | ExpressionKind::FixedScalar(_)
-        | ExpressionKind::Number(_) => Ok(Some(expression.clone())),
+        ExpressionKind::FixedScalar(_) | ExpressionKind::Number(_) => Ok(Some(expression.clone())),
         ExpressionKind::Reference(_) => {
             resolve_source_constant_references(expression, fold_context)
         }
@@ -197,6 +205,12 @@ fn fold_source_constant_initializer(
                         items.push(ExpressionRpnItem::Operand(operand));
                     }
                     ExpressionRpnItem::Operator { .. } => items.push(item.clone()),
+                    // A retained numeric recipe must stay untouched; body completion replaces it
+                    // before any fold runs, so this initializer is not foldable now.
+                    ExpressionRpnItem::PendingNumericBinding { .. }
+                    | ExpressionRpnItem::PendingNumericCast { .. }
+                    | ExpressionRpnItem::PendingNumericCall { .. }
+                    | ExpressionRpnItem::PendingNumericExpression { .. } => return Ok(None),
                     // Pending syntax never survives evaluation; its presence here is a broken
                     // compiler invariant, not a foldable position.
                     ExpressionRpnItem::PendingNumericLiteral { .. }
@@ -218,26 +232,22 @@ fn fold_source_constant_rpn(
     items: Vec<ExpressionRpnItem>,
     fold_context: &mut TirFoldContext<'_>,
 ) -> Result<Option<Expression>, TemplateError> {
-    let mut folded = match constant_fold(
-        items,
-        fold_context.string_table,
-        fold_context.numeric_profile,
-        fold_context.source_scope,
-    ) {
-        Ok(ConstantFoldOutcome::Folded(items)) => {
-            if items.len() != 1 {
-                return Ok(None);
+    let mut folded =
+        match constant_fold(items, fold_context.string_table, fold_context.source_scope) {
+            Ok(ConstantFoldOutcome::Folded(items)) => {
+                if items.len() != 1 {
+                    return Ok(None);
+                }
+                let Some(ExpressionRpnItem::Operand(expression)) = items.into_iter().next() else {
+                    return Ok(None);
+                };
+                expression
             }
-            let Some(ExpressionRpnItem::Operand(expression)) = items.into_iter().next() else {
-                return Ok(None);
-            };
-            expression
-        }
-        Ok(ConstantFoldOutcome::NotConstant(_))
-        | Ok(ConstantFoldOutcome::TextUnavailable { .. }) => return Ok(None),
-        Err(ConstantFoldError::Diagnostic(diagnostic)) => return Err(diagnostic.into()),
-        Err(ConstantFoldError::Infrastructure(error)) => return Err((*error).into()),
-    };
+            Ok(ConstantFoldOutcome::NotConstant(_))
+            | Ok(ConstantFoldOutcome::TextUnavailable { .. }) => return Ok(None),
+            Err(ConstantFoldError::Diagnostic(diagnostic)) => return Err(diagnostic.into()),
+            Err(ConstantFoldError::Infrastructure(error)) => return Err((*error).into()),
+        };
     folded.span = expression.span;
     folded.synthetic_interface_provenance = folded
         .synthetic_interface_provenance
@@ -417,7 +427,6 @@ pub(super) fn fold_tir_loop(
                 range_ref,
                 fold_context.template_const_loop_iteration_limit,
                 loop_span,
-                fold_context.numeric_profile.float_precision,
             )?;
             let range_provenance =
                 SyntheticInterfaceProvenance::union_all(range_provenance_expressions(range_ref));

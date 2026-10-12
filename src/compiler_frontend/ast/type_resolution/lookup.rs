@@ -529,8 +529,6 @@ fn visible_declaration_by_name<'a>(
 fn builtin_named_type(type_name: StringId, string_table: &StringTable) -> Option<DataType> {
     let resolved = string_table.resolve(type_name);
     let data_type = match resolved {
-        "Int" => DataType::Int,
-        "Float" => DataType::Float,
         "Bool" => DataType::Bool,
         "String" => DataType::StringSlice,
         "Char" => DataType::Char,

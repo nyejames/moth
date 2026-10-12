@@ -6,6 +6,8 @@
 
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::generic_functions::numeric_origins::DeclaredChoiceSubject;
+use crate::compiler_frontend::ast::numeric_known_shape::KnownShapeId;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -18,6 +20,29 @@ pub struct MatchArm {
     pub pattern: MatchPattern,
     pub guard: Option<Expression>,
     pub body: Vec<AstNode>,
+}
+
+/// The match subject a pattern is resolved against.
+///
+/// WHAT: the subject's exact type when it is already selected, a pending numeric origin whose
+///       type only the body root selects, a pending generic choice whose declared owner names
+///       its variants while the instance stays unselected, or a pending optional whose inner
+///       shape is known while the optional instance stays unselected.
+/// WHY: pattern values materialise at the selected subject type, so a pending subject keeps the
+///      authored fragment instead of fabricating a typed pattern early; a pending choice still
+///      fixes variant identity at parse time from its declared owner, and a pending option fixes
+///      its payload shape from the retained inner shape.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum MatchSubject {
+    /// The subject's exact type is already selected.
+    Known(TypeId),
+    /// The subject is a pending numeric origin whose exact type is not selected yet.
+    Pending,
+    /// The subject is a retained generic choice: its declared owner fixes the variant names.
+    PendingChoice(DeclaredChoiceSubject),
+    /// The subject is a retained optional: its inner shape is known while the optional instance
+    /// stays unselected, so a payload capture or value pattern can name its payload shape.
+    PendingOption { inner: KnownShapeId },
 }
 
 /// One payload field capture inside a choice-variant match pattern.

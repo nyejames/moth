@@ -1,0 +1,2 @@
+-- A stray `|` after a complete initializer expression.
+result = 1 | 2

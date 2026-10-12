@@ -36,7 +36,9 @@ use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
-use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
+use crate::compiler_frontend::builtins::casts::targets::{
+    BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget,
+};
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::DataType;
@@ -88,6 +90,43 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
 };
 use crate::compiler_frontend::traits::ids::TraitEvidenceId;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+/// One exact `I32` value for lowering fixtures.
+fn i32_value(value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range")
+}
+
+/// One exact `I64` value for fixtures that deliberately exceed `i32::MAX`.
+fn i64_value(value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(FixedScalar::I64, value).expect("I64 literal in range")
+}
+
+/// One exact `U32` value for lowering fixtures.
+fn u32_value(value: u64) -> FixedScalarValue {
+    FixedScalarValue::unsigned(FixedScalar::U32, value).expect("U32 literal in range")
+}
+
+/// One exact `F64` value for lowering fixtures.
+fn f64_value(value: f64) -> FixedScalarValue {
+    FixedScalarValue::binary_float(FixedScalar::F64, value)
+        .expect("F64 literal is exactly representable")
+}
+
+/// One exact `I32` literal expression for lowering fixtures.
+fn int_expr(value: i64, span: Option<SourceSpan>) -> Expression {
+    Expression::fixed_scalar(i32_value(value), span, ValueMode::ImmutableOwned)
+}
+
+/// One exact `U32` literal expression for lowering fixtures.
+fn uint_expr(value: u64, span: Option<SourceSpan>) -> Expression {
+    Expression::fixed_scalar(u32_value(value), span, ValueMode::ImmutableOwned)
+}
+
+/// One exact `F64` literal expression for lowering fixtures.
+fn float_expr(value: f64, span: Option<SourceSpan>) -> Expression {
+    Expression::fixed_scalar(f64_value(value), span, ValueMode::ImmutableOwned)
+}
 
 fn field_symbol(
     parent: &PathId,
@@ -517,7 +556,7 @@ fn lowers_primitive_literals() {
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
 
     let int_lowered = builder
-        .lower_expression(&Expression::int(42, span, ValueMode::ImmutableOwned))
+        .lower_expression(&int_expr(42, span))
         .expect("int lowering should succeed");
     assert!(int_lowered.prelude.is_empty());
     assert_eq!(
@@ -526,11 +565,11 @@ fn lowers_primitive_literals() {
     );
     assert!(matches!(
         &expression_row(&builder, int_lowered.value).kind,
-        HirExpressionKind::Int(42)
+        HirExpressionKind::FixedScalar(value) if *value == i32_value(42)
     ));
 
     let float_lowered = builder
-        .lower_expression(&Expression::float(3.25, span, ValueMode::ImmutableOwned))
+        .lower_expression(&float_expr(3.25, span))
         .expect("float lowering should succeed");
     assert!(float_lowered.prelude.is_empty());
     assert_eq!(
@@ -539,7 +578,7 @@ fn lowers_primitive_literals() {
     );
     assert!(matches!(
         &expression_row(&builder, float_lowered.value).kind,
-        HirExpressionKind::Float(3.25)
+        HirExpressionKind::FixedScalar(value) if *value == f64_value(3.25)
     ));
 
     let bool_lowered = builder
@@ -592,8 +631,8 @@ fn lowers_int_above_i32_range_without_truncation() {
 
     // Above `i32::MAX` so an `i32` carrier would truncate; the `i64` carrier preserves it.
     let lowered = builder
-        .lower_expression(&Expression::int(
-            3_000_000_000,
+        .lower_expression(&Expression::fixed_scalar(
+            i64_value(3_000_000_000),
             span,
             ValueMode::ImmutableOwned,
         ))
@@ -606,7 +645,7 @@ fn lowers_int_above_i32_range_without_truncation() {
     );
     assert!(matches!(
         &expression_row(&builder, lowered.value).kind,
-        HirExpressionKind::Int(3_000_000_000)
+        HirExpressionKind::FixedScalar(value) if *value == i64_value(3_000_000_000)
     ));
 }
 
@@ -618,11 +657,17 @@ fn lowers_reference_to_registered_local() {
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
 
-    register_local(&mut builder, x, LocalId(10), builtin_type_ids::INT, span);
+    register_local(
+        &mut builder,
+        x,
+        LocalId(10),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        span,
+    );
 
     let expr = reference_expr_with_type_id(
         x,
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         span,
         ValueMode::ImmutableReference,
     );
@@ -650,14 +695,11 @@ fn lowers_reference_to_module_constant_when_local_is_missing() {
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
 
-    builder.test_register_module_constant(
-        third_const,
-        Expression::int(3, span, ValueMode::ImmutableOwned),
-    );
+    builder.test_register_module_constant(third_const, int_expr(3, span));
 
     let expr = reference_expr_with_type_id(
         third_const,
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         span,
         ValueMode::ImmutableReference,
     );
@@ -672,7 +714,7 @@ fn lowers_reference_to_module_constant_when_local_is_missing() {
     );
     assert!(matches!(
         &expression_row(&builder, lowered.value).kind,
-        HirExpressionKind::Int(3)
+        HirExpressionKind::FixedScalar(value) if *value == i32_value(3)
     ));
 }
 
@@ -685,20 +727,32 @@ fn lowers_runtime_rpn_arithmetic_stack_correctly() {
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
 
-    register_local(&mut builder, x, LocalId(10), builtin_type_ids::INT, span);
-    register_local(&mut builder, y, LocalId(11), builtin_type_ids::INT, span);
+    register_local(
+        &mut builder,
+        x,
+        LocalId(10),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        span,
+    );
+    register_local(
+        &mut builder,
+        y,
+        LocalId(11),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        span,
+    );
 
     let items = vec![
         runtime_operand_item(reference_expr_with_type_id(
             x,
-            builtin_type_ids::INT,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
             span,
             ValueMode::ImmutableReference,
         )),
-        runtime_operand_item(Expression::int(2, span, ValueMode::ImmutableOwned)),
+        runtime_operand_item(int_expr(2, span)),
         runtime_operand_item(reference_expr_with_type_id(
             y,
-            builtin_type_ids::INT,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
             span,
             ValueMode::ImmutableReference,
         )),
@@ -706,7 +760,12 @@ fn lowers_runtime_rpn_arithmetic_stack_correctly() {
         runtime_operator_item(Operator::Add, span),
     ];
 
-    let expr = runtime_expr(items, builtin_type_ids::INT, span, ValueMode::MutableOwned);
+    let expr = runtime_expr(
+        items,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        span,
+        ValueMode::MutableOwned,
+    );
     let lowered = builder
         .lower_expression(&expr)
         .expect("runtime arithmetic lowering should succeed");
@@ -714,7 +773,7 @@ fn lowers_runtime_rpn_arithmetic_stack_correctly() {
     assert!(lowered.prelude.is_empty());
     assert_eq!(
         expression_row(&builder, lowered.value).ty,
-        builtin_type_ids::INT
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
     );
     assert!(
         matches!(
@@ -731,19 +790,21 @@ fn runtime_division_subexpression_infers_float_type_in_hir() {
     let mut string_table = StringTable::new();
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
-    let expected_float = builtin_type_ids::FLOAT;
+    let expected_float = builtin_type_ids::fixed_scalar(FixedScalar::F64);
 
     let items = vec![
-        runtime_operand_item(Expression::int(5, span, ValueMode::ImmutableOwned)),
-        runtime_operand_item(Expression::int(2, span, ValueMode::ImmutableOwned)),
+        runtime_operand_item(int_expr(5, span)),
+        runtime_operand_item(int_expr(2, span)),
         runtime_operator_item(Operator::Divide, span),
-        runtime_operand_item(Expression::int(1, span, ValueMode::ImmutableOwned)),
+        // The division result is `F64`, so the literal addend materialises at that
+        // receiving type instead of mixing an `I32` literal with an `F64` operand.
+        runtime_operand_item(float_expr(1.0, span)),
         runtime_operator_item(Operator::Add, span),
     ];
 
     let expr = runtime_expr(
         items,
-        builtin_type_ids::FLOAT,
+        builtin_type_ids::fixed_scalar(FixedScalar::F64),
         span,
         ValueMode::MutableOwned,
     );
@@ -767,15 +828,20 @@ fn runtime_integer_division_lowers_to_hir_int_div_with_int_type() {
     let mut string_table = StringTable::new();
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
-    let expected_int = builtin_type_ids::INT;
+    let expected_int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let items = vec![
-        runtime_operand_item(Expression::int(5, span, ValueMode::ImmutableOwned)),
-        runtime_operand_item(Expression::int(2, span, ValueMode::ImmutableOwned)),
+        runtime_operand_item(int_expr(5, span)),
+        runtime_operand_item(int_expr(2, span)),
         runtime_operator_item(Operator::IntDivide, span),
     ];
 
-    let expr = runtime_expr(items, builtin_type_ids::INT, span, ValueMode::MutableOwned);
+    let expr = runtime_expr(
+        items,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        span,
+        ValueMode::MutableOwned,
+    );
     let lowered = builder
         .lower_expression(&expr)
         .expect("runtime integer division lowering should succeed");
@@ -824,8 +890,8 @@ fn lowers_range_operator_in_runtime_rpn() {
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
 
     let items = vec![
-        runtime_operand_item(Expression::int(1, span, ValueMode::ImmutableOwned)),
-        runtime_operand_item(Expression::int(9, span, ValueMode::ImmutableOwned)),
+        runtime_operand_item(int_expr(1, span)),
+        runtime_operand_item(int_expr(9, span)),
         runtime_operator_item(Operator::Range, span),
     ];
 
@@ -856,8 +922,8 @@ fn lowers_function_call_to_call_statement_and_temp_load() {
 
     let call_expr = Expression::function_call(
         function_name,
-        vec![Expression::int(7, span, ValueMode::ImmutableOwned)],
-        vec![builtin_type_ids::INT],
+        vec![int_expr(7, span)],
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
         span,
     );
 
@@ -908,23 +974,26 @@ fn expression_function_call_uses_variant_result_type_ids_for_single_return() {
     let call_expr = Expression::function_call_with_typed_arguments(
         function_name,
         vec![],
-        vec![builtin_type_ids::INT],
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
         &mut builder.type_environment,
         span,
     );
-    assert_eq!(call_expr.type_id, builtin_type_ids::INT);
+    assert_eq!(
+        call_expr.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
     assert!(
         matches!(
             &call_expr.kind,
             ExpressionKind::FunctionCall { result_type_ids, .. }
-                if result_type_ids.as_slice() == [builtin_type_ids::INT]
+                if result_type_ids.as_slice() == [builtin_type_ids::fixed_scalar(FixedScalar::I32)]
         ),
         "typed function-call construction should store canonical result TypeIds immediately"
     );
 
     let expected_int = builder
-        .lower_type_id(builtin_type_ids::INT, &span)
-        .expect("builtin Int TypeId should lower in test context");
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::I32), &span)
+        .expect("fixed I32 TypeId should lower in test context");
     let lowered = builder
         .lower_expression(&call_expr)
         .expect("function call lowering should use variant result TypeIds");
@@ -972,7 +1041,10 @@ fn expression_function_call_uses_variant_result_type_ids_for_multi_return() {
     let call_expr = Expression::function_call_with_typed_arguments(
         function_name,
         vec![],
-        vec![builtin_type_ids::INT, builtin_type_ids::BOOL],
+        vec![
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            builtin_type_ids::BOOL,
+        ],
         &mut builder.type_environment,
         span,
     );
@@ -980,7 +1052,11 @@ fn expression_function_call_uses_variant_result_type_ids_for_multi_return() {
         matches!(
             &call_expr.kind,
             ExpressionKind::FunctionCall { result_type_ids, .. }
-                if result_type_ids.as_slice() == [builtin_type_ids::INT, builtin_type_ids::BOOL]
+                if result_type_ids.as_slice()
+                    == [
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                        builtin_type_ids::BOOL,
+                    ]
         ),
         "typed function-call construction should preserve canonical multi-return TypeIds"
     );
@@ -989,8 +1065,8 @@ fn expression_function_call_uses_variant_result_type_ids_for_multi_return() {
         .lower_expression(&call_expr)
         .expect("multi-return call lowering should use variant result TypeIds");
     let int_type = builder
-        .lower_type_id(builtin_type_ids::INT, &span)
-        .expect("builtin Int TypeId should lower in test context");
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::I32), &span)
+        .expect("fixed I32 TypeId should lower in test context");
     let bool_type = builder
         .lower_type_id(builtin_type_ids::BOOL, &span)
         .expect("builtin Bool TypeId should lower in test context");
@@ -1006,7 +1082,7 @@ fn expression_function_call_uses_variant_result_type_ids_for_multi_return() {
                 arguments,
             })) if arguments.as_ref() == [int_type, bool_type]
         ),
-        "expected multi-return expression call to lower as tuple(Int, Bool), got {lowered_type:?}"
+        "expected multi-return expression call to lower as tuple(I32, Bool), got {lowered_type:?}"
     );
 }
 
@@ -1019,7 +1095,8 @@ fn expression_host_call_uses_variant_result_type_ids() {
     let call_expr = Expression::host_function_call_with_typed_arguments(
         ExternalFunctionId::IoLine,
         vec![],
-        vec![builtin_type_ids::INT],
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+        false,
         &mut builder.type_environment,
         span,
     );
@@ -1027,14 +1104,14 @@ fn expression_host_call_uses_variant_result_type_ids() {
         matches!(
             &call_expr.kind,
             ExpressionKind::HostFunctionCall { result_type_ids, .. }
-                if result_type_ids.as_slice() == [builtin_type_ids::INT]
+                if result_type_ids.as_slice() == [builtin_type_ids::fixed_scalar(FixedScalar::I32)]
         ),
         "typed host-call construction should store canonical result TypeIds immediately"
     );
 
     let expected_int = builder
-        .lower_type_id(builtin_type_ids::INT, &span)
-        .expect("builtin Int TypeId should lower in test context");
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::I32), &span)
+        .expect("fixed I32 TypeId should lower in test context");
     let lowered = builder
         .lower_expression(&call_expr)
         .expect("host call lowering should use variant result TypeIds");
@@ -1050,8 +1127,8 @@ fn expression_handled_fallible_call_fallback_uses_variant_result_type_ids() {
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let ok_type = builder
-        .lower_type_id(builtin_type_ids::INT, &span)
-        .expect("builtin Int TypeId should lower in test context");
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::I32), &span)
+        .expect("fixed I32 TypeId should lower in test context");
     let err_type = builder
         .lower_type_id(builtin_type_ids::STRING, &span)
         .expect("builtin String TypeId should lower in test context");
@@ -1062,7 +1139,7 @@ fn expression_handled_fallible_call_fallback_uses_variant_result_type_ids() {
     let mut handled_call_expr = Expression::handled_fallible_function_call_with_typed_arguments(
         function_name,
         vec![],
-        vec![builtin_type_ids::INT],
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
         FallibleExpressionHandling::Recover,
         &mut builder.type_environment,
         span,
@@ -1076,7 +1153,7 @@ fn expression_handled_fallible_call_fallback_uses_variant_result_type_ids() {
         matches!(
             &handled_call_expr.kind,
             ExpressionKind::HandledFallibleFunctionCall { result_type_ids, .. }
-                if result_type_ids.as_slice() == [builtin_type_ids::INT]
+                if result_type_ids.as_slice() == [builtin_type_ids::fixed_scalar(FixedScalar::I32)]
         ),
         "typed handled fallible call construction should store canonical result TypeIds immediately"
     );
@@ -1087,14 +1164,14 @@ fn expression_handled_fallible_call_fallback_uses_variant_result_type_ids() {
             error: None,
             body: vec![AstNode {
                 kind: NodeKind::ThenValue(ProducedValues {
-                    expressions: vec![Expression::int(7, span, ValueMode::ImmutableOwned)],
+                    expressions: vec![int_expr(7, span)],
                     span,
                 }),
                 span,
                 scope: test_scope,
             }],
         },
-        vec![builtin_type_ids::INT],
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
     );
 
     let lowered = builder
@@ -1125,11 +1202,12 @@ fn optional_user_defined_cast_recovery_merges_the_inner_target_type() {
 
     let mut cast = Expression::cast(
         ResolvedCastExpression {
-            source: Box::new(Expression::int(1, span, ValueMode::ImmutableOwned)),
-            source_type_id: builtin_type_ids::INT,
+            source: Box::new(int_expr(1, span)),
+            source_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
             target_type_id: builtin_type_ids::STRING,
             target: BuiltinCastTarget::String,
             requires_optional_wrap_after_cast: true,
+            fallibility: BuiltinCastFallibility::Fallible,
             evidence: ResolvedCastEvidence::UserDefined {
                 evidence_id: TraitEvidenceId(0),
                 method_path,
@@ -1210,9 +1288,10 @@ fn expression_handled_result_derives_success_slots_from_tuple_type_id() {
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     builder.test_register_function_name(function_name, FunctionId(36));
 
-    let ok_type = builder
-        .type_environment
-        .intern_tuple(vec![builtin_type_ids::INT, builtin_type_ids::BOOL]);
+    let ok_type = builder.type_environment.intern_tuple(vec![
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        builtin_type_ids::BOOL,
+    ]);
     let err_type = builtin_type_ids::STRING;
     let carrier_type = result_carrier_type_id(&mut builder.type_environment, ok_type, err_type);
 
@@ -1233,7 +1312,7 @@ fn expression_handled_result_derives_success_slots_from_tuple_type_id() {
             body: vec![AstNode {
                 kind: NodeKind::ThenValue(ProducedValues {
                     expressions: vec![
-                        Expression::int(7, span, ValueMode::ImmutableOwned),
+                        int_expr(7, span),
                         Expression::bool(false, span, ValueMode::ImmutableOwned),
                     ],
                     span,
@@ -1243,7 +1322,10 @@ fn expression_handled_result_derives_success_slots_from_tuple_type_id() {
             }],
         },
         ok_type,
-        vec![builtin_type_ids::INT, builtin_type_ids::BOOL],
+        vec![
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            builtin_type_ids::BOOL,
+        ],
         span,
     );
     // Parser-produced catches carry a resolved HandledByCatch disposition on the protected
@@ -1274,12 +1356,8 @@ fn lowers_fresh_mutable_call_argument_via_hidden_local_with_origin_metadata() {
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     builder.test_register_function_name(function_name, FunctionId(24));
 
-    let fresh_argument = CallArgument::positional(
-        Expression::int(7, span, ValueMode::ImmutableOwned),
-        CallAccessMode::Shared,
-        span,
-    )
-    .with_passing_mode(CallPassingMode::FreshMutableValue);
+    let fresh_argument = CallArgument::positional(int_expr(7, span), CallAccessMode::Shared, span)
+        .with_passing_mode(CallPassingMode::FreshMutableValue);
 
     let call_expr =
         Expression::function_call_with_arguments(function_name, vec![fresh_argument], vec![], span);
@@ -1301,7 +1379,7 @@ fn lowers_fresh_mutable_call_argument_via_hidden_local_with_origin_metadata() {
         } => {
             assert!(matches!(
                 &builder.module.expressions.expression(*value).kind,
-                HirExpressionKind::Int(7)
+                HirExpressionKind::FixedScalar(value) if *value == i32_value(7)
             ));
             *local
         }
@@ -1374,11 +1452,11 @@ fn lowers_receiver_method_call_with_receiver_as_first_argument() {
         ),
         method_path,
         vec![CallArgument::positional(
-            Expression::int(7, span, ValueMode::ImmutableOwned),
+            int_expr(7, span),
             CallAccessMode::Shared,
             span,
         )],
-        vec![builtin_type_ids::INT],
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
         &mut builder.type_environment,
         span,
     );
@@ -1401,7 +1479,7 @@ fn lowers_receiver_method_call_with_receiver_as_first_argument() {
             ));
             assert!(matches!(
                 &builder.module.expressions.expression(args[1]).kind,
-                HirExpressionKind::Int(7)
+                HirExpressionKind::FixedScalar(value) if *value == i32_value(7)
             ));
         }
         other => panic!("expected lowered receiver call statement, got {other:?}"),
@@ -1412,7 +1490,7 @@ fn lowers_receiver_method_call_with_receiver_as_first_argument() {
 fn lowers_builtin_scalar_receiver_method_call_with_receiver_as_first_argument() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let method_path = super::symbol("Int/double", &mut path_fork, &mut string_table);
+    let method_path = super::symbol("I32/double", &mut path_fork, &mut string_table);
     let receiver_name = super::symbol("value", &mut path_fork, &mut string_table);
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
@@ -1423,20 +1501,20 @@ fn lowers_builtin_scalar_receiver_method_call_with_receiver_as_first_argument() 
         &mut builder,
         receiver_name,
         LocalId(42),
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         span,
     );
 
     let method_expression = Expression::method_call_with_typed_arguments(
         reference_expr_with_type_id(
             receiver_name,
-            builtin_type_ids::INT,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
             span,
             ValueMode::ImmutableReference,
         ),
         method_path,
         vec![],
-        vec![builtin_type_ids::INT],
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
         &mut builder.type_environment,
         span,
     );
@@ -1479,7 +1557,7 @@ fn lowers_host_call_expression_with_host_target() {
             span,
             ValueMode::ImmutableOwned,
         )],
-        vec![builtin_type_ids::INT],
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
         span,
     );
 
@@ -1513,12 +1591,22 @@ fn preserves_left_to_right_call_prelude_order_in_nested_call_args() {
     builder.test_register_function_name(second, FunctionId(2));
     builder.test_register_function_name(outer, FunctionId(3));
 
-    let arg_one = Expression::function_call(first, vec![], vec![builtin_type_ids::INT], span);
-    let arg_two = Expression::function_call(second, vec![], vec![builtin_type_ids::INT], span);
+    let arg_one = Expression::function_call(
+        first,
+        vec![],
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+        span,
+    );
+    let arg_two = Expression::function_call(
+        second,
+        vec![],
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+        span,
+    );
     let outer_call = Expression::function_call(
         outer,
         vec![arg_one, arg_two],
-        vec![builtin_type_ids::INT],
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
         span,
     );
 
@@ -1556,7 +1644,7 @@ fn malformed_runtime_rpn_reports_hir_transformation_error() {
 
     let expr = runtime_expr(
         vec![runtime_operator_item(Operator::Add, span)],
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         span,
         ValueMode::MutableOwned,
     );
@@ -1710,11 +1798,7 @@ fn runtime_template_inline_accumulator_coerces_non_string_segments() {
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
 
-    let expr = runtime_template_expression(
-        span,
-        vec![Expression::int(5, span, ValueMode::ImmutableOwned)],
-        builder.string_table,
-    );
+    let expr = runtime_template_expression(span, vec![int_expr(5, span)], builder.string_table);
 
     let lowered = builder
         .lower_expression(&expr)
@@ -1980,7 +2064,7 @@ fn runtime_template_control_flow_bool_if_coerces_dynamic_branch_chunks() {
         span,
         ValueMode::ImmutableOwned,
     );
-    let then_content = vec![Expression::int(5, span, ValueMode::ImmutableOwned)];
+    let then_content = vec![int_expr(5, span)];
     let expr =
         runtime_template_bool_if_expression(condition, then_content, span, builder.string_table);
 
@@ -2147,7 +2231,7 @@ fn runtime_template_control_flow_loop_range_lowers_inline_and_wraps_aggregate_wh
     let limit_path = super::symbol("limit", &mut path_fork, &mut string_table);
     let item_binding = loop_binding(
         "i",
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         &mut path_fork,
         &mut string_table,
     );
@@ -2157,20 +2241,20 @@ fn runtime_template_control_flow_loop_range_lowers_inline_and_wraps_aggregate_wh
         &mut builder,
         limit_path,
         LocalId(20),
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         span,
     );
     let body_content = vec![reference_expr_with_type_id(
         item_path,
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         span,
         ValueMode::ImmutableReference,
     )];
     let range = RangeLoopSpec {
-        start: Expression::int(0, span, ValueMode::ImmutableOwned),
+        start: int_expr(0, span),
         end: reference_expr_with_type_id(
             limit_path,
-            builtin_type_ids::INT,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
             span,
             ValueMode::ImmutableReference,
         ),
@@ -2239,7 +2323,7 @@ fn runtime_template_control_flow_loop_collection_materializes_iterable_and_lengt
     let items_path = super::symbol("items", &mut path_fork, &mut string_table);
     let item_binding = loop_binding(
         "item",
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         &mut path_fork,
         &mut string_table,
     );
@@ -2247,11 +2331,11 @@ fn runtime_template_control_flow_loop_collection_materializes_iterable_and_lengt
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let collection_type = builder
         .type_environment
-        .intern_collection(builtin_type_ids::INT, None);
+        .intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::I32), None);
     register_local(&mut builder, items_path, LocalId(21), collection_type, span);
     let body_content = vec![reference_expr_with_type_id(
         item_path,
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         span,
         ValueMode::ImmutableReference,
     )];
@@ -2381,15 +2465,15 @@ fn runtime_template_control_flow_loop_empty_body_does_not_mark_iteration_emitted
         &mut builder,
         limit_path,
         LocalId(23),
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         span,
     );
     let body_content: Vec<Expression> = vec![];
     let range = RangeLoopSpec {
-        start: Expression::int(0, span, ValueMode::ImmutableOwned),
+        start: int_expr(0, span),
         end: reference_expr_with_type_id(
             limit_path,
-            builtin_type_ids::INT,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
             span,
             ValueMode::ImmutableReference,
         ),
@@ -2535,22 +2619,19 @@ fn block_assigns_coerced_int_chunk(module: &HirModule, block: &HirBlock, expecte
             return false;
         };
 
-        let right = module.expressions.expression(*right);
-        let HirExpressionKind::BinOp {
-            op: HirBinOp::StringAppend,
-            left,
-            right,
-        } = &right.kind
+        // A fixed numeric chunk renders through the numeric text policy, so the appended
+        // value is the string conversion of the literal rather than a raw number.
+        let HirExpressionKind::Cast {
+            source,
+            policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Fixed(FixedScalar::I32)),
+        } = &module.expressions.expression(*right).kind
         else {
             return false;
         };
 
         matches!(
-            &module.expressions.expression(*left).kind,
-            HirExpressionKind::StringLiteral(value) if value.is_empty()
-        ) && matches!(
-            &module.expressions.expression(*right).kind,
-            HirExpressionKind::Int(value) if *value == expected
+            &module.expressions.expression(*source).kind,
+            HirExpressionKind::FixedScalar(value) if *value == i32_value(expected)
         )
     })
 }
@@ -2575,13 +2656,13 @@ fn local_resolution_uses_full_path_identity_not_leaf_name() {
         &mut builder,
         local_a,
         LocalId(22),
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         span,
     );
 
     let expr = reference_expr_with_type_id(
         local_b,
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         span,
         ValueMode::ImmutableReference,
     );
@@ -2603,7 +2684,7 @@ fn nominal_struct_identity_uses_field_parent_path() {
     let struct_path = super::symbol("MyStruct", &mut path_fork, &mut string_table);
     let field_path = field_symbol(&struct_path, "value", &mut path_fork, &mut string_table);
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
-    let int_type = builtin_type_ids::INT;
+    let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     builder.test_register_struct_with_fields(
         StructId(1),
@@ -2620,7 +2701,7 @@ fn nominal_struct_identity_uses_field_parent_path() {
 
     let expr_fields = vec![Declaration {
         id: field_path,
-        value: Expression::int(42, span, ValueMode::ImmutableOwned),
+        value: int_expr(42, span),
         binding_span: None,
         config_qualifier: None,
     }];
@@ -2706,7 +2787,12 @@ fn temp_locals_are_not_resolvable_as_user_symbols() {
 
     builder.test_register_function_name(callee, FunctionId(8));
 
-    let call_expr = Expression::function_call(callee, vec![], vec![builtin_type_ids::INT], span);
+    let call_expr = Expression::function_call(
+        callee,
+        vec![],
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+        span,
+    );
     let lowered = builder
         .lower_expression(&call_expr)
         .expect("call lowering should succeed");
@@ -2722,7 +2808,7 @@ fn temp_locals_are_not_resolvable_as_user_symbols() {
 
     let temp_reference = reference_expr_with_type_id(
         temp_name,
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         span,
         ValueMode::ImmutableReference,
     );
@@ -2753,7 +2839,7 @@ fn field_access_uses_base_struct_identity_not_global_leaf_lookup() {
         .expect("test path fits");
     let local_name = super::symbol("my_struct", &mut path_fork, &mut string_table);
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
-    let int_type = builtin_type_ids::INT;
+    let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     builder.test_register_struct_with_fields(
         StructId(10),
@@ -2987,7 +3073,7 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
 
     let receiver_type_id = builder
         .type_environment
-        .intern_collection(builtin_type_ids::INT, None);
+        .intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::I32), None);
     register_local(
         &mut builder,
         receiver_name,
@@ -3005,20 +3091,20 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
 
     let fallible_int_result = result_carrier_type_id(
         &mut builder.type_environment,
-        builtin_type_ids::INT,
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
     );
     let fallible_none_result = result_carrier_type_id(
         &mut builder.type_environment,
         builtin_type_ids::NONE,
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
     );
 
     let cases = vec![
         (
             CollectionBuiltinOp::Get,
             vec![CallArgument::positional(
-                Expression::int(1, span, ValueMode::ImmutableOwned),
+                int_expr(1, span),
                 CallAccessMode::Shared,
                 span,
             )],
@@ -3028,16 +3114,8 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
         (
             CollectionBuiltinOp::Set,
             vec![
-                CallArgument::positional(
-                    Expression::int(0, span, ValueMode::ImmutableOwned),
-                    CallAccessMode::Shared,
-                    span,
-                ),
-                CallArgument::positional(
-                    Expression::int(99, span, ValueMode::ImmutableOwned),
-                    CallAccessMode::Shared,
-                    span,
-                ),
+                CallArgument::positional(int_expr(0, span), CallAccessMode::Shared, span),
+                CallArgument::positional(int_expr(99, span), CallAccessMode::Shared, span),
             ],
             vec![fallible_none_result],
             set_id,
@@ -3047,7 +3125,7 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
         (
             CollectionBuiltinOp::PushFixed,
             vec![CallArgument::positional(
-                Expression::int(4, span, ValueMode::ImmutableOwned),
+                int_expr(4, span),
                 CallAccessMode::Shared,
                 span,
             )],
@@ -3057,7 +3135,7 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
         (
             CollectionBuiltinOp::PushGrowable,
             vec![CallArgument::positional(
-                Expression::int(4, span, ValueMode::ImmutableOwned),
+                int_expr(4, span),
                 CallAccessMode::Shared,
                 span,
             )],
@@ -3067,7 +3145,7 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
         (
             CollectionBuiltinOp::Remove,
             vec![CallArgument::positional(
-                Expression::int(0, span, ValueMode::ImmutableOwned),
+                int_expr(0, span),
                 CallAccessMode::Shared,
                 span,
             )],
@@ -3077,7 +3155,7 @@ fn lowers_collection_builtin_host_calls_from_explicit_ast_nodes() {
         (
             CollectionBuiltinOp::Length,
             vec![],
-            vec![builtin_type_ids::INT],
+            vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
             length_id,
         ),
     ];
@@ -3128,19 +3206,20 @@ fn map_literal_lowering_preserves_entry_order() {
     let priya = string_table.intern("Priya");
     let grace = string_table.intern("Grace");
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
-    let map_type = builder
-        .type_environment
-        .intern_map(builtin_type_ids::STRING, builtin_type_ids::INT);
+    let map_type = builder.type_environment.intern_map(
+        builtin_type_ids::STRING,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+    );
 
     let expression = Expression::new(
         ExpressionKind::MapLiteral(vec![
             MapLiteralEntry {
                 key: Expression::string_slice(priya, span, ValueMode::ImmutableOwned),
-                value: Expression::int(10, span, ValueMode::ImmutableOwned),
+                value: int_expr(10, span),
             },
             MapLiteralEntry {
                 key: Expression::string_slice(grace, span, ValueMode::ImmutableOwned),
-                value: Expression::int(12, span, ValueMode::ImmutableOwned),
+                value: int_expr(12, span),
             },
         ]),
         span,
@@ -3170,14 +3249,16 @@ fn map_literal_lowering_preserves_entry_order() {
             &expression_row(&builder, entries[0].key).kind,
             &expression_row(&builder, entries[0].value).kind
         ),
-        (HirExpressionKind::StringLiteral(key), HirExpressionKind::Int(10)) if key == "Priya"
+        (HirExpressionKind::StringLiteral(key), HirExpressionKind::FixedScalar(value))
+            if key == "Priya" && *value == i32_value(10)
     ));
     assert!(matches!(
         (
             &expression_row(&builder, entries[1].key).kind,
             &expression_row(&builder, entries[1].value).kind
         ),
-        (HirExpressionKind::StringLiteral(key), HirExpressionKind::Int(12)) if key == "Grace"
+        (HirExpressionKind::StringLiteral(key), HirExpressionKind::FixedScalar(value))
+            if key == "Grace" && *value == i32_value(12)
     ));
 }
 
@@ -3189,22 +3270,23 @@ fn map_builtin_calls_lower_to_first_class_hir_ops() {
     let scores_name = super::symbol("scores", &mut path_fork, &mut string_table);
     let key_name = string_table.intern("Priya");
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
-    let map_type = builder
-        .type_environment
-        .intern_map(builtin_type_ids::STRING, builtin_type_ids::INT);
+    let map_type = builder.type_environment.intern_map(
+        builtin_type_ids::STRING,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+    );
     register_local(&mut builder, scores_name, LocalId(80), map_type, span);
 
     let receiver_expression =
         reference_expr_with_type_id(scores_name, map_type, span, ValueMode::MutableReference);
     let fallible_int_result = result_carrier_type_id(
         &mut builder.type_environment,
-        builtin_type_ids::INT,
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
     );
     let fallible_none_result = result_carrier_type_id(
         &mut builder.type_environment,
         builtin_type_ids::NONE,
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
     );
     let key = CallArgument::positional(
         Expression::string_slice(key_name, span, ValueMode::ImmutableOwned),
@@ -3224,11 +3306,7 @@ fn map_builtin_calls_lower_to_first_class_hir_ops() {
             MapBuiltinOp::Set,
             vec![
                 key.clone(),
-                CallArgument::positional(
-                    Expression::int(99, span, ValueMode::ImmutableOwned),
-                    CallAccessMode::Shared,
-                    span,
-                ),
+                CallArgument::positional(int_expr(99, span), CallAccessMode::Shared, span),
             ],
             vec![fallible_none_result],
             HirMapOp::Set,
@@ -3237,7 +3315,7 @@ fn map_builtin_calls_lower_to_first_class_hir_ops() {
         (
             MapBuiltinOp::Length,
             vec![],
-            vec![builtin_type_ids::INT],
+            vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
             HirMapOp::Length,
             0,
         ),
@@ -3315,7 +3393,7 @@ fn map_builtin_calls_lower_to_first_class_hir_ops() {
 /// `TypeEnvironment`.
 ///
 /// WHY: this is the core contract of the Choice Hardening refactor — choice values must not
-/// masquerade as `HirExpressionKind::Int` in HIR.
+/// masquerade as `HirExpressionKind::FixedScalar` in HIR.
 #[test]
 fn lowers_choice_variant_expression_to_hir_variant_construct() {
     let mut path_fork = super::PathInternerFork::empty();
@@ -3405,13 +3483,13 @@ fn collection_expression_lowering_preserves_fixed_type_identity() {
     let mut string_table = StringTable::new();
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
-    let int_type = builder.type_environment.builtins().int;
+    let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let fixed_collection = builder
         .type_environment
         .intern_collection(int_type, Some(4));
 
     let expression = Expression::new(
-        ExpressionKind::Collection(vec![Expression::int(1, span, ValueMode::ImmutableOwned)]),
+        ExpressionKind::Collection(vec![int_expr(1, span)]),
         span,
         fixed_collection,
         crate::compiler_frontend::datatypes::DataType::Inferred,
@@ -3490,12 +3568,12 @@ fn lowers_fallible_success_to_hir_variant_construct() {
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
 
-    let ok_type_id = builtin_type_ids::INT;
+    let ok_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let err_type_id = builtin_type_ids::STRING;
     let result_type_id =
         result_carrier_type_id(&mut builder.type_environment, ok_type_id, err_type_id);
 
-    let value_expr = Expression::int(42, span, ValueMode::ImmutableOwned);
+    let value_expr = int_expr(42, span);
 
     let result_expr = Expression::result_construct(
         AstFallibleCarrierVariant::Success,
@@ -3526,9 +3604,9 @@ fn lowers_fallible_success_to_hir_variant_construct() {
             assert!(
                 matches!(
                     &expression_row(&builder, fields[0].value).kind,
-                    HirExpressionKind::Int(42)
+                    HirExpressionKind::FixedScalar(value) if *value == i32_value(42)
                 ),
-                "Result Ok field value should be Int(42)"
+                "Result Ok field value should be an exact I32(42) literal"
             );
         }
         other => panic!("expected VariantConstruct(Result, 0, [_]), got {other:?}"),
@@ -3545,7 +3623,7 @@ fn lowers_fallible_error_to_hir_variant_construct() {
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
 
-    let ok_type_id = builtin_type_ids::INT;
+    let ok_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let err_type_id = builtin_type_ids::STRING;
     let result_type_id =
         result_carrier_type_id(&mut builder.type_environment, ok_type_id, err_type_id);
@@ -3596,20 +3674,21 @@ fn external_float_call_emits_validate_float_in_current_block() {
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let float_type = builder
-        .lower_type_id(builtin_type_ids::FLOAT, &span)
-        .expect("builtin Float TypeId should lower in test context");
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::F64), &span)
+        .expect("fixed F64 TypeId should lower in test context");
 
     let call_expr = Expression::host_function_call_with_typed_arguments(
         ExternalFunctionId::Synthetic(0),
         vec![],
-        vec![builtin_type_ids::FLOAT],
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::F64)],
+        true,
         &mut builder.type_environment,
         span,
     );
 
     let lowered = builder
         .lower_expression_value_to_current_block(&call_expr)
-        .expect("external Float call should lower");
+        .expect("external F64 call should lower");
 
     assert_eq!(expression_row(&builder, lowered).ty, float_type);
 
@@ -3622,13 +3701,67 @@ fn external_float_call_emits_validate_float_in_current_block() {
                 ..
             }
         )),
-        "external Float call should emit the raw Call statement"
+        "external F64 call should emit the raw Call statement"
     );
     assert!(
         statements
             .iter()
             .any(|statement| matches!(&statement.kind, HirStatementKind::ValidateFloat { .. })),
-        "external Float call should emit ValidateFloat after the raw call"
+        "external F64 call should emit ValidateFloat after the raw call"
+    );
+}
+
+#[test]
+fn external_fixed_f64_call_allocates_and_validates_its_exact_type() {
+    let mut path_fork = super::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let span = None;
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let f64_type_id =
+        builtin_type_ids::fixed_scalar(moth_lexical::numeric::fixed_scalar::FixedScalar::F64);
+    let f64_type = builder
+        .lower_type_id(f64_type_id, &span)
+        .expect("fixed F64 TypeId should lower in test context");
+
+    let call_expr = Expression::host_function_call_with_typed_arguments(
+        ExternalFunctionId::Synthetic(0),
+        vec![],
+        vec![f64_type_id],
+        true,
+        &mut builder.type_environment,
+        span,
+    );
+
+    let lowered = builder
+        .lower_expression_value_to_current_block(&call_expr)
+        .expect("raw fixed F64 external call should lower");
+
+    assert_eq!(
+        expression_row(&builder, lowered).ty,
+        f64_type,
+        "the validated value must keep the resolved fixed F64 type"
+    );
+
+    let validate_result_local = builder
+        .test_current_block_statements()
+        .iter()
+        .find_map(|statement| match &statement.kind {
+            HirStatementKind::ValidateFloat { result, .. } => Some(result.local()),
+            _ => None,
+        })
+        .expect("raw fixed F64 external call should emit ValidateFloat");
+
+    let result_local_type = builder
+        .module
+        .blocks
+        .iter()
+        .flat_map(|block| &block.locals)
+        .find(|local| local.id == validate_result_local)
+        .map(|local| local.ty)
+        .expect("ValidateFloat result local should be registered");
+    assert_eq!(
+        result_local_type, f64_type,
+        "the validated result local must use the resolved fixed F64 type"
     );
 }
 
@@ -3640,11 +3773,11 @@ fn external_float_call_in_builtin_error_function_validates_with_return_error() {
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let float_type = builder
-        .lower_type_id(builtin_type_ids::FLOAT, &span)
-        .expect("builtin Float TypeId should lower in test context");
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::F64), &span)
+        .expect("fixed F64 TypeId should lower in test context");
     let int_type = builder
-        .lower_type_id(builtin_type_ids::INT, &span)
-        .expect("builtin Int TypeId should lower in test context");
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::I32), &span)
+        .expect("fixed I32 TypeId should lower in test context");
     let error_type = builder.test_register_builtin_error_type();
     let return_type = result_carrier_type_id(&mut builder.type_environment, int_type, error_type);
 
@@ -3654,14 +3787,15 @@ fn external_float_call_in_builtin_error_function_validates_with_return_error() {
     let call_expr = Expression::host_function_call_with_typed_arguments(
         ExternalFunctionId::Synthetic(1),
         vec![],
-        vec![builtin_type_ids::FLOAT],
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::F64)],
+        true,
         &mut builder.type_environment,
         span,
     );
 
     let lowered = builder
         .lower_expression_value_to_current_block(&call_expr)
-        .expect("external Float call should lower in builtin Error function");
+        .expect("external F64 call should lower in builtin Error function");
 
     assert_eq!(expression_row(&builder, lowered).ty, float_type);
 
@@ -3679,7 +3813,7 @@ fn external_float_call_in_builtin_error_function_validates_with_return_error() {
     assert_eq!(
         validate_modes,
         vec![NumericFailureMode::ReturnError],
-        "external Float boundary validation inside builtin Error! functions should be recoverable"
+        "external F64 boundary validation inside builtin Error! functions should be recoverable"
     );
 }
 
@@ -3693,18 +3827,19 @@ fn external_int_call_does_not_emit_validate_float() {
     let call_expr = Expression::host_function_call_with_typed_arguments(
         ExternalFunctionId::Synthetic(0),
         vec![],
-        vec![builtin_type_ids::INT],
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+        false,
         &mut builder.type_environment,
         span,
     );
 
     let lowered = builder
         .lower_expression(&call_expr)
-        .expect("external Int call should lower");
+        .expect("external I32 call should lower");
 
     assert_eq!(
         expression_row(&builder, lowered.value).ty,
-        builtin_type_ids::INT
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
     );
 
     let prelude_has_validate = lowered
@@ -3713,7 +3848,7 @@ fn external_int_call_does_not_emit_validate_float() {
         .any(|statement| matches!(&statement.kind, HirStatementKind::ValidateFloat { .. }));
     assert!(
         !prelude_has_validate,
-        "external Int call should not emit ValidateFloat"
+        "external I32 call should not emit ValidateFloat"
     );
 }
 
@@ -3725,8 +3860,8 @@ fn external_fallible_float_call_propagation_validates_success() {
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let float_type = builder
-        .lower_type_id(builtin_type_ids::FLOAT, &span)
-        .expect("builtin Float TypeId should lower in test context");
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::F64), &span)
+        .expect("fixed F64 TypeId should lower in test context");
     let error_type = builder.test_register_builtin_error_type();
     let carrier_type =
         result_carrier_type_id(&mut builder.type_environment, float_type, error_type);
@@ -3739,7 +3874,8 @@ fn external_fallible_float_call_propagation_validates_success() {
         crate::compiler_frontend::ast::expressions::expression::HandledFallibleHostFunctionCallInput {
             id: ExternalFunctionId::Synthetic(1),
             args: vec![],
-            result_type_ids: vec![builtin_type_ids::FLOAT],
+            result_type_ids: vec![builtin_type_ids::fixed_scalar(FixedScalar::F64)],
+            requires_external_float_validation: true,
             error_type_id: error_type,
             handling: FallibleExpressionHandling::Propagate,
             span,
@@ -3749,7 +3885,7 @@ fn external_fallible_float_call_propagation_validates_success() {
 
     let lowered = builder
         .lower_expression_value_to_current_block(&handled_call_expr)
-        .expect("fallible external Float call should lower");
+        .expect("fallible external F64 call should lower");
 
     assert_eq!(expression_row(&builder, lowered).ty, float_type);
 
@@ -3767,13 +3903,13 @@ fn external_fallible_float_call_propagation_validates_success() {
                 ..
             }
         )),
-        "fallible external Float call should emit the raw Call statement"
+        "fallible external F64 call should emit the raw Call statement"
     );
     assert!(
         all_statements
             .iter()
             .any(|statement| matches!(&statement.kind, HirStatementKind::ValidateFloat { .. })),
-        "fallible external Float call should validate the unwrapped success Float"
+        "fallible external F64 call should validate the unwrapped success F64"
     );
 }
 
@@ -3785,8 +3921,8 @@ fn external_fallible_float_call_catch_validates_success() {
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let float_type = builder
-        .lower_type_id(builtin_type_ids::FLOAT, &span)
-        .expect("builtin Float TypeId should lower in test context");
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::F64), &span)
+        .expect("fixed F64 TypeId should lower in test context");
     let error_type = builder.test_register_builtin_error_type();
     let carrier_type =
         result_carrier_type_id(&mut builder.type_environment, float_type, error_type);
@@ -3798,7 +3934,8 @@ fn external_fallible_float_call_catch_validates_success() {
         crate::compiler_frontend::ast::expressions::expression::HandledFallibleHostFunctionCallInput {
             id: ExternalFunctionId::Synthetic(2),
             args: vec![],
-            result_type_ids: vec![builtin_type_ids::FLOAT],
+            result_type_ids: vec![builtin_type_ids::fixed_scalar(FixedScalar::F64)],
+            requires_external_float_validation: true,
             error_type_id: error_type,
             handling: FallibleExpressionHandling::Propagate,
             span,
@@ -3817,19 +3954,19 @@ fn external_fallible_float_call_catch_validates_success() {
             error: None,
             body: vec![AstNode {
                 kind: NodeKind::ThenValue(ProducedValues {
-                    expressions: vec![Expression::float(0.0, span, ValueMode::ImmutableOwned)],
+                    expressions: vec![float_expr(0.0, span)],
                     span,
                 }),
                 span,
                 scope: function_name,
             }],
         },
-        vec![builtin_type_ids::FLOAT],
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::F64)],
     );
 
     let lowered = builder
         .lower_expression(&catch_expr)
-        .expect("fallible external Float catch should lower");
+        .expect("fallible external F64 catch should lower");
 
     assert_eq!(expression_row(&builder, lowered.value).ty, float_type);
 
@@ -3847,13 +3984,13 @@ fn external_fallible_float_call_catch_validates_success() {
                 ..
             }
         )),
-        "fallible external Float catch should emit the raw Call statement"
+        "fallible external F64 catch should emit the raw Call statement"
     );
     assert!(
         all_statements
             .iter()
             .any(|statement| matches!(&statement.kind, HirStatementKind::ValidateFloat { .. })),
-        "fallible external Float catch should validate the unwrapped success Float before merge"
+        "fallible external F64 catch should validate the unwrapped success F64 before merge"
     );
 }
 
@@ -3862,7 +3999,7 @@ fn external_fallible_float_call_catch_validates_success() {
 ///
 /// WHY: backends select the value conversion from the cast policy. A bare override
 /// would leave the source carrier (notably a 64-bit BigInt) under the target
-/// `Float` type, so implicit `Uint`/`Int` returns formatted as non-finite.
+/// `F64` type, so implicit `U32`/`I32` returns formatted as non-finite.
 #[test]
 fn coerced_numeric_promotion_lowers_to_explicit_infallible_cast() {
     let mut path_fork = super::PathInternerFork::empty();
@@ -3870,20 +4007,14 @@ fn coerced_numeric_promotion_lowers_to_explicit_infallible_cast() {
     let span = None;
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let float_type = builder
-        .lower_type_id(builtin_type_ids::FLOAT, &span)
-        .expect("builtin Float TypeId should lower in test context");
+        .lower_type_id(builtin_type_ids::fixed_scalar(FixedScalar::F64), &span)
+        .expect("fixed F64 TypeId should lower in test context");
 
     for (expected_source, inner) in [
-        (
-            NumericScalar::Uint,
-            Expression::uint(41, span, ValueMode::ImmutableOwned),
-        ),
-        (
-            NumericScalar::Int,
-            Expression::int(41, span, ValueMode::ImmutableOwned),
-        ),
+        (NumericScalar::Fixed(FixedScalar::U32), uint_expr(41, span)),
+        (NumericScalar::Fixed(FixedScalar::I32), int_expr(41, span)),
     ] {
-        let coerced = Expression::coerced(inner, builtin_type_ids::FLOAT);
+        let coerced = Expression::coerced(inner, builtin_type_ids::fixed_scalar(FixedScalar::F64));
         let lowered = builder
             .lower_expression(&coerced)
             .expect("numeric promotion should lower in HIR");
@@ -3912,23 +4043,23 @@ fn coerced_numeric_promotion_lowers_to_explicit_infallible_cast() {
                 }
             };
         assert_eq!(policy_source, expected_source);
-        assert_eq!(policy_target, NumericScalar::Float);
+        assert_eq!(policy_target, NumericScalar::Fixed(FixedScalar::F64));
         match expected_source {
-            NumericScalar::Uint => assert!(
+            NumericScalar::Fixed(FixedScalar::U32) => assert!(
                 matches!(
                     &builder.module.expressions.expression(converted).kind,
-                    HirExpressionKind::Uint(41)
+                    HirExpressionKind::FixedScalar(value) if *value == u32_value(41)
                 ),
-                "Uint promotion should convert the original Uint literal value"
+                "U32 promotion should convert the original U32 literal value"
             ),
-            NumericScalar::Int => assert!(
+            NumericScalar::Fixed(FixedScalar::I32) => assert!(
                 matches!(
                     &builder.module.expressions.expression(converted).kind,
-                    HirExpressionKind::Int(41)
+                    HirExpressionKind::FixedScalar(value) if *value == i32_value(41)
                 ),
-                "Int promotion should convert the original Int literal value"
+                "I32 promotion should convert the original I32 literal value"
             ),
-            _ => unreachable!("promotion test only covers Uint and Int sources"),
+            _ => unreachable!("promotion test only covers U32 and I32 sources"),
         }
     }
 }
@@ -3950,8 +4081,8 @@ fn metadata_replacement_preserves_distinct_occurrence_mappings() {
     let original = builder
         .make_expression(
             &Some(source_span),
-            HirExpressionKind::Int(7),
-            builtin_type_ids::INT,
+            HirExpressionKind::FixedScalar(i32_value(7)),
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
             ValueKind::Const,
             RegionId(0),
         )

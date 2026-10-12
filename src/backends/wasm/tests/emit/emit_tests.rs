@@ -26,8 +26,8 @@ use crate::backends::wasm::runtime::memory::{WasmMemoryPlan, WasmScalarStorageKi
 use crate::backends::wasm::runtime::strings::WasmRuntimeHelper;
 use crate::backends::wasm::tests::lowering::test_support::{
     build_module, build_type_environment, default_borrow_facts, default_numeric_proofs, expression,
-    int_expression, load_local as hir_load_local, local as hir_local, statement as hir_statement,
-    string_expression,
+    fixed_scalar_expression, fixed_scalar_type, i32_expression, load_local as hir_load_local,
+    local as hir_local, statement as hir_statement, string_expression,
 };
 use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::compiler_messages::compiler_errors::ErrorType;
@@ -50,10 +50,9 @@ use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, 
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use moth_lexical::numeric::binary16::round_f64_to_f16;
-use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use moth_lexical::numeric::format::format_finite_float;
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 use rustc_hash::FxHashMap;
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -63,7 +62,7 @@ fn lowers_hir_to_wasm_module_bytes() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut expressions = HirExpressionStore::default();
-    let (type_environment, types) = build_type_environment();
+    let (type_environment, _) = build_type_environment();
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
         .expect("test path fits");
@@ -73,18 +72,13 @@ fn lowers_hir_to_wasm_module_bytes() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(
-            7,
-            types.int,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(i32_expression(7, RegionId(0), &mut expressions)),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.int,
+        return_type: fixed_scalar_type(FixedScalar::I32),
     };
 
     let hir_module = build_module(
@@ -323,6 +317,134 @@ fn emits_requested_helper_exports_and_valid_section_order() {
 }
 
 #[test]
+fn vec_push_traps_on_crafted_header_before_any_write_in_node() {
+    let lir_module = build_manual_lir_module();
+    let request = request_with_helper_exports();
+    let emit_result =
+        emit_lir_to_wasm_module(&lir_module, &request).expect("manual lir emission should succeed");
+
+    const NODE_BODY: &str = r#"
+const memory = instance.exports.memory;
+const view = () => new DataView(memory.buffer);
+const vec = instance.exports.moth_vec_new();
+const push = instance.exports.moth_vec_push;
+const rows = [];
+const attempt = (name, step) => {
+  try {
+    step();
+    rows.push(`${name}|ok`);
+  } catch (error) {
+    const trapped = error instanceof WebAssembly.RuntimeError && /unreachable/.test(error.message);
+    rows.push(`${name}|${trapped ? "trap" : "other"}`);
+  }
+};
+attempt("first", () => push(vec, 7));
+rows.push(`len|${view().getUint32(vec + 4, true)}`);
+view().setUint32(vec + 4, 0xffffffff, true);
+attempt("wrapped-len", () => push(vec, 9));
+rows.push(`header-len|${view().getUint32(vec + 4, true)}`);
+view().setUint32(vec + 4, 1, true);
+view().setUint32(vec + 8, 0xffffffff, true);
+view().setUint32(vec + 0, 0xfffffffc, true);
+attempt("wrapped-ptr", () => push(vec, 9));
+rows.push(`header-len|${view().getUint32(vec + 4, true)}`);
+// A valid I32 element position can require bytes above signed I32::MAX.
+// Resource exhaustion is distinct from a rejected physical u32 product.
+view().setUint32(vec + 0, 0, true);
+view().setUint32(vec + 4, 0x20000000, true);
+view().setUint32(vec + 8, 0x3fffffff, true);
+try {
+  push(vec, 9);
+  rows.push("large-byte-product|unexpected-success");
+} catch (error) {
+  const resourceLimit = error instanceof WebAssembly.RuntimeError && /out of bounds/.test(error.message);
+  rows.push(`large-byte-product|${resourceLimit ? "resource-limit" : "other"}`);
+}
+rows.push(`header-len|${view().getUint32(vec + 4, true)}`);
+view().setUint32(vec + 4, 0x3fffffff, true);
+attempt("physical-product-overflow", () => push(vec, 9));
+rows.push(`header-len|${view().getUint32(vec + 4, true)}`);
+process.stdout.write(rows.join("\n"));
+"#;
+    const NODE_SETUP: &str = r#"
+imports.host = {
+  test_import() {
+    throw new Error("unexpected host call to test_import");
+  }
+};
+"#;
+    let output = run_wasm_node_script(&emit_result.wasm_bytes, NODE_SETUP, NODE_BODY);
+    let actual = String::from_utf8(output).expect("Node vec results should be UTF-8");
+    assert_eq!(
+        actual,
+        "first|ok\nlen|1\nwrapped-len|trap\nheader-len|4294967295\nwrapped-ptr|trap\nheader-len|1\nlarge-byte-product|resource-limit\nheader-len|536870912\nphysical-product-overflow|trap\nheader-len|1073741823",
+        "vec push must distinguish valid large byte products from physical overflow and preserve the header on either failure"
+    );
+}
+
+#[test]
+fn string_push_handle_traps_before_corrupting_memory_in_node() {
+    let lir_module = build_string_push_handle_wrapper_lir_module();
+    let request = request_with_helper_exports();
+    let emit_result = emit_lir_to_wasm_module(&lir_module, &request)
+        .expect("string push handle wrapper emission should succeed");
+
+    const NODE_BODY: &str = r#"
+const memory = instance.exports.memory;
+const push = instance.exports.moth_string_push_handle;
+const u8 = () => new Uint8Array(memory.buffer);
+const dv = () => new DataView(memory.buffer);
+const hex = values => values.map(value => `0x${value.toString(16)}`).join(",");
+const readBytes = (address, length) => hex(Array.from(u8().subarray(address, address + length)));
+const readHeader = address => hex([0, 4, 8].map(offset => dv().getUint32(address + offset, true)));
+const writeHeader = (address, ptr, len, cap) => {
+  dv().setUint32(address, ptr, true);
+  dv().setUint32(address + 4, len, true);
+  dv().setUint32(address + 8, cap, true);
+};
+const reset = (ptr, len, cap, srcLen) => {
+  u8().set([0x11, 0x22, 0x33, 0x44], 0x10);
+  u8()[0x300] = 0x5a;
+  u8()[0x3ff] = 0x3f;
+  writeHeader(0x100, ptr, len, cap);
+  dv().setUint32(0x200, 0x300, true);
+  dv().setUint32(0x204, srcLen, true);
+};
+const rows = [];
+const runCase = (name, ptr, len, cap, srcLen) => {
+  reset(ptr, len, cap, srcLen);
+  let outcome = "ok";
+  try {
+    push(0x100, 0x200);
+  } catch (error) {
+    const trapped = error instanceof WebAssembly.RuntimeError && /unreachable/.test(error.message);
+    outcome = trapped ? "unreachable" : "other";
+  }
+  rows.push(`${name}|${outcome}|low=${readBytes(0x10, 4)}|canary=${readBytes(0x3ff, 1)}|header=${readHeader(0x100)}`);
+};
+reset(0, 0, 0, 1);
+push(0x100, 0x200);
+push(0x100, 0x200);
+const controlPtr = dv().getUint32(0x100, true);
+rows.push(`control|ok|len=${hex([dv().getUint32(0x104, true)])}|cap=${hex([dv().getUint32(0x108, true)])}|bytes=${readBytes(controlPtr, 2)}`);
+runCase("wrap-tail", 0xfffffff0, 0x20, 0x100, 1);
+runCase("wrap-len", 0x400, 0xffffffff, 0xffffffff, 1);
+runCase("growth-wrap", 0, 0, 0, 0x80000000);
+process.stdout.write(rows.join("\n"));
+"#;
+    let output = run_wasm_node_script(&emit_result.wasm_bytes, "", NODE_BODY);
+    let actual = String::from_utf8(output).expect("Node string push results should be UTF-8");
+    assert_eq!(
+        actual,
+        "control|ok|len=0x2|cap=0x2|bytes=0x5a,0x5a\n\
+         wrap-tail|unreachable|low=0x11,0x22,0x33,0x44|canary=0x3f|header=0xfffffff0,0x20,0x100\n\
+         wrap-len|unreachable|low=0x11,0x22,0x33,0x44|canary=0x3f|header=0x400,0xffffffff,0xffffffff\n\
+         growth-wrap|unreachable|low=0x11,0x22,0x33,0x44|canary=0x3f|header=0x0,0x0,0x0",
+        "string push handle must trap before writing or publishing corrupt buffer headers"
+    );
+}
+
+#[test]
 fn rejects_invalid_helper_export_policy() {
     let mut request = WasmBackendRequest::default();
     request.export_policy.helper_exports = WasmHelperExportPolicy {
@@ -339,7 +461,7 @@ fn rejects_invalid_helper_export_policy() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut expressions = HirExpressionStore::default();
-    let (type_environment, types) = build_type_environment();
+    let (type_environment, _) = build_type_environment();
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
         .expect("test path fits");
@@ -348,18 +470,13 @@ fn rejects_invalid_helper_export_policy() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(
-            0,
-            types.int,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(i32_expression(0, RegionId(0), &mut expressions)),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.int,
+        return_type: fixed_scalar_type(FixedScalar::I32),
     };
     let hir_module = build_module(
         &mut path_fork,
@@ -631,7 +748,7 @@ fn checked_float_machine_boundaries_execute_with_native_traps() {
 fn validate_float_preserves_finite_bits_and_traps_nonfinite_values_in_node() {
     let module = build_float_validation_lir_module();
     let result = emit_lir_to_wasm_module(&module, &WasmBackendRequest::default())
-        .expect("Float validation LIR should emit");
+        .expect("binary-float validation LIR should emit");
     validate_wasm(&result.wasm_bytes);
 
     let f32_inputs = [
@@ -709,7 +826,7 @@ fn validate_float_preserves_finite_bits_and_traps_nonfinite_values_in_node() {
                     f64::from_bits(u64::from_str_radix(input_bits, 16).unwrap()).is_finite()
                 }
                 BinaryFloatPrecision::Binary16 => {
-                    panic!("Float validation tests require F32 or F64")
+                    panic!("binary-float validation tests require F32 or F64")
                 }
             };
             if finite {
@@ -1171,7 +1288,7 @@ process.stdout.write(results.join("\n"));
 }
 
 #[test]
-fn scalar_storage_facts_follow_profile_and_natural_layout() {
+fn scalar_storage_facts_follow_exact_scalars_and_natural_layout() {
     let kinds = [
         (WasmScalarStorageKind::I8, 1, WasmAbiType::I32),
         (WasmScalarStorageKind::U8, 1, WasmAbiType::I32),
@@ -1192,53 +1309,49 @@ fn scalar_storage_facts_follow_profile_and_natural_layout() {
         assert_eq!(kind.carrier(), carrier);
     }
 
-    let profiles = [
+    let scalar_rows = [
         (
-            IntWidth::Bits32,
-            FloatPrecision::Bits32,
+            FixedScalar::I32,
+            FixedScalar::F32,
             WasmScalarStorageKind::I32,
             WasmScalarStorageKind::F32,
         ),
         (
-            IntWidth::Bits32,
-            FloatPrecision::Bits64,
+            FixedScalar::I32,
+            FixedScalar::F64,
             WasmScalarStorageKind::I32,
             WasmScalarStorageKind::F64,
         ),
         (
-            IntWidth::Bits64,
-            FloatPrecision::Bits32,
+            FixedScalar::I64,
+            FixedScalar::F32,
             WasmScalarStorageKind::I64,
             WasmScalarStorageKind::F32,
         ),
         (
-            IntWidth::Bits64,
-            FloatPrecision::Bits64,
+            FixedScalar::I64,
+            FixedScalar::F64,
             WasmScalarStorageKind::I64,
             WasmScalarStorageKind::F64,
         ),
     ];
-    for (int_width, float_precision, int_kind, float_kind) in profiles {
-        let profile = NumericProfile {
-            int_width,
-            float_precision,
-        };
+    for (int_scalar, float_scalar, int_kind, float_kind) in scalar_rows {
         assert_eq!(
-            WasmScalarStorageKind::for_numeric_scalar(NumericScalar::Int, profile),
-            Some(int_kind)
+            WasmScalarStorageKind::for_numeric_scalar(NumericScalar::Fixed(int_scalar)),
+            Some(int_kind),
+            "{int_scalar:?} storage"
         );
         assert_eq!(
-            WasmScalarStorageKind::for_numeric_scalar(NumericScalar::Float, profile),
-            Some(float_kind)
-        );
-        assert_eq!(
-            WasmScalarStorageKind::for_numeric_scalar(
-                NumericScalar::Fixed(FixedScalar::F16),
-                profile
-            ),
-            Some(WasmScalarStorageKind::F16)
+            WasmScalarStorageKind::for_numeric_scalar(NumericScalar::Fixed(float_scalar)),
+            Some(float_kind),
+            "{float_scalar:?} storage"
         );
     }
+    assert_eq!(
+        WasmScalarStorageKind::for_numeric_scalar(NumericScalar::Fixed(FixedScalar::F16)),
+        Some(WasmScalarStorageKind::F16),
+        "F16 storage comes from its own scalar"
+    );
     assert_eq!(
         WasmScalarStorageKind::from_fixed_scalar(FixedScalar::Byte),
         Some(WasmScalarStorageKind::U8)
@@ -1915,7 +2028,7 @@ fn rejects_unsupported_wasm_feature_flags() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut expressions = HirExpressionStore::default();
-    let (type_environment, types) = build_type_environment();
+    let (type_environment, _) = build_type_environment();
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
         .expect("test path fits");
@@ -1924,18 +2037,13 @@ fn rejects_unsupported_wasm_feature_flags() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(
-            0,
-            types.int,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(i32_expression(0, RegionId(0), &mut expressions)),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.int,
+        return_type: fixed_scalar_type(FixedScalar::I32),
     };
     let hir_module = build_module(
         &mut path_fork,
@@ -1974,7 +2082,7 @@ fn rejects_unsupported_cfg_lowering_strategy() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut expressions = HirExpressionStore::default();
-    let (type_environment, types) = build_type_environment();
+    let (type_environment, _) = build_type_environment();
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
         .expect("test path fits");
@@ -1983,18 +2091,13 @@ fn rejects_unsupported_cfg_lowering_strategy() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(
-            0,
-            types.int,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(i32_expression(0, RegionId(0), &mut expressions)),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.int,
+        return_type: fixed_scalar_type(FixedScalar::I32),
     };
     let hir_module = build_module(
         &mut path_fork,
@@ -2145,7 +2248,6 @@ fn request_with_helper_exports() -> WasmBackendRequest {
         external_package_registry: Default::default(),
         structural_string_urls: None,
         function_emission_policy: Default::default(),
-        numeric_profile: NumericProfile::STANDARD,
     }
 }
 
@@ -2712,7 +2814,7 @@ fn build_float_validation_lir_module() -> WasmLirModule {
         let carrier = match precision {
             BinaryFloatPrecision::Binary32 => WasmAbiType::F32,
             BinaryFloatPrecision::Binary64 => WasmAbiType::F64,
-            BinaryFloatPrecision::Binary16 => panic!("Float validation requires F32 or F64"),
+            BinaryFloatPrecision::Binary16 => panic!("binary-float validation requires F32 or F64"),
         };
         let mut locals = vec![WasmLirLocal {
             id: source,
@@ -3197,6 +3299,54 @@ fn integer_string_conversion_function(
     (function, export)
 }
 
+fn build_string_push_handle_wrapper_lir_module() -> WasmLirModule {
+    let buffer = WasmLirLocalId(0);
+    let source = WasmLirLocalId(1);
+    let id = WasmLirFunctionId(0);
+    let function = WasmLirFunction {
+        id,
+        debug_name: "string_push_handle_wrapper".to_owned(),
+        origin: WasmLirFunctionOrigin::ExportWrapper,
+        signature: WasmLirSignature {
+            params: vec![WasmAbiType::Handle, WasmAbiType::Handle],
+            results: vec![],
+        },
+        locals: vec![
+            WasmLirLocal {
+                id: buffer,
+                name: Some("buffer".to_owned()),
+                ty: WasmAbiType::Handle,
+                role: WasmLocalRole::Param,
+            },
+            WasmLirLocal {
+                id: source,
+                name: Some("source".to_owned()),
+                ty: WasmAbiType::Handle,
+                role: WasmLocalRole::Param,
+            },
+        ],
+        blocks: vec![WasmLirBlock {
+            id: WasmLirBlockId(0),
+            statements: vec![WasmLirStmt::StringPushHandle {
+                buffer,
+                handle: source,
+            }],
+            terminator: WasmLirTerminator::Return { value: None },
+        }],
+        linkage: WasmFunctionLinkage::ExportedWrapper,
+    };
+    WasmLirModule {
+        functions: vec![function],
+        imports: vec![],
+        exports: vec![WasmExport {
+            export_name: "moth_string_push_handle".to_owned(),
+            kind: WasmExportKind::Function(id),
+        }],
+        static_data: vec![],
+        memory_plan: WasmMemoryPlan::default(),
+    }
+}
+
 fn build_float_string_conversion_lir_module() -> WasmLirModule {
     let cases = [
         (
@@ -3495,7 +3645,7 @@ process.stdout.write(results.join("\n"));
                 BinaryFloatPrecision::Binary32 => "\"f32\"",
                 BinaryFloatPrecision::Binary64 => "\"f64\"",
                 BinaryFloatPrecision::Binary16 => {
-                    panic!("Float validation observations require F32 or F64")
+                    panic!("binary-float validation observations require F32 or F64")
                 }
             };
             let input_bits = input_bits
@@ -3510,7 +3660,7 @@ process.stdout.write(results.join("\n"));
     let node_body = NODE_BODY.replace("__EXPORT_SPECS__", &format!("[{export_specs}]"));
     let output = run_wasm_node_script(wasm_bytes, "", &node_body);
     String::from_utf8(output)
-        .expect("Node Float validation results should be UTF-8")
+        .expect("Node binary-float validation results should be UTF-8")
         .lines()
         .map(str::to_owned)
         .collect()
@@ -3636,7 +3786,8 @@ process.stdout.write(results.join("\n"));
 ///         the run() U64 divide statement proves only for its exact non-zero divisor form
 ///         and the dynamic q divide stays retained,
 ///       - retained-only checks keep their traps for subtraction underflow, dynamic negation of
-///         INT_MIN, division by zero and the checksum alias ADD overflow (i32::MAX input),
+///         the I32 minimum (`i32::MIN`), division by zero and the checksum alias ADD overflow
+///         (`i32::MAX` input),
 ///       - the editions agree on every case (same values, same trap statuses),
 ///       - the analysed bytes differ from retained bytes (predicates and check-only scratch are
 ///         actually gone).
@@ -3676,7 +3827,6 @@ fn proven_integer_operations_execute_with_aliased_destinations() {
     let analysed = lower(&analyse_numeric_proofs(
         &fixture.module,
         &fixture.type_environment,
-        NumericProfile::STANDARD,
     ));
 
     let retained_bytes = retained.wasm_bytes.expect("retained edition emits bytes");
@@ -3689,8 +3839,8 @@ fn proven_integer_operations_execute_with_aliased_destinations() {
     );
 
     // (a, b, d): the safe case keeps every dynamic statement inside bounds; the trap cases each
-    // exercise one retained-only failure (subtraction underflow, INT_MIN negation, zero divisor,
-    // and the checksum add overflowing through a large `a`).
+    // exercise one retained-only failure (subtraction underflow, `i32::MIN` negation, zero
+    // divisor, and the checksum add overflowing through a large `a`).
     let ok_case = [0, 7, 6];
     let negation_trap_case = [0, i32::MIN as i64, 1];
     let division_trap_case = [0, 5, 0];
@@ -3739,21 +3889,25 @@ fn proven_integer_operations_execute_with_aliased_destinations() {
     );
 }
 
-/// Instantiated Uint scalar execution for the Wasm backend.
+/// Instantiated unsigned scalar execution for the Wasm backend.
 ///
-/// WHAT: lowers one HIR module with Uint parameters, locals and results through both integer
-///       profiles, instantiates the emitted bytes in Node and asserts exact values and trap
-///       statuses for unsigned arithmetic, exact Uint/Uint and Uint/Int comparisons and
-///       infallible Uint-to-Float conversion including the direct Float32 rounding witness.
-/// WHY: trap-mode Uint paths must execute with unsigned semantics and bit-pattern preservation
-///      above the signed maximum. Expected Wasm traps stay terminal `RuntimeError` assertions
-///      here; Moth `Error` codes belong to the JS/source recovery tests, never to this module.
+/// WHAT: lowers one HIR module with exact unsigned parameters, locals and results at U32 and
+///       U64, instantiates the emitted bytes in Node and asserts
+///       exact values and trap statuses for unsigned arithmetic, unsigned/unsigned and
+///       unsigned/signed comparisons and infallible unsigned-to-float conversion including the
+///       direct F32 rounding witness.
+/// WHY: trap-mode unsigned paths must execute with unsigned semantics and bit-pattern
+///      preservation above the signed maximum. Expected Wasm traps stay terminal `RuntimeError`
+///      assertions here; Moth `Error` codes belong to the JS/source recovery tests, never to
+///      this module.
 #[test]
 fn uint_scalar_operations_execute_with_unsigned_semantics_in_node() {
-    for profile in [uint_test_profile_32(), uint_test_profile_64()] {
-        let fixture = build_uint_scalar_fixture(profile);
+    for (uint_scalar, int_scalar) in [
+        (FixedScalar::U32, FixedScalar::I32),
+        (FixedScalar::U64, FixedScalar::I64),
+    ] {
+        let fixture = build_uint_scalar_fixture(uint_scalar, int_scalar);
         let mut request = WasmBackendRequest {
-            numeric_profile: profile,
             export_policy: uint_scalar_export_policy(&fixture.names),
             ..WasmBackendRequest::default()
         };
@@ -3767,35 +3921,41 @@ fn uint_scalar_operations_execute_with_unsigned_semantics_in_node() {
             &fixture.type_environment,
             &fixture.path_table,
         )
-        .unwrap_or_else(|error| panic!("{profile:?} Uint fixture should emit: {error:?}"));
-        let bytes = result.wasm_bytes.expect("Uint fixture emits bytes");
+        .unwrap_or_else(|error| {
+            panic!("{uint_scalar:?} unsigned integer fixture should emit: {error:?}")
+        });
+        let bytes = result
+            .wasm_bytes
+            .expect("unsigned integer fixture emits bytes");
         validate_wasm(&bytes);
-        let actual = execute_wasm_uint_exports_in_node(&bytes, &uint_scalar_calls(profile));
-        for (name, status, value) in uint_scalar_expectations(profile) {
+        let actual = execute_wasm_uint_exports_in_node(&bytes, &uint_scalar_calls(uint_scalar));
+        for (name, status, value) in uint_scalar_expectations(uint_scalar) {
             let found = actual
                 .iter()
                 .find(|(actual_name, _, _)| actual_name == &name)
-                .unwrap_or_else(|| panic!("{profile:?} missing Uint export result for {name}"));
+                .unwrap_or_else(|| {
+                    panic!("{uint_scalar:?} missing unsigned integer export result for {name}")
+                });
             assert_eq!(
                 found.1, status,
-                "{profile:?} {name} had an unexpected outcome"
+                "{uint_scalar:?} {name} had an unexpected outcome"
             );
             if status == "trap" {
                 // Terminal Wasm traps surface as engine `RuntimeError`s, never as Moth `Error`
                 // codes: recovery expectations belong to the JS/source tests, not to this module.
                 assert!(
                     !found.2.is_empty(),
-                    "{profile:?} {name} should report a trap"
+                    "{uint_scalar:?} {name} should report a trap"
                 );
                 assert!(
                     !found.2.contains("MOTH-"),
-                    "{profile:?} {name} must not surface a Moth Error code: {:?}",
+                    "{uint_scalar:?} {name} must not surface a Moth Error code: {:?}",
                     found.2
                 );
             } else {
                 assert_eq!(
                     found.2, value,
-                    "{profile:?} {name} returned an unexpected result"
+                    "{uint_scalar:?} {name} returned an unexpected result"
                 );
             }
         }
@@ -3804,64 +3964,41 @@ fn uint_scalar_operations_execute_with_unsigned_semantics_in_node() {
 
 #[test]
 fn uint_storage_maps_to_compact_carriers_with_natural_stride() {
-    let profiles = [
+    // Exact unsigned scalars own their storage; each names its own compact integer carrier.
+    let rows = [
         (
-            IntWidth::Bits32,
-            FloatPrecision::Bits32,
-            WasmScalarStorageKind::I32,
+            FixedScalar::U32,
+            4,
+            WasmAbiType::I32,
+            WasmScalarStorageKind::U32,
         ),
         (
-            IntWidth::Bits32,
-            FloatPrecision::Bits64,
-            WasmScalarStorageKind::I32,
-        ),
-        (
-            IntWidth::Bits64,
-            FloatPrecision::Bits32,
-            WasmScalarStorageKind::I64,
-        ),
-        (
-            IntWidth::Bits64,
-            FloatPrecision::Bits64,
-            WasmScalarStorageKind::I64,
+            FixedScalar::U64,
+            8,
+            WasmAbiType::I64,
+            WasmScalarStorageKind::U64,
         ),
     ];
-    for (int_width, float_precision, expected) in profiles {
-        let profile = NumericProfile {
-            int_width,
-            float_precision,
-        };
-        let kind = WasmScalarStorageKind::for_numeric_scalar(NumericScalar::Uint, profile)
-            .expect("Uint has scalar storage under every profile");
-        assert_eq!(kind, expected, "{profile:?} Uint storage");
-        let (size, carrier) = match int_width {
-            IntWidth::Bits32 => (4, WasmAbiType::I32),
-            IntWidth::Bits64 => (8, WasmAbiType::I64),
-        };
-        assert_eq!(kind.size(), size, "{profile:?} Uint size");
-        assert_eq!(kind.alignment(), size, "{profile:?} Uint alignment");
-        assert_eq!(kind.stride(), size, "{profile:?} Uint stride");
-        assert_eq!(kind.carrier(), carrier, "{profile:?} Uint carrier");
+    for (scalar, size, carrier, expected) in rows {
+        let kind = WasmScalarStorageKind::for_numeric_scalar(NumericScalar::Fixed(scalar))
+            .expect("unsigned integer scalar has fixed-scalar storage");
+        assert_eq!(kind, expected, "{scalar:?} storage");
+        assert_eq!(kind.size(), size, "{scalar:?} size");
+        assert_eq!(kind.alignment(), size, "{scalar:?} alignment");
+        assert_eq!(kind.stride(), size, "{scalar:?} stride");
+        assert_eq!(kind.carrier(), carrier, "{scalar:?} carrier");
     }
+    // Signedness stays part of the storage identity; the shared property stores and loads
+    // consume is the computation carrier, so the cross-identity check compares carriers.
     assert_eq!(
-        WasmScalarStorageKind::for_numeric_scalar(NumericScalar::Uint, NumericProfile::STANDARD,),
-        WasmScalarStorageKind::for_numeric_scalar(NumericScalar::Int, NumericProfile::STANDARD),
-        "Uint shares the Int width carrier without aliasing its semantic identity"
+        WasmScalarStorageKind::for_numeric_scalar(NumericScalar::Fixed(FixedScalar::U32))
+            .expect("U32 scalar has fixed-scalar storage")
+            .carrier(),
+        WasmScalarStorageKind::for_numeric_scalar(NumericScalar::Fixed(FixedScalar::I32))
+            .expect("I32 scalar has fixed-scalar storage")
+            .carrier(),
+        "U32 shares the I32 carrier without aliasing its semantic storage identity"
     );
-}
-
-fn uint_test_profile_32() -> NumericProfile {
-    NumericProfile {
-        int_width: IntWidth::Bits32,
-        float_precision: FloatPrecision::Bits64,
-    }
-}
-
-fn uint_test_profile_64() -> NumericProfile {
-    NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: FloatPrecision::Bits64,
-    }
 }
 
 struct UintScalarFixture {
@@ -3871,19 +4008,23 @@ struct UintScalarFixture {
     type_environment: crate::compiler_frontend::datatypes::environment::TypeEnvironment,
     path_table: crate::compiler_frontend::symbols::path_interner::PathTable,
 }
-/// One exported Uint helper per behaviour under test; every arithmetic helper is a trap-mode
+/// One exported unsigned integer helper per behaviour under test; every arithmetic helper is a trap-mode
 /// `NumericOp` over its parameters so Node observes native values or terminal traps. The module
 /// keeps a dedicated entry-start `main` following the established start/export split; only the
-/// named Uint helpers are exported.
-fn build_uint_scalar_fixture(profile: NumericProfile) -> UintScalarFixture {
+/// named unsigned integer helpers are exported.
+fn build_uint_scalar_fixture(
+    uint_scalar: FixedScalar,
+    int_scalar: FixedScalar,
+) -> UintScalarFixture {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (type_environment, types) = build_type_environment();
-    let uint_type = builtin_type_ids::UINT;
-    let int_type = builtin_type_ids::INT;
+    let (type_environment, _) = build_type_environment();
+    let float_scalar = FixedScalar::F64;
+    let uint_type = fixed_scalar_type(uint_scalar);
+    let int_type = fixed_scalar_type(int_scalar);
     let bool_type = builtin_type_ids::BOOL;
-    let float_type = builtin_type_ids::FLOAT;
-    let f32_type = builtin_type_ids::fixed_scalar(FixedScalar::F32);
+    let float_type = fixed_scalar_type(float_scalar);
+    let f32_type = fixed_scalar_type(FixedScalar::F32);
     let region = RegionId(0);
 
     let mut expressions = HirExpressionStore::default();
@@ -3898,14 +4039,18 @@ fn build_uint_scalar_fixture(profile: NumericProfile) -> UintScalarFixture {
         region,
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(0, types.int, region, &mut expressions)),
+        terminator: HirTerminator::Return(fixed_scalar_expression(
+            FixedScalarValue::signed(int_scalar, 0).expect("valid test value"),
+            region,
+            &mut expressions,
+        )),
     });
     functions.push((
         HirFunction {
             id: FunctionId(0),
             entry: BlockId(100),
             params: vec![],
-            return_type: types.int,
+            return_type: int_type,
         },
         start_path,
         HirFunctionOrigin::EntryStart,
@@ -3946,7 +4091,7 @@ fn build_uint_scalar_fixture(profile: NumericProfile) -> UintScalarFixture {
                 HirStatementKind::NumericOp {
                     op: HirNumericOp {
                         operator,
-                        domain: NumericScalar::Uint,
+                        domain: NumericScalar::Fixed(uint_scalar),
                     },
                     failure_mode: NumericFailureMode::Trap,
                     operands: HirNumericOperands::Binary { left, right },
@@ -3968,7 +4113,7 @@ fn build_uint_scalar_fixture(profile: NumericProfile) -> UintScalarFixture {
         ));
         names.push((id, name.to_owned()));
     }
-    // Above the signed maximum Uint/Uint order stays unsigned: the signed reinterpretation
+    // Above the signed maximum unsigned integer ordering stays unsigned: signed reinterpretation
     // would invert every assertion below.
     let ordered: Vec<(&str, HirBinOp)> = vec![
         ("ucmp_lt", HirBinOp::Lt),
@@ -4015,8 +4160,9 @@ fn build_uint_scalar_fixture(profile: NumericProfile) -> UintScalarFixture {
         ));
         names.push((id, name.to_owned()));
     }
-    // A negative Int is less than every Uint, including zero; a Uint above the signed maximum
-    // stays greater than the signed maximum in both operand orders.
+    // A negative signed operand is less than every unsigned operand, including zero; an unsigned
+    // operand above the signed maximum stays greater than the signed maximum in both operand
+    // orders.
     let mixed: Vec<(&str, HirBinOp, bool)> = vec![
         ("umix_lt", HirBinOp::Lt, false),
         ("umix_gt", HirBinOp::Gt, true),
@@ -4066,16 +4212,21 @@ fn build_uint_scalar_fixture(profile: NumericProfile) -> UintScalarFixture {
         ));
         names.push((id, name.to_owned()));
     }
-    // Infallible Uint-to-Float conversions. The Float32 witness input exceeds the 32-bit Uint
-    // range, so it only joins 64-bit profiles; the profile Float conversion is always present.
+    // Infallible unsigned-to-float conversions. The F32 witness input exceeds the U32 range,
+    // so it only joins the U64 fixture; the F64 conversion is always present.
     // The witness rounds directly to 9007200000000000 (F32 bits 0x5a000001).
     let mut conversions: Vec<(
         &str,
         u64,
         NumericScalar,
         crate::compiler_frontend::datatypes::ids::TypeId,
-    )> = vec![("uto_float", 3_000_000_001, NumericScalar::Float, float_type)];
-    if profile.int_width == IntWidth::Bits64 {
+    )> = vec![(
+        "uto_float",
+        3_000_000_001,
+        NumericScalar::Fixed(float_scalar),
+        float_type,
+    )];
+    if uint_scalar == FixedScalar::U64 {
         conversions.push((
             "uto_f32",
             9_007_199_791_611_905,
@@ -4088,17 +4239,15 @@ fn build_uint_scalar_fixture(profile: NumericProfile) -> UintScalarFixture {
         next_function_id += 1;
         let path = intern(name);
         let block_id = BlockId(1000 + id.0);
-        let source = expression(
-            HirExpressionKind::Uint(value),
-            uint_type,
+        let source = fixed_scalar_expression(
+            FixedScalarValue::unsigned(uint_scalar, value).expect("valid test value"),
             region,
-            ValueKind::Const,
             &mut expressions,
         );
         let body = expression(HirExpressionKind::Cast {
                 source,
                 policy: crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId::NumericConversion {
-                    source: NumericScalar::Uint,
+                    source: NumericScalar::Fixed(uint_scalar),
                     target,
                 },
             }, return_type, region, ValueKind::RValue, &mut expressions);
@@ -4156,8 +4305,8 @@ fn uint_scalar_export_policy(names: &[(FunctionId, String)]) -> WasmExportPolicy
 
 /// Calls use JS Numbers for 32-bit carriers and BigInts for 64-bit carriers; float results
 /// render as F32/F64 hex bits so the direct-rounding assertions are exact.
-fn uint_scalar_calls(profile: NumericProfile) -> Vec<(String, Vec<String>, Option<String>)> {
-    let big = profile.int_width == IntWidth::Bits64;
+fn uint_scalar_calls(uint_scalar: FixedScalar) -> Vec<(String, Vec<String>, Option<String>)> {
+    let big = uint_scalar == FixedScalar::U64;
     // Renders one Wasm integer parameter in its JS call shape.
     let param = |value: &str| {
         if big {
@@ -4214,7 +4363,7 @@ fn uint_scalar_calls(profile: NumericProfile) -> Vec<(String, Vec<String>, Optio
         ));
     }
     // Above-signed-maximum comparisons, mixed-sign comparisons and the infallible
-    // Uint-to-Float conversions (bit-exact F32/F64 rendering).
+    // unsigned-to-float conversions (bit-exact F32/F64 rendering).
     if big {
         calls.push((
             "ucmp_lt".to_owned(),
@@ -4267,10 +4416,10 @@ fn uint_scalar_calls(profile: NumericProfile) -> Vec<(String, Vec<String>, Optio
     calls
 }
 
-fn uint_scalar_expectations(profile: NumericProfile) -> Vec<(String, String, String)> {
+fn uint_scalar_expectations(uint_scalar: FixedScalar) -> Vec<(String, String, String)> {
     // I64-carrier results render through the signed JS BigInt view, so values above the signed
     // maximum observe as their signed reinterpretation: the assertions pin exact bit patterns.
-    let mut expected = if profile.int_width == IntWidth::Bits64 {
+    let mut expected = if uint_scalar == FixedScalar::U64 {
         vec![
             (
                 "uadd".to_owned(),
@@ -4315,20 +4464,20 @@ fn uint_scalar_expectations(profile: NumericProfile) -> Vec<(String, String, Str
     expected.push(("ucmp_eq".to_owned(), "ok".to_owned(), "1".to_owned()));
     expected.push(("umix_lt".to_owned(), "ok".to_owned(), "1".to_owned()));
     expected.push(("umix_gt".to_owned(), "ok".to_owned(), "1".to_owned()));
-    // 3000000001 is exactly representable in F64; the Float32 witness input rounds directly
+    // 3000000001 is exactly representable in F64; the F32 witness input rounds directly
     // to 9007200000000000 (F32 bits 0x5a000001).
     expected.push((
         "uto_float".to_owned(),
         "ok".to_owned(),
         "41e65a0bc0200000".to_owned(),
     ));
-    if profile.int_width == IntWidth::Bits64 {
+    if uint_scalar == FixedScalar::U64 {
         expected.push(("uto_f32".to_owned(), "ok".to_owned(), "5a000001".to_owned()));
     }
     expected
 }
 
-/// Executes named Uint exports in Node, distinguishing terminal Wasm traps from returned values.
+/// Executes named unsigned integer exports in Node, distinguishing terminal Wasm traps from returned values.
 fn execute_wasm_uint_exports_in_node(
     wasm_bytes: &[u8],
     calls: &[(String, Vec<String>, Option<String>)],
@@ -4370,7 +4519,7 @@ process.stdout.write(results.join("\n"));
                 Some("f64") => "\"f64\"",
                 Some("f32") => "\"f32\"",
                 None => "null",
-                Some(other) => panic!("unsupported Uint float rendering {other}"),
+                Some(other) => panic!("unsupported unsigned integer float rendering {other}"),
             };
             let rendered = args
                 .iter()
@@ -4394,7 +4543,7 @@ process.stdout.write(results.join("\n"));
     let node_body = NODE_BODY.replace("__CALLS__", &format!("[{calls}]"));
     let output = run_wasm_node_script(wasm_bytes, "", &node_body);
     String::from_utf8(output)
-        .expect("Node Uint results should be UTF-8")
+        .expect("Node unsigned integer results should be UTF-8")
         .lines()
         .map(|line| {
             let mut parts = line.splitn(3, '|');

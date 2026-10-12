@@ -1,3 +1,3 @@
 /**
- * @moth.opaque Canvas of Int
+ * @moth.opaque Canvas of I32
  */

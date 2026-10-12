@@ -1,10 +1,9 @@
 entry = "."
-numeric_profile = "Int32/Float64"
 
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-TYPE-0003","MOTH-RULE-0083","MOTH-TYPE-0003","MOTH-TYPE-0003","MOTH-SYNTAX-0008","MOTH-SYNTAX-0008","MOTH-TYPE-0003","MOTH-TYPE-0003","MOTH-TYPE-0001","MOTH-TYPE-0003","MOTH-TYPE-0003","MOTH-TYPE-0003","MOTH-TYPE-0001","MOTH-TYPE-0001","MOTH-TYPE-0001","MOTH-SYNTAX-0008","MOTH-TYPE-0001","MOTH-TYPE-0001","MOTH-TYPE-0001"]
+diagnostic_codes = ["MOTH-TYPE-0003","MOTH-RULE-0083","MOTH-TYPE-0003","MOTH-TYPE-0003","MOTH-SYNTAX-0008","MOTH-SYNTAX-0008","MOTH-TYPE-0003","MOTH-TYPE-0003","MOTH-TYPE-0001","MOTH-TYPE-0003","MOTH-TYPE-0003","MOTH-TYPE-0003","MOTH-TYPE-0001","MOTH-TYPE-0001","MOTH-TYPE-0001","MOTH-SYNTAX-0008","MOTH-TYPE-0001","MOTH-TYPE-0001"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-TYPE-0003"
@@ -116,9 +115,3 @@ occurrence = 3
 reason = "invalid_number_literal.outside_fixed_scalar_range"
 path = "input/u8_peer_range/@mod.moth"
 line = 2
-
-[[backends.html.diagnostic_assertions]]
-code = "MOTH-TYPE-0001"
-occurrence = 7
-path = "input/unresolved_generic_slot/@mod.moth"
-line = 5

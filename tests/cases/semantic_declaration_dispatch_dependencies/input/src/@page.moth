@@ -2,7 +2,7 @@
 @helpers Box as ImportedBox, Status as ImportedStatus
 
 value = helpers.identity(21)
-box ImportedBox of Int = ImportedBox(value = value)
+box ImportedBox of I32 = ImportedBox(value = value)
 status ImportedStatus = ImportedStatus::Ready
 
 status_label |input ImportedStatus| -> String:

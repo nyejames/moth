@@ -39,6 +39,16 @@ use crate::compiler_frontend::hir::hir_builder::{
     build_ast_with_registered_types, lower_ast, validate_module_for_tests,
 };
 
+/// One exact `I32` value for pattern and body fixtures.
+fn i32_value(value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range")
+}
+
+/// One exact `I32` literal expression for pattern and body fixtures.
+fn int_expr(value: i64, span: Option<SourceSpan>) -> Expression {
+    Expression::fixed_scalar(i32_value(value), span, ValueMode::ImmutableOwned)
+}
+
 #[test]
 fn non_unit_function_with_terminal_match_default_does_not_report_fallthrough() {
     let mut path_fork = super::PathInternerFork::empty();
@@ -51,33 +61,28 @@ fn non_unit_function_with_terminal_match_default_does_not_report_fallthrough() {
     let chooser_fn = function_node(
         chooser,
         FunctionSignature {
-            parameters: vec![param_with_type_id(x, builtin_type_ids::INT, false, None)],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+            parameters: vec![param_with_type_id(
+                x,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                false,
+                None,
+            )],
+            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
         },
         vec![node(
             NodeKind::Match {
                 scrutinee: reference_expr_with_type_id(
                     x,
-                    builtin_type_ids::INT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     None,
                     ValueMode::ImmutableReference,
                 ),
                 arms: vec![MatchArm {
-                    pattern: MatchPattern::Literal(Expression::int(
-                        1,
-                        None,
-                        ValueMode::ImmutableOwned,
-                    )),
+                    pattern: MatchPattern::Literal(int_expr(1, None)),
                     guard: None,
-                    body: vec![node(
-                        NodeKind::Return(vec![Expression::int(1, None, ValueMode::ImmutableOwned)]),
-                        None,
-                    )],
+                    body: vec![node(NodeKind::Return(vec![int_expr(1, None)]), None)],
                 }],
-                default: Some(vec![node(
-                    NodeKind::Return(vec![Expression::int(2, None, ValueMode::ImmutableOwned)]),
-                    None,
-                )]),
+                default: Some(vec![node(NodeKind::Return(vec![int_expr(2, None)]), None)]),
                 exhaustiveness: MatchExhaustiveness::HasDefault,
             },
             None,
@@ -143,7 +148,7 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
                 false,
                 None,
             )],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
         },
         vec![node(
             NodeKind::Match {
@@ -162,14 +167,7 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
                             span: None,
                         },
                         guard: None,
-                        body: vec![node(
-                            NodeKind::Return(vec![Expression::int(
-                                1,
-                                None,
-                                ValueMode::ImmutableOwned,
-                            )]),
-                            None,
-                        )],
+                        body: vec![node(NodeKind::Return(vec![int_expr(1, None)]), None)],
                     },
                     MatchArm {
                         pattern: MatchPattern::ChoiceVariant {
@@ -179,14 +177,7 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
                             span: None,
                         },
                         guard: None,
-                        body: vec![node(
-                            NodeKind::Return(vec![Expression::int(
-                                2,
-                                None,
-                                ValueMode::ImmutableOwned,
-                            )]),
-                            None,
-                        )],
+                        body: vec![node(NodeKind::Return(vec![int_expr(2, None)]), None)],
                     },
                 ],
                 default: None,
@@ -244,46 +235,24 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
         NodeKind::Match {
             scrutinee: reference_expr_with_type_id(
                 x,
-                builtin_type_ids::INT,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 None,
                 ValueMode::ImmutableReference,
             ),
             arms: vec![
                 MatchArm {
-                    pattern: MatchPattern::Literal(Expression::int(
-                        1,
-                        None,
-                        ValueMode::ImmutableOwned,
-                    )),
+                    pattern: MatchPattern::Literal(int_expr(1, None)),
                     guard: None,
-                    body: vec![node(
-                        NodeKind::ExpressionStatement(Expression::int(
-                            9,
-                            None,
-                            ValueMode::ImmutableOwned,
-                        )),
-                        None,
-                    )],
+                    body: vec![node(NodeKind::ExpressionStatement(int_expr(9, None)), None)],
                 },
                 MatchArm {
-                    pattern: MatchPattern::Literal(Expression::int(
-                        2,
-                        None,
-                        ValueMode::ImmutableOwned,
-                    )),
+                    pattern: MatchPattern::Literal(int_expr(2, None)),
                     guard: None,
-                    body: vec![node(
-                        NodeKind::ExpressionStatement(Expression::int(
-                            8,
-                            None,
-                            ValueMode::ImmutableOwned,
-                        )),
-                        None,
-                    )],
+                    body: vec![node(NodeKind::ExpressionStatement(int_expr(8, None)), None)],
                 },
             ],
             default: Some(vec![node(
-                NodeKind::ExpressionStatement(Expression::int(0, None, ValueMode::ImmutableOwned)),
+                NodeKind::ExpressionStatement(int_expr(0, None)),
                 None,
             )]),
             exhaustiveness: MatchExhaustiveness::HasDefault,
@@ -294,7 +263,12 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param_with_type_id(x, builtin_type_ids::INT, false, None)],
+            parameters: vec![param_with_type_id(
+                x,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                false,
+                None,
+            )],
             returns: vec![],
         },
         vec![match_node],
@@ -510,24 +484,17 @@ fn lowers_match_with_guarded_arm_into_hir_guard_expression() {
         NodeKind::Match {
             scrutinee: reference_expr_with_type_id(
                 x,
-                builtin_type_ids::INT,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 None,
                 ValueMode::ImmutableReference,
             ),
             arms: vec![MatchArm {
-                pattern: MatchPattern::Literal(Expression::int(1, None, ValueMode::ImmutableOwned)),
+                pattern: MatchPattern::Literal(int_expr(1, None)),
                 guard: Some(Expression::bool(true, None, ValueMode::ImmutableOwned)),
-                body: vec![node(
-                    NodeKind::ExpressionStatement(Expression::int(
-                        9,
-                        None,
-                        ValueMode::ImmutableOwned,
-                    )),
-                    None,
-                )],
+                body: vec![node(NodeKind::ExpressionStatement(int_expr(9, None)), None)],
             }],
             default: Some(vec![node(
-                NodeKind::ExpressionStatement(Expression::int(8, None, ValueMode::ImmutableOwned)),
+                NodeKind::ExpressionStatement(int_expr(8, None)),
                 None,
             )]),
             exhaustiveness: MatchExhaustiveness::HasDefault,
@@ -538,7 +505,12 @@ fn lowers_match_with_guarded_arm_into_hir_guard_expression() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param_with_type_id(x, builtin_type_ids::INT, false, None)],
+            parameters: vec![param_with_type_id(
+                x,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                false,
+                None,
+            )],
             returns: vec![],
         },
         vec![match_node],
@@ -577,7 +549,7 @@ fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
     let guarded_arm = MatchArm {
-        pattern: MatchPattern::Literal(Expression::int(1, None, ValueMode::ImmutableOwned)),
+        pattern: MatchPattern::Literal(int_expr(1, None)),
         guard: Some(Expression::host_function_call(
             crate::compiler_frontend::external_packages::ExternalFunctionId::IoLine,
             vec![Expression::bool(true, None, ValueMode::ImmutableOwned)],
@@ -590,14 +562,19 @@ fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param_with_type_id(x, builtin_type_ids::INT, false, None)],
+            parameters: vec![param_with_type_id(
+                x,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                false,
+                None,
+            )],
             returns: vec![],
         },
         vec![node(
             NodeKind::Match {
                 scrutinee: reference_expr_with_type_id(
                     x,
-                    builtin_type_ids::INT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     None,
                     ValueMode::ImmutableReference,
                 ),
@@ -638,21 +615,26 @@ fn match_rejects_non_literal_pattern_expressions() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param_with_type_id(x, builtin_type_ids::INT, false, None)],
+            parameters: vec![param_with_type_id(
+                x,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                false,
+                None,
+            )],
             returns: vec![],
         },
         vec![node(
             NodeKind::Match {
                 scrutinee: reference_expr_with_type_id(
                     x,
-                    builtin_type_ids::INT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     None,
                     ValueMode::ImmutableReference,
                 ),
                 arms: vec![MatchArm {
                     pattern: MatchPattern::Literal(reference_expr_with_type_id(
                         x,
-                        builtin_type_ids::INT,
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         None,
                         ValueMode::ImmutableReference,
                     )),
@@ -814,10 +796,7 @@ fn side_table_maps_statement_and_terminator_spans() {
         },
         vec![
             node(
-                NodeKind::VariableDeclaration(make_test_variable(
-                    x,
-                    Expression::int(1, Some(decl_span), ValueMode::ImmutableOwned),
-                )),
+                NodeKind::VariableDeclaration(make_test_variable(x, int_expr(1, Some(decl_span)))),
                 Some(decl_span),
             ),
             node(NodeKind::Return(vec![]), Some(ret_span)),
@@ -848,28 +827,21 @@ fn lowers_relational_pattern_to_hir_relational() {
         NodeKind::Match {
             scrutinee: reference_expr_with_type_id(
                 x,
-                builtin_type_ids::INT,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 None,
                 ValueMode::ImmutableReference,
             ),
             arms: vec![MatchArm {
                 pattern: MatchPattern::Relational {
                     op: RelationalPatternOp::LessThan,
-                    value: Expression::int(10, None, ValueMode::ImmutableOwned),
+                    value: int_expr(10, None),
                     span: None,
                 },
                 guard: None,
-                body: vec![node(
-                    NodeKind::ExpressionStatement(Expression::int(
-                        9,
-                        None,
-                        ValueMode::ImmutableOwned,
-                    )),
-                    None,
-                )],
+                body: vec![node(NodeKind::ExpressionStatement(int_expr(9, None)), None)],
             }],
             default: Some(vec![node(
-                NodeKind::ExpressionStatement(Expression::int(8, None, ValueMode::ImmutableOwned)),
+                NodeKind::ExpressionStatement(int_expr(8, None)),
                 None,
             )]),
             exhaustiveness: MatchExhaustiveness::HasDefault,
@@ -880,7 +852,12 @@ fn lowers_relational_pattern_to_hir_relational() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param_with_type_id(x, builtin_type_ids::INT, false, None)],
+            parameters: vec![param_with_type_id(
+                x,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                false,
+                None,
+            )],
             returns: vec![],
         },
         vec![match_node],
@@ -917,8 +894,11 @@ fn lowers_relational_pattern_to_hir_relational() {
     if let HirPattern::Relational { value, .. } = &arms[0].pattern {
         let value = module.expressions.expression(*value);
         assert!(
-            matches!(&value.kind, HirExpressionKind::Int(10)),
-            "relational RHS should be a const int literal"
+            matches!(
+                &value.kind,
+                HirExpressionKind::FixedScalar(lowered) if *lowered == i32_value(10)
+            ),
+            "relational RHS should be a const I32 literal"
         );
         assert_eq!(value.value_kind, ValueKind::Const);
     }
@@ -936,28 +916,21 @@ fn lowers_guarded_relational_pattern_preserving_guard_separation() {
         NodeKind::Match {
             scrutinee: reference_expr_with_type_id(
                 x,
-                builtin_type_ids::INT,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 None,
                 ValueMode::ImmutableReference,
             ),
             arms: vec![MatchArm {
                 pattern: MatchPattern::Relational {
                     op: RelationalPatternOp::LessThan,
-                    value: Expression::int(10, None, ValueMode::ImmutableOwned),
+                    value: int_expr(10, None),
                     span: None,
                 },
                 guard: Some(Expression::bool(true, None, ValueMode::ImmutableOwned)),
-                body: vec![node(
-                    NodeKind::ExpressionStatement(Expression::int(
-                        9,
-                        None,
-                        ValueMode::ImmutableOwned,
-                    )),
-                    None,
-                )],
+                body: vec![node(NodeKind::ExpressionStatement(int_expr(9, None)), None)],
             }],
             default: Some(vec![node(
-                NodeKind::ExpressionStatement(Expression::int(8, None, ValueMode::ImmutableOwned)),
+                NodeKind::ExpressionStatement(int_expr(8, None)),
                 None,
             )]),
             exhaustiveness: MatchExhaustiveness::HasDefault,
@@ -968,7 +941,12 @@ fn lowers_guarded_relational_pattern_preserving_guard_separation() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param_with_type_id(x, builtin_type_ids::INT, false, None)],
+            parameters: vec![param_with_type_id(
+                x,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                false,
+                None,
+            )],
             returns: vec![],
         },
         vec![match_node],
@@ -1004,7 +982,7 @@ fn lowers_guarded_relational_pattern_preserving_guard_separation() {
 /// Verifies that `MatchPattern::ChoiceVariant` lowers to `HirPattern::ChoiceVariant`
 /// with correct tag indices and a shared `ChoiceId`.
 ///
-/// WHY: choice match arms must not become `HirPattern::Literal(HirExpressionKind::Int)`
+/// WHY: choice match arms must not become `HirPattern::Literal(HirExpressionKind::FixedScalar)`
 /// after the Choice Hardening refactor.
 #[test]
 fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
@@ -1049,14 +1027,7 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
                         span: None,
                     },
                     guard: None,
-                    body: vec![node(
-                        NodeKind::ExpressionStatement(Expression::int(
-                            1,
-                            None,
-                            ValueMode::ImmutableOwned,
-                        )),
-                        None,
-                    )],
+                    body: vec![node(NodeKind::ExpressionStatement(int_expr(1, None)), None)],
                 },
                 MatchArm {
                     pattern: MatchPattern::ChoiceVariant {
@@ -1066,14 +1037,7 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
                         span: None,
                     },
                     guard: None,
-                    body: vec![node(
-                        NodeKind::ExpressionStatement(Expression::int(
-                            2,
-                            None,
-                            ValueMode::ImmutableOwned,
-                        )),
-                        None,
-                    )],
+                    body: vec![node(NodeKind::ExpressionStatement(int_expr(2, None)), None)],
                 },
             ],
             default: None,
@@ -1162,13 +1126,14 @@ fn lowers_option_present_capture_to_payload_assignment() {
     let capture_name = string_table.intern("value");
     let capture_path = super::symbol("value", &mut path_fork, &mut string_table);
     let mut type_environment = TypeEnvironment::new();
-    let option_int_type_id = type_environment.intern_option(builtin_type_ids::INT);
+    let option_i32_type_id =
+        type_environment.intern_option(builtin_type_ids::fixed_scalar(FixedScalar::I32));
 
     let match_node = node(
         NodeKind::Match {
             scrutinee: reference_expr_with_type_id(
                 maybe_name,
-                option_int_type_id,
+                option_i32_type_id,
                 None,
                 ValueMode::ImmutableReference,
             ),
@@ -1176,7 +1141,7 @@ fn lowers_option_present_capture_to_payload_assignment() {
                 pattern: MatchPattern::OptionPresentCapture {
                     name: capture_name,
                     binding_path: capture_path,
-                    inner_type_id: builtin_type_ids::INT,
+                    inner_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     span: None,
                     binding_span: None,
                 },
@@ -1184,7 +1149,7 @@ fn lowers_option_present_capture_to_payload_assignment() {
                 body: vec![node(
                     NodeKind::ExpressionStatement(reference_expr_with_type_id(
                         capture_path,
-                        builtin_type_ids::INT,
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         None,
                         ValueMode::ImmutableReference,
                     )),
@@ -1192,7 +1157,7 @@ fn lowers_option_present_capture_to_payload_assignment() {
                 )],
             }],
             default: Some(vec![node(
-                NodeKind::ExpressionStatement(Expression::int(0, None, ValueMode::ImmutableOwned)),
+                NodeKind::ExpressionStatement(int_expr(0, None)),
                 None,
             )]),
             exhaustiveness: MatchExhaustiveness::HasDefault,
@@ -1205,7 +1170,7 @@ fn lowers_option_present_capture_to_payload_assignment() {
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 maybe_name,
-                option_int_type_id,
+                option_i32_type_id,
                 false,
                 None,
             )],
@@ -1216,9 +1181,11 @@ fn lowers_option_present_capture_to_payload_assignment() {
     );
 
     let mut ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let registered_option_type_id = ast.type_environment.intern_option(builtin_type_ids::INT);
+    let registered_option_type_id = ast
+        .type_environment
+        .intern_option(builtin_type_ids::fixed_scalar(FixedScalar::I32));
     assert_eq!(
-        registered_option_type_id, option_int_type_id,
+        registered_option_type_id, option_i32_type_id,
         "test AST should use the same canonical option TypeId as HIR lowering"
     );
 

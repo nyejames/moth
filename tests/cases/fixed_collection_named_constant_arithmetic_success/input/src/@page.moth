@@ -1,5 +1,5 @@
-capacity #Int = 4
-larger_capacity #Int = capacity + 2
+capacity #I32 = 4
+larger_capacity #I32 = capacity + 2
 
 render || -> String:
     items ~{larger_capacity String} = {"a", "b", "c", "d", "e", "f"}

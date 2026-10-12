@@ -183,26 +183,8 @@ pub(crate) fn order_call_arguments_by_retained_slot(
     let mut ordered = vec![None; expected_slot_count];
 
     for argument in arguments {
-        if argument.target_param.is_some() != argument.target_span.is_some() {
-            return Err(CompilerError::compiler_error(
-                "Parsed named call argument has incomplete target metadata",
-            ));
-        }
-
-        let Some(parameter_slot) = argument.parameter_slot else {
-            return Err(CompilerError::compiler_error(
-                "Parsed call argument is missing its retained parameter slot",
-            ));
-        };
-
-        let slot_index = parameter_slot.index();
-        let Some(slot) = ordered.get_mut(slot_index) else {
-            return Err(CompilerError::compiler_error(format!(
-                "Parsed call argument retained out-of-range parameter slot {}",
-                slot_index
-            )));
-        };
-
+        let slot_index = retained_call_argument_slot_index(argument, 0, expected_slot_count)?;
+        let slot = &mut ordered[slot_index];
         if slot.is_some() {
             return Err(CompilerError::compiler_error(format!(
                 "Parsed call arguments retained duplicate parameter slot {}",
@@ -211,6 +193,69 @@ pub(crate) fn order_call_arguments_by_retained_slot(
         }
 
         *slot = Some(argument.clone());
+    }
+
+    Ok(ordered)
+}
+
+/// Resolve and validate one parser-assigned call-argument slot with its hidden-slot offset.
+fn retained_call_argument_slot_index(
+    argument: &CallArgument,
+    slot_offset: usize,
+    expected_slot_count: usize,
+) -> Result<usize, CompilerError> {
+    if argument.target_param.is_some() != argument.target_span.is_some() {
+        return Err(CompilerError::compiler_error(
+            "Parsed named call argument has incomplete target metadata",
+        ));
+    }
+
+    let Some(parameter_slot) = argument.parameter_slot else {
+        return Err(CompilerError::compiler_error(
+            "Parsed call argument is missing its retained parameter slot",
+        ));
+    };
+    let Some(slot_index) = parameter_slot.index().checked_add(slot_offset) else {
+        return Err(CompilerError::compiler_error(
+            "Parsed call argument retained an out-of-range parameter slot",
+        ));
+    };
+    if slot_index >= expected_slot_count {
+        return Err(CompilerError::compiler_error(format!(
+            "Parsed call argument retained out-of-range parameter slot {}",
+            slot_index
+        )));
+    }
+
+    Ok(slot_index)
+}
+
+/// Borrow parsed arguments in declaration-slot order while accounting for hidden leading slots.
+///
+/// WHAT: validates parser-owned named-target and parameter-slot facts, then stores only references
+///       in routed slots. `slot_offset` maps authored slots past hidden parameters such as a
+///       receiver without cloning their expressions.
+/// WHY: generic receiver inference needs declaration-order evidence while the original arguments
+///      remain owned by the call site for validation and emission.
+pub(crate) fn order_call_argument_refs_by_retained_slot(
+    arguments: &[CallArgument],
+    expected_slot_count: usize,
+    slot_offset: usize,
+) -> Result<Vec<Option<&CallArgument>>, CompilerError> {
+    let mut ordered = vec![None; expected_slot_count];
+
+    for argument in arguments {
+        let slot_index =
+            retained_call_argument_slot_index(argument, slot_offset, expected_slot_count)?;
+        let slot = &mut ordered[slot_index];
+        if slot.is_some() {
+            return Err(CompilerError::compiler_error(format!(
+                "Parsed call arguments retained duplicate parameter slot {}",
+                slot_index
+            )));
+        }
+
+        *slot = Some(argument);
     }
 
     Ok(ordered)

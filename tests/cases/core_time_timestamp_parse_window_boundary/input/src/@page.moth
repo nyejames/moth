@@ -9,7 +9,7 @@ parse_last || -> Timestamp, Error!:
 ;
 
 -- An accepted text whose offset pushes the instant past the last renderable one
-parse_past_last || -> Int, Error!:
+parse_past_last || -> I32, Error!:
     ts = timestamp_from_iso_string("9999-12-31T23:59:59.999-00:01")!
     return 0
 ;

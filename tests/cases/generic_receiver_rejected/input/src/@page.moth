@@ -2,6 +2,6 @@ Box type T = |
     value T,
 |
 
-get |this Box of Int| -> Int:
+get |this Box of I32| -> I32:
     return this.value
 ;

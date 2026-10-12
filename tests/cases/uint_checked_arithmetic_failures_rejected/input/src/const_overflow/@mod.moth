@@ -1,4 +1,4 @@
-fail_const || -> Uint, Error!:
-    k #Uint = 4294967295 + 1
+fail_const || -> U32, Error!:
+    k #U32 = 4294967295 + 1
     return k
 ;

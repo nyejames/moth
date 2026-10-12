@@ -37,7 +37,12 @@ names and emitted helper names cannot drift.
 | Handle | `input.Input` | opaque `Handle`, `ExternalTypeId(1)` |
 | Lifecycle | `input.new`, `input.update`, `input.close` | `new -> Input, Error!` is the only fallible function; `update` and `close` take `~Input` |
 | Keyboard | `input.key_down`, `input.key_pressed`, `input.key_released`, `input.last_key_pressed`, `input.last_key_released` | shared `Input` plus `String` key `-> Bool`, or `Input -> String?` |
-| Pointer | `input.pointer_down`, `input.pointer_pressed`, `input.pointer_released`, `input.pointer_x`, `input.pointer_y`, `input.last_pointer_pressed`, `input.last_pointer_released` | shared `Input` plus `String` button `-> Bool`, `Input -> Float` or `Input -> String?` |
+| Pointer | `input.pointer_down`, `input.pointer_pressed`, `input.pointer_released`, `input.pointer_x`, `input.pointer_y`, `input.last_pointer_pressed`, `input.last_pointer_released` | shared `Input` plus `String` button `-> Bool`, `Input -> F64` or `Input -> String?` |
+
+The delivered exact numeric cutover gives pointer coordinates F64 contracts.
+Preserve coordinate units, pointer semantics and the existing Wasm rejection.
+Shared finite-result validation and its documented fatal/builtin Error! delivery
+remain independent from authored safety-catch eligibility.
 
 `register_core_prelude` (`src/builder_surface/core_packages/prelude.rs`) registers bare `io` as a
 compile-time namespace alias. `io.set_title` is accepted queued design with no registration,
@@ -222,7 +227,7 @@ Primary owners:
 | Snapshot publication, transitions, repeat suppression, coalescing, `last_*` reads, key identity and naming, focus and visibility release, teardown, passive listeners and bounded storage | `src/backends/js/tests/io_input_runtime.rs` |
 | Mutable-access, argument-type and type-as-value rejection | `tests/cases/core_io_input_update_missing_mutable_rejected`, `core_io_input_non_string_key_rejected`, `core_io_input_type_as_value_rejected` |
 | Reachable HTML-Wasm rejection and unreachable acceptance | `tests/cases/core_io_input_wasm_rejected`, `core_io_unreachable_io_wrapper_wasm_ignored` |
-| Unsigned code record under both Int widths | `src/backends/js/tests/runtime_helpers.rs` |
+| U32 code record, including values above I32::MAX | `src/backends/js/tests/runtime_helpers.rs` |
 
 Every IO implementation phase closes with the programme's full phase gate plus console, input,
 lifecycle and recovery coverage appropriate to that phase. Runtime behaviour uses runtime-output

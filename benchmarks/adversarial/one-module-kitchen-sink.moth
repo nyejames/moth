@@ -8,19 +8,19 @@
 @core/random random_int
 
 -- Aliases
-Id as Int
+Id as I32
 Name as String
-Count as Int
+Count as I32
 
 -- Structs
-Point = | x Float, y Float |
+Point = | x F64, y F64 |
 Rect = | origin Point, size Size |
-Size = | width Float, height Float |
-Color = | r Int, g Int, b Int |
+Size = | width F64, height F64 |
+Color = | r I32, g I32, b I32 |
 
 -- Choices
 Shape ::
-    Circle | center Point, radius Float |,
+    Circle | center Point, radius F64 |,
     Rectangle | bounds Rect |,
     Polygon | points {Point} |,
 ;
@@ -29,7 +29,7 @@ Status ::
     Pending,
     Running,
     Done | label String |,
-    Failed | code Int |,
+    Failed | code I32 |,
 ;
 
 -- Trait
@@ -42,7 +42,7 @@ describe |this Point| -> String:
     return [: ([this.x], [this.y])]
 ;
 
-measure |this Point| -> Float:
+measure |this Point| -> F64:
     return (this.x * this.x) + (this.y * this.y)
 ;
 
@@ -99,14 +99,14 @@ status_badge |status Status| -> String:
 build_points || -> {Point}:
     points ~{Point} = {}
     loop 0 to 8 |i|:
-        x = i / 1.0
+        x = i / 1
         y = x * x
         ~points.push(Point(x, y))
     ;
     return points
 ;
 
-score_total |scores ~{String = Int}| -> Int:
+score_total |scores ~{String = I32}| -> I32:
     map_size = scores.length
     removed = ~scores.remove("key-0") catch:
         then 0
@@ -123,7 +123,7 @@ increment |this ~Counter|:
 ;
 
 Counter = |
-    value Int,
+    value I32,
 |
 
 -- Main runtime entry
@@ -161,7 +161,7 @@ run_kitchen_sink ||:
         then Point(0.0, 0.0)
     ;
     measure_sum = first_point.measure()
-    scores ~{String = Int} = {"key-0" = 0, "key-1" = 10, "key-2" = 20, "key-3" = 30}
+    scores ~{String = I32} = {"key-0" = 0, "key-1" = 10, "key-2" = 20, "key-3" = 30}
     total = score_total(~scores)
 
     io.line([: measures=[measure_sum] scores=[total] ])

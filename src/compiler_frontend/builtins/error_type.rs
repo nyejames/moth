@@ -131,9 +131,14 @@ fn resolve_builtin_named_type(
     string_table: &mut StringTable,
 ) -> Result<ResolvedBuiltinType, CompilerError> {
     let symbol = string_table.intern(type_name);
-    let Some(declaration) = context.get_reference(&symbol) else {
+    let Some(reference) = context.get_reference(&symbol) else {
         return Err(CompilerError::compiler_error(format!(
             "Builtin type '{type_name}' is missing from this compilation context."
+        )));
+    };
+    let Some(declaration) = reference.ready_declaration() else {
+        return Err(CompilerError::compiler_error(format!(
+            "Builtin type '{type_name}' resolved to a pending numeric binding at {span:?}."
         )));
     };
 
@@ -173,7 +178,7 @@ fn required_field(id: PathId, data_type: DataType, span: Option<SourceSpan>) -> 
 
 /// The canonical `Error.code` fixed-scalar identity; every code is an unsigned
 /// 32-bit value, so the default literal materialises through the existing
-/// fixed-scalar AST expression APIs rather than routed through `Int`.
+/// fixed-scalar AST expression APIs without a signed-integer intermediate.
 fn defaulted_u32_field(id: PathId, value: u32, span: Option<SourceSpan>) -> Declaration {
     Declaration {
         id,

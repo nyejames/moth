@@ -1,0 +1,93 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001", "MOTH-TYPE-0001", "MOTH-TYPE-0001", "MOTH-TYPE-0001", "MOTH-TYPE-0001", "MOTH-TYPE-0001"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 1
+path = "input/call_argument/@mod.moth"
+line = 5
+column = 20
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 2
+path = "input/declaration/@mod.moth"
+line = 2
+column = 16
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 3
+path = "input/f32_receiver/@mod.moth"
+line = 2
+column = 16
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 4
+path = "input/return_value/@mod.moth"
+line = 2
+column = 12
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 5
+path = "input/u32_return/@mod.moth"
+line = 2
+column = 12
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 6
+path = "input/u64_declaration/@mod.moth"
+line = 2
+column = 16
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001", "MOTH-TYPE-0001", "MOTH-TYPE-0001", "MOTH-TYPE-0001", "MOTH-TYPE-0001", "MOTH-TYPE-0001"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 1
+path = "input/call_argument/@mod.moth"
+line = 5
+column = 20
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 2
+path = "input/declaration/@mod.moth"
+line = 2
+column = 16
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 3
+path = "input/f32_receiver/@mod.moth"
+line = 2
+column = 16
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 4
+path = "input/return_value/@mod.moth"
+line = 2
+column = 12
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 5
+path = "input/u32_return/@mod.moth"
+line = 2
+column = 12
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 6
+path = "input/u64_declaration/@mod.moth"
+line = 2
+column = 16

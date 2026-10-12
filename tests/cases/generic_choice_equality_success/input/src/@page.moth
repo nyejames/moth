@@ -3,9 +3,9 @@ Maybe type T ::
     Empty,
 ;
 
-left Maybe of Int = Maybe::Some(1)
-right Maybe of Int = Maybe::Some(1)
-other Maybe of Int = Maybe::Some(2)
+left Maybe of I32 = Maybe::Some(1)
+right Maybe of I32 = Maybe::Some(1)
+other Maybe of I32 = Maybe::Some(2)
 
 if left is right:
     io.line("same")

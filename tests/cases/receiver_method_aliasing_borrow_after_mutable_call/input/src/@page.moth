@@ -1,8 +1,8 @@
 Point = |
-    x Int,
+    x I32,
 |
 
-set_x |this ~Point, new_x Int|:
+set_x |this ~Point, new_x I32|:
     this.x = new_x
 ;
 

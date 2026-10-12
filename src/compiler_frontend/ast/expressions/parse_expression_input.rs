@@ -58,7 +58,7 @@ pub(crate) struct ExpressionParseResources<'a, 'env, 'tokens> {
 /// WHY: `ExpectedType` and `CastTargetContext` intentionally stay separate:
 ///      - `ExpectedType` is for context-sensitive literals (`none`, empty `{}`)
 ///        so the parser can resolve types that would otherwise be ambiguous.
-///      - `CastTargetContext` is for explicit `cast` / `cast!` target boundaries
+///      - `CastTargetContext` is for explicit `cast` target boundaries
 ///        supplied by typed receivers; it does not affect ordinary literal
 ///        resolution and is intentionally independent of expected-type hints.
 pub(crate) struct ExpressionParseInput<'a, 'env, 'tokens> {
@@ -72,6 +72,24 @@ pub(crate) struct ExpressionParseInput<'a, 'env, 'tokens> {
     /// Stop a named-only value before an adjacent `name = value` entry so the shared list owner
     /// can report its missing comma.
     pub(crate) stop_at_named_entry: bool,
+    /// Whether this entry owns a numeric deferral for its complete fragment.
+    ///
+    /// WHAT: true when the caller can retain the position's whole ordered syntax (statement
+    ///       positions, declaration initializers, assignment RHSs, return slots, conditions,
+    ///       loop headers and arguments of a retaining source-call list).
+    /// WHY: a nested entry that swallowed enclosing structure must raise a non-owning deferral,
+    ///      so no consumer can mistake a sub-fragment for a whole statement.
+    pub(crate) numeric_deferral_owner: bool,
+    /// Whether this position retains eligible numeric fragments containing *any*
+    /// construction-only item.
+    ///
+    /// WHAT: an eligible origin boundary (an unannotated/annotated runtime declaration, or the
+    ///       right-hand side owned by a pending mutation target) must keep raw literal arithmetic
+    ///       unresolved until the body root has recorded every permitted use.
+    /// WHY: a literal-only fragment has no unresolvable reference, so without this opt-in the
+    ///      evaluator would materialise it at the language default before a later exact receiver
+    ///      is known — the early default the bounded inference contract forbids.
+    pub(crate) retain_pending_numeric_fragment: bool,
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) path_fork: &'a mut PathInternerFork,
 }
@@ -95,9 +113,31 @@ impl<'a, 'env, 'tokens> ExpressionParseInput<'a, 'env, 'tokens> {
             value_mode: resources.value_mode,
             trailing_policy,
             stop_at_named_entry: false,
+            numeric_deferral_owner: false,
+            retain_pending_numeric_fragment: false,
             string_table: resources.string_table,
             path_fork: resources.path_fork,
         }
+    }
+
+    /// Mark this entry as the owner of a numeric deferral for its complete fragment.
+    ///
+    /// WHAT: only the position that owned the whole expression syntax sets this, so nested
+    ///       parses keep raising non-owning deferrals.
+    pub(crate) fn with_numeric_deferral_owner(mut self) -> Self {
+        self.numeric_deferral_owner = true;
+        self
+    }
+
+    /// Mark this position as an eligible numeric origin boundary.
+    ///
+    /// WHAT: retains a fragment that contains any construction-only numeric item, including a
+    ///       literal-only recipe with no unresolvable reference.
+    /// WHY: retypeable literal arithmetic must reach the body root unresolved when a later exact
+    ///      receiver may select its single static type.
+    pub(crate) fn with_retained_pending_numeric_fragment(mut self) -> Self {
+        self.retain_pending_numeric_fragment = true;
+        self
     }
 
     /// Ordinary expression input: boundary catch and expected-result evidence
@@ -139,6 +179,26 @@ impl<'a, 'env, 'tokens> ExpressionParseInput<'a, 'env, 'tokens> {
                 allow_expected_result_evidence: false,
             },
         )
+    }
+
+    /// Call-argument value input.
+    ///
+    /// WHAT: boundary catch and expected-result evidence stay with the enclosing call;
+    ///       `owns_numeric_deferral` marks the argument as the owner of its own complete fragment
+    ///       exactly when its receiving list can retain a numeric deferral per argument.
+    /// WHY: a retaining source-call argument list resumes each retained argument at the body root;
+    ///      a nested parse inside the argument keeps raising a non-owning deferral, so a
+    ///      sub-fragment is never mistaken for the whole argument value.
+    pub(crate) fn call_argument(
+        resources: ExpressionParseResources<'a, 'env, 'tokens>,
+        owns_numeric_deferral: bool,
+    ) -> Self {
+        let input = Self::without_boundary_catch(resources, false);
+        if owns_numeric_deferral {
+            input.with_numeric_deferral_owner()
+        } else {
+            input
+        }
     }
 
     /// Bounded expression input for stop-token parsing with boundary recovery

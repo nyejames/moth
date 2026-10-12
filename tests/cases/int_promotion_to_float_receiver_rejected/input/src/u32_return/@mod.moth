@@ -1,0 +1,3 @@
+receive |value U32| -> F64:
+    return value
+;

@@ -1,11 +1,14 @@
 //! Shared call-argument syntax and retained parameter-slot routing.
 //!
 //! WHAT: owns parentheses, separators, named targets, mutable markers, expression boundaries,
-//!       cast-target threading and the one parser-time named/positional slot router used by every
-//!       call-shaped AST surface. Typed receiving policies select naming and value requirements
-//!       without changing that list ownership.
+//!       cast-target threading, the one parser-time named/positional slot router used by every
+//!       call-shaped AST surface, and per-argument numeric-deferral retention for the receiving
+//!       lanes that resume a retained call at the body root.
 //! WHY: each call consumer must parse the same syntax once and carry the selected parameter slot
-//!      into final validation instead of rebuilding call meaning after expression parsing.
+//!      into final validation instead of rebuilding call meaning after expression parsing. A
+//!      call whose argument needs body-root numeric completion retains that argument's authored
+//!      fragment, routing shape and receiving constraint instead of propagating the deferral past
+//!      the call that must resume it.
 //!
 //! This module does not own call result handling, defaults, type compatibility, access
 //! validation, generic inference or call-specific AST construction. Those policies consume the
@@ -23,9 +26,19 @@ use crate::compiler_frontend::ast::expressions::call_validation::{
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_with_trailing_newline_policy;
+use crate::compiler_frontend::ast::expressions::parse_expression::{
+    create_expression_with_trailing_newline_policy, fragment_typed_error_summary,
+    register_direct_receiver_witness,
+};
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
+};
+use crate::compiler_frontend::ast::generic_functions::numeric_origins::set_forward_destinations;
+use crate::compiler_frontend::ast::numeric_construction::{
+    DeferredCallArgument, DeferredCallArgumentShape, deferred_numeric_expression,
+};
+use crate::compiler_frontend::ast::numeric_known_shape::{
+    fragment_shape, register_shape_witness, union_shape_classes,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
@@ -34,6 +47,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidGenericInstantiationReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -169,16 +183,30 @@ impl CallArgumentDiagnosticContext {
     }
 }
 
+/// Whether a receiving owner can retain a numeric-dependent argument for body-root completion.
+///
+/// WHAT: keeps the per-argument retention choice with the shared list's receiving policy.
+/// WHY: owners with a completion or consumption lane keep complete argument deferrals; others
+///      propagate them to their enclosing owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CallArgumentNumericRetention {
+    /// The owner propagates numeric deferrals to its enclosing receiving boundary.
+    Propagate,
+    /// The owner keeps a complete numeric-dependent argument as a retained list item.
+    Retain,
+}
+
 /// Typed receiving context for one shared call-argument list.
 ///
-/// WHAT: carries naming, value-evaluation and diagnostic policy through the one parenthesised
-/// list loop.
+/// WHAT: carries naming, value-evaluation, numeric-retention and diagnostic policy through the one
+/// parenthesised list loop.
 /// WHY: future named-only/const-required surfaces can select their policy without fabricating
 /// declaration slots or introducing a second delimiter parser.
 #[derive(Clone, Copy)]
 pub(crate) struct CallArgumentReceivingContext {
     pub(crate) naming_policy: CallArgumentNamingPolicy,
     pub(crate) value_policy: CallArgumentValuePolicy,
+    pub(crate) numeric_retention: CallArgumentNumericRetention,
     pub(crate) diagnostics: CallArgumentDiagnosticContext,
 }
 
@@ -196,6 +224,7 @@ impl CallArgumentReceivingContext {
         Self {
             naming_policy,
             value_policy: CallArgumentValuePolicy::Ordinary,
+            numeric_retention: CallArgumentNumericRetention::Propagate,
             diagnostics: CallArgumentDiagnosticContext::from_syntax(syntax),
         }
     }
@@ -208,9 +237,33 @@ impl CallArgumentReceivingContext {
         Self {
             naming_policy,
             value_policy,
+            numeric_retention: CallArgumentNumericRetention::Propagate,
             diagnostics,
         }
     }
+
+    /// Opt into retaining arguments for an owner that completes or consumes this list.
+    pub(crate) fn with_numeric_retention(
+        mut self,
+        numeric_retention: CallArgumentNumericRetention,
+    ) -> Self {
+        self.numeric_retention = numeric_retention;
+        self
+    }
+}
+
+/// One retained-capable call-argument list: fully complete, or holding retained arguments.
+///
+/// WHAT: separates the two completion states the shared list loop can produce before the caller
+///       chooses its lane.
+/// WHY: ready lists keep their ordinary `CallArgument` vector; only a real deferral promotes the
+///      list to retained-argument storage.
+#[derive(Debug, Clone)]
+pub(crate) enum ParsedCallArguments {
+    /// Every argument completed; the list is ready for ordinary validation.
+    Ready(Vec<CallArgument>),
+    /// At least one argument was retained; completed arguments keep their authored routing.
+    Retained(Vec<DeferredCallArgument>),
 }
 
 /// Parses one call-shaped list through the shared receiving-context policy.
@@ -231,7 +284,7 @@ pub(crate) fn parse_call_arguments_with_receiving_context(
     syntax_context: CallArgumentSyntaxContext,
     path_fork: &mut PathInternerFork,
 ) -> Result<Vec<CallArgument>, ExpressionParseError> {
-    parse_call_arguments_inner(
+    match parse_call_arguments_inner(
         token_stream,
         context,
         type_interner,
@@ -240,13 +293,80 @@ pub(crate) fn parse_call_arguments_with_receiving_context(
         receiving_context,
         expectations,
         path_fork,
+    )? {
+        ParsedCallArguments::Ready(arguments) => Ok(arguments),
+        // This entry has no retained-argument completion lane.
+        ParsedCallArguments::Retained(_) => Err(
+            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                "a call surface without numeric-call retention retained a numeric-dependent \
+                 argument",
+            )
+            .into(),
+        ),
+    }
+}
+
+/// Parses a call's argument list while retaining numeric-dependent arguments.
+///
+/// WHAT: shared entry for receiving owners that keep a complete numeric-dependent argument until
+///       their body-root completion or consumption boundary.
+/// WHY: argument compatibility cannot run before numeric selection. Retained arguments preserve
+///      authored fragments, slot routing, access modes, spans and receiving constraints so the
+///      owner resumes the exact authored list without reparsing.
+pub(crate) fn parse_call_arguments_typed_with_numeric_retention(
+    token_stream: &mut AstCursor,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    string_table: &mut StringTable,
+    expectations: &[ParameterExpectation],
+    argument_syntax: CallArgumentSyntax,
+    path_fork: &mut PathInternerFork,
+) -> Result<ParsedCallArguments, ExpressionParseError> {
+    parse_call_arguments_inner(
+        token_stream,
+        context,
+        type_interner,
+        string_table,
+        CallArgumentSyntaxContext::Ordinary,
+        CallArgumentReceivingContext::existing_call(argument_syntax)
+            .with_numeric_retention(CallArgumentNumericRetention::Retain),
+        Some(expectations),
+        path_fork,
+    )
+}
+
+/// Parses an ordinary argument list when the authored callee has no resolved signature.
+///
+/// WHAT: consumes named and positional values through the shared parser and router without
+///       creating a callee identity, parameter slots, arity or type expectations.
+/// WHY: rejected member occurrences still contain authored value expressions whose nested calls
+///      must register their own witnesses, but the missing member has no contract to validate.
+pub(crate) fn parse_call_arguments_without_expectations(
+    token_stream: &mut AstCursor,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> Result<ParsedCallArguments, ExpressionParseError> {
+    parse_call_arguments_inner(
+        token_stream,
+        context,
+        type_interner,
+        string_table,
+        CallArgumentSyntaxContext::Ordinary,
+        CallArgumentReceivingContext::existing_call(CallArgumentSyntax::Supported {
+            callee_name: None,
+        })
+        .with_numeric_retention(CallArgumentNumericRetention::Retain),
+        None,
+        path_fork,
     )
 }
 
 /// Parses a call argument list with explicit parameter expectations threaded into each argument.
 ///
 /// WHAT: gives every argument expression a `CastTargetContext` derived from its corresponding
-///      parameter type, so `cast` / `cast!` can resolve at concrete source/receiver/host
+///      parameter type, so `cast` can resolve at concrete source/receiver/host
 ///      parameters and generic parameter slots can reject `cast` with `TargetIsGenericParameter`.
 /// WHY: raw call parsing used to resolve arguments before validation. Threading expectations keeps
 ///      the cast-target channel narrow and local to the argument parser.
@@ -279,19 +399,20 @@ pub(crate) fn parse_generic_call_arguments_typed(
     generic_function_name: Option<StringId>,
     expectations: &[ParameterExpectation],
     path_fork: &mut PathInternerFork,
-) -> Result<Vec<CallArgument>, ExpressionParseError> {
-    parse_call_arguments_with_receiving_context(
+) -> Result<ParsedCallArguments, ExpressionParseError> {
+    parse_call_arguments_inner(
         token_stream,
         context,
         type_interner,
         string_table,
-        CallArgumentReceivingContext::existing_call(CallArgumentSyntax::Supported {
-            callee_name: generic_function_name,
-        }),
-        Some(expectations),
         CallArgumentSyntaxContext::GenericFunction {
             function_name: generic_function_name,
         },
+        CallArgumentReceivingContext::existing_call(CallArgumentSyntax::Supported {
+            callee_name: generic_function_name,
+        })
+        .with_numeric_retention(CallArgumentNumericRetention::Retain),
+        Some(expectations),
         path_fork,
     )
 }
@@ -307,8 +428,9 @@ pub(crate) enum CallArgumentSyntaxContext {
 /// WHAT: passes an optional parameter type into expression parsing so a call argument such as
 ///      `message = none` can resolve its inner type before ordinary call validation runs.
 ///      Bare `none` keeps the baseline option slot; any other argument into a numeric
-///      (bare or optional) slot carries a literal destination. Dec and Uint also contextualise
-///      raw arithmetic, while other numeric destinations only materialise lone literals.
+///      (bare or optional) slot carries a literal destination. Every exact numeric receiver
+///      (fixed scalar, `Byte`, `Dec`, and their optional forms) qualifies. Named arithmetic
+///      stays forward-only: a completed named result keeps its own type.
 /// WHY: call arguments otherwise parse with natural-type inference, which is correct for most
 ///      values but rejects context-sensitive literals before the receiving slot is known.
 ///      Call validation keeps owning every argument type diagnostic.
@@ -317,19 +439,45 @@ fn expected_type_for_parameter_expectation(
     type_environment: &TypeEnvironment,
     token_stream: &AstCursor,
 ) -> ExpectedType {
-    let ExpectedParameterType::Known(type_id) = expectation.expected_type else {
-        return ExpectedType::Infer;
+    let type_id = match expectation.expected_type {
+        ExpectedParameterType::Known(type_id) => type_id,
+        ExpectedParameterType::GenericParameter(type_id) => {
+            // WHY: a generic slot never supplies a numeric literal destination. Only a bare `none`
+            // keeps its optional destination, so it resolves before generic inference runs.
+            return if type_environment.is_option(type_id) && argument_is_bare_none(token_stream) {
+                ExpectedType::Known(type_id)
+            } else {
+                ExpectedType::Infer
+            };
+        }
+        ExpectedParameterType::ConstructionShape(_) | ExpectedParameterType::UnknownExternal => {
+            return ExpectedType::Infer;
+        }
     };
 
     if type_environment.is_option(type_id) && argument_is_bare_none(token_stream) {
         return ExpectedType::Known(type_id);
     }
 
-    if is_numeric_literal_destination_type_id(type_id, type_environment) {
-        return ExpectedType::NumericLiteral(type_id);
-    }
+    expected_type_for_resolved_parameter(type_id, type_environment)
+}
 
-    ExpectedType::Infer
+/// Destination for a retained argument once its parameter type is materialised.
+///
+/// WHAT: a numeric destination carries its literal context; any other destination keeps the
+///       ordinary inference the completed lane already uses.
+/// WHY: a construction-shape slot has no type while its argument parses. Completion resumes the
+///      retained argument once that slot is materialised and must map it exactly as a concrete
+///      numeric slot would.
+pub(crate) fn expected_type_for_resolved_parameter(
+    type_id: TypeId,
+    type_environment: &TypeEnvironment,
+) -> ExpectedType {
+    if is_numeric_literal_destination_type_id(type_id, type_environment) {
+        ExpectedType::NumericLiteral(type_id)
+    } else {
+        ExpectedType::Infer
+    }
 }
 
 /// Builds a `CastTargetContext` from a single parameter expectation.
@@ -345,8 +493,13 @@ fn cast_target_context_for_parameter_expectation(
     path_fork: &PathInternerFork,
 ) -> CastTargetContext {
     match expectation.expected_type {
-        ExpectedParameterType::Known(type_id) => {
+        ExpectedParameterType::Known(type_id)
+        | ExpectedParameterType::GenericParameter(type_id) => {
             cast_target_context_for_type_id(type_id, type_environment, string_table, path_fork)
+        }
+        ExpectedParameterType::ConstructionShape(_) => {
+            // Unresolved shapes never supply a cast target; cast targets stay immediate concrete.
+            CastTargetContext::None
         }
         ExpectedParameterType::UnknownExternal => CastTargetContext::None,
     }
@@ -365,7 +518,7 @@ fn parse_call_arguments_inner(
     receiving_context: CallArgumentReceivingContext,
     expectations: Option<&[ParameterExpectation]>,
     path_fork: &mut PathInternerFork,
-) -> Result<Vec<CallArgument>, ExpressionParseError> {
+) -> Result<ParsedCallArguments, ExpressionParseError> {
     ast_log!("Creating function call arguments");
     let mut receiving_context = receiving_context;
     let opening_span = current_span(token_stream);
@@ -411,7 +564,7 @@ fn parse_call_arguments_inner(
         }
 
         token_stream.advance();
-        return Ok(Vec::new());
+        return Ok(ParsedCallArguments::Ready(Vec::new()));
     }
 
     // ------------------------
@@ -439,10 +592,10 @@ fn parse_call_arguments_inner(
 
     if token_stream.current_tag() == TokenTag::CLOSE_PARENTHESIS {
         token_stream.advance();
-        return Ok(Vec::new());
+        return Ok(ParsedCallArguments::Ready(Vec::new()));
     }
 
-    let mut arguments = Vec::new();
+    let mut arguments = ParsedCallArguments::Ready(Vec::new());
     let mut slot_router = ParameterSlotRouter::new(routed_expectations, receiving_context);
     // ------------------------
     //  Parse each argument
@@ -581,6 +734,16 @@ fn parse_call_arguments_inner(
 
         let parameter_expectation = parameter_slot
             .and_then(|slot| routed_expectations.and_then(|items| items.get(slot.index())));
+
+        // A construction-shape slot keeps its literal unresolved until completion, and its ready
+        // and retained arguments join the slot's numeric class.
+        let construction_shape =
+            parameter_expectation.and_then(|expectation| match expectation.expected_type {
+                ExpectedParameterType::ConstructionShape(shape) => Some(shape),
+                ExpectedParameterType::Known(_)
+                | ExpectedParameterType::GenericParameter(_)
+                | ExpectedParameterType::UnknownExternal => None,
+            });
         let mut inferred = parameter_expectation
             .map(|expectation| {
                 expected_type_for_parameter_expectation(
@@ -601,7 +764,38 @@ fn parse_call_arguments_inner(
             })
             .unwrap_or(CastTargetContext::None);
         let mut cast_target_context = cast_target_context;
-        let mut input = ExpressionParseInput::without_boundary_catch(
+        // A Retain argument into a concrete collection or map slot, or into one optional layer over
+        // either, keeps its pending fragment, so the slot's exact receiver types the fragment's
+        // literal leaves before body-root defaults run. The optional layer peels exactly as the
+        // receiver witness peels it. A generic-parameter slot is handled by `generic_slot` below.
+        let retains_known_aggregate =
+            matches!(
+                receiving_context.numeric_retention,
+                CallArgumentNumericRetention::Retain
+            ) && parameter_expectation.is_some_and(|expectation| match expectation.expected_type {
+                ExpectedParameterType::Known(type_id) => {
+                    let environment = type_interner.environment();
+                    let receiver = environment.option_inner_type(type_id).unwrap_or(type_id);
+                    environment.collection_shape(receiver).is_some()
+                        || environment.map_shape(receiver).is_some()
+                }
+                ExpectedParameterType::ConstructionShape(_)
+                | ExpectedParameterType::GenericParameter(_)
+                | ExpectedParameterType::UnknownExternal => false,
+            });
+        // Every generic-parameter slot retains its pending fragment, so the completed call can link the
+        // fragment's numeric origin to its declared generic parameter before any default applies.
+        let generic_slot = parameter_expectation.is_some_and(|expectation| {
+            matches!(
+                expectation.expected_type,
+                ExpectedParameterType::GenericParameter(_)
+            )
+        });
+        // Only an argument list that can retain a deferral treats its arguments as owners of their
+        // own complete fragment. Every other surface keeps raising non-owning deferrals, so a
+        // nested parse that swallowed enclosing structure can never be consumed as a whole
+        // argument by an outer retention site.
+        let mut input = ExpressionParseInput::call_argument(
             ExpressionParseResources {
                 token_stream,
                 scope_context: context,
@@ -612,30 +806,191 @@ fn parse_call_arguments_inner(
                 string_table,
                 path_fork,
             },
-            false,
+            matches!(
+                receiving_context.numeric_retention,
+                CallArgumentNumericRetention::Retain
+            ),
         );
+        if construction_shape.is_some() || retains_known_aggregate || generic_slot {
+            input = input.with_retained_pending_numeric_fragment();
+        }
+
         if matches!(
             receiving_context.naming_policy,
             CallArgumentNamingPolicy::NamedOnly
         ) {
             input.stop_at_named_entry = true;
         }
-        let value = create_expression_with_trailing_newline_policy(input)?;
-        validate_argument_value_policy(&value, context, path_fork, receiving_context)?;
 
-        // Preserve the value-expression span, named-parameter span, and authored `~` marker span
-        // independently so diagnostics can point at whichever source the author must change.
-        let value_span = value.span;
-        let argument = if let Some((name, target_span)) = named_target {
-            CallArgument::named(value, name, access_mode, value_span, target_span)
-        } else {
-            CallArgument::positional(value, access_mode, value_span)
-        };
-        let argument = argument.with_marker_span(marker_span);
-        let argument = if let Some(parameter_slot) = parameter_slot {
-            argument.with_parameter_slot(parameter_slot)
-        } else {
-            argument
+        // Forward producers this argument registers belong to its own position alone, so only they
+        // may take the parameter receiver below.
+        let producer_start = context.numeric_state().forward_producer_checkpoint();
+        let argument = match create_expression_with_trailing_newline_policy(input) {
+            Ok(value) => {
+                validate_argument_value_policy(&value, context, path_fork, receiving_context)?;
+
+                // Preserve the value-expression span, named-parameter span, and authored `~`
+                // marker span independently so diagnostics can point at whichever source the
+                // author must change.
+                let value_span = value.span;
+                let argument = if let Some((name, target_span)) = named_target {
+                    CallArgument::named(value, name, access_mode, value_span, target_span)
+                } else {
+                    CallArgument::positional(value, access_mode, value_span)
+                };
+                let argument = argument.with_marker_span(marker_span);
+                let argument = if let Some(parameter_slot) = parameter_slot {
+                    argument.with_parameter_slot(parameter_slot)
+                } else {
+                    argument
+                };
+
+                if let Some(shape) = construction_shape {
+                    let mut state = context.numeric_state_mut();
+                    register_shape_witness(
+                        &mut state,
+                        type_interner.environment(),
+                        shape,
+                        argument.value.type_id,
+                        argument.span,
+                    );
+                }
+
+                DeferredCallArgument::Ready(argument)
+            }
+            Err(error) => {
+                if matches!(
+                    receiving_context.numeric_retention,
+                    CallArgumentNumericRetention::Propagate
+                ) {
+                    return Err(error);
+                }
+
+                // Only the argument's own complete fragment may be retained: a nested parse that
+                // swallowed enclosing argument structure would otherwise lose that structure.
+                let deferral = error.take_numeric_deferral("a call argument")?;
+                // A known non-numeric parameter is the exact receiver of its argument's direct origin,
+                // so its shape constrains the origin's numeric leaves before body-root defaults. A
+                // numeric parameter already registers through its literal destination.
+                let known_receiver =
+                    parameter_expectation.and_then(|expectation| match expectation.expected_type {
+                        ExpectedParameterType::Known(type_id) => Some(type_id),
+                        ExpectedParameterType::ConstructionShape(_)
+                        | ExpectedParameterType::GenericParameter(_)
+                        | ExpectedParameterType::UnknownExternal => None,
+                    });
+                if let Some(receiver_type_id) = known_receiver.filter(|type_id| {
+                    !is_numeric_literal_destination_type_id(*type_id, type_interner.environment())
+                }) {
+                    // The argument's carrier leaves through its call's own error lane, so the call owns
+                    // any unhandled step there; the success value still constrains the parameter.
+                    register_direct_receiver_witness(
+                        context,
+                        type_interner.environment(),
+                        &deferral.items,
+                        receiver_type_id,
+                        true,
+                    )?;
+                    // The argument's own producers take the parameter's exact receiver, so its
+                    // aggregate leaves are typed by the parameter, not by defaults or later witnesses.
+                    let owned_producers =
+                        producer_start..context.numeric_state().forward_producer_checkpoint();
+                    let fragment = fragment_shape(
+                        context,
+                        type_interner.environment_mut_for_derived_types(),
+                        &deferral.items,
+                    )?;
+                    let mut state = context.numeric_state_mut();
+                    set_forward_destinations(
+                        &mut state,
+                        type_interner.environment(),
+                        fragment,
+                        receiver_type_id,
+                        &owned_producers,
+                    );
+                }
+                // A construction-shape slot joins the retained fragment's class before any default
+                // applies, so its literal shares the slot's numeric family. A forward fragment in
+                // that class registers its own producer, so its natural result completes before the
+                // class defaults.
+                // A generic slot instead keeps its fragment as the origin of a declared generic
+                // relation, linked at completion. Only a forward fragment registers a producer here.
+                let (forward, origin_shape) = match construction_shape {
+                    Some(shape) => {
+                        let fragment = fragment_shape(
+                            context,
+                            type_interner.environment_mut_for_derived_types(),
+                            &deferral.items,
+                        )?;
+                        let mut state = context.numeric_state_mut();
+                        // The forward flag is read before the union, which ORs a forward shape's
+                        // flag into the class; a raw fragment must not register as a producer.
+                        let class = state.forward_numeric_class(fragment);
+                        union_shape_classes(
+                            &mut state,
+                            type_interner.environment(),
+                            fragment,
+                            shape,
+                        );
+                        (class.map(|class| (class, fragment)), None)
+                    }
+                    None if generic_slot => {
+                        let fragment = fragment_shape(
+                            context,
+                            type_interner.environment_mut_for_derived_types(),
+                            &deferral.items,
+                        )?;
+                        let class = context.numeric_state_mut().forward_numeric_class(fragment);
+                        (class.map(|class| (class, fragment)), Some(fragment))
+                    }
+                    None => (None, None),
+                };
+
+                let (target_param, target_span) = match named_target {
+                    Some((name, span)) => (Some(name), span),
+                    None => (None, None),
+                };
+                let argument_shape = DeferredCallArgumentShape {
+                    target_param,
+                    access_mode,
+                    marker_span,
+                    value_span: deferral.span,
+                    target_span,
+                    parameter_slot,
+                    following_separator_span: None,
+                    origin_shape,
+                };
+                match forward {
+                    Some((class, fragment)) => {
+                        let typed_errors = fragment_typed_error_summary(&deferral.items);
+                        let expression = deferred_numeric_expression(
+                            deferral.items,
+                            deferral.expected,
+                            deferral.value_mode,
+                            deferral.span,
+                            deferral.suffix,
+                        );
+                        let producer = context
+                            .numeric_state_mut()
+                            .register_forward_producer(class, fragment, expression)?;
+                        DeferredCallArgument::Forward {
+                            shape: argument_shape,
+                            producer,
+                            typed_errors,
+                        }
+                    }
+                    None => DeferredCallArgument::Retained {
+                        shape: argument_shape,
+                        expression: deferred_numeric_expression(
+                            deferral.items,
+                            deferral.expected,
+                            deferral.value_mode,
+                            deferral.span,
+                            deferral.suffix,
+                        ),
+                    },
+                }
+            }
         };
 
         let (argument, list_ended) = match token_stream.current_tag() {
@@ -643,10 +998,8 @@ fn parse_call_arguments_inner(
                 let separator_span = current_span(token_stream);
                 token_stream.advance();
                 token_stream.skip_newlines();
-                (
-                    argument.with_following_separator_span(separator_span),
-                    false,
-                )
+                let argument = with_following_separator_span(argument, separator_span);
+                (argument, false)
             }
             TokenTag::CLOSE_PARENTHESIS => {
                 token_stream.advance();
@@ -681,13 +1034,66 @@ fn parse_call_arguments_inner(
             }
         };
 
-        arguments.push(argument);
+        arguments = match (arguments, argument) {
+            (ParsedCallArguments::Ready(mut ready), DeferredCallArgument::Ready(argument)) => {
+                ready.push(argument);
+                ParsedCallArguments::Ready(ready)
+            }
+            (
+                ParsedCallArguments::Ready(ready),
+                retained @ (DeferredCallArgument::Retained { .. }
+                | DeferredCallArgument::Forward { .. }),
+            ) => {
+                let mut retained_arguments = Vec::with_capacity(ready.len() + 1);
+                retained_arguments.extend(ready.into_iter().map(DeferredCallArgument::Ready));
+                retained_arguments.push(retained);
+                ParsedCallArguments::Retained(retained_arguments)
+            }
+            (ParsedCallArguments::Retained(mut retained), argument) => {
+                retained.push(argument);
+                ParsedCallArguments::Retained(retained)
+            }
+        };
         if list_ended {
             break;
         }
     }
 
     Ok(arguments)
+}
+
+/// Records the authored comma span on a completed or retained argument.
+///
+/// WHY: both argument shapes carry the separator only for diagnostics, and the retained shape
+///      must keep it as the authored routing fact instead of a rebuilt argument.
+fn with_following_separator_span(
+    argument: DeferredCallArgument,
+    separator_span: Option<SourceSpan>,
+) -> DeferredCallArgument {
+    match argument {
+        DeferredCallArgument::Ready(argument) => {
+            DeferredCallArgument::Ready(argument.with_following_separator_span(separator_span))
+        }
+        DeferredCallArgument::Retained {
+            mut shape,
+            expression,
+        } => {
+            shape.following_separator_span = separator_span;
+            DeferredCallArgument::Retained { shape, expression }
+        }
+        DeferredCallArgument::Forward {
+            mut shape,
+            producer,
+            typed_errors,
+        } => {
+            shape.following_separator_span = separator_span;
+            DeferredCallArgument::Forward {
+                shape,
+                producer,
+                typed_errors,
+            }
+        }
+    }
 }
 
 /// Returns whether the current argument is exactly `none` before its call delimiter.
@@ -728,9 +1134,9 @@ fn validate_argument_value_policy(
     let is_placeholder_reference = if let ExpressionKind::Reference(path) = &value.kind {
         path_fork.component(*path).is_some_and(|name| {
             context.get_reference(&name).is_some_and(|reference| {
-                reference
-                    .as_declaration()
-                    .is_unresolved_constant_placeholder()
+                reference.ready_declaration().is_some_and(|declaration| {
+                    context.is_unresolved_constant_placeholder(declaration)
+                })
             })
         })
     } else {
@@ -752,7 +1158,6 @@ fn validate_argument_value_policy(
         CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
         receiving_context.diagnostics.const_operation,
         value.span,
-        None,
     )
     .into())
 }

@@ -1,16 +1,16 @@
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigContractConflictReason, BuildConfigContractFact,
-    BuildConfigFingerprint, BuildConfigInputEntry, BuildConfigInputSet, BuildConfigResolutionError,
-    BuildConfigResolutionIndex, BuildConfigValueLocation, BuildConfigValueOrigin, BuildInputName,
-    BuildInputNameError, BuildInputType, BuildInputValueError, BuilderConfigGlobalSet,
-    PrimitiveBuildInputType, PrimitiveBuildValue, build_config_fingerprint,
-    resolve_build_config_values,
+    BuildConfigFingerprint, BuildConfigInputEntry, BuildConfigInputSet, BuildConfigInputValue,
+    BuildConfigResolutionError, BuildConfigResolutionIndex, BuildConfigValueLocation,
+    BuildConfigValueOrigin, BuildInputName, BuildInputNameError, BuildInputType,
+    BuildInputValueError, BuilderConfigGlobalSet, ContractValueError, PrimitiveBuildInputType,
+    PrimitiveBuildValue, build_config_fingerprint, resolve_build_config_values,
 };
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::folded_value::{FiniteFloat, PublicFoldedValue};
+use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::project_globals::{
     ProjectGlobalsFieldInput, ProjectGlobalsInterface,
 };
@@ -20,7 +20,8 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 fn source_span_at(_path: &str, _string_table: &mut StringTable) -> SourceSpan {
     SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start())
 }
@@ -35,7 +36,7 @@ fn command_location(argument_index: usize) -> BuildConfigValueLocation {
 
 fn entry(
     name: &str,
-    value: PrimitiveBuildValue,
+    value: impl Into<BuildConfigInputValue>,
     location: BuildConfigValueLocation,
 ) -> BuildConfigInputEntry {
     BuildConfigInputEntry::new(
@@ -84,14 +85,12 @@ fn primitive_values_report_their_exact_types() {
         PrimitiveBuildInputType::String
     );
     assert_eq!(
-        PrimitiveBuildValue::Int(-4).primitive_type(),
-        PrimitiveBuildInputType::Int
+        i32_value(-4).primitive_type(),
+        PrimitiveBuildInputType::Fixed(FixedScalar::I32)
     );
     assert_eq!(
-        PrimitiveBuildValue::float(0.75)
-            .expect("finite float should construct")
-            .primitive_type(),
-        PrimitiveBuildInputType::Float
+        float_value(0.75).primitive_type(),
+        PrimitiveBuildInputType::Fixed(FixedScalar::F64)
     );
     assert_eq!(
         PrimitiveBuildValue::Bool(true).primitive_type(),
@@ -101,21 +100,14 @@ fn primitive_values_report_their_exact_types() {
         PrimitiveBuildValue::Char(':').primitive_type(),
         PrimitiveBuildInputType::Char
     );
-
-    for non_finite in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        assert!(
-            PrimitiveBuildValue::float(non_finite).is_err(),
-            "non-finite float must be rejected"
-        );
-    }
 }
 
 #[test]
 fn build_input_types_accept_only_the_exact_primitive_or_matching_optional() {
     let primitives = [
         PrimitiveBuildInputType::String,
-        PrimitiveBuildInputType::Int,
-        PrimitiveBuildInputType::Float,
+        PrimitiveBuildInputType::Fixed(FixedScalar::I32),
+        PrimitiveBuildInputType::Fixed(FixedScalar::F64),
         PrimitiveBuildInputType::Bool,
         PrimitiveBuildInputType::Char,
     ];
@@ -166,11 +158,7 @@ fn build_config_input_set_iterates_in_deterministic_name_order() {
         ))
         .expect("second insert should succeed");
     inputs
-        .insert(entry(
-            "mid_way",
-            PrimitiveBuildValue::Int(7),
-            command_location(1),
-        ))
+        .insert(entry("mid_way", i32_value(7), command_location(1)))
         .expect("third insert should succeed");
 
     assert_eq!(inputs.len(), 3);
@@ -181,7 +169,10 @@ fn build_config_input_set_iterates_in_deterministic_name_order() {
 
     let alpha_name = BuildInputName::new("alpha").expect("test input name should validate");
     let alpha = inputs.get(&alpha_name).expect("alpha should be present");
-    assert_eq!(alpha.value(), &PrimitiveBuildValue::String("a".to_owned()));
+    assert_eq!(
+        alpha.value(),
+        &BuildConfigInputValue::from(PrimitiveBuildValue::String("a".to_owned()))
+    );
     assert_eq!(alpha.location(), &declared);
 }
 
@@ -192,19 +183,18 @@ fn build_config_input_set_rejects_duplicate_names_deterministically() {
 
     let mut inputs = BuildConfigInputSet::new();
     inputs
-        .insert(entry(
-            "retries",
-            PrimitiveBuildValue::Int(4),
-            declared.clone(),
-        ))
+        .insert(entry("retries", i32_value(4), declared.clone()))
         .expect("first insert should succeed");
 
-    let duplicate = entry("retries", PrimitiveBuildValue::Int(9), command_location(3));
+    let duplicate = entry("retries", i32_value(9), command_location(3));
     let error = inputs
         .insert(duplicate)
         .expect_err("duplicate input name must be rejected");
 
-    assert_eq!(error.rejected().value(), &PrimitiveBuildValue::Int(9));
+    assert_eq!(
+        error.rejected().value(),
+        &BuildConfigInputValue::from(i32_value(9))
+    );
     assert_eq!(error.rejected().location(), &command_location(3));
     assert_eq!(error.existing_location(), &declared);
 
@@ -214,7 +204,7 @@ fn build_config_input_set_rejects_duplicate_names_deterministically() {
     let retained = inputs
         .get(&retries_name)
         .expect("retries should be present");
-    assert_eq!(retained.value(), &PrimitiveBuildValue::Int(4));
+    assert_eq!(retained.value(), &BuildConfigInputValue::from(i32_value(4)));
     assert_eq!(retained.location(), &declared);
 }
 
@@ -222,26 +212,54 @@ fn build_config_input_set_rejects_duplicate_names_deterministically() {
 //  Command-text primitive inference
 // -------------------------
 
-fn infer(value: &str) -> PrimitiveBuildValue {
-    infer_with(value, NumericProfile::STANDARD)
+fn classify(value: &str) -> BuildConfigInputValue {
+    BuildConfigInputValue::from_command_text(value)
+        .expect("value should classify without a command-input diagnostic")
 }
 
-fn infer_with(value: &str, numeric_profile: NumericProfile) -> PrimitiveBuildValue {
-    PrimitiveBuildValue::from_command_text(value, numeric_profile)
-        .expect("value should infer without a command-input diagnostic")
+/// Typed command text (bool, string, char) is decided from the authored text alone.
+fn infer(value: &str) -> PrimitiveBuildValue {
+    match classify(value) {
+        BuildConfigInputValue::Typed(value) => value,
+        BuildConfigInputValue::Deferred(_) => panic!("typed command text should not defer"),
+    }
 }
 
 fn infer_error(value: &str) -> BuildInputValueError {
-    infer_error_with(value, NumericProfile::STANDARD)
-}
-
-fn infer_error_with(value: &str, numeric_profile: NumericProfile) -> BuildInputValueError {
-    PrimitiveBuildValue::from_command_text(value, numeric_profile)
+    BuildConfigInputValue::from_command_text(value)
         .expect_err("value should produce a command-input diagnostic")
 }
 
+/// Numeric command text materialises once the receiving contract is known.
+fn infer_at(value: &str, contract: PrimitiveBuildInputType) -> PrimitiveBuildValue {
+    classify(value)
+        .materialise_for(BuildInputType::Primitive(contract))
+        .expect("value should materialise at the receiving contract")
+}
+
+fn infer_error_at(value: &str, contract: PrimitiveBuildInputType) -> ContractValueError {
+    classify(value)
+        .materialise_for(BuildInputType::Primitive(contract))
+        .expect_err("value should be rejected by the receiving contract")
+}
+
+fn signed_value(scalar: FixedScalar, value: i64) -> PrimitiveBuildValue {
+    let fixed = FixedScalarValue::signed(scalar, value);
+    PrimitiveBuildValue::Fixed(fixed.expect("test integer should fit its scalar"))
+}
+
+fn i32_value(value: i64) -> PrimitiveBuildValue {
+    signed_value(FixedScalar::I32, value)
+}
+
+fn f32_value(value: f32) -> PrimitiveBuildValue {
+    let fixed = FixedScalarValue::binary_float(FixedScalar::F32, f64::from(value));
+    PrimitiveBuildValue::Fixed(fixed.expect("test float should be finite at binary32"))
+}
+
 fn float_value(value: f64) -> PrimitiveBuildValue {
-    PrimitiveBuildValue::Float(FiniteFloat::new(value).expect("test float should be finite"))
+    let fixed = FixedScalarValue::binary_float(FixedScalar::F64, value);
+    PrimitiveBuildValue::Fixed(fixed.expect("test float should be finite at binary64"))
 }
 
 /// The inference path is a pure function of the authored text: it takes no project config,
@@ -263,50 +281,61 @@ fn command_text_infers_bool_first_and_exactly() {
 }
 
 #[test]
-fn command_text_infers_complete_signed_whole_numbers_as_int() {
-    assert_eq!(infer("0"), PrimitiveBuildValue::Int(0));
-    assert_eq!(infer("4"), PrimitiveBuildValue::Int(4));
-    assert_eq!(infer("-7"), PrimitiveBuildValue::Int(-7));
-    assert_eq!(infer("-0"), PrimitiveBuildValue::Int(0));
+fn command_text_materialises_complete_signed_whole_numbers_at_i32() {
+    let i32_contract = PrimitiveBuildInputType::Fixed(FixedScalar::I32);
+    assert_eq!(infer_at("0", i32_contract), i32_value(0));
+    assert_eq!(infer_at("4", i32_contract), i32_value(4));
+    assert_eq!(infer_at("-7", i32_contract), i32_value(-7));
+    assert_eq!(infer_at("-0", i32_contract), i32_value(0));
     assert_eq!(
-        infer("2147483647"),
-        PrimitiveBuildValue::Int(i64::from(i32::MAX))
+        infer_at("2147483647", i32_contract),
+        i32_value(i64::from(i32::MAX))
     );
     assert_eq!(
-        infer("-2147483648"),
-        PrimitiveBuildValue::Int(i64::from(i32::MIN))
+        infer_at("-2147483648", i32_contract),
+        i32_value(i64::from(i32::MIN))
     );
-    assert_eq!(infer("1_000"), PrimitiveBuildValue::Int(1_000));
-    assert_eq!(infer("-1_0"), PrimitiveBuildValue::Int(-10));
+    assert_eq!(infer_at("1_000", i32_contract), i32_value(1_000));
+    assert_eq!(infer_at("-1_0", i32_contract), i32_value(-10));
 }
 
 #[test]
-fn command_text_infers_decimal_and_exponent_literals_as_float() {
-    assert_eq!(infer("0.75"), float_value(0.75));
-    assert_eq!(infer("-1.5"), float_value(-1.5));
-    assert_eq!(infer("1_000.5"), float_value(1_000.5));
-    assert_eq!(infer("1e6"), float_value(1e6));
-    assert_eq!(infer("2e31"), float_value(2e31));
-    assert_eq!(infer("-1.5e-2"), float_value(-1.5e-2));
-    // An exponent literal is Float even when its value is integral.
-    assert_eq!(infer("2e3"), float_value(2e3));
+fn command_text_materialises_decimal_and_exponent_literals_at_f64() {
+    let f64_contract = PrimitiveBuildInputType::Fixed(FixedScalar::F64);
+    assert_eq!(infer_at("0.75", f64_contract), float_value(0.75));
+    assert_eq!(infer_at("-1.5", f64_contract), float_value(-1.5));
+    assert_eq!(infer_at("1_000.5", f64_contract), float_value(1_000.5));
+    assert_eq!(infer_at("1e6", f64_contract), float_value(1e6));
+    assert_eq!(infer_at("2e31", f64_contract), float_value(2e31));
+    assert_eq!(infer_at("-1.5e-2", f64_contract), float_value(-1.5e-2));
+    // An exponent literal is a float even when its value is integral.
+    assert_eq!(infer_at("2e3", f64_contract), float_value(2e3));
 }
 
 #[test]
-fn command_text_rejects_int_overflow_and_non_finite_floats_as_diagnostics() {
-    // Integer-shaped out-of-range values diagnose rather than fall through to Float or String.
+fn command_text_defers_numeric_range_failures_to_the_receiving_scalar() {
+    // Integer-shaped text is deferred, so the I32 that receives it diagnoses the range.
+    let i32_contract = PrimitiveBuildInputType::Fixed(FixedScalar::I32);
     for value in ["2147483648", "-2147483649", "99999999999999999999"] {
-        let BuildInputValueError::IntOutOfRange { text } = infer_error(value) else {
-            panic!("expected an out-of-range Int diagnostic");
-        };
-        assert_eq!(text, value);
+        assert_eq!(
+            infer_error_at(value, i32_contract),
+            ContractValueError::LiteralOutOfRange {
+                text: String::from(value),
+                reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
+            }
+        );
     }
 
+    // Non-finite decimal text diagnoses at the F64 that receives it.
+    let f64_contract = PrimitiveBuildInputType::Fixed(FixedScalar::F64);
     for value in ["1e400", "-1e400"] {
-        let BuildInputValueError::NonFiniteFloat { text } = infer_error(value) else {
-            panic!("expected a non-finite Float diagnostic");
-        };
-        assert_eq!(text, value);
+        assert_eq!(
+            infer_error_at(value, f64_contract),
+            ContractValueError::LiteralOutOfRange {
+                text: String::from(value),
+                reason: NumberLiteralErrorReason::NonFiniteFixedFloat(FixedScalar::F64),
+            }
+        );
     }
 }
 
@@ -340,157 +369,251 @@ fn command_text_falls_back_to_string_for_every_other_value() {
         PrimitiveBuildValue::String(String::from("`raw`"))
     );
     assert_eq!(infer("x"), PrimitiveBuildValue::String(String::from("x")));
-    assert_eq!(infer("5"), PrimitiveBuildValue::Int(5));
+    assert_eq!(
+        infer_at("5", PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
+        i32_value(5)
+    );
     assert_eq!(infer("-"), PrimitiveBuildValue::String(String::from("-")));
 }
 
+/// Numeric command text has no width of its own: the receiving scalar decides whether it fits
+/// and how it rounds, so one authored text can differ between two contracts.
 #[test]
-fn command_text_inference_uses_the_profile_int_width() {
-    let wide = NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: FloatPrecision::Bits64,
-    };
+fn command_text_materialises_each_numeric_value_at_its_receiving_scalar() {
+    let i32_contract = PrimitiveBuildInputType::Fixed(FixedScalar::I32);
+    let i64_contract = PrimitiveBuildInputType::Fixed(FixedScalar::I64);
+    let f32_contract = PrimitiveBuildInputType::Fixed(FixedScalar::F32);
+    let f64_contract = PrimitiveBuildInputType::Fixed(FixedScalar::F64);
 
-    // The same authored text is a typed Int under a 64-bit width and an out-of-range diagnostic
-    // under the standard 32-bit width, because command inference materialises at the profile.
+    // 3_000_000_000 is outside I32 but exact in I64.
     assert_eq!(
-        infer_with("3000000000", wide),
-        PrimitiveBuildValue::Int(3_000_000_000)
-    );
-    let BuildInputValueError::IntOutOfRange { text } = infer_error("3000000000") else {
-        panic!("expected an out-of-range Int diagnostic under the standard width");
-    };
-    assert_eq!(text, "3000000000");
-}
-
-#[test]
-fn command_text_inference_rounds_floats_at_the_profile_precision() {
-    let narrow = NumericProfile {
-        int_width: IntWidth::Bits32,
-        float_precision: FloatPrecision::Bits32,
-    };
-
-    // 0.1 is not exactly representable; the binary32 value is the rounded carrier, and it differs
-    // from the binary64 value the standard profile keeps.
-    assert_eq!(infer_with("0.1", narrow), float_value(f64::from(0.1f32)));
-    assert_ne!(
-        infer_with("0.1", narrow),
-        infer_with("0.1", NumericProfile::STANDARD)
-    );
-    // A value that overflows the narrow precision diagnoses instead of materialising.
-    let BuildInputValueError::NonFiniteFloat { text } = infer_error_with("1e39", narrow) else {
-        panic!("expected a non-finite Float diagnostic at the narrow precision");
-    };
-    assert_eq!(text, "1e39");
-    assert_eq!(infer("1e39"), float_value(1e39));
-}
-
-/// One field's fingerprint follows the profile dimension its contract's value depends on: the
-/// `Int` contract follows `Int` width and the `Float` contract follows `Float` precision,
-/// never a `String`.
-#[test]
-fn build_config_fingerprints_follow_the_numeric_profile_for_numeric_contracts() {
-    // Each pair differs from STANDARD in exactly the dimension under test, so a contract
-    // fingerprint that ignored its own dimension would collide with STANDARD and fail.
-    let int_wide = NumericProfile {
-        int_width: IntWidth::Bits64,
-        ..NumericProfile::STANDARD
-    };
-    let float_narrow = NumericProfile {
-        float_precision: FloatPrecision::Bits32,
-        ..NumericProfile::STANDARD
-    };
-    let int_value = PrimitiveBuildValue::Int(7);
-    let float_value =
-        PrimitiveBuildValue::Float(FiniteFloat::new(0.75).expect("test float should be finite"));
-    let string_value = PrimitiveBuildValue::String(String::from("7"));
-    let int_contract = BuildInputType::Primitive(PrimitiveBuildInputType::Int);
-    let float_contract = BuildInputType::Primitive(PrimitiveBuildInputType::Float);
-    let string_contract = BuildInputType::Primitive(PrimitiveBuildInputType::String);
-
-    assert_ne!(
-        build_config_fingerprint("field", int_contract, Some(&int_value), int_wide),
-        build_config_fingerprint(
-            "field",
-            int_contract,
-            Some(&int_value),
-            NumericProfile::STANDARD
-        ),
-        "an Int field must invalidate when the boundary Int width changes"
-    );
-    assert_ne!(
-        build_config_fingerprint("field", float_contract, Some(&float_value), float_narrow),
-        build_config_fingerprint(
-            "field",
-            float_contract,
-            Some(&float_value),
-            NumericProfile::STANDARD
-        ),
-        "a Float field must invalidate when the boundary Float precision changes"
+        infer_at("3000000000", i64_contract),
+        signed_value(FixedScalar::I64, 3_000_000_000)
     );
     assert_eq!(
-        build_config_fingerprint("field", string_contract, Some(&string_value), float_narrow),
-        build_config_fingerprint(
-            "field",
-            string_contract,
-            Some(&string_value),
-            NumericProfile::STANDARD
-        ),
-        "a String field fingerprint must not depend on the numeric profile"
+        infer_error_at("3000000000", i32_contract),
+        ContractValueError::LiteralOutOfRange {
+            text: String::from("3000000000"),
+            reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
+        }
+    );
+
+    // 0.1 rounds once to the nearest binary32 value, which is not the nearest binary64 value.
+    assert_eq!(infer_at("0.1", f32_contract), f32_value(0.1));
+    assert_eq!(infer_at("0.1", f64_contract), float_value(0.1));
+    assert_ne!(infer_at("0.1", f32_contract), infer_at("0.1", f64_contract));
+
+    // 1e39 overflows binary32 but is finite in binary64.
+    assert_eq!(
+        infer_error_at("1e39", f32_contract),
+        ContractValueError::LiteralOutOfRange {
+            text: String::from("1e39"),
+            reason: NumberLiteralErrorReason::NonFiniteFixedFloat(FixedScalar::F32),
+        }
+    );
+    assert_eq!(infer_at("1e39", f64_contract), float_value(1e39));
+
+    // A whole spelling materialises directly at a float contract; a fractional spelling never
+    // narrows to an integer contract.
+    assert_eq!(infer_at("1", f32_contract), f32_value(1.0));
+    assert_eq!(
+        infer_error_at("1.0", i32_contract),
+        ContractValueError::TypeMismatch {
+            provided: PrimitiveBuildInputType::Fixed(FixedScalar::F64),
+        }
     );
 }
 
-/// The profile rule is applied where a value becomes resolved, so a default or retained carrier
-/// that predates the profile cannot silently resolve at a width the boundary does not have.
 #[test]
-fn resolution_rejects_a_value_outside_the_numeric_profile() {
+fn typed_numeric_inputs_require_exact_contracts_without_reparsing() {
+    for (value, scalar, other_scalar) in [
+        (
+            signed_value(FixedScalar::I64, 1),
+            FixedScalar::I64,
+            FixedScalar::I32,
+        ),
+        (float_value(1.0), FixedScalar::F64, FixedScalar::F32),
+    ] {
+        let input = BuildConfigInputValue::Typed(value.clone());
+        let exact_contract = BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(scalar));
+        let other_contract =
+            BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(other_scalar));
+        assert_eq!(input.materialise_for(exact_contract), Ok(value),);
+        assert_eq!(
+            input.materialise_for(other_contract),
+            Err(ContractValueError::TypeMismatch {
+                provided: PrimitiveBuildInputType::Fixed(scalar),
+            }),
+        );
+    }
+}
+
+/// Spellings just above a binary midpoint round once at the receiving precision. Rounding first
+/// through binary64 would land exactly on the midpoint and tie to the even neighbour below.
+#[test]
+fn command_text_rounds_binary_midpoint_spellings_once_at_the_receiving_precision() {
+    let f16_contract = PrimitiveBuildInputType::Fixed(FixedScalar::F16);
+    let f32_contract = PrimitiveBuildInputType::Fixed(FixedScalar::F32);
+
+    // 1 + 2^-11 is the F16 midpoint between 1 and 1 + 2^-10.
+    let above_f16_midpoint = "1.00048828125000000001";
+    let f16_above = FixedScalarValue::binary_float(FixedScalar::F16, 1.0 + f64::powi(2.0, -10))
+        .expect("1 + 2^-10 is finite at binary16");
+    assert_eq!(
+        infer_at(above_f16_midpoint, f16_contract),
+        PrimitiveBuildValue::Fixed(f16_above)
+    );
+
+    // 1 + 2^-24 is the F32 midpoint between 1 and 1 + 2^-23.
+    let above_f32_midpoint = "1.00000005960464477539062501";
+    assert_eq!(
+        infer_at(above_f32_midpoint, f32_contract),
+        f32_value(1.0 + f32::EPSILON)
+    );
+    assert_eq!(
+        infer_at("1.000000059604644775390625", f32_contract),
+        f32_value(1.0)
+    );
+}
+
+/// A numeric fingerprint names the exact scalar its value was materialised at. The same value at
+/// another scalar therefore never shares an identity with it.
+#[test]
+fn build_config_fingerprints_name_the_exact_scalar_of_numeric_values() {
+    let i32_seven = i32_value(7);
+    let i64_seven = signed_value(FixedScalar::I64, 7);
+    let f32_three_quarters = f32_value(0.75);
+    let f64_three_quarters = float_value(0.75);
+    let i32_contract = BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32));
+    let i64_contract = BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I64));
+    let f32_contract = BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::F32));
+    let f64_contract = BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::F64));
+
+    assert_ne!(
+        build_config_fingerprint("field", i32_contract, Some(&i32_seven)),
+        build_config_fingerprint("field", i64_contract, Some(&i64_seven)),
+        "an I32 field must not share an identity with an I64 field of the same value"
+    );
+    assert_ne!(
+        build_config_fingerprint("field", f32_contract, Some(&f32_three_quarters)),
+        build_config_fingerprint("field", f64_contract, Some(&f64_three_quarters)),
+        "an F32 field must not share an identity with an F64 field of the same value"
+    );
+    assert_eq!(
+        build_config_fingerprint("field", i32_contract, Some(&i32_seven)),
+        build_config_fingerprint("field", i32_contract, Some(&i32_value(7))),
+        "equal exact values must fingerprint identically"
+    );
+}
+
+/// Explicit numeric input materialises at the scalar its contract names. A literal that fits a
+/// wider contract diagnoses against a narrower one and resolves exactly at the wider one.
+#[test]
+fn resolution_materialises_explicit_literals_at_the_contract_scalar() {
     let mut string_table = StringTable::new();
-    let facts = vec![contract_fact(
+    let mut inputs = BuildConfigInputSet::new();
+    inputs
+        .insert(entry(
+            "count",
+            BuildConfigInputValue::from_command_text("3000000000")
+                .expect("test command text should classify"),
+            command_location(0),
+        ))
+        .expect("test input should not duplicate");
+
+    let i32_facts = vec![contract_fact(
         &mut string_table,
         "count",
-        BuildInputType::Primitive(PrimitiveBuildInputType::Int),
-        false,
-        Some(PrimitiveBuildValue::Int(3_000_000_000)),
+        BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
+        true,
+        None,
     )];
-
     let error = resolve_build_config_values(
-        &facts,
+        &i32_facts,
         &[],
         &[],
-        &BuildConfigInputSet::new(),
+        &inputs,
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
-    .expect_err("a default outside the standard Int width must not resolve");
-
+    .expect_err("an explicit literal outside its I32 contract must not resolve");
     assert_eq!(error.name().as_str(), "count");
-    let BuildConfigResolutionError::NumericProfileViolation { text, reason, .. } = &error else {
-        panic!("expected a numeric-profile violation, got {error:?}");
+    let BuildConfigResolutionError::NumericLiteralOutOfRange { text, reason, .. } = &error else {
+        panic!("expected a numeric literal range error, got {error:?}");
     };
     assert_eq!(text, "3000000000");
     assert_eq!(
         *reason,
-        moth_lexical::numeric::parse::NumberLiteralErrorReason::OutsideIntRange
+        NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32)
     );
 
-    // The same value resolves under a profile whose Int width contains it.
-    let wide = NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: FloatPrecision::Bits64,
-    };
+    let i64_facts = vec![contract_fact(
+        &mut string_table,
+        "count",
+        BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I64)),
+        true,
+        None,
+    )];
     let resolved = resolve_build_config_values(
-        &facts,
+        &i64_facts,
+        &[],
+        &[],
+        &inputs,
+        &BuilderConfigGlobalSet::new(),
+    )
+    .expect("the I64 contract must accept the same literal");
+    let name = BuildInputName::new("count").expect("test input name should validate");
+    assert_eq!(
+        resolved.get(&name).expect("count should resolve").value(),
+        Some(&signed_value(FixedScalar::I64, 3_000_000_000))
+    );
+}
+
+/// A default is typed by its contract, so a default of another scalar is rejected at
+/// resolution while the same scalar resolves.
+#[test]
+fn resolution_rejects_a_default_of_another_scalar() {
+    let mut string_table = StringTable::new();
+    let i32_facts = vec![contract_fact(
+        &mut string_table,
+        "count",
+        BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
+        false,
+        Some(signed_value(FixedScalar::I64, 3_000_000_000)),
+    )];
+
+    let error = resolve_build_config_values(
+        &i32_facts,
         &[],
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
-        wide,
     )
-    .expect("the wider profile must accept the same default");
+    .expect_err("a default of another scalar must not resolve");
+    assert_eq!(error.name().as_str(), "count");
+    let BuildConfigResolutionError::DefaultTypeMismatch { provided, .. } = &error else {
+        panic!("expected a default type mismatch, got {error:?}");
+    };
+    assert_eq!(*provided, PrimitiveBuildInputType::Fixed(FixedScalar::I64));
+
+    let i64_facts = vec![contract_fact(
+        &mut string_table,
+        "count",
+        BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I64)),
+        false,
+        Some(signed_value(FixedScalar::I64, 3_000_000_000)),
+    )];
+    let resolved = resolve_build_config_values(
+        &i64_facts,
+        &[],
+        &[],
+        &BuildConfigInputSet::new(),
+        &BuilderConfigGlobalSet::new(),
+    )
+    .expect("the I64 contract must accept its own default");
     let name = BuildInputName::new("count").expect("test input name should validate");
     assert_eq!(
         resolved.get(&name).expect("count should resolve").value(),
-        Some(&PrimitiveBuildValue::Int(3_000_000_000))
+        Some(&signed_value(FixedScalar::I64, 3_000_000_000))
     );
 }
 
@@ -684,8 +807,10 @@ fn project_global_with_fingerprint(
     );
     let field = ProjectGlobalsFieldInput::new(
         name,
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
-        PublicFoldedValue::Int(value),
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(FixedScalar::I32)),
+        PublicFoldedValue::FixedScalar(
+            FixedScalarValue::signed(FixedScalar::I32, value).expect("test i64 fits I32"),
+        ),
         Some(SourceSpan::new(
             SourceId::COMPILATION_ROOT,
             LocalSpan::source_start(),
@@ -704,8 +829,8 @@ fn project_global_with_fingerprint(
 #[test]
 fn build_config_fingerprints_ignore_origin_for_config_and_project_globals() {
     let mut string_table = StringTable::new();
-    let value = PrimitiveBuildValue::Int(7);
-    let contract = BuildInputType::Primitive(PrimitiveBuildInputType::Int);
+    let value = i32_value(7);
+    let contract = BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32));
     let facts = vec![contract_fact(
         &mut string_table,
         "same_value",
@@ -725,7 +850,6 @@ fn build_config_fingerprints_ignore_origin_for_config_and_project_globals() {
         &[],
         &explicit_inputs,
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
     .expect("explicit input should resolve");
     let defaulted = resolve_build_config_values(
@@ -734,7 +858,6 @@ fn build_config_fingerprints_ignore_origin_for_config_and_project_globals() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
     .expect("declaration default should resolve");
     let name = BuildInputName::new("same_value").expect("test input name should validate");
@@ -756,12 +879,7 @@ fn build_config_fingerprints_ignore_origin_for_config_and_project_globals() {
     assert_eq!(explicit_value.fingerprint(), defaulted_value.fingerprint());
     assert_eq!(
         explicit_value.fingerprint(),
-        build_config_fingerprint(
-            "same_value",
-            contract,
-            Some(&value),
-            NumericProfile::STANDARD
-        )
+        build_config_fingerprint("same_value", contract, Some(&value),)
     );
 
     // An @project consumer sees the same semantic member fingerprint even when the provider
@@ -791,7 +909,7 @@ fn boundary_resolver_applies_fixed_direct_explicit_global_default_precedence() {
         contract_fact(
             &mut string_table,
             "fixed_value",
-            BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+            BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
             true,
             None,
         ),
@@ -813,7 +931,7 @@ fn boundary_resolver_applies_fixed_direct_explicit_global_default_precedence() {
         contract_fact(
             &mut string_table,
             "global_value",
-            BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+            BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
             true,
             None,
         ),
@@ -835,9 +953,9 @@ fn boundary_resolver_applies_fixed_direct_explicit_global_default_precedence() {
     let fixed_project_facts = vec![contract_fact(
         &mut string_table,
         "fixed_value",
-        BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+        BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
         true,
-        Some(PrimitiveBuildValue::Int(41)),
+        Some(i32_value(41)),
     )];
     let direct_contract_type = BuildInputType::Primitive(PrimitiveBuildInputType::Bool);
     let direct_value = PrimitiveBuildValue::Bool(true);
@@ -852,23 +970,14 @@ fn boundary_resolver_applies_fixed_direct_explicit_global_default_precedence() {
         .with_resolved_provider(
             Some(direct_value.clone()),
             BuildConfigValueOrigin::ExplicitInput,
-            build_config_fingerprint(
-                "direct_value",
-                direct_contract_type,
-                Some(&direct_value),
-                NumericProfile::STANDARD,
-            ),
+            build_config_fingerprint("direct_value", direct_contract_type, Some(&direct_value)),
             Some(command_location(1)),
         ),
     ];
 
     let mut explicit_inputs = BuildConfigInputSet::new();
     explicit_inputs
-        .insert(entry(
-            "fixed_value",
-            PrimitiveBuildValue::Int(99),
-            command_location(0),
-        ))
+        .insert(entry("fixed_value", i32_value(99), command_location(0)))
         .expect("fixed input should be retained");
     explicit_inputs
         .insert(entry(
@@ -887,7 +996,7 @@ fn boundary_resolver_applies_fixed_direct_explicit_global_default_precedence() {
 
     let globals = builder_globals(&[
         ("direct_value", PrimitiveBuildValue::Bool(false)),
-        ("global_value", PrimitiveBuildValue::Int(7)),
+        ("global_value", i32_value(7)),
     ]);
     let resolved = resolve_build_config_values(
         &source_facts,
@@ -895,7 +1004,6 @@ fn boundary_resolver_applies_fixed_direct_explicit_global_default_precedence() {
         &direct_project_facts,
         &explicit_inputs,
         &globals,
-        NumericProfile::STANDARD,
     )
     .expect("all test contracts should resolve");
 
@@ -918,7 +1026,7 @@ fn boundary_resolver_applies_fixed_direct_explicit_global_default_precedence() {
             .get(&BuildInputName::new("fixed_value").expect("name should validate"))
             .expect("fixed value should resolve")
             .value(),
-        Some(&PrimitiveBuildValue::Int(41))
+        Some(&i32_value(41))
     );
     assert_eq!(
         resolved
@@ -953,7 +1061,7 @@ fn boundary_resolver_applies_fixed_direct_explicit_global_default_precedence() {
             .get(&BuildInputName::new("global_value").expect("name should validate"))
             .expect("global value should resolve")
             .value(),
-        Some(&PrimitiveBuildValue::Int(7))
+        Some(&i32_value(7))
     );
     assert_eq!(
         resolved
@@ -980,7 +1088,7 @@ fn boundary_resolver_reports_each_same_name_source_compatibility_conflict() {
             contract_fact(
                 &mut string_table,
                 "setting",
-                BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+                BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
                 true,
                 None,
             ),
@@ -996,14 +1104,13 @@ fn boundary_resolver_reports_each_same_name_source_compatibility_conflict() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
     .expect_err("different primitive source contracts must conflict");
     assert!(matches!(
         primitive_type_error,
         BuildConfigResolutionError::SourceContractConflict {
             reason: BuildConfigContractConflictReason::PrimitiveType {
-                first: PrimitiveBuildInputType::Int,
+                first: PrimitiveBuildInputType::Fixed(FixedScalar::I32),
                 conflicting: PrimitiveBuildInputType::String,
             },
             ..
@@ -1015,14 +1122,14 @@ fn boundary_resolver_reports_each_same_name_source_compatibility_conflict() {
             contract_fact(
                 &mut string_table,
                 "setting",
-                BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+                BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
                 true,
                 None,
             ),
             contract_fact(
                 &mut string_table,
                 "setting",
-                BuildInputType::Optional(PrimitiveBuildInputType::Int),
+                BuildInputType::Optional(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
                 false,
                 None,
             ),
@@ -1031,7 +1138,6 @@ fn boundary_resolver_reports_each_same_name_source_compatibility_conflict() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
     .expect_err("different source optionality must conflict");
     assert!(matches!(
@@ -1050,14 +1156,14 @@ fn boundary_resolver_reports_each_same_name_source_compatibility_conflict() {
             contract_fact(
                 &mut string_table,
                 "setting",
-                BuildInputType::Optional(PrimitiveBuildInputType::Int),
+                BuildInputType::Optional(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
                 true,
                 None,
             ),
             contract_fact(
                 &mut string_table,
                 "setting",
-                BuildInputType::Optional(PrimitiveBuildInputType::Int),
+                BuildInputType::Optional(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
                 false,
                 None,
             ),
@@ -1066,7 +1172,6 @@ fn boundary_resolver_reports_each_same_name_source_compatibility_conflict() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
     .expect_err("different source required states must conflict");
     assert!(matches!(
@@ -1085,35 +1190,33 @@ fn boundary_resolver_reports_each_same_name_source_compatibility_conflict() {
             contract_fact(
                 &mut string_table,
                 "setting",
-                BuildInputType::Optional(PrimitiveBuildInputType::Int),
+                BuildInputType::Optional(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
                 false,
-                Some(PrimitiveBuildValue::Int(1)),
+                Some(i32_value(1)),
             ),
             contract_fact(
                 &mut string_table,
                 "setting",
-                BuildInputType::Optional(PrimitiveBuildInputType::Int),
+                BuildInputType::Optional(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
                 false,
-                Some(PrimitiveBuildValue::Int(2)),
+                Some(i32_value(2)),
             ),
         ],
         &[],
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
     .expect_err("different normalized source defaults must conflict");
-    assert!(matches!(
-        default_error,
-        BuildConfigResolutionError::SourceContractConflict {
-            reason: BuildConfigContractConflictReason::Default {
-                first: Some(PrimitiveBuildValue::Int(1)),
-                conflicting: Some(PrimitiveBuildValue::Int(2)),
-            },
-            ..
-        }
-    ));
+    let BuildConfigResolutionError::SourceContractConflict {
+        reason: BuildConfigContractConflictReason::Default { first, conflicting },
+        ..
+    } = default_error
+    else {
+        panic!("expected a default conflict, found {default_error:?}");
+    };
+    assert_eq!(first, Some(i32_value(1)));
+    assert_eq!(conflicting, Some(i32_value(2)));
 }
 
 #[test]
@@ -1123,7 +1226,7 @@ fn boundary_resolver_checks_project_contracts_against_source_contracts() {
         &[contract_fact(
             &mut string_table,
             "setting",
-            BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+            BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
             true,
             None,
         )],
@@ -1137,7 +1240,6 @@ fn boundary_resolver_checks_project_contracts_against_source_contracts() {
         )],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
     .expect_err("direct project and source contracts must agree");
     assert!(matches!(
@@ -1145,7 +1247,7 @@ fn boundary_resolver_checks_project_contracts_against_source_contracts() {
         BuildConfigResolutionError::ProjectSourceContractConflict {
             reason: BuildConfigContractConflictReason::PrimitiveType {
                 first: PrimitiveBuildInputType::Bool,
-                conflicting: PrimitiveBuildInputType::Int,
+                conflicting: PrimitiveBuildInputType::Fixed(FixedScalar::I32),
             },
             ..
         }
@@ -1155,21 +1257,20 @@ fn boundary_resolver_checks_project_contracts_against_source_contracts() {
         &[contract_fact(
             &mut string_table,
             "setting",
-            BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+            BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
             true,
             None,
         )],
         &[contract_fact(
             &mut string_table,
             "setting",
-            BuildInputType::Optional(PrimitiveBuildInputType::Int),
+            BuildInputType::Optional(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
             false,
-            Some(PrimitiveBuildValue::Int(4)),
+            Some(i32_value(4)),
         )],
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
     .expect_err("fixed project and source contracts must agree on type");
     assert!(matches!(
@@ -1192,7 +1293,7 @@ fn boundary_resolver_reports_project_source_conflicts_in_collected_source_order(
         contract_fact(
             &mut string_table,
             "zulu_value",
-            BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+            BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
             true,
             None,
         ),
@@ -1215,9 +1316,9 @@ fn boundary_resolver_reports_project_source_conflicts_in_collected_source_order(
         contract_fact(
             &mut string_table,
             "alpha_value",
-            BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+            BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
             false,
-            Some(PrimitiveBuildValue::Int(1)),
+            Some(i32_value(1)),
         ),
     ];
 
@@ -1227,7 +1328,6 @@ fn boundary_resolver_reports_project_source_conflicts_in_collected_source_order(
         &direct_project_facts,
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
     .expect_err("the first collected project/source conflict should be reported");
 
@@ -1237,7 +1337,7 @@ fn boundary_resolver_reports_project_source_conflicts_in_collected_source_order(
         BuildConfigResolutionError::ProjectSourceContractConflict {
             reason: BuildConfigContractConflictReason::PrimitiveType {
                 first: PrimitiveBuildInputType::String,
-                conflicting: PrimitiveBuildInputType::Int,
+                conflicting: PrimitiveBuildInputType::Fixed(FixedScalar::I32),
             },
             ..
         }
@@ -1250,16 +1350,16 @@ fn check_only_contracts_resolve_independently_from_borrowed_canonical_state() {
     let canonical_facts = vec![contract_fact(
         &mut string_table,
         "canonical_value",
-        BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+        BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
         false,
-        Some(PrimitiveBuildValue::Int(7)),
+        Some(i32_value(7)),
     )];
     let first_check_only_facts = vec![contract_fact(
         &mut string_table,
         "transient_value",
-        BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+        BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
         false,
-        Some(PrimitiveBuildValue::Int(1)),
+        Some(i32_value(1)),
     )];
     let second_check_only_facts = vec![contract_fact(
         &mut string_table,
@@ -1275,7 +1375,6 @@ fn check_only_contracts_resolve_independently_from_borrowed_canonical_state() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
     .expect("canonical facts should resolve");
     let index = crate::compiler_frontend::build_config::BuildConfigResolutionIndex::from_validated(
@@ -1284,13 +1383,12 @@ fn check_only_contracts_resolve_independently_from_borrowed_canonical_state() {
         &[],
         &[],
     );
-    let changed_globals = builder_globals(&[("canonical_value", PrimitiveBuildValue::Int(99))]);
+    let changed_globals = builder_globals(&[("canonical_value", i32_value(99))]);
     let first_check_only = index
         .resolve_with_transient_source_facts(
             &first_check_only_facts,
             &BuildConfigInputSet::new(),
             &changed_globals,
-            NumericProfile::STANDARD,
         )
         .expect("the first check-only unit should resolve independently");
     let second_check_only = index
@@ -1298,7 +1396,6 @@ fn check_only_contracts_resolve_independently_from_borrowed_canonical_state() {
             &second_check_only_facts,
             &BuildConfigInputSet::new(),
             &changed_globals,
-            NumericProfile::STANDARD,
         )
         .expect("the second check-only unit should resolve independently");
 
@@ -1322,7 +1419,7 @@ fn check_only_contracts_resolve_independently_from_borrowed_canonical_state() {
             .get(&transient_name)
             .expect("first transient contract should be retained in its private map")
             .value(),
-        Some(&PrimitiveBuildValue::Int(1))
+        Some(&i32_value(1))
     );
     assert_eq!(
         second_check_only
@@ -1342,7 +1439,7 @@ fn check_only_conflict_keeps_canonical_and_transient_spans() {
     let name = BuildInputName::new("shared_setting").expect("test input name should validate");
     let canonical_fact = BuildConfigContractFact::new(
         name.clone(),
-        BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+        BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
         true,
         None,
         Some(canonical_span),
@@ -1359,8 +1456,7 @@ fn check_only_conflict_keeps_canonical_and_transient_spans() {
         &[],
         &[],
         &BuildConfigInputSet::new(),
-        &builder_globals(&[("shared_setting", PrimitiveBuildValue::Int(7))]),
-        NumericProfile::STANDARD,
+        &builder_globals(&[("shared_setting", i32_value(7))]),
     )
     .expect("canonical contract should resolve");
     let index = BuildConfigResolutionIndex::from_validated(
@@ -1375,7 +1471,6 @@ fn check_only_conflict_keeps_canonical_and_transient_spans() {
             std::slice::from_ref(&transient_fact),
             &BuildConfigInputSet::new(),
             &BuilderConfigGlobalSet::new(),
-            NumericProfile::STANDARD,
         )
         .expect_err("a transient contract differing from canonical state should conflict");
     let BuildConfigResolutionError::SourceContractConflict {
@@ -1394,7 +1489,7 @@ fn boundary_resolver_reports_typed_value_mismatches_with_locations() {
     let source_facts = [contract_fact(
         &mut string_table,
         "count",
-        BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+        BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
         true,
         None,
     )];
@@ -1413,9 +1508,8 @@ fn boundary_resolver_reports_typed_value_mismatches_with_locations() {
         &[],
         &explicit_inputs,
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
-    .expect_err("a String must not satisfy an Int contract");
+    .expect_err("a String must not satisfy an I32 contract");
     assert_eq!(error.name().as_str(), "count");
     assert_eq!(error.value_location(), Some(&command_location(4)));
     assert!(matches!(
@@ -1437,14 +1531,13 @@ fn boundary_resolver_reports_typed_value_mismatches_with_locations() {
         &[],
         &[],
         &BuildConfigInputSet::new(),
-        &builder_globals(&[("enabled", PrimitiveBuildValue::Int(1))]),
-        NumericProfile::STANDARD,
+        &builder_globals(&[("enabled", i32_value(1))]),
     )
-    .expect_err("a builder Int must not satisfy a Bool contract");
+    .expect_err("a builder I32 must not satisfy a Bool contract");
     assert!(matches!(
         &builder_error,
         BuildConfigResolutionError::ValueTypeMismatch {
-            provided: PrimitiveBuildInputType::Int,
+            provided: PrimitiveBuildInputType::Fixed(FixedScalar::I32),
             ..
         }
     ));
@@ -1482,7 +1575,6 @@ fn boundary_resolver_checks_unknown_inputs_after_all_contracts_are_known() {
         &[],
         &explicit_inputs,
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
     .expect_err("unknown explicit names must be rejected after contract collection");
     assert_eq!(error.name().as_str(), "unknown_value");
@@ -1510,7 +1602,6 @@ fn boundary_resolver_distinguishes_optional_absence_from_required_missing() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
     .expect("optional omission should resolve to absence");
     let optional_value = resolved
@@ -1526,7 +1617,7 @@ fn boundary_resolver_distinguishes_optional_absence_from_required_missing() {
     let required = [contract_fact(
         &mut string_table,
         "required_value",
-        BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+        BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
         true,
         None,
     )];
@@ -1536,7 +1627,6 @@ fn boundary_resolver_distinguishes_optional_absence_from_required_missing() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
     .expect_err("required omission must diagnose");
     assert!(matches!(
@@ -1560,9 +1650,9 @@ fn boundary_resolver_keeps_name_order_and_fingerprints_deterministic() {
         contract_fact(
             &mut first_string_table,
             "alpha_value",
-            BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+            BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
             false,
-            Some(PrimitiveBuildValue::Int(8)),
+            Some(i32_value(8)),
         ),
     ];
     let first = resolve_build_config_values(
@@ -1571,7 +1661,6 @@ fn boundary_resolver_keeps_name_order_and_fingerprints_deterministic() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
     .expect("first ordering should resolve");
 
@@ -1580,9 +1669,9 @@ fn boundary_resolver_keeps_name_order_and_fingerprints_deterministic() {
         contract_fact(
             &mut second_string_table,
             "alpha_value",
-            BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+            BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
             false,
-            Some(PrimitiveBuildValue::Int(8)),
+            Some(i32_value(8)),
         ),
         contract_fact(
             &mut second_string_table,
@@ -1598,7 +1687,6 @@ fn boundary_resolver_keeps_name_order_and_fingerprints_deterministic() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
     .expect("second ordering should resolve");
 

@@ -1,8 +1,8 @@
-parse_number |text String| -> Int, Error!:
+parse_number |text String| -> I32, Error!:
     return! Error(text)
 ;
 
-recover || -> Int:
+recover || -> I32:
     value = parse_number("bad") catch:
         then 0
     ;

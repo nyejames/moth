@@ -26,7 +26,7 @@ impl ScopeContext {
         &self,
         target_names: &[StringId],
     ) -> ScopeContext {
-        let mut context = self.clone();
+        let mut context = self.new_expression_policy_context();
         context
             .pending_catch_assignment_targets
             .extend(target_names.iter().copied());
@@ -34,7 +34,7 @@ impl ScopeContext {
     }
 
     pub(crate) fn activate_pending_catch_assignment_targets(&self) -> ScopeContext {
-        let mut context = self.clone();
+        let mut context = self.new_expression_policy_context();
         context
             .unavailable_assignment_targets
             .extend(self.pending_catch_assignment_targets.iter().copied());

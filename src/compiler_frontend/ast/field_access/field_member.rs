@@ -47,17 +47,20 @@ mod tests;
 //  Types
 // --------------------------
 
-struct ResolvedFieldMember {
-    field_name: StringId,
-    type_id: TypeId,
-    diagnostic_type: DataType,
-    value_mode: ValueMode,
-    const_record_state: ConstRecordState,
-    const_inline_value: Option<Expression>,
+pub(super) struct ResolvedFieldMember {
+    pub(super) field_name: StringId,
+    pub(super) type_id: TypeId,
+    pub(super) diagnostic_type: DataType,
+    pub(super) value_mode: ValueMode,
+    pub(super) const_record_state: ConstRecordState,
+    pub(super) const_inline_value: Option<Expression>,
 }
 
 struct FieldMemberResolution<'a> {
-    receiver_node: &'a AstNode,
+    /// The receiver's authored value, when one exists. A pending receiver (a retained call's
+    /// result) has none, so only the type-level field facts apply and no const-record projection
+    /// is possible.
+    receiver_value: Option<&'a Expression>,
     receiver_type_id: TypeId,
     field_name: StringId,
     type_environment: &'a TypeEnvironment,
@@ -120,10 +123,10 @@ fn clone_inlined_const_field(
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "const field inlining keeps the receiver node and type, field name, type environment, optional field and scope tables, template store, and path fork as separate borrows"
+    reason = "const field inlining keeps the receiver value and type, field name, type environment, optional field and scope tables, template store, and path fork as separate borrows"
 )]
 fn const_inline_field_value(
-    receiver_node: &AstNode,
+    receiver_value: Option<&Expression>,
     receiver_type_id: TypeId,
     field_name: StringId,
     type_environment: &TypeEnvironment,
@@ -133,7 +136,7 @@ fn const_inline_field_value(
     path_fork: &PathInternerFork,
 ) -> Result<Option<Expression>, ExpressionParseError> {
     if let Some(field_value) =
-        clone_const_record_field_from_receiver(receiver_node, field_name, scope_context, path_fork)
+        clone_const_record_field_from_value(receiver_value, field_name, scope_context, path_fork)
     {
         return clone_inlined_const_field(&field_value, template_ir_store);
     }
@@ -159,9 +162,12 @@ fn const_inline_field_value_from_receiver(
     scope_context: Option<&ScopeContext>,
     path_fork: &PathInternerFork,
 ) -> Result<Option<Expression>, ExpressionParseError> {
-    let Some(field_value) =
-        clone_const_record_field_from_receiver(receiver_node, field_name, scope_context, path_fork)
-    else {
+    let Some(field_value) = clone_const_record_field_from_value(
+        receiver_value_expression(receiver_node),
+        field_name,
+        scope_context,
+        path_fork,
+    ) else {
         return Ok(None);
     };
     clone_inlined_const_field(&field_value, template_ir_store)
@@ -186,7 +192,8 @@ fn with_const_record_declaration<T>(
         return visit(declaration);
     }
     let name = path_fork.component(*path)?;
-    visit(scope.get_reference(&name)?.as_declaration())
+    let reference = scope.get_reference(&name)?;
+    visit(reference.ready_declaration()?)
 }
 
 struct ConstRecordFieldFacts {
@@ -295,14 +302,14 @@ fn const_record_field_facts(
     )
 }
 
-fn clone_const_record_field_from_receiver(
-    receiver_node: &AstNode,
+fn clone_const_record_field_from_value(
+    receiver_value: Option<&Expression>,
     field_name: StringId,
     scope_context: Option<&ScopeContext>,
     path_fork: &PathInternerFork,
 ) -> Option<Expression> {
     with_const_record_field(
-        receiver_value_expression(receiver_node)?,
+        receiver_value?,
         field_name,
         scope_context,
         path_fork,
@@ -397,7 +404,7 @@ fn resolve_field_member(
     input: FieldMemberResolution<'_>,
 ) -> Result<Option<ResolvedFieldMember>, ExpressionParseError> {
     let FieldMemberResolution {
-        receiver_node,
+        receiver_value,
         receiver_type_id,
         field_name,
         type_environment,
@@ -408,13 +415,13 @@ fn resolve_field_member(
         path_fork,
     } = input;
 
-    let projected_field = receiver_value_expression(receiver_node).and_then(|receiver| {
+    let projected_field = receiver_value.and_then(|receiver| {
         const_record_field_facts(receiver, field_name, scope_context, path_fork)
     });
 
     let const_inline_value = if let Some(template_ir_store) = template_ir_store {
         const_inline_field_value(
-            receiver_node,
+            receiver_value,
             receiver_type_id,
             field_name,
             type_environment,
@@ -505,6 +512,39 @@ fn resolve_field_member(
     }))
 }
 
+/// Resolve one field member for a pending receiver whose concrete type is already known.
+///
+/// WHAT: runs the same canonical field lookup as the completed chain without a receiver value: no
+///       const-record projection is possible, while a declaration-level const field still inlines
+///       its compile-time value.
+/// WHY: member steps on a retained operand resolve against known receiver structure at the authored
+///      site, so their field facts must come from the one field-resolution owner instead of a
+///      second lookup beside it.
+pub(super) fn resolve_field_member_for_known_receiver(
+    receiver_type_id: TypeId,
+    field_name: StringId,
+    scope_context: &ScopeContext,
+    type_interner: &AstTypeInterner<'_>,
+    path_fork: &PathInternerFork,
+) -> Result<Option<ResolvedFieldMember>, ExpressionParseError> {
+    let template_ir_store = if scope_context.kind.is_constant_context() {
+        Some(scope_context.template_ir_store.clone())
+    } else {
+        None
+    };
+    resolve_field_member(FieldMemberResolution {
+        receiver_value: None,
+        receiver_type_id,
+        field_name,
+        type_environment: type_interner.environment(),
+        resolved_struct_fields_by_path: scope_context.resolved_struct_fields_by_path.as_deref(),
+        receiver_is_const_record: false,
+        template_ir_store: template_ir_store.as_ref(),
+        scope_context: Some(scope_context),
+        path_fork,
+    })
+}
+
 pub(super) fn parse_member_name_typed(
     token_stream: &AstCursor<'_>,
     string_table: &mut StringTable,
@@ -575,6 +615,7 @@ pub(super) fn parse_field_member_access_typed(
         ..
     } = context;
     let receiver_is_const_record = receiver_node.expression_is_const_record_value()?;
+    let receiver_value = receiver_value_expression(receiver_node);
     let field = {
         let template_ir_store = if scope_context.kind.is_constant_context() {
             Some(scope_context.template_ir_store.clone())
@@ -582,7 +623,7 @@ pub(super) fn parse_field_member_access_typed(
             None
         };
         resolve_field_member(FieldMemberResolution {
-            receiver_node,
+            receiver_value,
             receiver_type_id,
             field_name: member_name,
             type_environment: type_interner.environment(),

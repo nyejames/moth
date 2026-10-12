@@ -856,17 +856,14 @@ impl<'a> HirBuilder<'a> {
 
         if !matches!(
             &lowered_pattern_row.kind,
-            HirExpressionKind::Uint(_)
-                | HirExpressionKind::Int(_)
-                | HirExpressionKind::Float(_)
+            HirExpressionKind::FixedScalar(_)
                 | HirExpressionKind::Bool(_)
                 | HirExpressionKind::Char(_)
                 | HirExpressionKind::StringLiteral(_)
-                | HirExpressionKind::FixedScalar(_)
                 | HirExpressionKind::Number(_)
         ) {
             return_hir_transformation_error!(
-                "Match arm patterns currently support only literal int/float/fixed-scalar/number/bool/char/string values",
+                "Match arm patterns currently support only literal fixed-scalar/number/bool/char/string values",
                 self.hir_error_location(&condition.span)
             );
         }

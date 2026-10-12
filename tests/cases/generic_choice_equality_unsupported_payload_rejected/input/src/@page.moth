@@ -3,8 +3,8 @@ Maybe type T ::
     Empty,
 ;
 
-left Maybe of {Int} = Maybe::Some({1})
-right Maybe of {Int} = Maybe::Some({1})
+left Maybe of {I32} = Maybe::Some({1})
+right Maybe of {I32} = Maybe::Some({1})
 
 if left is right:
     io.line("unreachable")

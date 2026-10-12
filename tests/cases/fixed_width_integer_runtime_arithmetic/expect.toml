@@ -3,7 +3,7 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["fixed integer runtime u8=300 promoted=true signed=-420 promotion=true i64=-9223372036854775807 u64=18446744073709551614 signed-div=-2/-1/-2/1 fixed-div=3.5 mixed=true/true/true"]
+rendered_output_exact = "fixed integer runtime u8=300 wide=true signed=-420 mixed-domain=true i64=-9223372036854775807 u64=18446744073709551614 signed-div=-2/-1/-2/1 fixed-div=3.5 mixed=true/true/true exact-comparison=true/true/true/true/true/true/true/true/true/true"
 
 [backends.html_wasm]
 mode = "failure"
@@ -12,7 +12,7 @@ diagnostic_codes = ["MOTH-RULE-0064"]
 
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0064"
-reason = "unsupported_backend_feature.recoverable_numeric_failure"
+reason = "unsupported_backend_feature.checked_numeric_operations"
 path = "input/@page.moth"
-line = 10
-column = 18
+line = 4
+column = 22

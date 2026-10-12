@@ -174,6 +174,15 @@ fn receiver_key_for_resolved_parameter(
         ));
     }
 
+    // Exact numeric scalars are builtin scalar values, like Bool, String and Char, even though
+    // they have no receiver-method key of their own.
+    if type_environment.fixed_scalar(receiver_type_id).is_some() {
+        return Err(CompilerDiagnostic::invalid_receiver_declaration(
+            InvalidReceiverDeclarationReason::BuiltinScalarType,
+            span,
+        ));
+    }
+
     type_environment
         .receiver_key_for_type_id(receiver_type_id)
         .ok_or_else(|| {

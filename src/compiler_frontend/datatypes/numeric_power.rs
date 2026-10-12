@@ -1,7 +1,7 @@
 //! Portable binary64 power arithmetic for constant folding.
 //!
 //! WHAT: evaluate binary64 power with the fdlibm `e_pow.c` reduction and scaling algorithm.
-//! WHY: compile-time Float powers must use the same operation order and edge handling as the
+//! WHY: compile-time F64 powers must use the same operation order and edge handling as the
 //!      Wasm implementation instead of inheriting the host's libm result.
 //!
 //! fdlibm power is nearly rounded, not universally correctly rounded. This implementation keeps

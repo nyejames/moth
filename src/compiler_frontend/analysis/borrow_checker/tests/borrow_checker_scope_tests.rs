@@ -9,11 +9,12 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
 use crate::compiler_frontend::compiler_messages::BorrowDiagnosticKind;
 use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::builtin_type_ids::{BOOL, INT};
+use crate::compiler_frontend::datatypes::builtin_type_ids::{self, BOOL};
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::ids::HirNodeId;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, function_node, make_test_variable, node, reference_expr_with_datatype,
@@ -29,6 +30,15 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+fn i32_expression(value: i64, span: Option<SourceSpan>, mode: ValueMode) -> Expression {
+    Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range"),
+        span,
+        mode,
+    )
+}
 
 #[test]
 fn if_branch_local_alias_does_not_escape_merge() {
@@ -50,7 +60,7 @@ fn if_branch_local_alias_does_not_escape_merge() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                    i32_expression(1, test_source_location(1), ValueMode::MutableOwned),
                 )),
                 test_source_location(1),
             ),
@@ -71,8 +81,8 @@ fn if_branch_local_alias_does_not_escape_merge() {
                             y,
                             reference_expr_with_datatype(
                                 x,
-                                DataType::Int,
-                                INT,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(3),
                             ),
                         )),
@@ -85,8 +95,13 @@ fn if_branch_local_alias_does_not_escape_merge() {
             ),
             node(
                 NodeKind::Assignment {
-                    target: assignment_target(x, DataType::Int, INT, test_source_location(4)),
-                    value: Expression::int(2, test_source_location(4), ValueMode::ImmutableOwned),
+                    target: assignment_target(
+                        x,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                        test_source_location(4),
+                    ),
+                    value: i32_expression(2, test_source_location(4), ValueMode::ImmutableOwned),
                 },
                 test_source_location(4),
             ),
@@ -114,12 +129,17 @@ fn match_arm_local_alias_does_not_escape_merge() {
     let y = symbol("y", &mut path_fork, &mut string_table);
 
     let arm = MatchArm {
-        pattern: MatchPattern::Literal(Expression::int(1, None, ValueMode::ImmutableOwned)),
+        pattern: MatchPattern::Literal(i32_expression(1, None, ValueMode::ImmutableOwned)),
         guard: None,
         body: vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 y,
-                reference_expr_with_datatype(x, DataType::Int, INT, test_source_location(4)),
+                reference_expr_with_datatype(
+                    x,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    test_source_location(4),
+                ),
             )),
             test_source_location(4),
         )],
@@ -135,13 +155,13 @@ fn match_arm_local_alias_does_not_escape_merge() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                    i32_expression(1, test_source_location(1), ValueMode::MutableOwned),
                 )),
                 test_source_location(1),
             ),
             node(
                 NodeKind::Match {
-                    scrutinee: Expression::int(
+                    scrutinee: i32_expression(
                         1,
                         test_source_location(2),
                         ValueMode::ImmutableOwned,
@@ -154,8 +174,13 @@ fn match_arm_local_alias_does_not_escape_merge() {
             ),
             node(
                 NodeKind::Assignment {
-                    target: assignment_target(x, DataType::Int, INT, test_source_location(5)),
-                    value: Expression::int(2, test_source_location(5), ValueMode::ImmutableOwned),
+                    target: assignment_target(
+                        x,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                        test_source_location(5),
+                    ),
+                    value: i32_expression(2, test_source_location(5), ValueMode::ImmutableOwned),
                 },
                 test_source_location(5),
             ),
@@ -192,7 +217,7 @@ fn while_body_local_alias_does_not_escape_exit() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                    i32_expression(1, test_source_location(1), ValueMode::MutableOwned),
                 )),
                 test_source_location(1),
             ),
@@ -204,8 +229,8 @@ fn while_body_local_alias_does_not_escape_exit() {
                             y,
                             reference_expr_with_datatype(
                                 x,
-                                DataType::Int,
-                                INT,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(3),
                             ),
                         )),
@@ -216,8 +241,13 @@ fn while_body_local_alias_does_not_escape_exit() {
             ),
             node(
                 NodeKind::Assignment {
-                    target: assignment_target(x, DataType::Int, INT, test_source_location(4)),
-                    value: Expression::int(2, test_source_location(4), ValueMode::ImmutableOwned),
+                    target: assignment_target(
+                        x,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                        test_source_location(4),
+                    ),
+                    value: i32_expression(2, test_source_location(4), ValueMode::ImmutableOwned),
                 },
                 test_source_location(4),
             ),
@@ -254,7 +284,7 @@ fn dead_local_access_reports_borrow_error() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                    i32_expression(1, test_source_location(1), ValueMode::MutableOwned),
                 )),
                 test_source_location(1),
             ),
@@ -275,8 +305,8 @@ fn dead_local_access_reports_borrow_error() {
                             y,
                             reference_expr_with_datatype(
                                 x,
-                                DataType::Int,
-                                INT,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(3),
                             ),
                         )),
@@ -289,8 +319,13 @@ fn dead_local_access_reports_borrow_error() {
             ),
             node(
                 NodeKind::Assignment {
-                    target: assignment_target(x, DataType::Int, INT, test_source_location(4)),
-                    value: Expression::int(2, test_source_location(4), ValueMode::ImmutableOwned),
+                    target: assignment_target(
+                        x,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                        test_source_location(4),
+                    ),
+                    value: i32_expression(2, test_source_location(4), ValueMode::ImmutableOwned),
                 },
                 test_source_location(4),
             ),

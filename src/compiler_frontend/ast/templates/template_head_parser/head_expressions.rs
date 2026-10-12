@@ -12,6 +12,7 @@
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::file_value_resolution::resolve_file_value;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
@@ -35,6 +36,11 @@ pub(super) struct TemplateHeadExpressionContext<'a> {
     pub(super) type_environment: &'a TypeEnvironment,
     pub(super) construction_context: &'a mut TemplateConstructionContext,
     pub(super) path_fork: &'a PathInternerFork,
+    /// Value mode the head intake parsed this expression with.
+    ///
+    /// WHY: a retained numeric intake resumes the ordinary typed expression intake with the
+    ///      same access classification the head used, so the metadata must travel with it.
+    pub(super) value_mode: ValueMode,
 }
 
 /// Typed result shared by head-expression insertion helpers.
@@ -52,14 +58,16 @@ fn is_unresolved_constant_placeholder_reference(
     path_fork
         .component(*path)
         .and_then(|name| context.get_reference(&name))
-        .is_some_and(|declaration| {
-            declaration
-                .as_declaration()
-                .is_unresolved_constant_placeholder()
+        .is_some_and(|reference| {
+            // A pending numeric binding is a runtime body-local value with no declaration,
+            // never a constant placeholder, so it cannot satisfy this predicate.
+            reference
+                .ready_declaration()
+                .is_some_and(|declaration| context.is_unresolved_constant_placeholder(declaration))
         })
 }
 
-fn validate_template_head_value_type(
+pub(crate) fn validate_template_head_value_type(
     expression: &Expression,
     span: Option<SourceSpan>,
     type_environment: &TypeEnvironment,
@@ -170,6 +178,54 @@ pub(super) fn handle_template_value_in_template_head(
             span,
         );
     }
+
+    Ok(())
+}
+
+/// Pushes one parsed head expression, retaining a numeric deferral in TIR.
+///
+/// WHAT: a completed expression takes the ordinary head path; an owner-marked numeric deferral
+///       records a payload-free TIR position plus one retained intake under the owning body
+///       domain, so body-root completion installs the completed value there.
+/// WHY: the head is a formatting consumer, so it must not select a pending value's type. The
+///      deferral is the producer's actual retained result, and only the position (routing) and
+///      the intake metadata stay behind until completion.
+pub(super) fn push_parsed_template_head_expression(
+    result: Result<Expression, ExpressionParseError>,
+    target: TemplateHeadExpressionContext<'_>,
+    span: Option<SourceSpan>,
+    string_table: &StringTable,
+) -> HeadExpressionResult<()> {
+    match result {
+        Ok(expression) => push_template_head_expression(expression, target, span, string_table),
+        Err(error) => retain_template_head_numeric_deferral(error, target, span),
+    }
+}
+
+/// Retains one numeric deferral raised by a template head expression position.
+///
+/// WHAT: consumes the retained fragment from the expression producer and records it against a
+///       payload-free head position.
+/// WHY: the head states no numeric expectation and offers no cast channel, so it never fabricates
+///      a typed payload: the fragment waits in the store's intake table until body completion
+///      selects the binding's single static type.
+fn retain_template_head_numeric_deferral(
+    error: ExpressionParseError,
+    target: TemplateHeadExpressionContext<'_>,
+    span: Option<SourceSpan>,
+) -> HeadExpressionResult<()> {
+    let deferral = error.take_numeric_deferral("a template head expression")?;
+
+    target.construction_context.record_head_numeric_intake(
+        target.context.numeric_domain_id(),
+        deferral.items,
+        deferral.expected,
+        target.value_mode.clone(),
+        // The authored trailing handling travels with the fragment, so completion applies the
+        // exact `!` the author wrote instead of re-reading tokens.
+        deferral.suffix,
+        deferral.span.or(span),
+    )?;
 
     Ok(())
 }
@@ -289,6 +345,7 @@ pub(super) fn push_template_head_path_expression(
             type_environment: type_interner.environment(),
             construction_context,
             path_fork: &*path_fork,
+            value_mode,
         },
         source_span,
         string_table,

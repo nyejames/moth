@@ -1,8 +1,8 @@
-parse_number || -> Int, Error!:
+parse_number || -> I32, Error!:
     return! Error("bad")
 ;
 
-recover |log_error Bool| -> Int:
+recover |log_error Bool| -> I32:
     return parse_number() catch:
         if log_error:
             io.line("bad")

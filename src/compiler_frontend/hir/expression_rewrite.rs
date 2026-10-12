@@ -25,10 +25,7 @@ pub(crate) fn rewrite_expression_bottom_up(
     let row = store.expression(expression);
     if matches!(
         row.kind,
-        HirExpressionKind::Uint(_)
-            | HirExpressionKind::Int(_)
-            | HirExpressionKind::Float(_)
-            | HirExpressionKind::FixedScalar(_)
+        HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Number(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
@@ -127,10 +124,7 @@ pub(crate) fn rewrite_expression_bottom_up(
             }
         }
         // These leaves returned before cloning their potentially allocated value content.
-        HirExpressionKind::Uint(_)
-        | HirExpressionKind::Int(_)
-        | HirExpressionKind::Float(_)
-        | HirExpressionKind::FixedScalar(_)
+        HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Number(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)

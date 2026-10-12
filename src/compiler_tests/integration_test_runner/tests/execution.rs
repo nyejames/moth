@@ -671,7 +671,7 @@ fn synthetic_start_builtin_propagation_and_arithmetic_execute_directory_and_sing
                 "42",
             ),
             (
-                "product |left Int, right Int| -> Int:\n    return left * right\n;\n\
+                "product |left I32, right I32| -> I32:\n    return left * right\n;\n\
                  value = product(6, 7)\n[:[value]]\n",
                 "42",
             ),
@@ -1387,7 +1387,7 @@ fn synthetic_start_stack_overflow_is_a_host_fault_not_a_caught_failure() {
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for directory_entry in [true, false] {
         let fixture = EntryFixture::new(
-            "boom |depth Int| -> Int:\n\
+            "boom |depth I32| -> I32:\n\
              \x20   return boom(depth + 1)\n\
              ;\n\
              io.line(\"before-overflow\")\n\

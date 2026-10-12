@@ -1,5 +1,5 @@
-compute || -> Int, Error!:
+compute || -> I32, Error!:
     return 1
 ;
 
-value Float = cast compute()
+value F64 = cast compute()

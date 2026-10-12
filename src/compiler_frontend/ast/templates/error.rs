@@ -48,6 +48,19 @@ impl From<ExpressionParseError> for TemplateError {
         match error {
             ExpressionParseError::Diagnostic(diagnostic) => TemplateError::Diagnostic(diagnostic),
             ExpressionParseError::Infrastructure(error) => TemplateError::Infrastructure(error),
+            // A numeric-dependent fragment is retained only by the boundary that owns the whole
+            // authored position: template head positions retain through the head expression
+            // funnel, and control-flow suffix headers retain through the template body parser's
+            // nested-construct producers. A deferral escaping to this conversion therefore means
+            // the position was never handed to an owning boundary, so it must surface as an
+            // internal failure instead of becoming a fabricated value.
+            ExpressionParseError::NumericDeferral(_) => {
+                TemplateError::Infrastructure(Box::new(CompilerError::compiler_error(
+                    "numeric-dependent expression reached a template boundary that does not \
+                     retain it; template head positions and control-flow suffix headers must \
+                     consume deferrals through their owning boundary",
+                )))
+            }
         }
     }
 }

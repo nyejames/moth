@@ -1,0 +1,82 @@
+take |value I64|:
+;
+
+-- Only the later uncast calls select I64 for these numeric origins. A U32
+-- cast receiver must not default its source or discard the authored recovery.
+immutable_source = 42
+mutable_source ~= 43
+
+immutable_inline U32 = cast immutable_source catch then 101
+mutable_inline U32 = cast mutable_source catch then 102
+
+immutable_block U32 = cast immutable_source catch:
+    then 103
+;
+mutable_block U32 = cast mutable_source catch:
+    then 104
+;
+
+immutable_handler U32 = cast immutable_source catch |immutable_error|:
+    then 105
+;
+mutable_handler U32 = cast mutable_source catch |mutable_error|:
+    then 106
+;
+
+immutable_group U32 = cast (immutable_source) catch then 107
+mutable_group U32 = cast (mutable_source) catch then 108
+immutable_collection {U32} = {cast immutable_source} catch then {109}
+mutable_collection {U32} = {cast mutable_source} catch then {110}
+
+take(immutable_source)
+take(mutable_source)
+
+-- I64-to-U32 cannot represent -1. These retained casts must execute their
+-- original handlers rather than escaping as an unhandled runtime failure.
+failure_source = -1
+mutable_failure_source ~= -1
+
+failure_inline U32 = cast failure_source catch then 201
+mutable_failure_inline U32 = cast mutable_failure_source catch then 202
+
+failure_block U32 = cast failure_source catch:
+    then 203
+;
+mutable_failure_block U32 = cast mutable_failure_source catch:
+    then 204
+;
+
+failure_handler U32 = cast failure_source catch |failure_error|:
+    then 205
+;
+mutable_failure_handler U32 = cast mutable_failure_source catch |mutable_failure_error|:
+    then 206
+;
+
+failure_group U32 = cast (failure_source) catch then 207
+mutable_failure_group U32 = cast (mutable_failure_source) catch then 208
+failure_collection {U32} = {cast failure_source} catch then {209}
+mutable_failure_collection {U32} = {cast mutable_failure_source} catch then {210}
+
+take(failure_source)
+take(mutable_failure_source)
+
+assert(immutable_inline is 42)
+assert(mutable_inline is 43)
+assert(immutable_block is 42)
+assert(mutable_block is 43)
+assert(immutable_handler is 42)
+assert(mutable_handler is 43)
+assert(immutable_group is 42)
+assert(mutable_group is 43)
+assert(failure_inline is 201)
+assert(mutable_failure_inline is 202)
+assert(failure_block is 203)
+assert(mutable_failure_block is 204)
+assert(failure_handler is 205)
+assert(mutable_failure_handler is 206)
+assert(failure_group is 207)
+assert(mutable_failure_group is 208)
+
+[:retained cast success inline=[immutable_inline]/[mutable_inline] block=[immutable_block]/[mutable_block] handler=[immutable_handler]/[mutable_handler] group=[immutable_group]/[mutable_group] collection=[loop immutable_collection |immutable_item|:[immutable_item];]/[loop mutable_collection |mutable_item|:[mutable_item];]]
+[:retained cast failure inline=[failure_inline]/[mutable_failure_inline] block=[failure_block]/[mutable_failure_block] handler=[failure_handler]/[mutable_failure_handler] group=[failure_group]/[mutable_failure_group] collection=[loop failure_collection |failure_item|:[failure_item];]/[loop mutable_failure_collection |mutable_failure_item|:[mutable_failure_item];]]

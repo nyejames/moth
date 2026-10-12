@@ -12,6 +12,7 @@ use crate::compiler_frontend::hir::expression_store::HirProjection;
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatementKind, HirWriteTarget,
 };
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, function_node, make_test_variable, node, symbol, test_if_branch_metadata,
@@ -25,6 +26,15 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+fn i32_expression(value: i64, span: Option<SourceSpan>, mode: ValueMode) -> Expression {
+    Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range"),
+        span,
+        mode,
+    )
+}
 
 #[test]
 fn emits_advisory_return_drop_sites() {
@@ -43,7 +53,7 @@ fn emits_advisory_return_drop_sites() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 value,
-                Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                i32_expression(1, test_source_location(1), ValueMode::MutableOwned),
             )),
             test_source_location(1),
         )],
@@ -97,7 +107,7 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                    i32_expression(1, test_source_location(1), ValueMode::MutableOwned),
                 )),
                 test_source_location(1),
             ),
@@ -117,11 +127,11 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
                         NodeKind::Assignment {
                             target: assignment_target(
                                 x,
-                                DataType::Int,
-                                builtin_type_ids::INT,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(3),
                             ),
-                            value: Expression::int(
+                            value: i32_expression(
                                 2,
                                 test_source_location(3),
                                 ValueMode::ImmutableOwned,
@@ -133,11 +143,11 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
                         NodeKind::Assignment {
                             target: assignment_target(
                                 x,
-                                DataType::Int,
-                                builtin_type_ids::INT,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(4),
                             ),
-                            value: Expression::int(
+                            value: i32_expression(
                                 3,
                                 test_source_location(4),
                                 ValueMode::ImmutableOwned,
@@ -195,8 +205,8 @@ fn catch_outward_handler_failure_drops_abandoned_argument_and_handler_local() {
     use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 
     let source = "fresh || -> String:\nreturn \"argument\"\n;\n\
-                  combine |text String, count Int| -> String:\nreturn text\n;\n\
-                  probe |trigger Int| -> String, Error!:\n\
+                  combine |text String, count I32| -> String:\nreturn text\n;\n\
+                  probe |trigger I32| -> String, Error!:\n\
                   return combine(fresh(), trigger + 2147483647) catch:\n\
                       handler_local = \"handler\"\n\
                       count = trigger + 2147483647\n\
@@ -271,10 +281,11 @@ fn failed_field_compound_writeback_keeps_borrow_obligations_on_error_edge() {
 
     // The write-back cast narrows the promoted sum back into `box.level`; its
     // error edge must skip the field store while still cleaning up the
-    // abandoned right-hand-side temporaries.
-    let source = "Bucket = |\n    level U8,\n|\n\
-                  risky |amount U8| -> U8, Error!:\n    wide U32 = amount + 200\n    return cast! wide\n;\n\
-                  bump |box ~Bucket, extra U8| -> U8, Error!:\n    box.level += risky(extra) catch then extra\n    return box.level\n;\n";
+    // abandoned right-hand-side temporaries. The mixed-signedness `I8 += U8`
+    // promotes to the genuinely wider I16, so the narrowing conversion stays.
+    let source = "Bucket = |\n    level I8,\n|\n\
+                  risky |amount U8| -> U8, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
+                  bump |box ~Bucket, extra U8| -> I8, Error!:\n    box.level += risky(extra) catch then extra\n    return box.level\n;\n";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let registry = default_external_package_registry(&mut string_table);

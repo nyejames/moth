@@ -1,0 +1,13 @@
+entry = "."
+
+# HTML-only by design: this fixture asserts exact runtime values, and its
+# same-code Wasm disposition is not established by an observed contract. The
+# reachable Byte value materialisation sits in the observed fixed-width scalar
+# Wasm gate, and the raw division/comparison metadata path has no observed Wasm
+# success fixture under the capability validation. Declaring only the backend
+# whose output is asserted avoids pinning an unobserved diagnostic.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "scalar result identity same=false ratio=0.5 whole=1 money=1 raw=255 source=1 target=2"

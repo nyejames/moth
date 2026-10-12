@@ -1,4 +1,4 @@
-get_values |condition Bool| -> Int, String:
+get_values |condition Bool| -> I32, String:
     first, second = if condition then 1, "yes" else "no", 0
     return first, second
 ;

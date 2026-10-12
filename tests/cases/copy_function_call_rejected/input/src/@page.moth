@@ -1,4 +1,4 @@
-make || -> Int:
+make || -> I32:
     return 5
 ;
 y = copy make()

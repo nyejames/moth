@@ -1,12 +1,12 @@
-block || -> Int:
+block || -> I32:
     return 39
 ;
 
-group || -> Int:
+group || -> I32:
     return 1
 ;
 
-region || -> Int:
+region || -> I32:
     return 2
 ;
 

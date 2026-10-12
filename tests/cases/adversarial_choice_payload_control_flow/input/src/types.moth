@@ -1,11 +1,11 @@
 TaskResult ::
     Success |
-        value Int,
+        value I32,
         label String,
     |,
     Failure |
         reason String,
-        code Int,
+        code I32,
     |,
     Pending,
 ;

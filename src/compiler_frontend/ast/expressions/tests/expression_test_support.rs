@@ -120,6 +120,12 @@ impl Expression {
         )
     }
 
+    /// Builds an infallible external call whose result is never a validated float boundary.
+    ///
+    /// WHAT: these fixtures only carry non-float foreign results, so the
+    ///       `requires_external_float_validation` fact stays false.
+    /// WHY: guarded external float calls must go through the typed production constructor with
+    ///      the explicit fact, never through this convenience fixture.
     pub fn host_function_call(
         id: ExternalFunctionId,
         args: Vec<Expression>,
@@ -134,6 +140,7 @@ impl Expression {
         )
     }
 
+    /// Builds an infallible external call expression for non-float fixture results.
     pub fn host_function_call_with_arguments(
         id: ExternalFunctionId,
         args: Vec<CallArgument>,
@@ -145,6 +152,7 @@ impl Expression {
                 id,
                 args,
                 result_type_ids: result_type_ids.clone(),
+                requires_external_float_validation: false,
             },
             result_type_ids,
             span,
@@ -171,13 +179,12 @@ impl Expression {
 
 /// Best-effort builtin `TypeId` for hand-built AST tests that do not have a `TypeEnvironment`.
 ///
-/// Falls back to `NONE` for nominal, generic, or complex types; tests that need canonical
+/// Falls back to `NONE` for nominal, generic, `Dec`, or complex types; tests that need canonical
 /// identities for those should use the typed production constructor path.
 fn test_builtin_type_id_for_data_type(data_type: &DataType) -> TypeId {
     match data_type {
         DataType::Bool | DataType::True | DataType::False => builtin_type_ids::BOOL,
-        DataType::Int => builtin_type_ids::INT,
-        DataType::Float => builtin_type_ids::FLOAT,
+        DataType::FixedScalar(scalar) => builtin_type_ids::fixed_scalar(*scalar),
         DataType::StringSlice | DataType::Template => builtin_type_ids::STRING,
         DataType::Char => builtin_type_ids::CHAR,
         DataType::Range => builtin_type_ids::RANGE,

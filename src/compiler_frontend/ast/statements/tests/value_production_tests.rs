@@ -15,7 +15,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueIfBlock,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidControlFlowStatementReason, TypeMismatchContext,
+    CompilerDiagnostic, DiagnosticPayload, InvalidControlFlowStatementReason,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -25,11 +25,24 @@ use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+/// One exact `I32` literal expression for value-production fixtures.
+///
+/// WHY: an unconstrained whole literal defaults to `I32`, so fixtures model the completed
+///      expression their authored source produces.
+fn int_expr(value: i64) -> Expression {
+    Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+        None,
+        ValueMode::ImmutableOwned,
+    )
+}
 
 fn then_value(_line: i32) -> AstNode {
     node(
         NodeKind::ThenValue(ProducedValues {
-            expressions: vec![Expression::int(1, None, ValueMode::ImmutableOwned)],
+            expressions: vec![int_expr(1)],
             span: None,
         }),
         None,
@@ -37,23 +50,12 @@ fn then_value(_line: i32) -> AstNode {
 }
 
 fn return_value(line: i32) -> AstNode {
-    node(
-        NodeKind::Return(vec![Expression::int(
-            i64::from(line),
-            None,
-            ValueMode::ImmutableOwned,
-        )]),
-        None,
-    )
+    node(NodeKind::Return(vec![int_expr(i64::from(line))]), None)
 }
 
 fn expression_statement(line: i32) -> AstNode {
     node(
-        NodeKind::ExpressionStatement(Expression::int(
-            i64::from(line),
-            None,
-            ValueMode::ImmutableOwned,
-        )),
+        NodeKind::ExpressionStatement(int_expr(i64::from(line))),
         None,
     )
 }
@@ -84,13 +86,9 @@ fn bool_if(then_body: Vec<AstNode>, else_body: Option<Vec<AstNode>>, _line: i32)
 fn literal_match(arm_body: Vec<AstNode>, default: Option<Vec<AstNode>>, line: i32) -> AstNode {
     node(
         NodeKind::Match {
-            scrutinee: Expression::int(i64::from(line), None, ValueMode::ImmutableOwned),
+            scrutinee: int_expr(i64::from(line)),
             arms: vec![MatchArm {
-                pattern: MatchPattern::Literal(Expression::int(
-                    i64::from(line),
-                    None,
-                    ValueMode::ImmutableOwned,
-                )),
+                pattern: MatchPattern::Literal(int_expr(i64::from(line))),
                 guard: None,
                 body: arm_body,
             }],
@@ -390,26 +388,43 @@ fn inferred_block_value_if_rejects_later_nested_produced_type_conflict() {
         "choose |ready Bool, use_fallback Bool| -> String:\n    label = if ready:\n        if use_fallback:\n            then \"fallback\"\n        else\n            then 1\n        ;\n    else\n        then \"waiting\"\n    ;\n    return label\n;\n",
     );
 
-    let DiagnosticPayload::TypeMismatch { context, .. } = &diagnostic.payload else {
-        panic!(
-            "expected type mismatch from a later nested ThenValue, got {:?}",
-            diagnostic.payload
-        );
-    };
-    assert_eq!(*context, TypeMismatchContext::Declaration);
+    assert_string_then_i32_producer_conflict(&diagnostic, "a later nested ThenValue");
 }
 
 #[test]
 fn inferred_multi_bind_rejects_later_nested_produced_type_conflict() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "choose |ready Bool, use_fallback Bool| -> String, Int:\n    first, second Int = if ready:\n        if use_fallback:\n            then \"fallback\", 1\n        else\n            then 2, 1\n        ;\n    else\n        then \"waiting\", 2\n    ;\n    return first, second\n;\n",
+        "choose |ready Bool, use_fallback Bool| -> String, I32:\n    first, second I32 = if ready:\n        if use_fallback:\n            then \"fallback\", 1\n        else\n            then 2, 1\n        ;\n    else\n        then \"waiting\", 2\n    ;\n    return first, second\n;\n",
     );
 
-    let DiagnosticPayload::TypeMismatch { context, .. } = &diagnostic.payload else {
+    assert_string_then_i32_producer_conflict(&diagnostic, "a later nested multi-bind ThenValue");
+}
+
+/// Asserts that a nested producer conflict is rejected as the stable `String`-then-`I32` mismatch.
+///
+/// WHAT: checks the structured payload (expected `String` from the first produced value, found
+///       `I32` from the later nested producer) and the stable `MOTH-TYPE-0001` code.
+/// WHY: the receiving context is incidental to the rejection, so the contract is the
+///      consumer-visible types and code rather than the context label.
+fn assert_string_then_i32_producer_conflict(diagnostic: &CompilerDiagnostic, site: &str) {
+    let DiagnosticPayload::TypeMismatch {
+        expected, found, ..
+    } = &diagnostic.payload
+    else {
         panic!(
-            "expected type mismatch from a later nested multi-bind ThenValue, got {:?}",
+            "expected type mismatch from {site}, got {:?}",
             diagnostic.payload
         );
     };
-    assert_eq!(*context, TypeMismatchContext::Assignment);
+    assert_eq!(
+        *expected,
+        builtin_type_ids::STRING,
+        "the first produced String fixes the receiving type"
+    );
+    assert_eq!(
+        *found,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        "the later nested I32 producer is the conflicting found type"
+    );
+    assert_eq!(diagnostic.identity().code, "MOTH-TYPE-0001");
 }

@@ -3,6 +3,6 @@ Response type Ok, Err ::
 ;
 
 response = Response::Done(error = "bad", value = 42)
-same Response of Int, String = response
+same Response of I32, String = response
 
 [: named choice generic inference]

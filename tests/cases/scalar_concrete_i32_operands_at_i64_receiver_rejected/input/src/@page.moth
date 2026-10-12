@@ -1,0 +1,7 @@
+-- Both operands are already concrete I32, so the completed addition stays
+-- I32. The exact I64 receiver rejects it without retagging the result.
+left I32 = 1
+right I32 = 2
+total I64 = left + right
+
+[:unreachable]

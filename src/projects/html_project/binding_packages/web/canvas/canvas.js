@@ -109,7 +109,7 @@ export function getCanvas(id) {
 }
 
 /**
- * @moth.sig create_canvas |width Int, height Int| -> CanvasElement
+ * @moth.sig create_canvas |width I32, height I32| -> CanvasElement
  */
 export function createCanvas(width, height) {
     const canvas = document.createElement("canvas");
@@ -143,7 +143,7 @@ export function createImage(src) {
 }
 
 /**
- * @moth.sig create_image_with_size |src String, width Int, height Int| -> CanvasImage
+ * @moth.sig create_image_with_size |src String, width I32, height I32| -> CanvasImage
  */
 export function createImageWithSize(src, width, height) {
     const image = new Image(width, height);
@@ -169,49 +169,49 @@ export function context2d(canvas) {
 }
 
 /**
- * @moth.sig canvas_width |canvas CanvasElement| -> Int
+ * @moth.sig canvas_width |canvas CanvasElement| -> I32
  */
 export function canvasWidth(canvas) {
     return canvas.width;
 }
 
 /**
- * @moth.sig canvas_height |canvas CanvasElement| -> Int
+ * @moth.sig canvas_height |canvas CanvasElement| -> I32
  */
 export function canvasHeight(canvas) {
     return canvas.height;
 }
 
 /**
- * @moth.sig canvas_client_width |canvas CanvasElement| -> Int
+ * @moth.sig canvas_client_width |canvas CanvasElement| -> I32
  */
 export function canvasClientWidth(canvas) {
     return canvas.clientWidth;
 }
 
 /**
- * @moth.sig canvas_client_height |canvas CanvasElement| -> Int
+ * @moth.sig canvas_client_height |canvas CanvasElement| -> I32
  */
 export function canvasClientHeight(canvas) {
     return canvas.clientHeight;
 }
 
 /**
- * @moth.sig set_canvas_width |canvas ~CanvasElement, width Int|
+ * @moth.sig set_canvas_width |canvas ~CanvasElement, width I32|
  */
 export function setCanvasWidth(canvas, width) {
     canvas.width = width;
 }
 
 /**
- * @moth.sig set_canvas_height |canvas ~CanvasElement, height Int|
+ * @moth.sig set_canvas_height |canvas ~CanvasElement, height I32|
  */
 export function setCanvasHeight(canvas, height) {
     canvas.height = height;
 }
 
 /**
- * @moth.sig set_canvas_size |canvas ~CanvasElement, width Int, height Int|
+ * @moth.sig set_canvas_size |canvas ~CanvasElement, width I32, height I32|
  */
 export function setCanvasSize(canvas, width, height) {
     canvas.width = width;
@@ -243,7 +243,7 @@ export function toDataUrlType(canvas, mimeType) {
 }
 
 /**
- * @moth.sig to_data_url_quality |canvas CanvasElement, mime_type String, quality Float| -> String, Error!
+ * @moth.sig to_data_url_quality |canvas CanvasElement, mime_type String, quality F64| -> String, Error!
  */
 export function toDataUrlQuality(canvas, mimeType, quality) {
     try {
@@ -254,28 +254,28 @@ export function toDataUrlQuality(canvas, mimeType, quality) {
 }
 
 /**
- * @moth.sig image_width |image CanvasImage| -> Int
+ * @moth.sig image_width |image CanvasImage| -> I32
  */
 export function imageWidth(image) {
     return image.width;
 }
 
 /**
- * @moth.sig image_height |image CanvasImage| -> Int
+ * @moth.sig image_height |image CanvasImage| -> I32
  */
 export function imageHeight(image) {
     return image.height;
 }
 
 /**
- * @moth.sig image_natural_width |image CanvasImage| -> Int
+ * @moth.sig image_natural_width |image CanvasImage| -> I32
  */
 export function imageNaturalWidth(image) {
     return image.naturalWidth;
 }
 
 /**
- * @moth.sig image_natural_height |image CanvasImage| -> Int
+ * @moth.sig image_natural_height |image CanvasImage| -> I32
  */
 export function imageNaturalHeight(image) {
     return image.naturalHeight;
@@ -325,21 +325,21 @@ export function isContextLost(ctx) {
 }
 
 /**
- * @moth.sig clear_rect |ctx ~Canvas2d, x Float, y Float, width Float, height Float|
+ * @moth.sig clear_rect |ctx ~Canvas2d, x F64, y F64, width F64, height F64|
  */
 export function clearRect(ctx, x, y, width, height) {
     ctx.clearRect(x, y, width, height);
 }
 
 /**
- * @moth.sig fill_rect |ctx ~Canvas2d, x Float, y Float, width Float, height Float|
+ * @moth.sig fill_rect |ctx ~Canvas2d, x F64, y F64, width F64, height F64|
  */
 export function fillRect(ctx, x, y, width, height) {
     ctx.fillRect(x, y, width, height);
 }
 
 /**
- * @moth.sig stroke_rect |ctx ~Canvas2d, x Float, y Float, width Float, height Float|
+ * @moth.sig stroke_rect |ctx ~Canvas2d, x F64, y F64, width F64, height F64|
  */
 export function strokeRect(ctx, x, y, width, height) {
     ctx.strokeRect(x, y, width, height);
@@ -388,7 +388,7 @@ export function setStrokePattern(ctx, pattern) {
 }
 
 /**
- * @moth.sig set_global_alpha |ctx ~Canvas2d, alpha Float|
+ * @moth.sig set_global_alpha |ctx ~Canvas2d, alpha F64|
  */
 export function setGlobalAlpha(ctx, alpha) {
     ctx.globalAlpha = alpha;
@@ -402,7 +402,7 @@ export function setGlobalCompositeOperation(ctx, operation) {
 }
 
 /**
- * @moth.sig set_line_width |ctx ~Canvas2d, width Float|
+ * @moth.sig set_line_width |ctx ~Canvas2d, width F64|
  */
 export function setLineWidth(ctx, width) {
     ctx.lineWidth = width;
@@ -423,14 +423,14 @@ export function setLineJoin(ctx, lineJoin) {
 }
 
 /**
- * @moth.sig set_miter_limit |ctx ~Canvas2d, limit Float|
+ * @moth.sig set_miter_limit |ctx ~Canvas2d, limit F64|
  */
 export function setMiterLimit(ctx, limit) {
     ctx.miterLimit = limit;
 }
 
 /**
- * @moth.sig set_line_dash |ctx ~Canvas2d, dash Float, gap Float|
+ * @moth.sig set_line_dash |ctx ~Canvas2d, dash F64, gap F64|
  */
 export function setLineDash(ctx, dash, gap) {
     ctx.setLineDash([dash, gap]);
@@ -444,7 +444,7 @@ export function setLineDashSolid(ctx) {
 }
 
 /**
- * @moth.sig set_line_dash_offset |ctx ~Canvas2d, offset Float|
+ * @moth.sig set_line_dash_offset |ctx ~Canvas2d, offset F64|
  */
 export function setLineDashOffset(ctx, offset) {
     ctx.lineDashOffset = offset;
@@ -556,14 +556,14 @@ export function setShadowColor(ctx, color) {
 }
 
 /**
- * @moth.sig set_shadow_blur |ctx ~Canvas2d, blur Float|
+ * @moth.sig set_shadow_blur |ctx ~Canvas2d, blur F64|
  */
 export function setShadowBlur(ctx, blur) {
     ctx.shadowBlur = blur;
 }
 
 /**
- * @moth.sig set_shadow_offset |ctx ~Canvas2d, x Float, y Float|
+ * @moth.sig set_shadow_offset |ctx ~Canvas2d, x F64, y F64|
  */
 export function setShadowOffset(ctx, x, y) {
     ctx.shadowOffsetX = x;
@@ -578,14 +578,14 @@ export function beginPath(ctx) {
 }
 
 /**
- * @moth.sig move_to |ctx ~Canvas2d, x Float, y Float|
+ * @moth.sig move_to |ctx ~Canvas2d, x F64, y F64|
  */
 export function moveTo(ctx, x, y) {
     ctx.moveTo(x, y);
 }
 
 /**
- * @moth.sig line_to |ctx ~Canvas2d, x Float, y Float|
+ * @moth.sig line_to |ctx ~Canvas2d, x F64, y F64|
  */
 export function lineTo(ctx, x, y) {
     ctx.lineTo(x, y);
@@ -599,14 +599,14 @@ export function closePath(ctx) {
 }
 
 /**
- * @moth.sig rect |ctx ~Canvas2d, x Float, y Float, width Float, height Float|
+ * @moth.sig rect |ctx ~Canvas2d, x F64, y F64, width F64, height F64|
  */
 export function rect(ctx, x, y, width, height) {
     ctx.rect(x, y, width, height);
 }
 
 /**
- * @moth.sig round_rect |ctx ~Canvas2d, x Float, y Float, width Float, height Float, radius Float| -> Error!
+ * @moth.sig round_rect |ctx ~Canvas2d, x F64, y F64, width F64, height F64, radius F64| -> Error!
  */
 export function roundRect(ctx, x, y, width, height, radius) {
     try {
@@ -623,7 +623,7 @@ export function roundRect(ctx, x, y, width, height, radius) {
 }
 
 /**
- * @moth.sig arc |ctx ~Canvas2d, x Float, y Float, radius Float, start_angle Float, end_angle Float| -> Error!
+ * @moth.sig arc |ctx ~Canvas2d, x F64, y F64, radius F64, start_angle F64, end_angle F64| -> Error!
  */
 export function arc(ctx, x, y, radius, startAngle, endAngle) {
     try {
@@ -635,7 +635,7 @@ export function arc(ctx, x, y, radius, startAngle, endAngle) {
 }
 
 /**
- * @moth.sig arc_counterclockwise |ctx ~Canvas2d, x Float, y Float, radius Float, start_angle Float, end_angle Float| -> Error!
+ * @moth.sig arc_counterclockwise |ctx ~Canvas2d, x F64, y F64, radius F64, start_angle F64, end_angle F64| -> Error!
  */
 export function arcCounterclockwise(ctx, x, y, radius, startAngle, endAngle) {
     try {
@@ -647,7 +647,7 @@ export function arcCounterclockwise(ctx, x, y, radius, startAngle, endAngle) {
 }
 
 /**
- * @moth.sig arc_to |ctx ~Canvas2d, x1 Float, y1 Float, x2 Float, y2 Float, radius Float| -> Error!
+ * @moth.sig arc_to |ctx ~Canvas2d, x1 F64, y1 F64, x2 F64, y2 F64, radius F64| -> Error!
  */
 export function arcTo(ctx, x1, y1, x2, y2, radius) {
     try {
@@ -659,21 +659,21 @@ export function arcTo(ctx, x1, y1, x2, y2, radius) {
 }
 
 /**
- * @moth.sig quadratic_curve_to |ctx ~Canvas2d, cpx Float, cpy Float, x Float, y Float|
+ * @moth.sig quadratic_curve_to |ctx ~Canvas2d, cpx F64, cpy F64, x F64, y F64|
  */
 export function quadraticCurveTo(ctx, cpx, cpy, x, y) {
     ctx.quadraticCurveTo(cpx, cpy, x, y);
 }
 
 /**
- * @moth.sig bezier_curve_to |ctx ~Canvas2d, cp1x Float, cp1y Float, cp2x Float, cp2y Float, x Float, y Float|
+ * @moth.sig bezier_curve_to |ctx ~Canvas2d, cp1x F64, cp1y F64, cp2x F64, cp2y F64, x F64, y F64|
  */
 export function bezierCurveTo(ctx, cp1x, cp1y, cp2x, cp2y, x, y) {
     ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x, y);
 }
 
 /**
- * @moth.sig ellipse |ctx ~Canvas2d, x Float, y Float, radius_x Float, radius_y Float, rotation Float, start_angle Float, end_angle Float| -> Error!
+ * @moth.sig ellipse |ctx ~Canvas2d, x F64, y F64, radius_x F64, radius_y F64, rotation F64, start_angle F64, end_angle F64| -> Error!
  */
 export function ellipse(ctx, x, y, radiusX, radiusY, rotation, startAngle, endAngle) {
     try {
@@ -685,7 +685,7 @@ export function ellipse(ctx, x, y, radiusX, radiusY, rotation, startAngle, endAn
 }
 
 /**
- * @moth.sig ellipse_counterclockwise |ctx ~Canvas2d, x Float, y Float, radius_x Float, radius_y Float, rotation Float, start_angle Float, end_angle Float| -> Error!
+ * @moth.sig ellipse_counterclockwise |ctx ~Canvas2d, x F64, y F64, radius_x F64, radius_y F64, rotation F64, start_angle F64, end_angle F64| -> Error!
  */
 export function ellipseCounterclockwise(ctx, x, y, radiusX, radiusY, rotation, startAngle, endAngle) {
     try {
@@ -732,49 +732,49 @@ export function clipEvenOdd(ctx) {
 }
 
 /**
- * @moth.sig is_point_in_path |ctx Canvas2d, x Float, y Float| -> Bool
+ * @moth.sig is_point_in_path |ctx Canvas2d, x F64, y F64| -> Bool
  */
 export function isPointInPath(ctx, x, y) {
     return ctx.isPointInPath(x, y);
 }
 
 /**
- * @moth.sig is_point_in_stroke |ctx Canvas2d, x Float, y Float| -> Bool
+ * @moth.sig is_point_in_stroke |ctx Canvas2d, x F64, y F64| -> Bool
  */
 export function isPointInStroke(ctx, x, y) {
     return ctx.isPointInStroke(x, y);
 }
 
 /**
- * @moth.sig translate |ctx ~Canvas2d, x Float, y Float|
+ * @moth.sig translate |ctx ~Canvas2d, x F64, y F64|
  */
 export function translate(ctx, x, y) {
     ctx.translate(x, y);
 }
 
 /**
- * @moth.sig rotate |ctx ~Canvas2d, angle Float|
+ * @moth.sig rotate |ctx ~Canvas2d, angle F64|
  */
 export function rotate(ctx, angle) {
     ctx.rotate(angle);
 }
 
 /**
- * @moth.sig scale |ctx ~Canvas2d, x Float, y Float|
+ * @moth.sig scale |ctx ~Canvas2d, x F64, y F64|
  */
 export function scale(ctx, x, y) {
     ctx.scale(x, y);
 }
 
 /**
- * @moth.sig transform |ctx ~Canvas2d, a Float, b Float, c Float, d Float, e Float, f Float|
+ * @moth.sig transform |ctx ~Canvas2d, a F64, b F64, c F64, d F64, e F64, f F64|
  */
 export function transform(ctx, a, b, c, d, e, f) {
     ctx.transform(a, b, c, d, e, f);
 }
 
 /**
- * @moth.sig set_transform |ctx ~Canvas2d, a Float, b Float, c Float, d Float, e Float, f Float|
+ * @moth.sig set_transform |ctx ~Canvas2d, a F64, b F64, c F64, d F64, e F64, f F64|
  */
 export function setTransform(ctx, a, b, c, d, e, f) {
     ctx.setTransform(a, b, c, d, e, f);
@@ -788,28 +788,28 @@ export function resetTransform(ctx) {
 }
 
 /**
- * @moth.sig fill_text |ctx ~Canvas2d, text String, x Float, y Float|
+ * @moth.sig fill_text |ctx ~Canvas2d, text String, x F64, y F64|
  */
 export function fillText(ctx, text, x, y) {
     ctx.fillText(text, x, y);
 }
 
 /**
- * @moth.sig fill_text_max_width |ctx ~Canvas2d, text String, x Float, y Float, max_width Float|
+ * @moth.sig fill_text_max_width |ctx ~Canvas2d, text String, x F64, y F64, max_width F64|
  */
 export function fillTextMaxWidth(ctx, text, x, y, maxWidth) {
     ctx.fillText(text, x, y, maxWidth);
 }
 
 /**
- * @moth.sig stroke_text |ctx ~Canvas2d, text String, x Float, y Float|
+ * @moth.sig stroke_text |ctx ~Canvas2d, text String, x F64, y F64|
  */
 export function strokeText(ctx, text, x, y) {
     ctx.strokeText(text, x, y);
 }
 
 /**
- * @moth.sig stroke_text_max_width |ctx ~Canvas2d, text String, x Float, y Float, max_width Float|
+ * @moth.sig stroke_text_max_width |ctx ~Canvas2d, text String, x F64, y F64, max_width F64|
  */
 export function strokeTextMaxWidth(ctx, text, x, y, maxWidth) {
     ctx.strokeText(text, x, y, maxWidth);
@@ -823,56 +823,56 @@ export function measureText(ctx, text) {
 }
 
 /**
- * @moth.sig text_width |metrics CanvasTextMetrics| -> Float
+ * @moth.sig text_width |metrics CanvasTextMetrics| -> F64
  */
 export function textWidth(metrics) {
     return numberOrZero(metrics.width);
 }
 
 /**
- * @moth.sig text_actual_bounding_box_left |metrics CanvasTextMetrics| -> Float
+ * @moth.sig text_actual_bounding_box_left |metrics CanvasTextMetrics| -> F64
  */
 export function textActualBoundingBoxLeft(metrics) {
     return numberOrZero(metrics.actualBoundingBoxLeft);
 }
 
 /**
- * @moth.sig text_actual_bounding_box_right |metrics CanvasTextMetrics| -> Float
+ * @moth.sig text_actual_bounding_box_right |metrics CanvasTextMetrics| -> F64
  */
 export function textActualBoundingBoxRight(metrics) {
     return numberOrZero(metrics.actualBoundingBoxRight);
 }
 
 /**
- * @moth.sig text_actual_bounding_box_ascent |metrics CanvasTextMetrics| -> Float
+ * @moth.sig text_actual_bounding_box_ascent |metrics CanvasTextMetrics| -> F64
  */
 export function textActualBoundingBoxAscent(metrics) {
     return numberOrZero(metrics.actualBoundingBoxAscent);
 }
 
 /**
- * @moth.sig text_actual_bounding_box_descent |metrics CanvasTextMetrics| -> Float
+ * @moth.sig text_actual_bounding_box_descent |metrics CanvasTextMetrics| -> F64
  */
 export function textActualBoundingBoxDescent(metrics) {
     return numberOrZero(metrics.actualBoundingBoxDescent);
 }
 
 /**
- * @moth.sig text_font_bounding_box_ascent |metrics CanvasTextMetrics| -> Float
+ * @moth.sig text_font_bounding_box_ascent |metrics CanvasTextMetrics| -> F64
  */
 export function textFontBoundingBoxAscent(metrics) {
     return numberOrZero(metrics.fontBoundingBoxAscent);
 }
 
 /**
- * @moth.sig text_font_bounding_box_descent |metrics CanvasTextMetrics| -> Float
+ * @moth.sig text_font_bounding_box_descent |metrics CanvasTextMetrics| -> F64
  */
 export function textFontBoundingBoxDescent(metrics) {
     return numberOrZero(metrics.fontBoundingBoxDescent);
 }
 
 /**
- * @moth.sig create_linear_gradient |ctx Canvas2d, x0 Float, y0 Float, x1 Float, y1 Float| -> CanvasGradient, Error!
+ * @moth.sig create_linear_gradient |ctx Canvas2d, x0 F64, y0 F64, x1 F64, y1 F64| -> CanvasGradient, Error!
  */
 export function createLinearGradient(ctx, x0, y0, x1, y1) {
     try {
@@ -883,7 +883,7 @@ export function createLinearGradient(ctx, x0, y0, x1, y1) {
 }
 
 /**
- * @moth.sig create_radial_gradient |ctx Canvas2d, x0 Float, y0 Float, r0 Float, x1 Float, y1 Float, r1 Float| -> CanvasGradient, Error!
+ * @moth.sig create_radial_gradient |ctx Canvas2d, x0 F64, y0 F64, r0 F64, x1 F64, y1 F64, r1 F64| -> CanvasGradient, Error!
  */
 export function createRadialGradient(ctx, x0, y0, r0, x1, y1, r1) {
     try {
@@ -894,7 +894,7 @@ export function createRadialGradient(ctx, x0, y0, r0, x1, y1, r1) {
 }
 
 /**
- * @moth.sig create_conic_gradient |ctx Canvas2d, start_angle Float, x Float, y Float| -> CanvasGradient, Error!
+ * @moth.sig create_conic_gradient |ctx Canvas2d, start_angle F64, x F64, y F64| -> CanvasGradient, Error!
  */
 export function createConicGradient(ctx, startAngle, x, y) {
     try {
@@ -905,7 +905,7 @@ export function createConicGradient(ctx, startAngle, x, y) {
 }
 
 /**
- * @moth.sig add_color_stop |gradient ~CanvasGradient, offset Float, color String| -> Error!
+ * @moth.sig add_color_stop |gradient ~CanvasGradient, offset F64, color String| -> Error!
  */
 export function addColorStop(gradient, offset, color) {
     try {
@@ -954,7 +954,7 @@ export function createCanvasPattern(ctx, canvas, repetition) {
 }
 
 /**
- * @moth.sig draw_image |ctx ~Canvas2d, image CanvasImage, x Float, y Float| -> Error!
+ * @moth.sig draw_image |ctx ~Canvas2d, image CanvasImage, x F64, y F64| -> Error!
  */
 export function drawImage(ctx, image, x, y) {
     const loadedError = assertLoadedImage(image);
@@ -971,7 +971,7 @@ export function drawImage(ctx, image, x, y) {
 }
 
 /**
- * @moth.sig draw_image_scaled |ctx ~Canvas2d, image CanvasImage, x Float, y Float, width Float, height Float| -> Error!
+ * @moth.sig draw_image_scaled |ctx ~Canvas2d, image CanvasImage, x F64, y F64, width F64, height F64| -> Error!
  */
 export function drawImageScaled(ctx, image, x, y, width, height) {
     const loadedError = assertLoadedImage(image);
@@ -988,7 +988,7 @@ export function drawImageScaled(ctx, image, x, y, width, height) {
 }
 
 /**
- * @moth.sig draw_image_cropped |ctx ~Canvas2d, image CanvasImage, source_x Float, source_y Float, source_width Float, source_height Float, x Float, y Float, width Float, height Float| -> Error!
+ * @moth.sig draw_image_cropped |ctx ~Canvas2d, image CanvasImage, source_x F64, source_y F64, source_width F64, source_height F64, x F64, y F64, width F64, height F64| -> Error!
  */
 export function drawImageCropped(ctx, image, sourceX, sourceY, sourceWidth, sourceHeight, x, y, width, height) {
     const loadedError = assertLoadedImage(image);
@@ -1005,7 +1005,7 @@ export function drawImageCropped(ctx, image, sourceX, sourceY, sourceWidth, sour
 }
 
 /**
- * @moth.sig draw_canvas |ctx ~Canvas2d, canvas CanvasElement, x Float, y Float| -> Error!
+ * @moth.sig draw_canvas |ctx ~Canvas2d, canvas CanvasElement, x F64, y F64| -> Error!
  */
 export function drawCanvas(ctx, canvas, x, y) {
     try {
@@ -1017,7 +1017,7 @@ export function drawCanvas(ctx, canvas, x, y) {
 }
 
 /**
- * @moth.sig draw_canvas_scaled |ctx ~Canvas2d, canvas CanvasElement, x Float, y Float, width Float, height Float| -> Error!
+ * @moth.sig draw_canvas_scaled |ctx ~Canvas2d, canvas CanvasElement, x F64, y F64, width F64, height F64| -> Error!
  */
 export function drawCanvasScaled(ctx, canvas, x, y, width, height) {
     try {
@@ -1029,7 +1029,7 @@ export function drawCanvasScaled(ctx, canvas, x, y, width, height) {
 }
 
 /**
- * @moth.sig get_image_data |ctx Canvas2d, x Int, y Int, width Int, height Int| -> CanvasImageData, Error!
+ * @moth.sig get_image_data |ctx Canvas2d, x I32, y I32, width I32, height I32| -> CanvasImageData, Error!
  */
 export function getImageData(ctx, x, y, width, height) {
     try {
@@ -1040,7 +1040,7 @@ export function getImageData(ctx, x, y, width, height) {
 }
 
 /**
- * @moth.sig create_image_data |ctx Canvas2d, width Int, height Int| -> CanvasImageData, Error!
+ * @moth.sig create_image_data |ctx Canvas2d, width I32, height I32| -> CanvasImageData, Error!
  */
 export function createImageData(ctx, width, height) {
     try {
@@ -1062,7 +1062,7 @@ export function createImageDataFrom(ctx, imageData) {
 }
 
 /**
- * @moth.sig put_image_data |ctx ~Canvas2d, image_data CanvasImageData, x Float, y Float| -> Error!
+ * @moth.sig put_image_data |ctx ~Canvas2d, image_data CanvasImageData, x F64, y F64| -> Error!
  */
 export function putImageData(ctx, imageData, x, y) {
     try {
@@ -1074,7 +1074,7 @@ export function putImageData(ctx, imageData, x, y) {
 }
 
 /**
- * @moth.sig put_image_data_dirty |ctx ~Canvas2d, image_data CanvasImageData, x Float, y Float, dirty_x Float, dirty_y Float, dirty_width Float, dirty_height Float| -> Error!
+ * @moth.sig put_image_data_dirty |ctx ~Canvas2d, image_data CanvasImageData, x F64, y F64, dirty_x F64, dirty_y F64, dirty_width F64, dirty_height F64| -> Error!
  */
 export function putImageDataDirty(ctx, imageData, x, y, dirtyX, dirtyY, dirtyWidth, dirtyHeight) {
     try {
@@ -1086,21 +1086,21 @@ export function putImageDataDirty(ctx, imageData, x, y, dirtyX, dirtyY, dirtyWid
 }
 
 /**
- * @moth.sig image_data_width |image_data CanvasImageData| -> Int
+ * @moth.sig image_data_width |image_data CanvasImageData| -> I32
  */
 export function imageDataWidth(imageData) {
     return imageData.width;
 }
 
 /**
- * @moth.sig image_data_height |image_data CanvasImageData| -> Int
+ * @moth.sig image_data_height |image_data CanvasImageData| -> I32
  */
 export function imageDataHeight(imageData) {
     return imageData.height;
 }
 
 /**
- * @moth.sig image_data_get_red |image_data CanvasImageData, x Int, y Int| -> Int, Error!
+ * @moth.sig image_data_get_red |image_data CanvasImageData, x I32, y I32| -> I32, Error!
  */
 export function imageDataGetRed(imageData, x, y) {
     const pointError = assertImageDataPoint(imageData, x, y);
@@ -1112,7 +1112,7 @@ export function imageDataGetRed(imageData, x, y) {
 }
 
 /**
- * @moth.sig image_data_get_green |image_data CanvasImageData, x Int, y Int| -> Int, Error!
+ * @moth.sig image_data_get_green |image_data CanvasImageData, x I32, y I32| -> I32, Error!
  */
 export function imageDataGetGreen(imageData, x, y) {
     const pointError = assertImageDataPoint(imageData, x, y);
@@ -1124,7 +1124,7 @@ export function imageDataGetGreen(imageData, x, y) {
 }
 
 /**
- * @moth.sig image_data_get_blue |image_data CanvasImageData, x Int, y Int| -> Int, Error!
+ * @moth.sig image_data_get_blue |image_data CanvasImageData, x I32, y I32| -> I32, Error!
  */
 export function imageDataGetBlue(imageData, x, y) {
     const pointError = assertImageDataPoint(imageData, x, y);
@@ -1136,7 +1136,7 @@ export function imageDataGetBlue(imageData, x, y) {
 }
 
 /**
- * @moth.sig image_data_get_alpha |image_data CanvasImageData, x Int, y Int| -> Int, Error!
+ * @moth.sig image_data_get_alpha |image_data CanvasImageData, x I32, y I32| -> I32, Error!
  */
 export function imageDataGetAlpha(imageData, x, y) {
     const pointError = assertImageDataPoint(imageData, x, y);
@@ -1148,7 +1148,7 @@ export function imageDataGetAlpha(imageData, x, y) {
 }
 
 /**
- * @moth.sig image_data_set_pixel |image_data ~CanvasImageData, x Int, y Int, red Int, green Int, blue Int, alpha Int| -> Error!
+ * @moth.sig image_data_set_pixel |image_data ~CanvasImageData, x I32, y I32, red I32, green I32, blue I32, alpha I32| -> Error!
  */
 export function imageDataSetPixel(imageData, x, y, red, green, blue, alpha) {
     const pointError = assertImageDataPoint(imageData, x, y);
@@ -1166,7 +1166,7 @@ export function imageDataSetPixel(imageData, x, y, red, green, blue, alpha) {
 }
 
 /**
- * @moth.sig image_data_clear_pixel |image_data ~CanvasImageData, x Int, y Int| -> Error!
+ * @moth.sig image_data_clear_pixel |image_data ~CanvasImageData, x I32, y I32| -> Error!
  */
 export function imageDataClearPixel(imageData, x, y) {
     const pointError = assertImageDataPoint(imageData, x, y);

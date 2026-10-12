@@ -19,8 +19,8 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::build_config::{
     BuildConfigValueLocation, BuildConfigValueOrigin, BuildInputName, BuildInputType,
-    ConfigResolutionRecord, ConfigResolutionServices, PrimitiveBuildInputType, PrimitiveBuildValue,
-    ResolvedBuildConfigValue, build_config_fingerprint,
+    ConfigResolutionRecord, ConfigResolutionServices, ContractValueError, PrimitiveBuildInputType,
+    PrimitiveBuildValue, ResolvedBuildConfigValue, build_config_fingerprint,
 };
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -36,7 +36,6 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
-use moth_lexical::numeric::profile::NumericProfile;
 /// Resolve declaration-owned `#Config of T` metadata before the ordinary const store fold.
 ///
 /// Top-level declarations are the bootstrap owner. The declaration-boundary path records the
@@ -91,30 +90,35 @@ pub(super) fn resolve_config_declaration(
         };
         let configured_value = if let Some(entry) = services.explicit_input(&input_name) {
             Some((
-                entry.value(),
+                entry.value().materialise_for(contract),
                 BuildConfigValueOrigin::ExplicitInput,
                 Some(entry.location().clone()),
                 build_config_input_argument_index(entry.location()),
             ))
         } else {
-            services
-                .builder_global(&input_name)
-                .map(|value| (value, BuildConfigValueOrigin::BuilderGlobal, None, None))
+            services.builder_global(&input_name).map(|value| {
+                (
+                    value.accept_for(contract),
+                    BuildConfigValueOrigin::BuilderGlobal,
+                    None,
+                    None,
+                )
+            })
         };
 
         if let Some((value, origin, value_location, argument_index)) = configured_value {
-            if !contract.accepts_primitive(value.primitive_type()) {
-                return Err(config_input_type_mismatch(
-                    Some(declaration_name),
-                    value.primitive_type().name(),
+            let value = value.map_err(|error| {
+                configured_value_error(
+                    error,
+                    declaration_name,
                     contract,
                     qualifier.qualifier_span,
                     argument_index,
                     string_table,
-                ));
-            }
+                )
+            })?;
             declaration.value =
-                expression_for_build_value(value, contract, None, type_interner, string_table);
+                expression_for_build_value(&value, contract, None, type_interner, string_table)?;
             services.record(config_resolution_record(
                 declaration_name,
                 &declaration_text,
@@ -122,11 +126,10 @@ pub(super) fn resolve_config_declaration(
                 contract,
                 contract_required,
                 contract_default.clone(),
-                Some(value.clone()),
+                Some(value),
                 origin,
                 qualifier.qualifier_span,
                 value_location,
-                scope_context.numeric_profile,
             ));
         } else {
             match authored_default {
@@ -151,7 +154,6 @@ pub(super) fn resolve_config_declaration(
                         BuildConfigValueOrigin::DeclarationDefault,
                         qualifier.qualifier_span,
                         None,
-                        scope_context.numeric_profile,
                     ));
                 }
                 AuthoredConfigDefault::None { span } => {
@@ -169,7 +171,6 @@ pub(super) fn resolve_config_declaration(
                         BuildConfigValueOrigin::DeclarationDefault,
                         qualifier.qualifier_span,
                         span.map(BuildConfigValueLocation::Source),
-                        scope_context.numeric_profile,
                     ));
                 }
                 AuthoredConfigDefault::Value {
@@ -200,7 +201,6 @@ pub(super) fn resolve_config_declaration(
                         BuildConfigValueOrigin::DeclarationDefault,
                         qualifier.qualifier_span,
                         span.map(BuildConfigValueLocation::Source),
-                        scope_context.numeric_profile,
                     ));
                 }
             }
@@ -325,10 +325,8 @@ fn config_resolution_record(
     origin: BuildConfigValueOrigin,
     qualifier_span: Option<SourceSpan>,
     value_location: Option<BuildConfigValueLocation>,
-    numeric_profile: NumericProfile,
 ) -> ConfigResolutionRecord {
-    let fingerprint =
-        build_config_fingerprint(field_text, contract, value.as_ref(), numeric_profile);
+    let fingerprint = build_config_fingerprint(field_text, contract, value.as_ref());
     ConfigResolutionRecord {
         field_name,
         input_name,
@@ -370,6 +368,47 @@ fn config_input_type_mismatch(
     )
 }
 
+/// Map one contract rejection of a configured value onto the declaration's diagnostic.
+///
+/// WHAT: a type mismatch keeps the `#Config` type diagnostic, with the command argument position
+///       when the value came from the command. A command literal outside its scalar's range keeps
+///       that position too; any other out-of-range literal reports the number-literal diagnostic.
+/// WHY:  the declaration qualifier is the only source span this lane owns for a configured value.
+fn configured_value_error(
+    error: ContractValueError,
+    key: StringId,
+    contract: BuildInputType,
+    span: Option<SourceSpan>,
+    provided_argument_index: Option<usize>,
+    string_table: &mut StringTable,
+) -> ExpressionParseError {
+    match error {
+        ContractValueError::TypeMismatch { provided } => config_input_type_mismatch(
+            Some(key),
+            provided.name(),
+            contract,
+            span,
+            provided_argument_index,
+            string_table,
+        ),
+        ContractValueError::LiteralOutOfRange { text, reason } => {
+            let literal = string_table.intern(&text);
+            match provided_argument_index {
+                Some(index) => config_expression_error(
+                    Some(key),
+                    InvalidConfigReason::ConfigInputOutOfRange {
+                        literal,
+                        reason,
+                        provided_argument_index: Some(index),
+                    },
+                    span,
+                ),
+                None => CompilerDiagnostic::invalid_number_literal(literal, reason, span).into(),
+            }
+        }
+    }
+}
+
 fn build_config_input_argument_index(location: &BuildConfigValueLocation) -> Option<usize> {
     match location {
         BuildConfigValueLocation::Command(location) => Some(location.argument_index()),
@@ -389,8 +428,8 @@ fn config_type_name(contract: BuildInputType) -> String {
 fn primitive_type_id(primitive: PrimitiveBuildInputType) -> TypeId {
     match primitive {
         PrimitiveBuildInputType::String => builtin_type_ids::STRING,
-        PrimitiveBuildInputType::Int => builtin_type_ids::INT,
-        PrimitiveBuildInputType::Float => builtin_type_ids::FLOAT,
+        // Each admitted fixed scalar projects onto its own exact language identity.
+        PrimitiveBuildInputType::Fixed(scalar) => builtin_type_ids::fixed_scalar(scalar),
         PrimitiveBuildInputType::Bool => builtin_type_ids::BOOL,
         PrimitiveBuildInputType::Char => builtin_type_ids::CHAR,
     }
@@ -420,7 +459,7 @@ pub(crate) fn expression_for_resolved_build_config_value(
     span: Option<SourceSpan>,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
-) -> Expression {
+) -> Result<Expression, ExpressionParseError> {
     let mut expression = match resolved.value() {
         Some(value) => expression_for_build_value(
             value,
@@ -428,7 +467,7 @@ pub(crate) fn expression_for_resolved_build_config_value(
             span,
             type_interner,
             string_table,
-        ),
+        )?,
         None => {
             debug_assert!(
                 resolved.value_type().is_optional(),
@@ -443,7 +482,7 @@ pub(crate) fn expression_for_resolved_build_config_value(
             "source-config",
             resolved.name().as_str(),
         ));
-    expression
+    Ok(expression)
 }
 
 fn expression_for_build_value(
@@ -452,20 +491,15 @@ fn expression_for_build_value(
     span: Option<SourceSpan>,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
-) -> Expression {
+) -> Result<Expression, ExpressionParseError> {
     let inner = match value {
         PrimitiveBuildValue::String(text) => Expression::string_slice(
             string_table.intern(text),
             span,
             crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
         ),
-        PrimitiveBuildValue::Int(value) => Expression::int(
+        PrimitiveBuildValue::Fixed(value) => Expression::fixed_scalar(
             *value,
-            span,
-            crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-        ),
-        PrimitiveBuildValue::Float(value) => Expression::float(
-            value.value(),
             span,
             crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
         ),
@@ -480,11 +514,11 @@ fn expression_for_build_value(
             crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
         ),
     };
-    if contract.is_optional() {
+    Ok(if contract.is_optional() {
         expression_for_optional_default(inner, contract, type_interner)
     } else {
         inner
-    }
+    })
 }
 
 fn expression_for_optional_default(
@@ -523,11 +557,9 @@ fn primitive_value_from_expression(
             Ok(primitive_value_from_string_pieces(pieces, string_table)
                 .map(PrimitiveBuildValue::String))
         }
-        ExpressionKind::Int(value) => Ok(Some(PrimitiveBuildValue::Int(*value))),
-        // `Uint` is not a build-input primitive, so a Uint default never becomes a
-        // build value; the unsupported-contract path rejects `#Config of Uint` first.
-        ExpressionKind::Uint(_) => Ok(None),
-        ExpressionKind::Float(value) => Ok(PrimitiveBuildValue::float(*value).ok()),
+        // Every fixed scalar keeps its exact value. The contract check decides whether its type
+        // is an admitted build-input primitive, so `Byte` is rejected there rather than here.
+        ExpressionKind::FixedScalar(value) => Ok(Some(PrimitiveBuildValue::Fixed(*value))),
         ExpressionKind::Bool(value) => Ok(Some(PrimitiveBuildValue::Bool(*value))),
         ExpressionKind::Char(value) => Ok(Some(PrimitiveBuildValue::Char(*value))),
         ExpressionKind::Coerced { value, .. } => {

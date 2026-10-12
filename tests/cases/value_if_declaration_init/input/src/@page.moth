@@ -1,4 +1,4 @@
-get_value |condition Bool| -> Int:
+get_value |condition Bool| -> I32:
     result = if condition then 1 else 0
     return result
 ;

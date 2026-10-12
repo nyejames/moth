@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "<ul><li>range-0range-1</li></ul><ul></ul><b>conditional-selected</b><i>loop-0</i><i>loop-1</i>"

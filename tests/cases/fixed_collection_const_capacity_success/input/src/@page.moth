@@ -1,6 +1,6 @@
 render_const_capacity || -> String:
-    capacity #Int = 4
-    items ~{capacity Int} = {}
+    capacity #I32 = 4
+    items ~{capacity I32} = {}
     ~items.push(9) catch:
     ;
     first = items.get(0) catch:

@@ -80,9 +80,6 @@ fn display_definition(
     match definition {
         TypeDefinition::Builtin(builtin) => match builtin.key {
             super::ids::BuiltinTypeKey::Bool => "Bool".to_owned(),
-            super::ids::BuiltinTypeKey::Int => "Int".to_owned(),
-            super::ids::BuiltinTypeKey::Uint => "Uint".to_owned(),
-            super::ids::BuiltinTypeKey::Float => "Float".to_owned(),
             super::ids::BuiltinTypeKey::Number(scale) => scale.to_string(),
             super::ids::BuiltinTypeKey::String => "String".to_owned(),
             super::ids::BuiltinTypeKey::Char => "Char".to_owned(),

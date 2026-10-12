@@ -35,7 +35,7 @@ Multiple method requirements may appear in one trait. The current separator betw
 [codeblock, $code("moth"):
     NAMED must:
         name |This| -> String
-        id |This| -> Int
+        id |This| -> I32
     ;
 ]
 

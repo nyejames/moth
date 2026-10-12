@@ -68,8 +68,8 @@ shared meaning across declarations:
     ;
 
     Point = |
-        x Int,
-        y Int,
+        x I32,
+        y I32,
     |
 
     Status ::
@@ -170,8 +170,8 @@ to leave payload fields for future input:
     ;
 
     TodoMessage ::
-        Rename | id Int, value String |,
-        Delete | id Int |,
+        Rename | id I32, value String |,
+        Delete | id I32 |,
     ;
 
     todo_id = 42
@@ -253,7 +253,7 @@ generic inference. It does not become a first-class function, and no distant
 body inspection supplies missing inference evidence.
 
 A compatible route parameter forwards unchanged. For a choice variant declared
-with leading `id Int` and trailing `message EditorMessage`,
+with leading `id I32` and trailing `message EditorMessage`,
 `AppMessage::Editor(editor_id)` can satisfy
 `Route of EditorMessage -> AppMessage`. This describes child-message lifting.
 Composing it with an input-to-child route is a separate design question, with no
@@ -265,8 +265,8 @@ function receives an ordinary choice value and does not use Wire or Route:
 
 [codeblock, $code("moth"):
     TodoMessage ::
-        Rename | id Int, text String |,
-        Delete | id Int |,
+        Rename | id I32, text String |,
+        Delete | id I32 |,
     ;
 
     update |state String, message TodoMessage| -> String:
@@ -287,7 +287,7 @@ the future `EditorMessage` fills the remaining field:
     ;
 
     AppMessage ::
-        Editor | editor_id Int, message EditorMessage |,
+        Editor | editor_id I32, message EditorMessage |,
     ;
 
     receive_editor |on_message Route of EditorMessage -> AppMessage| -> String:

@@ -2,19 +2,19 @@
 -- Valid borrow/exclusivity stress benchmark.
 
 Counter = |
-    value Int,
+    value I32,
 |
 
 Bucket = |
     label String,
-    count Int,
+    count I32,
 |
 
 increment |this ~Counter|:
     this.value = this.value + 1
 ;
 
-add |this ~Counter, amount Int|:
+add |this ~Counter, amount I32|:
     this.value = this.value + amount
 ;
 
@@ -27,7 +27,7 @@ consume_bucket |bucket ~Bucket| -> String:
     return [: [bucket.label]:[bucket.count] ]
 ;
 
-bump_many |counter ~Counter, amount Int|:
+bump_many |counter ~Counter, amount I32|:
     loop 0 to 20 |i|:
         counter.value = counter.value + amount + i
     ;

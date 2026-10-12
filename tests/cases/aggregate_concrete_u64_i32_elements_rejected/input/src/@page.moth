@@ -1,0 +1,9 @@
+-- Explicitly typed I32 and U64 elements have no common storage promotion.
+
+mixed_reverse ||:
+    small I32 = 1
+    large U64 = 2
+    mixed = {large, small}
+;
+
+[:concrete_u64_i32_elements_rejected]

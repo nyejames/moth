@@ -1,47 +1,47 @@
 @shared keep_uint,
     shared_count
 
--- Task 1 transport: Uint literals reach every canonical type position with an
+-- Task 1 transport: U32 literals reach every canonical type position with an
 -- exact u64 payload. No arithmetic context; each literal has an explicit
--- Uint receiver.
-small Uint = 42
-separated Uint = 4_294_967_295
-zero Uint = 0
+-- U32 receiver.
+small U32 = 42
+separated U32 = 4_294_967_295
+zero U32 = 0
 
-maybe_missing Uint? = none
-maybe_present Uint? = 41
+maybe_missing U32? = none
+maybe_present U32? = 41
 
 Point = |
-    x Uint,
-    y Uint,
+    x U32,
+    y U32,
 |
 origin Point = Point(1, 2)
 
 Choice ::
     Empty,
-    Count | value Uint |,
+    Count | value U32 |,
 ;
 chosen Choice = Choice::Count(7)
 
-items {Uint} = {1, 2, 3}
+items {U32} = {1, 2, 3}
 first = items.get(0) catch:
     then 0
 ;
-picked Uint = first
+picked U32 = first
 
-Count as Uint
+Count as U32
 
 aliased Count = 11
 
 Box type T = |
     value T,
 |
-boxed Box of Uint = Box(13)
+boxed Box of U32 = Box(13)
 
-kept Uint = keep_uint(17)
+kept U32 = keep_uint(17)
 
-missing_text Uint = if maybe_missing is |value| then value else 0
-present_text Uint = if maybe_present is |value| then value else 0
-chosen_count Uint = if chosen is Choice::Count(value) then value else 0
+missing_text U32 = if maybe_missing is |value| then value else 0
+present_text U32 = if maybe_present is |value| then value else 0
+chosen_count U32 = if chosen is Choice::Count(value) then value else 0
 
 [:uint transport small=[small] separated=[separated] zero=[zero] missing=[missing_text] present=[present_text] point=[origin.x]/[origin.y] choice=[chosen_count] first=[picked] alias=[aliased] boxed=[boxed.value] kept=[kept] shared=[shared_count]]

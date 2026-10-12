@@ -6,13 +6,15 @@
 //! build expressions against the canonical AST type environment.
 
 use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::symbols::path_interner::PathId;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 #[test]
 fn typed_call_constructor_sets_expression_and_result_type_ids() {
     let mut type_environment = TypeEnvironment::new();
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let expression = Expression::function_call_with_typed_arguments(
         PathId::ROOT,

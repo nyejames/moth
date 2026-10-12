@@ -1,0 +1,6 @@
+hidden ||:
+    value = 1 + 2 catch:
+        v U8 = 256
+        then 0
+    ;
+;

@@ -1,0 +1,39 @@
+-- Every F16 operation completes at F16 before the next operation. With
+-- runtime operands (2048 + 1) - 2048 therefore rounds to zero at the first
+-- addition instead of deferring the rounding, and 65504 + 65504 fails at the
+-- F16 finite boundary even though an F32 carrier could hold 131008.
+add_f16 |left F16, right F16| -> F16, Error!:
+    return left + right
+;
+
+round_f16 |large F16, one F16| -> F16, Error!:
+    return (large + one) - large
+;
+
+-- A distinguishable fallback makes a wrongly failing or deferred rounding
+-- visible: a deferred F16 rounding would produce 1, and a spurious failure
+-- would produce the fallback.
+rounded_value = round_f16(2048, 1) catch:
+    then 1
+;
+rounded_text String = cast rounded_value
+
+overflow_code ~U32 = 0
+overflow_value = add_f16(65504, 65504) catch |overflow_error|:
+    overflow_code = overflow_error.code
+    then 0
+;
+overflow_text String = cast overflow_value
+
+ok_sum = add_f16(1.5, 2.25) catch:
+    then 0
+;
+ok_sum_text String = cast ok_sum
+
+constant_large #F16 = 2048
+constant_one #F16 = 1
+constant_rounded #F16 = (constant_large + constant_one) - constant_large
+assert(constant_rounded is 0)
+assert(rounded_value is constant_rounded)
+
+[:scalar f16 completion rounded=[rounded_text] overflow=[overflow_code]/[overflow_text] ok=[ok_sum_text]]

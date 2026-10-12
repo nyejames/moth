@@ -322,7 +322,7 @@ page_head #= language_theme_head
     Terse diagnostics have a stable compact shape:
 
     [codeblock, $code("bash"):
-        E|type|src/@page.moth|4:12|Expected Bool, found Int|help=Use a Bool expression here.
+        E|type|src/@page.moth|4:12|Expected Bool, found I32|help=Use a Bool expression here.
         W|identifier_naming_convention|src/button.moth|1:1|Dependency alias case mismatch
     ]
 ]
@@ -346,13 +346,13 @@ page_head #= language_theme_head
 
     [codeblock, $code("text"):
         Type Error (ಠ_ಠ) 🔥
-        Declaration 'count' has incompatible initializer type. Expected 'Int', but found 'String'.
+        Declaration 'count' has incompatible initializer type. Expected 'I32', but found 'String'.
 
           --> src/@page.moth:6:17
             |
-          6 | count Int = "wrong"
+          6 | count I32 = "wrong"
             |             ^^^^^^^
-          Use an Int value here, or change the declaration type.
+          Use an I32 value here, or change the declaration type.
     ]
 
     Read diagnostics from top to bottom:

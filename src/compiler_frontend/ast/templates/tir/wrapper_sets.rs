@@ -18,7 +18,9 @@ use crate::compiler_frontend::ast::templates::tir::contribution_shape::Contribut
 use crate::compiler_frontend::ast::templates::tir::ids::{
     ChildTemplateOccurrenceId, TemplateIrNodeId, TemplateWrapperSetId,
 };
-use crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind;
+use crate::compiler_frontend::ast::templates::tir::node::{
+    RetainedControlFlowRenderUnit, RetainedNumericIntakeRole, TemplateIrNodeKind,
+};
 use crate::compiler_frontend::ast::templates::tir::overlays::{
     TemplateViewContext, TirWrapperApplicationMode, TirWrapperContext, TirWrapperContextOverlay,
 };
@@ -299,10 +301,12 @@ struct PendingWrapperContext {
 /// Recursively collects wrapper contexts for child-template occurrences in the
 /// structural tree rooted at `node_id`.
 ///
-/// WHAT: traverses `Sequence`, `Conditional`, and `Loop` structural nodes to
-///       find `ChildTemplate` occurrences. For each occurrence, resolves the
-///       child template's metadata directly from the module store and records
-///       `$fresh` suppression or inherited wrapper-set context.
+/// WHAT: traverses concrete and retained structural control-flow nodes plus
+///       `Sequence` nodes to find `ChildTemplate` occurrences. Retained roles
+///       expose their prepared body and, for loops, their aggregate wrapper.
+///       For each occurrence, resolves the child template's metadata directly
+///       from the module store and records `$fresh` suppression or inherited
+///       wrapper-set context.
 ///
 /// WHY: wrapper context belongs to the occurrence in the owning structural
 ///      tree. This traversal does not recurse into a child's own root — it only
@@ -365,6 +369,63 @@ fn collect_wrapper_contexts(
             collect_wrapper_contexts(store, *body, inherited_wrapper_refs, contexts)?;
             if let Some(wrapper_id) = aggregate_wrapper {
                 collect_wrapper_contexts(store, *wrapper_id, inherited_wrapper_refs, contexts)?;
+            }
+        }
+        TemplateIrNodeKind::RetainedNumericIntake(role) if role.completes_into_control_flow() => {
+            let (body, aggregate_wrapper) = match *role {
+                RetainedNumericIntakeRole::ConditionalLoopCondition {
+                    body, render_unit, ..
+                }
+                | RetainedNumericIntakeRole::LoopRange {
+                    body, render_unit, ..
+                }
+                | RetainedNumericIntakeRole::LoopCollection {
+                    body, render_unit, ..
+                } => match render_unit {
+                    Some(RetainedControlFlowRenderUnit::Loop { aggregate_wrapper }) => {
+                        (body, Some(aggregate_wrapper))
+                    }
+                    Some(RetainedControlFlowRenderUnit::Conditional) => {
+                        return Err(CompilerError::compiler_error(format!(
+                            "wrapper-context overlay: retained loop position {node_id} has a conditional render unit.",
+                        )));
+                    }
+                    None => {
+                        return Err(CompilerError::compiler_error(format!(
+                            "wrapper-context overlay: retained loop position {node_id} has no prepared render unit.",
+                        )));
+                    }
+                },
+                RetainedNumericIntakeRole::ConditionalSelector {
+                    body, render_unit, ..
+                } => match render_unit {
+                    Some(RetainedControlFlowRenderUnit::Conditional) => (body, None),
+                    Some(RetainedControlFlowRenderUnit::Loop { .. }) => {
+                        return Err(CompilerError::compiler_error(format!(
+                            "wrapper-context overlay: retained conditional position {node_id} has a loop render unit.",
+                        )));
+                    }
+                    None => {
+                        return Err(CompilerError::compiler_error(format!(
+                            "wrapper-context overlay: retained conditional position {node_id} has no prepared render unit.",
+                        )));
+                    }
+                },
+                RetainedNumericIntakeRole::HeadExpression { .. } => {
+                    return Err(CompilerError::compiler_error(format!(
+                        "wrapper-context overlay: retained expression position {node_id} was reported as control flow.",
+                    )));
+                }
+            };
+
+            collect_wrapper_contexts(store, body, inherited_wrapper_refs, contexts)?;
+            if let Some(aggregate_wrapper) = aggregate_wrapper {
+                collect_wrapper_contexts(
+                    store,
+                    aggregate_wrapper,
+                    inherited_wrapper_refs,
+                    contexts,
+                )?;
             }
         }
         _ => {}

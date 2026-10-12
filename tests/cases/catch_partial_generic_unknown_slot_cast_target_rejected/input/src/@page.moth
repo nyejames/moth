@@ -1,0 +1,14 @@
+partial_pair type T |value T| -> U64, T, Error!:
+    return 0, value
+;
+consume_u64 |value U64| -> String:
+    return [:[value]]
+;
+probe || -> String:
+    origin = 1
+    small U8 = 2
+    first, second = partial_pair(origin) catch then 0, cast small
+    rendered = consume_u64(origin)
+    return [:[first],[second]]
+;
+[:[probe()]]

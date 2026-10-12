@@ -3,4 +3,4 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["42"]
+rendered_output_exact = "generic_facade immediate=42 first=18446744073709551615 second=18446744073709551614"

@@ -35,11 +35,11 @@ unwrap type T |cell Cell of T| -> T:
     return cell.value
 ;
 
-count_cells type T |cells {Cell of T}| -> Int:
+count_cells type T |cells {Cell of T}| -> I32:
     return cells.length()
 ;
 
-count_nested type T |cells {{Cell of T}}| -> Int:
+count_nested type T |cells {{Cell of T}}| -> I32:
     return cells.length()
 ;
 
@@ -55,648 +55,648 @@ right type A, B |pair Pair of A, B| -> B:
 -- every generic call site below presents a mapping the substitution cache
 -- has not seen.
 Kind0000 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0001 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0002 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0003 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0004 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0005 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0006 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0007 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0008 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0009 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0010 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0011 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0012 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0013 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0014 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0015 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0016 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0017 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0018 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0019 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0020 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0021 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0022 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0023 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0024 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0025 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0026 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0027 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0028 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0029 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0030 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0031 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0032 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0033 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0034 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0035 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0036 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0037 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0038 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0039 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0040 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0041 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0042 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0043 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0044 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0045 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0046 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0047 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0048 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0049 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0050 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0051 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0052 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0053 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0054 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0055 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0056 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0057 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0058 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0059 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0060 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0061 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0062 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0063 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0064 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0065 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0066 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0067 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0068 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0069 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0070 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0071 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0072 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0073 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0074 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0075 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0076 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0077 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0078 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0079 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0080 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0081 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0082 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0083 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0084 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0085 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0086 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0087 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0088 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0089 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0090 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0091 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0092 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0093 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0094 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0095 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0096 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0097 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0098 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0099 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0100 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0101 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0102 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0103 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0104 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0105 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0106 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0107 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0108 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0109 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0110 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0111 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0112 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0113 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0114 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0115 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0116 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0117 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0118 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0119 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0120 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0121 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0122 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0123 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0124 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0125 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0126 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0127 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0128 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0129 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0130 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0131 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0132 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0133 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0134 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0135 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0136 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0137 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0138 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0139 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0140 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0141 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0142 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0143 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0144 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0145 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0146 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0147 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0148 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0149 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0150 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0151 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0152 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0153 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0154 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0155 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0156 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0157 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0158 = |
-    slot Int,
+    slot I32,
 |
 
 Kind0159 = |
-    slot Int,
+    slot I32,
 |
 
 -- Instantiation churn: one small driver per concrete type, so statements
 -- per function stay constant and only the type count grows.
-drive0000 || -> Int:
+drive0000 || -> I32:
     sum ~= 0
     v = Kind0000(0)
     c = Cell(v)
@@ -711,7 +711,7 @@ drive0000 || -> Int:
     return sum
 ;
 
-drive0001 || -> Int:
+drive0001 || -> I32:
     sum ~= 0
     v = Kind0001(1)
     c = Cell(v)
@@ -726,7 +726,7 @@ drive0001 || -> Int:
     return sum
 ;
 
-drive0002 || -> Int:
+drive0002 || -> I32:
     sum ~= 0
     v = Kind0002(2)
     c = Cell(v)
@@ -741,7 +741,7 @@ drive0002 || -> Int:
     return sum
 ;
 
-drive0003 || -> Int:
+drive0003 || -> I32:
     sum ~= 0
     v = Kind0003(3)
     c = Cell(v)
@@ -756,7 +756,7 @@ drive0003 || -> Int:
     return sum
 ;
 
-drive0004 || -> Int:
+drive0004 || -> I32:
     sum ~= 0
     v = Kind0004(4)
     c = Cell(v)
@@ -771,7 +771,7 @@ drive0004 || -> Int:
     return sum
 ;
 
-drive0005 || -> Int:
+drive0005 || -> I32:
     sum ~= 0
     v = Kind0005(5)
     c = Cell(v)
@@ -786,7 +786,7 @@ drive0005 || -> Int:
     return sum
 ;
 
-drive0006 || -> Int:
+drive0006 || -> I32:
     sum ~= 0
     v = Kind0006(6)
     c = Cell(v)
@@ -801,7 +801,7 @@ drive0006 || -> Int:
     return sum
 ;
 
-drive0007 || -> Int:
+drive0007 || -> I32:
     sum ~= 0
     v = Kind0007(7)
     c = Cell(v)
@@ -816,7 +816,7 @@ drive0007 || -> Int:
     return sum
 ;
 
-drive0008 || -> Int:
+drive0008 || -> I32:
     sum ~= 0
     v = Kind0008(8)
     c = Cell(v)
@@ -831,7 +831,7 @@ drive0008 || -> Int:
     return sum
 ;
 
-drive0009 || -> Int:
+drive0009 || -> I32:
     sum ~= 0
     v = Kind0009(9)
     c = Cell(v)
@@ -846,7 +846,7 @@ drive0009 || -> Int:
     return sum
 ;
 
-drive0010 || -> Int:
+drive0010 || -> I32:
     sum ~= 0
     v = Kind0010(10)
     c = Cell(v)
@@ -861,7 +861,7 @@ drive0010 || -> Int:
     return sum
 ;
 
-drive0011 || -> Int:
+drive0011 || -> I32:
     sum ~= 0
     v = Kind0011(11)
     c = Cell(v)
@@ -876,7 +876,7 @@ drive0011 || -> Int:
     return sum
 ;
 
-drive0012 || -> Int:
+drive0012 || -> I32:
     sum ~= 0
     v = Kind0012(12)
     c = Cell(v)
@@ -891,7 +891,7 @@ drive0012 || -> Int:
     return sum
 ;
 
-drive0013 || -> Int:
+drive0013 || -> I32:
     sum ~= 0
     v = Kind0013(13)
     c = Cell(v)
@@ -906,7 +906,7 @@ drive0013 || -> Int:
     return sum
 ;
 
-drive0014 || -> Int:
+drive0014 || -> I32:
     sum ~= 0
     v = Kind0014(14)
     c = Cell(v)
@@ -921,7 +921,7 @@ drive0014 || -> Int:
     return sum
 ;
 
-drive0015 || -> Int:
+drive0015 || -> I32:
     sum ~= 0
     v = Kind0015(15)
     c = Cell(v)
@@ -936,7 +936,7 @@ drive0015 || -> Int:
     return sum
 ;
 
-drive0016 || -> Int:
+drive0016 || -> I32:
     sum ~= 0
     v = Kind0016(16)
     c = Cell(v)
@@ -951,7 +951,7 @@ drive0016 || -> Int:
     return sum
 ;
 
-drive0017 || -> Int:
+drive0017 || -> I32:
     sum ~= 0
     v = Kind0017(17)
     c = Cell(v)
@@ -966,7 +966,7 @@ drive0017 || -> Int:
     return sum
 ;
 
-drive0018 || -> Int:
+drive0018 || -> I32:
     sum ~= 0
     v = Kind0018(18)
     c = Cell(v)
@@ -981,7 +981,7 @@ drive0018 || -> Int:
     return sum
 ;
 
-drive0019 || -> Int:
+drive0019 || -> I32:
     sum ~= 0
     v = Kind0019(19)
     c = Cell(v)
@@ -996,7 +996,7 @@ drive0019 || -> Int:
     return sum
 ;
 
-drive0020 || -> Int:
+drive0020 || -> I32:
     sum ~= 0
     v = Kind0020(20)
     c = Cell(v)
@@ -1011,7 +1011,7 @@ drive0020 || -> Int:
     return sum
 ;
 
-drive0021 || -> Int:
+drive0021 || -> I32:
     sum ~= 0
     v = Kind0021(21)
     c = Cell(v)
@@ -1026,7 +1026,7 @@ drive0021 || -> Int:
     return sum
 ;
 
-drive0022 || -> Int:
+drive0022 || -> I32:
     sum ~= 0
     v = Kind0022(22)
     c = Cell(v)
@@ -1041,7 +1041,7 @@ drive0022 || -> Int:
     return sum
 ;
 
-drive0023 || -> Int:
+drive0023 || -> I32:
     sum ~= 0
     v = Kind0023(23)
     c = Cell(v)
@@ -1056,7 +1056,7 @@ drive0023 || -> Int:
     return sum
 ;
 
-drive0024 || -> Int:
+drive0024 || -> I32:
     sum ~= 0
     v = Kind0024(24)
     c = Cell(v)
@@ -1071,7 +1071,7 @@ drive0024 || -> Int:
     return sum
 ;
 
-drive0025 || -> Int:
+drive0025 || -> I32:
     sum ~= 0
     v = Kind0025(25)
     c = Cell(v)
@@ -1086,7 +1086,7 @@ drive0025 || -> Int:
     return sum
 ;
 
-drive0026 || -> Int:
+drive0026 || -> I32:
     sum ~= 0
     v = Kind0026(26)
     c = Cell(v)
@@ -1101,7 +1101,7 @@ drive0026 || -> Int:
     return sum
 ;
 
-drive0027 || -> Int:
+drive0027 || -> I32:
     sum ~= 0
     v = Kind0027(27)
     c = Cell(v)
@@ -1116,7 +1116,7 @@ drive0027 || -> Int:
     return sum
 ;
 
-drive0028 || -> Int:
+drive0028 || -> I32:
     sum ~= 0
     v = Kind0028(28)
     c = Cell(v)
@@ -1131,7 +1131,7 @@ drive0028 || -> Int:
     return sum
 ;
 
-drive0029 || -> Int:
+drive0029 || -> I32:
     sum ~= 0
     v = Kind0029(29)
     c = Cell(v)
@@ -1146,7 +1146,7 @@ drive0029 || -> Int:
     return sum
 ;
 
-drive0030 || -> Int:
+drive0030 || -> I32:
     sum ~= 0
     v = Kind0030(30)
     c = Cell(v)
@@ -1161,7 +1161,7 @@ drive0030 || -> Int:
     return sum
 ;
 
-drive0031 || -> Int:
+drive0031 || -> I32:
     sum ~= 0
     v = Kind0031(31)
     c = Cell(v)
@@ -1176,7 +1176,7 @@ drive0031 || -> Int:
     return sum
 ;
 
-drive0032 || -> Int:
+drive0032 || -> I32:
     sum ~= 0
     v = Kind0032(32)
     c = Cell(v)
@@ -1191,7 +1191,7 @@ drive0032 || -> Int:
     return sum
 ;
 
-drive0033 || -> Int:
+drive0033 || -> I32:
     sum ~= 0
     v = Kind0033(33)
     c = Cell(v)
@@ -1206,7 +1206,7 @@ drive0033 || -> Int:
     return sum
 ;
 
-drive0034 || -> Int:
+drive0034 || -> I32:
     sum ~= 0
     v = Kind0034(34)
     c = Cell(v)
@@ -1221,7 +1221,7 @@ drive0034 || -> Int:
     return sum
 ;
 
-drive0035 || -> Int:
+drive0035 || -> I32:
     sum ~= 0
     v = Kind0035(35)
     c = Cell(v)
@@ -1236,7 +1236,7 @@ drive0035 || -> Int:
     return sum
 ;
 
-drive0036 || -> Int:
+drive0036 || -> I32:
     sum ~= 0
     v = Kind0036(36)
     c = Cell(v)
@@ -1251,7 +1251,7 @@ drive0036 || -> Int:
     return sum
 ;
 
-drive0037 || -> Int:
+drive0037 || -> I32:
     sum ~= 0
     v = Kind0037(37)
     c = Cell(v)
@@ -1266,7 +1266,7 @@ drive0037 || -> Int:
     return sum
 ;
 
-drive0038 || -> Int:
+drive0038 || -> I32:
     sum ~= 0
     v = Kind0038(38)
     c = Cell(v)
@@ -1281,7 +1281,7 @@ drive0038 || -> Int:
     return sum
 ;
 
-drive0039 || -> Int:
+drive0039 || -> I32:
     sum ~= 0
     v = Kind0039(39)
     c = Cell(v)
@@ -1296,7 +1296,7 @@ drive0039 || -> Int:
     return sum
 ;
 
-drive0040 || -> Int:
+drive0040 || -> I32:
     sum ~= 0
     v = Kind0040(40)
     c = Cell(v)
@@ -1311,7 +1311,7 @@ drive0040 || -> Int:
     return sum
 ;
 
-drive0041 || -> Int:
+drive0041 || -> I32:
     sum ~= 0
     v = Kind0041(41)
     c = Cell(v)
@@ -1326,7 +1326,7 @@ drive0041 || -> Int:
     return sum
 ;
 
-drive0042 || -> Int:
+drive0042 || -> I32:
     sum ~= 0
     v = Kind0042(42)
     c = Cell(v)
@@ -1341,7 +1341,7 @@ drive0042 || -> Int:
     return sum
 ;
 
-drive0043 || -> Int:
+drive0043 || -> I32:
     sum ~= 0
     v = Kind0043(43)
     c = Cell(v)
@@ -1356,7 +1356,7 @@ drive0043 || -> Int:
     return sum
 ;
 
-drive0044 || -> Int:
+drive0044 || -> I32:
     sum ~= 0
     v = Kind0044(44)
     c = Cell(v)
@@ -1371,7 +1371,7 @@ drive0044 || -> Int:
     return sum
 ;
 
-drive0045 || -> Int:
+drive0045 || -> I32:
     sum ~= 0
     v = Kind0045(45)
     c = Cell(v)
@@ -1386,7 +1386,7 @@ drive0045 || -> Int:
     return sum
 ;
 
-drive0046 || -> Int:
+drive0046 || -> I32:
     sum ~= 0
     v = Kind0046(46)
     c = Cell(v)
@@ -1401,7 +1401,7 @@ drive0046 || -> Int:
     return sum
 ;
 
-drive0047 || -> Int:
+drive0047 || -> I32:
     sum ~= 0
     v = Kind0047(47)
     c = Cell(v)
@@ -1416,7 +1416,7 @@ drive0047 || -> Int:
     return sum
 ;
 
-drive0048 || -> Int:
+drive0048 || -> I32:
     sum ~= 0
     v = Kind0048(48)
     c = Cell(v)
@@ -1431,7 +1431,7 @@ drive0048 || -> Int:
     return sum
 ;
 
-drive0049 || -> Int:
+drive0049 || -> I32:
     sum ~= 0
     v = Kind0049(49)
     c = Cell(v)
@@ -1446,7 +1446,7 @@ drive0049 || -> Int:
     return sum
 ;
 
-drive0050 || -> Int:
+drive0050 || -> I32:
     sum ~= 0
     v = Kind0050(50)
     c = Cell(v)
@@ -1461,7 +1461,7 @@ drive0050 || -> Int:
     return sum
 ;
 
-drive0051 || -> Int:
+drive0051 || -> I32:
     sum ~= 0
     v = Kind0051(51)
     c = Cell(v)
@@ -1476,7 +1476,7 @@ drive0051 || -> Int:
     return sum
 ;
 
-drive0052 || -> Int:
+drive0052 || -> I32:
     sum ~= 0
     v = Kind0052(52)
     c = Cell(v)
@@ -1491,7 +1491,7 @@ drive0052 || -> Int:
     return sum
 ;
 
-drive0053 || -> Int:
+drive0053 || -> I32:
     sum ~= 0
     v = Kind0053(53)
     c = Cell(v)
@@ -1506,7 +1506,7 @@ drive0053 || -> Int:
     return sum
 ;
 
-drive0054 || -> Int:
+drive0054 || -> I32:
     sum ~= 0
     v = Kind0054(54)
     c = Cell(v)
@@ -1521,7 +1521,7 @@ drive0054 || -> Int:
     return sum
 ;
 
-drive0055 || -> Int:
+drive0055 || -> I32:
     sum ~= 0
     v = Kind0055(55)
     c = Cell(v)
@@ -1536,7 +1536,7 @@ drive0055 || -> Int:
     return sum
 ;
 
-drive0056 || -> Int:
+drive0056 || -> I32:
     sum ~= 0
     v = Kind0056(56)
     c = Cell(v)
@@ -1551,7 +1551,7 @@ drive0056 || -> Int:
     return sum
 ;
 
-drive0057 || -> Int:
+drive0057 || -> I32:
     sum ~= 0
     v = Kind0057(57)
     c = Cell(v)
@@ -1566,7 +1566,7 @@ drive0057 || -> Int:
     return sum
 ;
 
-drive0058 || -> Int:
+drive0058 || -> I32:
     sum ~= 0
     v = Kind0058(58)
     c = Cell(v)
@@ -1581,7 +1581,7 @@ drive0058 || -> Int:
     return sum
 ;
 
-drive0059 || -> Int:
+drive0059 || -> I32:
     sum ~= 0
     v = Kind0059(59)
     c = Cell(v)
@@ -1596,7 +1596,7 @@ drive0059 || -> Int:
     return sum
 ;
 
-drive0060 || -> Int:
+drive0060 || -> I32:
     sum ~= 0
     v = Kind0060(60)
     c = Cell(v)
@@ -1611,7 +1611,7 @@ drive0060 || -> Int:
     return sum
 ;
 
-drive0061 || -> Int:
+drive0061 || -> I32:
     sum ~= 0
     v = Kind0061(61)
     c = Cell(v)
@@ -1626,7 +1626,7 @@ drive0061 || -> Int:
     return sum
 ;
 
-drive0062 || -> Int:
+drive0062 || -> I32:
     sum ~= 0
     v = Kind0062(62)
     c = Cell(v)
@@ -1641,7 +1641,7 @@ drive0062 || -> Int:
     return sum
 ;
 
-drive0063 || -> Int:
+drive0063 || -> I32:
     sum ~= 0
     v = Kind0063(63)
     c = Cell(v)
@@ -1656,7 +1656,7 @@ drive0063 || -> Int:
     return sum
 ;
 
-drive0064 || -> Int:
+drive0064 || -> I32:
     sum ~= 0
     v = Kind0064(64)
     c = Cell(v)
@@ -1671,7 +1671,7 @@ drive0064 || -> Int:
     return sum
 ;
 
-drive0065 || -> Int:
+drive0065 || -> I32:
     sum ~= 0
     v = Kind0065(65)
     c = Cell(v)
@@ -1686,7 +1686,7 @@ drive0065 || -> Int:
     return sum
 ;
 
-drive0066 || -> Int:
+drive0066 || -> I32:
     sum ~= 0
     v = Kind0066(66)
     c = Cell(v)
@@ -1701,7 +1701,7 @@ drive0066 || -> Int:
     return sum
 ;
 
-drive0067 || -> Int:
+drive0067 || -> I32:
     sum ~= 0
     v = Kind0067(67)
     c = Cell(v)
@@ -1716,7 +1716,7 @@ drive0067 || -> Int:
     return sum
 ;
 
-drive0068 || -> Int:
+drive0068 || -> I32:
     sum ~= 0
     v = Kind0068(68)
     c = Cell(v)
@@ -1731,7 +1731,7 @@ drive0068 || -> Int:
     return sum
 ;
 
-drive0069 || -> Int:
+drive0069 || -> I32:
     sum ~= 0
     v = Kind0069(69)
     c = Cell(v)
@@ -1746,7 +1746,7 @@ drive0069 || -> Int:
     return sum
 ;
 
-drive0070 || -> Int:
+drive0070 || -> I32:
     sum ~= 0
     v = Kind0070(70)
     c = Cell(v)
@@ -1761,7 +1761,7 @@ drive0070 || -> Int:
     return sum
 ;
 
-drive0071 || -> Int:
+drive0071 || -> I32:
     sum ~= 0
     v = Kind0071(71)
     c = Cell(v)
@@ -1776,7 +1776,7 @@ drive0071 || -> Int:
     return sum
 ;
 
-drive0072 || -> Int:
+drive0072 || -> I32:
     sum ~= 0
     v = Kind0072(72)
     c = Cell(v)
@@ -1791,7 +1791,7 @@ drive0072 || -> Int:
     return sum
 ;
 
-drive0073 || -> Int:
+drive0073 || -> I32:
     sum ~= 0
     v = Kind0073(73)
     c = Cell(v)
@@ -1806,7 +1806,7 @@ drive0073 || -> Int:
     return sum
 ;
 
-drive0074 || -> Int:
+drive0074 || -> I32:
     sum ~= 0
     v = Kind0074(74)
     c = Cell(v)
@@ -1821,7 +1821,7 @@ drive0074 || -> Int:
     return sum
 ;
 
-drive0075 || -> Int:
+drive0075 || -> I32:
     sum ~= 0
     v = Kind0075(75)
     c = Cell(v)
@@ -1836,7 +1836,7 @@ drive0075 || -> Int:
     return sum
 ;
 
-drive0076 || -> Int:
+drive0076 || -> I32:
     sum ~= 0
     v = Kind0076(76)
     c = Cell(v)
@@ -1851,7 +1851,7 @@ drive0076 || -> Int:
     return sum
 ;
 
-drive0077 || -> Int:
+drive0077 || -> I32:
     sum ~= 0
     v = Kind0077(77)
     c = Cell(v)
@@ -1866,7 +1866,7 @@ drive0077 || -> Int:
     return sum
 ;
 
-drive0078 || -> Int:
+drive0078 || -> I32:
     sum ~= 0
     v = Kind0078(78)
     c = Cell(v)
@@ -1881,7 +1881,7 @@ drive0078 || -> Int:
     return sum
 ;
 
-drive0079 || -> Int:
+drive0079 || -> I32:
     sum ~= 0
     v = Kind0079(79)
     c = Cell(v)
@@ -1896,7 +1896,7 @@ drive0079 || -> Int:
     return sum
 ;
 
-drive0080 || -> Int:
+drive0080 || -> I32:
     sum ~= 0
     v = Kind0080(80)
     c = Cell(v)
@@ -1911,7 +1911,7 @@ drive0080 || -> Int:
     return sum
 ;
 
-drive0081 || -> Int:
+drive0081 || -> I32:
     sum ~= 0
     v = Kind0081(81)
     c = Cell(v)
@@ -1926,7 +1926,7 @@ drive0081 || -> Int:
     return sum
 ;
 
-drive0082 || -> Int:
+drive0082 || -> I32:
     sum ~= 0
     v = Kind0082(82)
     c = Cell(v)
@@ -1941,7 +1941,7 @@ drive0082 || -> Int:
     return sum
 ;
 
-drive0083 || -> Int:
+drive0083 || -> I32:
     sum ~= 0
     v = Kind0083(83)
     c = Cell(v)
@@ -1956,7 +1956,7 @@ drive0083 || -> Int:
     return sum
 ;
 
-drive0084 || -> Int:
+drive0084 || -> I32:
     sum ~= 0
     v = Kind0084(84)
     c = Cell(v)
@@ -1971,7 +1971,7 @@ drive0084 || -> Int:
     return sum
 ;
 
-drive0085 || -> Int:
+drive0085 || -> I32:
     sum ~= 0
     v = Kind0085(85)
     c = Cell(v)
@@ -1986,7 +1986,7 @@ drive0085 || -> Int:
     return sum
 ;
 
-drive0086 || -> Int:
+drive0086 || -> I32:
     sum ~= 0
     v = Kind0086(86)
     c = Cell(v)
@@ -2001,7 +2001,7 @@ drive0086 || -> Int:
     return sum
 ;
 
-drive0087 || -> Int:
+drive0087 || -> I32:
     sum ~= 0
     v = Kind0087(87)
     c = Cell(v)
@@ -2016,7 +2016,7 @@ drive0087 || -> Int:
     return sum
 ;
 
-drive0088 || -> Int:
+drive0088 || -> I32:
     sum ~= 0
     v = Kind0088(88)
     c = Cell(v)
@@ -2031,7 +2031,7 @@ drive0088 || -> Int:
     return sum
 ;
 
-drive0089 || -> Int:
+drive0089 || -> I32:
     sum ~= 0
     v = Kind0089(89)
     c = Cell(v)
@@ -2046,7 +2046,7 @@ drive0089 || -> Int:
     return sum
 ;
 
-drive0090 || -> Int:
+drive0090 || -> I32:
     sum ~= 0
     v = Kind0090(90)
     c = Cell(v)
@@ -2061,7 +2061,7 @@ drive0090 || -> Int:
     return sum
 ;
 
-drive0091 || -> Int:
+drive0091 || -> I32:
     sum ~= 0
     v = Kind0091(91)
     c = Cell(v)
@@ -2076,7 +2076,7 @@ drive0091 || -> Int:
     return sum
 ;
 
-drive0092 || -> Int:
+drive0092 || -> I32:
     sum ~= 0
     v = Kind0092(92)
     c = Cell(v)
@@ -2091,7 +2091,7 @@ drive0092 || -> Int:
     return sum
 ;
 
-drive0093 || -> Int:
+drive0093 || -> I32:
     sum ~= 0
     v = Kind0093(93)
     c = Cell(v)
@@ -2106,7 +2106,7 @@ drive0093 || -> Int:
     return sum
 ;
 
-drive0094 || -> Int:
+drive0094 || -> I32:
     sum ~= 0
     v = Kind0094(94)
     c = Cell(v)
@@ -2121,7 +2121,7 @@ drive0094 || -> Int:
     return sum
 ;
 
-drive0095 || -> Int:
+drive0095 || -> I32:
     sum ~= 0
     v = Kind0095(95)
     c = Cell(v)
@@ -2136,7 +2136,7 @@ drive0095 || -> Int:
     return sum
 ;
 
-drive0096 || -> Int:
+drive0096 || -> I32:
     sum ~= 0
     v = Kind0096(96)
     c = Cell(v)
@@ -2151,7 +2151,7 @@ drive0096 || -> Int:
     return sum
 ;
 
-drive0097 || -> Int:
+drive0097 || -> I32:
     sum ~= 0
     v = Kind0097(97)
     c = Cell(v)
@@ -2166,7 +2166,7 @@ drive0097 || -> Int:
     return sum
 ;
 
-drive0098 || -> Int:
+drive0098 || -> I32:
     sum ~= 0
     v = Kind0098(98)
     c = Cell(v)
@@ -2181,7 +2181,7 @@ drive0098 || -> Int:
     return sum
 ;
 
-drive0099 || -> Int:
+drive0099 || -> I32:
     sum ~= 0
     v = Kind0099(99)
     c = Cell(v)
@@ -2196,7 +2196,7 @@ drive0099 || -> Int:
     return sum
 ;
 
-drive0100 || -> Int:
+drive0100 || -> I32:
     sum ~= 0
     v = Kind0100(100)
     c = Cell(v)
@@ -2211,7 +2211,7 @@ drive0100 || -> Int:
     return sum
 ;
 
-drive0101 || -> Int:
+drive0101 || -> I32:
     sum ~= 0
     v = Kind0101(101)
     c = Cell(v)
@@ -2226,7 +2226,7 @@ drive0101 || -> Int:
     return sum
 ;
 
-drive0102 || -> Int:
+drive0102 || -> I32:
     sum ~= 0
     v = Kind0102(102)
     c = Cell(v)
@@ -2241,7 +2241,7 @@ drive0102 || -> Int:
     return sum
 ;
 
-drive0103 || -> Int:
+drive0103 || -> I32:
     sum ~= 0
     v = Kind0103(103)
     c = Cell(v)
@@ -2256,7 +2256,7 @@ drive0103 || -> Int:
     return sum
 ;
 
-drive0104 || -> Int:
+drive0104 || -> I32:
     sum ~= 0
     v = Kind0104(104)
     c = Cell(v)
@@ -2271,7 +2271,7 @@ drive0104 || -> Int:
     return sum
 ;
 
-drive0105 || -> Int:
+drive0105 || -> I32:
     sum ~= 0
     v = Kind0105(105)
     c = Cell(v)
@@ -2286,7 +2286,7 @@ drive0105 || -> Int:
     return sum
 ;
 
-drive0106 || -> Int:
+drive0106 || -> I32:
     sum ~= 0
     v = Kind0106(106)
     c = Cell(v)
@@ -2301,7 +2301,7 @@ drive0106 || -> Int:
     return sum
 ;
 
-drive0107 || -> Int:
+drive0107 || -> I32:
     sum ~= 0
     v = Kind0107(107)
     c = Cell(v)
@@ -2316,7 +2316,7 @@ drive0107 || -> Int:
     return sum
 ;
 
-drive0108 || -> Int:
+drive0108 || -> I32:
     sum ~= 0
     v = Kind0108(108)
     c = Cell(v)
@@ -2331,7 +2331,7 @@ drive0108 || -> Int:
     return sum
 ;
 
-drive0109 || -> Int:
+drive0109 || -> I32:
     sum ~= 0
     v = Kind0109(109)
     c = Cell(v)
@@ -2346,7 +2346,7 @@ drive0109 || -> Int:
     return sum
 ;
 
-drive0110 || -> Int:
+drive0110 || -> I32:
     sum ~= 0
     v = Kind0110(110)
     c = Cell(v)
@@ -2361,7 +2361,7 @@ drive0110 || -> Int:
     return sum
 ;
 
-drive0111 || -> Int:
+drive0111 || -> I32:
     sum ~= 0
     v = Kind0111(111)
     c = Cell(v)
@@ -2376,7 +2376,7 @@ drive0111 || -> Int:
     return sum
 ;
 
-drive0112 || -> Int:
+drive0112 || -> I32:
     sum ~= 0
     v = Kind0112(112)
     c = Cell(v)
@@ -2391,7 +2391,7 @@ drive0112 || -> Int:
     return sum
 ;
 
-drive0113 || -> Int:
+drive0113 || -> I32:
     sum ~= 0
     v = Kind0113(113)
     c = Cell(v)
@@ -2406,7 +2406,7 @@ drive0113 || -> Int:
     return sum
 ;
 
-drive0114 || -> Int:
+drive0114 || -> I32:
     sum ~= 0
     v = Kind0114(114)
     c = Cell(v)
@@ -2421,7 +2421,7 @@ drive0114 || -> Int:
     return sum
 ;
 
-drive0115 || -> Int:
+drive0115 || -> I32:
     sum ~= 0
     v = Kind0115(115)
     c = Cell(v)
@@ -2436,7 +2436,7 @@ drive0115 || -> Int:
     return sum
 ;
 
-drive0116 || -> Int:
+drive0116 || -> I32:
     sum ~= 0
     v = Kind0116(116)
     c = Cell(v)
@@ -2451,7 +2451,7 @@ drive0116 || -> Int:
     return sum
 ;
 
-drive0117 || -> Int:
+drive0117 || -> I32:
     sum ~= 0
     v = Kind0117(117)
     c = Cell(v)
@@ -2466,7 +2466,7 @@ drive0117 || -> Int:
     return sum
 ;
 
-drive0118 || -> Int:
+drive0118 || -> I32:
     sum ~= 0
     v = Kind0118(118)
     c = Cell(v)
@@ -2481,7 +2481,7 @@ drive0118 || -> Int:
     return sum
 ;
 
-drive0119 || -> Int:
+drive0119 || -> I32:
     sum ~= 0
     v = Kind0119(119)
     c = Cell(v)
@@ -2496,7 +2496,7 @@ drive0119 || -> Int:
     return sum
 ;
 
-drive0120 || -> Int:
+drive0120 || -> I32:
     sum ~= 0
     v = Kind0120(120)
     c = Cell(v)
@@ -2511,7 +2511,7 @@ drive0120 || -> Int:
     return sum
 ;
 
-drive0121 || -> Int:
+drive0121 || -> I32:
     sum ~= 0
     v = Kind0121(121)
     c = Cell(v)
@@ -2526,7 +2526,7 @@ drive0121 || -> Int:
     return sum
 ;
 
-drive0122 || -> Int:
+drive0122 || -> I32:
     sum ~= 0
     v = Kind0122(122)
     c = Cell(v)
@@ -2541,7 +2541,7 @@ drive0122 || -> Int:
     return sum
 ;
 
-drive0123 || -> Int:
+drive0123 || -> I32:
     sum ~= 0
     v = Kind0123(123)
     c = Cell(v)
@@ -2556,7 +2556,7 @@ drive0123 || -> Int:
     return sum
 ;
 
-drive0124 || -> Int:
+drive0124 || -> I32:
     sum ~= 0
     v = Kind0124(124)
     c = Cell(v)
@@ -2571,7 +2571,7 @@ drive0124 || -> Int:
     return sum
 ;
 
-drive0125 || -> Int:
+drive0125 || -> I32:
     sum ~= 0
     v = Kind0125(125)
     c = Cell(v)
@@ -2586,7 +2586,7 @@ drive0125 || -> Int:
     return sum
 ;
 
-drive0126 || -> Int:
+drive0126 || -> I32:
     sum ~= 0
     v = Kind0126(126)
     c = Cell(v)
@@ -2601,7 +2601,7 @@ drive0126 || -> Int:
     return sum
 ;
 
-drive0127 || -> Int:
+drive0127 || -> I32:
     sum ~= 0
     v = Kind0127(127)
     c = Cell(v)
@@ -2616,7 +2616,7 @@ drive0127 || -> Int:
     return sum
 ;
 
-drive0128 || -> Int:
+drive0128 || -> I32:
     sum ~= 0
     v = Kind0128(128)
     c = Cell(v)
@@ -2631,7 +2631,7 @@ drive0128 || -> Int:
     return sum
 ;
 
-drive0129 || -> Int:
+drive0129 || -> I32:
     sum ~= 0
     v = Kind0129(129)
     c = Cell(v)
@@ -2646,7 +2646,7 @@ drive0129 || -> Int:
     return sum
 ;
 
-drive0130 || -> Int:
+drive0130 || -> I32:
     sum ~= 0
     v = Kind0130(130)
     c = Cell(v)
@@ -2661,7 +2661,7 @@ drive0130 || -> Int:
     return sum
 ;
 
-drive0131 || -> Int:
+drive0131 || -> I32:
     sum ~= 0
     v = Kind0131(131)
     c = Cell(v)
@@ -2676,7 +2676,7 @@ drive0131 || -> Int:
     return sum
 ;
 
-drive0132 || -> Int:
+drive0132 || -> I32:
     sum ~= 0
     v = Kind0132(132)
     c = Cell(v)
@@ -2691,7 +2691,7 @@ drive0132 || -> Int:
     return sum
 ;
 
-drive0133 || -> Int:
+drive0133 || -> I32:
     sum ~= 0
     v = Kind0133(133)
     c = Cell(v)
@@ -2706,7 +2706,7 @@ drive0133 || -> Int:
     return sum
 ;
 
-drive0134 || -> Int:
+drive0134 || -> I32:
     sum ~= 0
     v = Kind0134(134)
     c = Cell(v)
@@ -2721,7 +2721,7 @@ drive0134 || -> Int:
     return sum
 ;
 
-drive0135 || -> Int:
+drive0135 || -> I32:
     sum ~= 0
     v = Kind0135(135)
     c = Cell(v)
@@ -2736,7 +2736,7 @@ drive0135 || -> Int:
     return sum
 ;
 
-drive0136 || -> Int:
+drive0136 || -> I32:
     sum ~= 0
     v = Kind0136(136)
     c = Cell(v)
@@ -2751,7 +2751,7 @@ drive0136 || -> Int:
     return sum
 ;
 
-drive0137 || -> Int:
+drive0137 || -> I32:
     sum ~= 0
     v = Kind0137(137)
     c = Cell(v)
@@ -2766,7 +2766,7 @@ drive0137 || -> Int:
     return sum
 ;
 
-drive0138 || -> Int:
+drive0138 || -> I32:
     sum ~= 0
     v = Kind0138(138)
     c = Cell(v)
@@ -2781,7 +2781,7 @@ drive0138 || -> Int:
     return sum
 ;
 
-drive0139 || -> Int:
+drive0139 || -> I32:
     sum ~= 0
     v = Kind0139(139)
     c = Cell(v)
@@ -2796,7 +2796,7 @@ drive0139 || -> Int:
     return sum
 ;
 
-drive0140 || -> Int:
+drive0140 || -> I32:
     sum ~= 0
     v = Kind0140(140)
     c = Cell(v)
@@ -2811,7 +2811,7 @@ drive0140 || -> Int:
     return sum
 ;
 
-drive0141 || -> Int:
+drive0141 || -> I32:
     sum ~= 0
     v = Kind0141(141)
     c = Cell(v)
@@ -2826,7 +2826,7 @@ drive0141 || -> Int:
     return sum
 ;
 
-drive0142 || -> Int:
+drive0142 || -> I32:
     sum ~= 0
     v = Kind0142(142)
     c = Cell(v)
@@ -2841,7 +2841,7 @@ drive0142 || -> Int:
     return sum
 ;
 
-drive0143 || -> Int:
+drive0143 || -> I32:
     sum ~= 0
     v = Kind0143(143)
     c = Cell(v)
@@ -2856,7 +2856,7 @@ drive0143 || -> Int:
     return sum
 ;
 
-drive0144 || -> Int:
+drive0144 || -> I32:
     sum ~= 0
     v = Kind0144(144)
     c = Cell(v)
@@ -2871,7 +2871,7 @@ drive0144 || -> Int:
     return sum
 ;
 
-drive0145 || -> Int:
+drive0145 || -> I32:
     sum ~= 0
     v = Kind0145(145)
     c = Cell(v)
@@ -2886,7 +2886,7 @@ drive0145 || -> Int:
     return sum
 ;
 
-drive0146 || -> Int:
+drive0146 || -> I32:
     sum ~= 0
     v = Kind0146(146)
     c = Cell(v)
@@ -2901,7 +2901,7 @@ drive0146 || -> Int:
     return sum
 ;
 
-drive0147 || -> Int:
+drive0147 || -> I32:
     sum ~= 0
     v = Kind0147(147)
     c = Cell(v)
@@ -2916,7 +2916,7 @@ drive0147 || -> Int:
     return sum
 ;
 
-drive0148 || -> Int:
+drive0148 || -> I32:
     sum ~= 0
     v = Kind0148(148)
     c = Cell(v)
@@ -2931,7 +2931,7 @@ drive0148 || -> Int:
     return sum
 ;
 
-drive0149 || -> Int:
+drive0149 || -> I32:
     sum ~= 0
     v = Kind0149(149)
     c = Cell(v)
@@ -2946,7 +2946,7 @@ drive0149 || -> Int:
     return sum
 ;
 
-drive0150 || -> Int:
+drive0150 || -> I32:
     sum ~= 0
     v = Kind0150(150)
     c = Cell(v)
@@ -2961,7 +2961,7 @@ drive0150 || -> Int:
     return sum
 ;
 
-drive0151 || -> Int:
+drive0151 || -> I32:
     sum ~= 0
     v = Kind0151(151)
     c = Cell(v)
@@ -2976,7 +2976,7 @@ drive0151 || -> Int:
     return sum
 ;
 
-drive0152 || -> Int:
+drive0152 || -> I32:
     sum ~= 0
     v = Kind0152(152)
     c = Cell(v)
@@ -2991,7 +2991,7 @@ drive0152 || -> Int:
     return sum
 ;
 
-drive0153 || -> Int:
+drive0153 || -> I32:
     sum ~= 0
     v = Kind0153(153)
     c = Cell(v)
@@ -3006,7 +3006,7 @@ drive0153 || -> Int:
     return sum
 ;
 
-drive0154 || -> Int:
+drive0154 || -> I32:
     sum ~= 0
     v = Kind0154(154)
     c = Cell(v)
@@ -3021,7 +3021,7 @@ drive0154 || -> Int:
     return sum
 ;
 
-drive0155 || -> Int:
+drive0155 || -> I32:
     sum ~= 0
     v = Kind0155(155)
     c = Cell(v)
@@ -3036,7 +3036,7 @@ drive0155 || -> Int:
     return sum
 ;
 
-drive0156 || -> Int:
+drive0156 || -> I32:
     sum ~= 0
     v = Kind0156(156)
     c = Cell(v)
@@ -3051,7 +3051,7 @@ drive0156 || -> Int:
     return sum
 ;
 
-drive0157 || -> Int:
+drive0157 || -> I32:
     sum ~= 0
     v = Kind0157(157)
     c = Cell(v)
@@ -3066,7 +3066,7 @@ drive0157 || -> Int:
     return sum
 ;
 
-drive0158 || -> Int:
+drive0158 || -> I32:
     sum ~= 0
     v = Kind0158(158)
     c = Cell(v)
@@ -3081,7 +3081,7 @@ drive0158 || -> Int:
     return sum
 ;
 
-drive0159 || -> Int:
+drive0159 || -> I32:
     sum ~= 0
     v = Kind0159(159)
     c = Cell(v)

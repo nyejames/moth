@@ -1,1 +1,1 @@
-UserId as Int
+UserId as I32

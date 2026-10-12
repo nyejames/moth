@@ -9,55 +9,55 @@ finite_namespace = math.sqrt(16.0)
 finite_alias = exponential(1.0)
 alias_ok = abs(finite_alias - 2.718282) < 0.000001
 
-invalid_sqrt || -> Float, Error!:
+invalid_sqrt || -> F64, Error!:
     return sqrt(-1.0)
 ;
 
-invalid_exp || -> Float, Error!:
+invalid_exp || -> F64, Error!:
     return math.exp(10000.0)
 ;
 
-invalid_alias_exp || -> Float, Error!:
+invalid_alias_exp || -> F64, Error!:
     return exponential(10000.0)
 ;
 
-invalid_log_zero || -> Float, Error!:
+invalid_log_zero || -> F64, Error!:
     return log(0.0)
 ;
 
-invalid_log_negative || -> Float, Error!:
+invalid_log_negative || -> F64, Error!:
     return math.log(-1.0)
 ;
 
-invalid_asin_above_one || -> Float, Error!:
+invalid_asin_above_one || -> F64, Error!:
     return asin(1.5)
 ;
 
-invalid_asin_below_minus_one || -> Float, Error!:
+invalid_asin_below_minus_one || -> F64, Error!:
     return asin(-1.5)
 ;
 
-invalid_acos_above_one || -> Float, Error!:
+invalid_acos_above_one || -> F64, Error!:
     return acos(1.5)
 ;
 
-invalid_acosh_below_one || -> Float, Error!:
+invalid_acosh_below_one || -> F64, Error!:
     return acosh(0.5)
 ;
 
-invalid_atanh_at_one || -> Float, Error!:
+invalid_atanh_at_one || -> F64, Error!:
     return atanh(1.0)
 ;
 
-invalid_atanh_beyond_one || -> Float, Error!:
+invalid_atanh_beyond_one || -> F64, Error!:
     return atanh(1.5)
 ;
 
-invalid_log1p_at_minus_one || -> Float, Error!:
+invalid_log1p_at_minus_one || -> F64, Error!:
     return log1p(-1.0)
 ;
 
-invalid_log1p_below_minus_one || -> Float, Error!:
+invalid_log1p_below_minus_one || -> F64, Error!:
     return log1p(-1.5)
 ;
 

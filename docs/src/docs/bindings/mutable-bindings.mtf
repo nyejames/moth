@@ -18,6 +18,10 @@
 - `~=` is an adjacent mutable-declaration marker. Write whitespace before `~` and after `=`, but never between them.
 - Mutability belongs to the binding, not the semantic type.
 
+Every write constrains the binding's one static type. An eligible numeric
+origin can use all its writes before fallback, but later mutation never gives
+the same binding a second type.
+
 ### Exclusive access
 
 Declaration mutability and call-site exclusive access are separate operations.

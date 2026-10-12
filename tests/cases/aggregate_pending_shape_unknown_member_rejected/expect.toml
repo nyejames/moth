@@ -1,0 +1,15 @@
+entry = "."
+
+# HTML-only: the pending map literal requires the JS backend.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0048"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0048"
+reason = "invalid_field_access.unknown_member"
+path = "input/@page.moth"
+line = 9
+column = 9

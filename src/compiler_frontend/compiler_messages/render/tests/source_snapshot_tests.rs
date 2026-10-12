@@ -770,6 +770,75 @@ fn renderers_include_related_donor_path_and_message_in_terminal_and_html() {
     );
 }
 
+/// A span-only secondary label is a valid structured fact (label message code 0). The shared
+/// resolver and both renderers must surface its own resolved location, and neither may append an
+/// empty message separator.
+#[test]
+fn span_only_secondary_label_surfaces_its_own_location() {
+    let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
+    let mut string_table = StringTable::new();
+    let (source_database, source_id) = retained_source_database(
+        temporary_directory.path(),
+        "main.moth",
+        "base\nvalue\n",
+        &mut string_table,
+    );
+
+    let name = string_table.intern("value");
+    let diagnostic =
+        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 5, 5)))
+            .with_labels(vec![DiagnosticLabel::secondary(
+                Some(inline_span(source_id, 0, 4)),
+                None,
+            )]);
+    let context = DiagnosticRenderContext::new(&string_table)
+        .with_optional_source_database(Some(&source_database));
+
+    let label_facts =
+        resolve_label_render_facts_from_root(&diagnostic, context, temporary_directory.path());
+    assert_eq!(
+        label_facts,
+        vec![ResolvedDiagnosticLabel {
+            style: DiagnosticLabelStyle::Secondary,
+            path: Some("src/main.moth".to_owned()),
+            line: Some(1),
+            column: Some(1),
+            message: String::new(),
+        }],
+        "a span-only label must keep its resolved location with an empty message",
+    );
+
+    let terminal_labels = format_label_messages_with_context_from_root(
+        &diagnostic,
+        context,
+        temporary_directory.path(),
+    );
+    assert_eq!(
+        terminal_labels,
+        vec!["info: 1:1"],
+        "the terminal label line must show the distinct location without an empty message suffix",
+    );
+
+    let html = render_diagnostics_html_with_context(
+        std::slice::from_ref(&diagnostic),
+        temporary_directory.path(),
+        context,
+    );
+    assert!(
+        html.contains("src/main.moth:2:1"),
+        "the primary location must still render: {html}",
+    );
+    assert_eq!(
+        html.matches(r#"class="diagnostic-label""#).count(),
+        1,
+        "the span-only label must render exactly once: {html}",
+    );
+    assert!(
+        html.contains(r#"class="diagnostic-label">info: 1:1</p>"#),
+        "HTML must show the span-only label location without an empty message suffix: {html}",
+    );
+}
+
 #[test]
 fn html_escapes_dynamic_relative_source_paths() {
     let temporary_directory = tempfile::tempdir().expect("temporary directory should exist");

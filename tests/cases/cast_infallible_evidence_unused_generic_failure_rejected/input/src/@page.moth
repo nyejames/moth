@@ -1,0 +1,13 @@
+Count type T = |value U8, tag T|
+
+double |value U8| -> U8:
+    return value + value
+;
+
+to_u8 type T |this Count of T| -> U8:
+    return double(this.value)
+;
+
+Count must CASTABLE_TO_U8
+
+[:unused generic evidence still has to be infallible]

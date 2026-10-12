@@ -3,49 +3,104 @@
 //! WHAT: parses statement forms that start with a symbol inside function/start-function bodies.
 //! WHY: symbol-led statements are the densest statement branch (mutation, calls, declarations,
 //! access chains and start dependency callability), so isolating them keeps dispatch readable.
+//!
+//! A symbol that resolves to a pending numeric binding is a body-owned origin whose single static
+//! type is selected at the body root. Mutations of it record one ordered continuation instead of
+//! being built early; a multi-bind keeps supported producers on that same completion path, while
+//! unsupported RHS shapes report their authored rule diagnostic.
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression::{
+    Expression, ExpressionKind, Operator,
+};
+use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::mutation::{
-    handle_mutation, handle_mutation_target,
+    MutationOutcome, compound_assignment_operator_for_tag, handle_mutation, handle_mutation_target,
+};
+use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_with_trailing_newline_policy;
+use crate::compiler_frontend::ast::expressions::parse_expression_input::{
+    ExpressionParseInput, ExpressionParseResources,
 };
 use crate::compiler_frontend::ast::expressions::parse_expression_places::place_expression_from_expression;
-use crate::compiler_frontend::ast::field_access::parse_field_access;
+use crate::compiler_frontend::ast::field_access::{
+    ParsedPostfixExpression, PostfixChainAccess, RetainedMemberTarget, RetainedOperandInput,
+    parse_field_access, retain_pending_operand_member_access, retained_member_target,
+};
+use crate::compiler_frontend::ast::numeric_construction::{
+    AssignmentContinuation, BodyDraft, CompoundAssignmentContinuation, DeferredAssignmentTarget,
+    DeferredExpressionSuffix, ExpressionStatementContinuation, NumericBindingId,
+    NumericContinuation, PendingPlaceTarget, StatementExpression, binding_reference_shape,
+    deferred_numeric_expression, numeric_witness_type, register_binding_witness,
+    single_direct_pending_reference, union_alias_classes,
+};
+use crate::compiler_frontend::ast::numeric_known_shape::{
+    exact_shape_type, project_exact_shape, register_shape_witness, union_shape_classes,
+};
 use crate::compiler_frontend::ast::receiver_methods::free_function_receiver_method_call_error;
 use crate::compiler_frontend::ast::statements::body_expr_stmt::{
-    is_expression_statement, parse_symbol_expression_statement_candidate,
+    is_expression_statement, push_statement_expression,
 };
 use crate::compiler_frontend::ast::statements::declarations::ResolvedDeclarationStatementKind;
-use crate::compiler_frontend::ast::statements::declarations::new_declaration;
-use crate::compiler_frontend::ast::statements::multi_bind::parse_multi_bind_statement;
+use crate::compiler_frontend::ast::statements::declarations::{
+    NewDeclarationOutcome, new_declaration,
+};
+use crate::compiler_frontend::ast::statements::multi_bind::{
+    MultiBindStatement, parse_multi_bind_statement,
+};
+use crate::compiler_frontend::ast::statements::value_production::multi_bind::finalize_inferred_value_block;
+use crate::compiler_frontend::ast::statements::value_production::receiver::try_parse_value_block_at_receiver_with_target;
+use crate::compiler_frontend::ast::statements::value_production::types::ParsedReceiverValue;
+use crate::compiler_frontend::ast::statements::value_production::{
+    ActiveValueProductionTarget, ValueReceiverKind,
+};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::is_reserved_builtin_symbol;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidDeclarationReason,
-    InvalidStandaloneStatementReason, InvalidThisUsageReason, ReservedNameOwner,
+    InvalidFieldAccessReason, InvalidMultiBindReason, InvalidStandaloneStatementReason,
+    InvalidThisUsageReason, ReservedNameOwner,
 };
+use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::syntax_errors::statement_position::check_mistaken_keyword_symbol;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
+use crate::compiler_frontend::type_coercion::parse_context::{
+    CastTargetContext, ExpectedType, cast_target_context_for_type_id, parse_expectation_for_type_id,
+};
+use crate::compiler_frontend::value_mode::ValueMode;
 
 // --------------------------
-//  Accessed-symbol statement helper
+//  Statement routing helpers
 // --------------------------
+
+/// Route one parsed mutation into the body draft.
+///
+/// WHAT: pushes the finished node, or records the retained continuation at the authored position.
+/// WHY: a mutation whose right-hand side still holds numeric origins has no node yet; its target
+///      and authored position are already fixed, so the body root resumes it exactly once.
+fn push_mutation_outcome(outcome: MutationOutcome, draft: &mut BodyDraft) {
+    match outcome {
+        MutationOutcome::Ready(node) => draft.push_node(node),
+        MutationOutcome::Retained(continuation) => draft.push_pending(continuation),
+    }
+}
 
 fn push_accessed_symbol_statement(
     accessed_expression: Expression,
-    ast: &mut Vec<AstNode>,
+    draft: &mut BodyDraft,
     context: &ScopeContext,
     token_stream: &AstCursor,
     _symbol_id: StringId,
     _string_table: &StringTable,
 ) -> Result<(), CompilerDiagnostic> {
     if is_expression_statement(&accessed_expression) {
-        ast.push(AstNode {
+        draft.push_node(AstNode {
             span: accessed_expression.span,
             kind: NodeKind::ExpressionStatement(accessed_expression),
             scope: context.scope,
@@ -68,13 +123,57 @@ fn push_accessed_symbol_statement(
     ))
 }
 
+/// Route one retained postfix expression at its authored position.
+///
+/// WHAT: rejects assignment to a temporary receiver and otherwise records the retained item as an
+///       expression-statement continuation.
+/// WHY: the operand owns the retained chain and any delayed invalid-member occurrence, so the
+///      body root resumes that authored position through its ordinary continuation path.
+fn push_retained_accessed_symbol_statement(
+    item: ExpressionRpnItem,
+    draft: &mut BodyDraft,
+    context: &ScopeContext,
+    token_stream: &AstCursor,
+) -> Result<(), ExpressionParseError> {
+    if token_stream.current_tag().is_assignment_operator() {
+        return Err(CompilerDiagnostic::invalid_assignment_target(
+            InvalidAssignmentTargetReason::TemporaryNotAssignable,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(token_stream.current_span()),
+        )
+        .into());
+    }
+
+    let span = item.source_span();
+    let expression = StatementExpression::Retained(deferred_numeric_expression(
+        vec![item],
+        ExpectedType::Infer,
+        ValueMode::ImmutableOwned,
+        span,
+        DeferredExpressionSuffix::None,
+    ));
+    let continuation = context.register_numeric_continuation(
+        NumericContinuation::ExpressionStatement(ExpressionStatementContinuation {
+            expression,
+            span,
+            scope: context.scope,
+        }),
+    )?;
+    draft.push_pending(continuation);
+    Ok(())
+}
+
 // --------------------------
 //  `this` statement parsing
 // --------------------------
 
 pub(crate) fn parse_this_statement(
     token_stream: &mut AstCursor,
-    ast: &mut Vec<AstNode>,
+    draft: &mut BodyDraft,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     string_table: &mut StringTable,
@@ -82,6 +181,13 @@ pub(crate) fn parse_this_statement(
 ) -> Result<(), ExpressionParseError> {
     let this_id = string_table.intern("this");
     let this_reference = context.resolve_this_reference(this_id, token_stream.current_span())?;
+    // `this` is a receiver declaration, never a body-owned numeric origin.
+    let this_declaration = this_reference
+        .ready_declaration()
+        .ok_or_else(|| {
+            CompilerError::compiler_error("`this` resolved to a pending numeric binding")
+        })?
+        .to_owned();
 
     match token_stream.peek_next_tag() {
         // Direct reassignment of `this` is never allowed.
@@ -99,12 +205,23 @@ pub(crate) fn parse_this_statement(
             token_stream.advance();
             let accessed_node = parse_field_access(
                 token_stream,
-                this_reference.as_declaration(),
+                &this_declaration,
                 context,
                 type_interner,
                 string_table,
                 path_fork,
             )?;
+            let accessed_node = match accessed_node {
+                ParsedPostfixExpression::Value(node) => node,
+                ParsedPostfixExpression::RetainedOperand(item) => {
+                    return push_retained_accessed_symbol_statement(
+                        item,
+                        draft,
+                        context,
+                        token_stream,
+                    );
+                }
+            };
 
             if token_stream.current_tag().is_assignment_operator() {
                 let Some(target) = place_expression_from_expression(&accessed_node) else {
@@ -120,9 +237,9 @@ pub(crate) fn parse_this_statement(
                     .into());
                 };
 
-                let mutation_node = handle_mutation_target(
+                let mutation = handle_mutation_target(
                     token_stream,
-                    this_reference.as_declaration(),
+                    &this_declaration,
                     target,
                     this_reference.binding_span(),
                     context,
@@ -131,13 +248,13 @@ pub(crate) fn parse_this_statement(
                     path_fork,
                 )?;
 
-                ast.push(mutation_node);
+                push_mutation_outcome(mutation, draft);
                 return Ok(());
             }
 
             push_accessed_symbol_statement(
                 accessed_node,
-                ast,
+                draft,
                 context,
                 token_stream,
                 this_id,
@@ -147,24 +264,14 @@ pub(crate) fn parse_this_statement(
         }
 
         // Bare `this` or `this` used as the start of a general expression.
-        _ => {
-            let expression = parse_symbol_expression_statement_candidate(
-                token_stream,
-                context,
-                this_id,
-                type_interner,
-                string_table,
-                path_fork,
-            )?;
-
-            let span = expression.span;
-            ast.push(AstNode {
-                kind: NodeKind::ExpressionStatement(expression),
-                span,
-                scope: context.scope,
-            });
-            Ok(())
-        }
+        _ => push_statement_expression(
+            token_stream,
+            draft,
+            context,
+            type_interner,
+            string_table,
+            path_fork,
+        ),
     }
 }
 
@@ -172,9 +279,563 @@ pub(crate) fn parse_this_statement(
 //  Symbol-led statement parsing
 // --------------------------
 
+/// One authored invalid member access on an unresolved numeric binding, retained with its span.
+///
+/// WHAT: the member name and authored span; the operand separately retains the binding reference.
+/// WHY: completing that operand supplies the selected receiver type after ordinary binding
+///      resolution, so the occurrence can report the ordinary delayed diagnostic without a
+///      fabricated receiver or a duplicate continuation record.
+#[derive(Debug, Clone)]
+pub(crate) struct PendingNumericMemberAccess {
+    pub(crate) member_name: StringId,
+    pub(crate) member_span: Option<SourceSpan>,
+}
+
+/// The ordinary member diagnostic for one retained occurrence, after its binding resolved.
+///
+/// WHAT: the same unknown-member diagnostic a known receiver type reports, with the selected
+///       receiver type and no member suggestions (a numeric scalar has no members to suggest).
+/// WHY: the diagnostic must be issued after independent binding resolution and its normal
+///      range/conflict handling, in the exact shape the completed member path uses.
+pub(crate) fn pending_member_access_diagnostic(
+    occurrence: &PendingNumericMemberAccess,
+    receiver_type_id: TypeId,
+) -> CompilerDiagnostic {
+    CompilerDiagnostic::invalid_field_access(
+        InvalidFieldAccessReason::UnknownMember,
+        Some(occurrence.member_name),
+        Some(receiver_type_id),
+        Vec::new(),
+        occurrence.member_span,
+    )
+}
+
+/// Build the construction-only operand item for one pending numeric binding reference.
+///
+/// WHAT: reads the binding's authored value mode from its own live construction domain and keeps
+///       the plain-reference shape.
+/// WHY: member resolution on the reference needs the same retained item every other pending
+///      binding use carries; `None` from the domain-checked lookup is a broken compiler invariant.
+fn pending_binding_reference_item(
+    context: &ScopeContext,
+    binding: NumericBindingId,
+    span: Option<SourceSpan>,
+) -> Result<ExpressionRpnItem, ExpressionParseError> {
+    let value_mode = context.pending_numeric_value_mode(binding).ok_or_else(|| {
+        CompilerError::compiler_error(
+            "a pending numeric binding reference had no live row in its own construction domain",
+        )
+    })?;
+    Ok(ExpressionRpnItem::PendingNumericBinding {
+        binding,
+        span,
+        value_mode,
+        is_copy: false,
+    })
+}
+
+/// Parse one right-hand side owned by a pending numeric target.
+///
+/// WHAT: an unselected target (a pending binding, or a member whose type is still open) keeps an
+///       authored fragment whenever the value holds literal leaves (which the completed target type
+///       types) or unresolved origins. A selected target (a plain member assignment to a concrete
+///       type) parses under that type's ordinary receiving contract.
+/// WHY: materialising a raw literal at the language default before the target's receiving context
+///      is known would select the wrong domain; a selected type already is that receiving context.
+fn parse_pending_mutation_rhs(
+    token_stream: &mut AstCursor,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    value_mode: &ValueMode,
+    selected_target: Option<TypeId>,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> Result<StatementExpression, ExpressionParseError> {
+    // A value-producing `if` at this assignment's receiving position belongs to the shared
+    // value-production receiver owner, exactly as it does at a ready target. An unselected target
+    // keeps one inferred slot for this receiver kind, with no slot TypeId invented; a selected
+    // target supplies its known slot. The canonical missing-else and multiline-else diagnostics
+    // come from that owner instead of the general dispatch's outside-receiver rejection.
+    if let Some(value_block_result) = try_parse_value_block_at_receiver_with_target(
+        token_stream,
+        context,
+        type_interner,
+        ActiveValueProductionTarget::mixed(&[selected_target], ValueReceiverKind::Assignment),
+        string_table,
+        path_fork,
+    ) {
+        return match value_block_result {
+            Ok(ParsedReceiverValue::Complete(expression)) => {
+                Ok(StatementExpression::Built(expression))
+            }
+            // The block's authored values still hold the pending numeric origins (or its bodies
+            // hold continuations), so the assignment keeps the whole block and the body root
+            // resolves it against the target's now-selected expectations.
+            Ok(ParsedReceiverValue::Retained(retained)) => {
+                let deferral = retained.into_deferral(value_mode).take_numeric_deferral(
+                    "the value of a mutation whose target has no selected numeric type",
+                )?;
+                Ok(StatementExpression::Retained(deferred_numeric_expression(
+                    deferral.items,
+                    deferral.expected,
+                    deferral.value_mode,
+                    deferral.span,
+                    deferral.suffix,
+                )))
+            }
+            // A structurally complete block infers its single slot from its own produced values
+            // through the value-production owner's finalizer; the target's pending type is never
+            // used as a slot stand-in.
+            Ok(ParsedReceiverValue::NeedsSlotInference { block, span }) => {
+                let expression =
+                    finalize_inferred_value_block(block, span, &[None], 1, type_interner)?;
+                Ok(StatementExpression::Built(expression))
+            }
+            // A nested retained construct inside the block keeps the ordinary deferral
+            // conversion this right-hand side already owns; every authored diagnostic (the
+            // missing-else and multiline forms) passes through unchanged.
+            Err(error @ ExpressionParseError::NumericDeferral(_)) => {
+                let deferral = error.take_numeric_deferral(
+                    "the value of a mutation whose target has no selected numeric type",
+                )?;
+                Ok(StatementExpression::Retained(deferred_numeric_expression(
+                    deferral.items,
+                    deferral.expected,
+                    deferral.value_mode,
+                    deferral.span,
+                    deferral.suffix,
+                )))
+            }
+            Err(error) => Err(error),
+        };
+    }
+
+    let (mut expected, mut cast_target) = match selected_target {
+        None => (ExpectedType::Infer, CastTargetContext::None),
+        Some(target_type_id) => (
+            parse_expectation_for_type_id(target_type_id, type_interner.environment()),
+            cast_target_context_for_type_id(
+                target_type_id,
+                type_interner.environment(),
+                string_table,
+                &*path_fork,
+            ),
+        ),
+    };
+    let input = ExpressionParseInput::ordinary(
+        ExpressionParseResources {
+            token_stream,
+            scope_context: context,
+            type_interner,
+            expected_type: &mut expected,
+            cast_target_context: &mut cast_target,
+            value_mode,
+            string_table,
+            path_fork,
+        },
+        false,
+    )
+    .with_numeric_deferral_owner()
+    .with_retained_pending_numeric_fragment();
+    match create_expression_with_trailing_newline_policy(input) {
+        Ok(expression) => Ok(StatementExpression::Built(expression)),
+        Err(error) => {
+            let deferral = error.take_numeric_deferral(
+                "the value of a mutation whose target has no selected numeric type",
+            )?;
+            Ok(StatementExpression::Retained(deferred_numeric_expression(
+                deferral.items,
+                deferral.expected,
+                deferral.value_mode,
+                deferral.span,
+                deferral.suffix,
+            )))
+        }
+    }
+}
+
+/// The pending numeric binding one mutation statement writes, with its authored name and span.
+///
+/// WHY: the target travels as one record so the helper's argument list stays within the call
+///      shape budget while its facts still arrive together.
+struct PendingMutationTarget {
+    binding: NumericBindingId,
+    name: StringId,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
+    declaration_span: Option<crate::compiler_frontend::source::SourceSpan>,
+}
+
+/// Retain a mutation whose target is a pending numeric binding.
+///
+/// WHAT: parses the authored operator and right-hand side, records one ordered continuation and
+///       keeps the authored position in the body draft.
+/// WHY: the mutation node needs the target's place, which does not exist until the body root has
+///      selected the binding's single static type; the write-back conversion re-runs there with
+///      the exact type. Mutability is a binding fact, so it is checked here in authored order.
+fn retain_pending_mutation(
+    token_stream: &mut AstCursor,
+    draft: &mut BodyDraft,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+    target: PendingMutationTarget,
+) -> Result<(), ExpressionParseError> {
+    let PendingMutationTarget {
+        binding,
+        name: target_name,
+        span: target_span,
+        declaration_span,
+    } = target;
+    let operator_tag = token_stream.current_tag();
+    let span = Some(token_stream.current_span());
+    // The pending target is this statement's own assignment target, so the same protection the
+    // known-type mutation owner applies must cover the right-hand side: a `catch` recovery inside
+    // it must not read or mutate the target whose value does not exist yet.
+    let rhs_context = context.with_pending_catch_assignment_targets(&[target_name]);
+    let value_mode = context.pending_numeric_value_mode(binding).ok_or_else(|| {
+        CompilerError::compiler_error(
+            "a mutation target named a pending numeric binding with no live construction row",
+        )
+    })?;
+    if !value_mode.is_mutable() {
+        return Err(CompilerDiagnostic::invalid_assignment_target(
+            InvalidAssignmentTargetReason::ImmutableBinding,
+            Some(target_name),
+            None,
+            None,
+            None,
+            declaration_span,
+            span,
+        )
+        .into());
+    }
+    let target = DeferredAssignmentTarget::Pending(PendingPlaceTarget {
+        binding,
+        span: target_span,
+    });
+
+    if operator_tag == TokenTag::ASSIGN {
+        token_stream.advance();
+        let value = parse_pending_mutation_rhs(
+            token_stream,
+            &rhs_context,
+            type_interner,
+            &value_mode,
+            None,
+            string_table,
+            path_fork,
+        )?;
+        // A completed value of an exact numeric type fixes the target's single static type, and a
+        // bare reference to another origin makes the two one numeric unknown (a copy/equality),
+        // exactly like a declaration-level copy.
+        match &value {
+            StatementExpression::Built(expression) => {
+                let mut state = context.numeric_state_mut();
+                register_binding_witness(
+                    &mut state,
+                    type_interner.environment(),
+                    binding,
+                    expression.type_id,
+                    span,
+                );
+            }
+            StatementExpression::Retained(deferred) => {
+                if let Some(reference) = single_direct_pending_reference(&deferred.items) {
+                    let mut state = context.numeric_state_mut();
+                    union_alias_classes(&mut state, binding, reference.binding);
+                }
+            }
+        }
+        let continuation = context.register_numeric_continuation(
+            NumericContinuation::Assignment(AssignmentContinuation {
+                target,
+                value,
+                span,
+                scope: context.scope,
+            }),
+        )?;
+        draft.push_pending(continuation);
+        return Ok(());
+    }
+
+    let Some((operator, _label)) = compound_assignment_operator_for_tag(operator_tag) else {
+        return Err(CompilerError::compiler_error(
+            "a mutation target carried an assignment operator with no arithmetic operator",
+        )
+        .into());
+    };
+    token_stream.advance();
+    let value = parse_pending_mutation_rhs(
+        token_stream,
+        &rhs_context,
+        type_interner,
+        &value_mode,
+        None,
+        string_table,
+        path_fork,
+    )?;
+    if let StatementExpression::Built(expression) = &value
+        && let Some(type_id) = numeric_witness_type(expression.type_id, type_interner.environment())
+    {
+        // A concrete right-hand side fixes the target's single static type: the compound update
+        // is an assignment boundary like any other mutation.
+        let mut state = context.numeric_state_mut();
+        register_binding_witness(
+            &mut state,
+            type_interner.environment(),
+            binding,
+            type_id,
+            span,
+        );
+    }
+    let continuation = context.register_numeric_continuation(
+        NumericContinuation::CompoundAssignment(CompoundAssignmentContinuation {
+            target,
+            operator,
+            value,
+            span,
+            scope: context.scope,
+        }),
+    )?;
+    draft.push_pending(continuation);
+    Ok(())
+}
+
+/// The pending struct member one mutation statement writes through its numeric root.
+///
+/// WHAT: the authored member operand, its assignable member place and the root binding facts that
+///       the statement's value mode, catch protection and declaration boundary come from.
+/// WHY: the member is written through the root, so the target carries the root's declaration facts
+///      instead of a binding of its own.
+struct PendingMemberMutation {
+    item: ExpressionRpnItem,
+    member: RetainedMemberTarget,
+    root: NumericBindingId,
+    root_name: StringId,
+    root_span: Option<SourceSpan>,
+}
+
+/// Retain a mutation whose target is a field of a pending numeric struct root.
+///
+/// WHAT: parses the authored operator and right-hand side, then records one ordered continuation
+///       whose target is the retained member place.
+/// WHY: the member's declared shape and the root's single static type are known only at body
+///      completion, where the place resolves exactly like an ordinary field place; the root's
+///      mutability and declaration span still gate the write there.
+fn retain_pending_member_mutation(
+    token_stream: &mut AstCursor,
+    draft: &mut BodyDraft,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+    mutation: PendingMemberMutation,
+) -> Result<(), ExpressionParseError> {
+    let PendingMemberMutation {
+        item,
+        member,
+        root,
+        root_name,
+        root_span,
+    } = mutation;
+    let operator_tag = token_stream.current_tag();
+    let span = Some(token_stream.current_span());
+    // The member's root is this statement's own write target, so a `catch` in the right-hand side
+    // must not read or mutate it before the write, exactly as for a pending binding target.
+    let rhs_context = context.with_pending_catch_assignment_targets(&[root_name]);
+    let value_mode = context.pending_numeric_value_mode(root).ok_or_else(|| {
+        CompilerError::compiler_error(
+            "a member mutation named a pending numeric root with no live construction row",
+        )
+    })?;
+    if let Some(field_name) = member.field_name
+        && !value_mode.is_mutable()
+    {
+        // The root is this statement's own write place, so an immutable root rejects the member
+        // write before its right-hand side is parsed, as the ready field path does.
+        return Err(CompilerDiagnostic::invalid_assignment_target(
+            InvalidAssignmentTargetReason::ImmutableFieldRoot,
+            None,
+            None,
+            Some(field_name),
+            Some(root_name),
+            root_span,
+            span,
+        )
+        .into());
+    }
+
+    let operator = if operator_tag == TokenTag::ASSIGN {
+        None
+    } else {
+        let Some((operator, _label)) = compound_assignment_operator_for_tag(operator_tag) else {
+            return Err(CompilerError::compiler_error(
+                "a member mutation carried an assignment operator with no arithmetic operator",
+            )
+            .into());
+        };
+        Some(operator)
+    };
+    token_stream.advance();
+    // A plain assignment to a member whose type is selected takes that type's ordinary receiving
+    // contract. A compound update, or a member whose type is still open, keeps the pending contract.
+    let selected_target = if operator.is_none() {
+        member_selected_type(context, type_interner, member)?
+    } else {
+        None
+    };
+    let value = parse_pending_mutation_rhs(
+        token_stream,
+        &rhs_context,
+        type_interner,
+        &value_mode,
+        selected_target,
+        string_table,
+        path_fork,
+    )?;
+    register_member_mutation_witness(
+        context,
+        type_interner,
+        member,
+        &value,
+        span,
+        operator.as_ref(),
+    )?;
+    let target_span = item.source_span();
+    let target = DeferredAssignmentTarget::Retained {
+        target: deferred_numeric_expression(
+            vec![item],
+            ExpectedType::Infer,
+            ValueMode::ImmutableOwned,
+            target_span,
+            DeferredExpressionSuffix::None,
+        ),
+        declaration_value_mode: value_mode,
+        declaration_span: root_span,
+    };
+    let continuation = match operator {
+        None => NumericContinuation::Assignment(AssignmentContinuation {
+            target,
+            value,
+            span,
+            scope: context.scope,
+        }),
+        Some(operator) => NumericContinuation::CompoundAssignment(CompoundAssignmentContinuation {
+            target,
+            operator,
+            value,
+            span,
+            scope: context.scope,
+        }),
+    };
+    let continuation = context.register_numeric_continuation(continuation)?;
+    draft.push_pending(continuation);
+    Ok(())
+}
+
+/// The concrete type a plain member write selects, when the member's type is already exact.
+///
+/// WHAT: a concrete member answers its own type; a declared member answers the exact type its shape
+///       projects to, and an open numeric leaf answers `None`.
+/// WHY: the ordinary receiving contract needs a selected type, but an unresolved leaf must stay
+///      pending rather than take a family default.
+fn member_selected_type(
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    member: RetainedMemberTarget,
+) -> Result<Option<TypeId>, ExpressionParseError> {
+    if let Some(type_id) = member.concrete_type {
+        return Ok(Some(type_id));
+    }
+    let Some(shape) = member.declared_shape else {
+        return Ok(None);
+    };
+    let mut state = context.numeric_state_mut();
+    exact_shape_type(
+        &mut state,
+        type_interner.environment_mut_for_derived_types(),
+        shape,
+    )
+}
+
+/// Register the shape a member write shares with the value written into it.
+///
+/// WHAT: a concrete value fixes the member's numeric leaves. On a plain assignment, a bare reference
+///       to another pending origin projects its exact receivers first, then joins only its still-open
+///       leaves with the member's. A compound update only fixes the member from a concrete value,
+///       matching the binding-target rules.
+/// WHY: the member and the written value share one static numeric type, so the root's later
+///      receivers observe the same type the write selected. Projecting first keeps the origin's
+///      pre-binding receivers from importing into the member's already declared family.
+fn register_member_mutation_witness(
+    context: &ScopeContext,
+    type_interner: &AstTypeInterner<'_>,
+    member: RetainedMemberTarget,
+    value: &StatementExpression,
+    span: Option<SourceSpan>,
+    operator: Option<&Operator>,
+) -> Result<(), ExpressionParseError> {
+    let Some(declared_shape) = member.declared_shape else {
+        return Ok(());
+    };
+    let environment = type_interner.environment();
+    let mut state = context.numeric_state_mut();
+    match (value, operator) {
+        (StatementExpression::Built(expression), _) => register_shape_witness(
+            &mut state,
+            environment,
+            declared_shape,
+            expression.type_id,
+            span,
+        ),
+        (StatementExpression::Retained(deferred), None) => {
+            let Some(reference) = single_direct_pending_reference(&deferred.items) else {
+                return Ok(());
+            };
+            let Some(reference_shape) = binding_reference_shape(&state, reference.binding) else {
+                return Ok(());
+            };
+            // Solved leaves of the origin arrive as exact witnesses carrying their receiver's
+            // source span; only its still-open leaves can join the member's classes.
+            let projected = project_exact_shape(&mut state, reference_shape)?;
+            // A refused numeric pair stays separate, and the coercion path reports it.
+            union_shape_classes(&mut state, environment, declared_shape, projected);
+        }
+        (StatementExpression::Retained(_), Some(_)) => {}
+    }
+    Ok(())
+}
+
+/// Report an escaped numeric-dependent multi-bind RHS as its ordinary source diagnostic.
+///
+/// WHAT: converts a deferral that the multi-bind owner could not retain into `UnsupportedRhs`,
+///       preserving the authored RHS span for both whole and nested fragments.
+/// WHY: deferral shape is construction detail, not a user-facing failure; only the explicitly
+///      supported calls and value blocks have body-root resumption routes.
+fn reject_numeric_dependency_in_multi_bind(error: ExpressionParseError) -> ExpressionParseError {
+    match error {
+        ExpressionParseError::NumericDeferral(deferral) => {
+            let span = deferral.span.or_else(|| {
+                deferral
+                    .items
+                    .first()
+                    .and_then(ExpressionRpnItem::source_span)
+            });
+            CompilerDiagnostic::invalid_multi_bind(
+                InvalidMultiBindReason::UnsupportedRhs,
+                None,
+                span,
+            )
+            .into()
+        }
+        other => other,
+    }
+}
+
 pub(crate) fn parse_symbol_statement(
     token_stream: &mut AstCursor,
-    ast: &mut Vec<AstNode>,
+    draft: &mut BodyDraft,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     warnings: &mut Vec<CompilerDiagnostic>,
@@ -217,27 +878,57 @@ pub(crate) fn parse_symbol_statement(
         .into());
     }
 
-    if let Some(multi_bind_node) = parse_multi_bind_statement(
+    if let Some(multi_bind) = parse_multi_bind_statement(
         token_stream,
         context,
         type_interner,
         string_table,
         path_fork,
-    )? {
-        ast.push(multi_bind_node);
+    )
+    .map_err(reject_numeric_dependency_in_multi_bind)?
+    {
+        match multi_bind {
+            MultiBindStatement::Completed(node) => draft.push_node(node),
+            MultiBindStatement::Retained(continuation) => draft.push_pending(continuation),
+        }
         return Ok(());
     }
 
     // If the symbol already names a visible local, treat it as a use
     // (assignment, field access, or expression) rather than a new declaration.
     if let Some(existing_reference) = context.get_reference(&symbol_id) {
+        let reference_span = Some(token_stream.current_span());
         match token_stream.peek_next_tag() {
             // Direct reassignment of an existing local variable.
             Some(next_tag) if next_tag.is_assignment_operator() => {
                 token_stream.advance();
-                let mutation_node = handle_mutation(
+                if let Some(binding) = existing_reference.pending_binding() {
+                    return retain_pending_mutation(
+                        token_stream,
+                        draft,
+                        context,
+                        type_interner,
+                        string_table,
+                        path_fork,
+                        PendingMutationTarget {
+                            binding,
+                            name: symbol_id,
+                            span: reference_span,
+                            declaration_span: existing_reference.binding_span(),
+                        },
+                    );
+                }
+                let declaration = existing_reference
+                    .ready_declaration()
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "a mutation target reference had neither a declaration nor a pending binding",
+                        )
+                    })?
+                    .to_owned();
+                let mutation = handle_mutation(
                     token_stream,
-                    existing_reference.as_declaration(),
+                    &declaration,
                     existing_reference.binding_span(),
                     context,
                     type_interner,
@@ -245,21 +936,94 @@ pub(crate) fn parse_symbol_statement(
                     path_fork,
                 )?;
 
-                ast.push(mutation_node);
+                push_mutation_outcome(mutation, draft);
                 return Ok(());
             }
 
             // Field access on an existing local: may be a mutation or a call.
             Some(TokenTag::DOT) => {
+                if let Some(binding) = existing_reference.pending_binding() {
+                    // A pending binding's receiver stays at its authored dot: a known concrete
+                    // result shape retains its authored member steps as a statement value, while a
+                    // numeric-only origin records the invalid-member occurrence for its delayed
+                    // ordinary diagnostic so every later eligible use still registers.
+                    token_stream.advance();
+                    let mut expression = vec![pending_binding_reference_item(
+                        context,
+                        binding,
+                        reference_span,
+                    )?];
+                    retain_pending_operand_member_access(
+                        token_stream,
+                        &mut expression,
+                        RetainedOperandInput {
+                            chain_access: PostfixChainAccess::shared(),
+                            expected: ExpectedType::Infer,
+                            value_mode: &ValueMode::ImmutableOwned,
+                        },
+                        context,
+                        type_interner,
+                        string_table,
+                        path_fork,
+                    )?;
+                    let item = expression
+                        .pop()
+                        .expect("a retained operand keeps its authored position");
+                    if token_stream.current_tag().is_assignment_operator()
+                        && let Some(member) = retained_member_target(&item)
+                    {
+                        return retain_pending_member_mutation(
+                            token_stream,
+                            draft,
+                            context,
+                            type_interner,
+                            string_table,
+                            path_fork,
+                            PendingMemberMutation {
+                                item,
+                                member,
+                                root: binding,
+                                root_name: symbol_id,
+                                root_span: existing_reference.binding_span(),
+                            },
+                        );
+                    }
+                    return push_retained_accessed_symbol_statement(
+                        item,
+                        draft,
+                        context,
+                        token_stream,
+                    );
+                }
+
                 token_stream.advance();
+                let declaration = existing_reference
+                    .ready_declaration()
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "a member-access receiver had neither a declaration nor a pending binding",
+                        )
+                    })?
+                    .to_owned();
                 let accessed_node = parse_field_access(
                     token_stream,
-                    existing_reference.as_declaration(),
+                    &declaration,
                     context,
                     type_interner,
                     string_table,
                     path_fork,
                 )?;
+                let accessed_node = match accessed_node {
+                    ParsedPostfixExpression::Value(node) => node,
+                    ParsedPostfixExpression::RetainedOperand(item) => {
+                        return push_retained_accessed_symbol_statement(
+                            item,
+                            draft,
+                            context,
+                            token_stream,
+                        );
+                    }
+                };
 
                 if token_stream.current_tag().is_assignment_operator() {
                     let Some(target) = place_expression_from_expression(&accessed_node) else {
@@ -275,9 +1039,9 @@ pub(crate) fn parse_symbol_statement(
                         .into());
                     };
 
-                    let mutation_node = handle_mutation_target(
+                    let mutation = handle_mutation_target(
                         token_stream,
-                        existing_reference.as_declaration(),
+                        &declaration,
                         target,
                         existing_reference.binding_span(),
                         context,
@@ -286,13 +1050,13 @@ pub(crate) fn parse_symbol_statement(
                         path_fork,
                     )?;
 
-                    ast.push(mutation_node);
+                    push_mutation_outcome(mutation, draft);
                     return Ok(());
                 }
 
                 push_accessed_symbol_statement(
                     accessed_node,
-                    ast,
+                    draft,
                     context,
                     token_stream,
                     symbol_id,
@@ -306,7 +1070,7 @@ pub(crate) fn parse_symbol_statement(
             Some(tag) if tag.is_builtin_scalar_type_name() || tag == TokenTag::MUTABLE => {
                 let mut diagnostic = CompilerDiagnostic::shadowed_name(
                     symbol_id,
-                    existing_reference.value.span,
+                    existing_reference.binding_span(),
                     Some(token_stream.current_span()),
                 );
                 diagnostic.primary_span = Some(token_stream.current_span());
@@ -315,21 +1079,14 @@ pub(crate) fn parse_symbol_statement(
 
             // Otherwise, parse the symbol as the start of a general expression statement.
             _ => {
-                let expression = parse_symbol_expression_statement_candidate(
+                push_statement_expression(
                     token_stream,
+                    draft,
                     context,
-                    symbol_id,
                     type_interner,
                     string_table,
                     path_fork,
                 )?;
-
-                let span = expression.span;
-                ast.push(AstNode {
-                    kind: NodeKind::ExpressionStatement(expression),
-                    span,
-                    scope: context.scope,
-                });
                 return Ok(());
             }
         }
@@ -359,20 +1116,14 @@ pub(crate) fn parse_symbol_statement(
 
         // Host calls share the receiving expression owner with source calls, so a catch protects
         // the whole call and its operands rather than completing at this statement dispatcher.
-        let external_call_expression = parse_symbol_expression_statement_candidate(
+        push_statement_expression(
             token_stream,
+            draft,
             context,
-            symbol_id,
             type_interner,
             string_table,
             path_fork,
         )?;
-        let external_call_span = external_call_expression.span;
-        ast.push(AstNode {
-            kind: NodeKind::ExpressionStatement(external_call_expression),
-            span: external_call_span,
-            scope: context.scope,
-        });
         return Ok(());
     }
 
@@ -412,25 +1163,19 @@ pub(crate) fn parse_symbol_statement(
     // to a call. Route them through expression-statement validation before declaration parsing
     // interprets the leading symbol as a malformed declaration.
     if token_stream.peek_next_tag() == Some(TokenTag::DOT) {
-        let expression = parse_symbol_expression_statement_candidate(
+        push_statement_expression(
             token_stream,
+            draft,
             context,
-            symbol_id,
             type_interner,
             string_table,
             path_fork,
         )?;
-        let span = expression.span;
-        ast.push(AstNode {
-            kind: NodeKind::ExpressionStatement(expression),
-            span,
-            scope: context.scope,
-        });
         return Ok(());
     }
 
     // No existing reference and no call target: this must be a new declaration.
-    let resolved_declaration = new_declaration(
+    let outcome = new_declaration(
         token_stream,
         symbol_id,
         context,
@@ -439,6 +1184,17 @@ pub(crate) fn parse_symbol_statement(
         string_table,
         path_fork,
     )?;
+
+    let resolved_declaration = match outcome {
+        NewDeclarationOutcome::PendingNumeric(continuation) => {
+            // The binding is already visible through its frame slot; its declaration node resumes
+            // at the body root in this authored position.
+            draft.push_pending(continuation);
+            return Ok(());
+        }
+        NewDeclarationOutcome::Ready(resolved) => resolved,
+    };
+
     let declaration = resolved_declaration.declaration;
     let statement_kind = resolved_declaration.statement_kind;
     let is_compile_time_binding = resolved_declaration.is_compile_time_binding;
@@ -448,7 +1204,7 @@ pub(crate) fn parse_symbol_statement(
     // everything else becomes a local variable declaration.
     match &statement_kind {
         ResolvedDeclarationStatementKind::StructDefinition(params) => {
-            ast.push(AstNode {
+            draft.push_node(AstNode {
                 kind: NodeKind::StructDefinition(declaration.id.to_owned(), params.to_owned()),
                 span: declaration_span,
                 scope: context.scope,
@@ -456,7 +1212,7 @@ pub(crate) fn parse_symbol_statement(
         }
 
         ResolvedDeclarationStatementKind::Function { signature, body } => {
-            ast.push(AstNode {
+            draft.push_node(AstNode {
                 kind: NodeKind::Function(
                     declaration.id.to_owned(),
                     signature.to_owned(),
@@ -468,7 +1224,7 @@ pub(crate) fn parse_symbol_statement(
         }
 
         ResolvedDeclarationStatementKind::Variable => {
-            ast.push(AstNode {
+            draft.push_node(AstNode {
                 kind: NodeKind::VariableDeclaration(declaration.to_owned()),
                 span: declaration_span,
                 scope: context.scope,

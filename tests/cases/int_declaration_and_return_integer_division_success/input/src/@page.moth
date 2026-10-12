@@ -1,9 +1,9 @@
-value Int = 5 // 2
+value I32 = 5 // 2
 
-calc || -> Int:
+calc || -> I32:
     return 9 // 4
 ;
 
-result Int = calc()
+result I32 = calc()
 
 [: decl=[value], ret=[result] ]

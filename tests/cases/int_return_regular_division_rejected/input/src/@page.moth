@@ -1,4 +1,4 @@
-calc || -> Int:
+calc || -> I32:
     return 5 / 2
 ;
 

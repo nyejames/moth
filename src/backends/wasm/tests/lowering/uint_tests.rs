@@ -1,24 +1,24 @@
-//! Uint scalar lowering for the Wasm backend.
+//! Unsigned integer scalar lowering for the Wasm backend.
 //!
-//! WHAT: pins HIR -> Wasm LIR lowering for profile-sized Uint literals, parameters, locals,
-//!       results, unsigned and Uint/Int-mixed comparisons, infallible numeric casts and
+//! WHAT: pins HIR -> Wasm LIR lowering for exact-width U32/U64 literals, parameters,
+//!       locals, results, unsigned and mixed-signedness comparisons, infallible numeric casts and
 //!       unsigned integer formatting.
-//! WHY: Uint shares the Int width's I32/I64 carriers with an unsigned interpretation, so these
-//!      tests prove the lowerer selects unsigned opcodes and preserves bit patterns above the
-//!      signed maximum instead of reinterpreting values as signed.
+//! WHY: U32/U64 share the I32/I64 carriers with their signed counterparts under an
+//!      unsigned interpretation, so these tests prove the lowerer selects unsigned opcodes and
+//!      preserves bit patterns above the signed maximum instead of reinterpreting values as
+//!      signed.
 
 use super::test_support::{
     build_module, build_type_environment, default_borrow_facts, default_numeric_proofs, expression,
-    load_local, local, statement,
+    fixed_scalar_type, load_local, local, statement,
 };
 use crate::backends::wasm::backend::lower_hir_to_wasm_lir;
 use crate::backends::wasm::lir::instructions::{
-    WasmLirStmt, WasmScalarComparisonOp, WasmScalarComparisonType,
+    WasmIntegerOperationKind, WasmLirStmt, WasmScalarComparisonOp, WasmScalarComparisonType,
 };
 use crate::backends::wasm::lir::types::WasmAbiType;
 use crate::backends::wasm::request::WasmBackendRequest;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
-use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirBlock;
@@ -36,37 +36,28 @@ use crate::compiler_frontend::hir::statements::{
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
-fn uint_literal(expressions: &mut HirExpressionStore, value: u64) -> HirValueId {
+fn uint_literal(
+    expressions: &mut HirExpressionStore,
+    scalar: FixedScalar,
+    value: u64,
+) -> HirValueId {
     expression(
-        HirExpressionKind::Uint(value),
-        builtin_type_ids::UINT,
+        HirExpressionKind::FixedScalar(
+            FixedScalarValue::unsigned(scalar, value).expect("valid test value"),
+        ),
+        fixed_scalar_type(scalar),
         RegionId(0),
         ValueKind::Const,
         expressions,
     )
 }
 
-fn int32_profile() -> NumericProfile {
-    NumericProfile {
-        int_width: IntWidth::Bits32,
-        float_precision: FloatPrecision::Bits64,
-    }
-}
-
-fn int64_profile() -> NumericProfile {
-    NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: FloatPrecision::Bits64,
-    }
-}
-
 fn lower_entry_returning(
     expressions: HirExpressionStore,
     value: HirValueId,
     return_type: crate::compiler_frontend::datatypes::ids::TypeId,
-    profile: NumericProfile,
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
     type_environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
@@ -95,10 +86,7 @@ fn lower_entry_returning(
         vec![start_block],
         FunctionId(0),
     );
-    let request = WasmBackendRequest {
-        numeric_profile: profile,
-        ..Default::default()
-    };
+    let request = WasmBackendRequest::default();
     let lowered = lower_hir_to_wasm_lir(
         &module,
         &default_borrow_facts(),
@@ -108,7 +96,7 @@ fn lower_entry_returning(
         type_environment,
         &path_fork.snapshot_table(),
     )
-    .unwrap_or_else(|error| panic!("Uint expression should lower under {profile:?}: {error:?}"));
+    .unwrap_or_else(|error| panic!("unsigned integer expression should lower: {error:?}"));
     lowered
         .lir_module
         .functions
@@ -123,29 +111,36 @@ fn uint_literals_lower_with_bit_pattern_preservation() {
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, _) = build_type_environment();
 
-    // Values above the signed maximum keep their exact bit patterns in the selected carrier.
+    // Values above the signed maximum keep their exact bit patterns in the scalar's own carrier.
     let cases = [
-        (int32_profile(), 0u64, WasmAbiType::I32),
-        (int32_profile(), 2_147_483_647, WasmAbiType::I32),
-        (int32_profile(), 2_147_483_648, WasmAbiType::I32),
-        (int32_profile(), 4_294_967_295, WasmAbiType::I32),
-        (int64_profile(), 0, WasmAbiType::I64),
-        (int64_profile(), 9_223_372_036_854_775_807, WasmAbiType::I64),
-        (int64_profile(), 9_223_372_036_854_775_808, WasmAbiType::I64),
+        (FixedScalar::U32, 0u64, WasmAbiType::I32),
+        (FixedScalar::U32, 2_147_483_647, WasmAbiType::I32),
+        (FixedScalar::U32, 2_147_483_648, WasmAbiType::I32),
+        (FixedScalar::U32, 4_294_967_295, WasmAbiType::I32),
+        (FixedScalar::U64, 0, WasmAbiType::I64),
         (
-            int64_profile(),
+            FixedScalar::U64,
+            9_223_372_036_854_775_807,
+            WasmAbiType::I64,
+        ),
+        (
+            FixedScalar::U64,
+            9_223_372_036_854_775_808,
+            WasmAbiType::I64,
+        ),
+        (
+            FixedScalar::U64,
             18_446_744_073_709_551_615,
             WasmAbiType::I64,
         ),
     ];
-    for (profile, value, carrier) in cases {
+    for (scalar, value, carrier) in cases {
         let mut expressions = HirExpressionStore::default();
-        let value_id = uint_literal(&mut expressions, value);
+        let value_id = uint_literal(&mut expressions, scalar, value);
         let function = lower_entry_returning(
             expressions,
             value_id,
-            builtin_type_ids::UINT,
-            profile,
+            fixed_scalar_type(scalar),
             &mut path_fork,
             &mut string_table,
             &type_environment,
@@ -159,7 +154,7 @@ fn uint_literals_lower_with_bit_pattern_preservation() {
                         WasmLirStmt::ConstI32 { dst, .. } => Some(*dst),
                         _ => None,
                     })
-                    .expect("Uint32 literal should lower to ConstI32"),
+                    .expect("U32 literal should lower to ConstI32"),
                 value: value as u32 as i32,
             },
             WasmAbiType::I64 => WasmLirStmt::ConstI64 {
@@ -170,30 +165,30 @@ fn uint_literals_lower_with_bit_pattern_preservation() {
                         WasmLirStmt::ConstI64 { dst, .. } => Some(*dst),
                         _ => None,
                     })
-                    .expect("Uint64 literal should lower to ConstI64"),
+                    .expect("U64 literal should lower to ConstI64"),
                 value: value as i64,
             },
-            _ => unreachable!("Uint fixtures use integer carriers"),
+            _ => unreachable!("unsigned integer fixtures use integer carriers"),
         };
         assert!(
             function.blocks[0].statements.contains(&expected),
-            "{profile:?} Uint literal {value} must preserve its bit pattern"
+            "{scalar:?} literal {value} must preserve its bit pattern"
         );
     }
 }
 
 #[test]
-fn uint_params_locals_and_results_use_the_selected_carrier() {
+fn uint_params_locals_and_results_use_the_exact_carrier() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, _) = build_type_environment();
 
-    for profile in [int32_profile(), int64_profile()] {
+    for (scalar, expected) in [
+        (FixedScalar::U32, WasmAbiType::I32),
+        (FixedScalar::U64, WasmAbiType::I64),
+    ] {
         let mut expressions = HirExpressionStore::default();
-        let expected = match profile.int_width {
-            IntWidth::Bits32 => WasmAbiType::I32,
-            IntWidth::Bits64 => WasmAbiType::I64,
-        };
+        let scalar_type = fixed_scalar_type(scalar);
         let function_path = path_fork
             .try_intern_portable_path("identity", &mut string_table)
             .expect("test path fits");
@@ -201,26 +196,21 @@ fn uint_params_locals_and_results_use_the_selected_carrier() {
             id: BlockId(0),
             region: RegionId(0),
             locals: vec![
-                local(0, builtin_type_ids::UINT, RegionId(0)),
-                local(1, builtin_type_ids::UINT, RegionId(0)),
+                local(0, scalar_type, RegionId(0)),
+                local(1, scalar_type, RegionId(0)),
             ],
             statements: vec![statement(
                 1,
                 HirStatementKind::Write {
                     target: HirWriteTarget::DefineLocal(LocalId(1)),
-                    value: load_local(
-                        &mut expressions,
-                        LocalId(0),
-                        builtin_type_ids::UINT,
-                        RegionId(0),
-                    ),
+                    value: load_local(&mut expressions, LocalId(0), scalar_type, RegionId(0)),
                 },
                 1,
             )],
             terminator: HirTerminator::Return(load_local(
                 &mut expressions,
                 LocalId(1),
-                builtin_type_ids::UINT,
+                scalar_type,
                 RegionId(0),
             )),
         };
@@ -228,7 +218,7 @@ fn uint_params_locals_and_results_use_the_selected_carrier() {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![LocalId(0)],
-            return_type: builtin_type_ids::UINT,
+            return_type: scalar_type,
         };
         let module = build_module(
             &mut path_fork,
@@ -238,10 +228,7 @@ fn uint_params_locals_and_results_use_the_selected_carrier() {
             vec![block],
             FunctionId(0),
         );
-        let request = WasmBackendRequest {
-            numeric_profile: profile,
-            ..Default::default()
-        };
+        let request = WasmBackendRequest::default();
         let lowered = lower_hir_to_wasm_lir(
             &module,
             &default_borrow_facts(),
@@ -251,7 +238,9 @@ fn uint_params_locals_and_results_use_the_selected_carrier() {
             &type_environment,
             &path_fork.snapshot_table(),
         )
-        .unwrap_or_else(|error| panic!("Uint identity should lower under {profile:?}: {error:?}"));
+        .unwrap_or_else(|error| {
+            panic!("unsigned integer identity should lower with {scalar:?}: {error:?}")
+        });
         let lowered = lowered
             .lir_module
             .functions
@@ -269,7 +258,7 @@ fn uint_comparisons_lower_with_unsigned_scalar_types() {
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
 
-    // (profile, operator, left_is_uint, expected left/right scalar types)
+    // (operator, left_is_uint, right_is_uint)
     let cases = [
         (HirBinOp::Eq, true, true),
         (HirBinOp::Ne, true, true),
@@ -282,30 +271,33 @@ fn uint_comparisons_lower_with_unsigned_scalar_types() {
         (HirBinOp::Gt, true, false),
         (HirBinOp::Ge, false, true),
     ];
-    for profile in [int32_profile(), int64_profile()] {
-        let bits = match profile.int_width {
-            IntWidth::Bits32 => 32,
-            IntWidth::Bits64 => 64,
-        };
+    for (uint_scalar, signed_scalar, bits) in [
+        (FixedScalar::U32, FixedScalar::I32, 32u8),
+        (FixedScalar::U64, FixedScalar::I64, 64u8),
+    ] {
         for (operator, left_is_uint, right_is_uint) in cases {
             let mut expressions = HirExpressionStore::default();
             let left = if left_is_uint {
-                uint_literal(&mut expressions, 4_294_967_295)
+                uint_literal(&mut expressions, uint_scalar, 4_294_967_295)
             } else {
                 expression(
-                    HirExpressionKind::Int(-1),
-                    types.int,
+                    HirExpressionKind::FixedScalar(
+                        FixedScalarValue::signed(signed_scalar, -1).expect("valid test value"),
+                    ),
+                    fixed_scalar_type(signed_scalar),
                     RegionId(0),
                     ValueKind::Const,
                     &mut expressions,
                 )
             };
             let right = if right_is_uint {
-                uint_literal(&mut expressions, 0)
+                uint_literal(&mut expressions, uint_scalar, 0)
             } else {
                 expression(
-                    HirExpressionKind::Int(-1),
-                    types.int,
+                    HirExpressionKind::FixedScalar(
+                        FixedScalarValue::signed(signed_scalar, -1).expect("valid test value"),
+                    ),
+                    fixed_scalar_type(signed_scalar),
                     RegionId(0),
                     ValueKind::Const,
                     &mut expressions,
@@ -326,7 +318,6 @@ fn uint_comparisons_lower_with_unsigned_scalar_types() {
                 expressions,
                 comparison,
                 types.boolean,
-                profile,
                 &mut path_fork,
                 &mut string_table,
                 &type_environment,
@@ -348,7 +339,7 @@ fn uint_comparisons_lower_with_unsigned_scalar_types() {
                 HirBinOp::Le => WasmScalarComparisonOp::Le,
                 HirBinOp::Gt => WasmScalarComparisonOp::Gt,
                 HirBinOp::Ge => WasmScalarComparisonOp::Ge,
-                _ => unreachable!("Uint fixtures use comparison operators"),
+                _ => unreachable!("unsigned integer fixtures use comparison operators"),
             };
             assert!(
                 function.blocks[0]
@@ -365,7 +356,7 @@ fn uint_comparisons_lower_with_unsigned_scalar_types() {
                             && *lhs_type == expected_left
                             && *rhs_type == expected_right
                     )),
-                "{profile:?} {operator:?} comparison must keep its signedness per operand"
+                "{uint_scalar:?} {operator:?} comparison must keep its signedness per operand"
             );
         }
     }
@@ -376,24 +367,25 @@ fn uint_infallible_casts_use_unsigned_conversion_opcodes() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, _) = build_type_environment();
-    let float32_profile = NumericProfile {
-        int_width: IntWidth::Bits32,
-        float_precision: FloatPrecision::Bits32,
-    };
 
-    // Uint converts directly to the profile Float without a signed intermediate.
-    for profile in [int32_profile(), int64_profile(), float32_profile] {
+    // U32/U64 convert directly to their exact binary-float target without a signed intermediate.
+    for (source_scalar, target_scalar) in [
+        (FixedScalar::U32, FixedScalar::F64),
+        (FixedScalar::U64, FixedScalar::F64),
+        (FixedScalar::U32, FixedScalar::F32),
+    ] {
         let mut expressions = HirExpressionStore::default();
-        let source = uint_literal(&mut expressions, 3_000_000_001);
+        let source = uint_literal(&mut expressions, source_scalar, 3_000_000_001);
+        let target_type = fixed_scalar_type(target_scalar);
         let cast = expression(
             HirExpressionKind::Cast {
                 source,
                 policy: BuiltinCastPolicyId::NumericConversion {
-                    source: NumericScalar::Uint,
-                    target: NumericScalar::Float,
+                    source: NumericScalar::Fixed(source_scalar),
+                    target: NumericScalar::Fixed(target_scalar),
                 },
             },
-            builtin_type_ids::FLOAT,
+            target_type,
             RegionId(0),
             ValueKind::RValue,
             &mut expressions,
@@ -401,15 +393,15 @@ fn uint_infallible_casts_use_unsigned_conversion_opcodes() {
         let function = lower_entry_returning(
             expressions,
             cast,
-            builtin_type_ids::FLOAT,
-            profile,
+            target_type,
             &mut path_fork,
             &mut string_table,
             &type_environment,
         );
-        let expected_dst = match profile.float_precision {
-            FloatPrecision::Bits32 => WasmAbiType::F32,
-            FloatPrecision::Bits64 => WasmAbiType::F64,
+        let expected_dst = match target_scalar {
+            FixedScalar::F32 => WasmAbiType::F32,
+            FixedScalar::F64 => WasmAbiType::F64,
+            _ => unreachable!("numeric conversion targets are binary floats"),
         };
         assert!(
             function.blocks[0]
@@ -430,22 +422,23 @@ fn uint_infallible_casts_use_unsigned_conversion_opcodes() {
                             .is_some_and(|local| local.ty == expected_dst)
                     )
                 )),
-            "{profile:?} Uint-to-Float must convert directly with an unsigned opcode"
+            "{source_scalar:?}->{target_scalar:?} must convert with an unsigned opcode"
         );
     }
 
-    // A Uint32 value widens into U64 with zero extension, never sign extension.
+    // A U32 value widens into U64 with zero extension, never sign extension.
     let mut expressions = HirExpressionStore::default();
-    let source = uint_literal(&mut expressions, 4_294_967_295);
+    let u64_type = fixed_scalar_type(FixedScalar::U64);
+    let source = uint_literal(&mut expressions, FixedScalar::U32, 4_294_967_295);
     let cast = expression(
         HirExpressionKind::Cast {
             source,
             policy: BuiltinCastPolicyId::NumericConversion {
-                source: NumericScalar::Uint,
-                target: NumericScalar::Fixed(moth_lexical::numeric::fixed_scalar::FixedScalar::U64),
+                source: NumericScalar::Fixed(FixedScalar::U32),
+                target: NumericScalar::Fixed(FixedScalar::U64),
             },
         },
-        builtin_type_ids::fixed_scalar(moth_lexical::numeric::fixed_scalar::FixedScalar::U64),
+        u64_type,
         RegionId(0),
         ValueKind::RValue,
         &mut expressions,
@@ -453,8 +446,7 @@ fn uint_infallible_casts_use_unsigned_conversion_opcodes() {
     let function = lower_entry_returning(
         expressions,
         cast,
-        builtin_type_ids::fixed_scalar(moth_lexical::numeric::fixed_scalar::FixedScalar::U64),
-        int32_profile(),
+        u64_type,
         &mut path_fork,
         &mut string_table,
         &type_environment,
@@ -470,21 +462,23 @@ fn uint_infallible_casts_use_unsigned_conversion_opcodes() {
                     ..
                 }
             )),
-        "Uint-to-U64 must zero-extend under the Int32 profile"
+        "U32 must zero-extend into U64, never sign-extend"
     );
 
-    // Same-carrier Uint-to-U32 is a bit-pattern passthrough with no conversion opcode.
+    // Same-carrier U16-to-U32 widening is a bit-pattern passthrough with no conversion
+    // opcode: both scalars share the I32 carrier, so the value needs no instruction.
     let mut expressions = HirExpressionStore::default();
-    let source = uint_literal(&mut expressions, 4_294_967_295);
+    let u32_type = fixed_scalar_type(FixedScalar::U32);
+    let source = uint_literal(&mut expressions, FixedScalar::U16, u64::from(u16::MAX));
     let cast = expression(
         HirExpressionKind::Cast {
             source,
             policy: BuiltinCastPolicyId::NumericConversion {
-                source: NumericScalar::Uint,
-                target: NumericScalar::Fixed(moth_lexical::numeric::fixed_scalar::FixedScalar::U32),
+                source: NumericScalar::Fixed(FixedScalar::U16),
+                target: NumericScalar::Fixed(FixedScalar::U32),
             },
         },
-        builtin_type_ids::fixed_scalar(moth_lexical::numeric::fixed_scalar::FixedScalar::U32),
+        u32_type,
         RegionId(0),
         ValueKind::RValue,
         &mut expressions,
@@ -492,8 +486,7 @@ fn uint_infallible_casts_use_unsigned_conversion_opcodes() {
     let function = lower_entry_returning(
         expressions,
         cast,
-        builtin_type_ids::fixed_scalar(moth_lexical::numeric::fixed_scalar::FixedScalar::U32),
-        int32_profile(),
+        u32_type,
         &mut path_fork,
         &mut string_table,
         &type_environment,
@@ -502,8 +495,8 @@ fn uint_infallible_casts_use_unsigned_conversion_opcodes() {
         function.blocks[0]
             .statements
             .iter()
-            .any(|statement| matches!(statement, WasmLirStmt::ConstI32 { value: -1, .. })),
-        "Uint32 maximum must keep its bit pattern through the U32 passthrough"
+            .any(|statement| matches!(statement, WasmLirStmt::ConstI32 { value: 65_535, .. })),
+        "U16 maximum must keep its bit pattern through the U16-to-U32 passthrough"
     );
     assert!(
         !function.blocks[0]
@@ -516,7 +509,7 @@ fn uint_infallible_casts_use_unsigned_conversion_opcodes() {
                     | WasmLirStmt::FloatExtend { .. }
                     | WasmLirStmt::RoundF16 { .. }
             )),
-        "same-carrier Uint-to-U32 must not emit a conversion"
+        "same-carrier U16-to-U32 must not emit a conversion"
     );
 }
 
@@ -527,20 +520,20 @@ fn uint_to_string_formats_through_the_unsigned_helper() {
     let (type_environment, types) = build_type_environment();
 
     let cases = [
-        (int32_profile(), 4_294_967_295, WasmAbiType::I32),
+        (FixedScalar::U32, 4_294_967_295, WasmAbiType::I32),
         (
-            int64_profile(),
+            FixedScalar::U64,
             18_446_744_073_709_551_615,
             WasmAbiType::I64,
         ),
     ];
-    for (profile, value, carrier) in cases {
+    for (scalar, value, carrier) in cases {
         let mut expressions = HirExpressionStore::default();
-        let source = uint_literal(&mut expressions, value);
+        let source = uint_literal(&mut expressions, scalar, value);
         let cast = expression(
             HirExpressionKind::Cast {
                 source,
-                policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Uint),
+                policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Fixed(scalar)),
             },
             types.string,
             RegionId(0),
@@ -551,7 +544,6 @@ fn uint_to_string_formats_through_the_unsigned_helper() {
             expressions,
             cast,
             types.string,
-            profile,
             &mut path_fork,
             &mut string_table,
             &type_environment,
@@ -561,14 +553,14 @@ fn uint_to_string_formats_through_the_unsigned_helper() {
                 .statements
                 .iter()
                 .any(|statement| matches!(statement, WasmLirStmt::StringFromU64 { .. })),
-            "{profile:?} Uint formatting must use the unsigned text helper"
+            "{scalar:?} formatting must use the unsigned text helper"
         );
         assert!(
             !function.blocks[0]
                 .statements
                 .iter()
                 .any(|statement| matches!(statement, WasmLirStmt::StringFromI64 { .. })),
-            "{profile:?} Uint formatting must not use the signed text helper"
+            "{scalar:?} formatting must not use the signed text helper"
         );
         let _ = carrier;
     }
@@ -588,34 +580,29 @@ fn uint_trap_arithmetic_selects_unsigned_operation_kinds() {
         NumericOperator::Remainder,
         NumericOperator::Power,
     ];
-    for profile in [int32_profile(), int64_profile()] {
-        let expected_kind = match profile.int_width {
-            IntWidth::Bits32 => {
-                crate::backends::wasm::lir::instructions::WasmIntegerOperationKind::Unsigned32
-            }
-            IntWidth::Bits64 => {
-                crate::backends::wasm::lir::instructions::WasmIntegerOperationKind::Unsigned64
-            }
-        };
+    for (scalar, expected_kind) in [
+        (FixedScalar::U32, WasmIntegerOperationKind::Unsigned32),
+        (FixedScalar::U64, WasmIntegerOperationKind::Unsigned64),
+    ] {
         for operator in operators {
             let mut expressions = HirExpressionStore::default();
             let function_path = path_fork
                 .try_intern_portable_path("operate", &mut string_table)
                 .expect("test path fits");
             let operands = HirNumericOperands::Binary {
-                left: uint_literal(&mut expressions, 7),
-                right: uint_literal(&mut expressions, 3),
+                left: uint_literal(&mut expressions, scalar, 7),
+                right: uint_literal(&mut expressions, scalar, 3),
             };
             let block = HirBlock {
                 id: BlockId(0),
                 region: RegionId(0),
-                locals: vec![local(0, builtin_type_ids::UINT, RegionId(0))],
+                locals: vec![local(0, fixed_scalar_type(scalar), RegionId(0))],
                 statements: vec![statement(
                     902,
                     HirStatementKind::NumericOp {
                         op: HirNumericOp {
                             operator,
-                            domain: NumericScalar::Uint,
+                            domain: NumericScalar::Fixed(scalar),
                         },
                         failure_mode: NumericFailureMode::Trap,
                         operands,
@@ -626,7 +613,7 @@ fn uint_trap_arithmetic_selects_unsigned_operation_kinds() {
                 terminator: HirTerminator::Return(load_local(
                     &mut expressions,
                     LocalId(0),
-                    builtin_type_ids::UINT,
+                    fixed_scalar_type(scalar),
                     RegionId(0),
                 )),
             };
@@ -634,7 +621,7 @@ fn uint_trap_arithmetic_selects_unsigned_operation_kinds() {
                 id: FunctionId(0),
                 entry: BlockId(0),
                 params: vec![],
-                return_type: builtin_type_ids::UINT,
+                return_type: fixed_scalar_type(scalar),
             };
             let module = build_module(
                 &mut path_fork,
@@ -644,10 +631,7 @@ fn uint_trap_arithmetic_selects_unsigned_operation_kinds() {
                 vec![block],
                 FunctionId(0),
             );
-            let request = WasmBackendRequest {
-                numeric_profile: profile,
-                ..Default::default()
-            };
+            let request = WasmBackendRequest::default();
             let lowered = lower_hir_to_wasm_lir(
                 &module,
                 &default_borrow_facts(),
@@ -658,7 +642,7 @@ fn uint_trap_arithmetic_selects_unsigned_operation_kinds() {
                 &path_fork.snapshot_table(),
             )
             .unwrap_or_else(|error| {
-                panic!("{profile:?} Uint {operator:?} should lower: {error:?}")
+                panic!("unsigned integer {operator:?} should lower with {scalar:?}: {error:?}")
             });
             let lowered = lowered
                 .lir_module
@@ -675,7 +659,7 @@ fn uint_trap_arithmetic_selects_unsigned_operation_kinds() {
                         WasmLirStmt::CheckedIntegerOp { operation }
                             if operation.operator == operator && operation.kind == expected_kind
                     )),
-                "{profile:?} Uint {operator:?} must lower as {expected_kind:?}"
+                "{scalar:?} unsigned integer {operator:?} must lower as {expected_kind:?}"
             );
         }
     }

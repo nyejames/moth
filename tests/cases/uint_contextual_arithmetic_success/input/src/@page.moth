@@ -1,76 +1,76 @@
--- Task 2A: Uint contextual arithmetic. Uint receivers and both-sided Uint
--- peers type unresolved whole-number arithmetic as Uint; decimal leaves keep
--- Float typing and select the mixed Uint/Float rule.
+-- Task 2A: U32 contextual arithmetic. U32 receivers and both-sided U32
+-- peers type unresolved whole-number arithmetic as U32; decimal leaves keep
+-- F64 typing and select the mixed U32/F64 rule.
 
-peer_left_text |value Uint| -> String:
+peer_left_text |value U32| -> String:
     result = value + (1 + 2)
     return [result]
 ;
 
-peer_right_text |value Uint| -> String:
+peer_right_text |value U32| -> String:
     result = (1 + 2) + value
     return [result]
 ;
 
-peer_group_right_text |value Uint| -> String:
+peer_group_right_text |value U32| -> String:
     result = value + ((1 + 2) * 2)
     return [result]
 ;
 
-peer_product_text |value Uint| -> String:
+peer_product_text |value U32| -> String:
     result = value + (1 * 2)
     return [result]
 ;
 
-peer_typed_inner_text |value Uint, other Uint| -> String:
+peer_typed_inner_text |value U32, other U32| -> String:
     result = value + (other + 1)
     return [result]
 ;
 
-received_typed_inner_text |value Uint, other Uint| -> String:
-    result Uint = value + (other + 1)
+received_typed_inner_text |value U32, other U32| -> String:
+    result U32 = value + (other + 1)
     return [result]
 ;
 
-typed_inner_text |left Uint, right Uint| -> String:
-    result Uint = (left + right) + 1
+typed_inner_text |left U32, right U32| -> String:
+    result U32 = (left + right) + 1
     return [result]
 ;
 
-received_inner_text |left Uint, right Uint| -> String:
-    result Uint = left + (right + 1)
+received_inner_text |left U32, right U32| -> String:
+    result U32 = left + (right + 1)
     return [result]
 ;
 
-same_text |value Uint| -> String:
+same_text |value U32| -> String:
     result Bool = value is (1 + 2)
     return [result]
 ;
 
-ordered_text |value Uint| -> String:
+ordered_text |value U32| -> String:
     result Bool = value < (1 + 20)
     return [result]
 ;
 
-power_uint_exponent_text |exponent Uint| -> String:
-    result Uint = 2 ^ exponent
+power_uint_exponent_text |exponent U32| -> String:
+    result U32 = 2 ^ exponent
     return [result]
 ;
 
-take_uint |value Uint| -> Uint:
+take_uint |value U32| -> U32:
     return value
 ;
 
-explicit_return_text || -> Uint:
+explicit_return_text || -> U32:
     return 1 + 2
 ;
 
-with_default |value Uint = 1 + 2| -> Uint:
+with_default |value U32 = 1 + 2| -> U32:
     return value
 ;
 
-branch_text |flag Bool| -> Uint:
-    result Uint = if flag:
+branch_text |flag Bool| -> U32:
+    result U32 = if flag:
         then 1 + 2
     else
         then 3 + 4
@@ -78,11 +78,11 @@ branch_text |flag Bool| -> Uint:
     return result
 ;
 
-split_pair |flag Bool| -> Uint, Int:
+split_pair |flag Bool| -> U32, I32:
     return 1 + 2, 3 + 4
 ;
 
-make_uint || -> Uint:
+make_uint || -> U32:
     return 1 + 2
 ;
 
@@ -92,38 +92,41 @@ call_peer_text || -> String:
 ;
 
 mutable_assign_text || -> String:
-    target ~Uint = 0
+    target ~U32 = 0
     target = 1 + 2
     return [target]
 ;
 
-render_uint_text |value Uint| -> String:
+render_uint_text |value U32| -> String:
     return [value]
 ;
 
 Point = |
-    x Uint,
+    x U32,
 |
 
-count Uint = 1 + 2
-large Uint = 3_000_000_000 + 1
-grouped Uint = (1 + 2) * 3
-peer Uint = 10
+count U32 = 1 + 2
+large U32 = 3_000_000_000 + 1
+cast_operand_result U32 = cast (1 + 2) catch then 0
+assert(cast_operand_result is 3)
+grouped U32 = (1 + 2) * 3
+peer U32 = 10
 from_right = (1 + 2) + peer
 from_left = peer + (1 + 2)
-power_group Uint = 2 ^ (1 + 2)
-power_right Uint = 2 ^ 3 ^ 2
-power_left Uint = (2 ^ 3) ^ 2
-int_div Uint = 7 // 2
-remainder Uint = 7 % 3
-mixed_left = 1.5 + peer
-mixed_right = peer + 1.5
+power_group U32 = 2 ^ (1 + 2)
+power_right U32 = 2 ^ 3 ^ 2
+power_left U32 = (2 ^ 3) ^ 2
+int_div U32 = 7 // 2
+remainder U32 = 7 % 3
+floating_peer F64 = cast peer
+mixed_left = 1.5 + floating_peer
+mixed_right = floating_peer + 1.5
 real_div = peer / 4
-accumulate ~Uint = 10
+accumulate ~U32 = 10
 accumulate += 1 + 2
-scaled ~Uint = 10
+scaled ~U32 = 10
 scaled *= 1 + 2
-powered ~Uint = 2
+powered ~U32 = 2
 powered ^= 1 + 2
 peer_left = peer_left_text(10)
 peer_right = peer_right_text(10)
@@ -141,28 +144,28 @@ explicit_return = explicit_return_text()
 omitted_default = with_default()
 branch_true = branch_text(true)
 branch_false = branch_text(false)
-split_first Uint, split_second Int = split_pair(true)
+split_first U32, split_second I32 = split_pair(true)
 mutable_assign = mutable_assign_text()
-optional_payload Uint? = 1 + 2
+optional_payload U32? = 1 + 2
 optional_text String = if optional_payload is |payload| then [payload] else "none"
 point Point = Point(x = 1 + 2)
-elements {Uint} = {1 + 2}
-element_value Uint = elements.get(0) catch:
+elements {U32} = {1 + 2}
+element_value U32 = elements.get(0) catch:
     then 0
 ;
-keyed {String = Uint} = { "a" = 1 + 2 }
-keyed_value Uint = keyed.get("a") catch:
+keyed {String = U32} = { "a" = 1 + 2 }
+keyed_value U32 = keyed.get("a") catch:
     then 0
 ;
-missing Uint = elements.get(5) catch then 4 + 5
+missing U32 = elements.get(5) catch then 4 + 5
 call_peer = call_peer_text()
 amount Dec2 = 1.5
 dec_uint_power Dec2 = amount + (3 ^ 2)
 decmix Dec2 = 1.5 + peer
-float_from_uint Float = peer
+float_from_uint F64 = cast peer
 rendered = render_uint_text(peer)
 matched_text ~= ""
-m Uint = 5
+m U32 = 5
 if m is:
     5 => matched_text = "five"
     else => matched_text = "other"

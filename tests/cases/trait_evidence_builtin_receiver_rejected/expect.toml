@@ -3,3 +3,9 @@ mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0041"]
 message_contains = ["cannot target builtin scalar types"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0041"
+path = "input/@page.moth"
+line = 5
+column = 8

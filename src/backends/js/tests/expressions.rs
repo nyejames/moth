@@ -121,12 +121,12 @@ fn lowers_option_construct_expression() {
             fields: append_variant_fields(
                 &[HirVariantField {
                     name: Some(value_name),
-                    value: int_expression(10, types.int, RegionId(0), &mut expressions),
+                    value: i32_expression(10, types.i32, RegionId(0), &mut expressions),
                 }],
                 &mut expressions,
             ),
         },
-        types.option_int,
+        types.option_i32,
         RegionId(0),
         ValueKind::RValue,
         &mut expressions,
@@ -191,13 +191,13 @@ fn growable_collection_expression_lowers_to_array() {
     let mut string_table = StringTable::new();
     let (mut type_environment, types) = build_type_environment();
 
-    let growable_type = type_environment.intern_collection(types.int, None);
+    let growable_type = type_environment.intern_collection(types.i32, None);
 
     let collection_expr = expression(
         HirExpressionKind::Collection(append_values(
             &[
-                int_expression(1, types.int, RegionId(0), &mut expressions),
-                int_expression(2, types.int, RegionId(0), &mut expressions),
+                i32_expression(1, types.i32, RegionId(0), &mut expressions),
+                i32_expression(2, types.i32, RegionId(0), &mut expressions),
             ],
             &mut expressions,
         )),
@@ -268,13 +268,13 @@ fn fixed_collection_expression_lowers_to_wrapper() {
     let mut string_table = StringTable::new();
     let (mut type_environment, types) = build_type_environment();
 
-    let fixed_type = type_environment.intern_collection(types.int, Some(4));
+    let fixed_type = type_environment.intern_collection(types.i32, Some(4));
 
     let collection_expr = expression(
         HirExpressionKind::Collection(append_values(
             &[
-                int_expression(10, types.int, RegionId(0), &mut expressions),
-                int_expression(20, types.int, RegionId(0), &mut expressions),
+                i32_expression(10, types.i32, RegionId(0), &mut expressions),
+                i32_expression(20, types.i32, RegionId(0), &mut expressions),
             ],
             &mut expressions,
         )),
@@ -341,7 +341,7 @@ fn fixed_collection_empty_expression_lowers_to_wrapper() {
     let mut string_table = StringTable::new();
     let (mut type_environment, types) = build_type_environment();
 
-    let fixed_type = type_environment.intern_collection(types.int, Some(2));
+    let fixed_type = type_environment.intern_collection(types.i32, Some(2));
 
     let collection_expr = expression(
         HirExpressionKind::Collection(append_values(&[], &mut expressions)),
@@ -411,16 +411,16 @@ fn map_literal_with_entries_lowers_to_map_new() {
 
     let entry1 = HirMapEntry {
         key: string_expression("Priya", types.string, RegionId(0), &mut expressions),
-        value: int_expression(10, types.int, RegionId(0), &mut expressions),
+        value: i32_expression(10, types.i32, RegionId(0), &mut expressions),
     };
     let entry2 = HirMapEntry {
         key: string_expression("Grace", types.string, RegionId(0), &mut expressions),
-        value: int_expression(12, types.int, RegionId(0), &mut expressions),
+        value: i32_expression(12, types.i32, RegionId(0), &mut expressions),
     };
 
     let map_expr = expression(
         HirExpressionKind::MapLiteral(append_map_entries(&[entry1, entry2], &mut expressions)),
-        types.map_string_int,
+        types.map_string_i32,
         RegionId(0),
         ValueKind::RValue,
         &mut expressions,
@@ -485,7 +485,7 @@ fn empty_map_literal_lowers_to_map_new_with_empty_array() {
 
     let map_expr = expression(
         HirExpressionKind::MapLiteral(append_map_entries(&[], &mut expressions)),
-        types.map_string_int,
+        types.map_string_i32,
         RegionId(0),
         ValueKind::RValue,
         &mut expressions,

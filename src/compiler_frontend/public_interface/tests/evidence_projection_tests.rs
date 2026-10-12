@@ -32,6 +32,7 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ReceiverKey;
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -51,6 +52,7 @@ use crate::compiler_frontend::traits::evidence::environment::{
     TraitEvidenceDefinition, TraitEvidenceKind, TraitRequirementEvidence,
 };
 use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId, TraitRequirementId};
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 use rustc_hash::FxHashMap;
 
@@ -643,7 +645,10 @@ fn evidence_requirement_mappings_preserve_authored_order_and_exact_receiver_orig
         "NAMED",
         this_id,
         0,
-        &[("name", env.builtins().string), ("id", env.builtins().int)],
+        &[
+            ("name", env.builtins().string),
+            ("id", builtin_type_ids::fixed_scalar(FixedScalar::I32)),
+        ],
         &mut string_table,
         &mut path_fork,
     );
@@ -1232,7 +1237,10 @@ fn evidence_rejects_requirement_count_mismatch() {
         "NAMED",
         this_id,
         0,
-        &[("name", env.builtins().string), ("id", env.builtins().int)],
+        &[
+            ("name", env.builtins().string),
+            ("id", builtin_type_ids::fixed_scalar(FixedScalar::I32)),
+        ],
         &mut string_table,
         &mut path_fork,
     );

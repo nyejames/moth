@@ -1,0 +1,7 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "retained cast success inline=42/43 block=42/43 handler=42/43 group=42/43 collection=42;/43;\nretained cast failure inline=201/202 block=203/204 handler=205/206 group=207/208 collection=209;/210;"
+

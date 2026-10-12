@@ -1,0 +1,13 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+flags = ["release"]
+rendered_output_exact = "types i8=-128 u32=4294967295 u64=18446744073709551615 half=true precision=true"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+flags = ["release"]
+rendered_output_exact = "types i8=-128 u32=4294967295 u64=18446744073709551615 half=true precision=true"

@@ -1,0 +1,40 @@
+@core/math atan2
+
+transport_f16 |value F16| -> F16:
+    return value
+;
+
+transport_f32 |value F32| -> F32:
+    return value
+;
+
+transport_f64 |value F64| -> F64:
+    return value
+;
+
+-- These spellings must reach their destination before runtime transport.
+half_midpoint #F16 = 1.00048828125
+half_above_midpoint #F16 = 1.0004882812500000000001
+half_below_overflow #F16 = 65519
+half_subnormal #F16 = 0.000000059604644775390625
+single_subnormal #F32 = 1e-45
+double_subnormal #F64 = 5e-324
+half_negative_zero #F16 = -0.0
+single_negative_zero #F32 = -0.0
+double_negative_zero #F64 = -0.0
+
+stored_midpoint ~= transport_f16(half_midpoint)
+stored_above ~= transport_f16(half_above_midpoint)
+stored_limit ~= transport_f16(half_below_overflow)
+stored_half ~= transport_f16(half_subnormal)
+stored_single ~= transport_f32(single_subnormal)
+stored_double ~= transport_f64(double_subnormal)
+stored_half_zero ~= transport_f16(half_negative_zero)
+stored_single_zero ~= transport_f32(single_negative_zero)
+stored_double_zero ~= transport_f64(double_negative_zero)
+half_zero_wide F64 = cast stored_half_zero
+single_zero_wide F64 = cast stored_single_zero
+half_zero_sign = atan2(half_zero_wide, -1.0) < 0.0
+single_zero_sign = atan2(single_zero_wide, -1.0) < 0.0
+double_zero_sign = atan2(stored_double_zero, -1.0) < 0.0
+[:literal transport midpoint=[stored_midpoint] above=[stored_above] finite=[stored_limit] subnormals=[stored_half]/[stored_single]/[stored_double] signs=[half_zero_sign]/[single_zero_sign]/[double_zero_sign]]

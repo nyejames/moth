@@ -1,0 +1,15 @@
+entry = "."
+
+# The growable binding cannot convert to the fixed {2 U64} parameter, so the
+# later receiver is an ordinary type mismatch at the argument.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+path = "input/@page.moth"
+line = 9
+column = 22

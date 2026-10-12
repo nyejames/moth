@@ -2,7 +2,7 @@
 -- an alias created after the write, demonstrating __moth_write, __moth_alias_binding, and __moth_read.
 
 Counter = |
-    value Int,
+    value I32,
 |
 
 render_write_through || -> String:

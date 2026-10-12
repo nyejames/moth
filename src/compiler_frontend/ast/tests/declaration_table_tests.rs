@@ -148,6 +148,59 @@ fn stage3_order_assigns_ids_to_value_and_metadata_declarations() {
 }
 
 #[test]
+fn pending_constant_placeholder_is_identified_by_header_role_not_declared_type() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let constant_path = path_fork
+        .try_intern_portable_path("typed_constant", &mut string_table)
+        .expect("test path fits");
+    let function_path = path_fork
+        .try_intern_portable_path("shell_function", &mut string_table)
+        .expect("test path fits");
+
+    let table = TopLevelDeclarationTable::from_stage3_order(
+        vec![
+            ordered_declaration(
+                0,
+                0,
+                &constant_path,
+                OrderedSemanticDeclarationKind::Constant,
+                Some(declaration(&constant_path, DataType::Bool)),
+            ),
+            ordered_declaration(
+                1,
+                1,
+                &function_path,
+                OrderedSemanticDeclarationKind::Function,
+                Some(declaration(&function_path, DataType::Bool)),
+            ),
+        ],
+        Vec::new(),
+        &path_fork,
+    )
+    .expect("distinct Stage 3 paths should build a declaration table");
+
+    let constant = table
+        .get_by_path(&constant_path)
+        .expect("constant header should be indexed");
+    let function = table
+        .get_by_path(&function_path)
+        .expect("function header should be indexed");
+    assert!(table.is_unresolved_constant_placeholder(constant));
+    assert!(!table.is_unresolved_constant_placeholder(function));
+    assert!(
+        table
+            .get_visible_resolved_by_path(&constant_path, None)
+            .is_none()
+    );
+    assert!(
+        table
+            .get_visible_resolved_by_path(&function_path, None)
+            .is_some()
+    );
+}
+
+#[test]
 fn stage3_order_rejects_duplicate_semantic_paths() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -771,13 +824,13 @@ fn nested_generated_layers_inherit_prior_deltas_without_mutating_siblings() {
 #[test]
 fn declaration_copy_counter_detects_flat_row_clones() {
     use crate::compiler_frontend::instrumentation::{
-        capture_frontend_counters_for_test, lock_counter_test, log_frontend_counters,
+        capture_counters_for_test, lock_counter_test, log_frontend_counters,
         reset_frontend_counters,
     };
     use crate::timing::start_benchmark_collection;
 
     let _guard = lock_counter_test();
-    let _counter_capture = capture_frontend_counters_for_test();
+    let _counter_capture = capture_counters_for_test();
     reset_frontend_counters();
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
 
@@ -812,13 +865,13 @@ fn declaration_copy_counter_detects_flat_row_clones() {
 #[test]
 fn generated_layer_clones_do_not_copy_inherited_rows() {
     use crate::compiler_frontend::instrumentation::{
-        capture_frontend_counters_for_test, lock_counter_test, log_frontend_counters,
+        capture_counters_for_test, lock_counter_test, log_frontend_counters,
         reset_frontend_counters,
     };
     use crate::timing::start_benchmark_collection;
 
     let _guard = lock_counter_test();
-    let _counter_capture = capture_frontend_counters_for_test();
+    let _counter_capture = capture_counters_for_test();
     reset_frontend_counters();
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
 

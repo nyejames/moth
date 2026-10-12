@@ -1,0 +1,45 @@
+-- Exact return receivers require unary negation to preserve every operand type.
+negate_i8 |value I8| -> I8, Error!:
+    return -value
+;
+
+negate_i16 |value I16| -> I16, Error!:
+    return -value
+;
+
+negate_i32 |value I32| -> I32, Error!:
+    return -value
+;
+
+negate_i64 |value I64| -> I64, Error!:
+    return -value
+;
+
+negate_f16 |value F16| -> F16, Error!:
+    return -value
+;
+
+negate_f32 |value F32| -> F32, Error!:
+    return -value
+;
+
+negate_f64 |value F64| -> F64, Error!:
+    return -value
+;
+
+result_i8 I8 = negate_i8(3) catch then 0
+text_i8 String = cast result_i8
+result_i16 I16 = negate_i16(3) catch then 0
+text_i16 String = cast result_i16
+result_i32 I32 = negate_i32(3) catch then 0
+text_i32 String = cast result_i32
+result_i64 I64 = negate_i64(3) catch then 0
+text_i64 String = cast result_i64
+result_f16 F16 = negate_f16(3) catch then 0
+text_f16 String = cast result_f16
+result_f32 F32 = negate_f32(3) catch then 0
+text_f32 String = cast result_f32
+result_f64 F64 = negate_f64(3) catch then 0
+text_f64 String = cast result_f64
+
+[:exact unary I8=[text_i8] I16=[text_i16] I32=[text_i32] I64=[text_i64] F16=[text_f16] F32=[text_f32] F64=[text_f64]]

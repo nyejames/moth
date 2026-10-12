@@ -1148,10 +1148,11 @@ pub(crate) mod test_support {
     use super::super::ids::ExternalFunctionId;
     use super::CompilerError;
     use super::ExternalPackageRegistry;
+    use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub enum TestExternalReturnType {
-        NativeInt,
+        Fixed(FixedScalar),
         Void,
     }
 
@@ -1170,7 +1171,9 @@ pub(crate) mod test_support {
     impl From<TestExternalReturnType> for ExternalSignatureType {
         fn from(value: TestExternalReturnType) -> Self {
             match value {
-                TestExternalReturnType::NativeInt => ExternalSignatureType::NativeInt,
+                TestExternalReturnType::Fixed(scalar) => {
+                    ExternalSignatureType::Abi(ExternalAbiType::Fixed(scalar))
+                }
                 TestExternalReturnType::Void => ExternalSignatureType::Abi(ExternalAbiType::Void),
             }
         }

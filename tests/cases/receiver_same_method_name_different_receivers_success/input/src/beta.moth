@@ -1,5 +1,5 @@
 Beta = |
-    value Int,
+    value I32,
 |
 
 label |this Beta| -> String:

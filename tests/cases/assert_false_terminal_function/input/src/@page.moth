@@ -1,6 +1,6 @@
 -- assert(false, "msg") should be statically terminal in a non-Void function
 
-returns_int || -> Int:
+returns_int || -> I32:
     assert(false, "unreachable")
 ;
 

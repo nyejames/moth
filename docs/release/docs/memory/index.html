@@ -827,7 +827,7 @@ independent <span class='moth-code-operator'>~=</span> <span class='moth-code-ke
 <span class='moth-code-operator'>~</span>independent.<span class='moth-code-function'>push</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>4</span><span class='moth-code-delimiter'>)</span>
 <span class='moth-code-comment'>-- original still has 3 items</span></code></pre><p>Without <code>copy</code>, both names point at the same collection.</p><h3 id="mutating-existing-values-with">Mutating existing values with <code>~</code></h3><p>To change an existing value, use <code>~</code> before the value name:</p><pre style=""><code class='codeblock'>items <span class='moth-code-operator'>~=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>2</span>, <span class='moth-code-number'>3</span><span class='moth-code-delimiter'>}</span>
 <span class='moth-code-operator'>~</span>items.<span class='moth-code-function'>push</span><span class='moth-code-delimiter'>(</span><span class='moth-code-number'>4</span><span class='moth-code-delimiter'>)</span></code></pre><p>The <code>~</code> tells the compiler you want exclusive access to mutate the value.</p><h3 id="fresh-values-dont-need">Fresh values don&#39;t need <code>~</code></h3><p>When you create a new value from scratch, it doesn&#39;t need <code>~</code>:</p><pre style=""><code class='codeblock'>fresh <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>2</span>, <span class='moth-code-number'>3</span><span class='moth-code-delimiter'>}</span>   <span class='moth-code-comment'>-- new collection, no ~ needed</span>
-fresh_with_type <span class='moth-code-operator'>~</span><span class='moth-code-delimiter'>{</span><span class='moth-code-type'>Int</span><span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>2</span>, <span class='moth-code-number'>3</span><span class='moth-code-delimiter'>}</span>  <span class='moth-code-comment'>-- mutable binding, no ~ on the initializer</span></code></pre>
+fresh_with_type <span class='moth-code-operator'>~</span><span class='moth-code-delimiter'>{</span><span class='moth-code-type'>I32</span><span class='moth-code-delimiter'>}</span> <span class='moth-code-operator'>=</span> <span class='moth-code-delimiter'>{</span><span class='moth-code-number'>1</span>, <span class='moth-code-number'>2</span>, <span class='moth-code-number'>3</span><span class='moth-code-delimiter'>}</span>  <span class='moth-code-comment'>-- mutable binding, no ~ on the initializer</span></code></pre>
 </div>
 
 <div class="doc-level__panel doc-level__panel--advanced">
@@ -1337,6 +1337,7 @@ function __moth_collection_set(collection, index, value) {
 }
 
 function __moth_collection_push_growable(collection, value) {
+    if (collection.length >= 2147483647) throw new RangeError("Collection length exceeds the I32 length carrier");
     collection.push(value);
 }
 

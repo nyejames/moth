@@ -1,0 +1,18 @@
+-- Bound floating precision stays deferred inside direct generic constructors
+-- until an exact F32 or F64 receiver selects the instance type.
+
+Packet type T = |value T|
+
+read_f32 |value F32| -> String:
+    return cast value
+;
+read_f64 |value F64| -> String:
+    return cast value
+;
+
+narrow = Packet(1.00000001)
+wide = Packet(1.00000001)
+narrow_text = read_f32(narrow.value)
+wide_text = read_f64(wide.value)
+
+[:generic_constructed_numeric_deferred_float_runtime narrow=[narrow_text] wide=[wide_text]]

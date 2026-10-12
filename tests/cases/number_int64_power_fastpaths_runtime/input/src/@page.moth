@@ -1,20 +1,20 @@
-power_unity |base Dec0, exponent Int| -> Dec0:
+power_unity |base Dec0, exponent I32| -> Dec0:
     return base ^ exponent
 ;
-power_tiny |base Dec1, exponent Int| -> Dec1:
+power_tiny |base Dec1, exponent I32| -> Dec1:
     return base ^ exponent
 ;
 
-add_float |value Float, increment Float| -> Float:
+add_float |value F32, increment F32| -> F32:
     return value + increment
 ;
 
-positive_unity = power_unity(1, 4294967296)
-negative_unity = power_unity(-1, 4294967297)
-zero = power_unity(0, 9223372036854775807)
-tiny_positive = power_tiny(0.1, 9223372036854775807)
-tiny_negative = power_tiny(-0.1, 9223372036854775807)
+positive_unity = power_unity(1, 2147483646)
+negative_unity = power_unity(-1, 2147483647)
+zero = power_unity(0, 2147483647)
+tiny_positive = power_tiny(0.1, 2147483647)
+tiny_negative = power_tiny(-0.1, 2147483647)
 
 float_profile = add_float(16777216.0, 1.0)
 
-[:Dec Int64 exponents even=[positive_unity] odd=[negative_unity] zero=[zero] tiny_positive=[tiny_positive] tiny_negative=[tiny_negative] float32=[float_profile]]
+[:Dec large exponents even=[positive_unity] odd=[negative_unity] zero=[zero] tiny_positive=[tiny_positive] tiny_negative=[tiny_negative] float32=[float_profile]]

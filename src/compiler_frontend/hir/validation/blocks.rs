@@ -29,7 +29,6 @@ use crate::compiler_frontend::hir::terminators::{
     HirTerminator, classify_assertion_message_evaluation,
 };
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
-use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::FxHashSet;
 
 #[derive(Clone, Copy)]
@@ -389,7 +388,8 @@ impl<'a> HirValidator<'a> {
                 }
 
                 // NumericOp operands normally share their result domain. Dec power alone keeps
-                // its exponent in the canonical profile Int type.
+                // its exponent in the exact builtin `I32` domain.
+                let exponent_domain = NumericScalar::Fixed(FixedScalar::I32);
                 let domain_type = self.numeric_scalar_type_id(op.domain, anchor)?;
                 let number_power = op.operator == NumericOperator::Power
                     && matches!(op.domain, NumericScalar::Number(_));
@@ -415,7 +415,7 @@ impl<'a> HirValidator<'a> {
                         let right = self.expression_row(*right, anchor)?;
 
                         let right_type = if number_power {
-                            self.type_environment.builtins().int
+                            exponent_domain.type_id(self.type_environment)
                         } else {
                             domain_type
                         };
@@ -433,7 +433,7 @@ impl<'a> HirValidator<'a> {
                 let operator_domain_valid = match op.operator {
                     NumericOperator::Negate => negation_domain(op.domain) == Some(op.domain),
                     NumericOperator::Power if number_power => {
-                        binary_operation_domain(op.operator, op.domain, NumericScalar::Int)
+                        binary_operation_domain(op.operator, op.domain, exponent_domain)
                             == Some(op.domain)
                     }
                     _ => {
@@ -488,13 +488,9 @@ impl<'a> HirValidator<'a> {
                 in_range_result,
                 ..
             } => {
-                if !matches!(
-                    domain,
-                    NumericScalar::Float
-                        | NumericScalar::Fixed(FixedScalar::F32 | FixedScalar::F64)
-                ) {
+                if !domain.is_binary_float() {
                     return Err(self.error_with_hir(
-                        "FloatRangeCandidate requires a profile Float, F32, or F64 domain",
+                        "FloatRangeCandidate requires a binary-float domain",
                         anchor,
                     ));
                 }
@@ -580,14 +576,7 @@ impl<'a> HirValidator<'a> {
                         anchor,
                     ));
                 }
-                self.validate_float_effect_statement(
-                    "ValidateFloat",
-                    *source,
-                    *failure_mode,
-                    *result,
-                    self.type_environment.builtins().float,
-                    anchor,
-                )?;
+                self.validate_validated_float_statement(*source, *failure_mode, *result, anchor)?;
             }
         }
 
@@ -685,9 +674,9 @@ impl<'a> HirValidator<'a> {
             return Ok(());
         };
 
-        // Dec-bearing rows are profile-independent: integer/scale direction fixes exact
+        // Dec-bearing rows are decided by exact scale: integer/scale direction fixes exact
         // conversion fallibility, and numeric text conversions use fixed policies.
-        let Some(row) = lookup_builtin_evidence(source, target, NumericProfile::STANDARD) else {
+        let Some(row) = lookup_builtin_evidence(source, target) else {
             return Err(self.error_with_hir(
                 format!("Cast policy {policy:?} has no builtin evidence row"),
                 anchor,
@@ -797,9 +786,11 @@ impl<'a> HirValidator<'a> {
         self.validate_expression(source, anchor)?;
         let source = self.expression_row(source, anchor)?;
 
-        if source.ty != self.type_environment.builtins().float {
+        if !NumericScalar::from_type_id(source.ty, self.type_environment)
+            .is_some_and(NumericScalar::is_binary_float)
+        {
             return Err(self.error_with_hir(
-                format!("{statement_name} source must have Float type"),
+                format!("{statement_name} source must have an exact binary-float type"),
                 anchor,
             ));
         }
@@ -809,6 +800,42 @@ impl<'a> HirValidator<'a> {
             failure_mode,
             result,
             success_type,
+            anchor,
+        )
+    }
+
+    /// Validates a `ValidateFloat` statement against its source row's exact binary-float type.
+    ///
+    /// WHAT: admits every exact `F16`/`F32`/`F64` source, then requires the
+    ///       result local (or the fallible carrier's success slot) to carry exactly that
+    ///       source type.
+    /// WHY: the source expression row owns the resolved precision, so the validated result must
+    ///      keep it instead of assuming a default float; a mismatched carrier would erode the
+    ///      value before ordinary Moth code observes it.
+    fn validate_validated_float_statement(
+        &self,
+        source: HirValueId,
+        failure_mode: NumericFailureMode,
+        result: HirLocalDestination,
+        anchor: Option<HirLocation>,
+    ) -> Result<(), CompilerError> {
+        self.validate_expression(source, anchor)?;
+        let source_type = self.expression_row(source, anchor)?.ty;
+
+        if !NumericScalar::from_type_id(source_type, self.type_environment)
+            .is_some_and(NumericScalar::is_binary_float)
+        {
+            return Err(self.error_with_hir(
+                "ValidateFloat source must have an exact binary-float type",
+                anchor,
+            ));
+        }
+
+        self.validate_numeric_result_local(
+            "ValidateFloat",
+            failure_mode,
+            result,
+            source_type,
             anchor,
         )
     }

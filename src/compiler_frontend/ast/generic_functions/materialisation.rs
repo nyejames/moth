@@ -30,7 +30,6 @@ use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(crate) use artefact_emit::ModuleMaterialisationContext;
@@ -66,11 +65,6 @@ pub(crate) struct ModuleMaterialisationInput<'a> {
         &'a mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) build_profile: FrontendBuildProfile,
-    /// The requester boundary's `Int` width and `Float` precision.
-    ///
-    /// WHY: a generated body materialises its own AST outside the requester's compiler instance, so
-    ///      it must carry the same boundary numeric profile rather than defaulting one.
-    pub(crate) numeric_profile: NumericProfile,
     pub(crate) template_const_loop_iteration_limit: usize,
     /// The requesting module owns generated work in current-schema attribution.
     #[cfg(feature = "timers")]

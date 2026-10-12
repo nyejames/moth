@@ -31,5 +31,5 @@ When you create a new value from scratch, it doesn't need `~`:
 
 [codeblock, $code("moth"):
     fresh = {1, 2, 3}   -- new collection, no ~ needed
-    fresh_with_type ~{Int} = {1, 2, 3}  -- mutable binding, no ~ on the initializer
+    fresh_with_type ~{I32} = {1, 2, 3}  -- mutable binding, no ~ on the initializer
 ]

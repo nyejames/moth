@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "late_u64_collection original=18446744073709551615,18446744073709551614 len=2 duplicate=18446744073709551615,18446744073709551614 len=2"

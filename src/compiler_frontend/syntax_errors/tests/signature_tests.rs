@@ -4,7 +4,7 @@ use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_diagno
 #[test]
 fn detects_open_parenthesis_as_parameter_delimiter_mistake() {
     let diagnostic =
-        parse_single_file_ast_diagnostic("bad |a Int, (b Int)| -> Int:\n    return a\n;\n");
+        parse_single_file_ast_diagnostic("bad |a I32, (b I32)| -> I32:\n    return a\n;\n");
 
     assert!(matches!(
         diagnostic.payload,

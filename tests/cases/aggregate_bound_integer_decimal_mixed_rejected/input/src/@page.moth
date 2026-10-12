@@ -1,0 +1,8 @@
+-- Named integer elements keep their integer family beside raw decimal elements.
+
+mixed_forward ||:
+    count = 1
+    mixed = {count, 2.5}
+;
+
+[:bound_integer_decimal_mixed_rejected]

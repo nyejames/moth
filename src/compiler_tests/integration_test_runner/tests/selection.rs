@@ -25,7 +25,6 @@ fn case(
         tags: tags.iter().map(|tag| (*tag).to_owned()).collect(),
         contract: contract.map(str::to_owned),
         role: None,
-        numeric_profile: Default::default(),
         backend_id,
         entry_path: PathBuf::from("input/@page.moth"),
         flags: Vec::new(),

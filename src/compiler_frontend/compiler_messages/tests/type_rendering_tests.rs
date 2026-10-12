@@ -38,8 +38,8 @@ fn diagnostic_render_context_renders_builtin_type_names() {
         .with_path_table(&path_table);
 
     assert_eq!(
-        diagnostic_type_name(type_environment.builtins().int, context),
-        "Int"
+        diagnostic_type_name(builtin_type_ids::fixed_scalar(FixedScalar::I32), context),
+        "I32"
     );
     assert_eq!(
         diagnostic_type_name(type_environment.builtins().string, context),
@@ -56,7 +56,7 @@ fn rule_diagnostics_render_receiver_type_names() {
     let context = DiagnosticRenderContext::new(&string_table)
         .with_optional_type_environment(Some(&type_environment))
         .with_path_table(&path_table);
-    let int_type = type_environment.builtins().int;
+    let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let field_access = CompilerDiagnostic::invalid_field_access(
         InvalidFieldAccessReason::UnknownMember,
@@ -66,7 +66,7 @@ fn rule_diagnostics_render_receiver_type_names() {
         None,
     );
     let field_guidance = format_payload_guidance(&field_access.payload, context);
-    assert!(field_guidance.iter().any(|line| line.contains("'Int'")));
+    assert!(field_guidance.iter().any(|line| line.contains("'I32'")));
 
     let assignment = CompilerDiagnostic::invalid_assignment_target(
         InvalidAssignmentTargetReason::TemporaryNotAssignable,
@@ -278,11 +278,12 @@ fn diagnostic_render_context_renders_constructed_type_names() {
     let string_table = StringTable::new();
     let path_fork = PathInternerFork::empty();
     let builtins = *type_environment.builtins();
+    let i32_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let collection = type_environment.intern_constructed(
         TypeConstructor::Builtin(BuiltinTypeConstructor::Collection {
             fixed_capacity: None,
         }),
-        Box::new([builtins.int]),
+        Box::new([i32_id]),
     );
     let option = type_environment.intern_constructed(
         TypeConstructor::Builtin(BuiltinTypeConstructor::Option),
@@ -290,7 +291,7 @@ fn diagnostic_render_context_renders_constructed_type_names() {
     );
     let result = type_environment.intern_constructed(
         TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier),
-        Box::new([builtins.int, builtins.string]),
+        Box::new([i32_id, builtins.string]),
     );
 
     let path_table = path_fork.snapshot_table();
@@ -298,9 +299,9 @@ fn diagnostic_render_context_renders_constructed_type_names() {
         .with_optional_type_environment(Some(&type_environment))
         .with_path_table(&path_table);
 
-    assert_eq!(diagnostic_type_name(collection, context), "{Int}");
+    assert_eq!(diagnostic_type_name(collection, context), "{I32}");
     assert_eq!(diagnostic_type_name(option, context), "String?");
-    assert_eq!(diagnostic_type_name(result, context), "Int, String!");
+    assert_eq!(diagnostic_type_name(result, context), "I32, String!");
 }
 
 #[test]
@@ -329,7 +330,7 @@ fn terse_type_mismatch_uses_type_environment_names_when_available() {
     let string_table = StringTable::new();
     let path_fork = PathInternerFork::empty();
     let diagnostic = CompilerDiagnostic::type_mismatch(
-        type_environment.builtins().int,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         type_environment.builtins().string,
         TypeMismatchContext::Assignment,
         None,
@@ -342,7 +343,7 @@ fn terse_type_mismatch_uses_type_environment_names_when_available() {
     let lines = format_terse_diagnostics_with_context(&[diagnostic], context);
 
     assert_eq!(lines.len(), 1);
-    assert!(lines[0].contains("expected Int, found String"));
+    assert!(lines[0].contains("expected I32, found String"));
     assert!(!lines[0].contains("TypeId("));
 }
 
@@ -368,43 +369,6 @@ fn unsupported_operator_message_explains_missing_fixed_integer_common_type() {
         ),
         "`I64` and `U64` have no common integer type for `+`. Convert one operand with `cast` first."
     );
-}
-
-#[test]
-fn unsupported_operator_message_explains_fixed_numeric_mixing() {
-    let cases = [
-        (
-            DiagnosticOperator::Add,
-            builtin_type_ids::fixed_scalar(FixedScalar::U8),
-            builtin_type_ids::INT,
-            "`U8` and `Int` do not mix implicitly. Convert one operand with `cast` first.",
-        ),
-        (
-            DiagnosticOperator::Equality,
-            builtin_type_ids::fixed_scalar(FixedScalar::F32),
-            builtin_type_ids::FLOAT,
-            "`F32` and `Float` do not mix implicitly. Convert one operand with `cast` first.",
-        ),
-        (
-            DiagnosticOperator::Add,
-            builtin_type_ids::fixed_scalar(FixedScalar::U8),
-            builtin_type_ids::UINT,
-            "`U8` and `Uint` do not mix implicitly. Convert one operand with `cast` first.",
-        ),
-        (
-            DiagnosticOperator::Multiply,
-            builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            builtin_type_ids::fixed_scalar(FixedScalar::F16),
-            "`I32` and `F16` do not mix implicitly. Convert one operand with `cast` first.",
-        ),
-    ];
-
-    for (operator, lhs, rhs, expected) in cases {
-        assert_eq!(
-            unsupported_operator_message(operator, lhs, Some(rhs)),
-            expected
-        );
-    }
 }
 
 #[test]

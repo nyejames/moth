@@ -10,7 +10,7 @@ active_label = if enabled then "on" else "off"
 inactive_label = if disabled then "on" else "off"
 literal_label = if true then "yes" else "no"
 
-pick |flag Bool| -> Int:
+pick |flag Bool| -> I32:
     return if flag then 10 else 20
 ;
 

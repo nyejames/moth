@@ -82,7 +82,7 @@ fn block_group_and_region_are_ordinary_variable_names() {
 #[test]
 fn block_is_an_ordinary_function_name() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("block || -> Int:\n    return 1\n;\n\nresult = block()\n");
+        parse_single_file_ast("block || -> I32:\n    return 1\n;\n\nresult = block()\n");
 
     assert_eq!(
         function_body_by_name(&ast, &path_fork, &string_table, "block").len(),

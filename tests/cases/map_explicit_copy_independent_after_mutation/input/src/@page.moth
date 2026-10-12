@@ -1,6 +1,6 @@
 -- An explicit copy of a map `get` result remains usable after the map is mutated.
 
-observe |value String, before Int| -> String:
+observe |value String, before I32| -> String:
     return [:map_explicit_copy_independent_after_mutation observed=[value] length_before=[before]]
 ;
 

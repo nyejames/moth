@@ -48,9 +48,23 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 fn expression(value: i64) -> Expression {
-    Expression::int(value, None, ValueMode::ImmutableOwned)
+    Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+        None,
+        ValueMode::ImmutableOwned,
+    )
+}
+
+/// Whether this expression is one exact `I32` literal with the expected value.
+fn is_i32_literal(expression: &Expression, expected: i64) -> bool {
+    matches!(
+        &expression.kind,
+        ExpressionKind::FixedScalar(value)
+            if value.scalar() == FixedScalar::I32 && value.as_i64() == Some(expected)
+    )
 }
 
 fn dynamic_node(store: &mut TemplateIrStore, value: i64) -> TemplateIrNodeId {
@@ -206,7 +220,7 @@ fn structural_collection_ignores_child_expression_overlay() {
 
     assert_eq!(payloads.len(), 1);
     assert_eq!(payloads[0].0, child_site_id);
-    assert!(matches!(payloads[0].1.kind, ExpressionKind::Int(1)));
+    assert!(is_i32_literal(&payloads[0].1, 1));
 }
 
 #[test]
@@ -249,9 +263,11 @@ fn effective_collection_reads_same_store_child_overlay() {
 
     let payloads = collect_effective_tir_expression_overlay_payloads(&root_view)
         .expect("effective collection should succeed");
-    assert!(payloads.iter().any(|(site_id, value)| {
-        *site_id == child_site_id && matches!(value.kind, ExpressionKind::Int(9))
-    }));
+    assert!(
+        payloads
+            .iter()
+            .any(|(site_id, value)| { *site_id == child_site_id && is_i32_literal(value, 9) })
+    );
 }
 
 #[test]
@@ -314,7 +330,7 @@ fn effective_collection_preserves_outer_context_precedence_for_reused_site() {
         .expect("effective collection should succeed");
 
     assert_eq!(payloads.len(), 1);
-    assert!(matches!(payloads[0].1.kind, ExpressionKind::Int(9)));
+    assert!(is_i32_literal(&payloads[0].1, 9));
 }
 
 #[test]
@@ -377,7 +393,7 @@ fn effective_collection_revisits_shared_root_for_a_new_context_once() {
         .expect("effective collection should succeed");
 
     assert_eq!(payloads.len(), 1);
-    assert!(matches!(payloads[0].1.kind, ExpressionKind::Int(2)));
+    assert!(is_i32_literal(&payloads[0].1, 2));
 }
 
 #[test]
@@ -424,7 +440,7 @@ fn view_walker_reads_expression_overlay() {
     .expect("view should construct");
 
     let payloads = collect_view(&view).expect("view walk should succeed");
-    assert!(matches!(payloads[0].kind, ExpressionKind::Int(42)));
+    assert!(is_i32_literal(&payloads[0], 42));
 }
 
 #[test]
@@ -451,11 +467,7 @@ fn nested_expression_walker_enters_same_store_template_view() {
     })
     .expect("nested expression walk should succeed");
 
-    assert!(
-        payloads
-            .iter()
-            .any(|value| matches!(value.kind, ExpressionKind::Int(7)))
-    );
+    assert!(payloads.iter().any(|value| is_i32_literal(value, 7)));
 }
 
 #[test]
@@ -541,8 +553,8 @@ fn runtime_expression(operand: Expression) -> Expression {
             items: vec![ExpressionRpnItem::Operand(operand)],
         }),
         None,
-        builtin_type_ids::INT,
-        DataType::Int,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        DataType::FixedScalar(FixedScalar::I32),
         ValueMode::ImmutableOwned,
     )
 }
@@ -818,14 +830,14 @@ fn collects_dynamic_payloads_conditional_selectors_and_loop_headers() {
         payloads
             .iter()
             .any(|(site_id, expression)| *site_id == selector_site_id
-                && matches!(expression.kind, ExpressionKind::Int(1))),
+                && is_i32_literal(expression, 1)),
         "conditional selector payload should be keyed by its selector site ID"
     );
     assert!(
         payloads
             .iter()
             .any(|(site_id, expression)| *site_id == header_condition_site_id
-                && matches!(expression.kind, ExpressionKind::Int(3))),
+                && is_i32_literal(expression, 3)),
         "loop header payload should be keyed by the allocated header expression-site ID"
     );
 }
@@ -908,12 +920,11 @@ fn replacement_preserves_other_context_dimensions_and_rejects_duplicate_sites() 
             .collect::<Vec<_>>(),
         vec![first_site_id, second_site_id]
     );
-    assert!(matches!(
+    assert!(is_i32_literal(
         replacement_overlay
             .expression_for_site(first_site_id)
-            .expect("replaced site should exist")
-            .kind,
-        ExpressionKind::Int(9)
+            .expect("replaced site should exist"),
+        9
     ));
 
     let error = replace_expression_overlay_entries(
@@ -973,13 +984,13 @@ fn range_loop_header_positions_are_visited_by_mutation_and_collected_by_site_id(
         .expect("expression overlay collection should succeed");
     assert_eq!(payloads.len(), 3);
     assert!(payloads.iter().any(|(site_id, expression)| {
-        *site_id == start_site_id && matches!(expression.kind, ExpressionKind::Int(1))
+        *site_id == start_site_id && is_i32_literal(expression, 1)
     }));
     assert!(payloads.iter().any(|(site_id, expression)| {
-        *site_id == end_site_id && matches!(expression.kind, ExpressionKind::Int(10))
+        *site_id == end_site_id && is_i32_literal(expression, 10)
     }));
     assert!(payloads.iter().any(|(site_id, expression)| {
-        *site_id == step_site_id && matches!(expression.kind, ExpressionKind::Int(2))
+        *site_id == step_site_id && is_i32_literal(expression, 2)
     }));
 
     // Mutation walker: the same three range header positions are visited in
@@ -1063,7 +1074,7 @@ fn view_walker_reads_effective_conditional_selector_before_body() {
         "the effective selector must be visited first"
     );
     assert!(
-        matches!(payloads[1].kind, ExpressionKind::Int(2)),
+        is_i32_literal(&payloads[1], 2),
         "the body must follow the effective selector"
     );
 }
@@ -1137,33 +1148,23 @@ fn view_walker_reads_loop_header_overlay() {
 
     assert_eq!(payloads.len(), 3);
     assert!(
-        payloads
-            .iter()
-            .any(|e| matches!(e.kind, ExpressionKind::Int(100))),
+        payloads.iter().any(|e| is_i32_literal(e, 100)),
         "overlay range start should be visited"
     );
     assert!(
-        payloads
-            .iter()
-            .any(|e| matches!(e.kind, ExpressionKind::Int(10))),
+        payloads.iter().any(|e| is_i32_literal(e, 10)),
         "structural range end should be visited"
     );
     assert!(
-        payloads
-            .iter()
-            .any(|e| matches!(e.kind, ExpressionKind::Int(50))),
+        payloads.iter().any(|e| is_i32_literal(e, 50)),
         "overlay range step should be visited"
     );
     assert!(
-        !payloads
-            .iter()
-            .any(|e| matches!(e.kind, ExpressionKind::Int(1))),
+        !payloads.iter().any(|e| is_i32_literal(e, 1)),
         "structural range start should not be visited"
     );
     assert!(
-        !payloads
-            .iter()
-            .any(|e| matches!(e.kind, ExpressionKind::Int(2))),
+        !payloads.iter().any(|e| is_i32_literal(e, 2)),
         "structural range step should not be visited"
     );
 }
@@ -1244,12 +1245,12 @@ fn view_walker_uses_parent_overlay_for_the_same_child_root() {
     assert!(
         payloads
             .iter()
-            .any(|expression| matches!(expression.kind, ExpressionKind::Int(1)))
+            .any(|expression| is_i32_literal(expression, 1))
     );
     assert!(
         !payloads
             .iter()
-            .any(|expression| matches!(expression.kind, ExpressionKind::Int(42)))
+            .any(|expression| is_i32_literal(expression, 42))
     );
 }
 
@@ -1295,7 +1296,7 @@ fn view_walker_reads_insert_contribution_effective_overlay() {
 
     assert_eq!(payloads.len(), 1);
     assert!(
-        matches!(payloads[0].kind, ExpressionKind::Int(42)),
+        is_i32_literal(&payloads[0], 42),
         "insert contribution should recurse through a child view and read the inherited overlay override, not the structural payload"
     );
 }
@@ -1360,7 +1361,7 @@ fn nested_walker_inspects_runtime_and_coerced_operands() {
 
     assert_eq!(payloads.len(), 1);
     assert!(
-        matches!(payloads[0].kind, ExpressionKind::Int(99)),
+        is_i32_literal(&payloads[0], 99),
         "TIR dynamic expression behind Coerced and Runtime should be visited"
     );
 }
@@ -1419,10 +1420,7 @@ fn nested_walker_shares_visited_set_between_tir_child_and_expression_template() 
     let payloads =
         collect_nested_expression_payloads(&expression, &store).expect("walk should succeed");
 
-    let int_42_count = payloads
-        .iter()
-        .filter(|e| matches!(e.kind, ExpressionKind::Int(42)))
-        .count();
+    let int_42_count = payloads.iter().filter(|e| is_i32_literal(e, 42)).count();
     assert_eq!(
         int_42_count, 1,
         "shared visited set should visit child B only once across TIR child and expression template paths"

@@ -1,0 +1,12 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "generic_constructed_numeric_partial_envelope_runtime left=4294967305 right=2.5 narrow=1 wide=4294967307"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0058"]
+message_contains = ["__moth_collection_length"]

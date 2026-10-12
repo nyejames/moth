@@ -44,7 +44,7 @@ pub(crate) struct WasmEmitPlan {
     pub data_offsets: FxHashMap<WasmStaticDataId, u32>,
     /// Static-data segment lengths cached for literal helper calls.
     pub data_lengths: FxHashMap<WasmStaticDataId, u32>,
-    /// Ryu power-table segment offset and byte length when Float formatting is used.
+    /// Ryu power-table segment offset and byte length when binary-float formatting is used.
     pub float_format_tables_offset: Option<u32>,
     pub float_format_tables_len: Option<u32>,
     pub float_format_tables: Option<Vec<u8>>,
@@ -156,7 +156,7 @@ pub(crate) fn build_emit_plan(
         && initial_memory_pages > max_pages
     {
         return Err(CompilerError::compiler_error(
-            "Wasm Float formatting tables exceed the configured maximum memory",
+            "Wasm binary-float formatting tables exceed the configured maximum memory",
         )
         .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
     }

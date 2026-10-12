@@ -266,6 +266,17 @@ fn inject_collection_expression_statement(
     module.blocks[entry_block_index].statements.push(statement);
 }
 
+/// One exact `I32` value for HIR validation fixtures.
+fn i32_value(value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range")
+}
+
+/// One exact `F64` value for HIR validation fixtures.
+fn f64_value(value: f64) -> FixedScalarValue {
+    FixedScalarValue::binary_float(FixedScalar::F64, value)
+        .expect("F64 literal is exactly representable")
+}
+
 fn int_expression(
     value: i64,
     type_id: TypeId,
@@ -275,7 +286,7 @@ fn int_expression(
 ) -> HirValueId {
     let expression_id = append_hir_expression(
         module,
-        HirExpressionKind::Int(value),
+        HirExpressionKind::FixedScalar(i32_value(value)),
         type_id,
         region,
         ValueKind::RValue,
@@ -293,7 +304,7 @@ fn float_expression(
 ) -> HirValueId {
     let expression_id = append_hir_expression(
         module,
-        HirExpressionKind::Float(value),
+        HirExpressionKind::FixedScalar(f64_value(value)),
         type_id,
         region,
         ValueKind::RValue,
@@ -369,7 +380,7 @@ fn validator_accepts_field_projection_owned_by_current_nominal_type() {
     let mut path_fork = PathInternerFork::empty();
     let struct_path = super::symbol("Owner", &mut path_fork, &mut string_table);
     let field_path = super::symbol("value", &mut path_fork, &mut string_table);
-    let int_type = type_environment.builtins().int;
+    let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let (_, owner_type) = type_environment.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path: struct_path,
@@ -405,7 +416,7 @@ fn validator_rejects_field_projection_owned_by_another_nominal_type() {
     let foreign_path = super::symbol("Foreign", &mut path_fork, &mut string_table);
     let owner_field_path = super::symbol("value", &mut path_fork, &mut string_table);
     let foreign_field_path = super::symbol("value", &mut path_fork, &mut string_table);
-    let int_type = type_environment.builtins().int;
+    let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let (_, owner_type) = type_environment.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path: owner_path,
@@ -476,7 +487,7 @@ fn validator_rejects_field_projection_owned_by_another_generic_instance() {
         .list_id;
     let parameter_type =
         type_environment.intern_generic_parameter(GenericParameterId(0), parameter_name);
-    let int_type = type_environment.builtins().int;
+    let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let string_type = type_environment.builtins().string;
     let (nominal_id, _) = type_environment.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
@@ -502,7 +513,7 @@ fn validator_rejects_field_projection_owned_by_another_generic_instance() {
         type_environment.intern_generic_instance(nominal_id, Box::new([string_type]));
     let int_fields = type_environment
         .fields_for(int_instance)
-        .expect("the Int instance should have substituted fields");
+        .expect("the I32 instance should have substituted fields");
     let string_fields = type_environment
         .fields_for(string_instance)
         .expect("the String instance should have substituted fields");
@@ -541,7 +552,7 @@ fn validator_rejects_field_projection_owned_by_another_generic_instance() {
     append_place_load_for_validation(&mut module, place, int_type, Some(span));
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("a field from Box<String> must not be accepted on Box<Int>");
+        .expect_err("a field from Box<String> must not be accepted on Box<I32>");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert_eq!(error.source_span, Some(span));
@@ -553,7 +564,7 @@ fn validator_resolves_field_and_index_projections_from_each_reached_type() {
     let mut path_fork = PathInternerFork::empty();
     let inner_path = super::symbol("Inner", &mut path_fork, &mut string_table);
     let inner_field_path = super::symbol("value", &mut path_fork, &mut string_table);
-    let int_type = type_environment.builtins().int;
+    let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let (_, inner_type) = type_environment.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path: inner_path,
@@ -601,7 +612,7 @@ fn validator_resolves_field_and_index_projections_from_each_reached_type() {
     let region = module.blocks[entry.0 as usize].region;
     let index = append_hir_expression(
         &mut module,
-        HirExpressionKind::Int(0),
+        HirExpressionKind::FixedScalar(i32_value(0)),
         int_type,
         region,
         ValueKind::Const,
@@ -627,7 +638,7 @@ fn validator_rejects_foreign_field_after_index_projection() {
     let foreign_path = super::symbol("Foreign", &mut path_fork, &mut string_table);
     let element_field_path = super::symbol("value", &mut path_fork, &mut string_table);
     let foreign_field_path = super::symbol("value", &mut path_fork, &mut string_table);
-    let int_type = type_environment.builtins().int;
+    let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let (_, element_type) = type_environment.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
         path: element_path,
@@ -694,7 +705,7 @@ fn validator_rejects_foreign_field_after_index_projection() {
     let region = module.blocks[entry.0 as usize].region;
     let index = append_hir_expression(
         &mut module,
-        HirExpressionKind::Int(0),
+        HirExpressionKind::FixedScalar(i32_value(0)),
         int_type,
         region,
         ValueKind::Const,
@@ -723,8 +734,8 @@ fn validator_rejects_place_classification_for_non_load_values() {
     let region = module.blocks[entry.0 as usize].region;
     let literal = append_hir_expression(
         &mut module,
-        HirExpressionKind::Int(1),
-        builtin_type_ids::INT,
+        HirExpressionKind::FixedScalar(i32_value(1)),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         region,
         ValueKind::Place,
     );
@@ -740,12 +751,17 @@ fn validator_rejects_place_classification_for_non_load_values() {
 fn validator_accepts_rvalue_load_and_checks_load_copy_place_types() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let entry = module.functions[module.start_function.unwrap().0 as usize].entry;
-    add_local(&mut module, entry, LocalId(9000), builtin_type_ids::INT);
+    add_local(
+        &mut module,
+        entry,
+        LocalId(9000),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+    );
     let region = module.blocks[entry.0 as usize].region;
     let load = append_hir_expression(
         &mut module,
         HirExpressionKind::Load(HirPlace::local(LocalId(9000))),
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         region,
         ValueKind::RValue,
     );
@@ -766,7 +782,12 @@ fn validator_accepts_rvalue_load_and_checks_load_copy_place_types() {
     ] {
         let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
         let entry = module.functions[module.start_function.unwrap().0 as usize].entry;
-        add_local(&mut module, entry, LocalId(9000), builtin_type_ids::INT);
+        add_local(
+            &mut module,
+            entry,
+            LocalId(9000),
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        );
         let region = module.blocks[entry.0 as usize].region;
         let expression = append_hir_expression(
             &mut module,
@@ -1187,7 +1208,6 @@ fn validate_number_comparison_for_test(
 fn validator_rejects_numeric_ops_with_invalid_fixed_domains() {
     let f32_type = fixed_type(FixedScalar::F32);
     let u32_type = fixed_type(FixedScalar::U32);
-    let i8_type = fixed_type(FixedScalar::I8);
     let cases = [
         (
             HirNumericOp {
@@ -1212,14 +1232,6 @@ fn validator_rejects_numeric_ops_with_invalid_fixed_domains() {
             },
             vec![u32_type],
             u32_type,
-        ),
-        (
-            HirNumericOp {
-                operator: NumericOperator::Negate,
-                domain: NumericScalar::Fixed(FixedScalar::I8),
-            },
-            vec![i8_type],
-            i8_type,
         ),
     ];
 
@@ -1289,14 +1301,25 @@ fn validator_accepts_valid_fixed_numeric_ops() {
         u32_type,
     )
     .expect("valid fixed integer division should pass HIR validation");
+    let i8_type = fixed_type(FixedScalar::I8);
+    validate_numeric_op_for_test(
+        HirNumericOp {
+            operator: NumericOperator::Negate,
+            domain: NumericScalar::Fixed(FixedScalar::I8),
+        },
+        &[i8_type],
+        i8_type,
+    )
+    .expect("narrow signed negation keeps its own domain and should pass HIR validation");
 }
 
 #[test]
 fn validator_accepts_uint_numeric_ops_and_rejects_mixed_or_negated_pairs() {
-    // Uint arithmetic validates in its own domain; mixed Uint/Int
-    // operands and Uint negation never reach HIR, so both are rejected here.
-    let uint_type = builtin_type_ids::UINT;
-    let int_type = builtin_type_ids::INT;
+    // U32 arithmetic validates in its own domain; a NumericOp whose operands are not
+    // converted to its domain and U32 negation are never emitted by lowering, so both
+    // are rejected here.
+    let uint_type = builtin_type_ids::fixed_scalar(FixedScalar::U32);
+    let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     for operator in [
         NumericOperator::Add,
@@ -1309,63 +1332,77 @@ fn validator_accepts_uint_numeric_ops_and_rejects_mixed_or_negated_pairs() {
         validate_numeric_op_for_test(
             HirNumericOp {
                 operator,
-                domain: NumericScalar::Uint,
+                domain: NumericScalar::Fixed(FixedScalar::U32),
             },
             &[uint_type, uint_type],
             uint_type,
         )
-        .expect("valid Uint arithmetic should pass HIR validation");
+        .expect("valid U32 arithmetic should pass HIR validation");
     }
 
-    // Uint `/` computes in Float, so a `/` NumericOp in the Uint domain itself
+    // U32 `/` computes in F64, so a `/` NumericOp in the U32 domain itself
     // is rejected: lowering must convert the operands before emitting it.
     let error = validate_numeric_op_for_test(
         HirNumericOp {
             operator: NumericOperator::Divide,
-            domain: NumericScalar::Uint,
+            domain: NumericScalar::Fixed(FixedScalar::U32),
         },
         &[uint_type, uint_type],
         uint_type,
     )
-    .expect_err("Uint division must leave the Uint domain before NumericOp");
+    .expect_err("U32 division must leave the U32 domain before NumericOp");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
 
     let error = validate_numeric_op_for_test(
         HirNumericOp {
             operator: NumericOperator::Add,
-            domain: NumericScalar::Uint,
+            domain: NumericScalar::Fixed(FixedScalar::U32),
         },
         &[uint_type, int_type],
         uint_type,
     )
-    .expect_err("mixed Uint/Int operands must be converted before NumericOp");
+    .expect_err("mixed U32/I32 operands must be converted before NumericOp");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
 
     let error = validate_numeric_op_for_test(
         HirNumericOp {
             operator: NumericOperator::Negate,
-            domain: NumericScalar::Uint,
+            domain: NumericScalar::Fixed(FixedScalar::U32),
         },
         &[uint_type],
         uint_type,
     )
-    .expect_err("Uint negation has no operator domain");
+    .expect_err("U32 negation has no operator domain");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
 }
 
 #[test]
 fn validator_accepts_uint_cast_pairs_and_comparisons() {
-    // Uint participates in fallible CastOp narrowing and in exact
-    // Uint/Uint and Uint/Int comparisons without any conversion failure.
-    validate_number_cast_op_for_test(NumericScalar::Uint, NumericScalar::Int)
-        .expect("Uint-to-Int narrowing should use a fallible CastOp");
-    validate_number_cast_op_for_test(NumericScalar::Int, NumericScalar::Uint)
-        .expect("Int-to-Uint narrowing should use a fallible CastOp");
+    // U32 participates in fallible CastOp narrowing and in exact
+    // U32/U32 and U32/I32 comparisons without any conversion failure.
+    validate_number_cast_op_for_test(
+        NumericScalar::Fixed(FixedScalar::U32),
+        NumericScalar::Fixed(FixedScalar::I32),
+    )
+    .expect("U32-to-I32 narrowing should use a fallible CastOp");
+    validate_number_cast_op_for_test(
+        NumericScalar::Fixed(FixedScalar::I32),
+        NumericScalar::Fixed(FixedScalar::U32),
+    )
+    .expect("I32-to-U32 narrowing should use a fallible CastOp");
 
-    validate_comparison_for_test(builtin_type_ids::UINT, builtin_type_ids::UINT, HirBinOp::Lt)
-        .expect("exact Uint comparison should remain valid");
-    validate_comparison_for_test(builtin_type_ids::UINT, builtin_type_ids::INT, HirBinOp::Gt)
-        .expect("exact Uint/Int comparison should remain valid");
+    validate_comparison_for_test(
+        builtin_type_ids::fixed_scalar(FixedScalar::U32),
+        builtin_type_ids::fixed_scalar(FixedScalar::U32),
+        HirBinOp::Lt,
+    )
+    .expect("exact U32 comparison should remain valid");
+    validate_comparison_for_test(
+        builtin_type_ids::fixed_scalar(FixedScalar::U32),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        HirBinOp::Gt,
+    )
+    .expect("exact U32/I32 comparison should remain valid");
 }
 
 #[test]
@@ -1390,9 +1427,9 @@ fn validator_accepts_number_operator_scale_rules_and_int_power_exponent() {
     validate_number_numeric_op_for_test(
         NumericOperator::Power,
         scale_two,
-        Some(NumericScalar::Int),
+        Some(NumericScalar::Fixed(FixedScalar::I32)),
     )
-    .expect("Dec power with a profile Int exponent should be valid");
+    .expect("Dec power with an I32 exponent should be valid");
 }
 
 #[test]
@@ -1420,7 +1457,7 @@ fn validator_rejects_number_operator_scale_and_operand_mismatches() {
     let error = validate_number_numeric_op_for_test(
         NumericOperator::Add,
         scale_two,
-        Some(NumericScalar::Int),
+        Some(NumericScalar::Fixed(FixedScalar::I32)),
     )
     .expect_err("mixed integer operands must be explicitly converted before NumericOp");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
@@ -1442,8 +1479,11 @@ fn validator_rejects_unregistered_number_domain_without_panicking() {
             operator: NumericOperator::Add,
             domain: NumericScalar::Number(scale),
         },
-        &[builtin_type_ids::INT, builtin_type_ids::INT],
-        builtin_type_ids::INT,
+        &[
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        ],
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
     )
     .expect_err("an unregistered Dec scale cannot form a valid HIR numeric domain");
 
@@ -1460,8 +1500,11 @@ fn validator_distinguishes_fallible_number_cast_pairs() {
         NumericScalar::Number(scale_two),
     )
     .expect("Dec scale narrowing should use a fallible CastOp");
-    validate_number_cast_op_for_test(NumericScalar::Number(scale_two), NumericScalar::Int)
-        .expect("Dec-to-Int should use a fallible CastOp");
+    validate_number_cast_op_for_test(
+        NumericScalar::Number(scale_two),
+        NumericScalar::Fixed(FixedScalar::I32),
+    )
+    .expect("Dec-to-I32 should use a fallible CastOp");
 
     let error = validate_number_cast_op_for_test(
         NumericScalar::Number(scale_two),
@@ -1475,12 +1518,18 @@ fn validator_distinguishes_fallible_number_cast_pairs() {
             NumericScalar::Number(scale_two),
             NumericScalar::Number(scale_two),
         ),
-        (NumericScalar::Number(scale_two), NumericScalar::Float),
+        (
+            NumericScalar::Number(scale_two),
+            NumericScalar::Fixed(FixedScalar::F64),
+        ),
         (
             NumericScalar::Number(scale_two),
             NumericScalar::Fixed(FixedScalar::Byte),
         ),
-        (NumericScalar::Float, NumericScalar::Number(scale_two)),
+        (
+            NumericScalar::Fixed(FixedScalar::F64),
+            NumericScalar::Number(scale_two),
+        ),
     ] {
         let error = validate_number_cast_op_for_test(source, target)
             .expect_err("unsupported Dec cast pair must have no HIR policy row");
@@ -1492,11 +1541,11 @@ fn validator_distinguishes_fallible_number_cast_pairs() {
 fn validator_rejects_numeric_conversion_cast_source_policy_mismatch() {
     let error = validate_cast_op_for_test(
         BuiltinCastPolicyId::NumericConversion {
-            source: NumericScalar::Float,
-            target: NumericScalar::Int,
+            source: NumericScalar::Fixed(FixedScalar::F64),
+            target: NumericScalar::Fixed(FixedScalar::I32),
         },
-        builtin_type_ids::INT,
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         None,
     )
     .expect_err("validator should reject a CastOp source that disagrees with its policy");
@@ -1508,10 +1557,10 @@ fn validator_rejects_numeric_conversion_cast_source_policy_mismatch() {
 fn validator_rejects_numeric_conversion_cast_carrier_success_type_mismatch() {
     let error = validate_cast_op_for_test(
         BuiltinCastPolicyId::NumericConversion {
-            source: NumericScalar::Int,
-            target: NumericScalar::Int,
+            source: NumericScalar::Fixed(FixedScalar::I32),
+            target: NumericScalar::Fixed(FixedScalar::I32),
         },
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         fixed_type(FixedScalar::U8),
         None,
     )
@@ -1524,11 +1573,11 @@ fn validator_rejects_numeric_conversion_cast_carrier_success_type_mismatch() {
 fn validator_rejects_numeric_conversion_cast_carrier_error_type_mismatch() {
     let error = validate_cast_op_for_test(
         BuiltinCastPolicyId::NumericConversion {
-            source: NumericScalar::Int,
-            target: NumericScalar::Int,
+            source: NumericScalar::Fixed(FixedScalar::I32),
+            target: NumericScalar::Fixed(FixedScalar::I32),
         },
-        builtin_type_ids::INT,
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         Some(builtin_type_ids::STRING),
     )
     .expect_err("validator should reject a CastOp carrier with a non-builtin error slot");
@@ -1548,20 +1597,24 @@ fn validator_uses_numeric_comparison_compatibility_and_keeps_same_type_other_val
         .expect("same-type Byte comparison should remain valid");
 
     let f64_type = fixed_type(FixedScalar::F64);
-    let error = validate_comparison_for_test(builtin_type_ids::INT, f64_type, HirBinOp::Eq)
-        .expect_err("incompatible numeric comparison should be rejected");
+    let error = validate_comparison_for_test(
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        f64_type,
+        HirBinOp::Eq,
+    )
+    .expect_err("incompatible numeric comparison should be rejected");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
 }
 
 #[test]
 fn validator_requires_explicit_integer_to_number_comparison_conversion() {
-    validate_number_comparison_for_test(NumericScalar::Int, true)
-        .expect("explicit profile Int-to-Dec comparison conversion should pass");
+    validate_number_comparison_for_test(NumericScalar::Fixed(FixedScalar::I32), true)
+        .expect("explicit I32-to-Dec comparison conversion should pass");
     validate_number_comparison_for_test(NumericScalar::Fixed(FixedScalar::U64), true)
         .expect("explicit fixed-integer-to-Dec comparison conversion should pass");
 
-    let error = validate_number_comparison_for_test(NumericScalar::Int, false)
-        .expect_err("mixed Dec and Int comparison must be converted in HIR");
+    let error = validate_number_comparison_for_test(NumericScalar::Fixed(FixedScalar::I32), false)
+        .expect_err("mixed Dec and I32 comparison must be converted in HIR");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
 }
 
@@ -1638,7 +1691,7 @@ fn validator_rejects_numeric_op_operand_shape_mismatch() {
     let span = None;
     let entry_block_index = start_entry_block_index(&module);
     let entry_region = module.blocks[entry_block_index].region;
-    let int_type = type_environment.builtins().int;
+    let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let result_local = LocalId(9000);
 
     module.blocks[entry_block_index].locals.push(HirLocal {
@@ -1657,7 +1710,7 @@ fn validator_rejects_numeric_op_operand_shape_mismatch() {
         kind: HirStatementKind::NumericOp {
             op: HirNumericOp {
                 operator: NumericOperator::Negate,
-                domain: NumericScalar::Int,
+                domain: NumericScalar::Fixed(FixedScalar::I32),
             },
             failure_mode: NumericFailureMode::Trap,
             operands: HirNumericOperands::Binary { left, right },
@@ -1687,8 +1740,8 @@ fn validator_rejects_numeric_op_operand_domain_mismatch() {
     let span = None;
     let entry_block_index = start_entry_block_index(&module);
     let entry_region = module.blocks[entry_block_index].region;
-    let int_type = type_environment.builtins().int;
-    let float_type = type_environment.builtins().float;
+    let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let float_type = builtin_type_ids::fixed_scalar(FixedScalar::F64);
     let result_local = LocalId(9000);
 
     module.blocks[entry_block_index].locals.push(HirLocal {
@@ -1699,7 +1752,7 @@ fn validator_rejects_numeric_op_operand_domain_mismatch() {
         span: None,
     });
 
-    // Int-domain addition fed Float operands: lowering must convert explicitly, so a
+    // I32-domain addition fed F64 operands: lowering must convert explicitly, so a
     // mismatched operand type is a builder bug the validator has to catch.
     let left = float_expression(1.0, float_type, entry_region, &span, &mut module);
     let right = float_expression(2.0, float_type, entry_region, &span, &mut module);
@@ -1709,7 +1762,7 @@ fn validator_rejects_numeric_op_operand_domain_mismatch() {
         kind: HirStatementKind::NumericOp {
             op: HirNumericOp {
                 operator: NumericOperator::Add,
-                domain: NumericScalar::Int,
+                domain: NumericScalar::Fixed(FixedScalar::I32),
             },
             failure_mode: NumericFailureMode::Trap,
             operands: HirNumericOperands::Binary { left, right },
@@ -1734,7 +1787,7 @@ fn validator_rejects_integer_divide_on_float_domain() {
     let span = None;
     let entry_block_index = start_entry_block_index(&module);
     let entry_region = module.blocks[entry_block_index].region;
-    let float_type = type_environment.builtins().float;
+    let float_type = builtin_type_ids::fixed_scalar(FixedScalar::F64);
     let result_local = LocalId(9000);
 
     module.blocks[entry_block_index].locals.push(HirLocal {
@@ -1748,13 +1801,13 @@ fn validator_rejects_integer_divide_on_float_domain() {
     let left = float_expression(1.0, float_type, entry_region, &span, &mut module);
     let right = float_expression(2.0, float_type, entry_region, &span, &mut module);
 
-    // Truncating `//` needs an integer domain; real `/` is the only division on Float.
+    // Truncating `//` needs an integer domain; real `/` is the only division on F64.
     let statement = HirStatement {
         id: HirNodeId(9000),
         kind: HirStatementKind::NumericOp {
             op: HirNumericOp {
                 operator: NumericOperator::IntegerDivide,
-                domain: NumericScalar::Float,
+                domain: NumericScalar::Fixed(FixedScalar::F64),
             },
             failure_mode: NumericFailureMode::Trap,
             operands: HirNumericOperands::Binary { left, right },
@@ -1767,7 +1820,7 @@ fn validator_rejects_integer_divide_on_float_domain() {
     module.blocks[entry_block_index].statements.push(statement);
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject IntegerDivide on a Float domain");
+        .expect_err("validator should reject IntegerDivide on an F64 domain");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("operator does not match the domain"));
@@ -1818,7 +1871,7 @@ fn validator_accepts_internal_string_append_with_scalar_chunk() {
         &span,
         string_type,
         string_type,
-        type_environment.builtins().int,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
     );
     let statement = HirStatement {
         id: HirNodeId(9013),
@@ -1843,8 +1896,8 @@ fn validator_rejects_string_append_with_non_string_result() {
         &mut module,
         &span,
         string_type,
-        type_environment.builtins().int,
-        type_environment.builtins().int,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
     );
     let statement = HirStatement {
         id: HirNodeId(9014),
@@ -1872,9 +1925,9 @@ fn validator_rejects_string_append_with_non_string_accumulator() {
     let expression = append_expression_for_validation(
         &mut module,
         &span,
-        type_environment.builtins().int,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         type_environment.builtins().string,
-        type_environment.builtins().int,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
     );
     let statement = HirStatement {
         id: HirNodeId(9015),
@@ -1901,7 +1954,7 @@ fn validator_rejects_plain_numeric_unary_op() {
     let span = None;
     let entry_block_index = start_entry_block_index(&module);
     let entry_region = module.blocks[entry_block_index].region;
-    let int_type = type_environment.builtins().int;
+    let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let operand = int_expression(1, int_type, entry_region, &span, &mut module);
 
@@ -1938,23 +1991,32 @@ fn validator_rejects_plain_numeric_unary_op() {
 
 fn inject_float_statement(
     module: &mut HirModule,
-    type_environment: &TypeEnvironment,
     span: &Option<SourceSpan>,
     kind: HirStatementKind,
+    source_type: TypeId,
+    result_type: TypeId,
+) {
+    let entry_block_index = start_entry_block_index(module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let source = float_expression(1.5, source_type, entry_region, span, module);
+    inject_float_statement_with_source(module, span, kind, source, result_type);
+}
+
+/// Emits a `FormatFloat`/`ValidateFloat` statement over an already-built source expression.
+///
+/// WHY: negative fixtures need a source literal that is valid for its own non-float type, so the
+///      statement's own type guard rejects it instead of an ill-typed literal.
+fn inject_float_statement_with_source(
+    module: &mut HirModule,
+    span: &Option<SourceSpan>,
+    kind: HirStatementKind,
+    source: HirValueId,
     result_type: TypeId,
 ) {
     let _path_fork = super::PathInternerFork::empty();
     let entry_block_index = start_entry_block_index(module);
     let entry_region = module.blocks[entry_block_index].region;
     let result_local = LocalId(9000);
-
-    let source = float_expression(
-        1.5,
-        type_environment.builtins().float,
-        entry_region,
-        span,
-        module,
-    );
 
     {
         let entry_block = &mut module.blocks[entry_block_index];
@@ -1991,6 +2053,28 @@ fn inject_float_statement(
     module.blocks[entry_block_index].statements.push(statement);
 }
 
+/// Builds a mapped fixed binary-float literal row for `scalar`/`type_id`.
+fn fixed_float_source(
+    module: &mut HirModule,
+    span: &Option<SourceSpan>,
+    scalar: FixedScalar,
+    type_id: TypeId,
+) -> HirValueId {
+    let entry_block_index = start_entry_block_index(module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let value = FixedScalarValue::binary_float(scalar, 1.5)
+        .expect("1.5 is exactly representable at every supported binary-float precision");
+    let expression_id = append_hir_expression(
+        module,
+        HirExpressionKind::FixedScalar(value),
+        type_id,
+        entry_region,
+        ValueKind::RValue,
+    );
+    module.side_table.map_value(*span, expression_id, *span);
+    expression_id
+}
+
 #[test]
 fn validator_accepts_format_float_trap() {
     let _path_fork = super::PathInternerFork::empty();
@@ -2000,13 +2084,13 @@ fn validator_accepts_format_float_trap() {
 
     inject_float_statement(
         &mut module,
-        &type_environment,
         &span,
         HirStatementKind::FormatFloat {
             source: HirValueId(0),
             failure_mode: NumericFailureMode::Trap,
             result: HirLocalDestination::Define(LocalId(0)),
         },
+        builtin_type_ids::fixed_scalar(FixedScalar::F64),
         string_type,
     );
 
@@ -2019,11 +2103,10 @@ fn validator_accepts_validate_float_trap() {
     let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let span = None;
-    let float_type = type_environment.builtins().float;
+    let float_type = builtin_type_ids::fixed_scalar(FixedScalar::F64);
 
     inject_float_statement(
         &mut module,
-        &type_environment,
         &span,
         HirStatementKind::ValidateFloat {
             source: HirValueId(0),
@@ -2031,10 +2114,98 @@ fn validator_accepts_validate_float_trap() {
             result: HirLocalDestination::Define(LocalId(0)),
         },
         float_type,
+        float_type,
     );
 
     validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("validator should accept ValidateFloat with Trap and Float result local");
+        .expect("validator should accept ValidateFloat with Trap and F64 result local");
+}
+
+#[test]
+fn validator_accepts_validate_float_with_exact_fixed_f64_type() {
+    let _path_fork = super::PathInternerFork::empty();
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let span = None;
+    let f64_type = fixed_type(FixedScalar::F64);
+    let source = fixed_float_source(&mut module, &span, FixedScalar::F64, f64_type);
+
+    inject_float_statement_with_source(
+        &mut module,
+        &span,
+        HirStatementKind::ValidateFloat {
+            source: HirValueId(0),
+            failure_mode: NumericFailureMode::Trap,
+            result: HirLocalDestination::Define(LocalId(0)),
+        },
+        source,
+        f64_type,
+    );
+
+    validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect("validator should accept ValidateFloat with an exact fixed F64 source and result");
+}
+
+#[test]
+fn validator_rejects_validate_float_result_type_mismatch() {
+    let _path_fork = super::PathInternerFork::empty();
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let span = None;
+    let f64_type = fixed_type(FixedScalar::F64);
+    let source = fixed_float_source(&mut module, &span, FixedScalar::F64, f64_type);
+
+    inject_float_statement_with_source(
+        &mut module,
+        &span,
+        HirStatementKind::ValidateFloat {
+            source: HirValueId(0),
+            failure_mode: NumericFailureMode::Trap,
+            result: HirLocalDestination::Define(LocalId(0)),
+        },
+        source,
+        // A narrower binary-float identity must not erode the validated exact type.
+        fixed_type(FixedScalar::F32),
+    );
+
+    let error = validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect_err("validator should reject a result local that erodes the validated type");
+
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+}
+
+#[test]
+fn validator_rejects_validate_float_with_non_float_source() {
+    let _path_fork = super::PathInternerFork::empty();
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let span = None;
+    let i32_type = fixed_type(FixedScalar::I32);
+    let entry_block_index = start_entry_block_index(&module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let i32_value = FixedScalarValue::signed(FixedScalar::I32, 41).expect("41 fits in I32");
+    let source = append_hir_expression(
+        &mut module,
+        HirExpressionKind::FixedScalar(i32_value),
+        i32_type,
+        entry_region,
+        ValueKind::RValue,
+    );
+    module.side_table.map_value(span, source, span);
+
+    inject_float_statement_with_source(
+        &mut module,
+        &span,
+        HirStatementKind::ValidateFloat {
+            source: HirValueId(0),
+            failure_mode: NumericFailureMode::Trap,
+            result: HirLocalDestination::Define(LocalId(0)),
+        },
+        source,
+        i32_type,
+    );
+
+    let error = validate_module_for_tests(&module, &string_table, &type_environment)
+        .expect_err("validator should reject a non-float ValidateFloat source");
+
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
 }
 
 #[test]
@@ -2042,17 +2213,17 @@ fn validator_rejects_format_float_trap_with_non_string_result() {
     let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let span = None;
-    let float_type = type_environment.builtins().float;
+    let float_type = builtin_type_ids::fixed_scalar(FixedScalar::F64);
 
     inject_float_statement(
         &mut module,
-        &type_environment,
         &span,
         HirStatementKind::FormatFloat {
             source: HirValueId(0),
             failure_mode: NumericFailureMode::Trap,
             result: HirLocalDestination::Define(LocalId(0)),
         },
+        float_type,
         float_type,
     );
 
@@ -2078,13 +2249,13 @@ fn validator_accepts_format_float_return_error_with_carrier() {
 
     inject_float_statement(
         &mut module,
-        &type_environment,
         &span,
         HirStatementKind::FormatFloat {
             source: HirValueId(0),
             failure_mode: NumericFailureMode::ReturnError,
             result: HirLocalDestination::Define(LocalId(0)),
         },
+        builtin_type_ids::fixed_scalar(FixedScalar::F64),
         carrier_type,
     );
 
@@ -2101,13 +2272,13 @@ fn validator_rejects_format_float_return_error_without_carrier() {
 
     inject_float_statement(
         &mut module,
-        &type_environment,
         &span,
         HirStatementKind::FormatFloat {
             source: HirValueId(0),
             failure_mode: NumericFailureMode::ReturnError,
             result: HirLocalDestination::Define(LocalId(0)),
         },
+        builtin_type_ids::fixed_scalar(FixedScalar::F64),
         string_type,
     );
 
@@ -2126,17 +2297,17 @@ fn validator_rejects_validate_float_return_error_without_carrier() {
     let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let span = None;
-    let float_type = type_environment.builtins().float;
+    let float_type = builtin_type_ids::fixed_scalar(FixedScalar::F64);
 
     inject_float_statement(
         &mut module,
-        &type_environment,
         &span,
         HirStatementKind::ValidateFloat {
             source: HirValueId(0),
             failure_mode: NumericFailureMode::ReturnError,
             result: HirLocalDestination::Define(LocalId(0)),
         },
+        float_type,
         float_type,
     );
 
@@ -2179,11 +2350,12 @@ fn validator_rejects_discharged_mode_on_float_and_range_step_statements() {
     for (kind, expected_message) in float_cases {
         let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
         let span = None;
+        let float_type = builtin_type_ids::fixed_scalar(FixedScalar::F64);
         let success_type = match &kind {
             HirStatementKind::FormatFloat { .. } => type_environment.builtins().string,
-            _ => type_environment.builtins().float,
+            _ => float_type,
         };
-        inject_float_statement(&mut module, &type_environment, &span, kind, success_type);
+        inject_float_statement(&mut module, &span, kind, float_type, success_type);
 
         let error = validate_module_for_tests(&module, &string_table, &type_environment)
             .expect_err("validator should reject Infallible on float statements");
@@ -2271,8 +2443,18 @@ fn validator_rejects_invalid_jump_target() {
 fn validator_accepts_typed_jump_definition_from_local_source() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let entry = module.functions[module.start_function.unwrap().0 as usize].entry;
-    add_local(&mut module, entry, LocalId(9000), builtin_type_ids::INT);
-    add_local(&mut module, entry, LocalId(9001), builtin_type_ids::INT);
+    add_local(
+        &mut module,
+        entry,
+        LocalId(9000),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+    );
+    add_local(
+        &mut module,
+        entry,
+        LocalId(9001),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+    );
     install_entry_self_jump(
         &mut module,
         vec![HirJumpArgument {
@@ -2289,7 +2471,12 @@ fn validator_accepts_typed_jump_definition_from_local_source() {
 fn validator_rejects_jump_with_unknown_source_or_destination_local() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let entry = module.functions[module.start_function.unwrap().0 as usize].entry;
-    add_local(&mut module, entry, LocalId(9001), builtin_type_ids::INT);
+    add_local(
+        &mut module,
+        entry,
+        LocalId(9001),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+    );
     install_entry_self_jump(
         &mut module,
         vec![HirJumpArgument {
@@ -2305,7 +2492,12 @@ fn validator_rejects_jump_with_unknown_source_or_destination_local() {
 
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let entry = module.functions[module.start_function.unwrap().0 as usize].entry;
-    add_local(&mut module, entry, LocalId(9000), builtin_type_ids::INT);
+    add_local(
+        &mut module,
+        entry,
+        LocalId(9000),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+    );
     install_entry_self_jump(
         &mut module,
         vec![HirJumpArgument {
@@ -2324,8 +2516,18 @@ fn validator_rejects_jump_with_unknown_source_or_destination_local() {
 fn validator_rejects_mismatched_and_duplicate_jump_destinations() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let entry = module.functions[module.start_function.unwrap().0 as usize].entry;
-    add_local(&mut module, entry, LocalId(9000), builtin_type_ids::INT);
-    add_local(&mut module, entry, LocalId(9001), builtin_type_ids::FLOAT);
+    add_local(
+        &mut module,
+        entry,
+        LocalId(9000),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+    );
+    add_local(
+        &mut module,
+        entry,
+        LocalId(9001),
+        builtin_type_ids::fixed_scalar(FixedScalar::F64),
+    );
     install_entry_self_jump(
         &mut module,
         vec![HirJumpArgument {
@@ -2342,7 +2544,12 @@ fn validator_rejects_mismatched_and_duplicate_jump_destinations() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let entry = module.functions[module.start_function.unwrap().0 as usize].entry;
     for id in [LocalId(9000), LocalId(9001), LocalId(9002)] {
-        add_local(&mut module, entry, id, builtin_type_ids::INT);
+        add_local(
+            &mut module,
+            entry,
+            id,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        );
     }
     install_entry_self_jump(
         &mut module,
@@ -2369,8 +2576,18 @@ fn validator_requires_jump_destinations_to_belong_to_the_target_block() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let entry = module.functions[module.start_function.unwrap().0 as usize].entry;
     let region = module.blocks[entry.0 as usize].region;
-    add_local(&mut module, entry, LocalId(9000), builtin_type_ids::INT);
-    add_local(&mut module, entry, LocalId(9001), builtin_type_ids::INT);
+    add_local(
+        &mut module,
+        entry,
+        LocalId(9000),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+    );
+    add_local(
+        &mut module,
+        entry,
+        LocalId(9001),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+    );
     let target = append_failure_block(&mut module, region, vec![]);
     module.blocks[entry.0 as usize].terminator = HirTerminator::Jump {
         target,
@@ -2393,13 +2610,18 @@ fn validator_requires_all_incoming_edges_to_agree_on_destination_set_and_arity()
     let region = module.blocks[entry.0 as usize].region;
     let source = LocalId(9000);
     let destination = LocalId(9001);
-    add_local(&mut module, entry, source, builtin_type_ids::INT);
+    add_local(
+        &mut module,
+        entry,
+        source,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+    );
     let target = append_failure_block(
         &mut module,
         region,
         vec![HirLocal {
             id: destination,
-            ty: builtin_type_ids::INT,
+            ty: builtin_type_ids::fixed_scalar(FixedScalar::I32),
             mutable: false,
             region,
             span: None,
@@ -2442,22 +2664,32 @@ fn validator_requires_all_incoming_edges_to_agree_on_destination_set_and_arity()
     let right_source = LocalId(9001);
     let left_destination = LocalId(9002);
     let right_destination = LocalId(9003);
-    add_local(&mut module, entry, left_source, builtin_type_ids::INT);
-    add_local(&mut module, entry, right_source, builtin_type_ids::INT);
+    add_local(
+        &mut module,
+        entry,
+        left_source,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+    );
+    add_local(
+        &mut module,
+        entry,
+        right_source,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+    );
     let target = append_failure_block(
         &mut module,
         region,
         vec![
             HirLocal {
                 id: left_destination,
-                ty: builtin_type_ids::INT,
+                ty: builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 mutable: false,
                 region,
                 span: None,
             },
             HirLocal {
                 id: right_destination,
-                ty: builtin_type_ids::INT,
+                ty: builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 mutable: false,
                 region,
                 span: None,
@@ -2512,22 +2744,32 @@ fn validator_accepts_reordered_incoming_jump_destination_pairs() {
     let second_source = LocalId(9001);
     let first_destination = LocalId(9002);
     let second_destination = LocalId(9003);
-    add_local(&mut module, entry, first_source, builtin_type_ids::INT);
-    add_local(&mut module, entry, second_source, builtin_type_ids::INT);
+    add_local(
+        &mut module,
+        entry,
+        first_source,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+    );
+    add_local(
+        &mut module,
+        entry,
+        second_source,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+    );
     let target = append_failure_block(
         &mut module,
         region,
         vec![
             HirLocal {
                 id: first_destination,
-                ty: builtin_type_ids::INT,
+                ty: builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 mutable: false,
                 region,
                 span: None,
             },
             HirLocal {
                 id: second_destination,
-                ty: builtin_type_ids::INT,
+                ty: builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 mutable: false,
                 region,
                 span: None,
@@ -2618,13 +2860,13 @@ fn validator_rejects_jump_sources_owned_by_another_function() {
         &mut module,
         start_entry,
         LocalId(9000),
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
     );
     add_local(
         &mut module,
         helper_entry,
         LocalId(9001),
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
     );
     module.blocks[start_entry.0 as usize].terminator = HirTerminator::Jump {
         target: start_entry,
@@ -2648,7 +2890,7 @@ fn validator_requires_parameters_to_be_defined_in_the_entry_block() {
     let region = module.blocks[entry.0 as usize].region;
     let non_entry_local = HirLocal {
         id: LocalId(9000),
-        ty: builtin_type_ids::INT,
+        ty: builtin_type_ids::fixed_scalar(FixedScalar::I32),
         mutable: false,
         region,
         span: None,
@@ -2670,12 +2912,17 @@ fn validator_requires_parameters_to_be_defined_in_the_entry_block() {
 fn validator_rejects_parameter_definition_destinations_but_accepts_updates() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let parameter = LocalId(9000);
-    let entry = add_entry_parameter(&mut module, parameter, builtin_type_ids::INT, false);
+    let entry = add_entry_parameter(
+        &mut module,
+        parameter,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        false,
+    );
     let region = module.blocks[entry.0 as usize].region;
     let value = append_hir_expression(
         &mut module,
-        HirExpressionKind::Int(1),
-        builtin_type_ids::INT,
+        HirExpressionKind::FixedScalar(i32_value(1)),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         region,
         ValueKind::Const,
     );
@@ -2729,7 +2976,12 @@ fn validator_rejects_parameter_definition_destinations_but_accepts_updates() {
 
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let parameter = LocalId(9000);
-    add_entry_parameter(&mut module, parameter, builtin_type_ids::INT, false);
+    add_entry_parameter(
+        &mut module,
+        parameter,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        false,
+    );
     install_entry_self_jump(
         &mut module,
         vec![HirJumpArgument {
@@ -2745,12 +2997,17 @@ fn validator_rejects_parameter_definition_destinations_but_accepts_updates() {
 
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let parameter = LocalId(9000);
-    let entry = add_entry_parameter(&mut module, parameter, builtin_type_ids::INT, true);
+    let entry = add_entry_parameter(
+        &mut module,
+        parameter,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        true,
+    );
     let region = module.blocks[entry.0 as usize].region;
     let value = append_hir_expression(
         &mut module,
-        HirExpressionKind::Int(1),
-        builtin_type_ids::INT,
+        HirExpressionKind::FixedScalar(i32_value(1)),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         region,
         ValueKind::Const,
     );
@@ -2778,7 +3035,12 @@ fn validator_rejects_non_literal_match_pattern() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param_with_type_id(x, builtin_type_ids::INT, false, None)],
+            parameters: vec![param_with_type_id(
+                x,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                false,
+                None,
+            )],
             returns: vec![],
         },
         vec![node(NodeKind::Return(vec![]), None)],
@@ -2804,7 +3066,7 @@ fn validator_rejects_non_literal_match_pattern() {
     let value_span = None;
     let scrutinee = append_hir_expression(
         &mut module,
-        HirExpressionKind::Int(1),
+        HirExpressionKind::FixedScalar(i32_value(1)),
         local_ty,
         region,
         ValueKind::Const,
@@ -2844,7 +3106,7 @@ fn validator_rechecks_shared_expression_in_match_pattern_context() {
     let entry_block_index = start_entry_block_index(&module);
     let entry_block_id = module.blocks[entry_block_index].id;
     let entry_region = module.blocks[entry_block_index].region;
-    let int_type = type_environment.builtins().int;
+    let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let bool_type = type_environment.builtins().bool;
     let value_span = SourceSpan::new(SourceId::from_index(1), LocalSpan::source_start());
     let match_span = SourceSpan::new(SourceId::from_index(2), LocalSpan::source_start());
@@ -2853,7 +3115,7 @@ fn validator_rechecks_shared_expression_in_match_pattern_context() {
     let shared_value = module
         .expressions
         .append_expression(HirExpression {
-            kind: HirExpressionKind::Int(1),
+            kind: HirExpressionKind::FixedScalar(i32_value(1)),
             ty: int_type,
             value_kind: ValueKind::Const,
             region: entry_region,
@@ -3035,7 +3297,11 @@ fn validator_rejects_missing_side_table_mappings() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, authored_span, ValueMode::ImmutableOwned),
+                    Expression::fixed_scalar(
+                        i32_value(1),
+                        authored_span,
+                        ValueMode::ImmutableOwned,
+                    ),
                 )),
                 authored_span,
             ),
@@ -3135,7 +3401,10 @@ fn validator_rejects_option_and_result_containing_generic_parameter() {
             let generic_type_id = generic_parameter_type_id(string_table, type_environment);
             type_environment.intern_constructed(
                 TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier),
-                Box::new([type_environment.builtins().int, generic_type_id]),
+                Box::new([
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    generic_type_id,
+                ]),
             )
         });
     assert_eq!(result_error.error_type, ErrorType::HirTransformation);
@@ -3170,7 +3439,7 @@ fn validator_rejects_function_type_containing_generic_parameter() {
         let generic_type_id = generic_parameter_type_id(string_table, type_environment);
         type_environment.intern_function(FunctionTypeKey {
             parameters: Box::new([generic_type_id]),
-            returns: Box::new([type_environment.builtins().int]),
+            returns: Box::new([builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
             error_return: None,
         })
     });
@@ -3209,7 +3478,7 @@ fn validator_rejects_struct_field_type_containing_generic_parameter() {
 
     module.structs.push(HirStruct {
         id: StructId(9000),
-        frontend_type_id: type_environment.builtins().int,
+        frontend_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
         fields: vec![HirField {
             id: FieldId(9000),
             ty: collection_type_id,
@@ -3253,7 +3522,7 @@ fn validator_rejects_function_parameter_type_containing_generic_parameter() {
         FunctionSignature {
             parameters: vec![param_with_type_id(
                 value_name,
-                builtin_type_ids::INT,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 false,
                 None,
             )],
@@ -3291,7 +3560,7 @@ fn validator_rejects_choice_payload_type_containing_generic_parameter() {
 
     module.choices.push(HirChoice {
         id: ChoiceId(9000),
-        frontend_type_id: type_environment.builtins().int,
+        frontend_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
         variants: vec![HirChoiceVariant {
             name: string_table.intern("Some"),
             fields: vec![HirChoiceField {
@@ -3319,7 +3588,7 @@ fn validator_rejects_expression_type_containing_generic_parameter() {
     let span = None;
     let value_id = append_hir_expression(
         &mut module,
-        HirExpressionKind::Int(1),
+        HirExpressionKind::FixedScalar(i32_value(1)),
         generic_type_id,
         region,
         ValueKind::Const,
@@ -3367,7 +3636,7 @@ fn validator_rejects_anonymous_const_record_marker_on_expression() {
     let span = None;
     let value_id = append_hir_expression(
         &mut module,
-        HirExpressionKind::Int(1),
+        HirExpressionKind::FixedScalar(i32_value(1)),
         marker,
         region,
         ValueKind::Const,
@@ -3503,7 +3772,7 @@ fn validator_rejects_cycle_in_expression_id_graph() {
             tuple: HirValueId(next_expression_id),
             index: 0,
         },
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         entry_region,
         ValueKind::RValue,
     );
@@ -3534,7 +3803,7 @@ fn validator_rejects_dangling_expression_child_id() {
             tuple: HirValueId(u32::MAX),
             index: 0,
         },
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         entry_region,
         ValueKind::RValue,
     );
@@ -3559,7 +3828,7 @@ fn validator_rejects_dangling_index_expression_id() {
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let entry_block_index = start_entry_block_index(&module);
     let entry_region = module.blocks[entry_block_index].region;
-    let element_type = type_environment.builtins().int;
+    let element_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let collection_type = type_environment.intern_collection(element_type, None);
     let local_id = LocalId(9003);
     let entry_block_id = module.blocks[entry_block_index].id;
@@ -3749,7 +4018,7 @@ fn hir_variant_construct_option_invalid_index_rejected() {
     let region = module.blocks[entry_block_index].region;
 
     let mut type_env = type_environment.clone();
-    let int_ty = builtin_type_ids::INT;
+    let int_ty = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let option_ty = type_env.intern_constructed(
         crate::compiler_frontend::datatypes::ids::TypeConstructor::Builtin(
             crate::compiler_frontend::datatypes::ids::BuiltinTypeConstructor::Option,
@@ -3824,7 +4093,7 @@ fn hir_variant_construct_result_invalid_index_rejected() {
     let region = module.blocks[entry_block_index].region;
 
     let mut type_env = type_environment.clone();
-    let int_ty = builtin_type_ids::INT;
+    let int_ty = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let result_ty = type_env.intern_constructed(
         crate::compiler_frontend::datatypes::ids::TypeConstructor::Builtin(
             crate::compiler_frontend::datatypes::ids::BuiltinTypeConstructor::FallibleCarrier,
@@ -4123,7 +4392,7 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
 fn validator_rejects_collection_expression_with_non_collection_type() {
     let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let int_type = type_environment.builtins().int;
+    let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     inject_collection_expression_statement(&mut module, int_type, None);
 
     let error = validate_module_for_tests(&module, &string_table, &type_environment)
@@ -4140,7 +4409,7 @@ fn validator_rejects_collection_expression_with_non_collection_type() {
 fn validator_accepts_collection_expression_with_growable_collection_type() {
     let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
-    let int_type = type_environment.builtins().int;
+    let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let growable_collection = type_environment.intern_collection(int_type, None);
     inject_collection_expression_statement(&mut module, growable_collection, None);
 
@@ -4152,81 +4421,12 @@ fn validator_accepts_collection_expression_with_growable_collection_type() {
 fn validator_accepts_collection_expression_with_fixed_collection_type() {
     let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
-    let int_type = type_environment.builtins().int;
+    let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let fixed_collection = type_environment.intern_collection(int_type, Some(64));
     inject_collection_expression_statement(&mut module, fixed_collection, None);
 
     validate_module_for_tests(&module, &string_table, &type_environment)
         .expect("validator should accept Collection expression with fixed collection type");
-}
-
-// ---------------------------------------------------------------------------
-// Non-finite Float literal invariant
-// ---------------------------------------------------------------------------
-
-/// WHAT: injects a `HirExpressionKind::Float(value)` expression into the start entry block and
-///       runs HIR validation.
-/// WHY: Moth Float stays finite at its profile-selected precision. Non-finite f64 literal
-///      payloads breach that invariant and must be rejected before backend lowering.
-fn inject_nonfinite_float_expression(
-    module: &mut HirModule,
-    float_type: TypeId,
-    value: f64,
-    span: &Option<SourceSpan>,
-) {
-    let _path_fork = super::PathInternerFork::empty();
-    let entry_block_index = start_entry_block_index(module);
-    let entry_region = module.blocks[entry_block_index].region;
-    let expression = float_expression(value, float_type, entry_region, span, module);
-
-    let statement = HirStatement {
-        id: HirNodeId(9000),
-        kind: HirStatementKind::Expr(expression),
-        span: *span,
-    };
-
-    module.side_table.map_statement(*span, &statement);
-    module.blocks[entry_block_index].statements.push(statement);
-}
-
-#[test]
-fn validator_rejects_nonfinite_float_literal_infinity() {
-    let _path_fork = super::PathInternerFork::empty();
-    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let float_type = type_environment.builtins().float;
-    let span = None;
-
-    inject_nonfinite_float_expression(&mut module, float_type, f64::INFINITY, &span);
-
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject HIR Float literal with INFINITY");
-
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(
-        error.msg.contains("must be finite"),
-        "expected 'must be finite' in error, got: {}",
-        error.msg
-    );
-}
-
-#[test]
-fn validator_rejects_nonfinite_float_literal_nan() {
-    let _path_fork = super::PathInternerFork::empty();
-    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let float_type = type_environment.builtins().float;
-    let span = None;
-
-    inject_nonfinite_float_expression(&mut module, float_type, f64::NAN, &span);
-
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject HIR Float literal with NaN");
-
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(
-        error.msg.contains("must be finite"),
-        "expected 'must be finite' in error, got: {}",
-        error.msg
-    );
 }
 
 #[test]
@@ -4292,8 +4492,8 @@ fn validator_rejects_number_literal_scale_that_mismatches_hir_type() {
 fn validator_owns_pending_catch_handler_edges_and_rejects_dangling_or_cross_function_records() {
     use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 
-    let source = "double |value Int| -> Int:\nreturn value + 2147483647\n;\n\
-                  recover |value Int| -> Int:\nreturn double(value) catch then 0\n;\n";
+    let source = "double |value I32| -> I32:\nreturn value + 2147483647\n;\n\
+                  recover |value I32| -> I32:\nreturn double(value) catch then 0\n;\n";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let (mut module, type_environment) = lower_ast(ast, &mut string_table, &mut path_fork)
         .expect("the direct inferred-failure catch must lower");

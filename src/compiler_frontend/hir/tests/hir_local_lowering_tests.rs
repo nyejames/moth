@@ -19,6 +19,7 @@ use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatementKind, HirWriteTarget,
 };
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, fresh_success_returns, function_node, make_test_variable, node,
@@ -26,11 +27,23 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tests::type_id_fixture_support::multi_bind_target;
+
+/// One exact `I32` literal expression.
+///
+/// WHY: these fixtures pin the exact `I32` width explicitly at the scalar carrier.
+fn i32_literal(value: i64, span: Option<SourceSpan>, value_mode: ValueMode) -> Expression {
+    Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+        span,
+        value_mode,
+    )
+}
 
 #[test]
 fn direct_self_update_predicate_requires_the_same_unprojected_place_load() {
@@ -38,7 +51,7 @@ fn direct_self_update_predicate_requires_the_same_unprojected_place_load() {
     let target = HirWriteTarget::AssignPlace(HirPlace::local(local));
     let direct_place_read = HirExpression {
         kind: HirExpressionKind::Load(HirPlace::local(local)),
-        ty: builtin_type_ids::INT,
+        ty: builtin_type_ids::fixed_scalar(FixedScalar::I32),
         value_kind: ValueKind::Place,
         region: RegionId(0),
         span: None,
@@ -118,7 +131,7 @@ fn allocates_parameter_locals_and_binds_names() {
     let body = vec![node(
         NodeKind::Return(vec![reference_expr_with_type_id(
             x,
-            builtin_type_ids::INT,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
             None,
             ValueMode::ImmutableReference,
         )]),
@@ -128,8 +141,13 @@ fn allocates_parameter_locals_and_binds_names() {
     let start_function = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param_with_type_id(x, builtin_type_ids::INT, false, None)],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+            parameters: vec![param_with_type_id(
+                x,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                false,
+                None,
+            )],
+            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
         },
         body,
         None,
@@ -187,7 +205,7 @@ fn variable_declaration_emits_local_and_definition_write() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 x,
-                Expression::int(42, None, ValueMode::ImmutableOwned),
+                i32_literal(42, None, ValueMode::ImmutableOwned),
             )),
             None,
         )],
@@ -257,8 +275,18 @@ fn immutable_and_mutable_place_initializers_keep_place_classification() {
         start_name,
         FunctionSignature {
             parameters: vec![
-                param_with_type_id(immutable_source, builtin_type_ids::INT, false, None),
-                param_with_type_id(mutable_source, builtin_type_ids::INT, true, None),
+                param_with_type_id(
+                    immutable_source,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    false,
+                    None,
+                ),
+                param_with_type_id(
+                    mutable_source,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    true,
+                    None,
+                ),
             ],
             returns: vec![],
         },
@@ -268,7 +296,7 @@ fn immutable_and_mutable_place_initializers_keep_place_classification() {
                     immutable_copy,
                     reference_expr_with_type_id(
                         immutable_source,
-                        builtin_type_ids::INT,
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         None,
                         ValueMode::ImmutableReference,
                     ),
@@ -280,7 +308,7 @@ fn immutable_and_mutable_place_initializers_keep_place_classification() {
                     mutable_copy,
                     reference_expr_with_type_id(
                         mutable_source,
-                        builtin_type_ids::INT,
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         None,
                         ValueMode::MutableReference,
                     ),
@@ -351,14 +379,14 @@ fn duplicate_local_declarations_in_same_scope_fail() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     var_name,
-                    Expression::int(1, None, ValueMode::ImmutableOwned),
+                    i32_literal(1, None, ValueMode::ImmutableOwned),
                 )),
                 None,
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     var_name,
-                    Expression::int(2, None, ValueMode::ImmutableOwned),
+                    i32_literal(2, None, ValueMode::ImmutableOwned),
                 )),
                 None,
             ),
@@ -392,10 +420,10 @@ fn assignment_lowers_value_prelude_before_assign() {
         helper,
         FunctionSignature {
             parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
         },
         vec![node(
-            NodeKind::Return(vec![Expression::int(1, None, ValueMode::ImmutableOwned)]),
+            NodeKind::Return(vec![i32_literal(1, None, ValueMode::ImmutableOwned)]),
             None,
         )],
         None,
@@ -403,8 +431,18 @@ fn assignment_lowers_value_prelude_before_assign() {
 
     let assignment = node(
         NodeKind::Assignment {
-            target: assignment_target(x, DataType::Int, builtin_type_ids::INT, None),
-            value: Expression::function_call(helper, vec![], vec![builtin_type_ids::INT], None),
+            target: assignment_target(
+                x,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                None,
+            ),
+            value: Expression::function_call(
+                helper,
+                vec![],
+                vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+                None,
+            ),
         },
         None,
     );
@@ -412,7 +450,12 @@ fn assignment_lowers_value_prelude_before_assign() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param_with_type_id(x, builtin_type_ids::INT, true, None)],
+            parameters: vec![param_with_type_id(
+                x,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                true,
+                None,
+            )],
             returns: vec![],
         },
         vec![assignment],
@@ -491,10 +534,10 @@ fn call_expression_statements_materialize_result_values() {
         callee,
         FunctionSignature {
             parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
         },
         vec![node(
-            NodeKind::Return(vec![Expression::int(9, None, ValueMode::ImmutableOwned)]),
+            NodeKind::Return(vec![i32_literal(9, None, ValueMode::ImmutableOwned)]),
             None,
         )],
         None,
@@ -511,7 +554,7 @@ fn call_expression_statements_materialize_result_values() {
                 NodeKind::ExpressionStatement(Expression::function_call_with_arguments(
                     callee,
                     vec![],
-                    vec![builtin_type_ids::INT],
+                    vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
                     None,
                 )),
                 None,
@@ -520,11 +563,11 @@ fn call_expression_statements_materialize_result_values() {
                 NodeKind::ExpressionStatement(Expression::host_function_call_with_arguments(
                     alloc_id,
                     vec![CallArgument::positional(
-                        Expression::int(1, None, ValueMode::ImmutableOwned),
+                        i32_literal(1, None, ValueMode::ImmutableOwned),
                         CallAccessMode::Shared,
                         None,
                     )],
-                    vec![builtin_type_ids::INT],
+                    vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
                     None,
                 )),
                 None,
@@ -575,12 +618,15 @@ fn multi_bind_assignment_reads_every_rhs_slot_before_updating_targets() {
         pair_name,
         FunctionSignature {
             parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT, builtin_type_ids::INT]),
+            returns: fresh_success_returns(vec![
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            ]),
         },
         vec![node(
             NodeKind::Return(vec![
-                Expression::int(1, None, ValueMode::ImmutableOwned),
-                Expression::int(2, None, ValueMode::ImmutableOwned),
+                i32_literal(1, None, ValueMode::ImmutableOwned),
+                i32_literal(2, None, ValueMode::ImmutableOwned),
             ]),
             None,
         )],
@@ -590,8 +636,18 @@ fn multi_bind_assignment_reads_every_rhs_slot_before_updating_targets() {
         start_name,
         FunctionSignature {
             parameters: vec![
-                param_with_type_id(left, builtin_type_ids::INT, true, None),
-                param_with_type_id(right, builtin_type_ids::INT, true, None),
+                param_with_type_id(
+                    left,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    true,
+                    None,
+                ),
+                param_with_type_id(
+                    right,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    true,
+                    None,
+                ),
             ],
             returns: vec![],
         },
@@ -600,14 +656,14 @@ fn multi_bind_assignment_reads_every_rhs_slot_before_updating_targets() {
                 targets: vec![
                     multi_bind_target(
                         left,
-                        builtin_type_ids::INT,
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         ValueMode::MutableOwned,
                         MultiBindTargetKind::Assignment,
                         None,
                     ),
                     multi_bind_target(
                         right,
-                        builtin_type_ids::INT,
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         ValueMode::MutableOwned,
                         MultiBindTargetKind::Assignment,
                         None,
@@ -616,7 +672,10 @@ fn multi_bind_assignment_reads_every_rhs_slot_before_updating_targets() {
                 value: Expression::function_call(
                     pair_name,
                     vec![],
-                    vec![builtin_type_ids::INT, builtin_type_ids::INT],
+                    vec![
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    ],
                     None,
                 ),
             },
@@ -708,11 +767,14 @@ fn mixed_multi_bind_preserves_definition_and_update_destination_tags() {
         pair_name,
         FunctionSignature {
             parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT, builtin_type_ids::BOOL]),
+            returns: fresh_success_returns(vec![
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                builtin_type_ids::BOOL,
+            ]),
         },
         vec![node(
             NodeKind::Return(vec![
-                Expression::int(1, None, ValueMode::ImmutableOwned),
+                i32_literal(1, None, ValueMode::ImmutableOwned),
                 Expression::bool(true, None, ValueMode::ImmutableOwned),
             ]),
             None,
@@ -735,7 +797,7 @@ fn mixed_multi_bind_preserves_definition_and_update_destination_tags() {
                 targets: vec![
                     multi_bind_target(
                         declared,
-                        builtin_type_ids::INT,
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         ValueMode::ImmutableOwned,
                         MultiBindTargetKind::Declaration,
                         None,
@@ -751,7 +813,10 @@ fn mixed_multi_bind_preserves_definition_and_update_destination_tags() {
                 value: Expression::function_call(
                     pair_name,
                     vec![],
-                    vec![builtin_type_ids::INT, builtin_type_ids::BOOL],
+                    vec![
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                        builtin_type_ids::BOOL,
+                    ],
                     None,
                 ),
             },
@@ -846,10 +911,10 @@ fn return_lowering_handles_zero_one_and_many_values() {
         one_name,
         FunctionSignature {
             parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
         },
         vec![node(
-            NodeKind::Return(vec![Expression::int(8, None, ValueMode::ImmutableOwned)]),
+            NodeKind::Return(vec![i32_literal(8, None, ValueMode::ImmutableOwned)]),
             None,
         )],
         None,
@@ -859,11 +924,14 @@ fn return_lowering_handles_zero_one_and_many_values() {
         many_name,
         FunctionSignature {
             parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT, builtin_type_ids::BOOL]),
+            returns: fresh_success_returns(vec![
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                builtin_type_ids::BOOL,
+            ]),
         },
         vec![node(
             NodeKind::Return(vec![
-                Expression::int(1, None, ValueMode::ImmutableOwned),
+                i32_literal(1, None, ValueMode::ImmutableOwned),
                 Expression::bool(true, None, ValueMode::ImmutableOwned),
             ]),
             None,
@@ -896,7 +964,10 @@ fn return_lowering_handles_zero_one_and_many_values() {
         HirTerminator::Return(value)
             if matches!(
                 &module.expressions.expression(*value).kind,
-                HirExpressionKind::Int(8)
+                HirExpressionKind::FixedScalar(literal)
+                    if *literal
+                        == FixedScalarValue::signed(FixedScalar::I32, 8)
+                            .expect("I32 literal in range")
             )
     ));
 

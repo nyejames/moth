@@ -294,7 +294,6 @@ fn canonicalize_generated_request_evidence(
                     trait_id,
                     &materialisation_context.type_environment,
                     materialisation_context.trait_environment(),
-                    materialisation_context.numeric_profile,
                 ) {
                     return Err(CompilerError::compiler_error(
                         "Generated request retained an invalid on-demand builtin cast proof",

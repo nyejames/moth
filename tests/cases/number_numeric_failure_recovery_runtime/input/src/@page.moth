@@ -1,7 +1,7 @@
 divide_numbers |left Dec1, right Dec1| -> Dec1, Error!:
     return left / right
 ;
-power_number |base Dec1, exponent Int| -> Dec1, Error!:
+power_number |base Dec1, exponent I32| -> Dec1, Error!:
     return base ^ exponent
 ;
 

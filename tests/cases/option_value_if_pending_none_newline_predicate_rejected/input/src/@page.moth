@@ -1,0 +1,10 @@
+wrap type T |value T| -> T?:
+    return value
+;
+origin = wrap(1)
+label String = if origin is
+    none:
+    then "none"
+else
+    then "present"
+;

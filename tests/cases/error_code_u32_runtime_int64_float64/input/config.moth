@@ -2,5 +2,4 @@ project #= (
     name = "test_project",
     entry_root = "src",
 )
-numeric_profile #= "Int64/Float64"
 html #= ()

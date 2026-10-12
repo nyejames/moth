@@ -13,6 +13,7 @@ use crate::compiler_frontend::compiler_messages::{
     RuleDiagnosticKind, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::parse_declaration_syntax;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::source::{
@@ -33,6 +34,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 // --------------------------
 //  Basic declarations
@@ -48,7 +50,10 @@ fn parses_mutable_and_explicitly_typed_declarations() {
     let NodeKind::VariableDeclaration(count_decl) = &body[0].kind else {
         panic!("expected mutable declaration");
     };
-    assert_eq!(count_decl.value.diagnostic_type, DataType::Int);
+    assert_eq!(
+        count_decl.value.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::I32)
+    );
     assert_eq!(count_decl.value.value_mode, ValueMode::MutableOwned);
 
     let NodeKind::VariableDeclaration(name_decl) = &body[1].kind else {
@@ -64,7 +69,7 @@ fn parses_mutable_and_explicitly_typed_declarations() {
 #[test]
 fn resolves_named_type_annotations_against_prior_structs() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("Point = |\n    x Int,\n|\n\norigin Point = Point(0)\n");
+        parse_single_file_ast("Point = |\n    x I32,\n|\n\norigin Point = Point(0)\n");
 
     let body = start_function_body(&ast, &path_fork, &string_table);
 
@@ -122,7 +127,7 @@ fn rejects_struct_redefinition_of_reserved_error_symbol() {
 fn allows_user_declarations_named_old_error_family_symbols() {
     parse_single_file_ast(
         "ErrorKind = |\n    message String,\n|\n\n\
-         ErrorLocation = |\n    line Int,\n|\n\n\
+         ErrorLocation = |\n    line I32,\n|\n\n\
          StackFrame = |\n    name String,\n|\n\n\
          kind = ErrorKind(\"custom\")\n\
          location = ErrorLocation(12)\n\
@@ -145,7 +150,7 @@ fn rejects_keyword_shadow_variable_declarations() {
 
 #[test]
 fn shadowed_declaration_retains_exact_duplicate_name_span() {
-    let source = "value = \"π\"\nvalue Int = 2\n";
+    let source = "value = \"π\"\nvalue I32 = 2\n";
     let diagnostic = parse_single_file_ast_diagnostic(source);
 
     assert!(matches!(
@@ -154,7 +159,7 @@ fn shadowed_declaration_retains_exact_duplicate_name_span() {
     ));
 
     let duplicate_start = source
-        .rfind("value Int")
+        .rfind("value I32")
         .expect("the duplicate declaration should be present") as u32;
     let mut expected_builder = ExtendedSpanBuilder::new();
     let expected_span =
@@ -190,7 +195,7 @@ fn rejects_unconsumed_source_config_qualifier_at_declaration_boundary() {
 
 #[test]
 fn rejects_initializer_type_mismatch_with_target_and_value_details() {
-    let diagnostic = parse_single_file_ast_diagnostic("result Float = true\n");
+    let diagnostic = parse_single_file_ast_diagnostic("result F64 = true\n");
 
     let DiagnosticPayload::TypeMismatch {
         expected,
@@ -202,18 +207,26 @@ fn rejects_initializer_type_mismatch_with_target_and_value_details() {
     };
 
     assert_eq!(*context, TypeMismatchContext::Declaration);
-    assert_eq!(expected.0, 2);
-    assert_eq!(found.0, 0);
+    assert_eq!(
+        *expected,
+        builtin_type_ids::fixed_scalar(FixedScalar::F64),
+        "the declared F64 receiver is the expected identity"
+    );
+    assert_eq!(
+        *found,
+        builtin_type_ids::BOOL,
+        "the boolean value is the found identity"
+    );
 }
 
 #[test]
 fn rejects_multiline_regular_division_with_operator_on_next_line() {
-    assert_declaration_type_mismatch("result Int = 5\n / 2\n");
+    assert_declaration_type_mismatch("result I32 = 5\n / 2\n");
 }
 
 #[test]
 fn rejects_multiline_regular_division_with_operator_at_end_of_line() {
-    assert_declaration_type_mismatch("result Int = 5 /\n 2\n");
+    assert_declaration_type_mismatch("result I32 = 5 /\n 2\n");
 }
 
 fn assert_declaration_type_mismatch(source: &str) {
@@ -243,7 +256,7 @@ fn shorthand_fixed_collection_declaration_infers_element_type() {
         decl.value
             .diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{2 Int}"
+        "{2 I32}"
     );
 }
 
@@ -271,7 +284,7 @@ fn fixed_collection_alias_literal_is_accepted() {
 
 #[test]
 fn nested_fixed_collection_literal_is_accepted() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("grid {2 {3 Int}} = {{1}, {2}}\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast("grid {2 {3 I32}} = {{1}, {2}}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(decl) = &body[0].kind else {
@@ -282,7 +295,7 @@ fn nested_fixed_collection_literal_is_accepted() {
         decl.value
             .diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{2 {3 Int}}"
+        "{2 {3 I32}}"
     );
 }
 
@@ -290,11 +303,11 @@ fn nested_fixed_collection_literal_is_accepted() {
 fn immutable_fixed_collection_from_function_call_is_allowed() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
         r#"
-    make || -> {2 Int}:
+    make || -> {2 I32}:
         return {1}
     ;
     
-    items {2 Int} = make()
+    items {2 I32} = make()
     "#,
     );
     let body = start_function_body(&ast, &path_fork, &string_table);
@@ -307,7 +320,7 @@ fn immutable_fixed_collection_from_function_call_is_allowed() {
         decl.value
             .diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{2 Int}"
+        "{2 I32}"
     );
 }
 
@@ -319,7 +332,7 @@ fn generic_identity_preserves_fixed_collection_shape() {
         return value
     ;
     
-    items {2 Int} = {1}
+    items {2 I32} = {1}
     same = identity(items)
     "#,
     );
@@ -333,7 +346,7 @@ fn generic_identity_preserves_fixed_collection_shape() {
         decl.value
             .diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{2 Int}"
+        "{2 I32}"
     );
 }
 
@@ -342,7 +355,7 @@ fn fixed_collection_struct_field_default_allows_empty_literal() {
     parse_single_file_ast(
         r#"
 Buffer = |
-    items {2 Int} = {},
+    items {2 I32} = {},
 |
 
 buffer ~= Buffer()
@@ -352,7 +365,7 @@ buffer ~= Buffer()
 
 #[test]
 fn mutable_empty_fixed_collection_is_allowed() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("items ~{2 Int} = {}\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast("items ~{2 I32} = {}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(decl) = &body[0].kind else {
@@ -363,13 +376,13 @@ fn mutable_empty_fixed_collection_is_allowed() {
         decl.value
             .diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{2 Int}"
+        "{2 I32}"
     );
 }
 
 #[test]
 fn normal_collection_declaration() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("items {Int} = {1, 2}\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast("items {I32} = {1, 2}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
     let NodeKind::VariableDeclaration(decl) = &body[0].kind else {
         panic!("expected declaration");
@@ -378,7 +391,7 @@ fn normal_collection_declaration() {
         decl.value
             .diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{Int}"
+        "{I32}"
     );
 }
 
@@ -386,8 +399,8 @@ fn normal_collection_declaration() {
 fn fixed_and_growable_assignment_mismatch_is_rejected() {
     let diagnostic = parse_single_file_ast_diagnostic(
         r#"
-growable {Int} = {1}
-items {2 Int} = growable
+growable {I32} = {1}
+items {2 I32} = growable
 "#,
     );
 
@@ -402,8 +415,8 @@ items {2 Int} = growable
 fn exact_fixed_capacity_mismatch_is_rejected() {
     let diagnostic = parse_single_file_ast_diagnostic(
         r#"
-three {3 Int} = {1}
-items {2 Int} = three
+three {3 I32} = {1}
+items {2 I32} = three
 "#,
     );
 
@@ -421,10 +434,10 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
     let long_target = format!("{long_type} = 1");
     for (target, expected_anchor) in [
         ("= 1", "="),
-        ("Int = 1", "Int"),
+        ("I32 = 1", "I32"),
         ("~= 1", "~"),
         ("#= 1", "#"),
-        ("#Config of Int = 1", "#"),
+        ("#Config of I32 = 1", "#"),
         (long_target.as_str(), long_type.as_str()),
     ] {
         let source = format!("padding #= \"{padding}\"\nvalue {target}\n");

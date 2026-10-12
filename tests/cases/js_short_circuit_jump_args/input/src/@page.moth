@@ -1,6 +1,6 @@
 -- Exercise short-circuit CFG merge transport through Jump.args block arguments.
 
-rhs_probe |calls ~Int| -> Bool:
+rhs_probe |calls ~I32| -> Bool:
     calls = calls + 1
     return true
 ;

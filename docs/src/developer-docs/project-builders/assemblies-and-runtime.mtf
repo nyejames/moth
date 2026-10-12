@@ -30,6 +30,16 @@ before lowering. The builder supplies its lifecycle and output policies but
 never selects a memory strategy, manufactures call summaries or repackages
 numeric proof tables.
 
+Assembly contracts retain exact numeric identities independently of physical
+carriers. A wider register doesn't widen an `I8` operation or remove `F16`
+completion. Imported constants and successful host returns retain their declared
+types, and adapters validate values before exposing them to Moth. See
+@../../docs/numbers/#checked-arithmetic (Checked arithmetic) and
+@../../docs/packages/#external-binding-contracts (External binding contracts).
+The @../../docs/progress/packages-and-builders (packages and builders progress
+matrix) records target availability. Exact numeric support doesn't grant a
+missing package lowering.
+
 ### Read constant and runtime templates
 
 An entry's template assembly view exposes folded fragments, runtime fragment

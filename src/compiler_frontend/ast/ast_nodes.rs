@@ -9,14 +9,11 @@
 //! `CompilerError` in this module means an internal compiler invariant or setup failure only.
 //! Source-authored syntax, type, and rule failures are rejected earlier with `CompilerDiagnostic`.
 
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, PlaceExpression,
-};
+use crate::compiler_frontend::ast::expressions::expression::{Expression, PlaceExpression};
 use crate::compiler_frontend::ast::generic_functions::IfGenericRequestRanges;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::declaration_syntax::build_config_contract::BuildConfigQualifierSyntax;
 use crate::compiler_frontend::source::SourceSpan;
@@ -38,13 +35,6 @@ pub struct Declaration {
     /// Declaration-owned `#Config of T` syntax metadata, consumed by config resolution when
     /// applicable and otherwise retained for source-contract header consumers.
     pub(crate) config_qualifier: Option<BuildConfigQualifierSyntax>,
-}
-
-impl Declaration {
-    pub(crate) fn is_unresolved_constant_placeholder(&self) -> bool {
-        matches!(self.value.kind, ExpressionKind::NoValue)
-            && matches!(self.value.diagnostic_type, DataType::Inferred)
-    }
 }
 
 #[derive(Debug, Clone)]

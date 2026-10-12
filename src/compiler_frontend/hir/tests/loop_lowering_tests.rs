@@ -30,6 +30,7 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
     loop_binding_with_type_id as loop_binding, runtime_expr, runtime_operand_item,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 fn node(kind: NodeKind, span: Option<crate::compiler_frontend::source::SourceSpan>) -> AstNode {
     AstNode {
@@ -102,12 +103,27 @@ fn range_loop_cfg_blocks(module: &HirModule) -> (BlockId, BlockId, BlockId) {
 fn collection_literal(span: Option<crate::compiler_frontend::source::SourceSpan>) -> Expression {
     crate::compiler_frontend::tests::type_id_fixture_support::collection_expr(
         vec![
-            Expression::int(1, span, ValueMode::ImmutableOwned),
-            Expression::int(2, span, ValueMode::ImmutableOwned),
-            Expression::int(3, span, ValueMode::ImmutableOwned),
+            i32_literal(1, span, ValueMode::ImmutableOwned),
+            i32_literal(2, span, ValueMode::ImmutableOwned),
+            i32_literal(3, span, ValueMode::ImmutableOwned),
         ],
         span,
         ValueMode::ImmutableOwned,
+    )
+}
+
+/// One exact `I32` literal expression.
+///
+/// WHY: these fixtures pin the exact `I32` width explicitly at the scalar carrier.
+fn i32_literal(
+    value: i64,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
+    value_mode: ValueMode,
+) -> Expression {
+    Expression::fixed_scalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+        span,
+        value_mode,
     )
 }
 
@@ -122,12 +138,15 @@ fn lowers_range_loop_with_new_syntax() {
     let range_loop = node(
         NodeKind::RangeLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    PathId::ROOT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
             range: range_loop_spec(
-                Expression::int(0, location, ValueMode::ImmutableOwned),
-                Expression::int(3, location, ValueMode::ImmutableOwned),
+                i32_literal(0, location, ValueMode::ImmutableOwned),
+                i32_literal(3, location, ValueMode::ImmutableOwned),
                 RangeEndKind::Exclusive,
                 None,
             ),
@@ -196,8 +215,8 @@ fn lowers_range_loop_without_user_bindings() {
                 index: None,
             }),
             range: range_loop_spec(
-                Expression::int(0, location, ValueMode::ImmutableOwned),
-                Expression::int(3, location, ValueMode::ImmutableOwned),
+                i32_literal(0, location, ValueMode::ImmutableOwned),
+                i32_literal(3, location, ValueMode::ImmutableOwned),
                 RangeEndKind::Exclusive,
                 None,
             ),
@@ -249,12 +268,18 @@ fn lowers_range_loop_with_index_binding() {
     let range_loop = node(
         NodeKind::RangeLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(item_symbol, builtin_type_ids::INT)),
-                index: Some(loop_binding(index_symbol, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    item_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
+                index: Some(loop_binding(
+                    index_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
             }),
             range: range_loop_spec(
-                Expression::int(0, location, ValueMode::ImmutableOwned),
-                Expression::int(4, location, ValueMode::ImmutableOwned),
+                i32_literal(0, location, ValueMode::ImmutableOwned),
+                i32_literal(4, location, ValueMode::ImmutableOwned),
                 RangeEndKind::Exclusive,
                 None,
             ),
@@ -314,14 +339,17 @@ fn lowers_range_loop_with_index_binding() {
                     op:
                         HirNumericOp {
                             operator: NumericOperator::Add,
-                            domain: NumericScalar::Int,
+                            domain: NumericScalar::Fixed(FixedScalar::I32),
                         },
                     operands: HirNumericOperands::Binary { right, .. },
                     result: HirLocalDestination::Update(_),
                     ..
                 } => matches!(
                     &module.expressions.expression(*right).kind,
-                    HirExpressionKind::Int(1)
+                    HirExpressionKind::FixedScalar(literal)
+                        if *literal
+                            == FixedScalarValue::signed(FixedScalar::I32, 1)
+                                .expect("I32 literal in range")
                 ),
                 _ => false,
             })
@@ -345,7 +373,7 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
     let step_decl = node(
         NodeKind::VariableDeclaration(Declaration {
             id: step_symbol,
-            value: Expression::int(2, location, ValueMode::ImmutableOwned),
+            value: i32_literal(2, location, ValueMode::ImmutableOwned),
             binding_span: None,
             config_qualifier: None,
         }),
@@ -355,16 +383,19 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
     let range_loop = node(
         NodeKind::RangeLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    PathId::ROOT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
             range: range_loop_spec(
-                Expression::int(0, location, ValueMode::ImmutableOwned),
-                Expression::int(10, location, ValueMode::ImmutableOwned),
+                i32_literal(0, location, ValueMode::ImmutableOwned),
+                i32_literal(10, location, ValueMode::ImmutableOwned),
                 RangeEndKind::Exclusive,
                 Some(reference_expr_with_type_id(
                     step_symbol,
-                    builtin_type_ids::INT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     location,
                     ValueMode::ImmutableReference,
                 )),
@@ -425,7 +456,10 @@ fn lowers_collection_loop_to_explicit_cfg() {
     let collection_loop = node(
         NodeKind::CollectionLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    PathId::ROOT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
             iterable: collection_literal(location),
@@ -553,7 +587,10 @@ fn lowers_collection_loop_item_binding_from_indexed_place() {
     let collection_loop = node(
         NodeKind::CollectionLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    PathId::ROOT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
             iterable: collection_literal(location),
@@ -626,8 +663,14 @@ fn lowers_collection_loop_optional_index_binding() {
     let collection_loop = node(
         NodeKind::CollectionLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(item_symbol, builtin_type_ids::INT)),
-                index: Some(loop_binding(index_symbol, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    item_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
+                index: Some(loop_binding(
+                    index_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
             }),
             iterable: collection_literal(location),
             body: vec![],
@@ -701,12 +744,18 @@ fn lowers_range_loop_user_bindings_as_immutable_locals() {
     let range_loop = node(
         NodeKind::RangeLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(item_symbol, builtin_type_ids::INT)),
-                index: Some(loop_binding(index_symbol, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    item_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
+                index: Some(loop_binding(
+                    index_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
             }),
             range: range_loop_spec(
-                Expression::int(0, location, ValueMode::ImmutableOwned),
-                Expression::int(4, location, ValueMode::ImmutableOwned),
+                i32_literal(0, location, ValueMode::ImmutableOwned),
+                i32_literal(4, location, ValueMode::ImmutableOwned),
                 RangeEndKind::Exclusive,
                 None,
             ),
@@ -757,8 +806,14 @@ fn lowers_collection_loop_user_bindings_as_immutable_locals() {
     let collection_loop = node(
         NodeKind::CollectionLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(item_symbol, builtin_type_ids::INT)),
-                index: Some(loop_binding(index_symbol, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    item_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
+                index: Some(loop_binding(
+                    index_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
             }),
             iterable: collection_literal(location),
             body: vec![],
@@ -815,7 +870,10 @@ fn break_targets_exit_block_in_collection_loop() {
     let collection_loop = node(
         NodeKind::CollectionLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    PathId::ROOT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
             iterable: collection_literal(location),
@@ -901,7 +959,10 @@ fn direct_break_in_collection_loop_does_not_leave_unreachable_step_block() {
     let collection_loop = node(
         NodeKind::CollectionLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    PathId::ROOT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
             iterable: collection_literal(location),
@@ -941,12 +1002,15 @@ fn direct_break_in_range_loop_does_not_leave_unreachable_step_block() {
     let range_loop = node(
         NodeKind::RangeLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    PathId::ROOT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
             range: range_loop_spec(
-                Expression::int(0, location, ValueMode::ImmutableOwned),
-                Expression::int(3, location, ValueMode::ImmutableOwned),
+                i32_literal(0, location, ValueMode::ImmutableOwned),
+                i32_literal(3, location, ValueMode::ImmutableOwned),
                 RangeEndKind::Exclusive,
                 None,
             ),
@@ -986,7 +1050,10 @@ fn continue_targets_step_block_in_collection_loop() {
     let collection_loop = node(
         NodeKind::CollectionLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    PathId::ROOT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
             iterable: collection_literal(location),
@@ -1050,7 +1117,10 @@ fn nested_loop_targets_remain_correct() {
     let inner_loop = node(
         NodeKind::CollectionLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(inner_item_symbol, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    inner_item_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
             iterable: collection_literal(location),
@@ -1063,7 +1133,10 @@ fn nested_loop_targets_remain_correct() {
     let outer_loop = node(
         NodeKind::CollectionLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(outer_item_symbol, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    outer_item_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
             iterable: collection_literal(location),

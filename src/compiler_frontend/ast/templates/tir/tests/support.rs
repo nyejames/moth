@@ -23,7 +23,7 @@ use crate::compiler_frontend::ast::templates::tir::overlays::{
     TirWrapperApplicationMode, TirWrapperContext,
 };
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateWrapperReference;
-use crate::compiler_frontend::ast::templates::tir::slot_plan::runtime_slot_plan_roots;
+use crate::compiler_frontend::ast::templates::tir::slot_plan::TemplateSlotPlan;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::view::TirView;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -175,7 +175,8 @@ fn child_node_ids(kind: &TemplateIrNodeKind) -> Vec<TemplateIrNodeId> {
         | TemplateIrNodeKind::InsertContribution { .. }
         | TemplateIrNodeKind::AggregateOutput
         | TemplateIrNodeKind::RuntimeSlotSite { .. }
-        | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Vec::new(),
+        | TemplateIrNodeKind::RuntimeSlotContributionSource { .. }
+        | TemplateIrNodeKind::RetainedNumericIntake(_) => Vec::new(),
     }
 }
 
@@ -349,15 +350,14 @@ where
             ));
         }
 
-        let (contribution_roots, site_render_roots) =
-            runtime_slot_plan_roots(self.store, slot_plan_id)?;
+        // `runtime_slot_plan_roots` borrows the plan inside `self.store`, so its iterator cannot
+        // stay alive across the node mutations below. Count the roots under a scoped borrow and
+        // copy each root id out per index instead, so no root vector is allocated per walk.
+        let root_count = self.runtime_slot_plan_root_count(slot_plan_id)?;
 
         let result = self.walk_node(wrapper_root).and_then(|()| {
-            for root in contribution_roots {
-                self.walk_node(root)?;
-            }
-
-            for root in site_render_roots {
+            for index in 0..root_count {
+                let root = self.runtime_slot_plan_root_at(slot_plan_id, index)?;
                 self.walk_node(root)?;
             }
 
@@ -369,6 +369,54 @@ where
             self.completed_slot_plans.insert(slot_plan_id);
         }
         result
+    }
+
+    /// Resolves the committed runtime slot plan behind the mutation walk.
+    fn runtime_slot_plan(
+        &self,
+        slot_plan_id: TemplateSlotPlanId,
+    ) -> Result<&TemplateSlotPlan, CompilerError> {
+        self.store.get_slot_plan(slot_plan_id).ok_or_else(|| {
+            CompilerError::compiler_error(
+                "TIR expression mutation referenced a missing runtime slot plan.",
+            )
+        })
+    }
+
+    /// Counts `slot_plan_id`'s render roots, keeping the plan check ahead of any node mutation.
+    fn runtime_slot_plan_root_count(
+        &self,
+        slot_plan_id: TemplateSlotPlanId,
+    ) -> Result<usize, CompilerError> {
+        let slot_plan = self.runtime_slot_plan(slot_plan_id)?;
+        Ok(slot_plan.contribution_sources.len() + slot_plan.slot_sites.len())
+    }
+
+    /// Copies the render root at `index` in `runtime_slot_plan_roots` order: contribution
+    /// sources first, then slot sites.
+    ///
+    /// WHY: the shared plan borrow ends when this returns the copied id, so the walk can mutate
+    /// nodes between root reads.
+    fn runtime_slot_plan_root_at(
+        &self,
+        slot_plan_id: TemplateSlotPlanId,
+        index: usize,
+    ) -> Result<TemplateIrNodeId, CompilerError> {
+        let slot_plan = self.runtime_slot_plan(slot_plan_id)?;
+
+        if let Some(source) = slot_plan.contribution_sources.get(index) {
+            return Ok(source.render_root);
+        }
+
+        // Contribution sources come first, so a remaining index must address a slot site.
+        let site_index = index - slot_plan.contribution_sources.len();
+        let Some(site) = slot_plan.slot_sites.get(site_index) else {
+            return Err(CompilerError::compiler_error(format!(
+                "TIR expression mutation read slot-plan root {index} outside plan {slot_plan_id}."
+            )));
+        };
+
+        Ok(site.render_root)
     }
 
     fn walk_node(&mut self, node_id: TemplateIrNodeId) -> Result<(), CompilerError> {
@@ -486,7 +534,8 @@ where
             TemplateIrNodeKind::Text { .. }
             | TemplateIrNodeKind::Slot { .. }
             | TemplateIrNodeKind::AggregateOutput
-            | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(Vec::new()),
+            | TemplateIrNodeKind::RuntimeSlotContributionSource { .. }
+            | TemplateIrNodeKind::RetainedNumericIntake(_) => Ok(Vec::new()),
         }
     }
 

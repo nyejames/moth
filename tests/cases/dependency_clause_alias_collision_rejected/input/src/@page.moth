@@ -1,4 +1,4 @@
-sine |x Float| -> Float:
+sine |x F64| -> F64:
     return x
 ;
 

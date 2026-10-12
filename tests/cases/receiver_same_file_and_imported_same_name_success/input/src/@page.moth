@@ -1,5 +1,5 @@
 Counter = |
-    value Int,
+    value I32,
 |
 
 label |this Counter| -> String:

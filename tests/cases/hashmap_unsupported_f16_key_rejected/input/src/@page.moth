@@ -1,2 +1,2 @@
-bad {F16 = Int} = {}
+bad {F16 = I32} = {}
 [:test]
