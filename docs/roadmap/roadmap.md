@@ -15,7 +15,7 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md). Partially complete and underway. **ACTIVE IN PARALLEL.**
 
-- [Boracle research plans](./plans/boracle-next-research-plans): Resume on `boracle-research` only after merged dense HIR/native result-channel capabilities and the explicit research activation gate. Mechanical representation/extraction migration belongs to the compiler foundation, not a new precision experiment. **PAUSED**
+- [Boracle research](./plans/boracle-next-research-plans) and [production borrow checker development](./plans/production-borrow-checker.md): Ongoing parallel record and production follow-ups on `borrow-checker-and-boracle-development`. Research precision and migration wait for the merged typed-expression/native-result capabilities and explicit activation; current status, accepted implementation decisions and borrow/Boracle issues live in the production companion. **ONGOING, RESEARCH RESTART PAUSED**
 
 - [Collecting bad diagnostics examples to be improved later](./plans/bad-diagnostics-log.md): **ONGOING**
 
@@ -72,6 +72,8 @@ This roadmap owns the normal serial order. A plan owns its own work and nothing 
 **Do not cite a plan from another plan.** When two plans genuinely share a contract, that contract belongs in a canonical document under `docs/src/docs/` or `docs/*-design.md`, and both plans point there. If it is not stable enough to be canonical, it is not stable enough for another plan to depend on the wording.
 
 **Package programme exception.** The umbrella and package-level plans under `docs/roadmap/plans/packages/` are living implementation companions rather than ordinary short-lived plans. They may link one another and specialised package implementation plans in that directory. Package-level plans remain after a current version completes so later work retains implementation rationale, quirks and blockers. Completed checklists should be removed or compressed. A specialised one-shot plan may still be retired after its durable decisions and follow-ups move into the living package plan. Canonical package documentation remains the semantic authority. The main roadmap links only the umbrella programme, and the normal deletion and no-plan-link rules still apply everywhere else.
+
+**Borrow-checker/Boracle living-companion exception.** The production implementation tracker remains after individual patches land and may cross-link the Boracle research handoff for navigation. They are the ongoing parallel work under one roadmap entry. Only the production tracker owns live Stage 6 implementation status, accepted production implementation choices, borrow performance evidence and actionable Boracle-to-production follow-ups. Canonical memory and compiler references still own language semantics and stage contracts. Do not duplicate this tracker in roadmap deferred notes or the progress matrix.
 
 ---
 
@@ -157,8 +159,8 @@ implemented surface as `Partial`. Semantic expression/scratch separation and den
 expression/place storage now belong to the queued compiler foundation above. That work also owns
 unchanged-root reuse, constant handoffs and repeated type/fold work at the migrated boundaries.
 The deferred post-TIR owner retains independent cache, key, source-span text and scheduling
-investigations, refreshed against the delivered representation. Broad borrow-fact compaction and
-unrelated parser/statement storage changes still require evidence and their own bounded scope.
+investigations, refreshed against the delivered representation. Unrelated parser/statement
+storage changes still require evidence and their own bounded scope.
 
 ## Code-block highlighting follow-ups
 
@@ -191,21 +193,6 @@ directive will format, remains deferred. Full semantic or editor grammar
 parity stays owned by editor tooling, not the compile-time formatter. The built-in formatter never
 performs semantic symbol resolution or syntax diagnostics.
 
-## Boracle real-source replay gaps
-
-The last recorded replay sweep, at checkpoint `99ab43de2`, covered 1068 sources and left two failures. The current `tests/cases/` corpus has changed since that checkpoint, so later sources are unmeasured and these counts are historical rather than a current sweep. Both recorded failures are problem-extraction defects rather than oracle defects, and both also fail the `problem` dump, so extraction and validation reject them before the oracle runs. The subcommand exists only under the `boracle` feature, so each reproduction below runs as `cargo run --features boracle -- boracle <source> --dump problem`.
-
-- A `match` with guards can produce unsorted branch targets. The source is `tests/cases/result_match_guard_propagation_order/input/@page.moth`, and validation fails with `terminator target blocks references must be strictly sorted and unique: BlockId(12) then BlockId(7)`, so the builder's target mapping does not preserve the ascending unique order that problem validation requires.
-- Runtime reactive `if` metadata can leave a local unresolved. The source is `tests/cases/runtime_if_reactive_metadata_preserved/input/@page.moth`, and extraction fails with `unknown HIR local LocalId(1)`. Reactivity retirement will classify this historical case with its owner: remove V1-only coverage and preserve any surviving control-flow contract in ordinary source coverage, rather than repair an obsolete observation model.
-
-## Boracle reduction reachability
-
-`reduce_problem` and `render_fixture_skeleton` are implemented, audited and covered by the reducer tests, and the operational oracle authority documents the pass order, the preserved classification and the rendered fixture skeleton. Nothing outside the tests calls either of them, so a developer who follows the disagreement workflow reduces a problem by writing a test rather than by running a command.
-
-Making reduction reachable is a CLI slice with two parts. The Boracle dump vocabulary in `src/projects/cli.rs` needs a reduction arm, and the differential service needs bound inputs, because `service.rs` hard-codes `OracleBounds::default()` and exposes no bound flags. Reduction is only useful when the caller can choose the bounds the reduced result must preserve.
-
-No plan owns this. The bounded operational oracle plan deliberately excluded CLI changes, and its completion criteria require a reducer that preserves the disagreement class rather than a reachable command.
-
 ## Genuinely deferred items
 
 - final builder selection syntax and a possible Moth-native build script system
@@ -219,7 +206,7 @@ No plan owns this. The bounded operational oracle plan deliberately excluded CLI
 - profiling-backed frontend optimisations and the deferred post-TIR template investigations linked above
 - future Component Model integration
 - external non-scalar constant design: string slices, collections and opaque-type external constants in const contexts
-- private const and config follow-ups: consume HIR const metadata in borrow checking, temporary-local reduction and constant propagation
+- private const and config follow-ups: temporary-local reduction and constant propagation
 - `moth new` follow-ups: non-interactive `--default`, template selection, project type aliases, richer scaffold presets and optional package or dev tooling setup
 - benchmarking and profiling deferred tooling: CI performance gates, public dashboards, source-backed package HIR caching, ownership, drop and ABI specialisation, JS minification and tree shaking, package-manager caching, broad Criterion benchmark suites, tracing and allocation profiler integrations, and tracked-summary counter expansion
 
