@@ -52,6 +52,12 @@ recoverable from Git.
 | 5 | [Call summaries and deferred exclusive access](./boracle-call-summary-and-deferred-exclusive-access-plan.md) | proposed, inactive | Explores per-result, outcome-sensitive, recursive summaries and reserved exclusive arguments |
 | 6 | [Aggregate copy and builtin storage provenance](./boracle-aggregate-copy-and-builtin-storage-provenance-plan.md) | proposed, inactive | Models deep-copy topology, fixed projection precision and compiler-known storage effects |
 
+### Additional exploratory research - group-aware place precision and stability effects
+
+[Group-aware place precision and stability-effect research](./group-aware-place-and-stability-effects-research.md) records Zeta-inspired index-disjointness proofs, conditional and iterator stability, narrow operation effects and lessons from Valen, Carbon, Ante and Rust. It is inactive research, not package 7 and not an amendment to packages 3-6. Initial experiments preserve Moth's exclusive-access, no-data-race and lifetime-topology guarantees. More permissive collection receiver contracts, aliasable mutation and parallel APIs require separate semantic approval.
+
+This topic should be re-anchored when native-result foundations are available and the relevant Boracle soundness gaps have been resolved or isolated. The [production companion](../production-borrow-checker.md) tracks activation and any eventual production implications.
+
 ### Package 1 result
 
 `OriginRelations` is the only origin-overlap owner. Loan conflicts consume `OriginOverlapDecision`. Empty `AliasParams` is malformed input. Missing argument, copy, projection, and aggregate provenance cannot become a fresh generation. Rule selection is `boracle-reference-v1` plus a sorted experiment set; `dead-exclusive-loan` remains the only named experiment. Canonical Boracle docs describe that model.
