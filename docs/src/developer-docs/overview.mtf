@@ -27,6 +27,11 @@ For design-boundary questions, read the public Design Scope authority at
 
 For build-system or project orchestration questions, read `docs/build-system-design.md`.
 
+For backend optimisation goals and the division between Moth and native code
+generation, read `docs/src/developer-docs/wasm-optimisation/overview.mtf`.
+Lappet's runtime and package-manager designs live in `crates/lappet/docs/`, with
+independent implementation checkpoints in `crates/lappet/roadmap.md`.
+
 For the public Rust builder API, use
 `docs/src/developer-docs/project-builders/overview.mtf`. The tutorial starts at
 `docs/src/developer-docs/project-builders/creating-a-builder.mtf`.

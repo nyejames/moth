@@ -131,6 +131,10 @@ The series links the progress matrix and roadmap. It does not paste either docum
 
 ## Where authority lives
 
+`docs/src/developer-docs/wasm-optimisation/overview.mtf` routes to the permanent
+authority for optimisation goals and the Moth/native-code boundary. It keeps
+pass policy separate from compiler-stage and memory-model contracts.
+
 - `docs/compiler-design-overview.md` for compiler stages, identities, artefacts and validation
 - `docs/build-system-design.md` for commands, graphs, builders, linking and outputs
 - `docs/src/developer-docs/language/overview.mtf` for language surface

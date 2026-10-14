@@ -55,6 +55,17 @@ The selected builder does not supply or propagate a semantic numeric profile. It
 
 The capability surface contains registered directive signatures/contexts, source-backed Core/Builder packages, binding-backed packages, template directives, import providers, runtime requirements, supported source kinds, primitive build globals and target-affinity/capability metadata.
 
+Official executable environments provide the canonical Core catalogue through
+official native or browser implementations, with documented host-capability gates
+and unsupported outcomes. Custom builders may provide any subset for local code
+without changing Core meanings or reserved names. Official certification and
+managed Core-dependent package admission are separate package-manager policies,
+not a consequence of a matching capability surface. The
+[Lappet design](../crates/lappet/docs/design.md) owns native implementation policy.
+Tooling overlays inspect the selected environment rather than owning another
+runtime. The [Wasm optimisation authority](src/developer-docs/wasm-optimisation/overview.mtf)
+owns optimisation goals and the separate Moth-profile/native-strategy choices.
+
 Frontend names and builtins remain authoritative. Registration rejects duplicates and overrides. Unknown directives, wrong-context uses and recognised unavailable capabilities receive distinct diagnostics rather than silent acceptance. Registries grant constrained powers, not arbitrary semantic callbacks.
 
 Builder globals express stable semantic configuration. They never reveal a physical target, backend, OS or architecture through `$config`. Command target intent stays outside source-visible configuration. Tooling overlays extend analysis without becoming competing artefact builders.
@@ -371,7 +382,45 @@ Each package owns its build-input namespace. Consumer CLI/programmatic inputs ne
 
 Project dependency declarations and file-local clauses have separate roles. A project declaration names a direct external package and may assign a local root alias before Stage 0 graph construction. Source clauses bind only already registered roots. They neither acquire undeclared packages nor expose transitive dependencies. Build-input contracts do not declare, alias or enable packages.
 
-Canonical package identity stays separate from a local alias. Aliases affect binding/diagnostics, not artefact or resource-output identity, and collisions are checked before source compilation. The declaration carrier and resolver/catalog handoff remain design-gated under `docs/roadmap/plans/package-dependency-declarations-and-manager-foundations-plan.md`. No config-import preamble is implied. Remote fetching, registries, version solving, lockfiles and publishing remain open design.
+Canonical package identity stays separate from a local alias. Aliases affect binding/diagnostics, not artefact or resource-output identity, and collisions are checked before source compilation.
+
+### Project dependency declarations and resolver input
+
+Each declaration names one direct canonical external package and may assign one
+project-local root alias. Retain authored order for diagnostics. Reject duplicate
+canonical declarations and colliding visible roots before resolution or source
+compilation. Core, Builder and ProjectLocal packages are not acquired through
+this external declaration surface. Project globals, project modules and relative
+or parent paths are not canonical external package names.
+
+Declarations establish availability before the project's source graph is built.
+They do not bind package symbols into config, expose transitive dependencies or
+share consumer build inputs with dependency graphs. A source clause only binds
+an already registered facade. Changing an alias never changes package, artefact
+or resource identity. Resource prefixes remain injective over the complete stable
+package-instance identity, including the future version-instance policy.
+
+The resolver supplies explicit, immutable records for source or compatible
+precompiled packages, their dependency metadata and their compatibility facts.
+Missing, duplicate and incompatible packages have distinct failures. Resolution
+and compilation use deterministic canonical order. Lookup maps may accelerate
+construction without becoming a second retained graph authority.
+
+The compiler and build system consume that catalog. They do not fetch packages,
+probe undeclared filesystem locations or recover missing roots through fallback
+search. Config import preambles, `package_folders` and implicit `/lib` discovery
+remain excluded. Exact numeric, ABI and capability checks use the existing
+compatibility owners. Incompatible artefacts are rebuilt or rejected, not
+repaired through guessed numeric or layout adapters.
+
+The declaration carrier, canonical name grammar, alias replacement policy and
+first local/programmatic catalog require design approval in the
+[Lappet roadmap](../crates/lappet/roadmap.md). The
+[package-manager design](../crates/lappet/docs/package-manager.md) owns acquisition,
+managed-package classification, official/custom admission and future security
+policy. Moving that work does not implement it or change compiler acceptance of
+otherwise valid local packages. Remote fetching, version solving, lockfiles and
+publishing remain separately gated.
 
 ### Core and Builder source package graphs
 

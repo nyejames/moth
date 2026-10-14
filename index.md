@@ -13,6 +13,13 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [validate/bench/docs workflow](justfile)
 - [contributor workflow and validation commands](CONTRIBUTING.md)
 
+## Lappet runtime and package infrastructure
+
+- [Lappet crate](crates/lappet/README.md) and [library entry](crates/lappet/src/lib.rs): dependency-free initial workspace library, with no runtime API yet.
+- [Runtime design](crates/lappet/docs/design.md), [package-manager design](crates/lappet/docs/package-manager.md) and [independent roadmap](crates/lappet/roadmap.md): accepted contracts and isolated-worktree implementation checkpoints.
+- [Wasm optimisation reference](docs/src/developer-docs/wasm-optimisation/overview.mtf) and [detailed authority](docs/src/developer-docs/wasm-optimisation/wasm-optimisation.mtf): shared compiler/native-code policy. Its [page](docs/src/developer-docs/wasm-optimisation/@page.moth) composes the site.
+- [Lappet introduction](docs/src/docs/lappet/lappet.mtf) and [page](docs/src/docs/lappet/@page.moth): application and embedding overview, with implementation status explicit.
+
 ## Standalone lexical and MON crates
 
 - [moth-lexical entry](crates/moth-lexical/src/lib.rs): compiler-independent identifier, source-word and numeric leaf facts.

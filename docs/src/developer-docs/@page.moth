@@ -22,6 +22,8 @@ page_head #= theme_head
 
     - @./compiler-design (Compiler design): staged pipeline, task-reading matrix and cross-cutting contracts
     - @./project-builders (Rust project builders): public SDK tutorial, host bindings, capabilities and application output
+    - @./wasm-optimisation (Wasm optimisation): shared compiler and native execution policy
+    - @../docs/lappet (Lappet): planned native runtime, embedding and package infrastructure
     - @./memory-management (Memory management): reference semantics, borrow validation, lifetime regions, ownership and backend lowering
     - @./style-guide (Development standards): implementation style, test strategy and validation gates
     - @../docs/design-scope (Design scope, public authority): accepted mechanisms, constraints and intentionally excluded complexity

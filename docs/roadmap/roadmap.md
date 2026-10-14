@@ -2,6 +2,14 @@
 
 This is the main todo list and future design / implementation roadmap for Moth.
 
+[Lappet](../../crates/lappet/README.md), Moth's native runtime and future package
+infrastructure, has its own [roadmap](../../crates/lappet/roadmap.md),
+[runtime design](../../crates/lappet/docs/design.md) and
+[package-manager design](../../crates/lappet/docs/package-manager.md). Its work
+happens in a separate isolated worktree and is not sequenced by this roadmap.
+Compiler integration consumes delivered capabilities without resuming paused
+compiler work. All user-facing tooling remains under `moth`.
+
 The next major plans are kept inside [plans](docs/roadmap/plans) and linked here in top to bottom order under the `Plans` heading.
 
 Use the [Compiler Progress Matrix](docs/src/docs/progress/@page.moth) for language, compiler, memory and backend status.
@@ -50,8 +58,6 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 - TODO plan: Structural feature selection and config-only feature declarations. Add pre-graph $feature source selection, declared feature names, builder identity predicates and selection-aware graph/interface/cache validation. Promote this to a hard prerequisite before enabling multi-builder projects.
 
 - TODO plan: Export directives. Replace export: with compiler-owned $export while preserving module-root public surfaces and re-exports. Decide prefix-only versus optional directive-block form before implementation. Keep one final visibility syntax.
-
-- [Package dependency declarations and package-manager foundations](./plans/package-dependency-declarations-and-manager-foundations-plan.md)
 
 - TODO plan: Test root purpose. Design $test as a non-page consumer of normal-root top-level execution, including command selection, lifecycle, reporting, failure handling and HTML-aware testing needs. Schedule after the currently queued implementation work.
 
@@ -136,7 +142,7 @@ performs semantic symbol resolution or syntax diagnostics.
 ## Genuinely deferred items
 
 - final builder selection syntax and a possible Moth-native build script system
-- remote package registries, fetching, version solving, lockfiles, publishing and package-manager policy beyond the design-gated package dependency foundations plan
+- package acquisition, admission and registry work is tracked only in the [Lappet roadmap](../../crates/lappet/roadmap.md)
 - persistent artefact serialisation and precompiled package caches
 - explicit output transformation pipeline syntax
 - cross-page browser chunk sharing beyond physical variant reuse
@@ -221,19 +227,6 @@ After the canvas reachability refactor:
 ---
 
 # Future Design Notes
-
-## Package manager ideas
-
-The [package dependency declarations and package-manager foundations plan](./plans/package-dependency-declarations-and-manager-foundations-plan.md) owns the design-gated declaration, alias and resolver boundary. The notes below remain exploratory package-manager policy and must not be implemented before that design review.
-
-- Should try to prevent dependency explosion as much as possible, make adding dependencies with lots of dependencies harder or discouraged.
-- Idea of "Golden" packages (and silver, bronze etc):
-    1. Golden dependencies have 0 dependencies themselves outside first-party Core packages.
-    2. Silver dependencies only have golden dependencies.
-    3. Bronze dependencies only have silver or gold dependencies.
-    4. Lead dependencies do not meet these criteria and there is additional friction and checks before they can be added to a project.
-- Lead dependencies may not be eligible for the future official Moth package registry and will not be supported automatically by the package manager.
-- The package manager should be extremely strict about security and other things before something can become an official "package". Maybe the source code must pass a series of quality checks and be run through various bits of compiler tooling before it can be added.
 
 ## Possible additional constraints
 

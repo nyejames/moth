@@ -25,6 +25,12 @@ result slots, validated compiler handoffs and the normal-root entry contract.
 `docs/build-system-design.md` owns graph orchestration, package topology,
 configuration, assembly, lifecycle inputs and output ownership.
 
+`crates/lappet/docs/design.md` owns the planned native Wasmtime implementation of
+the host boundary. It reuses this SDK rather than defining another registration
+system. `crates/lappet/docs/package-manager.md` owns official/custom package
+admission. Using Lappet never certifies a custom builder. The shared optimisation
+policy is routed by `docs/src/developer-docs/wasm-optimisation/overview.mtf`.
+
 Exact source directive contracts belong to
 `docs/src/docs/directives/directives.mtf`. Language and memory references remain
 authoritative for value semantics. This SDK supplies constrained registrations
