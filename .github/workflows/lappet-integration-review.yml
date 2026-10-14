@@ -1,0 +1,35 @@
+# Temporary branch-only review helper. Removed before the final PR tree.
+name: Lappet integration review
+
+on:
+  push:
+    branches: ["lappet/initial-crate-and-design"]
+    paths:
+      - ".github/workflows/lappet-integration-review.yml"
+      - ".lappet-integration.patch"
+
+permissions:
+  contents: read
+
+jobs:
+  review-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Archive the pinned source for review
+        shell: bash
+        run: |
+          set -euo pipefail
+          git archive --format=tar HEAD > "$RUNNER_TEMP/moth-review-source.tar"
+          git rev-parse HEAD > "$RUNNER_TEMP/moth-review-revision.txt"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lappet-review-source
+          path: |
+            ${{ runner.temp }}/moth-review-source.tar
+            ${{ runner.temp }}/moth-review-revision.txt
+          retention-days: 1
+          if-no-files-found: error
