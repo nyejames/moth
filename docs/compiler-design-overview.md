@@ -12,6 +12,7 @@ Companion authorities:
 
 - `docs/src/developer-docs/language/overview.mtf` routes to canonical unsuffixed language references. They own source syntax and observable semantics. Paired Basic pages teach subsets.
 - `docs/compiler-data-layout-design.md` owns source, token and diagnostic representation, identity lifetimes and the three failure lanes.
+- [Wasm optimisation](src/developer-docs/wasm-optimisation/overview.mtf) routes to the authority for backend optimisation goals, pass placement and the policy shared with Lappet. Language semantics and validated memory contracts remain with their existing owners.
 - `docs/src/developer-docs/memory-management/overview.mtf` routes to reference semantics, access validation, lifetime topology and physical memory contracts. Its permanent contracts take precedence over temporary memory implementation plans.
 - `docs/src/docs/directives/directives.mtf` owns directive grammar and extension limits. `docs/src/docs/mon/mon-format.mtf` owns MON literal-data semantics.
 - `docs/src/docs/design-scope/` owns accepted and excluded language boundaries. `docs/src/developer-docs/style-guide/style-guide.mtf` owns implementation standards.
@@ -43,6 +44,7 @@ For every compiler task, read the authority text and `Architectural invariants`.
 | Lifetimes, retention and cleanup frontiers | `Lifetime-region and escape validation` | Build design > `HTML project builder > Link planning and lifetime topology` |
 | Physical memory strategies and REC | `Lifetime-region and escape validation > Memory-strategy planning` | The memory overview's runtime/backend route |
 | Reachability, target checks and backend inputs | `Per-function link facts`, `Target-contract validation` and `Backend-facing compiler handoff` | Build entry/package and builder sections |
+| Wasm optimisation and native compilation policy | `Backend-facing compiler handoff` | [Wasm optimisation authority](src/developer-docs/wasm-optimisation/wasm-optimisation.mtf) and the affected semantic or memory owner |
 | MON codec boundaries | `Rust-only MON service` | MON format and data-layout design > `MON data handoff` |
 
 `Stage 4`, `Stage 5` and `Stage 6` above are under `Frontend stages`. `Build design` means `docs/build-system-design.md`.

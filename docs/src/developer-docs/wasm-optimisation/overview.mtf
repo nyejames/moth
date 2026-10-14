@@ -1,0 +1,21 @@
+# Wasm optimisation reference
+
+`wasm-optimisation.mtf` owns backend optimisation goals, the division between
+Moth and native code generation and the evidence required for new passes.
+Read it before changing Wasm optimisation or Lappet's compilation policy.
+
+`@page.moth` composes the website from that topic file. It does not import this
+routing reference.
+
+## Related authorities
+
+- `docs/compiler-design-overview.md` owns compiler stages and validated handoffs.
+- `docs/build-system-design.md` owns builder policy, linking and output planning.
+- `docs/src/developer-docs/memory-management/overview.mtf` routes to access,
+  lifetime and physical memory contracts.
+- `crates/lappet/docs/design.md` owns native execution and Rust host bindings.
+- `crates/lappet/roadmap.md` owns Lappet's implementation checkpoints.
+
+Language and memory semantics take precedence over an optimisation opportunity.
+An optimisation proposal is not permission to add a new language rule or to
+change a published proof without its owning validation.

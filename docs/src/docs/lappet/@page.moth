@@ -1,0 +1,20 @@
+@styles navbar, section, theme_head
+@lappet content as lappet_content
+
+page_title #= "Lappet"
+page_description #= "Moth's planned native runtime, Rust embedding and package infrastructure."
+page_head #= theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Documentation) / Lappet
+
+    # Lappet
+
+    Use an official native environment or embed Moth in a Rust application.
+    Lappet provides the shared execution and binding foundation, with all
+    application-facing tooling staying behind the Moth CLI.
+]
+
+#[section, lappet_content]

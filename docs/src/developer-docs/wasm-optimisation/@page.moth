@@ -1,0 +1,20 @@
+@styles navbar, section, theme_head, codeblock
+@wasm-optimisation content as optimisation_content
+
+page_title #= "Wasm optimisation"
+page_description #= "Optimisation ownership across Moth, WebAssembly and native execution."
+page_head #= theme_head
+
+#[navbar]
+
+#[section, $md:
+    @../ (Developer documentation) / Wasm optimisation
+
+    # Wasm optimisation
+
+    Moth and its execution environment see different information about a
+    program. This reference explains where to simplify it, where to preserve
+    evidence and how to measure the result without duplicating compiler work.
+]
+
+#[section, optimisation_content]

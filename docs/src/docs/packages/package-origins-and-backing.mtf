@@ -41,7 +41,25 @@ The prelude is implicit dependency policy, not an origin or backing. It exposes 
 
 ### Builder-selected availability
 
-The builder decides which packages exist. Unsupported packages are rejected with an unsupported-by-builder diagnostic. The HTML builder opts into `@html`, `@web/canvas`, `@web/graphics` and current optional Core packages.
+Builders provide implementations and additional packages without redefining
+Core semantics. Official browser and native environments provide the canonical
+Core catalogue, including its documented host-capability gates. Custom builders
+may provide a subset or no public Core implementation. Reserved Core identities
+and the `io` prelude keep their meaning even when an operation is unavailable.
+The progress matrix records current implementation gaps separately from this
+design contract.
+
+The future official package manager classifies managed Moth-source packages as
+no-core or Core-dependent over their complete dependency closure. Official
+certified environments may consume both. Custom builders receive no-core
+packages only, even when they use Lappet or implement all Core APIs. Certification
+is a Moth project decision, not inferred from matching signatures.
+
+Compiler-internal helpers and the unused `io` prelude do not make a package
+Core-dependent. No-core still requires support for the language features it
+executes. Managed Builder-dependent and foreign-code packages are deferred.
+Local and builder-supplied packages retain their normal compiler rules. See
+@../lappet (Lappet) for scope and the package-manager design.
 
 ### Binding-backed package constraints
 

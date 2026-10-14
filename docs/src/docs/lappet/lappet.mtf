@@ -1,0 +1,102 @@
+## Choose an environment
+
+Lappet is the planned native runtime and Rust host-binding library for Moth. It
+lives beside the compiler in the same repository. Its first consumers are Rust
+game engines and server applications. Browser programs continue to use the
+HTML builder and browser execution.
+
+The initial crate contains design documents and a roadmap only. Runtime
+execution, native Core implementations and package installation are not yet
+available through it. These pages describe the agreed direction without adding
+new working commands.
+
+### Use an official builder
+
+Official builders are distributed with the Moth CLI and their required
+libraries. The intended application-author workflow needs only that distribution
+on a supported platform. It does not require installing Rust, Cargo, Node.js or
+a separate Wasm runtime. Developing Moth or writing a custom Rust host has its
+own tooling requirements.
+
+All user-facing commands keep the `moth` name. Lappet identifies the library and
+runtime implementation, not another executable to learn. Future command syntax
+will be documented when its own design and implementation are complete.
+
+### Embed Moth in Rust
+
+A Rust application can use the compiler to build a Moth project and Lappet to
+execute its Wasm. The builder selects host packages, owns application state and
+chooses when exported Moth functions run. Lappet handles the runtime and typed
+binding boundary rather than a game loop or a server framework.
+
+For example, a game engine can expose a checked entity API while keeping entity
+storage in Rust. A server can expose its own services without granting every
+program ambient filesystem or network access. V1 calls are synchronous.
+
+Rust host functions may use ordinary Rust libraries or wrap C libraries. These
+are trusted native dependencies, outside the Wasm sandbox. Their safety and
+blocking behaviour remain the host author's responsibility. The package manager
+will not install native code merely because a Moth package asks for it.
+
+## Keep Core consistent
+
+Official native and browser environments share compiler-owned Core signatures
+and semantics. Each implementation preserves documented host differences and
+capability requirements. A headless server does not pretend to have a window
+just to make a title operation succeed.
+
+Custom builders can use selected Core implementations or provide none. Core
+names, including the `io` prelude, stay reserved. A custom builder cannot replace
+their meaning or gain official certification simply by implementing them.
+
+The future official package manager admits Core-dependent packages only for
+officially supported environments. Custom builders receive no-core packages
+only, even when they use Lappet. Local and builder-supplied code can still use
+the APIs that their host actually supports.
+
+No-core means no direct or transitive dependency on public Core APIs. It does
+not remove the runtime requirements of ordinary language features such as
+collections. Every target still validates the Moth features it can execute.
+
+## Understand the execution policy
+
+Lappet V1 uses Wasmtime, with Winch for development and Cranelift for release by
+default. A builder can override that selection. Moth's output profile and the
+native compilation strategy remain separate choices with the same language
+semantics.
+
+Persistent AOT caches, async scheduling, foreign Wasm components and automatic
+native dependency installation are later work. JavaScript bindings remain a
+browser-builder capability and are not available in Lappet. File-backed WAT
+also requires an explicit provider and supported ABI rather than a general
+foreign-package loader.
+
+## Add dependencies deliberately
+
+The planned package manager favours small, inspectable dependency graphs. Its
+first managed packages contain Moth source and are classified as no-core or
+Core-dependent. Dependencies on specialised Builder APIs remain outside that
+initial managed ecosystem.
+
+An addition begins with dependency metadata checks, then obtains source in
+isolated staging for assessment. The report distinguishes dependency depth,
+breadth and size from security findings. A shallow dependency graph is not
+proof that a package is safe.
+
+Failed checks or insufficient evidence cause rejection. Only an admissible
+proposal reaches user confirmation, and the project changes only after that
+confirmation. Downloading source for inspection is not installing a dependency.
+Exact assessment tools and limits remain future design checkpoints.
+
+## Follow the design
+
+- @../../developer-docs/project-builders (Rust project builders) explains the
+  compiler SDK and host-binding contracts.
+- @../../developer-docs/wasm-optimisation (Wasm optimisation) owns the shared
+  compiler and native-code optimisation policy.
+- @https://github.com/nyejames/moth/blob/main/crates/lappet/docs/design.md (Runtime
+  design) records Lappet's execution and embedding boundaries.
+- @https://github.com/nyejames/moth/blob/main/crates/lappet/docs/package-manager.md
+  (Package-manager design) records eligibility and admission policy.
+- @https://github.com/nyejames/moth/blob/main/crates/lappet/roadmap.md (Lappet
+  roadmap) tracks its independent work and the checkpoints before implementation.

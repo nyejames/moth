@@ -1,0 +1,258 @@
+## Start where the information is richest
+
+Moth should simplify a program while its types, values and lifetimes are still
+known, then generate straightforward WebAssembly. The execution environment
+can turn that Wasm into efficient machine code for its CPU. This division avoids
+building a second general-purpose native optimiser inside Moth.
+
+This document owns optimisation goals, pass placement and the policy shared by
+Moth's Wasm backend and Lappet. The compiler and memory references still own
+language semantics, validation and physical ownership. The opportunities below
+are design priorities, not claims that the corresponding passes exist.
+
+For example, Moth knows that a generic operation has been instantiated with a
+particular numeric type. It also knows which error channel is declared and
+whether a returned value may retain an input allocation. Those facts can remove
+work before Wasm is emitted. A native compiler receives the resulting functions
+and memory operations, not Moth's complete type or lifetime model.
+
+## Keep three decisions separate
+
+The builder selects a Moth compilation profile, a target capability contract and
+a native compilation strategy. These selections have different purposes.
+
+The Moth profile controls optional analysis effort and permitted physical
+representation. Target validation checks that the selected executable can be
+implemented. The native strategy controls how Wasm is translated to machine
+code. None changes exact numeric types, required access validation or observable
+error behaviour.
+
+Lappet V1 uses Wasmtime. Development defaults to Winch and release defaults to
+Cranelift. Builders can choose either strategy independently of the Moth
+profile. Lappet configures the engine through its supported API and performs no
+additional Wasm optimisation pass.
+
+Winch supplies a fast baseline for repeated compilation. It is not a literal
+Wasm instruction counter or a promise of identical machine code across hosts.
+Cranelift is the release path for optimising native code generation. Precise
+proposal support, optimisation settings and debugging features are verified
+against the selected engine version at Lappet's runtime checkpoint.
+
+## Preserve required compiler work
+
+Some transformations are part of compiling Moth correctly, even when they also
+make the output smaller. Constant evaluation where required, concrete generic
+completion, ordinary static branch selection and result-channel construction
+follow their existing compiler contracts. A debug profile cannot disable them
+as though they were optional optimisation passes.
+
+Both branches of ordinary static control flow receive the required frontend
+validation before executable selection. Reachability does not make an authored
+source dependency valid after the fact. Compiler-owned link facts determine
+which already validated functions and runtime requirements enter an assembly.
+
+Borrow and lifetime-topology validation also remain mandatory. Failing to prove
+an optional transfer can retain storage conservatively. Failing to prove legal
+lifetime topology cannot be repaired by a collector or by native optimisation.
+A capable full-control release backend keeps its collector-free guarantee.
+
+## Use Moth's semantic evidence first
+
+### Concrete types and binding instances
+
+Complete generics before executable lowering. Keep owner-local generic
+parameters and canonical concrete instances distinct. Reuse the established
+specialisation and binding-instance owners instead of cloning a function or
+creating a second type-instantiation table inside the backend.
+
+Trusted scalar-parametric Core bindings resolve their exact semantic types
+before selecting an implementation. A narrow numeric value carried in an i32
+register remains narrow. A Dec value does not become F64 to fit an available
+helper. Its result may share an operand representation under the declared
+provenance contract, so selection is not automatically a fresh allocation.
+
+File-backed WAT or JavaScript supplies implementation code, not permission to
+redefine a Core operation. Reuse registered adapters and helper identities.
+Ordinary foreign annotations never gain trusted memory access from their file
+location or a matching function name. Unsupported representations retain their
+capability diagnostics.
+
+### Known values and checked arithmetic
+
+Use existing constant and numeric evidence before adding another analysis.
+The current numeric-proof contract supports a bounded set of integer-check
+elisions. It does not establish arbitrary range analysis, loop bounds or
+floating-point reassociation. Broader proofs need an explicit owner and tests.
+
+A successful proof can remove a runtime predicate while retaining the original
+operation, evaluation order and declared source contract. For example, proving
+that one concrete call cannot overflow does not erase a public Error channel
+or make an otherwise required handler optional.
+
+Exact integer domains, finite binary floats, per-operation precision and Dec
+rounding remain language rules. Native wrapping arithmetic is not an implicit
+substitute for a checked Moth operation. Fast-math or other constraints use
+their separately approved semantics rather than inheriting whatever an engine's
+aggressive setting happens to permit.
+
+### Allocation, retention and copies
+
+Moth owns the information needed to reason about allocation families, aliases,
+retained edges and cleanup frontiers. Keep those decisions in their existing
+analysis and memory-planning owners. A Wasm optimiser is not expected to recover
+them from pointer arithmetic or calls to runtime helpers.
+
+The compiler's validated memory plan is the sole final authority for layout,
+physical strategy, cleanup and retained-edge transitions. It can express stack
+or inline placement, affine cleanup, regions and selective retained-edge
+counting. The lowerer realises that plan rather than choosing a cheaper-looking
+strategy independently.
+
+Prioritise avoiding unnecessary allocation and copying, shortening valid
+retention and fusing redundant planned runtime transitions. Each change must
+preserve explicit copy semantics, internal sharing, result provenance and all
+exit paths. A same-family replacement must not become a temporary
+last-reference decrement followed by an increment.
+
+Physical refinement and coalescing happen before plan validation and
+fingerprinting. Late code generation cannot split an escaped allocation or
+invent a new cleanup owner. Read the memory authority for the complete proof
+conditions rather than duplicating them in a new optimisation pass.
+
+### Calls, results and templates
+
+Preserve zero, one and multiple success slots and the separate error channel.
+Avoid materialising a tuple or temporary record merely because a target ABI
+packs results. Packing belongs at that ABI boundary. Evaluate each producer
+once and read success results only on the success continuation.
+
+For templates, keep folded strings folded and lower runtime construction through
+the existing string operations. Investigate repeated allocation or copying at
+that owner before adding a general string optimiser. Structural resource
+strings still need the builder's validated output context before their concrete
+characters can be observed.
+
+## Generate Wasm that exposes useful work
+
+Emit structured control flow, exact scalar operations and explicit stable calls
+through the existing Wasm lowerer. Avoid dispatcher loops, redundant carrier
+conversions and unnecessary memory round trips when ordinary lowering already
+has the facts to omit them.
+
+This is good lowering, not a reason to add a broad optimisation pipeline. Keep
+register allocation, CPU instruction selection and target-specific code-quality
+heuristics in the native backend. Native optimisers can also simplify scalar
+expressions and control flow where the emitted representation exposes those
+relationships.
+
+A Rust host call can hide an implementation from the Wasm-to-machine-code
+compiler. Prefer a direct Wasm instruction or existing trusted Wasm helper for
+a small operation when it preserves the complete contract. Use Rust bindings
+for host services and genuinely native libraries rather than routing every
+Core operation through the host for uniformity.
+
+Guest-to-host conversion is still a real cost. For game engines, measure small
+frequent calls and useful batches. For servers, also measure buffer sizes,
+allocation and time spent in native services. A change that improves a scalar
+microbenchmark but increases boundary copying may be a regression overall.
+
+## Place future passes deliberately
+
+Start a new pass only after identifying work that existing owners cannot remove
+more directly. Use this order when investigating a measured problem:
+
+1. Correct inefficient lowering or duplicated runtime work using facts already
+   available to its owner.
+2. Exploit type, value, access or lifetime evidence before that information is
+   erased.
+3. Leave ordinary native code-quality work to Cranelift and measure the result.
+4. Add a dedicated Wasm transformation only when it still provides a worthwhile
+   benefit for supported consumers.
+
+Inlining is a useful example. Moth-level inlining could expose semantic facts
+that native compilation cannot see. It could also inflate Wasm, repeat analysis
+and slow both compilation strategies. Native inlining capabilities and defaults
+must be verified rather than assumed. Neither blanket Moth inlining nor blanket
+delegation is the policy. Investigate selected call sites with a code-size and
+compile-time budget.
+
+Loop transformations, vectorisation, general bounds-check elimination and
+post-emission tools follow the same rule. Their presence in another compiler
+is not evidence that Moth needs another implementation. Browser output may
+benefit differently from Lappet output, so record the consuming targets rather
+than generalising one engine measurement to all Wasm environments.
+
+## Preserve evidence across transformations
+
+Published module results, generated sidecars, HIR and their proof tables are
+immutable. A pass cannot rewrite an executable while retaining analyses that
+were proved for its previous form.
+
+A proposed transformation must name its input owner, output owner, valid phase
+and affected proofs. If it changes control flow, aliases, lifetimes or physical
+obligations, it must be placed before the corresponding validation or use an
+explicitly reviewed revalidation handoff. Builders and Lappet do not mutate HIR,
+run raw compiler stages or repair analysis tables themselves.
+
+Recompute or invalidate affected interface, implementation, runtime and physical
+fingerprints through their existing owners. An optimisation creates no parallel
+semantic identity scheme. A cache hit or a native engine's successful validation
+cannot establish Moth memory-model correctness.
+
+## Measure the stages independently
+
+Keep source compilation, Wasm generation, engine compilation, instantiation and
+execution as separate measurements. Include output bytes, allocations and
+resident memory where relevant. Host binding measurements should distinguish
+dispatch, conversion and the host operation itself.
+
+For a representative program, compare four configurations:
+
+[codeblock, $code("text"):
+    Moth development output + Winch
+    Moth development output + Cranelift
+    Moth release output     + Winch
+    Moth release output     + Cranelift
+]
+
+The Winch comparisons help expose changes in emitted Wasm without depending on
+an optimising native strategy to remove them. Cranelift comparisons establish
+whether the same changes help the release path. Neither comparison proves
+performance on every runtime or CPU.
+
+Lappet V1 has no persistent AOT cache. A cold compilation benchmark creates the
+required fresh engine/module state and records any process or operating-system
+reuse. Execution benchmarks compile outside the timed loop. In-process module
+reuse is valid application behaviour but must not be labelled cold startup.
+Record the engine version, Cargo features, host target, CPU, Moth profile,
+strategy, limits, instrumentation and workload with the evidence.
+
+Use matched repeated measurements under the repository benchmark policy. Keep
+correctness tests separate from timing thresholds. A performance result does
+not prove numerical, error or ownership equivalence.
+
+## Gate each new optimisation
+
+Before implementation, record the eliminated work, the semantic evidence that
+permits it and the owner that supplies that evidence. Identify any downstream
+pass that could already do the same work. Define the fallback when optional
+proof is unavailable and the budget for code size, compilation and memory.
+
+Tests must preserve exact types, evaluation order, observable errors, allocation
+relationships and cleanup on every affected exit. Add negative cases where the
+proof does not apply. Measure both game and server workloads and applicable
+browser output before widening a local result into a general policy.
+
+The Moth roadmap owns compiler work. Lappet's separate roadmap owns runtime
+configuration and interoperability. Updating this authority coordinates those
+owners without activating their paused work or authorising an unreviewed pass.
+
+## Further reading
+
+- @../compiler-design (Compiler design) for stage and immutable handoff contracts.
+- @../memory-management/runtime-and-backend-lowering (Runtime and backend memory
+  lowering) for physical plans, ABI ownership and cleanup.
+- @../project-builders (Rust project builders) for capability and assembly policy.
+- @../../docs/lappet (Lappet) for the native environment and its current scope.
+- @https://github.com/nyejames/moth/blob/main/crates/lappet/roadmap.md (Lappet
+  roadmap) for runtime implementation gates.
