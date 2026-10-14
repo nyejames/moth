@@ -59,7 +59,7 @@ Compiler-internal helpers and the unused `io` prelude do not make a package
 Core-dependent. No-core still requires support for the language features it
 executes. Managed Builder-dependent and foreign-code packages are deferred.
 Local and builder-supplied packages retain their normal compiler rules. See
-@../../lappet (Lappet) for scope and the package-manager design.
+@../lappet (Lappet) for scope and the package-manager design.
 
 ### Binding-backed package constraints
 

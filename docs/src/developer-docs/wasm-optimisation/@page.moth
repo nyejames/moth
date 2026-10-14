@@ -13,7 +13,7 @@ page_head #= theme_head
     # Wasm optimisation
 
     Moth and its execution environment see different information about a
-    programme. This reference explains where to simplify it, where to preserve
+    program. This reference explains where to simplify it, where to preserve
     evidence and how to measure the result without duplicating compiler work.
 ]
 

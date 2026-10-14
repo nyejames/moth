@@ -17,7 +17,7 @@ page_head #= language_theme_head
     but binding-backed implementations don't become files in your project.
 
     Most Core packages require explicit dependency clauses. Unlike large standard-library
-    preludes, Moth exposes only a small always-available surface such as `io`.
+    preludes, Moth reserves only a small implicit namespace surface such as `io`.
 
     Official environments target the complete Core catalogue with documented
     host-capability gates. Custom builders may supply only the implementations

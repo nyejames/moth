@@ -138,7 +138,7 @@ implementations and invoke explicitly selected exports. Prove one embedded game
 lifecycle and one server lifecycle without adding a scheduler or web framework.
 Keep rendering/output/resource planning with the builder and build system.
 
-**Evidence.** Run actual Moth programmes, not hand-authored ABI substitutes.
+**Evidence.** Run actual Moth programs, not hand-authored ABI substitutes.
 Cover source-to-host-to-source values, errors, lifecycle cleanup, isolated host
 state and capability rejection. Benchmark all four combinations of Moth
 output profile and native strategy under the shared optimisation authority.
@@ -248,6 +248,6 @@ Lead packages for policy review rather than a depth-only registry ban.
 Review producer/consumer ownership, duplicated facts, unused abstractions,
 legacy paths, failure categories and meaningful test coverage. Reconcile the
 permanent docs and implementation status, update the index and perform the Slice
-review. Use the current repository validation guide, including `just
-validate-full` for the exact tree intended for main. A narrow crate check,
+review. Use the current repository validation guide, including
+`just validate-full` for the exact tree intended for main. A narrow crate check,
 fixture run or documentation build never claims that wider gate passed.

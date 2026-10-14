@@ -1,6 +1,6 @@
 ## Start where the information is richest
 
-Moth should simplify a programme while its types, values and lifetimes are still
+Moth should simplify a program while its types, values and lifetimes are still
 known, then generate straightforward WebAssembly. The execution environment
 can turn that Wasm into efficient machine code for its CPU. This division avoids
 building a second general-purpose native optimiser inside Moth.
@@ -206,7 +206,7 @@ execution as separate measurements. Include output bytes, allocations and
 resident memory where relevant. Host binding measurements should distinguish
 dispatch, conversion and the host operation itself.
 
-For a representative programme, compare four configurations:
+For a representative program, compare four configurations:
 
 [codeblock, $code("text"):
     Moth development output + Winch

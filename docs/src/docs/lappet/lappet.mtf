@@ -2,7 +2,7 @@
 
 Lappet is the planned native runtime and Rust host-binding library for Moth. It
 lives beside the compiler in the same repository. Its first consumers are Rust
-game engines and server applications. Browser programmes continue to use the
+game engines and server applications. Browser programs continue to use the
 HTML builder and browser execution.
 
 The initial crate contains design documents and a roadmap only. Runtime
@@ -31,7 +31,7 @@ binding boundary rather than a game loop or a server framework.
 
 For example, a game engine can expose a checked entity API while keeping entity
 storage in Rust. A server can expose its own services without granting every
-programme ambient filesystem or network access. V1 calls are synchronous.
+program ambient filesystem or network access. V1 calls are synchronous.
 
 Rust host functions may use ordinary Rust libraries or wrap C libraries. These
 are trusted native dependencies, outside the Wasm sandbox. Their safety and
