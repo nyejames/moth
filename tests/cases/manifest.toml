@@ -10452,6 +10452,13 @@ contract = "language.dependencies.explicit_moth_extension_rejected"
 role = "primary"
 
 [[case]]
+id = "html_js_reexport_linking"
+path = "html_js_reexport_linking"
+tags = ["integration", "imports", "external-js"]
+contract = "build.external_js.reexport_runtime_linking"
+role = "primary"
+
+[[case]]
 id = "unsupported_external_js_import_rejected"
 path = "unsupported_external_js_import_rejected"
 tags = ["integration", "dependencies", "external-imports", "diagnostics"]

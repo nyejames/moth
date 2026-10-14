@@ -13,12 +13,10 @@
 ## Status and inspection baseline
 
 ```text
-STATUS: ready for implementation, subject to the activation baseline
-REVIEWED_MAIN: 0096b781b45e347dfd545ccf504a654a8e3767bf
-REVIEW_DATE: 2026-10-14
-IMPLEMENTATION: not performed by this plan refresh
-VALIDATION: source inspection and plan review only, no compiler test execution
-LANDING: one fully validated commit on main, with expression-refactor remaining paused
+STATUS: active on link-fixes-and-test-cleanup
+CURRENT_SLICE: executable red regression established, runtime-import handoff next
+BLOCKERS: supplied website archive unavailable in inspected input locations
+NEXT_ACTION: complete final-call-demanded runtime candidates and checked HTML glue inputs
 ```
 
 The reviewed main includes the typed-expression/native-result Phase 4 checkpoint. Its plan explicitly pauses before Phase 5. The affected source still collects ordinary-module provider candidates by source-file ownership and still loses later error types during infrastructure aggregation. The original missing-asset path remains present. Establish an executed failing baseline before changing it. [S1] [S2] [S5] [S6]
@@ -78,10 +76,10 @@ Permanent authorities own semantics. Plans record delivery and approved task dec
 
 **Owners:** the uploaded website, `tests/cases/`, `src/build_system/tests/build_dependency_tests.rs` and `src/compiler_tests/integration_test_runner/assertions/`.
 
-- [ ] Record the checkout revision, dirty state, Rust toolchain, Node version, command and build profile. Read the repository's pinned toolchain files. Keep baseline logs under `./tmp`.
+- [x] Record the checkout revision, dirty state, Rust toolchain, Node version, command and build profile. Read the repository's pinned toolchain files. Keep baseline logs under `./tmp`.
 - [ ] Build a disposable copy of the supplied website with unchanged source. Its archive has `config.moth` at the repository root, `src/@page.moth` and `src/components/@components.moth`. The page calls the directly re-exported `animate_canvas` from `src/components/background-animation.js`.
-- [ ] Reproduce with the small project below. Record whether failure is the expected missing runtime asset, an earlier independent diagnostic or a harness problem.
-- [ ] Before patching, add a permanent regression whose post-fix expectation is successful execution. Demonstrate its failure on the baseline. Preserve the smallest source shape even when adding a richer companion scenario.
+- [x] Reproduce with the small project below. Record whether failure is the expected missing runtime asset, an earlier independent diagnostic or a harness problem.
+- [x] Before patching, add a permanent regression whose post-fix expectation is successful execution. Demonstrate its failure on the baseline. Preserve the smallest source shape even when adding a richer companion scenario.
 
 ### Minimal project, using delivered syntax
 
