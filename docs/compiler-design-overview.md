@@ -926,6 +926,8 @@ Borrow validation resolves calls to access/effect summaries. Target validation a
 
 ### Stage 6: borrow validation
 
+The live production implementation status, borrow-analysis performance investigations and Boracle-to-production implementation decisions are tracked in `docs/roadmap/plans/production-borrow-checker.md`. This section defines the solver-independent end-state handoff, not a running inventory of alpha code.
+
 Borrow validation runs for every canonical module and generated concrete function. It enforces shared/exclusive access, mutable call access, conservative collection/map aliasing, control-flow joins and no-later-use proof for optional transfers.
 
 Its solver-independent output contains:

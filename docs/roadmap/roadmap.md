@@ -15,7 +15,7 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - [First-party Core and Builder package programme](./plans/packages/first-party-package-programme.md). Partially complete and underway. **ACTIVE IN PARALLEL.**
 
-- [Boracle research plans](./plans/boracle-next-research-plans): Resume on `boracle-research` only after merged dense HIR/native result-channel capabilities and the explicit research activation gate. Mechanical representation/extraction migration belongs to the compiler foundation, not a new precision experiment. **PAUSED**
+- [Boracle research](./plans/boracle-next-research-plans) and [production borrow checker development](./plans/production-borrow-checker.md): Ongoing parallel record and production follow-ups on `borrow-checker-and-boracle-development`. Research precision and migration wait for the merged typed-expression/native-result capabilities and explicit activation. Current status, accepted implementation decisions and borrow/Boracle issues live in the production companion. **ONGOING, RESEARCH RESTART PAUSED**
 
 - [Collecting bad diagnostics examples to be improved later](./plans/bad-diagnostics-log.md): **ONGOING**
 
@@ -38,6 +38,8 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 - [Runtime anonymous records](./plans/runtime-anonymous-records-plan.md) - Queued: consume delivered shared MON syntax, exact numeric types and bounded known-leaf inference. Wait for the required compact typed-expression and ordinary-struct construction capabilities. Support recursive local anonymous records through ordinary hidden nominal structs, with explicit nominal children and transitive escape checks.
 
 - [Never return contracts](./plans/never-return-contract-plan.md)
+
+- [Reusable generics, type-parametric Core bindings and file-backed JS/WAT](./plans/generics-core-bindings-and-file-backed-js-wat-plan.md) - Queued: file-private reusable generic declarations, closed numeric-family limits, bounded nested-call context, trusted scalar-parametric Core bindings and file-backed JS/WAT implementations. Deliver generic min, max, clamp and uniformly fallible abs. Consume exact numeric semantics and existing backend capabilities without waiting for the later mixed-Wasm implementation.
 
 - TODO plan: Struct layout directives. Consume the delivered numeric scalar sizes, natural alignment and element strides. Define compiler-owned $layout contracts, permitted field types, aggregate alignment/padding, target validation and semantic/interface fingerprints before physical memory-layout decisions and Wasm struct lowering consume them. The nominal type model stays unchanged.
 
@@ -73,55 +75,13 @@ This roadmap owns the normal serial order. A plan owns its own work and nothing 
 
 **Package programme exception.** The umbrella and package-level plans under `docs/roadmap/plans/packages/` are living implementation companions rather than ordinary short-lived plans. They may link one another and specialised package implementation plans in that directory. Package-level plans remain after a current version completes so later work retains implementation rationale, quirks and blockers. Completed checklists should be removed or compressed. A specialised one-shot plan may still be retired after its durable decisions and follow-ups move into the living package plan. Canonical package documentation remains the semantic authority. The main roadmap links only the umbrella programme, and the normal deletion and no-plan-link rules still apply everywhere else.
 
+**Borrow-checker/Boracle living-companion exception.** The production implementation tracker remains after individual patches land and may cross-link the Boracle research handoff for navigation. They are the ongoing parallel work under one roadmap entry. Only the production tracker owns live Stage 6 implementation status, accepted production implementation choices, borrow performance evidence and actionable Boracle-to-production follow-ups. Canonical memory and compiler references still own language semantics and stage contracts. Do not duplicate this tracker in roadmap deferred notes or the progress matrix.
+
 ---
 
 # Deferred design and follow-ups
 
 This is a bunch of notes for work that will likely be picked up in the future, but has no set design plan yet.
-
-## MON language integration and static builder
-
-MON means Moth Object Notation. MON syntax names the shared argument/value-construction notation. The MON format contains literal data: its reader never evaluates expressions, even when those expressions could fold at compile time. The format and standalone Rust `moth-mon` codec, also available through `moth::mon`, are delivered separately from deferred language integration.
-
-The final roadmap follow-up adds Moth-native usage and the static MON project
-builder. It consumes `moth-mon`, the shared `moth-lexical` identifier/reservation
-and numeric policies, MON syntax notation and ordinary Moth types. MON literal
-traversal and escape decoding remain local to the codec. This follow-up adds no
-second MON parser, Moth-expression dependency for literal reading, explicit
-serialisation traits or second schema language. Compiler-owned `$mon`
-convenience remains accepted direction, but its exact invocation syntax stays
-undefined. Source typing, automatic schema extraction, backend operations and
-builder commands remain undelivered. Consume explicit fixed-width schemas and
-lossless Integer/Decimal data without profile-selection APIs or a second
-numeric materialisation owner. The standalone exact API cutover is delivered.
-
-Preserve the accepted source parity decisions: `{=}` is an empty map, `{}` remains
-a collection even at a map receiving context, and `::Variant(...)` uses a known
-expected choice type. MON Unicode escapes remain local to the MON format; source
-Unicode-escape support is explicitly deferred. Track undelivered source
-portions rather than assuming support from the data reader.
-
-The static builder emits compile-time-known `.mon` assets through ordinary build output ownership. Evaluated runtime templates remain ordinary serialisable Strings for consuming builders. Templates acquire no hidden schema, wire, route or subscription. Resource-bearing strings require concrete builder-assigned characters before MON encoding. Applications own schema versions, migrations and resource interpretation.
-
-Dynamic schemas, streaming, public borrowed views and additional canonical byte representations wait for concrete use cases. Canonical bytes are a serialiser policy, not a restriction on MON semantics. Publish durable contracts in the language and compiler/build authorities, with Rust tooling, source integration and builder support tracked separately in the progress matrices.
-
-## Generics, type-parametric Core bindings and file-backed JS/WAT
-
-Queued design work, not yet an authored implementation plan. Preserve the normal programme order
-above and schedule this work explicitly when its activation requirements have been accepted.
-Consume the delivered D15 operator-domain table in
-`docs/src/docs/numbers/operators.mtf` and the bounded numeric-origin generic exception, not eager
-literal typing or callee-body inference. Equal types retain their width, mixed operands use the
-smallest supported common domain and narrow/F16 checks complete at each operation. Preserve
-fixed-integer `/ -> F64`, binary-float `//` rejection, unsigned/Byte negation rejection and Dec
-scale, integer-mixing and `I32` exponent exceptions.
-
-This owner must deliver explicit compiler-defined closed numeric bounds at all visibilities and
-forward an already-concrete expected type into a nested generic call. Neither capability landed
-with the numeric implementation. It also owns type-parametric Core bindings and file-backed
-JS/WAT design. Keep body-inferred capabilities, operator overloading and conditional error
-signatures outside this work. The permanent handoff lives under
-[Numeric and generic extensions](../src/docs/design-scope/deferred-and-outside-scope.mtf#numeric-and-generic-extensions).
 
 ## Optional catch tooling advisory
 
@@ -141,24 +101,6 @@ Two temporary implementation plans remain in the tree. They are work items await
 - [Retained Edge Counting](./plans/retained-edge-counting-design-and-implementation-plan.md) - temporary implementation plan covering REC analysis, the two-bit handle ABI, counters and lowering sequencing
 
 Where a temporary plan and a permanent authority disagree, the permanent authority wins.
-
-## Post-TIR template performance follow-ups
-
-The [post-TIR `$md` and template-parser optimisation plan](./plans/post-tir-template-parser-optimization-plan.md)
-is the single deferred owner for source-span template text, parse and formatter reuse, source-hash
-keys, imported-constant/directive invalidation, incremental template prerequisites, profiling-gated
-parallel folding and cross-owner backend string-assembly investigation. It requires profiles and a
-complete semantic key/invalidation model before any cache or scheduling implementation.
-
-The final TIR completion plan remains the historical architecture source. The initial frontend arena
-and semantic-invariant optimisation programme is complete; its evidence remains in
-`benchmarks/frontend-optimization-results.md`, and the progress matrix continues to report the
-implemented surface as `Partial`. Semantic expression/scratch separation and dense HIR
-expression/place storage now belong to the queued compiler foundation above. That work also owns
-unchanged-root reuse, constant handoffs and repeated type/fold work at the migrated boundaries.
-The deferred post-TIR owner retains independent cache, key, source-span text and scheduling
-investigations, refreshed against the delivered representation. Broad borrow-fact compaction and
-unrelated parser/statement storage changes still require evidence and their own bounded scope.
 
 ## Code-block highlighting follow-ups
 
@@ -191,21 +133,6 @@ directive will format, remains deferred. Full semantic or editor grammar
 parity stays owned by editor tooling, not the compile-time formatter. The built-in formatter never
 performs semantic symbol resolution or syntax diagnostics.
 
-## Boracle real-source replay gaps
-
-The last recorded replay sweep, at checkpoint `99ab43de2`, covered 1068 sources and left two failures. The current `tests/cases/` corpus has changed since that checkpoint, so later sources are unmeasured and these counts are historical rather than a current sweep. Both recorded failures are problem-extraction defects rather than oracle defects, and both also fail the `problem` dump, so extraction and validation reject them before the oracle runs. The subcommand exists only under the `boracle` feature, so each reproduction below runs as `cargo run --features boracle -- boracle <source> --dump problem`.
-
-- A `match` with guards can produce unsorted branch targets. The source is `tests/cases/result_match_guard_propagation_order/input/@page.moth`, and validation fails with `terminator target blocks references must be strictly sorted and unique: BlockId(12) then BlockId(7)`, so the builder's target mapping does not preserve the ascending unique order that problem validation requires.
-- Runtime reactive `if` metadata can leave a local unresolved. The source is `tests/cases/runtime_if_reactive_metadata_preserved/input/@page.moth`, and extraction fails with `unknown HIR local LocalId(1)`. Reactivity retirement will classify this historical case with its owner: remove V1-only coverage and preserve any surviving control-flow contract in ordinary source coverage, rather than repair an obsolete observation model.
-
-## Boracle reduction reachability
-
-`reduce_problem` and `render_fixture_skeleton` are implemented, audited and covered by the reducer tests, and the operational oracle authority documents the pass order, the preserved classification and the rendered fixture skeleton. Nothing outside the tests calls either of them, so a developer who follows the disagreement workflow reduces a problem by writing a test rather than by running a command.
-
-Making reduction reachable is a CLI slice with two parts. The Boracle dump vocabulary in `src/projects/cli.rs` needs a reduction arm, and the differential service needs bound inputs, because `service.rs` hard-codes `OracleBounds::default()` and exposes no bound flags. Reduction is only useful when the caller can choose the bounds the reduced result must preserve.
-
-No plan owns this. The bounded operational oracle plan deliberately excluded CLI changes, and its completion criteria require a reducer that preserves the disagreement class rather than a reachable command.
-
 ## Genuinely deferred items
 
 - final builder selection syntax and a possible Moth-native build script system
@@ -219,7 +146,7 @@ No plan owns this. The bounded operational oracle plan deliberately excluded CLI
 - profiling-backed frontend optimisations and the deferred post-TIR template investigations linked above
 - future Component Model integration
 - external non-scalar constant design: string slices, collections and opaque-type external constants in const contexts
-- private const and config follow-ups: consume HIR const metadata in borrow checking, temporary-local reduction and constant propagation
+- private const and config follow-ups: temporary-local reduction and constant propagation
 - `moth new` follow-ups: non-interactive `--default`, template selection, project type aliases, richer scaffold presets and optional package or dev tooling setup
 - benchmarking and profiling deferred tooling: CI performance gates, public dashboards, source-backed package HIR caching, ownership, drop and ABI specialisation, JS minification and tree shaking, package-manager caching, broad Criterion benchmark suites, tracing and allocation profiler integrations, and tracked-summary counter expansion
 

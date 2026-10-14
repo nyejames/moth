@@ -15,11 +15,11 @@ The role is serious even when the name is not. Boracle provides an executable, i
 
 ## Status and authority
 
-This document is the permanent design authority for Boracle.
+This document is the permanent design authority for Boracle. Live production implementation status, performance work and Boracle-to-production follow-ups are owned by `docs/roadmap/plans/production-borrow-checker.md`.
 
 Canonical language and memory documents still define Moth semantics. Boracle does not override them. Within compiler testing, Boracle reference mode is the executable reference model against which a future production solver can be compared.
 
-The current alpha borrow checker remains the normal compiler authority until a later project replaces it. Boracle is compiled and run only through explicit developer and test paths.
+Boracle is compiled and run only through explicit developer and test paths, independently from the production compiler. Consult the living production tracker for the current alpha checker, its replacement gates and the shared development branch.
 
 The semantic integration and adversarial-hardening baseline is now complete for the reference
 borrow-analysis boundary. The source service feeds one normalized problem into parameter-aware
@@ -1135,22 +1135,9 @@ A useful reference implementation for Moth can ask a more direct question:
 
 That question is possible because Moth does not encode arbitrary lifetime relationships inside source types.
 
-## Fast paths belong to the future production solver
+## Production fast-path observations
 
-Boracle may record opportunities such as:
-
-- no alias-producing operation
-- no loans
-- no exclusive access
-- scalar-only function
-- no optional-transfer candidate
-- acyclic CFG
-- no recursive call-summary SCC
-- no projection overlap beyond locals
-
-It should not optimise around them.
-
-The future production checker can use these observations to skip work. Boracle remains the slow answer used to prove the skipped result.
+Potential production shortcuts discovered while developing the reference solver are tracked as investigations in `docs/roadmap/plans/production-borrow-checker.md`. Boracle itself remains the inspectable, intentionally slow reference and does not specialise the solver around those shapes.
 
 ## Relationship to lifetime topology
 

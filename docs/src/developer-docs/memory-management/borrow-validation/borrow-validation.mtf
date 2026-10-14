@@ -86,10 +86,9 @@ These are analysis lattice states. They are not Moth source types and do not dir
 
 ## Access roots and aliases
 
-Every analysed place resolves to one or more storage roots. Fields and indexes currently resolve conservatively through their base roots. Alias bindings carry root sets. Merged control flow can union root sets. Shared and mutable conflicts are checked against overlapping roots.
+Every analysed place resolves to one or more storage roots. A solver may conservatively use a base root for fields or indexes. Alias bindings can carry root sets and merged control flow can union them. Shared and mutable conflicts are checked against overlapping storage when a solver uses this approximation.
 
-Production Stage 6 still checks conflicts against overlapping storage roots; the feature-gated
-Boracle reference solver instead evaluates typed `OriginRelations` provenance.
+The concrete production overlap algorithm and its current difference from feature-gated Boracle are documented in `docs/roadmap/plans/production-borrow-checker.md`.
 
 Alias activity is path-sensitive and control-flow-sensitive. Shared aliases, and exclusive aliases
 that have a reachable holder use, use non-lexical activity. Whether an issued but never-used
@@ -305,31 +304,9 @@ Boracle is a permanent reference solver and experiment facility. It may improve 
 
 Missing optional transfer proof falls back to borrowing. Missing mandatory topology proof remains a topology diagnostic rather than a physical-strategy fallback.
 
-## Current alpha implementation
+## Live implementation status
 
-Everything in this section describes the current alpha algorithm or its scaffolding. It isn't the solver-independent architecture above and may be replaced without changing the stable handoff or source semantics.
-
-### Abstract states and root approximation
-
-The current alpha lattice uses these states:
-
-- **uninitialized:** local has no valid value.
-- **slot:** local may own independent storage.
-- **alias:** local observes roots owned elsewhere.
-- **slot + alias:** conservative control-flow result where either shape may arrive.
-
-The current root approximation is centred on `LocalId`. Fields and indexes resolve conservatively through their base roots. Alias bindings carry root sets, and merged control flow may union those sets. This metadata isn't source-visible reference identity and isn't a permanent downstream representation.
-
-### Future-use transfer and joins
-
-The current checker precomputes per-block may/must future-use facts and runs a forward fixed-point transfer over reachable HIR blocks. Branches are visited independently. Joins conservatively combine incoming alpha states and root sets, retaining activity when any incoming path may still use an alias. Loops use the same fixed-point transfer until the current result stabilises.
-Cross-block traversal ordinals don't prove alias activity: source-semantic conflicts use point-specific CFG future-use facts and write-through assignments reachable within lexical visibility for mutable source aliases, so a predecessor visited after its merge cannot prolong an alias whose final access has passed.
-
-Branch-local aliases are removed when they leave visibility. The current transfer implementation records returns, breaks and region exits for advisory cleanup-candidate generation. An infinite path without an exit doesn't receive an exit candidate merely because it loops.
-
-### Advisory drop candidates
-
-Current advisory drop candidates are implementation hints for the alpha lowering path. They don't prove lifetime topology, exact release permission or a final destruction point. Stronger production analysis may replace their derivation or omit them entirely.
+The source, verified implementation inventory, known alpha precision limits, performance evidence and ongoing work are maintained in `docs/roadmap/plans/production-borrow-checker.md`. The stable contract above governs any replacement algorithm. This reference does not duplicate the changing implementation description.
 
 ## Diagnostics
 
